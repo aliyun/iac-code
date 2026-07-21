@@ -39,6 +39,7 @@ def create_pipeline(
     prerequisite_resolution: dict[str, Any] | None = None,
     mcp_manager: Any | None = None,
     mcp_config_warnings: list[Any] | None = None,
+    aliyun_delegated_executor_factory: Callable[[str], Any] | None = None,
 ) -> PipelineRunner:
     """Factory: create a pipeline runner by name.
 
@@ -89,6 +90,7 @@ def create_pipeline(
         prerequisite_resolution=resolved_prerequisites,
         mcp_manager=mcp_manager,
         mcp_config_warnings=mcp_config_warnings,
+        aliyun_delegated_executor_factory=aliyun_delegated_executor_factory,
     )
 
 

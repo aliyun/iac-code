@@ -7,6 +7,20 @@ from enum import Enum
 from typing import Literal
 
 MAX_PERMISSION_AUDIT_FILES = 100
+MAX_PERMISSION_AUDIT_ITEMS = 8
+
+ExecutionClass = Literal["concurrent", "serial"]
+
+
+@dataclass(frozen=True)
+class InvocationBinding:
+    """Immutable identity binding for one model-originated tool invocation."""
+
+    runtime_nonce: str
+    session_id: str
+    tool_use_id: str
+    tool_name: str
+    canonical_input_sha256: str
 
 
 class PermissionMode(str, Enum):
@@ -88,8 +102,14 @@ class PermissionResult:
     behavior: Literal["allow", "deny", "ask", "passthrough"]
     message: str = ""
     reason: PermissionDecisionReason | None = None
+    reasons: list[PermissionDecisionReason] | None = None
     suggestions: list[PermissionRuleValue] | None = None
     audit: PermissionAuditMetadata | None = None
+    audit_items: tuple[PermissionAuditMetadata, ...] = ()
+    invocation_binding: InvocationBinding | None = None
+    snapshot_id: str | None = None
+    security_digest: str | None = None
+    execution_class: ExecutionClass | None = None
 
 
 @dataclass
@@ -98,6 +118,8 @@ class ToolPermissionContext:
 
     mode: PermissionMode = PermissionMode.DEFAULT
     cwd: str = ""
+    invocation_binding: InvocationBinding | None = None
+    pipeline_mode: bool = False
     allow_rules: dict[str, list[str]] = field(default_factory=dict)
     deny_rules: dict[str, list[str]] = field(default_factory=dict)
     ask_rules: dict[str, list[str]] = field(default_factory=dict)

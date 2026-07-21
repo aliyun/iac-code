@@ -69,7 +69,7 @@ from common import (  # noqa: E402
 from debugger import (  # noqa: E402
     A2A_VERSION_HEADERS,
     _a2a_task_identity,
-    _extract_pipeline_envelope,
+    _extract_pipeline_envelopes,
     _parse_sse_data_line,
     build_message_stream_payload,
     build_task_cancel_payload,
@@ -1565,8 +1565,7 @@ def _apply_event(summary: StreamSummary, payload: Any) -> None:
         if state:
             summary.status_states.append(str(state))
 
-    envelope = _extract_pipeline_envelope(payload)
-    if envelope is not None:
+    for envelope in _extract_pipeline_envelopes(payload):
         summary.task_id = str(envelope.get("taskId") or envelope.get("task_id") or summary.task_id)
         summary.context_id = str(envelope.get("contextId") or envelope.get("context_id") or summary.context_id)
         event_type = str(envelope.get("eventType") or envelope.get("event_type") or "")
@@ -1595,42 +1594,41 @@ def _is_normal_handoff(envelope: dict[str, Any]) -> bool:
 
 def _step_started(step_id: str) -> Callable[[Any, StreamSummary], bool]:
     def predicate(event: Any, _summary: StreamSummary) -> bool:
-        envelope = _extract_pipeline_envelope(event)
-        step = envelope.get("step") if isinstance(envelope, dict) else None
-        return (
-            isinstance(envelope, dict)
-            and envelope.get("eventType") == "step_started"
-            and isinstance(step, dict)
-            and step.get("id") == step_id
+        return any(
+            envelope.get("eventType") == "step_started"
+            and isinstance(envelope.get("step"), dict)
+            and envelope["step"].get("id") == step_id
+            for envelope in _extract_pipeline_envelopes(event)
         )
 
     return predicate
 
 
 def _candidate_started(event: Any, _summary: StreamSummary) -> bool:
-    envelope = _extract_pipeline_envelope(event)
-    return isinstance(envelope, dict) and envelope.get("eventType") in {"candidate_started", "candidate_step_started"}
+    return any(
+        envelope.get("eventType") in {"candidate_started", "candidate_step_started"}
+        for envelope in _extract_pipeline_envelopes(event)
+    )
 
 
 def _input_required_step(step_id: str) -> Callable[[Any, StreamSummary], bool]:
     def predicate(event: Any, _summary: StreamSummary) -> bool:
-        envelope = _extract_pipeline_envelope(event)
-        step = envelope.get("step") if isinstance(envelope, dict) else None
-        data = envelope.get("data") if isinstance(envelope, dict) else None
-        data_step_id = data.get("stepId") if isinstance(data, dict) else None
-        return (
-            isinstance(envelope, dict)
-            and envelope.get("eventType") == "input_required"
-            and ((isinstance(step, dict) and step.get("id") == step_id) or data_step_id == step_id)
-        )
+        for envelope in _extract_pipeline_envelopes(event):
+            step = envelope.get("step")
+            data = envelope.get("data")
+            data_step_id = data.get("stepId") if isinstance(data, dict) else None
+            if envelope.get("eventType") == "input_required" and (
+                (isinstance(step, dict) and step.get("id") == step_id) or data_step_id == step_id
+            ):
+                return True
+        return False
 
     return predicate
 
 
 def _event_type(event_type: str) -> Callable[[Any, StreamSummary], bool]:
     def predicate(event: Any, _summary: StreamSummary) -> bool:
-        envelope = _extract_pipeline_envelope(event)
-        return isinstance(envelope, dict) and envelope.get("eventType") == event_type
+        return any(envelope.get("eventType") == event_type for envelope in _extract_pipeline_envelopes(event))
 
     return predicate
 
@@ -2154,8 +2152,9 @@ def _latest_pending_kind(path: Path) -> str:
             value = json.loads(line)
         except json.JSONDecodeError:
             continue
-        envelope = _extract_pipeline_envelope(value)
-        if isinstance(envelope, dict) and envelope.get("eventType") == "input_required":
+        for envelope in _extract_pipeline_envelopes(value):
+            if envelope.get("eventType") != "input_required":
+                continue
             data = envelope.get("data")
             if isinstance(data, dict):
                 kind = str(data.get("kind") or "")
@@ -2165,8 +2164,9 @@ def _latest_pending_kind(path: Path) -> str:
 def _latest_input_required_kind_from_events(events: Iterable[Any]) -> str:
     kind = ""
     for value in events:
-        envelope = _extract_pipeline_envelope(value)
-        if isinstance(envelope, dict) and envelope.get("eventType") == "input_required":
+        for envelope in _extract_pipeline_envelopes(value):
+            if envelope.get("eventType") != "input_required":
+                continue
             data = envelope.get("data")
             if isinstance(data, dict):
                 kind = str(data.get("kind") or "")
@@ -2176,15 +2176,15 @@ def _latest_input_required_kind_from_events(events: Iterable[Any]) -> str:
 def _latest_input_required_step_id_from_events(events: Iterable[Any]) -> str:
     step_id = ""
     for value in events:
-        envelope = _extract_pipeline_envelope(value)
-        if not isinstance(envelope, dict) or envelope.get("eventType") != "input_required":
-            continue
-        step = envelope.get("step")
-        if isinstance(step, dict) and step.get("id"):
-            step_id = str(step.get("id") or "")
-        data = envelope.get("data")
-        if isinstance(data, dict) and data.get("stepId"):
-            step_id = str(data.get("stepId") or "")
+        for envelope in _extract_pipeline_envelopes(value):
+            if envelope.get("eventType") != "input_required":
+                continue
+            step = envelope.get("step")
+            if isinstance(step, dict) and step.get("id"):
+                step_id = str(step.get("id") or "")
+            data = envelope.get("data")
+            if isinstance(data, dict) and data.get("stepId"):
+                step_id = str(data.get("stepId") or "")
     return step_id
 
 
@@ -2352,9 +2352,23 @@ def _created_stack_id_from_event(
     exclude: set[str],
     expected_stack_name: str | None = None,
 ) -> str | None:
-    envelope = _extract_pipeline_envelope(event)
-    if not isinstance(envelope, dict):
-        return None
+    for envelope in _extract_pipeline_envelopes(event):
+        stack_id = _created_stack_id_from_envelope(
+            envelope,
+            exclude=exclude,
+            expected_stack_name=expected_stack_name,
+        )
+        if stack_id:
+            return stack_id
+    return None
+
+
+def _created_stack_id_from_envelope(
+    envelope: dict[str, Any],
+    *,
+    exclude: set[str],
+    expected_stack_name: str | None = None,
+) -> str | None:
     data = envelope.get("data")
     if not isinstance(data, dict):
         return None
@@ -2509,11 +2523,12 @@ def _cleanup_event_for_stack(
     event_types: set[str],
 ) -> Callable[[Any, StreamSummary], bool]:
     def predicate(event: Any, _summary: StreamSummary) -> bool:
-        envelope = _extract_pipeline_envelope(event)
-        if not isinstance(envelope, dict) or envelope.get("eventType") not in event_types:
-            return False
-        data = envelope.get("data")
-        return isinstance(data, dict) and data.get("resourceId") == stack_id
+        return any(
+            envelope.get("eventType") in event_types
+            and isinstance(envelope.get("data"), dict)
+            and envelope["data"].get("resourceId") == stack_id
+            for envelope in _extract_pipeline_envelopes(event)
+        )
 
     return predicate
 
@@ -2528,12 +2543,12 @@ def _events_file_has_cleanup_event(path: Path, *, stack_id: str, event_types: se
             value = json.loads(line)
         except json.JSONDecodeError:
             continue
-        envelope = _extract_pipeline_envelope(value)
-        if not isinstance(envelope, dict) or envelope.get("eventType") not in event_types:
-            continue
-        data = envelope.get("data")
-        if isinstance(data, dict) and data.get("resourceId") == stack_id:
-            return True
+        for envelope in _extract_pipeline_envelopes(value):
+            if envelope.get("eventType") not in event_types:
+                continue
+            data = envelope.get("data")
+            if isinstance(data, dict) and data.get("resourceId") == stack_id:
+                return True
     return False
 
 
@@ -2551,8 +2566,7 @@ def _events_file_has_cleanup_activity(path: Path) -> bool:
             value = json.loads(line)
         except json.JSONDecodeError:
             continue
-        envelope = _extract_pipeline_envelope(value)
-        if isinstance(envelope, dict) and _pipeline_envelope_has_cleanup_activity(envelope):
+        if any(_pipeline_envelope_has_cleanup_activity(envelope) for envelope in _extract_pipeline_envelopes(value)):
             return True
     return False
 

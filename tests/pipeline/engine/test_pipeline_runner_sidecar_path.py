@@ -1051,6 +1051,129 @@ async def test_resume_candidate_selection_emits_selected_option_details(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_resume_candidate_selection_routes_natural_language_to_current_llm_step(tmp_path):
+    runner = _build_runner(tmp_path)
+    runner.state_machine.current_step.ui_mode = "candidate_selection"
+    options = [
+        {"name": "方案A", "candidate_index": 0},
+        {"name": "方案B", "candidate_index": 1},
+    ]
+    runner._waiting_input_options_by_step["s1"] = options
+    runner.context.set_conclusion("x", {"user_prompt": "请选择方案", "options": options})
+    seen_user_messages = []
+
+    async def fake_execute(step, context, session_id, user_message=None, **_kwargs):
+        seen_user_messages.append(user_message)
+        conclusion = {"selected_candidate_name": "方案A", "selected_candidate_index": 0}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner.resume("你随便选一个方案。")]
+
+    assert seen_user_messages == ["你随便选一个方案。"]
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_REQUIRED for event in events
+    )
+    received = next(
+        event
+        for event in events
+        if isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_RECEIVED
+    )
+    assert "selected_index" not in received.data
+
+
+@pytest.mark.asyncio
+async def test_resume_candidate_selection_preserves_image_content_for_current_llm_step(tmp_path):
+    runner = _build_runner(tmp_path)
+    runner.state_machine.current_step.ui_mode = "candidate_selection"
+    options = [{"name": "方案A", "candidate_index": 0}]
+    runner._waiting_input_options_by_step["s1"] = options
+    runner.context.set_conclusion("x", {"user_prompt": "请选择方案", "options": options})
+    image_input = [
+        TextBlock(text="请读取图片中的文字，并将图片中的文字作为本轮用户输入执行。"),
+        ImageBlock(media_type="image/png", data="aGVsbG8="),
+    ]
+    seen_user_messages = []
+
+    async def fake_execute(step, context, session_id, user_message=None, **_kwargs):
+        seen_user_messages.append(user_message)
+        conclusion = {"selected_candidate_name": "方案A", "selected_candidate_index": 0}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner.resume(image_input)]
+
+    assert seen_user_messages == [image_input]
+    received = next(
+        event
+        for event in events
+        if isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_RECEIVED
+    )
+    assert received.data["has_images"] is True
+    assert "selected_index" not in received.data
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "user_input",
+    [
+        '{"selected_candidate_index": 9}',
+        '{"selected_candidate_index": "1"}',
+        '{"selected_evaluated_candidate_index": 9}',
+        '{"selected_candidate_index":',
+    ],
+)
+async def test_resume_candidate_selection_rejects_invalid_structured_input_without_consuming_wait_state(
+    tmp_path,
+    user_input,
+):
+    runner = _build_runner(tmp_path)
+    runner.state_machine.current_step.ui_mode = "candidate_selection"
+    options = [
+        {"name": "方案A", "candidate_index": 0},
+        {"name": "方案B", "candidate_index": 1},
+    ]
+    started_at = 123.0
+    runner._waiting_input_options_by_step["s1"] = options
+    runner._waiting_input_started_at["s1"] = started_at
+    runner.context.set_conclusion("x", {"user_prompt": "请选择方案", "options": options})
+    runner._observability.candidate_selection_rejected = MagicMock()
+    runner._observability.user_input_received = MagicMock()
+    runner._set_current_step_user_input = MagicMock()
+
+    async def fail_continue(**_kwargs):
+        raise AssertionError("invalid selection must not continue the pipeline")
+        yield
+
+    runner._continue_from_current = fail_continue
+
+    events = [event async for event in runner.resume(user_input)]
+
+    required = next(event for event in events if isinstance(event, PipelineEvent))
+    assert required.type == PipelineEventType.USER_INPUT_REQUIRED
+    assert required.data == {
+        "step_id": "s1",
+        "prompt": "请选择方案",
+        "options": options,
+        "validation_error": "invalid_candidate_selection",
+    }
+    assert runner._waiting_input_options_by_step["s1"] == options
+    assert runner._waiting_input_started_at["s1"] == started_at
+    assert "user_input" not in runner.context.get_conclusion("x")
+    runner._set_current_step_user_input.assert_not_called()
+    runner._observability.user_input_received.assert_not_called()
+    runner._observability.candidate_selection_rejected.assert_called_once_with(
+        step_id="s1",
+        step_attempt=1,
+        option_count=2,
+    )
+
+
+@pytest.mark.asyncio
 async def test_resume_candidate_selection_extracts_index_from_structured_json(tmp_path):
     runner = _build_runner(tmp_path)
     runner.state_machine.current_step.ui_mode = "candidate_selection"
@@ -1079,6 +1202,83 @@ async def test_resume_candidate_selection_extracts_index_from_structured_json(tm
     assert received.type == PipelineEventType.USER_INPUT_RECEIVED
     assert received.data["selected_index"] == 1
     assert received.data["selected_option"] == {"name": "方案B", "candidate_index": 1}
+
+
+@pytest.mark.asyncio
+async def test_resume_candidate_selection_extracts_index_from_numbered_choice(tmp_path):
+    runner = _build_runner(tmp_path)
+    runner.state_machine.current_step.ui_mode = "candidate_selection"
+    runner._waiting_input_options_by_step["s1"] = [
+        {"name": "方案A", "candidate_index": 0},
+        {"name": "方案B", "candidate_index": 1},
+    ]
+
+    async def fake_continue(user_input=None, **kwargs):
+        assert kwargs == {"resume_waiting_step": True}
+        if False:
+            yield
+
+    runner._continue_from_current = fake_continue
+
+    events = [event async for event in runner.resume("我选择方案1")]
+
+    received = next(event for event in events if isinstance(event, PipelineEvent))
+    assert received.type == PipelineEventType.USER_INPUT_RECEIVED
+    assert received.data["selected_index"] == 1
+    assert received.data["selected_option"] == {"name": "方案B", "candidate_index": 1}
+
+
+@pytest.mark.asyncio
+async def test_resume_candidate_selection_prefers_evaluated_index_over_display_index(tmp_path):
+    runner = _build_runner(tmp_path)
+    runner.state_machine.current_step.ui_mode = "candidate_selection"
+    runner._waiting_input_options_by_step["s1"] = [
+        {"name": "方案A", "candidate_index": 1},
+        {"name": "方案B", "candidate_index": 2},
+    ]
+
+    async def fake_continue(user_input=None, **kwargs):
+        assert kwargs == {"resume_waiting_step": True}
+        if False:
+            yield
+
+    runner._continue_from_current = fake_continue
+    user_input = json.dumps(
+        {
+            "selected_candidate_index": 0,
+            "selected_evaluated_candidate_index": 2,
+        },
+        ensure_ascii=False,
+    )
+
+    events = [event async for event in runner.resume(user_input)]
+
+    received = next(event for event in events if isinstance(event, PipelineEvent))
+    assert received.type == PipelineEventType.USER_INPUT_RECEIVED
+    assert received.data["selected_index"] == 1
+    assert received.data["selected_option"] == {"name": "方案B", "candidate_index": 2}
+
+
+@pytest.mark.asyncio
+async def test_resume_candidate_selection_keeps_display_index_semantics(tmp_path):
+    runner = _build_runner(tmp_path)
+    runner.state_machine.current_step.ui_mode = "candidate_selection"
+    runner._waiting_input_options_by_step["s1"] = [
+        {"name": "方案A", "candidate_index": 1},
+        {"name": "方案B", "candidate_index": 2},
+    ]
+
+    async def fake_continue(user_input=None, **kwargs):
+        if False:
+            yield
+
+    runner._continue_from_current = fake_continue
+
+    events = [event async for event in runner.resume('{"selected_candidate_index": 0}')]
+
+    received = next(event for event in events if isinstance(event, PipelineEvent))
+    assert received.data["selected_index"] == 0
+    assert received.data["selected_option"] == {"name": "方案A", "candidate_index": 1}
 
 
 @pytest.mark.asyncio
@@ -1113,6 +1313,77 @@ async def test_resume_candidate_selection_uses_restored_context_options(tmp_path
         "selected_value": "方案B",
         "selected_option": {"name": "方案B", "candidate_index": 1},
     }
+
+
+@pytest.mark.asyncio
+async def test_resume_candidate_selection_llm_result_continues_to_deploying(tmp_path):
+    pipeline_dir = tmp_path / "candidate-selection-pipe"
+    pipeline_dir.mkdir()
+    (pipeline_dir / "pipeline.yaml").write_text(
+        yaml.dump(
+            {
+                "name": "t",
+                "context_dependencies": {"selected_plan": [], "deployment": ["selected_plan"]},
+                "steps": [
+                    {
+                        "id": "confirm_and_select",
+                        "conclusion_field": "selected_plan",
+                        "forward": "deploying",
+                        "prompt": "prompts/confirm_and_select.md",
+                        "auto_advance": False,
+                        "ui_mode": "candidate_selection",
+                    },
+                    {
+                        "id": "deploying",
+                        "conclusion_field": "deployment",
+                        "forward": None,
+                        "prompt": "prompts/deploying.md",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    prompts_dir = pipeline_dir / "prompts"
+    prompts_dir.mkdir()
+    (prompts_dir / "confirm_and_select.md").write_text("select", encoding="utf-8")
+    (prompts_dir / "deploying.md").write_text("deploy", encoding="utf-8")
+    runner = _build_runner(tmp_path, pipeline_dir=pipeline_dir)
+    options = [
+        {"name": "方案A", "candidate_index": 0},
+        {"name": "方案B", "candidate_index": 1},
+    ]
+    runner._waiting_input_options_by_step["confirm_and_select"] = options
+    runner.context.set_conclusion(
+        "selected_plan",
+        {"user_prompt": "请选择方案", "options": options},
+    )
+    calls = []
+
+    async def fake_execute(step, context, session_id, user_message=None, **_kwargs):
+        calls.append((step.step_id, user_message))
+        if step.step_id == "confirm_and_select":
+            conclusion = {
+                "selected_candidate_name": "方案A",
+                "selected_candidate_index": 0,
+            }
+        else:
+            assert context.get_conclusion("selected_plan")["selected_candidate_name"] == "方案A"
+            conclusion = {"status": "deployed"}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner.resume("选一个最简单的方案")]
+
+    assert calls == [
+        ("confirm_and_select", "选一个最简单的方案"),
+        ("deploying", None),
+    ]
+    assert any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+    )
 
 
 @pytest.mark.asyncio

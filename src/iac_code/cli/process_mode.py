@@ -513,6 +513,7 @@ class PipelineProcessRuntimeController:
         agent_runtime_factory: Any | None = None,
         pipeline_factory: Any | None = None,
         context_store: PipelineProcessContextStore | None = None,
+        aliyun_delegated_executor_factory: Any | None = None,
     ) -> None:
         self._options = options
         self.model = options.model
@@ -520,6 +521,7 @@ class PipelineProcessRuntimeController:
         self._agent_runtime_factory = agent_runtime_factory or self._default_agent_runtime_factory
         self._pipeline_factory = pipeline_factory or self._default_pipeline_factory
         self._context_store = context_store or PipelineProcessContextStore()
+        self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
         self._agent_runtime: Any | None = None
         self._pipeline: Any | None = None
         self._translator: Any | None = None
@@ -610,7 +612,7 @@ class PipelineProcessRuntimeController:
             model=self.model,
             resume_from_sidecar=snapshot is not None,
         )
-        pipeline = self._ensure_pipeline(request)
+        pipeline = await self._ensure_pipeline(request)
         pipeline_input = normalize_pipeline_user_input(frame.text)
         stream = self._pipeline_stream(pipeline, pipeline_input, snapshot)
         state = PipelineProcessTurnState()
@@ -651,11 +653,21 @@ class PipelineProcessRuntimeController:
         )
 
     async def aclose(self) -> None:
-        close = getattr(self._agent_runtime, "aclose", None)
+        runtime = self._agent_runtime
+        self._agent_runtime = None
+        self._pipeline = None
+        self._translator = None
+        await self._close_agent_runtime(runtime)
+
+    @staticmethod
+    async def _close_agent_runtime(runtime: Any | None) -> None:
+        close = getattr(runtime, "aclose", None)
         if close is None:
             return
         try:
-            await close()
+            result = close()
+            if asyncio.iscoroutine(result):
+                await result
         except Exception:
             logger.debug("Pipeline process runtime close failed", exc_info=True)
 
@@ -690,17 +702,29 @@ class PipelineProcessRuntimeController:
             )
         )
 
-    def _ensure_pipeline(self, request: PipelineProcessCreateRequest) -> Any:
+    async def _ensure_pipeline(self, request: PipelineProcessCreateRequest) -> Any:
         if self._pipeline is not None and self._context_id == request.context_id and self._task_id == request.task_id:
             return self._pipeline
-        self._agent_runtime = self._agent_runtime_factory(request)
-        request = replace(request, agent_runtime=self._agent_runtime)
-        self._pipeline = self._pipeline_factory(request)
-        self._translator = self._create_translator(request)
+
+        runtime = self._agent_runtime_factory(request)
+        try:
+            request = replace(request, agent_runtime=runtime)
+            pipeline = self._pipeline_factory(request)
+            translator = self._create_translator(request)
+        except BaseException:
+            await self._close_agent_runtime(runtime)
+            raise
+
+        previous_runtime = self._agent_runtime
+        self._agent_runtime = runtime
+        self._pipeline = pipeline
+        self._translator = translator
         self._context_id = request.context_id
         self._task_id = request.task_id
         self.session_id = request.iac_code_session_id
-        return self._pipeline
+        if previous_runtime is not runtime:
+            await self._close_agent_runtime(previous_runtime)
+        return pipeline
 
     def _pipeline_stream(self, pipeline: Any, pipeline_input: Any, snapshot: PipelineProcessContextSnapshot | None):
         sidecar_status = getattr(pipeline, "sidecar_status", None) or (snapshot.sidecar_status if snapshot else None)
@@ -774,6 +798,10 @@ class PipelineProcessRuntimeController:
         command_registry = getattr(runtime, "command_registry", None)
         skills = command_registry.get_model_invocable_skills() if command_registry is not None else None
         permission_context = getattr(agent_loop, "permission_context", None)
+        delegated_factory = self._aliyun_delegated_executor_factory
+        if delegated_factory is None:
+            services = getattr(runtime, "aliyun_services", None)
+            delegated_factory = getattr(services, "delegated_executor_factory", None)
         return create_pipeline(
             self._pipeline_name(),
             provider_manager=runtime.provider_manager,
@@ -788,6 +816,7 @@ class PipelineProcessRuntimeController:
             backup_service=SessionBackupService(session_storage=session_storage),
             mcp_manager=getattr(runtime, "mcp_manager", None),
             mcp_config_warnings=getattr(runtime, "mcp_config_warnings", None),
+            aliyun_delegated_executor_factory=delegated_factory,
         )
 
     def _pipeline_name(self) -> str:

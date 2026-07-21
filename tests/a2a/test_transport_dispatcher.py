@@ -2,17 +2,27 @@ import asyncio
 import base64
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from a2a.server.context import ServerCallContext
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.types import SubscribeToTaskRequest, Task, TaskState, TaskStatus, TaskStatusUpdateEvent
 
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
+from iac_code.a2a.pipeline_transport_delivery import (
+    PipelineTransportDeliveryClosedError,
+    bind_pipeline_transport_delivery_tracker,
+    close_pipeline_transport_delivery_tracker,
+    create_pipeline_transport_delivery_tracker,
+    pipeline_transport_delivery_tracking_enabled,
+    register_pipeline_transport_delivery,
+)
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.a2a.transports.dispatcher import (
     A2AJsonRpcDispatcher,
     A2ARuntimeComponents,
     IacCodeRequestHandler,
+    _StreamingASGITransport,
     create_runtime_components,
 )
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
@@ -21,6 +31,23 @@ from iac_code.types.stream_events import TextDeltaEvent
 from .fakes import FakeAgentLoop, FakeRuntime
 
 _STREAM_TEST_TIMEOUT = 5
+
+
+@pytest.mark.asyncio
+async def test_closed_transport_tracker_reports_closed_stage_on_registration() -> None:
+    tracker = create_pipeline_transport_delivery_tracker()
+    close_pipeline_transport_delivery_tracker(tracker)
+    stages: list[str] = []
+
+    with bind_pipeline_transport_delivery_tracker(tracker):
+        completion = register_pipeline_transport_delivery(
+            object(),
+            stage_observer=lambda stage, _at_ns: stages.append(stage),
+        )
+
+    with pytest.raises(PipelineTransportDeliveryClosedError):
+        await completion
+    assert stages == ["registered", "closed"]
 
 
 @pytest.mark.asyncio
@@ -90,6 +117,154 @@ async def test_dispatcher_stream_yields_events(monkeypatch, tmp_path) -> None:
     assert any(event["result"]["status"]["state"] == "working" for event in events)
     assert events[-1]["result"]["status"]["state"] == "input-required"
     await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_stream_backpressures_asgi_until_consumer_resumes() -> None:
+    first_chunk_consumed = asyncio.Event()
+
+    async def app(_scope, _receive, send) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"text/event-stream")],
+            }
+        )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": b'data: {"id":"1","result":{"index":1}}\n\n',
+                "more_body": True,
+            }
+        )
+        first_chunk_consumed.set()
+        await send(
+            {
+                "type": "http.response.body",
+                "body": b'data: {"id":"1","result":{"index":2}}\n\n',
+                "more_body": False,
+            }
+        )
+
+    dispatcher = A2AJsonRpcDispatcher(SimpleNamespace(app=app))
+    stream = dispatcher.dispatch_stream({"jsonrpc": "2.0", "id": "1"})
+
+    first = await anext(stream)
+    assert first["result"]["index"] == 1
+    assert first_chunk_consumed.is_set() is False
+
+    second = await anext(stream)
+    assert first_chunk_consumed.is_set() is True
+    assert second["result"]["index"] == 2
+    with pytest.raises(StopAsyncIteration):
+        await anext(stream)
+
+    await dispatcher.aclose()
+
+
+@pytest.mark.asyncio
+async def test_streaming_asgi_transport_cancels_app_before_response_start() -> None:
+    app_started = asyncio.Event()
+    app_cancelled = asyncio.Event()
+
+    async def app(_scope, _receive, _send) -> None:
+        app_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            app_cancelled.set()
+            raise
+
+    transport = _StreamingASGITransport(app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://transport.local") as client:
+        request_task = asyncio.create_task(client.get("/"))
+        await app_started.wait()
+
+        request_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await request_task
+
+    assert app_cancelled.is_set()
+    assert not any(task.get_name() == "a2a-streaming-asgi-dispatch" and not task.done() for task in asyncio.all_tasks())
+
+
+@pytest.mark.asyncio
+async def test_message_stream_acknowledges_transport_delivery_only_when_resumed(monkeypatch) -> None:
+    observed: dict[str, asyncio.Future[None]] = {}
+    stages: list[str] = []
+    update = TaskStatusUpdateEvent(
+        task_id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+
+    async def sdk_stream(_handler, _params, _context):
+        observed["completion"] = register_pipeline_transport_delivery(
+            update,
+            stage_observer=lambda stage, _at_ns: stages.append(stage),
+        )
+        yield update
+
+    async def hydrate(_params) -> None:
+        return None
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send_stream", sdk_stream)
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = object()
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    params = SimpleNamespace(message=SimpleNamespace(task_id=None))
+
+    stream = handler.on_message_send_stream(params, object())
+    assert await anext(stream) is update
+    assert observed["completion"].done() is False
+    assert stages == ["registered", "dequeued"]
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(stream)
+
+    assert observed["completion"].done() is True
+    assert stages == ["registered", "dequeued", "acknowledged"]
+    assert pipeline_transport_delivery_tracking_enabled() is False
+
+
+@pytest.mark.asyncio
+async def test_message_stream_does_not_acknowledge_transport_delivery_when_closed(monkeypatch) -> None:
+    observed: dict[str, asyncio.Future[None]] = {}
+    stages: list[str] = []
+    update = TaskStatusUpdateEvent(
+        task_id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+
+    async def sdk_stream(_handler, _params, _context):
+        observed["completion"] = register_pipeline_transport_delivery(
+            update,
+            stage_observer=lambda stage, _at_ns: stages.append(stage),
+        )
+        yield update
+
+    async def hydrate(_params) -> None:
+        return None
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send_stream", sdk_stream)
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = object()
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    params = SimpleNamespace(message=SimpleNamespace(task_id=None))
+
+    stream = handler.on_message_send_stream(params, object())
+    assert await anext(stream) is update
+    await stream.aclose()
+
+    assert isinstance(observed["completion"].exception(), PipelineTransportDeliveryClosedError)
+    assert stages == ["registered", "dequeued", "closed"]
+    assert pipeline_transport_delivery_tracking_enabled() is False
 
 
 @pytest.mark.asyncio

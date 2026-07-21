@@ -39,6 +39,7 @@ class AgentRuntime:
     task_manager: Any
     memory_manager: Any
     legacy_memory_manager: Any
+    aliyun_services: Any | None = None
     _cloud_tools_refresher: Any | None = field(default=None, repr=False)
     mcp_manager: Any | None = None
     mcp_config_warnings: list[Any] | None = None
@@ -46,12 +47,22 @@ class AgentRuntime:
     _mcp_change_listeners: list[Any] = field(default_factory=list, repr=False)
     _mcp_auth_tasks: set[asyncio.Task[Any]] = field(default_factory=set, repr=False)
     _mcp_auth_flows: set[Any] = field(default_factory=set, repr=False)
+    _aliyun_services_closed: bool = field(default=False, init=False, repr=False)
 
     async def aclose(self) -> None:
-        await _close_mcp_auth_flows(self._mcp_auth_tasks, self._mcp_auth_flows)
-        if self.mcp_manager is not None:
-            with contextlib.suppress(Exception):
-                await self.mcp_manager.disconnect_all()
+        try:
+            await _close_mcp_auth_flows(self._mcp_auth_tasks, self._mcp_auth_flows)
+            if self.mcp_manager is not None:
+                with contextlib.suppress(Exception):
+                    await self.mcp_manager.disconnect_all()
+        finally:
+            if self.aliyun_services is not None and not self._aliyun_services_closed:
+                try:
+                    await self.aliyun_services.aclose()
+                except Exception:
+                    pass
+                else:
+                    self._aliyun_services_closed = True
 
     def add_mcp_change_listener(self, listener: Any) -> None:
         self._mcp_change_listeners.append(listener)
@@ -69,6 +80,7 @@ _A2A_SAFE_NORMAL_TOOL_NAMES = frozenset(
         "grep",
         "aliyun_api",
         "aliyun_doc_search",
+        "aliyun_api_doc",
         "ros_stack",
         "skill",
         "read_memory",
@@ -78,6 +90,19 @@ _A2A_SAFE_NORMAL_TOOL_NAMES = frozenset(
 
 
 def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
+    from iac_code.config import get_config_dir
+    from iac_code.tools.cloud.aliyun.runtime import create_aliyun_runtime_services
+
+    aliyun_services = create_aliyun_runtime_services(cache_dir=get_config_dir() / "openmeta-cache")
+    try:
+        return _create_agent_runtime(options, aliyun_services)
+    except BaseException:
+        with contextlib.suppress(Exception):
+            _run_async_blocking(aliyun_services.aclose())
+        raise
+
+
+def _create_agent_runtime(options: AgentFactoryOptions, aliyun_services: Any) -> AgentRuntime:
     from loguru import logger
 
     from iac_code.agent.agent_loop import AgentLoop
@@ -147,12 +172,29 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
         request_policy_override=options.request_policy_override,
     )
 
+    def aliyun_default_region_provider() -> str:
+        from iac_code.services.providers.aliyun import DEFAULT_REGION
+
+        credential = CloudCredentials().get_provider("aliyun")
+        return credential.region_id if credential is not None and credential.region_id else DEFAULT_REGION
+
+    def aliyun_credential_provider() -> Any:
+        credential = CloudCredentials().get_provider("aliyun")
+        if credential is not None and credential.mode == "OAuth":
+            from iac_code.services.providers.aliyun import AliyunCredentials
+
+            credential = AliyunCredentials.refresh_oauth_if_needed(credential)
+        return credential
+
+    aliyun_services.credential_provider = aliyun_credential_provider
+    aliyun_services.default_region_provider = aliyun_default_region_provider
+
     tool_registry = ToolRegistry()
     tool_registry.register_default_tools()
-    register_cloud_tools(tool_registry, CloudCredentials())
+    register_cloud_tools(tool_registry, CloudCredentials(), aliyun_services)
 
     def refresh_cloud_tools() -> None:
-        register_cloud_tools(tool_registry, CloudCredentials())
+        register_cloud_tools(tool_registry, CloudCredentials(), aliyun_services)
         if options.a2a_safe_mode:
             _filter_tool_registry_for_a2a_safe_mode(tool_registry)
 
@@ -395,6 +437,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
             task_manager=task_manager,
             memory_manager=memory_manager,
             legacy_memory_manager=legacy_memory_manager,
+            aliyun_services=aliyun_services,
             _cloud_tools_refresher=refresh_cloud_tools,
             mcp_manager=mcp_manager,
             mcp_config_warnings=mcp_config_warnings,

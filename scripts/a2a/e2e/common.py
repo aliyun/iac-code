@@ -30,7 +30,7 @@ if str(A2A_SCRIPTS_DIR) not in sys.path:
 from debugger import (  # noqa: E402
     A2A_VERSION_HEADERS,
     _a2a_task_identity,
-    _extract_pipeline_envelope,
+    _extract_pipeline_envelopes,
     _parse_sse_data_line,
     build_message_stream_payload,
 )
@@ -317,8 +317,7 @@ def _apply_event(summary: StreamSummary, payload: Any) -> None:
         if state:
             summary.status_states.append(str(state))
 
-    envelope = _extract_pipeline_envelope(payload)
-    if envelope is not None:
+    for envelope in _extract_pipeline_envelopes(payload):
         summary.task_id = str(envelope.get("taskId") or envelope.get("task_id") or summary.task_id)
         summary.context_id = str(envelope.get("contextId") or envelope.get("context_id") or summary.context_id)
         event_type = str(envelope.get("eventType") or envelope.get("event_type") or "")

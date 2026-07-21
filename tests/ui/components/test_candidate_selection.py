@@ -83,8 +83,10 @@ class TestCandidateSelectionRendererTabManagement:
         assert r.tab_count == 2
         assert r.selected_index == 0
         assert r.confirm_selection().selected_candidate_index == 0
+        assert r.confirm_selection().selected_evaluated_candidate_index == 0
         r.handle_key(key("right"))
         assert r.confirm_selection().selected_candidate_index == 1
+        assert r.confirm_selection().selected_evaluated_candidate_index == 1
 
     def test_seed_candidates_creates_placeholders_for_missing_tool_events(self):
         r, console = _make_renderer()
@@ -106,6 +108,23 @@ class TestCandidateSelectionRendererTabManagement:
         assert "Plan B missing architecture diagram/details" in output
         r.handle_key(key("right"))
         assert r.confirm_selection().selected_candidate_index == 1
+
+    def test_confirm_selection_uses_seeded_option_order_for_display_index(self):
+        r, _ = _make_renderer()
+        r.add_diagram("Failed", "graph TD", candidate_index=0)
+        r.seed_candidates(
+            [
+                {"name": "Plan C", "candidate_index": 2},
+                {"name": "Plan B", "candidate_index": 1},
+            ]
+        )
+        r.handle_key(key("right"))
+
+        selection = r.confirm_selection()
+
+        assert selection.selected_candidate_name == "Plan C"
+        assert selection.selected_candidate_index == 0
+        assert selection.selected_evaluated_candidate_index == 2
 
     def test_streaming_summary_merges_into_later_indexed_detail(self):
         r, _ = _make_renderer()
@@ -294,7 +313,8 @@ class TestCandidateSelectionRendererSelection:
         r.enter_selection_mode()
         selection = r.confirm_selection()
         assert selection.selected_candidate_name == "方案2"
-        assert selection.selected_candidate_index is None
+        assert selection.selected_candidate_index == 1
+        assert selection.selected_evaluated_candidate_index is None
 
 
 class TestRenderDiagramFallback:

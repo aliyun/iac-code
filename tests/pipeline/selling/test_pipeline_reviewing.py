@@ -42,6 +42,7 @@ def test_review_enabled_loads_infraguard_repair_step_before_cost() -> None:
         "infraguard_scan",
         "ros_validate_template",
         "aliyun_doc_search",
+        "aliyun_api_doc",
         "web_fetch",
         "aliyun_api",
     ]

@@ -1,0 +1,449 @@
+trusted_endpoint_suffixes:
+  - aliyuncs.com
+  - aliyunpds.com
+  - btripopen.alibtrip.com
+products:
+  AccessAnalyzer:
+    "2024-02-01":
+      source: "DNS resolution and signed ListAnalyzers validation across four public regions on 2026-07-19"
+      reason: Official OpenMeta omits endpoint metadata, while the four DNS-resolvable regional endpoints all returned HTTP 200 for the read-only ListAnalyzers API.
+      checked_on: "2026-07-19"
+      location_service_code: null
+      regions:
+        ap-southeast-1: accessanalyzer.ap-southeast-1.aliyuncs.com
+        cn-beijing: accessanalyzer.cn-beijing.aliyuncs.com
+        cn-hangzhou: accessanalyzer.cn-hangzhou.aliyuncs.com
+        cn-shanghai: accessanalyzer.cn-shanghai.aliyuncs.com
+      regional_endpoint_pattern: accessanalyzer.{region_id}.aliyuncs.com
+      global: null
+      host_template: null
+  AIRegistry:
+    "2026-03-17":
+      source: "DNS resolution and signed ListNamespaces validation across eleven public regions on 2026-07-19"
+      reason: Official OpenMeta omits endpoint metadata, while every DNS-resolvable public regional endpoint returned HTTP 200 for the read-only ListNamespaces API.
+      checked_on: "2026-07-19"
+      location_service_code: null
+      regions:
+        ap-southeast-1: airegistry.ap-southeast-1.aliyuncs.com
+        cn-beijing: airegistry.cn-beijing.aliyuncs.com
+        cn-chengdu: airegistry.cn-chengdu.aliyuncs.com
+        cn-hangzhou: airegistry.cn-hangzhou.aliyuncs.com
+        cn-hongkong: airegistry.cn-hongkong.aliyuncs.com
+        cn-shanghai: airegistry.cn-shanghai.aliyuncs.com
+        cn-shenzhen: airegistry.cn-shenzhen.aliyuncs.com
+        cn-wulanchabu: airegistry.cn-wulanchabu.aliyuncs.com
+        cn-zhangjiakou: airegistry.cn-zhangjiakou.aliyuncs.com
+        eu-central-1: airegistry.eu-central-1.aliyuncs.com
+        us-east-1: airegistry.us-east-1.aliyuncs.com
+      regional_endpoint_pattern: airegistry.{region_id}.aliyuncs.com
+      global: null
+      host_template: null
+  AiContent:
+    "20240611":
+      source: "official Alibaba Cloud AiContent endpoint documentation: https://help.aliyun.com/zh/document_detail/2850843.html"
+      reason: Official OpenMeta exposes a compact-date API version, and the product endpoint documentation lists its public regional endpoints.
+      checked_on: "2026-07-19"
+      location_service_code: null
+      regions:
+        cn-beijing: aicontent.cn-beijing.aliyuncs.com
+        cn-hangzhou: aicontent.cn-hangzhou.aliyuncs.com
+        cn-shanghai: aicontent.aliyuncs.com
+      global: aicontent.aliyuncs.com
+      host_template: null
+  AISC:
+    "2026-01-01":
+      source: "official AISC endpoint documentation and exact OpenMeta endpoint metadata, with representative signed validation on 2026-07-19: https://help.aliyun.com/en/security-center/developer-reference/api-aisc-2026-01-01-endpoint"
+      reason: Official metadata maps 25 supported region IDs to the Shanghai or Singapore public service endpoint; representative regions in both routing groups returned HTTP 200.
+      checked_on: "2026-07-19"
+      location_service_code: null
+      regions:
+        ap-northeast-1: aisc.ap-southeast-1.aliyuncs.com
+        ap-northeast-2: aisc.ap-southeast-1.aliyuncs.com
+        ap-southeast-1: aisc.ap-southeast-1.aliyuncs.com
+        ap-southeast-5: aisc.ap-southeast-1.aliyuncs.com
+        ap-southeast-6: aisc.ap-southeast-1.aliyuncs.com
+        ap-southeast-7: aisc.ap-southeast-1.aliyuncs.com
+        cn-beijing: aisc.cn-shanghai.aliyuncs.com
+        cn-beijing-finance-1: aisc.cn-shanghai.aliyuncs.com
+        cn-guangzhou: aisc.cn-shanghai.aliyuncs.com
+        cn-hangzhou: aisc.cn-shanghai.aliyuncs.com
+        cn-hangzhou-finance: aisc.cn-shanghai.aliyuncs.com
+        cn-heyuan-acdr-1: aisc.cn-shanghai.aliyuncs.com
+        cn-huhehaote: aisc.cn-shanghai.aliyuncs.com
+        cn-nanjing: aisc.cn-shanghai.aliyuncs.com
+        cn-qingdao: aisc.cn-shanghai.aliyuncs.com
+        cn-shanghai: aisc.cn-shanghai.aliyuncs.com
+        cn-shanghai-finance-1: aisc.cn-shanghai.aliyuncs.com
+        cn-shenzhen-finance-1: aisc.cn-shanghai.aliyuncs.com
+        cn-wulanchabu: aisc.cn-shanghai.aliyuncs.com
+        cn-zhangjiakou: aisc.cn-shanghai.aliyuncs.com
+        eu-central-1: aisc.ap-southeast-1.aliyuncs.com
+        eu-west-1: aisc.ap-southeast-1.aliyuncs.com
+        me-east-1: aisc.ap-southeast-1.aliyuncs.com
+        us-east-1: aisc.ap-southeast-1.aliyuncs.com
+        us-west-1: aisc.ap-southeast-1.aliyuncs.com
+      global: null
+      host_template: null
+  AlikafkaKopilot:
+    "2026-04-14":
+      source: "DNS and live validation follow-up on 2026-07-15"
+      reason: OpenMeta/aliyun-openapi-meta lacked a usable public endpoint for this product-version.
+      checked_on: "2026-07-15"
+      location_service_code: null
+      regions:
+        cn-beijing: alikafkakopilot.cn-beijing.aliyuncs.com
+      regional_endpoint_pattern: alikafkakopilot.{region_id}.aliyuncs.com
+      global: null
+      host_template: null
+  AgentTeams:
+    "2026-06-05":
+      source: "official AgentTeams product overview and signed ListInstances/QuerySupportedZones validation on 2026-07-19: https://help.aliyun.com/zh/document_detail/3040377.html"
+      reason: Official documentation lists Hangzhou, Beijing, and Singapore; both read-only APIs returned HTTP 200 in all three regions and QuerySupportedZones returned matching regional zones.
+      checked_on: "2026-07-19"
+      location_service_code: null
+      regions:
+        ap-southeast-1: agentteams.ap-southeast-1.aliyuncs.com
+        cn-beijing: agentteams.cn-beijing.aliyuncs.com
+        cn-hangzhou: agentteams.cn-hangzhou.aliyuncs.com
+      regional_endpoint_pattern: agentteams.{region_id}.aliyuncs.com
+      global: null
+      host_template: null
+  AgentRetailVision:
+    "2026-05-06":
+      source: "official OpenMeta version endpoint metadata on 2026-07-17"
+      reason: aliyun-openapi-meta marks the product unavailable, but the exact OpenMeta api-docs.json declares a public endpoint for this product-version.
+      checked_on: "2026-07-17"
+      location_service_code: null
+      regions:
+        cn-beijing: agentretailvision.cn-beijing.aliyuncs.com
+      regional_endpoint_pattern: agentretailvision.{region_id}.aliyuncs.com
+      global: null
+      host_template: null
+  AIDeepSign:
+    "2026-05-11":
+      source: "DNS evidence and live validation follow-up on 2026-07-15"
+      reason: Default endpoint was unavailable; regional public endpoint resolved and advanced validation to an account permission result.
+      checked_on: "2026-07-15"
+      location_service_code: null
+      regions:
+        cn-hangzhou: aideepsign.cn-hangzhou.aliyuncs.com
+      regional_endpoint_pattern: aideepsign.{region_id}.aliyuncs.com
+      global: null
+      host_template: null
+  Aidge:
+    "2026-04-28":
+      source: "DNS evidence and live validation follow-up on 2026-07-15"
+      reason: Default endpoint was unavailable; regional public endpoint resolved and enabled a live HTTP 200 validation path.
+      checked_on: "2026-07-15"
+      location_service_code: null
+      regions:
+        cn-beijing: aidge.cn-beijing.aliyuncs.com
+      regional_endpoint_pattern: aidge.{region_id}.aliyuncs.com
+      global: null
+      host_template: null
+  airticketOpen:
+    "2023-01-17":
+      source: "official Alibaba Cloud SDK Center endpoint example on 2026-07-17"
+      reason: OpenMeta endpoint metadata marks the product unavailable, but the SDK Center sample configures the public endpoint airticketopen.aliyuncs.com for this product-version.
+      checked_on: "2026-07-17"
+      location_service_code: null
+      regions: {}
+      global: airticketopen.aliyuncs.com
+      host_template: null
+  btripOpen:
+    "2022-05-20":
+      source: "official OpenMeta HTTP request example and live business-error validation on 2026-07-18"
+      reason: The generated SDK regional endpoint repeatedly returns ServiceUnavailable, while the documented btripopen.alibtrip.com/api route reaches the business service and returns an application credential error for intentionally invalid credentials.
+      checked_on: "2026-07-18"
+      location_service_code: null
+      regions: {}
+      global: btripopen.alibtrip.com
+      host_template: null
+  AiSearchEngine:
+    "2026-04-17":
+      source: "official OpenMeta version endpoint metadata on 2026-07-15"
+      reason: aliyun-openapi-meta marks the product unavailable, but official OpenMeta declares a public endpoint for this product-version.
+      checked_on: "2026-07-15"
+      location_service_code: null
+      regions:
+        cn-hangzhou: aisearchengine.aliyuncs.com
+      global: null
+      host_template: null
+  AgentLoop:
+    "2026-05-20":
+      source: "official AgentLoop endpoint documentation and exact OpenMeta metadata, with signed DescribeRegions validation on 2026-07-19: https://help.aliyun.com/zh/document_detail/3041793.html"
+      reason: The official DescribeRegions API returned the same nine-region support set declared by endpoint metadata, and all nine public endpoints returned HTTP 200.
+      checked_on: "2026-07-19"
+      location_service_code: null
+      regions:
+        ap-southeast-1: agentloop.ap-southeast-1.aliyuncs.com
+        cn-beijing: agentloop.cn-beijing.aliyuncs.com
+        cn-chengdu: agentloop.cn-chengdu.aliyuncs.com
+        cn-guangzhou: agentloop.cn-guangzhou.aliyuncs.com
+        cn-hangzhou: agentloop.cn-hangzhou.aliyuncs.com
+        cn-heyuan: null
+        cn-hongkong: agentloop.cn-hongkong.aliyuncs.com
+        cn-shanghai: agentloop.cn-shanghai.aliyuncs.com
+        cn-shenzhen: agentloop.cn-shenzhen.aliyuncs.com
+        cn-zhangjiakou: agentloop.cn-zhangjiakou.aliyuncs.com
+      regional_endpoint_pattern: agentloop.{region_id}.aliyuncs.com
+      global: null
+      host_template: null
+  BailianVoiceBot:
+    "2025-01-01":
+      source: "DNS and live validation follow-up on 2026-07-15"
+      reason: OpenMeta/aliyun-openapi-meta lacked a usable public endpoint for this product-version.
+      checked_on: "2026-07-15"
+      location_service_code: null
+      regions:
+        cn-beijing: bailianvoicebot.cn-beijing.aliyuncs.com
+      regional_endpoint_pattern: bailianvoicebot.{region_id}.aliyuncs.com
+      global: null
+      host_template: null
+  Config:
+    "2019-01-08":
+      source: "official global OpenAPI endpoint compatibility review"
+      reason: Product uses a global endpoint and should skip Location/regional guessing.
+      checked_on: "2026-07-15"
+      location_service_code: null
+      regions: {}
+      global: config.aliyuncs.com
+      host_template: null
+    "2020-09-07":
+      source: "official global OpenAPI endpoint compatibility review"
+      reason: Product uses a global endpoint and should skip Location/regional guessing.
+      checked_on: "2026-07-15"
+      location_service_code: null
+      regions: {}
+      global: config.aliyuncs.com
+      host_template: null
+  Chatbot:
+    "2022-04-08":
+      source: "official exact-version OpenMeta endpoint metadata plus signed Shanghai and Hong Kong ListInstance validation on 2026-07-19"
+      reason: OpenMeta declares the Shanghai endpoint; Shanghai and Hong Kong both reached the exact Chatbot/2022-04-08 ListInstance business service, with Hong Kong confirmed by internal backend timing.
+      checked_on: "2026-07-19"
+      location_service_code: null
+      regions:
+        cn-shanghai: chatbot.cn-shanghai.aliyuncs.com
+        cn-hongkong: chatbot.cn-hongkong.aliyuncs.com
+      regional_endpoint_pattern: chatbot.{region_id}.aliyuncs.com
+      global: null
+      host_template: null
+  DtsAI:
+    "2026-04-01":
+      source: "DNS and live validation follow-up on 2026-07-15"
+      reason: OpenMeta/aliyun-openapi-meta lacked a usable public endpoint for this product-version.
+      checked_on: "2026-07-15"
+      location_service_code: null
+      regions:
+        cn-beijing: dtsai.cn-beijing.aliyuncs.com
+      regional_endpoint_pattern: dtsai.{region_id}.aliyuncs.com
+      global: null
+      host_template: null
+  grace:
+    "2022-06-06":
+      source: "official global OpenAPI endpoint compatibility review"
+      reason: Product uses a global endpoint and should skip Location/regional guessing.
+      checked_on: "2026-07-15"
+      location_service_code: null
+      regions: {}
+      global: grace.aliyuncs.com
+      host_template: null
+  Iot:
+    "2016-05-30":
+      source: "official IoT Platform API request-structure documentation and DNS validation on 2026-07-17"
+      reason: aliyun-openapi-meta only exposes LocationServiceCode for modern IoT versions, but the official IoT Platform documentation defines the OpenAPI endpoint as iot.${RegionId}.aliyuncs.com; the cn-shanghai endpoint resolves publicly and is used by official examples.
+      checked_on: "2026-07-17"
+      location_service_code: iot
+      regions:
+        cn-shanghai: iot.cn-shanghai.aliyuncs.com
+      regional_endpoint_pattern: iot.{region_id}.aliyuncs.com
+      global: null
+      host_template: null
+  OssSddp:
+    "2024-02-22":
+      source: "official global OpenAPI endpoint compatibility review"
+      reason: Product uses a global endpoint and should skip Location/regional guessing.
+      checked_on: "2026-07-15"
+      location_service_code: null
+      regions: {}
+      global: osssddp.aliyuncs.com
+      host_template: null
+  MaasAISearchProxy:
+    "2026-04-24":
+      source: "official OpenMeta version endpoint metadata and DNS validation on 2026-07-15"
+      reason: Official OpenMeta declares a public global endpoint; regional endpoint guessing is unavailable for live validation.
+      checked_on: "2026-07-15"
+      location_service_code: null
+      regions: {}
+      global: maasaisearchproxy.aliyuncs.com
+      host_template: null
+  objectdet:
+    "2019-12-30":
+      source: "official OpenMeta version endpoint metadata on 2026-07-18: https://api.aliyun.com/meta/v1/products/objectdet/versions/2019-12-30/api-docs.json?language=ZH_CN"
+      reason: aliyun-openapi-meta only exposes a LocationServiceCode for this product-version, but the exact OpenMeta api-docs.json declares the cn-shanghai public endpoint.
+      checked_on: "2026-07-18"
+      location_service_code: null
+      regions:
+        cn-shanghai: objectdet.cn-shanghai.aliyuncs.com
+      regional_endpoint_pattern: objectdet.{region_id}.aliyuncs.com
+      global: null
+      host_template: null
+  hcs-mgw:
+    "2024-06-26":
+      source: "official alibabacloud-hcs-mgw20240626 SDK 1.0.6 and alibabacloud-gateway-oss 0.0.27"
+      reason: "The official SDK binds its required userid host-map value as {userid}.{endpoint}; exact-version OpenMeta omits this host parameter."
+      checked_on: "2026-07-18"
+      location_service_code: null
+      regions: {}
+      global: null
+      host_template: "{userid}.{endpoint}"
+  pds:
+    "2022-03-01":
+      source: "official PDS call-methods and JavaScript SDK documentation on 2026-07-17"
+      reason: PDS admin APIs use regional admin.aliyunpds.com endpoints, while domain-scoped APIs bind domain_id into {domain_id}.api.aliyunpds.com; OpenMeta marks domain_id as a host parameter but aliyun-openapi-meta only provides admin regional endpoints.
+      checked_on: "2026-07-17"
+      location_service_code: null
+      regions: {}
+      global: null
+      host_template: "{domain_id}.api.aliyunpds.com"
+  Searchplat:
+    "2024-05-29":
+      source: "official Alibaba Cloud Searchplat Go SDK POP v4 gateway contract and published regional endpoint on 2026-07-18"
+      reason: This version uses the official POP v4 gateway signing path; an exact version record prevents endpoint resolution from silently inheriting the 2024-04-01 contract.
+      checked_on: "2026-07-18"
+      location_service_code: null
+      regions:
+        cn-shanghai: searchplat.cn-shanghai.aliyuncs.com
+        eu-central-1: searchplat.eu-central-1.aliyuncs.com
+      regional_endpoint_pattern: searchplat.{region_id}.aliyuncs.com
+      global: null
+      host_template: null
+  Sls:
+    "2019-10-23":
+      source: "official aliyun-python-sdk-sls 1.1.2 endpoint policy and live CommonRequest validation on 2026-07-18"
+      reason: This historical SLS RPC surface uses the central sls.aliyuncs.com endpoint; it must not inherit the project-bound SLS 2020 endpoint contract.
+      checked_on: "2026-07-18"
+      location_service_code: null
+      regions: {}
+      global: sls.aliyuncs.com
+      host_template: null
+    "2020-12-30":
+      source: "official SLS endpoint contract compatibility review"
+      reason: SLS project-level APIs require Location service resolution plus project host binding.
+      checked_on: "2026-07-15"
+      location_service_code: sls
+      regions: {}
+      global: null
+      host_template: "{project}.{endpoint}"
+  SMQProxy:
+    "2026-04-09":
+      source: "official MNS endpoint contract and live account-scoped MNS validation on 2026-07-18"
+      reason: SMQProxy delegates to MNS, whose public endpoint is account-scoped; the AccountId is discovered through the read-only STS GetCallerIdentity API and is never persisted.
+      checked_on: "2026-07-18"
+      location_service_code: null
+      regions: {}
+      global: null
+      host_template: null
+      account_id_host_template: "{account_id}.mns.{region_id}.aliyuncs.com"
+  RealTranslationAgent:
+    "2026-06-22":
+      source: "official global OpenAPI endpoint compatibility review"
+      reason: Product uses a global endpoint and should skip Location/regional guessing.
+      checked_on: "2026-07-15"
+      location_service_code: null
+      regions: {}
+      global: realtranslationagent.aliyuncs.com
+      host_template: null
+  ResourceCenter:
+    "2022-12-01":
+      source: "official ResourceCenter endpoint documentation and signed SearchResources validation on 2026-07-19: https://help.aliyun.com/zh/resource-management/resource-center/developer-reference/api-resourcecenter-2022-12-01-endpoint"
+      reason: The China public API is a central Shanghai endpoint that is valid independently of the caller's configured region; the generated catalog otherwise exposes it only for cn-shanghai.
+      checked_on: "2026-07-19"
+      location_service_code: null
+      regions: {}
+      global: resourcecenter.aliyuncs.com
+      host_template: null
+  RiskManagement:
+    "2026-04-24":
+      source: "official global OpenAPI endpoint compatibility review"
+      reason: Product uses a global endpoint and should skip Location/regional guessing.
+      checked_on: "2026-07-15"
+      location_service_code: null
+      regions: {}
+      global: riskmanagement.aliyuncs.com
+      host_template: null
+  safconsole:
+    "2025-05-21":
+      source: "official OpenMeta version endpoint metadata and DNS validation on 2026-07-15"
+      reason: aliyun-openapi-meta only covered an older safconsole version; OpenMeta declares public endpoints for this product-version.
+      checked_on: "2026-07-15"
+      location_service_code: null
+      regions:
+        cn-hangzhou: safconsole.cn-hangzhou.aliyuncs.com
+        cn-shanghai: safconsole.cn-shanghai.aliyuncs.com
+      regional_endpoint_pattern: safconsole.{region_id}.aliyuncs.com
+      global: null
+      host_template: null
+  rtc-white-board:
+    "2020-12-14":
+      source: "official Alibaba Cloud SDK Center endpoint example on 2026-07-17"
+      reason: OpenMeta endpoint metadata marks the product unavailable, but the SDK Center sample references the public endpoint rtc-white-board.cn-shanghai.aliyuncs.com for this product-version.
+      checked_on: "2026-07-17"
+      location_service_code: null
+      regions:
+        cn-shanghai: rtc-white-board.cn-shanghai.aliyuncs.com
+      regional_endpoint_pattern: rtc-white-board.{region_id}.aliyuncs.com
+      global: null
+      host_template: null
+  STAROps:
+    "2026-04-28":
+      source: "official STAROps endpoint documentation and signed regional validation on 2026-07-19: https://help.aliyun.com/zh/starops/developer-reference/api-starops-2026-04-28-endpoint"
+      reason: Official metadata lists only Beijing and Singapore; both returned HTTP 200, while Hangzhou and Shanghai returned unsupported-region or unavailable-service results.
+      checked_on: "2026-07-19"
+      location_service_code: null
+      regions:
+        ap-southeast-1: starops.ap-southeast-1.aliyuncs.com
+        cn-beijing: starops.cn-beijing.aliyuncs.com
+        cn-hangzhou: null
+        cn-shanghai: null
+      regional_endpoint_pattern: starops.{region_id}.aliyuncs.com
+      global: null
+      host_template: null
+  TrafficFxOpen:
+    "2024-08-15":
+      source: "official Alibaba Cloud SDK Center endpoint example on 2026-07-17"
+      reason: OpenMeta endpoint metadata marks the product unavailable, but the SDK Center sample configures the public endpoint trafficfxopen.aliyuncs.com for this product-version.
+      checked_on: "2026-07-17"
+      location_service_code: null
+      regions: {}
+      global: trafficfxopen.aliyuncs.com
+      host_template: null
+  wyota:
+    "2021-04-20":
+      source: "DNS resolution and signed DescribeClients validation across three public regions on 2026-07-19"
+      reason: Official OpenMeta omits endpoint metadata, while all three DNS-resolvable regional endpoints returned HTTP 200 for the read-only DescribeClients API.
+      checked_on: "2026-07-19"
+      location_service_code: null
+      regions:
+        ap-southeast-1: wyota.ap-southeast-1.aliyuncs.com
+        cn-hangzhou: wyota.cn-hangzhou.aliyuncs.com
+        eu-west-1: wyota.eu-west-1.aliyuncs.com
+      regional_endpoint_pattern: wyota.{region_id}.aliyuncs.com
+      global: null
+      host_template: null
+  Yike:
+    "2026-03-19":
+      source: "official OpenMeta exact-version endpoints and live validation on 2026-07-19"
+      reason: The generated catalog's cn-hangzhou ICE endpoint returns InvalidVersion for Yike; current exact OpenMeta publishes Yike endpoints for cn-shanghai and ap-southeast-1.
+      checked_on: "2026-07-19"
+      regions:
+        ap-southeast-1: yike.ap-southeast-1.aliyuncs.com
+        cn-hangzhou: null
+      regional_endpoint_pattern: yike.{region_id}.aliyuncs.com
+  Oss:
+    "2019-05-17":
+      source: "official OSS endpoint contract compatibility review"
+      reason: OSS APIs require bucket host binding and the regional OSS endpoint form.
+      checked_on: "2026-07-15"
+      host_template: "{bucket}.{endpoint}"

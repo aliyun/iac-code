@@ -565,10 +565,10 @@ Resources:
     overview = result.views[0].mermaid_source
     detail = result.views[1]
     assert 'ECS["ECS instance' in overview
-    assert "展开: 应用层展开" in overview
-    assert "\\n展开: 应用层展开" in overview
+    assert "expand: 应用层展开" in overview
+    assert "\\nexpand: 应用层展开" in overview
     assert 'ALB["ALB Instance' in overview
-    assert 'ALB["ALB Instance\n展开: 应用层展开"]' not in overview
+    assert 'ALB["ALB Instance\nexpand: 应用层展开"]' not in overview
     assert detail.architecture_context["anchors"] == ["ECS"]
 
 
@@ -633,7 +633,7 @@ Resources:
     overview = result.views[0].mermaid_source
     assert "subgraph layer_VPC" in overview
     assert "subgraph layer_VSwitch" in overview
-    assert 'AppGroup["应用服务器组\\n+ 应用服务器 1\\n+ 应用服务器 2\\n展开: 应用层详情"]' in overview
+    assert 'AppGroup["应用服务器组\\n+ 应用服务器 1\\n+ 应用服务器 2\\nexpand: 应用层详情"]' in overview
     assert 'Redis["Redis 缓存"]' in overview
     assert "AppGroup -->|缓存访问| Redis" in overview
     assert 'ECS1["应用服务器 1"]' not in overview
@@ -1328,8 +1328,8 @@ Resources:
     assert "subgraph layer_VSwitch1" not in overview
     assert "subgraph layer_VSwitch2" not in overview
     assert "LoadBalancer -->|流量分发| BackendGroup" in overview
-    assert "\\n展开: 网络详情" not in overview
-    assert "展开: 网络详情" in overview
+    assert "\\nexpand: 网络详情" not in overview
+    assert "expand: 网络详情" in overview
 
 
 def test_large_graph_folds_repeated_attachment_markers_into_owner_resource():

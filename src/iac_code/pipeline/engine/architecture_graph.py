@@ -1531,7 +1531,7 @@ def _semantic_view_group_label(
         lines.append(f"+ {placement_summary}")
     remaining_count = len(member_ids) - len(member_labels)
     if remaining_count > 0:
-        remaining_label = "其他" if get_current_language() == "zh" else "more"
+        remaining_label = _("more")
         lines.append(f"+ {remaining_label} x{remaining_count}")
     return "\\n".join(lines)
 
@@ -1576,9 +1576,7 @@ def _semantic_view_group_placement_summary(
         return None
     root_labels = [str(containers_by_id[container_id].get("label") or container_id) for container_id in unique_root_ids]
     kind = _semantic_group_container_kind(root_labels)
-    if get_current_language() == "zh":
-        return f"跨 {kind} x{len(unique_root_ids)}"
-    return f"across {kind} x{len(unique_root_ids)}"
+    return _("across {kind} x{count}").format(kind=kind, count=len(unique_root_ids))
 
 
 def _root_container_id(container_id: str | None, layer_parent: dict[str, str]) -> str | None:
@@ -1594,7 +1592,7 @@ def _semantic_group_container_kind(labels: list[str]) -> str:
     kinds = {re.split(r"\s|\(", label.strip(), maxsplit=1)[0] for label in labels if label.strip()}
     if len(kinds) == 1:
         return next(iter(kinds))
-    return "边界" if get_current_language() == "zh" else "boundaries"
+    return _("boundaries")
 
 
 def _with_detail_anchor_labels(
@@ -1622,8 +1620,8 @@ def _append_detail_anchor_label(label: str, detail_titles: list[str], *, multili
         return label
     detail_label = " / ".join(unique_titles)
     if not multiline:
-        return f"{label}（展开: {detail_label}）"
-    return f"{label}\\n展开: {detail_label}"
+        return _("{label} (expand: {detail_label})").format(label=label, detail_label=detail_label)
+    return _("{label}\\nexpand: {detail_label}").format(label=label, detail_label=detail_label)
 
 
 def _semantic_view_id(raw_view: dict[str, Any], index: int) -> str:
@@ -3863,8 +3861,10 @@ def _layer_attachment_summary_label(
     rules: ArchitectureRules,
 ) -> str:
     layer_label = _localized_layer_type_label(layer, rules)
-    suffix = "配置" if get_current_language() == "zh" else "configuration"
-    return "{} {}\\n{}".format(layer_label, suffix, "\\n".join(formatted_labels))
+    return _("{layer_label} configuration\\n{details}").format(
+        layer_label=layer_label,
+        details="\\n".join(formatted_labels),
+    )
 
 
 def _localized_layer_type_label(layer: TemplateResource, rules: ArchitectureRules) -> str:

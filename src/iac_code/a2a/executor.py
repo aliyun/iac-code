@@ -17,7 +17,7 @@ from a2a.types import Message, Role, Task, TaskState, TaskStatus, TaskStatusUpda
 from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict, ParseDict
 
-from iac_code.a2a.backup import backup_session_async
+from iac_code.a2a.backup import backup_session_async, run_sync_fenced
 from iac_code.a2a.events import (
     iac_code_session_metadata,
     make_text_part,
@@ -87,7 +87,17 @@ from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.capabilities.multimodal import is_model_multimodal
 from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredential
-from iac_code.services.session_backup import BackupReason, SessionBackupBlocked, SessionBackupService
+from iac_code.services.session_backup import (
+    BackupReason,
+    SessionBackupBlocked,
+    SessionBackupService,
+    SessionReconcileResult,
+)
+from iac_code.services.session_backup_state import (
+    NORMAL_HANDOFF_PROOF_KEY,
+    BackupPublicationProof,
+    SessionBackupState,
+)
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import TextDeltaEvent
 from iac_code.utils.file_security import atomic_write_text, ensure_private_dir, ensure_private_file
@@ -942,6 +952,8 @@ class IacCodeA2AExecutor(AgentExecutor):
         task = None
         initial_task_published = False
         public_path_roots: list[dict[str, str]] | None = None
+        context_execution_token: str | None = None
+        active_pipeline_owner: asyncio.Task[Any] | None = None
 
         async def publish_initial_task_if_missing() -> None:
             nonlocal initial_task_published
@@ -956,19 +968,46 @@ class IacCodeA2AExecutor(AgentExecutor):
             )
             initial_task_published = True
 
+        async def release_context_execution() -> None:
+            nonlocal context_execution_token
+            if context_execution_token is None:
+                return
+            token = context_execution_token
+            context_execution_token = None
+            await self._task_store.end_context_execution(context_id, token)
+
         try:
             metadata = getattr(context, "metadata", None) or getattr(
                 getattr(context, "message", None), "metadata", None
             )
             cwd = self._resolve_cwd(metadata)
             public_path_roots = build_public_path_roots(cwd=cwd)
+            pipeline_mode = get_run_mode() == RunMode.PIPELINE
+            if pipeline_mode and requested_task_id:
+                reservation = await self._task_store.begin_context_execution_if_task_active(
+                    context_id,
+                    requested_task_id,
+                )
+                if reservation is not None:
+                    context_execution_token, active_pipeline_owner = reservation
+            if context_execution_token is None:
+                try:
+                    (
+                        context_execution_token,
+                        _reconcile_result,
+                    ) = await self._task_store.begin_context_execution_after_reconciliation(
+                        context_id,
+                        lambda: self._reconcile_session_before_route_locked(context_id=context_id, cwd=cwd),
+                        wait_timeout=_CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS,
+                    )
+                except TimeoutError as exc:
+                    raise ValueError(_("Task is already working.")) from exc
             user_id = self._resolve_user_id(metadata)
             metadata_model = self._resolve_model(metadata)
             metadata_api_key = self._resolve_api_key(metadata)
             request_policy_override = self._resolve_request_policy(metadata)
             model = metadata_model or self._model
             aliyun_credential = self._resolve_aliyun_credential(metadata)
-            pipeline_mode = get_run_mode() == RunMode.PIPELINE
             route_pipeline_handoff_to_normal = False
             if pipeline_mode:
                 route_pipeline_handoff_to_normal = await self._should_route_pipeline_handoff_to_normal(
@@ -1004,8 +1043,10 @@ class IacCodeA2AExecutor(AgentExecutor):
             await publish_initial_task_if_missing()
             await self._task_store.ensure_task_not_expired(task.task_id)
         except InvalidParamsError:
+            await release_context_execution()
             raise
         except Exception as exc:
+            await release_context_execution()
             await publish_initial_task_if_missing()
             if _is_retryable_executor_error(exc):
                 await self._publish_status(
@@ -1041,17 +1082,20 @@ class IacCodeA2AExecutor(AgentExecutor):
             and normal_input is not None
             and normal_input.is_empty
         ):
-            task.state = TASK_STATE_FAILED
-            await self._publish_status(
-                event_queue,
-                task_id=task_id,
-                context_id=context_id,
-                state=TaskState.TASK_STATE_FAILED,
-                text="A2A server currently accepts text input only.",
-            )
-            self._task_store.mirror_task(task)
-            await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
-            self._metrics.record_task_failed()
+            try:
+                task.state = TASK_STATE_FAILED
+                await self._publish_status(
+                    event_queue,
+                    task_id=task_id,
+                    context_id=context_id,
+                    state=TaskState.TASK_STATE_FAILED,
+                    text="A2A server currently accepts text input only.",
+                )
+                self._task_store.mirror_task(task)
+                await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
+                self._metrics.record_task_failed()
+            finally:
+                await release_context_execution()
             return
 
         if pipeline_mode and not route_pipeline_handoff_to_normal:
@@ -1072,26 +1116,54 @@ class IacCodeA2AExecutor(AgentExecutor):
                 request_policy_override=request_policy_override,
                 backup_service=self._backup_service,
             )
-            await pipeline_executor.execute(
-                context=context,
-                event_queue=event_queue,
-                task=task,
-                task_id=task_id,
-                context_id=context_id,
-                cwd=cwd,
-                pipeline_input=pipeline_input,
-            )
+            try:
+                pipeline_result = await pipeline_executor.execute(
+                    context=context,
+                    event_queue=event_queue,
+                    task=task,
+                    task_id=task_id,
+                    context_id=context_id,
+                    cwd=cwd,
+                    pipeline_input=pipeline_input,
+                    active_followup_only=active_pipeline_owner is not None,
+                )
+                if active_pipeline_owner is not None and pipeline_result is False:
+                    owner_finished = active_pipeline_owner.done()
+                    if owner_finished:
+                        if task.active_task is active_pipeline_owner:
+                            task.active_task = None
+                        task.state = TASK_STATE_INPUT_REQUIRED
+                        self._task_store.mirror_task(task)
+                    await self._publish_status(
+                        event_queue,
+                        task_id=task_id,
+                        context_id=context_id,
+                        state=TaskState.TASK_STATE_INPUT_REQUIRED,
+                        text=_("A temporary error occurred. Please retry."),
+                    )
+                    if owner_finished:
+                        await self._notify_terminal_task(
+                            task_id=task.task_id,
+                            context_id=task.context_id,
+                            state=task.state,
+                        )
+            finally:
+                await release_context_execution()
             return
         if route_pipeline_handoff_to_normal:
-            await self._ensure_pipeline_handoff_context_in_session(context_id=context_id, cwd=cwd)
+            try:
+                await self._ensure_pipeline_handoff_context_in_session(context_id=context_id, cwd=cwd)
+            except BaseException:
+                await release_context_execution()
+                raise
 
         task.active_task = asyncio.current_task()
         task.state = TASK_STATE_WORKING
         self._task_store.mirror_task(task)
+        await release_context_execution()
 
         def runtime_factory(session_id: str) -> Any:
             session_storage = SessionStorage()
-            SessionBackupService(session_storage=session_storage).restore_session(cwd, session_id)
             ensure_v2_session = getattr(session_storage, "ensure_v2_session_dir_for_new_session", None)
             if callable(ensure_v2_session):
                 ensure_v2_session(cwd, session_id)
@@ -1699,6 +1771,137 @@ class IacCodeA2AExecutor(AgentExecutor):
             await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
             return True
 
+    async def _reconcile_session_before_route(
+        self,
+        *,
+        context_id: str,
+        cwd: str,
+    ) -> SessionReconcileResult | None:
+        reconcile = getattr(self._backup_service, "reconcile_session", None)
+        if not callable(reconcile):
+            return None
+        async with self._task_store.reconciliation_lock(context_id):
+            await self._task_store.ensure_context_reconciliation_safe(context_id)
+            return await self._reconcile_session_before_route_locked(context_id=context_id, cwd=cwd)
+
+    async def _reconcile_session_before_route_locked(
+        self,
+        *,
+        context_id: str,
+        cwd: str,
+    ) -> SessionReconcileResult | None:
+        reconcile = getattr(self._backup_service, "reconcile_session", None)
+        if not callable(reconcile):
+            return None
+        try:
+            context = await self._task_store.get_context_record(context_id)
+        except Exception:
+            return None
+        if context.cwd != cwd:
+            return None
+        result = await run_sync_fenced(
+            reconcile,
+            cwd,
+            context.session_id,
+            attempted_proof_validator=lambda key, proof: self._validate_attempted_publication_proof(
+                cwd=cwd,
+                session_id=context.session_id,
+                key=key,
+                proof=proof,
+            ),
+        )
+        if not isinstance(result, SessionReconcileResult):
+            raise TypeError("session backup reconciliation returned an invalid result")
+        proven_handoff = self._normal_handoff_has_state_proof(
+            cwd=cwd,
+            session_id=context.session_id,
+            state=result.state,
+        )
+        if result.payload_changed or (proven_handoff and context.active_task_id is not None):
+            await self._task_store.refresh_context_from_session(
+                context_id=context_id,
+                cwd=cwd,
+                session_id=context.session_id,
+                clear_active_task_for_proven_handoff=proven_handoff,
+            )
+        return result
+
+    def _validate_attempted_publication_proof(
+        self,
+        *,
+        cwd: str,
+        session_id: str,
+        key: str,
+        proof: BackupPublicationProof,
+    ) -> bool:
+        if key != NORMAL_HANDOFF_PROOF_KEY:
+            return False
+        state = _a2a_pipeline_state_for_session(cwd=cwd, session_id=session_id)
+        if state is None:
+            return False
+        _snapshot_store, _journal, _snapshot, journal_events = state
+        return _handoff_from_publication_proof(proof, journal_events=journal_events) is not None
+
+    def _normal_handoff_has_state_proof(
+        self,
+        *,
+        cwd: str,
+        session_id: str,
+        state: SessionBackupState | None = None,
+        handoff: dict[str, Any] | None = None,
+        journal_events: list[dict[str, Any]] | None = None,
+    ) -> bool:
+        if state is None:
+            read_local_state = getattr(self._backup_service, "read_local_state", None)
+            if not callable(read_local_state):
+                return False
+            try:
+                state = read_local_state(cwd, session_id)
+            except Exception:
+                return False
+        if state is None or state.status != "succeeded":
+            return False
+        proof = state.publication_proofs.get(NORMAL_HANDOFF_PROOF_KEY)
+        if proof is None:
+            return False
+        if journal_events is None:
+            pipeline_state = _a2a_pipeline_state_for_session(cwd=cwd, session_id=session_id)
+            if pipeline_state is None:
+                return False
+            _snapshot_store, _journal, _snapshot, journal_events = pipeline_state
+        if (
+            handoff is not None
+            and _publication_proof_matches_handoff(
+                proof,
+                handoff=handoff,
+                journal_events=journal_events,
+            )
+            and _is_normal_handoff(handoff)
+        ):
+            return True
+        return _handoff_from_publication_proof(proof, journal_events=journal_events) is not None
+
+    def _normal_handoff_from_state_proof(
+        self,
+        *,
+        cwd: str,
+        session_id: str,
+        journal_events: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        read_local_state = getattr(self._backup_service, "read_local_state", None)
+        if not callable(read_local_state):
+            return None
+        try:
+            state = read_local_state(cwd, session_id)
+        except Exception:
+            return None
+        if state is None or state.status != "succeeded":
+            return None
+        proof = state.publication_proofs.get(NORMAL_HANDOFF_PROOF_KEY)
+        if proof is None:
+            return None
+        return _handoff_from_publication_proof(proof, journal_events=journal_events)
+
     async def _should_route_pipeline_handoff_to_normal(self, *, context_id: str, cwd: str) -> bool:
         try:
             ctx = await self._task_store.get_context_record(context_id)
@@ -1711,10 +1914,14 @@ class IacCodeA2AExecutor(AgentExecutor):
             return False
         _snapshot_store, _journal, snapshot, journal_events = state
         handoff = snapshot.get("normalHandoff")
-        if not isinstance(handoff, dict):
-            return False
-        if not _normal_handoff_has_backup_ack(handoff, journal_events):
-            return False
+        if not isinstance(handoff, dict) or not _normal_handoff_has_backup_ack(handoff, journal_events):
+            handoff = self._normal_handoff_from_state_proof(
+                cwd=cwd,
+                session_id=ctx.session_id,
+                journal_events=journal_events,
+            )
+            if handoff is None:
+                return False
         return handoff.get("action") == "switch_to_normal" and handoff.get("targetMode") == "normal"
 
     async def _ensure_pipeline_handoff_context_in_session(self, *, context_id: str, cwd: str) -> None:
@@ -1729,10 +1936,14 @@ class IacCodeA2AExecutor(AgentExecutor):
             return
         _snapshot_store, _journal, snapshot, journal_events = state
         handoff = snapshot.get("normalHandoff")
-        if not isinstance(handoff, dict):
-            return
-        if not _normal_handoff_has_backup_ack(handoff, journal_events):
-            return
+        if not isinstance(handoff, dict) or not _normal_handoff_has_backup_ack(handoff, journal_events):
+            handoff = self._normal_handoff_from_state_proof(
+                cwd=cwd,
+                session_id=ctx.session_id,
+                journal_events=journal_events,
+            )
+            if handoff is None:
+                return
         summary = handoff.get("summary")
         cleanup_payload = None
         data = handoff.get("data")
@@ -1916,7 +2127,7 @@ class IacCodeA2AExecutor(AgentExecutor):
 
 def _normal_handoff_has_backup_ack(handoff: dict[str, Any], journal_events: list[dict[str, Any]]) -> bool:
     if handoff.get("visibility") != "committed":
-        return True
+        return False
     handoff_sequence = _a2a_pipeline_sequence_number(handoff.get("sequence"))
     handoff_event_id = handoff.get("eventId")
     handoff_event_type = handoff.get("eventType") or "pipeline_handoff_ready"
@@ -1935,6 +2146,63 @@ def _normal_handoff_has_backup_ack(handoff: dict[str, Any], journal_events: list
         ):
             return True
     return False
+
+
+def _publication_proof_matches_handoff(
+    proof: BackupPublicationProof,
+    *,
+    handoff: dict[str, Any],
+    journal_events: list[dict[str, Any]],
+) -> bool:
+    if handoff.get("visibility") != "committed":
+        return False
+    if (
+        handoff.get("eventId") != proof.event_id
+        or handoff.get("eventType") != proof.event_type
+        or _a2a_pipeline_sequence_number(handoff.get("sequence")) != proof.sequence
+    ):
+        return False
+    return any(
+        event.get("visibility") == "committed"
+        and event.get("eventId") == proof.event_id
+        and event.get("eventType") == proof.event_type
+        and _a2a_pipeline_sequence_number(event.get("sequence")) == proof.sequence
+        for event in journal_events
+    )
+
+
+def _handoff_from_publication_proof(
+    proof: BackupPublicationProof,
+    *,
+    journal_events: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if proof.event_type != "pipeline_handoff_ready":
+        return None
+    for event in journal_events:
+        if (
+            event.get("visibility") != "committed"
+            or event.get("eventId") != proof.event_id
+            or event.get("eventType") != proof.event_type
+            or _a2a_pipeline_sequence_number(event.get("sequence")) != proof.sequence
+        ):
+            continue
+        data = event.get("data")
+        data = dict(data) if isinstance(data, dict) else {}
+        handoff = {
+            **data,
+            "data": data,
+            "eventId": proof.event_id,
+            "eventType": proof.event_type,
+            "sequence": proof.sequence,
+            "status": event.get("status"),
+            "visibility": "committed",
+        }
+        return handoff if _is_normal_handoff(handoff) else None
+    return None
+
+
+def _is_normal_handoff(handoff: dict[str, Any]) -> bool:
+    return handoff.get("action") == "switch_to_normal" and handoff.get("targetMode") == "normal"
 
 
 def _is_retryable_executor_error(exc: Exception) -> bool:

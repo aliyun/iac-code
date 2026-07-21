@@ -1,0 +1,83 @@
+contract_policy_version: 1
+default_signature_scheme: acs3
+products:
+  airticketOpen:
+    versions:
+      "2023-01-17":
+        auth_type: AK
+  btripOpen:
+    versions:
+      "2022-05-20":
+        auth_type: AK
+        pathname_prefix: /api
+        actions:
+          QueryGroupCorpList:
+            consumes:
+              - application/x-www-form-urlencoded
+  Searchplat:
+    versions:
+      "2024-05-29":
+        auth_type: AK
+  TrafficFxOpen:
+    versions:
+      "2024-08-15":
+        auth_type: AK
+  fnf:
+    versions:
+      "2019-03-15":
+        default_signature_scheme: acs1
+  hcs-mgw:
+    versions:
+      "2024-06-26":
+        additional_parameters:
+          userid:
+            location: host
+            required: true
+            schema:
+              type: string
+            description: Required user host identity published by the official hcs-mgw SDK but omitted by OpenMeta.
+  Sls:
+    versions:
+      "2019-10-23":
+        default_signature_scheme: acs1
+  ververica:
+    versions:
+      "2020-05-01":
+        default_signature_scheme: acs1
+  AnyTrans:
+    versions:
+      "2025-07-07":
+        actions:
+          TextTranslate:
+            parameter_locations:
+              workspaceId: body
+              format: body
+              sourceLanguage: body
+              targetLanguage: body
+              text: body
+              scene: body
+              ext: body
+  FaRui:
+    versions:
+      "2024-06-28":
+        actions:
+          RunSearchLawQuery:
+            parameter_locations:
+              appId: body
+              thread: body
+              query: body
+              queryKeywords: body
+              pageParam: body
+              filterCondition: body
+  Eci:
+    versions:
+      "2018-08-08":
+        parameter_styles:
+          DestinationResource: null
+  Oss:
+    default_signature_scheme: oss_v4
+    versions:
+      "2019-05-17":
+        sdk_adapter: oss_v2
+        path_parameters:
+          key: preserve_slashes

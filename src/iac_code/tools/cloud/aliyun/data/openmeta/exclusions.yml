@@ -1,0 +1,840 @@
+schema_version: 1
+products: {}
+versions:
+  CGCS:
+    '2021-11-11':
+      reason: target_all_read_apis_invalid
+      category: openmeta_unrequestable_version
+      observed: Live validation reached the target service on 2026-07-15 for all operationType=read APIs plus safe list APIs
+        in this version but returned HTTP 404 InvalidApi.NotFound.
+      discovered_on: '2026-07-15'
+      source: live_validation
+      note: Excluded as a version-level OpenMeta or target routing issue after multiple safe API checks.
+  Cms:
+    '2015-10-20':
+      reason: target_all_read_apis_invalid
+      category: openmeta_unrequestable_version
+      observed: Live validation reached the target service on 2026-07-15 for all read APIs in this version but returned HTTP
+        404 InvalidApi.NotFound.
+      discovered_on: '2026-07-15'
+      source: live_validation
+      note: Excluded as a version-level OpenMeta or target routing issue after multiple safe API checks.
+    '2016-03-18':
+      reason: target_all_read_apis_invalid
+      category: openmeta_unrequestable_version
+      observed: Live validation reached the target service on 2026-07-15 for all read APIs in this version but returned HTTP
+        404 InvalidApi.NotFound.
+      discovered_on: '2026-07-15'
+      source: live_validation
+      note: Excluded as a version-level OpenMeta or target routing issue after multiple safe API checks.
+  FCSandbox:
+    '2026-05-09':
+      reason: empty_api_docs
+      category: openmeta_empty_api_docs
+      observed: Official api-docs.json exists but currently contains an empty apis map.
+      discovered_on: '2026-07-15'
+      source: openmeta_api_docs_review
+      note: Excluded as a version-level OpenMeta data issue; counts as validation coverage closure.
+  gws:
+    '2019-06-18':
+      reason: target_all_safe_read_apis_invalid
+      category: openmeta_unrequestable_version
+      observed: Live validation reached the target service on 2026-07-15 and 2026-07-16 for multiple same-version safe read APIs, including DescribeAvailableResource, DescribeClusters, DescribeImages, DescribeInstances, GetConnectTicket, DescribeClusterPolicy, DescribeInstancePolicy, DescribeClusterADDomain, and DescribeClusterConnections, but returned HTTP 404 InvalidApi.NotFound.
+      discovered_on: '2026-07-16'
+      source: live_validation
+      note: Excluded as a version-level OpenMeta or target routing issue after multiple safe API checks across the expanded safe read surface.
+  ltl:
+    '2019-05-10':
+      reason: target_safe_read_apis_invalid
+      category: openmeta_unrequestable_version
+      observed: Live validation reached the target service on 2026-07-15 for multiple safe read/list APIs in this version
+        but returned HTTP 404 InvalidApi.NotFound.
+      discovered_on: '2026-07-15'
+      source: live_validation
+      note: Excluded as a version-level OpenMeta or target routing issue after multiple safe API checks.
+  MaaS:
+    '2026-03-18':
+      reason: target_all_read_apis_invalid
+      category: openmeta_unrequestable_version
+      observed: Live validation reached the target service on 2026-07-15 for all read APIs in this deprecated-only version
+        but returned HTTP 404 InvalidApi.NotFound.
+      discovered_on: '2026-07-15'
+      source: live_validation
+      note: Excluded as a version-level OpenMeta or target routing issue after multiple safe API checks.
+  Mts:
+    '2018-05-28':
+      reason: target_invalid_version
+      category: openmeta_unrequestable_version
+      observed: Live validation reached the target service on 2026-07-15 across multiple read APIs but returned HTTP 400 InvalidVersion.
+      discovered_on: '2026-07-15'
+      source: live_validation
+      note: Excluded as a version-level OpenMeta or target routing issue after multiple safe API checks.
+  pds:
+    '2020-03-20':
+      reason: deprecated_or_obsolete_openmeta_version
+      category: openmeta_deprecated_or_obsolete_version
+      observed: Manual review classifies pds/2020-03-20 as an obsolete version for OpenMeta runtime matching. Exact OpenMeta publishes the newer pds/2022-03-01 as the default version; safe probes against the legacy 2020 surface did not produce a usable product response.
+      discovered_on: '2026-07-18'
+      source: user_confirmed_obsolete_version_and_live_validation_review
+      note: Excluded only for pds/2020-03-20; do not generalize to pds/2022-03-01 or other versions.
+  rds-data:
+    '2022-03-30':
+      reason: target_all_current_apis_invalid
+      category: openmeta_unrequestable_version
+      observed: Live validation reached the target service on 2026-07-18 for ExecuteStatement, BeginTransaction, and BatchExecuteStatement with inert placeholder ARNs and SQL, but all returned HTTP 404 InvalidApi.NotFound.
+      discovered_on: '2026-07-18'
+      source: manual_review_live_validation_followup
+      note: Excluded only for this reviewed product-version; do not generalize the decision to other rds-data versions.
+  rtc-white-board:
+    '2020-12-14':
+      reason: service_unavailable_for_openmeta_runtime_matching
+      category: openmeta_service_unavailable
+      observed: Live validation reached the safe rtc-white-board/2020-12-14 DescribeApps, DescribeWhiteBoards, and DescribeWhiteBoardRecordings APIs at cn-shanghai across refreshed credential windows, but all returned HTTP 503 ServiceUnavailable; remaining APIs create, open, record, pause, resume, stop, or mutate whiteboard state.
+      discovered_on: '2026-07-18'
+      source: manual_review_live_validation_followup
+      note: Excluded only for this reviewed product-version; do not generalize the decision to other rtc-white-board versions.
+  Actiontrail:
+    '2015-09-28':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: LookupEvents."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  AgentRetailVision:
+    '2026-05-06':
+      reason: service_unavailable_for_openmeta_runtime_matching
+      category: openmeta_service_unavailable
+      observed: Live validation reached AgentRetailVision/2026-05-06 QueryRecognitionResult on 2026-07-17 after endpoint correction, but the target route returned HTTP 404 InvalidApi.NotFound.
+      discovered_on: '2026-07-18'
+      source: manual_review_live_validation_followup
+      note: Excluded only for this reviewed product-version; do not generalize the decision to other AgentRetailVision versions.
+  IaCService:
+    '2021-07-22':
+      reason: deprecated_or_obsolete_openmeta_version
+      category: openmeta_deprecated_or_obsolete_version
+      observed: Manual review classifies IaCService/2021-07-22 as an obsolete version for OpenMeta runtime matching. Live validation of its read APIs, including ListResources, GetResource, and ListDataSources, returned HTTP 503 ServiceUnavailable at the official cn-zhangjiakou endpoint across refreshed credential windows.
+      discovered_on: '2026-07-18'
+      source: user_confirmed_obsolete_version_and_live_validation_review
+      note: Excluded only for this reviewed product-version; do not generalize the decision to other IaCService versions.
+  Iot:
+    '2016-01-04':
+      reason: deprecated_or_obsolete_openmeta_version
+      category: openmeta_deprecated_or_obsolete_version
+      observed: Manual review classifies Iot/2016-01-04 as an obsolete version for OpenMeta runtime matching. Its only read-like API, ListDevicePermits, returned HTTP 503 ServiceUnavailable through the production runtime with the documented integer AppKey shape, and the official SDK Core request timed out.
+      discovered_on: '2026-07-18'
+      source: user_confirmed_obsolete_version_production_runtime_and_official_sdk_core_review
+      note: Excluded only for Iot/2016-01-04; do not generalize the decision to other Iot versions.
+    '2016-05-30':
+      reason: service_unavailable_for_openmeta_runtime_matching
+      category: openmeta_service_unavailable
+      observed: Live validation reached multiple Iot/2016-05-30 read APIs across refreshed credential windows, including ListRule, GetCats, GetRule, QueryApplyStatus, QueryDevice, QueryProductByUserId, and QueryProduct, but returned HTTP 503 ServiceUnavailable.
+      discovered_on: '2026-07-18'
+      source: manual_review_live_validation_followup
+      note: Excluded only for this reviewed product-version; do not generalize the decision to newer Iot versions.
+  linkedmall:
+    '2023-09-30':
+      reason: service_unavailable_for_openmeta_runtime_matching
+      category: openmeta_service_unavailable
+      observed: Live validation reached a broad linkedmall/2023-09-30 safe read/query surface, including SearchProducts, QueryOrders, ListPurchaserShops, ListSelectionProducts, ListSelectionProductSaleInfos, ListSelectionSkuSaleInfos, GetOrder, GetPurchaseOrderStatus, GetPurchaserShop, GetRefundOrder, GetSelectionProduct, GetSelectionProductSaleInfo, ListCategories, and ListLogisticsOrders, but returned stable HTTP 500 RemoteServerError or HTTP 503 ServiceUnavailable, with remaining purchase/refund/shipping APIs unsafe for automatic validation.
+      discovered_on: '2026-07-18'
+      source: manual_review_live_validation_followup
+      note: Excluded only for this reviewed product-version; do not generalize the decision to other linkedmall versions.
+  AIPodcast:
+    '2025-02-28':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: PodcastTaskResultQuery, PodcastTaskSubmit."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  AISC:
+    '2026-01-01':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: CreateSkillFileCheck, ListSubTasks."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  AIMath:
+    '2024-11-14':
+      reason: service_unavailable_for_openmeta_runtime_matching
+      category: openmeta_service_unavailable
+      observed: Official OpenMeta currently exposes only GenStep for this version; the reviewed validation policy classifies this service surface as unavailable for automatic OpenMeta matching.
+      discovered_on: '2026-07-18'
+      source: manual_review_live_validation_followup
+      note: Excluded only for this reviewed product-version; do not generalize the decision to other AIMath versions.
+  alimt:
+    '2018-08-07':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: MachineTranslateECommerce, MachineTranslateGeneral."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+    '2019-01-07':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: TranslateECommerce, TranslateGeneral."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  ARMS:
+    '2016-08-04':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: ArmsQueryDataSet."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+    '2016-10-31':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: ARMSQueryDataSet."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+    '2016-11-25':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: ARMSQueryDataSet, WhereInDimQuery."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+    '2017-07-25':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: ARMSQueryDataSet, WhereInDimQuery."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+    '2018-06-20':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: ARMSQueryDataSet."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+    '2018-10-15':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: ARMSQueryDataSet, MetricQuery."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+    '2018-12-19':
+      reason: deprecated_or_obsolete_openmeta_version
+      category: openmeta_deprecated_or_obsolete_version
+      observed: Live validation reached multiple safe ARMS/2018-12-19 trace/query APIs, including SearchTraces, ARMSQueryDataSet, GetServices, and GetTrace, but returned HTTP 503 ServiceUnavailable across refreshed credential windows; manual review classifies this exact version as obsolete for OpenMeta runtime matching.
+      discovered_on: '2026-07-18'
+      source: manual_review_live_validation_followup
+      note: Excluded only for this reviewed product-version; do not generalize the decision to newer ARMS versions.
+    '2019-02-19':
+      reason: deprecated_or_obsolete_openmeta_version
+      category: openmeta_deprecated_or_obsolete_version
+      observed: Live validation reached multiple safe ARMS/2019-02-19 trace/tag/service/token APIs, including SearchTraces, GetIpOrHosts, GetServices, GetSpanNames, GetTagKey, GetTagVal, GetToken, and GetTrace, but returned HTTP 503 ServiceUnavailable across refreshed credential windows; manual review classifies this exact version as obsolete for OpenMeta runtime matching.
+      discovered_on: '2026-07-18'
+      source: manual_review_live_validation_followup
+      note: Excluded only for this reviewed product-version; do not generalize the decision to ARMS/2019-08-08 or other newer ARMS versions.
+    '2021-04-22':
+      reason: deprecated_or_obsolete_openmeta_version
+      category: openmeta_deprecated_or_obsolete_version
+      observed: Live validation reached multiple safe ARMS/2021-04-22 trace, alert, RetCode, Prometheus, and status read/list APIs, including SearchTraces, CheckServiceStatus, DescribeTraceLicenseKey, DescribeTraceLocation, GetMultipleTrace, GetStack, ListActivatedAlerts, and ListAlertTemplates, but returned HTTP 503 ServiceUnavailable across refreshed credential windows; manual review classifies this exact version as obsolete for OpenMeta runtime matching.
+      discovered_on: '2026-07-18'
+      source: manual_review_live_validation_followup
+      note: Excluded only for this reviewed product-version; do not generalize the decision to ARMS/2021-05-19 or other newer ARMS versions.
+  BPStudio:
+    '2020-07-10':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: GetDeployDetail."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  btripOpen:
+    '2022-05-17':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: ScanMsgList, TakeAccessToken."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  captcha:
+    '2023-03-05':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: VerifyCaptcha, VerifyIntelligentCaptcha."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  CCC:
+    '2020-05-27':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: CheckServiceLinkedRoleForDeleting."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  cms-export:
+    '2021-11-01':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: BatchGet, Cursor."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  companyreg:
+    '2026-04-23':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: QuerySuccessIcpData."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  datahub:
+    '2019-11-20':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: ListProjects, OpenDataHubService."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  ddosbgp:
+    '2018-02-01':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: ReleaseInstance."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  DocumentParseService:
+    '2026-04-14':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: DocumentParseOnlineApi."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  Drds:
+    '2016-05-06':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: OrderRefund."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  Dytnsapi:
+    '2023-01-01':
+      reason: service_unavailable_for_openmeta_runtime_matching
+      category: openmeta_service_unavailable
+      observed: Live validation reached multiple Dytnsapi/2023-01-01 safe APIs, including DescribeNumberMccMnc, DescribeNumberHLR, GetIdentificationResult, GetIdentificationSession, GetPhoneNumberIdentificationResult, and GetPhoneNumberIdentificationUrl, but returned HTTP 503 ServiceUnavailable across refreshed credential windows.
+      discovered_on: '2026-07-18'
+      source: manual_review_live_validation_followup
+      note: Excluded only for this reviewed product-version; do not generalize the decision to other Dytnsapi versions.
+  ecd:
+    '2023-06-27':
+      reason: target_all_current_apis_invalid
+      category: openmeta_unrequestable_version
+      observed: Live validation reached the target service on 2026-07-17 for the current official API surface, including DescribeBenefits, GetRequestToken, and GetRedeemCodes, but returned HTTP 404 InvalidApi.NotFound.
+      discovered_on: '2026-07-17'
+      source: live_validation
+      note: Excluded as a version-level OpenMeta or target routing issue after all current same-version API routes returned InvalidApi.NotFound.
+  ecs-workbench:
+    '2025-11-11':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: DescribeTerminalSettings, ModifyTerminalSettings."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  eds-user:
+    '2021-06-22':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: GetUserByToken."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  EduInterpreting:
+    '2024-08-28':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: RecognizeAudio, SubmitEvaluationTask."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  EduTutor:
+    '2025-07-07':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: AnswerSSE, CutQuestions."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  eflo-controller:
+    '2026-06-12':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: ListImages."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  elasticsearch:
+    '2019-04-22':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: DescribeVSwitches, DescribeVpcs."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  EMRASSISTANT:
+    '2025-07-23':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: ChatCompletion."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  facebody:
+    '2020-09-10':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: ExecuteServerSideVerification."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  FC-Open:
+    '2020-03-10':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: OpenFcService."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  goodstech:
+    '2019-12-30':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: ClassifyCommodity."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  imageaudit:
+    '2019-12-30':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: ScanImage, ScanText."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  LinkWAN:
+    '2018-10-30':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: GetKpmEncryptedNodeTuplesByOrderId, SubmitKpmEncryptedNodeTupleOrder."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  MaasAISearchProxy:
+    '2026-04-24':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: QaChat, WebSearch."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  moguan-sdk:
+    '2021-04-15':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: RegisterDevice."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  MultimodalDialog:
+    '2025-09-03':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: Vocabulary."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  nlp-automl:
+    '2019-05-29':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: PredictModel."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  nls-cloud-meta:
+    '2018-05-18':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: CreateToken."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+    '2019-02-28':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: CreateToken."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  nls-filetrans:
+    '2018-08-17':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: GetTaskResult, SubmitTask."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+    '2019-08-23':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: GetTaskResult, SubmitTask."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  OssAdmin:
+    '2019-04-22':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: OpenOssService."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  OssSddp:
+    '2024-02-22':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: GetSddpVersion, UpgradeSddpVersion."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  pai-dsw:
+    '2021-02-26':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: GetInstance."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  PAIModelGallery:
+    '2025-06-30':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: ListModelGalleryModels."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  PaiStudio:
+    '2020-04-28':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: AddModel, CheckServiceLinkedRoleForDeleting."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  SasRasp:
+    '2024-07-27':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: DescribeAttackProtectionCount, DescribeAttacks."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  Sls:
+    '2018-06-13':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: AnalyzeProductLog."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  Status:
+    '2020-01-17':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: ListEventInProgress."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  SuperappNlp:
+    '2024-09-30':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: NlpAddressNormalization."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  videoseg:
+    '2020-03-20':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: GetAsyncJobResult, SegmentVideoBody."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  Workorder:
+    '2016-08-30':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: QueryUserStatByQuestionStatus."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+    '2016-09-19':
+      reason: target_all_read_apis_invalid
+      category: openmeta_unrequestable_version
+      observed: Live validation reached the target service on 2026-07-16 for all four same-version read APIs, QueryRecordList, QueryQuestionFromOtherSite, QueryQuestionCountByAccount, and QueryUserStatByQuestionStatus, but returned HTTP 404 InvalidApi.NotFound.
+      discovered_on: '2026-07-16'
+      source: live_validation
+      note: Excluded as a version-level OpenMeta or target routing issue after the complete read surface returned InvalidApi.NotFound.
+    '2018-10-10':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: GetAttachTempURLAuth."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+    '2018-10-12':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 API: GetAttachTempURL."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+    '2019-05-16':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 1 non-excluded API after live validation removed invalid API routes: QueryQuestionByFaultIdList."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count_and_live_validation
+      note: Product-version has at most 2 currently usable APIs after controlled API-level exclusions and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+  Searchplat:
+    '2024-05-29':
+      reason: target_invalid_version
+      category: openmeta_unrequestable_version
+      observed: The production runtime and the official alibabacloud_searchplat20240529 Python SDK 2.6.0 both used the official POP v4 gateway contract and returned HTTP 400 InvalidVersion for GetMemorySkill. The same result was reproduced at the OpenMeta-published cn-shanghai and eu-central-1 endpoints.
+      discovered_on: '2026-07-18'
+      source: official_sdk_and_live_validation
+      note: Excluded only for Searchplat/2024-05-29; Searchplat/2024-04-01 remains available and has an independently validated read path.
+  WuyingAI:
+    '2026-03-11':
+      reason: transitional_small_surface
+      category: openmeta_transitional_small_surface
+      observed: "Official api-docs.json currently exposes 2 APIs: Chat, GetAccessToken."
+      discovered_on: '2026-07-16'
+      source: openmeta_api_docs_count
+      note: Product-version has at most 2 APIs and is treated as a transitional or auxiliary surface; runtime OpenMeta matching ignores it and leaves handling to the LLM and document search path.
+apis:
+  aiccs:
+    '2019-10-15':
+      GetInstanceList:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+  Cdn:
+    '2018-05-10':
+      DescribeCdnFullDomainsBlockIPHistory:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+      DescribeCdnFullDomainsBlockIPConfig:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+  CarbonFootprint:
+    '2023-07-11':
+      QueryMultiAccountCarbonTrack:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+  CloudAPI:
+    '2016-02-01':
+      DescribeApiDocs:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+  Cms:
+    '2016-09-22':
+      GetMetricStatistics:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+      GetMetrics:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+      ListMetrics:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+      NodeAgentVersion:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+      QueryMetric:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+      QueryMetricTop:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+  dataworks-public:
+    '2018-06-01':
+      GetDataServiceApiContext:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+      GetDataServiceApiAuthMapContext:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+      GetDataServiceConfig:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+      ListEmrHiveDatabases:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+  dcdn:
+    '2018-01-15':
+      DescribeDcdnFullDomainsBlockIPHistory:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+  dms-enterprise:
+    '2018-11-01':
+      ListDataLakePartition:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+  Domain:
+    '2018-02-08':
+      QueryBrokerDemand:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+  gws:
+    '2019-06-18':
+      DescribeAvailableResource:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+      DescribeClusters:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+      DescribeInstances:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+      DescribeImages:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+  Qualitycheck:
+    '2019-01-15':
+      GetMiningTaskResult:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+  WebsiteBuild:
+    '2025-04-29':
+      SearchImage:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+  Workorder:
+    '2019-05-16':
+      GetQuestionOwnerById:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.
+      GetQuestionOwnerByVid:
+        reason: target_invalid_api_not_found
+        category: openmeta_dirty_api
+        observed: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound.
+        discovered_on: '2026-07-15'
+        source: live_validation
+        note: Excluded only for this API; same product-version remains eligible for other safe candidates.

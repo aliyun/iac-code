@@ -67,6 +67,16 @@ _CURRENT_STEP_PRECOMPLETED_TOOLS_KEY = "current_step_precompleted_tools"
 _PENDING_ASK_USER_QUESTION_RESUME_KEY = "pending_ask_user_question_resume"
 _PENDING_INPUT_KIND_KEY = "pending_input_kind"
 _PIPELINE_PAUSE_CONFIRMATION_KIND = "pipeline_pause_confirmation"
+_CANDIDATE_SELECTION_PAYLOAD_FIELDS = frozenset(
+    {
+        "selected_candidate_name",
+        "selected_candidate_index",
+        "selected_evaluated_candidate_index",
+        "parameter_overrides",
+        "deployment_parameters",
+        "parameters",
+    }
+)
 _REAL_RESTORE_FAILURE_REASONS = {
     "corrupt_meta",
     "invalid_meta",
@@ -455,6 +465,7 @@ class PipelineRunner:
         prerequisite_resolution: dict[str, Any] | None = None,
         mcp_manager: Any | None = None,
         mcp_config_warnings: list[Any] | None = None,
+        aliyun_delegated_executor_factory: Callable[[str], Any] | None = None,
     ) -> None:
         self._session_storage = session_storage
         self._session_id = session_id
@@ -467,6 +478,7 @@ class PipelineRunner:
         self._mcp_manager = mcp_manager
         self._mcp_config_warnings = mcp_config_warnings if mcp_config_warnings is not None else []
         self._mcp_status_event_signature: str | None = None
+        self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
 
         self._pipeline_dir = pipeline_dir
 
@@ -551,6 +563,7 @@ class PipelineRunner:
             auto_trigger_skills=self._auto_trigger_skills,
             surface=self._surface,
             tool_context_env_overrides=self._tool_context_env_overrides,
+            aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
         )
         self._apply_telemetry_correlation(self._step_executor)
 
@@ -2201,6 +2214,7 @@ class PipelineRunner:
             auto_trigger_skills=self._auto_trigger_skills,
             surface=self._surface,
             tool_context_env_overrides=self._tool_context_env_overrides,
+            aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
         )
         self._apply_telemetry_correlation(sub_context_executor)
         sub_context_dependencies = sub_context_executor._sub_context_dependencies(sub_spec)
@@ -2246,6 +2260,7 @@ class PipelineRunner:
                 auto_trigger_skills=self._auto_trigger_skills,
                 surface=self._surface,
                 tool_context_env_overrides=self._tool_context_env_overrides,
+                aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
             )
             self._apply_telemetry_correlation(step_executor)
             agent_context = step_executor.build_agent_loop_context(
@@ -2291,14 +2306,41 @@ class PipelineRunner:
 
     def _infer_selected_index(self, selected_value: str, options: list[Any]) -> int | None:
         structured = parse_selected_candidate(selected_value)
-        if structured is not None and structured.selected_candidate_index is not None:
-            idx = structured.selected_candidate_index
-            if 0 <= idx < len(options):
-                return idx
+        if structured is not None:
+            if structured.selected_evaluated_candidate_index is not None:
+                matches = [
+                    idx
+                    for idx, option in enumerate(options)
+                    if isinstance(option, dict)
+                    and option.get("candidate_index") == structured.selected_evaluated_candidate_index
+                ]
+                return matches[0] if len(matches) == 1 else None
+            if structured.selected_candidate_index is not None:
+                idx = structured.selected_candidate_index
+                return idx if 0 <= idx < len(options) else None
+            selected_value = structured.selected_candidate_name
         matches = [idx for idx, option in enumerate(options) if self._option_display_value(option) == selected_value]
         if len(matches) == 1:
             return matches[0]
         return None
+
+    @staticmethod
+    def _is_explicit_candidate_selection_payload(selected_value: str) -> bool:
+        stripped = selected_value.strip()
+        try:
+            decoded = json.loads(stripped)
+        except json.JSONDecodeError:
+            return stripped.startswith("{") and any(field in stripped for field in _CANDIDATE_SELECTION_PAYLOAD_FIELDS)
+        return isinstance(decoded, dict) and bool(_CANDIDATE_SELECTION_PAYLOAD_FIELDS.intersection(decoded))
+
+    def _is_invalid_candidate_selection_payload(self, selected_value: str, options: list[Any]) -> bool:
+        if self._infer_selected_index(selected_value, options) is not None:
+            return False
+        structured = parse_selected_candidate(selected_value)
+        has_explicit_index = structured is not None and (
+            structured.selected_candidate_index is not None or structured.selected_evaluated_candidate_index is not None
+        )
+        return has_explicit_index or self._is_explicit_candidate_selection_payload(selected_value)
 
     def _next_step_attempt(self, step_id: str) -> int:
         attempt = self._step_attempts.get(step_id, 0) + 1
@@ -2406,12 +2448,10 @@ class PipelineRunner:
         step = self.state_machine.current_step
         step_index = self.state_machine.current_step_index + 1
         step_attempt = self._current_step_attempt(step.step_id)
-        wait_started_at = self._waiting_input_started_at.pop(step.step_id, None)
-        wait_duration_ms = self._observability.duration_ms(wait_started_at) if wait_started_at is not None else None
         current_conclusion = self.context.get_conclusion(step.conclusion_field) or {}
         if not isinstance(current_conclusion, dict):
             current_conclusion = {}
-        waiting_options = self._waiting_input_options_by_step.pop(step.step_id, [])
+        waiting_options = self._waiting_input_options_by_step.get(step.step_id, [])
         if not waiting_options:
             restored_options = current_conclusion.get("options")
             if isinstance(restored_options, list):
@@ -2419,12 +2459,34 @@ class PipelineRunner:
         selected_index: int | None = None
         if step.ui_mode == "candidate_selection":
             selected_index = self._infer_selected_index(user_text, waiting_options)
-            if selected_index is None:
+            if selected_index is None and self._is_invalid_candidate_selection_payload(user_text, waiting_options):
                 logger.debug(
-                    "Pipeline candidate selection did not match a unique option: step_id=%s option_count=%d",
+                    "Pipeline candidate selection payload is invalid: step_id=%s option_count=%d",
                     step.step_id,
                     len(waiting_options),
                 )
+                self._observability.candidate_selection_rejected(
+                    step_id=step.step_id,
+                    step_attempt=step_attempt,
+                    option_count=len(waiting_options),
+                )
+                yield PipelineEvent(
+                    type=PipelineEventType.USER_INPUT_REQUIRED,
+                    step_id=step.step_id,
+                    timestamp=time.time(),
+                    data={
+                        "step_id": step.step_id,
+                        "prompt": current_conclusion.get("user_prompt", "")
+                        if isinstance(current_conclusion.get("user_prompt", ""), str)
+                        else "",
+                        "options": waiting_options,
+                        "validation_error": "invalid_candidate_selection",
+                    },
+                )
+                return
+        wait_started_at = self._waiting_input_started_at.pop(step.step_id, None)
+        wait_duration_ms = self._observability.duration_ms(wait_started_at) if wait_started_at is not None else None
+        self._waiting_input_options_by_step.pop(step.step_id, None)
         current_conclusion["user_input"] = user_text
         self.context.set_conclusion(step.conclusion_field, current_conclusion)
         self._set_current_step_user_input(pipeline_input)
@@ -4220,6 +4282,7 @@ class PipelineRunner:
                 surface=self._surface,
                 backup_service=self._backup_service,
                 tool_context_env_overrides=self._tool_context_env_overrides,
+                aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
             )
             for _ in candidates
         ]

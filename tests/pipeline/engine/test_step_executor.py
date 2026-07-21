@@ -85,6 +85,32 @@ def _make_executor(tmp_path: Path) -> StepExecutor:
     )
 
 
+def test_step_executor_injects_exact_aliyun_delegated_executor(tmp_path: Path) -> None:
+    from iac_code.tools.cloud.aliyun.ros_template_tools import RosValidateTemplateTool
+
+    delegated = object()
+    factory_calls = []
+
+    def factory(action: str):
+        factory_calls.append(action)
+        return delegated
+
+    pipeline = _make_pipeline()
+    pipeline.pipeline_tools["ros_validate_template"] = RosValidateTemplateTool
+    executor = StepExecutor(
+        provider_manager=MagicMock(),
+        base_tool_registry=ToolRegistry(),
+        pipeline=pipeline,
+        pipeline_dir=tmp_path,
+        aliyun_delegated_executor_factory=factory,
+    )
+
+    tool = executor._instantiate_pipeline_tool(RosValidateTemplateTool, step=None)
+
+    assert tool._delegated_executor is delegated
+    assert factory_calls == ["ValidateTemplate"]
+
+
 def _make_fake_agent_loop_class(events_to_yield):
     class FakeAgentLoop:
         def __init__(self, **kwargs):
@@ -214,6 +240,7 @@ class TestStepExecutorToolSetup:
         registry = ToolRegistry()
         registry.register_default_tools()
         registry.register(_NamedTool("aliyun_doc_search"))
+        registry.register(_NamedTool("aliyun_api_doc"))
         registry.register(_NamedTool("write_memory"))
         executor = StepExecutor(
             provider_manager=MagicMock(),
@@ -228,6 +255,7 @@ class TestStepExecutorToolSetup:
         assert tool_reg.get("read_file") is not None
         assert tool_reg.get("edit_file") is not None
         assert tool_reg.get("ros_validate_template") is not None
+        assert tool_reg.get("aliyun_api_doc") is not None
         assert tool_reg.get("aliyun_api") is None
         assert tool_reg.get("infraguard_scan") is not None
         assert tool_reg.get("write_memory") is None

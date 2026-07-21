@@ -11,7 +11,12 @@ from iac_code.services.providers.aliyun import (
     mask_sensitive,
     use_aliyun_credential,
 )
-from iac_code.services.providers.aliyun_oauth import AliyunOAuthReloginRequired, OAuthStsCredentials, OAuthToken
+from iac_code.services.providers.aliyun_oauth import (
+    AliyunOAuthError,
+    AliyunOAuthReloginRequired,
+    OAuthStsCredentials,
+    OAuthToken,
+)
 
 
 class TestAliyunCredential:
@@ -916,6 +921,55 @@ class TestAliyunCredentialsOAuthRefresh:
 
         assert refreshed is cred
         assert saved == [cred]
+        assert cred.access_key_id == "new-ak"
+        assert cred.access_key_secret == "new-sk"
+        assert cred.sts_token == "new-sts"
+        assert cred.sts_expiration == 2500
+
+    def test_refresh_oauth_refreshes_access_token_when_sts_exchange_rejects_short_lifetime(self, monkeypatch):
+        cred = AliyunCredential(
+            mode="OAuth",
+            oauth_site_type="CN",
+            oauth_access_token="old-access",
+            oauth_refresh_token="old-refresh",
+            oauth_access_token_expire=2000,
+            access_key_id="old-ak",
+            access_key_secret="old-sk",
+            sts_token="old-sts",
+            sts_expiration=900,
+        )
+        saved: list[AliyunCredential] = []
+        calls: list[str] = []
+
+        class FakeClient:
+            def refresh_access_token(self, refresh_token, *, now=None):
+                calls.append("refresh:{}".format(refresh_token))
+                assert refresh_token == "old-refresh"
+                assert now == 1000
+                return OAuthToken("new-access", "new-refresh", 4600, 0)
+
+            def exchange_access_token_for_sts(self, access_token):
+                calls.append("exchange:{}".format(access_token))
+                if access_token == "old-access":
+                    raise AliyunOAuthError(
+                        "exchange access token for STS failed with status 403: "
+                        "error=access_denied, error_description=token expire time is too short",
+                        error_code="access_denied",
+                        status_code=403,
+                    )
+                assert access_token == "new-access"
+                return OAuthStsCredentials("new-ak", "new-sk", "new-sts", 2500)
+
+        monkeypatch.setattr(AliyunCredentials, "save", saved.append)
+
+        refreshed = AliyunCredentials.refresh_oauth_if_needed(cred, oauth_client=FakeClient(), now=1000)
+
+        assert refreshed is cred
+        assert calls == ["exchange:old-access", "refresh:old-refresh", "exchange:new-access"]
+        assert saved == [cred]
+        assert cred.oauth_access_token == "new-access"
+        assert cred.oauth_refresh_token == "new-refresh"
+        assert cred.oauth_access_token_expire == 4600
         assert cred.access_key_id == "new-ak"
         assert cred.access_key_secret == "new-sk"
         assert cred.sts_token == "new-sts"

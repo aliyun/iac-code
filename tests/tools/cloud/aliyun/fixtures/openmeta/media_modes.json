@@ -1,0 +1,41 @@
+{
+  "apis": [
+    {
+      "product": "Ecs",
+      "version": "2014-05-26",
+      "action": "XmlUpload",
+      "style": "ROA",
+      "methods": ["POST"],
+      "path": "/upload",
+      "schemes": ["HTTPS"],
+      "consumes": ["application/xml"],
+      "produces": ["application/xml"],
+      "security": [{"AK": []}],
+      "parameters": [{"name": "payload", "in": "body", "schema": {"type": "string", "format": "binary"}}]
+    },
+    {
+      "product": "Ecs",
+      "version": "2014-05-26",
+      "action": "TextRead",
+      "style": "ROA",
+      "methods": ["GET"],
+      "path": "/text",
+      "schemes": ["HTTPS"],
+      "produces": ["text/plain"],
+      "security": [{"AK": []}],
+      "parameters": []
+    },
+    {
+      "product": "Ecs",
+      "version": "2014-05-26",
+      "action": "BinaryRead",
+      "style": "ROA",
+      "methods": ["GET"],
+      "path": "/binary",
+      "schemes": ["HTTPS"],
+      "produces": ["application/octet-stream"],
+      "security": [{"AK": []}],
+      "parameters": []
+    }
+  ]
+}

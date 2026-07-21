@@ -5,7 +5,7 @@ import contextlib
 import copy
 import inspect
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -20,7 +20,12 @@ from iac_code.a2a.artifacts import artifact_store_for_session
 from iac_code.a2a.backup import backup_session_async
 from iac_code.a2a.events import make_text_part, publish_mcp_warnings
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
+from iac_code.a2a.pipeline_flow_monitor import (
+    PipelineA2AFlowIdentity,
+    PipelineA2AFlowMonitor,
+)
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
+from iac_code.a2a.pipeline_outbound import PipelineA2AOutboundQueue
 from iac_code.a2a.pipeline_paths import (
     a2a_pipeline_dir_for_sidecar_dir,
     existing_a2a_pipeline_dir_for_session,
@@ -33,6 +38,7 @@ from iac_code.a2a.pipeline_stream import (
     committed_backup_publication_envelope,
     pending_backup_publication_envelope,
 )
+from iac_code.a2a.pipeline_transport_delivery import PipelineTransportDeliveryClosedError
 from iac_code.a2a.runtime_overrides import (
     a2a_request_context,
     configure_runtime_model,
@@ -61,8 +67,10 @@ from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.providers.aliyun import AliyunCredential
 from iac_code.services.session_backup import BackupReason, SessionBackupBlocked, SessionBackupService
+from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
+from iac_code.services.session_layout import SessionPaths
 from iac_code.services.session_storage import SessionStorage
-from iac_code.types.stream_events import AskUserQuestionEvent, SubPipelineStreamEvent
+from iac_code.types.stream_events import AskUserQuestionEvent, SubPipelineStreamEvent, TextDeltaEvent
 from iac_code.utils.path_locks import PathLockRegistry
 from iac_code.utils.public_errors import public_exception_summary, sanitize_public_text
 
@@ -144,11 +152,15 @@ class A2APipelineRuntime:
     agent_runtime: Any
     pipeline: Any | None = None
     publisher: PipelineA2AEventPublisher | None = None
+    outbound: PipelineA2AOutboundQueue | None = None
+    outbound_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     current_stream: Any | None = None
     pending_question: "_PendingAskUserQuestion | None" = None
     active_owner_task: asyncio.Task[Any] | None = None
     restart_after_interrupt: bool = False
     pause_after_interrupt: bool = False
+    active_interrupt_count: int = 0
+    terminal_publication_started: bool = False
     restart_requested: asyncio.Event = field(default_factory=asyncio.Event)
     interrupt_settled: asyncio.Event = field(default_factory=_new_set_asyncio_event)
 
@@ -191,6 +203,19 @@ class _NormalHandoffPublication:
 class _TerminalHandoffPublishResult:
     attempted: bool
     terminal_available: bool
+
+
+@dataclass(frozen=True)
+class _TerminalStreamPublishResult:
+    interrupt_action: str | None = None
+    handoff: _TerminalHandoffPublishResult | None = None
+    text: str | None = None
+
+
+@dataclass(frozen=True)
+class _TerminalSidecarRecoveryResult:
+    published: bool
+    available: bool
 
 
 class _SidecarOwnerUnavailableError(RuntimeError):
@@ -238,6 +263,7 @@ class IacCodeA2APipelineExecutor:
         metadata_api_key: str | None = None,
         request_policy_override: ProviderRequestPolicy | None = None,
         backup_service: Any | None = None,
+        aliyun_delegated_executor_factory: Any | None = None,
     ) -> None:
         self._task_store = task_store
         self._model = model
@@ -253,6 +279,7 @@ class IacCodeA2APipelineExecutor:
         self._metadata_api_key = metadata_api_key
         self._request_policy_override = request_policy_override
         self._backup_service = backup_service or SessionBackupService()
+        self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
 
     async def execute(
         self,
@@ -265,7 +292,8 @@ class IacCodeA2APipelineExecutor:
         cwd: str,
         pipeline_input: PipelineUserInput | str | None = None,
         prompt: str | None = None,
-    ) -> None:
+        active_followup_only: bool = False,
+    ) -> bool | None:
         if pipeline_input is None:
             pipeline_input = prompt or ""
         pipeline_input = normalize_pipeline_user_input(pipeline_input)
@@ -273,7 +301,6 @@ class IacCodeA2APipelineExecutor:
         session_storage = SessionStorage()
 
         def runtime_factory(session_id: str) -> Any:
-            SessionBackupService(session_storage=session_storage).restore_session(cwd, session_id)
             return create_agent_runtime(AgentFactoryOptions(model=self._model, session_id=session_id, cwd=cwd))
 
         try:
@@ -312,7 +339,16 @@ class IacCodeA2APipelineExecutor:
                         preserve_task_record=preserve_active_task,
                     )
                 if routed:
-                    return
+                    return True
+            if active_followup_only:
+                await self._fail_already_active(
+                    event_queue,
+                    task=task,
+                    task_id=task_id,
+                    context_id=context_id,
+                    preserve_task_record=preserve_active_task,
+                )
+                return True
             await self._fail_already_active(
                 event_queue,
                 task=task,
@@ -321,6 +357,9 @@ class IacCodeA2APipelineExecutor:
                 preserve_task_record=preserve_active_task,
             )
             return
+
+        if active_followup_only:
+            return False
 
         lock = ctx.lock
         try:
@@ -335,6 +374,7 @@ class IacCodeA2APipelineExecutor:
 
             pipeline = None
             publisher: PipelineA2AEventPublisher | None = None
+            pipeline_runtime: A2APipelineRuntime | None = None
             try:
                 with self._request_context(session_id=ctx.session_id):
                     pipeline_runtime = self._pipeline_runtime_from_context(
@@ -451,7 +491,8 @@ class IacCodeA2APipelineExecutor:
                 terminal_sidecar = _is_terminal_sidecar_status(getattr(pipeline, "sidecar_status", None))
                 terminal_sidecar_recovery_allowed = not terminal_handoff_unavailable
                 if terminal_sidecar and terminal_sidecar_recovery_allowed and publisher is not None:
-                    terminal_status_published = await self._publish_terminal_sidecar_recovery_event(
+                    terminal_status_published = await self._run_terminal_sidecar_recovery_publication(
+                        pipeline_runtime,
                         publisher,
                         pipeline,
                         task_id=task_id,
@@ -492,33 +533,44 @@ class IacCodeA2APipelineExecutor:
             except asyncio.CancelledError:
                 try:
                     task.state = TASK_STATE_CANCELED
-                    if pipeline is not None:
-                        await self._mark_user_aborted(pipeline)
                     cancel_data = {"source": "executor", "reason": _("Task canceled.")}
                     cancel_handoff_data = {"canceled": True, "reason": _("Task canceled.")}
-                    cancel_transaction_result = _TerminalHandoffPublishResult(
-                        attempted=False,
-                        terminal_available=False,
-                    )
-                    if pipeline is not None and publisher is not None:
-                        cancel_transaction_result = await self._publish_manual_terminal_with_normal_handoff(
-                            pipeline,
-                            publisher,
-                            event_type="pipeline_canceled",
-                            status="canceled",
-                            terminal_data=cancel_data,
-                            handoff_data=cancel_handoff_data,
+
+                    async def publish_cancel_terminal() -> bool:
+                        if pipeline is not None:
+                            await self._mark_user_aborted(pipeline)
+                        cancel_transaction_result = _TerminalHandoffPublishResult(
+                            attempted=False,
+                            terminal_available=False,
                         )
-                    cancel_terminal_available = cancel_transaction_result.terminal_available
-                    if not cancel_transaction_result.attempted:
-                        cancel_terminal_available = await self._publish_pipeline_terminal_event(
-                            publisher,
-                            event_type="pipeline_canceled",
-                            status="canceled",
-                            data=cancel_data,
+                        if pipeline is not None and publisher is not None:
+                            cancel_transaction_result = await self._publish_manual_terminal_with_normal_handoff(
+                                pipeline,
+                                publisher,
+                                event_type="pipeline_canceled",
+                                status="canceled",
+                                terminal_data=cancel_data,
+                                handoff_data=cancel_handoff_data,
+                            )
+                        cancel_terminal_available = cancel_transaction_result.terminal_available
+                        if not cancel_transaction_result.attempted:
+                            cancel_terminal_available = await self._publish_pipeline_terminal_event(
+                                publisher,
+                                event_type="pipeline_canceled",
+                                status="canceled",
+                                data=cancel_data,
+                            )
+                            if cancel_terminal_available and pipeline is not None and publisher is not None:
+                                await self._publish_normal_handoff_ready(pipeline, publisher, cancel_handoff_data)
+                        return cancel_terminal_available
+
+                    if pipeline_runtime is not None and publisher is not None:
+                        cancel_terminal_available = await self._run_external_terminal_publication(
+                            pipeline_runtime,
+                            publish_cancel_terminal,
                         )
-                        if cancel_terminal_available and pipeline is not None and publisher is not None:
-                            await self._publish_normal_handoff_ready(pipeline, publisher, cancel_handoff_data)
+                    else:
+                        cancel_terminal_available = await publish_cancel_terminal()
                     if not cancel_terminal_available:
                         task.state = TASK_STATE_INPUT_REQUIRED
                     await self._publish_status(
@@ -564,6 +616,7 @@ class IacCodeA2APipelineExecutor:
                         context_id=context_id,
                         exc=exc,
                         pipeline_publisher=publisher,
+                        pipeline_runtime=pipeline_runtime,
                     )
                 except _PipelineBackupBlockedTransitionError:
                     await self._complete_backup_blocked_transition(task=task, ctx=ctx)
@@ -639,6 +692,50 @@ class IacCodeA2APipelineExecutor:
         pipeline_input: PipelineUserInput,
         preserve_task_record: bool,
     ) -> bool:
+        runtime = ctx.runtime
+        if getattr(runtime, "pipeline", None) is None:
+            return False
+        if not await _register_active_interrupt(runtime):
+            logger.info("Ignoring A2A pipeline interrupt after terminal publication started")
+            return True
+
+        interrupt_registered = True
+
+        async def settle_interrupt() -> None:
+            nonlocal interrupt_registered
+            if not interrupt_registered:
+                return
+            interrupt_registered = False
+            await _settle_active_interrupt_safely(runtime)
+
+        try:
+            return await self._route_registered_active_pipeline_interrupt(
+                event_queue,
+                task=task,
+                ctx=ctx,
+                task_id=task_id,
+                context_id=context_id,
+                cwd=cwd,
+                pipeline_input=pipeline_input,
+                preserve_task_record=preserve_task_record,
+                settle_interrupt=settle_interrupt,
+            )
+        finally:
+            await settle_interrupt()
+
+    async def _route_registered_active_pipeline_interrupt(
+        self,
+        event_queue: Any,
+        *,
+        task: Any,
+        ctx: Any,
+        task_id: str,
+        context_id: str,
+        cwd: str,
+        pipeline_input: PipelineUserInput,
+        preserve_task_record: bool,
+        settle_interrupt: Callable[[], Awaitable[None]],
+    ) -> bool:
         pipeline_input = normalize_pipeline_user_input(pipeline_input)
         prompt = pipeline_input.display_text
         runtime = ctx.runtime
@@ -710,6 +807,7 @@ class IacCodeA2APipelineExecutor:
         )
 
         if _pending_pipeline_pause_input_from_sidecar(publisher, task_id=task_id, context_id=context_id) is not None:
+            await settle_interrupt()
             await self._continue_active_pause_confirmation(
                 event_queue,
                 task=task,
@@ -733,12 +831,13 @@ class IacCodeA2APipelineExecutor:
         paused = False
         verdict: Any | None = None
         interrupt_received_published = False
-        interrupt_settled = _interrupt_settled_event(runtime)
-        interrupt_settled.clear()
         try:
             publish_interrupt_received = getattr(publisher, "publish_interrupt_received", None)
             if callable(publish_interrupt_received):
-                await publish_interrupt_received(prompt=prompt)
+                await self._run_outbound_serialized(
+                    runtime,
+                    lambda: publish_interrupt_received(prompt=prompt),
+                )
                 interrupt_received_published = True
 
             pause_agent_loops = getattr(pipeline, "pause_agent_loops", None)
@@ -748,30 +847,43 @@ class IacCodeA2APipelineExecutor:
 
             runner_input = _pipeline_runner_input(pipeline_input)
             verdict = await _maybe_await(handler(runner_input))
-            parent_rollback: bool | None = None
-            if getattr(verdict, "action", "") == "hard_interrupt":
-                apply_hard_interrupt = getattr(pipeline, "apply_hard_interrupt", None)
-                if callable(apply_hard_interrupt):
-                    parameters = inspect.signature(apply_hard_interrupt).parameters
-                    if "source_input" in parameters or any(
-                        parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
-                    ):
-                        applied = apply_hard_interrupt(verdict, source_input=runner_input)
-                    else:
-                        applied = apply_hard_interrupt(verdict)
-                    parent_rollback = bool(await _maybe_await(applied))
-                    if parent_rollback:
-                        runtime.restart_after_interrupt = True
-                        _restart_requested_event(runtime).set()
+            async with _outbound_lock(runtime):
+                if bool(getattr(runtime, "terminal_publication_started", False)):
+                    return True
+                parent_rollback: bool | None = None
+                if getattr(verdict, "action", "") == "hard_interrupt":
+                    apply_hard_interrupt = getattr(pipeline, "apply_hard_interrupt", None)
+                    if callable(apply_hard_interrupt):
+                        parameters = inspect.signature(apply_hard_interrupt).parameters
+                        if "source_input" in parameters or any(
+                            parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
+                        ):
+                            applied = apply_hard_interrupt(verdict, source_input=runner_input)
+                        else:
+                            applied = apply_hard_interrupt(verdict)
+                        parent_rollback = bool(await _maybe_await(applied))
+                        if parent_rollback:
+                            runtime.restart_after_interrupt = True
+                            _restart_requested_event(runtime).set()
 
-            await publisher.publish_interrupt(
-                prompt=prompt,
-                verdict=verdict,
-                parent_rollback=parent_rollback,
-                include_received=not interrupt_received_published,
-            )
+                outbound = getattr(runtime, "outbound", None)
+
+                async def publish_classification() -> None:
+                    await publisher.publish_interrupt(
+                        prompt=prompt,
+                        verdict=verdict,
+                        parent_rollback=parent_rollback,
+                        include_received=not interrupt_received_published,
+                    )
+
+                if outbound is None:
+                    await publish_classification()
+                else:
+                    await outbound.run_serialized(publish_classification)
             if _is_terminal_sidecar_status(getattr(pipeline, "sidecar_status", None)):
-                terminal_status_published = await self._publish_terminal_sidecar_recovery_event(
+                await settle_interrupt()
+                terminal_status_published = await self._run_terminal_sidecar_recovery_publication(
+                    runtime,
                     publisher,
                     pipeline,
                     task_id=task_id,
@@ -804,7 +916,7 @@ class IacCodeA2APipelineExecutor:
             if bool(getattr(verdict, "paused", False)):
                 pause_event = await _save_pipeline_interrupt_pause(pipeline, verdict)
                 if pause_event is not None:
-                    await publisher.publish(pause_event)
+                    await self._run_outbound_serialized(runtime, lambda: publisher.publish(pause_event))
                 task.state = TASK_STATE_INPUT_REQUIRED
                 self._task_store.mirror_task(task)
                 runtime.pause_after_interrupt = True
@@ -827,7 +939,6 @@ class IacCodeA2APipelineExecutor:
                 await self._complete_backup_blocked_transition(task=task, ctx=ctx)
             return True
         finally:
-            interrupt_settled.set()
             if paused and not bool(getattr(verdict, "paused", False)):
                 resume_agent_loops = getattr(pipeline, "resume_agent_loops", None)
                 if callable(resume_agent_loops):
@@ -901,7 +1012,8 @@ class IacCodeA2APipelineExecutor:
             terminal_sidecar = _is_terminal_sidecar_status(getattr(pipeline, "sidecar_status", None))
             terminal_sidecar_recovery_allowed = not terminal_handoff_unavailable
             if terminal_sidecar and terminal_sidecar_recovery_allowed:
-                terminal_status_published = await self._publish_terminal_sidecar_recovery_event(
+                terminal_status_published = await self._run_terminal_sidecar_recovery_publication(
+                    runtime,
                     publisher,
                     pipeline,
                     task_id=task_id,
@@ -944,6 +1056,7 @@ class IacCodeA2APipelineExecutor:
                     exc=exc,
                     preserve_task_record=False,
                     pipeline_publisher=publisher,
+                    pipeline_runtime=runtime,
                 )
             except _PipelineBackupBlockedTransitionError:
                 await self._complete_backup_blocked_transition(task=task, ctx=ctx)
@@ -979,6 +1092,10 @@ class IacCodeA2APipelineExecutor:
         create_kwargs: dict[str, Any] = {}
         if prerequisite_resolution is not None:
             create_kwargs["prerequisite_resolution"] = prerequisite_resolution
+        delegated_factory = self._aliyun_delegated_executor_factory
+        if delegated_factory is None:
+            services = getattr(runtime, "aliyun_services", None)
+            delegated_factory = getattr(services, "delegated_executor_factory", None)
         return create_pipeline(
             pipeline_name,
             provider_manager=runtime.provider_manager,
@@ -989,6 +1106,7 @@ class IacCodeA2APipelineExecutor:
             resume_from_sidecar=resume_from_sidecar,
             surface="a2a",
             backup_service=self._backup_service,
+            aliyun_delegated_executor_factory=delegated_factory,
             **create_kwargs,
             mcp_manager=getattr(runtime, "mcp_manager", None),
             mcp_config_warnings=getattr(runtime, "mcp_config_warnings", None),
@@ -1064,6 +1182,126 @@ class IacCodeA2APipelineExecutor:
             return continue_after_interrupt()
         return pipeline.run(_pipeline_runner_input(pipeline_input))
 
+    async def _run_outbound_serialized(
+        self,
+        runtime: Any,
+        callback: Callable[[], Awaitable[Any]],
+    ) -> Any:
+        async with _outbound_lock(runtime):
+            outbound = getattr(runtime, "outbound", None)
+            if outbound is None:
+                return await callback()
+            return await outbound.run_serialized(callback)
+
+    async def _run_external_terminal_publication(
+        self,
+        runtime: Any,
+        callback: Callable[[], Awaitable[bool]],
+    ) -> bool:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _ACTIVE_INTERRUPT_TERMINAL_WAIT_TIMEOUT_SECONDS
+        interrupt_settled = _interrupt_settled_event(runtime)
+
+        while True:
+            async with _outbound_lock(runtime):
+                if interrupt_settled.is_set() or loop.time() >= deadline:
+                    if not interrupt_settled.is_set():
+                        logger.warning(
+                            "Timed out waiting for active A2A pipeline interrupt before publishing terminal status"
+                        )
+                    runtime.terminal_publication_started = True
+                    try:
+                        outbound = getattr(runtime, "outbound", None)
+                        if outbound is None:
+                            committed = await callback()
+                        else:
+                            committed = await outbound.run_serialized(callback)
+                    except BaseException:
+                        runtime.terminal_publication_started = False
+                        raise
+                    if not committed:
+                        runtime.terminal_publication_started = False
+                    return committed
+
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                continue
+            try:
+                await asyncio.wait_for(interrupt_settled.wait(), timeout=remaining)
+            except TimeoutError:
+                pass
+
+    async def _run_terminal_sidecar_recovery_publication(
+        self,
+        runtime: Any,
+        publisher: PipelineA2AEventPublisher,
+        pipeline: Any,
+        *,
+        task_id: str,
+        context_id: str,
+    ) -> bool:
+        result = _TerminalSidecarRecoveryResult(published=False, available=False)
+
+        async def publish_or_confirm() -> bool:
+            nonlocal result
+            result = await self._publish_terminal_sidecar_recovery_event(
+                publisher,
+                pipeline,
+                task_id=task_id,
+                context_id=context_id,
+            )
+            return result.available
+
+        await self._run_external_terminal_publication(runtime, publish_or_confirm)
+        return result.published
+
+    async def _publish_pending_mcp_warnings(
+        self,
+        *,
+        runtime: A2APipelineRuntime,
+        outbound: PipelineA2AOutboundQueue | None,
+        publisher: PipelineA2AEventPublisher,
+    ) -> None:
+        if outbound is not None and not _has_unpublished_mcp_warnings(runtime.agent_runtime):
+            return
+
+        async def publish() -> None:
+            await publish_mcp_warnings(
+                publisher.event_queue,
+                task_id=publisher.translator.context.task_id,
+                context_id=publisher.translator.context.context_id,
+                runtime=runtime.agent_runtime,
+                iac_code_session_id=publisher.translator.context.iac_code_session_id,
+            )
+
+        if outbound is None:
+            await publish()
+        else:
+            await outbound.run_serialized(publish)
+
+    async def _finish_runtime_outbound(
+        self,
+        runtime: Any,
+        outbound: PipelineA2AOutboundQueue,
+    ) -> None:
+        async with _outbound_lock(runtime):
+            try:
+                await outbound.close()
+            except asyncio.CancelledError:
+                raise
+            except BaseException:
+                if runtime.outbound is outbound:
+                    runtime.outbound = None
+                raise
+            if runtime.outbound is outbound:
+                runtime.outbound = None
+
+    async def _abort_runtime_outbound(self, runtime: Any, outbound: PipelineA2AOutboundQueue) -> None:
+        await _abort_outbound_worker(outbound)
+        async with _outbound_lock(runtime):
+            if runtime.outbound is outbound:
+                runtime.outbound = None
+
     async def _consume_stream_until_restart(
         self,
         *,
@@ -1073,18 +1311,33 @@ class IacCodeA2APipelineExecutor:
         task: Any,
     ) -> "_StreamConsumeResult":
         had_events = False
+        outbound = PipelineA2AOutboundQueue(publisher) if publisher.extreme_performance else None
+        outbound_registered = False
         stream_iter = stream.__aiter__()
-        owner_task = asyncio.current_task()
-        if owner_task is not None:
-            runtime.active_owner_task = owner_task
-            task.active_task = owner_task
-        runtime.current_stream = stream_iter
         restart_event = _restart_requested_event(runtime)
-        next_task: asyncio.Task[Any] | None = None
+        stream_requests: asyncio.Queue[asyncio.Future[Any]] = asyncio.Queue()
+        stream_driver = asyncio.create_task(
+            _drive_stream_events(stream_iter, stream_requests),
+            name="pipeline-a2a-stream-driver",
+        )
+        next_event: asyncio.Future[Any] | None = None
         restart_task: asyncio.Task[Any] | None = None
         close_stream_on_exit = False
         terminal_handoff_unavailable = False
+        stream_exception: BaseException | None = None
         try:
+            if outbound is not None:
+                await outbound.start()
+            async with _outbound_lock(runtime):
+                runtime.terminal_publication_started = False
+                if outbound is not None:
+                    runtime.outbound = outbound
+                    outbound_registered = True
+            owner_task = asyncio.current_task()
+            if owner_task is not None:
+                runtime.active_owner_task = owner_task
+                task.active_task = owner_task
+            runtime.current_stream = stream_iter
             while True:
                 if runtime.pause_after_interrupt and restart_event.is_set():
                     restart_event.clear()
@@ -1105,18 +1358,19 @@ class IacCodeA2APipelineExecutor:
                         terminal_handoff_unavailable=terminal_handoff_unavailable,
                     )
 
-                next_task = asyncio.create_task(_next_stream_event(stream_iter))
+                next_event = asyncio.get_running_loop().create_future()
+                stream_requests.put_nowait(next_event)
                 restart_task = asyncio.create_task(restart_event.wait())
                 done, _pending = await asyncio.wait(
-                    {next_task, restart_task},
+                    {next_event, restart_task},
                     return_when=asyncio.FIRST_COMPLETED,
                 )
 
                 if restart_task in done and runtime.restart_after_interrupt:
                     restart_event.clear()
                     runtime.restart_after_interrupt = False
-                    await _cancel_task_safely(next_task)
-                    next_task = None
+                    await _cancel_task_safely(stream_driver)
+                    next_event = None
                     await _cancel_task_safely(restart_task)
                     restart_task = None
                     await _close_stream_safely(stream_iter)
@@ -1128,8 +1382,8 @@ class IacCodeA2APipelineExecutor:
                 if restart_task in done and runtime.pause_after_interrupt:
                     restart_event.clear()
                     runtime.pause_after_interrupt = False
-                    await _cancel_task_safely(next_task)
-                    next_task = None
+                    await _cancel_task_safely(stream_driver)
+                    next_event = None
                     await _cancel_task_safely(restart_task)
                     restart_task = None
                     await _close_stream_safely(stream_iter)
@@ -1142,15 +1396,13 @@ class IacCodeA2APipelineExecutor:
                 await _cancel_task_safely(restart_task)
                 restart_task = None
                 try:
-                    event = await next_task
+                    event = await next_event
                 except StopAsyncIteration:
-                    next_task = None
-                    await publish_mcp_warnings(
-                        publisher.event_queue,
-                        task_id=publisher.translator.context.task_id,
-                        context_id=publisher.translator.context.context_id,
-                        runtime=runtime.agent_runtime,
-                        iac_code_session_id=publisher.translator.context.iac_code_session_id,
+                    next_event = None
+                    await self._publish_pending_mcp_warnings(
+                        runtime=runtime,
+                        outbound=outbound,
+                        publisher=publisher,
                     )
                     return _StreamConsumeResult(
                         had_events=had_events,
@@ -1158,49 +1410,73 @@ class IacCodeA2APipelineExecutor:
                         terminal_handoff_unavailable=terminal_handoff_unavailable,
                     )
                 finally:
-                    next_task = None
+                    next_event = None
 
-                interrupt_action = await _consume_active_interrupt_action_before_terminal(runtime, event)
-                if interrupt_action == "restart":
-                    close_stream_on_exit = True
-                    return _StreamConsumeResult(
-                        had_events=had_events,
-                        restart_requested=True,
-                        terminal_handoff_unavailable=terminal_handoff_unavailable,
+                if _is_pipeline_terminal_stream_event(event):
+                    terminal_publication = await self._publish_terminal_stream_event(
+                        runtime=runtime,
+                        outbound=outbound,
+                        publisher=publisher,
+                        event=event,
                     )
-                if interrupt_action == "pause":
-                    close_stream_on_exit = True
-                    return _StreamConsumeResult(
-                        had_events=had_events,
-                        restart_requested=False,
-                        terminal_handoff_unavailable=terminal_handoff_unavailable,
-                    )
-
-                had_events = True
-                await publish_mcp_warnings(
-                    publisher.event_queue,
-                    task_id=publisher.translator.context.task_id,
-                    context_id=publisher.translator.context.context_id,
-                    runtime=runtime.agent_runtime,
-                    iac_code_session_id=publisher.translator.context.iac_code_session_id,
-                )
-                terminal_handoff_result = await self._maybe_publish_terminal_with_normal_handoff(
-                    runtime.pipeline,
-                    publisher,
-                    event,
-                )
-                if terminal_handoff_result.attempted:
-                    if not terminal_handoff_result.terminal_available:
-                        terminal_handoff_unavailable = True
-                    text = None
+                    if terminal_publication.interrupt_action == "restart":
+                        close_stream_on_exit = True
+                        return _StreamConsumeResult(
+                            had_events=had_events,
+                            restart_requested=True,
+                            terminal_handoff_unavailable=terminal_handoff_unavailable,
+                        )
+                    if terminal_publication.interrupt_action == "pause":
+                        close_stream_on_exit = True
+                        return _StreamConsumeResult(
+                            had_events=had_events,
+                            restart_requested=False,
+                            terminal_handoff_unavailable=terminal_handoff_unavailable,
+                        )
+                    had_events = True
+                    terminal_handoff_result = terminal_publication.handoff
+                    assert terminal_handoff_result is not None
+                    text = terminal_publication.text
                 else:
-                    text = await publisher.publish(
-                        event,
-                        permission_resolver=self._permission_resolver,
-                        auto_approve_permissions=self._auto_approve_permissions,
+                    had_events = True
+                    await self._publish_pending_mcp_warnings(
+                        runtime=runtime,
+                        outbound=outbound,
+                        publisher=publisher,
                     )
-                    self._track_pending_question(runtime, publisher, event)
-                    await self._maybe_publish_normal_handoff_ready(runtime.pipeline, publisher, event)
+                    terminal_handoff_result = await self._maybe_publish_terminal_with_normal_handoff(
+                        runtime.pipeline,
+                        publisher,
+                        event,
+                    )
+                    if terminal_handoff_result.attempted:
+                        text = None
+                    else:
+                        if outbound is not None:
+                            delivery_text = _text_delta_output(event)
+                            await outbound.submit(
+                                event,
+                                permission_resolver=self._permission_resolver,
+                                auto_approve_permissions=self._auto_approve_permissions,
+                                after_delivery=(
+                                    lambda text=delivery_text: (
+                                        task.output_text.append(text) if text is not None else None
+                                    )
+                                ),
+                            )
+                            if _ask_user_question_from(event) is not None:
+                                await outbound.flush()
+                            text = None
+                        else:
+                            text = await publisher.publish(
+                                event,
+                                permission_resolver=self._permission_resolver,
+                                auto_approve_permissions=self._auto_approve_permissions,
+                            )
+                        self._track_pending_question(runtime, publisher, event)
+                        await self._maybe_publish_normal_handoff_ready(runtime.pipeline, publisher, event)
+                if terminal_handoff_result.attempted and not terminal_handoff_result.terminal_available:
+                    terminal_handoff_unavailable = True
                 if text:
                     task.output_text.append(text)
                 if _ask_user_question_from(event) is not None:
@@ -1210,18 +1486,119 @@ class IacCodeA2APipelineExecutor:
                         restart_requested=False,
                         terminal_handoff_unavailable=terminal_handoff_unavailable,
                     )
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as exc:
+            stream_exception = exc
             close_stream_on_exit = True
             raise
+        except BaseException as exc:
+            stream_exception = exc
+            raise
         finally:
-            if next_task is not None:
-                await _cancel_task_safely(next_task)
+            if next_event is not None and not next_event.done():
+                next_event.cancel()
+            await _cancel_task_safely(stream_driver)
             if restart_task is not None:
                 await _cancel_task_safely(restart_task)
             if close_stream_on_exit:
                 await _close_stream_safely(stream_iter)
             if runtime.current_stream is stream_iter:
                 runtime.current_stream = None
+            if outbound is not None:
+                try:
+                    if outbound_registered:
+                        await self._finish_runtime_outbound(
+                            runtime,
+                            outbound,
+                        )
+                    else:
+                        await _abort_outbound_worker(outbound)
+                except asyncio.CancelledError:
+                    await self._abort_runtime_outbound(runtime, outbound)
+                    raise
+                except BaseException:
+                    if stream_exception is None:
+                        raise
+                    logger.warning("A2A pipeline outbound queue close failed", exc_info=True)
+
+    async def _publish_terminal_stream_event(
+        self,
+        *,
+        runtime: A2APipelineRuntime,
+        outbound: PipelineA2AOutboundQueue | None,
+        publisher: PipelineA2AEventPublisher,
+        event: Any,
+    ) -> _TerminalStreamPublishResult:
+        async def publish() -> tuple[_TerminalHandoffPublishResult, str | None]:
+            await publish_mcp_warnings(
+                publisher.event_queue,
+                task_id=publisher.translator.context.task_id,
+                context_id=publisher.translator.context.context_id,
+                runtime=runtime.agent_runtime,
+                iac_code_session_id=publisher.translator.context.iac_code_session_id,
+            )
+            handoff = await self._maybe_publish_terminal_with_normal_handoff(
+                runtime.pipeline,
+                publisher,
+                event,
+            )
+            if handoff.attempted:
+                return handoff, None
+            text = await publisher.publish(
+                event,
+                permission_resolver=self._permission_resolver,
+                auto_approve_permissions=self._auto_approve_permissions,
+            )
+            self._track_pending_question(runtime, publisher, event)
+            await self._maybe_publish_normal_handoff_ready(runtime.pipeline, publisher, event)
+            return handoff, text
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _ACTIVE_INTERRUPT_TERMINAL_WAIT_TIMEOUT_SECONDS
+        timed_out = False
+        interrupt_settled = _interrupt_settled_event(runtime)
+        restart_event = _restart_requested_event(runtime)
+
+        while True:
+            interrupt_action = _consume_requested_interrupt_action(runtime)
+            if interrupt_action is not None:
+                return _TerminalStreamPublishResult(interrupt_action=interrupt_action)
+
+            async with _outbound_lock(runtime):
+                interrupt_action = _consume_requested_interrupt_action(runtime)
+                if interrupt_action is not None:
+                    return _TerminalStreamPublishResult(interrupt_action=interrupt_action)
+                if interrupt_settled.is_set() or timed_out:
+                    runtime.terminal_publication_started = True
+                    if outbound is None:
+                        handoff, text = await publish()
+                    else:
+                        handoff, text = await outbound.run_serialized(publish)
+                    return _TerminalStreamPublishResult(handoff=handoff, text=text)
+
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                logger.warning(
+                    "Timed out waiting for active A2A pipeline interrupt before publishing terminal pipeline event"
+                )
+                timed_out = True
+                continue
+
+            settled_task = asyncio.create_task(interrupt_settled.wait())
+            restart_task = asyncio.create_task(restart_event.wait())
+            try:
+                done, _pending = await asyncio.wait(
+                    {settled_task, restart_task},
+                    timeout=remaining,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            finally:
+                await _cancel_task_safely(settled_task)
+                await _cancel_task_safely(restart_task)
+            if not done:
+                logger.warning(
+                    "Timed out waiting for active A2A pipeline interrupt before publishing terminal pipeline event"
+                )
+                timed_out = True
 
     def _publisher(
         self,
@@ -1252,6 +1629,13 @@ class IacCodeA2APipelineExecutor:
         except Exception:
             logger.warning("Failed to hydrate A2A pipeline translator from journal", exc_info=True)
         artifact_store = self._artifact_store_for_session(cwd=cwd, session_id=session_id)
+        flow_monitor = _pipeline_flow_monitor_for_session(
+            cwd=cwd,
+            session_id=session_id,
+            context_id=context_id,
+            task_id=task_id,
+            pipeline_run_id=context.pipeline_run_id,
+        )
         return PipelineA2AEventPublisher(
             event_queue=event_queue,
             translator=translator,
@@ -1260,6 +1644,7 @@ class IacCodeA2APipelineExecutor:
             artifact_store=artifact_store,
             exposure_types=self._thinking_exposure_types,
             backup_commit_gate=_requires_backup_committed_publication,
+            flow_monitor=flow_monitor,
         )
 
     def _install_backup_hook(
@@ -1308,6 +1693,11 @@ class IacCodeA2APipelineExecutor:
                 return True
         else:
             self._mirror_a2a_snapshots_for_pipeline_publication(envelope, task=task, ctx=ctx)
+        publication_proofs = None
+        if reason == BackupReason.HANDOFF_READY and envelope.get("visibility") == "committed":
+            publication_proofs = {
+                NORMAL_HANDOFF_PROOF_KEY: BackupPublicationProof.from_envelope(envelope),
+            }
         try:
             await backup_session_async(
                 self._backup_service,
@@ -1316,6 +1706,7 @@ class IacCodeA2APipelineExecutor:
                 reason=reason,
                 critical=True,
                 metrics=self._metrics,
+                publication_proofs=publication_proofs,
             )
         except SessionBackupBlocked as exc:
             sidecar_synced = await _sync_pipeline_backup_blocked_sidecar(
@@ -1592,23 +1983,23 @@ class IacCodeA2APipelineExecutor:
         *,
         task_id: str,
         context_id: str,
-    ) -> bool:
+    ) -> _TerminalSidecarRecoveryResult:
         sidecar_status = getattr(pipeline, "sidecar_status", None)
         terminal_event = _terminal_event_from_sidecar_status(sidecar_status)
         if terminal_event is None:
-            return False
+            return _TerminalSidecarRecoveryResult(published=False, available=False)
         event_type, status = terminal_event
         snapshot = publisher.snapshot_store.load()
         journal_events = _safe_read_pipeline_journal(publisher.journal)
         scoped_journal_events = _events_for_task_context(journal_events, task_id=task_id, context_id=context_id)
         if _terminal_publication_unavailable_blocks_recovery(scoped_journal_events):
-            return False
+            return _TerminalSidecarRecoveryResult(published=False, available=False)
         existing_terminal_event = _latest_terminal_a2a_event(scoped_journal_events)
         if existing_terminal_event is not None:
             existing_status = _terminal_status_from_a2a_event(existing_terminal_event)
             if existing_status != status:
                 self._rebuild_terminal_recovery_snapshot(publisher, scoped_journal_events)
-                return False
+                return _TerminalSidecarRecoveryResult(published=False, available=False)
             if _terminal_snapshot_needs_journal_rebuild(
                 snapshot,
                 scoped_journal_events,
@@ -1617,16 +2008,16 @@ class IacCodeA2APipelineExecutor:
                 context_id=context_id,
             ):
                 self._rebuild_terminal_recovery_snapshot(publisher, scoped_journal_events)
-            return False
+            return _TerminalSidecarRecoveryResult(published=False, available=True)
         if _snapshot_has_conflicting_terminal_status(snapshot, status, task_id=task_id, context_id=context_id):
-            return False
+            return _TerminalSidecarRecoveryResult(published=False, available=False)
         if not _terminal_snapshot_needs_recovery_event(
             snapshot,
             status,
             task_id=task_id,
             context_id=context_id,
         ) and not _has_unacknowledged_committed_terminal_event(scoped_journal_events):
-            return False
+            return _TerminalSidecarRecoveryResult(published=False, available=True)
 
         published = await publisher.publish_manual(
             event_type,
@@ -1647,8 +2038,8 @@ class IacCodeA2APipelineExecutor:
                 },
                 reason="terminal_recovery_publication_failed",
             )
-            return False
-        return True
+            return _TerminalSidecarRecoveryResult(published=False, available=False)
+        return _TerminalSidecarRecoveryResult(published=True, available=True)
 
     def _rebuild_terminal_recovery_snapshot(
         self,
@@ -2183,23 +2574,56 @@ class IacCodeA2APipelineExecutor:
         exc: Exception,
         preserve_task_record: bool = False,
         pipeline_publisher: PipelineA2AEventPublisher | None = None,
+        pipeline_runtime: A2APipelineRuntime | None = None,
     ) -> None:
+        if isinstance(exc, PipelineTransportDeliveryClosedError) and pipeline_publisher is not None:
+            committed_status = _committed_terminal_status_for_task_context(
+                pipeline_publisher,
+                task_id=task_id,
+                context_id=context_id,
+            )
+            if committed_status is not None:
+                logger.info(
+                    "Preserving committed A2A pipeline terminal after transport closed status=%s",
+                    committed_status,
+                )
+                if not preserve_task_record:
+                    task.state = _task_state_from_a2a_status(committed_status)
+                    self._task_store.mirror_task(task)
+                    await self._notify_terminal_task(
+                        task_id=task.task_id,
+                        context_id=task.context_id,
+                        state=task.state,
+                    )
+                    self._record_state(task.state)
+                return
+
         retryable = _is_retryable_executor_error(exc)
         task_state = TASK_STATE_INPUT_REQUIRED if retryable else TASK_STATE_FAILED
         text = _retry_text() if retryable else _sanitize_error(exc)
         failure = None if retryable else public_error(message=text, error_type=type(exc).__name__)
         terminal_status_available = retryable or preserve_task_record
         if not retryable and not preserve_task_record:
-            terminal_status_available = await self._publish_pipeline_terminal_event(
-                pipeline_publisher,
-                event_type="pipeline_failed",
-                status="failed",
-                data={
-                    "source": "executor",
-                    "errorSummary": text,
-                    "errorDetails": _public_error_details_for_a2a(failure.details) if failure is not None else {},
-                },
-            )
+
+            async def publish_failed_terminal() -> bool:
+                return await self._publish_pipeline_terminal_event(
+                    pipeline_publisher,
+                    event_type="pipeline_failed",
+                    status="failed",
+                    data={
+                        "source": "executor",
+                        "errorSummary": text,
+                        "errorDetails": _public_error_details_for_a2a(failure.details) if failure is not None else {},
+                    },
+                )
+
+            if pipeline_runtime is not None and pipeline_publisher is not None:
+                terminal_status_available = await self._run_external_terminal_publication(
+                    pipeline_runtime,
+                    publish_failed_terminal,
+                )
+            else:
+                terminal_status_available = await publish_failed_terminal()
         if not terminal_status_available:
             task_state = TASK_STATE_INPUT_REQUIRED
         await self._publish_status(
@@ -2835,12 +3259,18 @@ def _cancel_waiting_input_task_from_sidecar_locked(
             state=TASK_STATE_INPUT_REQUIRED,
         )
         return WaitingInputCancelResult.PERSIST_FAILED
+    publication_proofs = None
+    if committed_handoff_envelope is not None:
+        publication_proofs = {
+            NORMAL_HANDOFF_PROOF_KEY: BackupPublicationProof.from_envelope(committed_handoff_envelope),
+        }
     try:
         backup_result = (backup_service or SessionBackupService()).backup_session(
             cwd,
             session_id,
             reason=BackupReason.TERMINAL,
             critical=True,
+            publication_proofs=publication_proofs,
         )
     except SessionBackupBlocked as exc:
         _record_backup_failed_metric(
@@ -3404,16 +3834,36 @@ async def _save_pipeline_interrupt_pause(pipeline: Any, verdict: Any) -> Pipelin
     return event if isinstance(event, PipelineEvent) else None
 
 
-async def _next_stream_event(stream: AsyncIterator[Any]) -> Any:
-    return await anext(stream)
+async def _drive_stream_events(
+    stream: AsyncIterator[Any],
+    requests: asyncio.Queue[asyncio.Future[Any]],
+) -> None:
+    while True:
+        completion = await requests.get()
+        if completion.cancelled():
+            continue
+        try:
+            event = await anext(stream)
+        except asyncio.CancelledError:
+            completion.cancel()
+            raise
+        except BaseException as exc:
+            if not completion.done():
+                completion.set_exception(exc)
+            return
+        if not completion.done():
+            completion.set_result(event)
 
 
 async def _cancel_task_safely(task: asyncio.Task[Any]) -> None:
     if not task.done():
         task.cancel()
+    await asyncio.wait({task})
+    if task.cancelled():
+        return
     try:
-        await task
-    except (asyncio.CancelledError, StopAsyncIteration):
+        task.result()
+    except StopAsyncIteration:
         pass
     except Exception:
         logger.warning("A2A pipeline stream task cleanup failed", exc_info=True)
@@ -3427,6 +3877,60 @@ async def _close_stream_safely(stream: Any) -> None:
         await _maybe_await(aclose())
     except Exception:
         logger.warning("A2A pipeline interrupt stream close failed", exc_info=True)
+
+
+async def _abort_outbound_worker(outbound: PipelineA2AOutboundQueue) -> None:
+    abort_task = asyncio.create_task(outbound.abort())
+    while not abort_task.done():
+        try:
+            await asyncio.shield(abort_task)
+        except asyncio.CancelledError:
+            continue
+    await abort_task
+
+
+async def _settle_active_interrupt_safely(runtime: Any) -> None:
+    async def settle() -> None:
+        async with _outbound_lock(runtime):
+            runtime.active_interrupt_count = max(0, _active_interrupt_count(runtime) - 1)
+            if runtime.active_interrupt_count == 0:
+                _interrupt_settled_event(runtime).set()
+
+    cancellation: asyncio.CancelledError | None = None
+    settle_task = asyncio.create_task(settle())
+    while not settle_task.done():
+        try:
+            await asyncio.shield(settle_task)
+        except asyncio.CancelledError as exc:
+            cancellation = exc
+            continue
+    await settle_task
+    if cancellation is not None:
+        raise cancellation
+
+
+async def _register_active_interrupt(runtime: Any) -> bool:
+    async with _outbound_lock(runtime):
+        if bool(getattr(runtime, "terminal_publication_started", False)):
+            return False
+        runtime.active_interrupt_count = _active_interrupt_count(runtime) + 1
+        _interrupt_settled_event(runtime).clear()
+        return True
+
+
+def _outbound_lock(runtime: Any) -> asyncio.Lock:
+    lock = getattr(runtime, "outbound_lock", None)
+    if isinstance(lock, asyncio.Lock):
+        return lock
+    lock = asyncio.Lock()
+    runtime.outbound_lock = lock
+    return lock
+
+
+def _text_delta_output(event: Any) -> str | None:
+    while isinstance(event, SubPipelineStreamEvent):
+        event = event.inner
+    return event.text if isinstance(event, TextDeltaEvent) else None
 
 
 def _restart_requested_event(runtime: Any) -> asyncio.Event:
@@ -3447,38 +3951,15 @@ def _interrupt_settled_event(runtime: Any) -> asyncio.Event:
     return interrupt_settled
 
 
-async def _consume_active_interrupt_action_before_terminal(runtime: Any, event: Any) -> str | None:
-    if not _is_pipeline_terminal_stream_event(event):
-        return None
+def _active_interrupt_count(runtime: Any) -> int:
+    count = getattr(runtime, "active_interrupt_count", 0)
+    return count if isinstance(count, int) and count > 0 else 0
 
-    action = _consume_requested_interrupt_action(runtime)
-    if action is not None:
-        return action
 
-    interrupt_settled = _interrupt_settled_event(runtime)
-    if interrupt_settled.is_set():
-        return None
-
-    restart_event = _restart_requested_event(runtime)
-    settled_task = asyncio.create_task(interrupt_settled.wait())
-    restart_task = asyncio.create_task(restart_event.wait())
-    try:
-        done, _pending = await asyncio.wait(
-            {settled_task, restart_task},
-            timeout=_ACTIVE_INTERRUPT_TERMINAL_WAIT_TIMEOUT_SECONDS,
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-    finally:
-        await _cancel_task_safely(settled_task)
-        await _cancel_task_safely(restart_task)
-
-    action = _consume_requested_interrupt_action(runtime)
-    if action is not None:
-        return action
-
-    if not done and not interrupt_settled.is_set():
-        logger.warning("Timed out waiting for active A2A pipeline interrupt before publishing terminal pipeline event")
-    return None
+def _has_unpublished_mcp_warnings(runtime: Any) -> bool:
+    warnings = getattr(runtime, "mcp_config_warnings", None) or []
+    pushed_count = getattr(runtime, "_a2a_mcp_warnings_pushed_count", 0)
+    return isinstance(pushed_count, int) and pushed_count < len(warnings)
 
 
 def _consume_requested_interrupt_action(runtime: Any) -> str | None:
@@ -3520,6 +4001,34 @@ def _pipeline_sidecar_dir(pipeline: Any, cwd: str, session_id: str) -> Path:
             return existing_a2a_pipeline_dir_for_session(cwd=cwd, session_id=session_id)
         return a2a_pipeline_dir_for_sidecar_dir(sidecar_dir)
     return existing_a2a_pipeline_dir_for_session(cwd=cwd, session_id=session_id)
+
+
+def _pipeline_flow_monitor_for_session(
+    *,
+    cwd: str,
+    session_id: str,
+    context_id: str,
+    task_id: str,
+    pipeline_run_id: str,
+) -> PipelineA2AFlowMonitor | None:
+    try:
+        session_paths = SessionPaths.require_supported(SessionStorage().session_dir(cwd, session_id))
+    except Exception as exc:
+        logger.warning(
+            "Failed to initialize session A2A pipeline flow monitor error_type=%s",
+            type(exc).__name__,
+        )
+        return None
+    return PipelineA2AFlowMonitor(
+        session_paths.a2a_pipeline_flow_log_path,
+        PipelineA2AFlowIdentity(
+            session_id=session_id,
+            context_id=context_id,
+            task_id=task_id,
+            pipeline_run_id=pipeline_run_id,
+        ),
+        session_dir=session_paths.session_dir,
+    )
 
 
 def _pipeline_parent_step_order(pipeline: Any) -> list[str]:

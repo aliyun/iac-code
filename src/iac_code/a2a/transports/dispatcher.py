@@ -4,10 +4,10 @@ import asyncio
 import inspect
 import json
 import logging
-from contextlib import AsyncExitStack, suppress
+from contextlib import AsyncExitStack, nullcontext, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, AsyncIterator, cast
+from typing import Any, AsyncGenerator, AsyncIterator, cast
 
 import httpx
 from a2a.server.agent_execution.active_task import INTERRUPTED_TASK_STATES, TERMINAL_TASK_STATES
@@ -63,6 +63,14 @@ from iac_code.a2a.pipeline_executor import (
     terminal_task_state_from_sidecar,
     waiting_input_task_id_from_sidecar,
 )
+from iac_code.a2a.pipeline_transport_delivery import (
+    acknowledge_pipeline_transport_delivery,
+    bind_pipeline_transport_delivery_route,
+    bind_pipeline_transport_delivery_tracker,
+    close_pipeline_transport_delivery_tracker,
+    create_pipeline_transport_delivery_tracker,
+    mark_pipeline_transport_delivery_dequeued,
+)
 from iac_code.a2a.push import (
     A2APushConfigStore,
     A2APushSender,
@@ -80,6 +88,169 @@ from iac_code.utils.public_errors import public_exception_summary
 
 logger = logging.getLogger(__name__)
 _ACTIVE_MESSAGE_STREAM_COMPLETED = object()
+_ASGI_STREAM_END = object()
+
+
+@dataclass
+class _ASGIResponseChunk:
+    body: bytes
+    more_body: bool
+    consumed: asyncio.Future[None]
+
+
+class _StreamingASGIResponseStream(httpx.AsyncByteStream):
+    def __init__(
+        self,
+        queue: asyncio.Queue[_ASGIResponseChunk | object],
+        app_task: asyncio.Task[None],
+        app_error: list[BaseException],
+        disconnect: asyncio.Event,
+    ) -> None:
+        self._queue = queue
+        self._app_task = app_task
+        self._app_error = app_error
+        self._disconnect = disconnect
+        self._pending: _ASGIResponseChunk | None = None
+        self._finished = False
+        self._closed = False
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        try:
+            while True:
+                entry = await self._queue.get()
+                if entry is _ASGI_STREAM_END:
+                    await self._finish()
+                    return
+                assert isinstance(entry, _ASGIResponseChunk)
+                self._pending = entry
+                try:
+                    if entry.body:
+                        yield entry.body
+                finally:
+                    self._acknowledge_pending()
+                if not entry.more_body:
+                    await self._finish()
+                    return
+        finally:
+            self._acknowledge_pending()
+
+    async def aclose(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._acknowledge_pending()
+        self._disconnect.set()
+        if not self._finished and not self._app_task.done():
+            self._app_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await self._app_task
+
+    def _acknowledge_pending(self) -> None:
+        pending = self._pending
+        self._pending = None
+        if pending is not None and not pending.consumed.done():
+            pending.consumed.set_result(None)
+
+    async def _finish(self) -> None:
+        await self._app_task
+        self._finished = True
+        if self._app_error:
+            raise self._app_error[0]
+
+
+class _StreamingASGITransport(httpx.AsyncBaseTransport):
+    def __init__(self, app: Any) -> None:
+        self._app = app
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        assert isinstance(request.stream, httpx.AsyncByteStream)
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": request.method,
+            "headers": [(key.lower(), value) for key, value in request.headers.raw],
+            "scheme": request.url.scheme,
+            "path": request.url.path,
+            "raw_path": request.url.raw_path.split(b"?")[0],
+            "query_string": request.url.query,
+            "server": (request.url.host, request.url.port),
+            "client": ("127.0.0.1", 0),
+            "root_path": "",
+        }
+        request_chunks = request.stream.__aiter__()
+        request_complete = False
+        response_started = asyncio.Event()
+        response_complete = False
+        response_status: int | None = None
+        response_headers: list[tuple[bytes, bytes]] | None = None
+        response_queue: asyncio.Queue[_ASGIResponseChunk | object] = asyncio.Queue()
+        disconnect = asyncio.Event()
+        app_error: list[BaseException] = []
+
+        async def receive() -> dict[str, Any]:
+            nonlocal request_complete
+            if request_complete:
+                await disconnect.wait()
+                return {"type": "http.disconnect"}
+            try:
+                body = await anext(request_chunks)
+            except StopAsyncIteration:
+                request_complete = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            return {"type": "http.request", "body": body, "more_body": True}
+
+        async def send(message: dict[str, Any]) -> None:
+            nonlocal response_complete, response_headers, response_status
+            message_type = message["type"]
+            if message_type == "http.response.start":
+                if response_started.is_set():
+                    raise RuntimeError("ASGI application sent duplicate response start")
+                response_status = int(message["status"])
+                response_headers = list(message.get("headers", []))
+                response_started.set()
+                return
+            if message_type != "http.response.body":
+                return
+            if response_status is None or response_complete:
+                raise RuntimeError("ASGI application sent an invalid response body")
+            more_body = bool(message.get("more_body", False))
+            chunk = _ASGIResponseChunk(
+                body=bytes(message.get("body", b"")),
+                more_body=more_body,
+                consumed=asyncio.get_running_loop().create_future(),
+            )
+            await response_queue.put(chunk)
+            await chunk.consumed
+            response_complete = not more_body
+
+        async def run_app() -> None:
+            try:
+                await self._app(scope, receive, send)
+            except BaseException as exc:
+                app_error.append(exc)
+            finally:
+                response_started.set()
+                if not response_complete:
+                    await response_queue.put(_ASGI_STREAM_END)
+
+        app_task = asyncio.create_task(run_app(), name="a2a-streaming-asgi-dispatch")
+        try:
+            await response_started.wait()
+            if response_status is None or response_headers is None:
+                await app_task
+                if app_error:
+                    raise app_error[0]
+                raise RuntimeError("ASGI application did not start a response")
+        except BaseException:
+            disconnect.set()
+            if not app_task.done():
+                app_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await app_task
+            raise
+        stream = _StreamingASGIResponseStream(response_queue, app_task, app_error, disconnect)
+        return httpx.Response(response_status, headers=response_headers, stream=stream)
 
 
 @dataclass
@@ -274,16 +445,30 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             task = await self.task_store.get(task_id, context)
             active_task = await self._active_task_registry.get(task_id)
             if task is not None and active_task is not None and task.status.state not in TERMINAL_TASK_STATES:
-                async for event in self._on_active_message_send_stream(
+                active_stream = self._on_active_message_send_stream(
                     params,
                     context,
                     task=task,
                     active_task=active_task,
-                ):
-                    yield event
+                )
+                try:
+                    async for event in active_stream:
+                        yield event
+                finally:
+                    await active_stream.aclose()
                 return
-        async for event in super().on_message_send_stream(params, context):
-            yield event
+        tracked_stream = _iterate_with_pipeline_transport_tracking(
+            super().on_message_send_stream(params, context),
+            task_id=getattr(params.message, "task_id", None) or None,
+            context_id=getattr(params.message, "context_id", None) or None,
+        )
+        try:
+            async for event in tracked_stream:
+                mark_pipeline_transport_delivery_dequeued(event)
+                yield event
+                acknowledge_pipeline_transport_delivery(event)
+        finally:
+            await tracked_stream.aclose()
 
     async def _on_active_message_send_stream(self, params: SendMessageRequest, context, *, task: Task, active_task):
         request_context = await self._request_context_builder.build(
@@ -307,35 +492,47 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                 with suppress(QueueShutDown):
                     await tapped_queue._put_internal((_ACTIVE_MESSAGE_STREAM_COMPLETED, None))
 
-        producer_task = asyncio.create_task(run_active_message())
+        delivery_tracker = create_pipeline_transport_delivery_tracker()
+        with bind_pipeline_transport_delivery_route(
+            delivery_tracker,
+            task_id=task.id,
+            context_id=getattr(task, "context_id", None) or params.message.context_id,
+        ):
+            with bind_pipeline_transport_delivery_tracker(delivery_tracker):
+                producer_task = asyncio.create_task(run_active_message())
 
-        try:
-            while True:
-                try:
-                    dequeued = await tapped_queue.dequeue_event()
-                except QueueShutDown:
-                    break
-                event, _updated_task = cast(Any, dequeued)
-                if event is _ACTIVE_MESSAGE_STREAM_COMPLETED:
-                    tapped_queue.task_done()
-                    break
-                if isinstance(event, BaseException):
-                    raise event
-                if isinstance(event, Task):
-                    self._validate_task_id_match(task.id, event.id)
-                    yield apply_history_length(event, params.configuration)
-                else:
-                    yield event
-                tapped_queue.task_done()
-        except (asyncio.CancelledError, GeneratorExit):
-            producer_task.cancel()
-            raise
-        finally:
-            await tapped_queue.close(immediate=True)
-            async with active_task._lock:
-                active_task._reference_count -= 1
-            await active_task._maybe_cleanup()
-            await self._cleanup_active_message_producer(producer_task, task.id)
+            try:
+                while True:
+                    try:
+                        dequeued = await tapped_queue.dequeue_event()
+                    except QueueShutDown:
+                        break
+                    event, _updated_task = cast(Any, dequeued)
+                    if event is _ACTIVE_MESSAGE_STREAM_COMPLETED:
+                        tapped_queue.task_done()
+                        break
+                    if isinstance(event, BaseException):
+                        raise event
+                    try:
+                        mark_pipeline_transport_delivery_dequeued(event)
+                        if isinstance(event, Task):
+                            self._validate_task_id_match(task.id, event.id)
+                            yield apply_history_length(event, params.configuration)
+                        else:
+                            yield event
+                    finally:
+                        tapped_queue.task_done()
+                    acknowledge_pipeline_transport_delivery(event)
+            except (asyncio.CancelledError, GeneratorExit):
+                producer_task.cancel()
+                raise
+            finally:
+                close_pipeline_transport_delivery_tracker(delivery_tracker)
+                await tapped_queue.close(immediate=True)
+                async with active_task._lock:
+                    active_task._reference_count -= 1
+                await active_task._maybe_cleanup()
+                await self._cleanup_active_message_producer(producer_task, task.id)
 
     async def _hydrate_recoverable_pipeline_task_id(self, params: SendMessageRequest) -> None:
         if get_run_mode() is not RunMode.PIPELINE or not isinstance(self.task_store, A2ATaskStore):
@@ -590,6 +787,35 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             raise ExtensionSupportRequiredError(f"Required A2A extensions were not requested: {', '.join(missing)}")
 
 
+async def _iterate_with_pipeline_transport_tracking(
+    events,
+    *,
+    task_id: str | None = None,
+    context_id: str | None = None,
+) -> AsyncGenerator[Any, None]:
+    iterator = events.__aiter__()
+    delivery_tracker = create_pipeline_transport_delivery_tracker()
+    route = (
+        bind_pipeline_transport_delivery_route(delivery_tracker, task_id=task_id, context_id=context_id)
+        if task_id and context_id
+        else nullcontext()
+    )
+    with route:
+        try:
+            while True:
+                with bind_pipeline_transport_delivery_tracker(delivery_tracker):
+                    try:
+                        event = await anext(iterator)
+                    except StopAsyncIteration:
+                        return
+                yield event
+        finally:
+            close_pipeline_transport_delivery_tracker(delivery_tracker)
+            close = getattr(iterator, "aclose", None)
+            if callable(close):
+                await close()
+
+
 def _task_is_input_required(task: Task) -> bool:
     try:
         return TaskState.Name(task.status.state) == TaskState.Name(TaskState.TASK_STATE_INPUT_REQUIRED)
@@ -635,7 +861,7 @@ class A2AJsonRpcDispatcher:
     def __init__(self, components: A2ARuntimeComponents) -> None:
         self._components = components
         self._http_client = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=self._components.app),
+            transport=_StreamingASGITransport(self._components.app),
             base_url="http://transport.local",
         )
 

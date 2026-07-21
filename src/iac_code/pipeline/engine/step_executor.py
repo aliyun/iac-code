@@ -98,6 +98,7 @@ class StepExecutor:
         auto_trigger_skills: list[Any] | None = None,
         surface: str = "repl",
         tool_context_env_overrides: dict[str, str] | None = None,
+        aliyun_delegated_executor_factory: Callable[[str], Any] | None = None,
     ) -> None:
         self._provider_manager = provider_manager
         self._base_tool_registry = base_tool_registry
@@ -112,6 +113,7 @@ class StepExecutor:
         self._auto_trigger_skills = auto_trigger_skills or []
         self._surface = surface
         self._tool_context_env_overrides = dict(tool_context_env_overrides or {})
+        self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
         self._current_agent_loop = None
         pipeline_name = getattr(pipeline, "name", "")
         if not isinstance(pipeline_name, str):
@@ -854,14 +856,16 @@ class StepExecutor:
                 else:
                     registry.register(self._instantiate_pipeline_tool(tool_cls, step=None))
 
-    @staticmethod
-    def _instantiate_pipeline_tool(tool_cls: type, step: StepSpec | None) -> Any:
+    def _instantiate_pipeline_tool(self, tool_cls: type, step: StepSpec | None) -> Any:
         try:
             parameters = inspect.signature(tool_cls).parameters
         except (TypeError, ValueError):
             parameters = {}
         if step is not None and "step_config" in parameters:
             return tool_cls(step_config=step.config)
+        if "delegated_executor" in parameters and self._aliyun_delegated_executor_factory is not None:
+            action = getattr(tool_cls, "action", "")
+            return tool_cls(delegated_executor=self._aliyun_delegated_executor_factory(str(action)))
         return tool_cls()
 
     @staticmethod

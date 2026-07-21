@@ -77,6 +77,7 @@ class SubPipelineExecutor:
         surface: str = "repl",
         backup_service: Any | None = None,
         tool_context_env_overrides: dict[str, str] | None = None,
+        aliyun_delegated_executor_factory: Callable[[str], Any] | None = None,
     ) -> None:
         self._provider_manager = provider_manager
         self._base_tool_registry = base_tool_registry
@@ -91,6 +92,7 @@ class SubPipelineExecutor:
         self._auto_trigger_skills = auto_trigger_skills or []
         self._surface = surface
         self._tool_context_env_overrides = dict(tool_context_env_overrides or {})
+        self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
         self._active_step_executor = None
         self._telemetry_correlation: dict[str, str] = {}
         pipeline_name = getattr(pipeline, "name", "")
@@ -171,6 +173,7 @@ class SubPipelineExecutor:
             auto_trigger_skills=self._auto_trigger_skills,
             surface=self._surface,
             tool_context_env_overrides=self._tool_context_env_overrides,
+            aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
         )
         self._apply_telemetry_correlation(step_executor)
 
@@ -353,6 +356,7 @@ class SubPipelineExecutor:
             auto_trigger_skills=self._auto_trigger_skills,
             surface=self._surface,
             tool_context_env_overrides=self._tool_context_env_overrides,
+            aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
         )
         self._apply_telemetry_correlation(executor)
         return executor

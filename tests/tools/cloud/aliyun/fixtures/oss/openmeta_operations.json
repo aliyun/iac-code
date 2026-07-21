@@ -1,0 +1,2423 @@
+{
+  "_meta": {
+    "product": "Oss",
+    "schema_version": 1,
+    "source": "Alibaba Cloud OpenMeta",
+    "source_url_template": "https://api.aliyun.com/meta/v1/products/Oss/versions/2019-05-17/apis/{action}/api.json?language=ZH_CN",
+    "version": "2019-05-17"
+  },
+  "operations": [
+    {
+      "action": "AbortMultipartUpload",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "ec48fb827391ea5c73fd08c7213ba8f116e8e71e8c612254857afbb76aa59a73",
+      "method": "DELETE",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "uploadId",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "abort_multipart_upload"
+    },
+    {
+      "action": "AppendObject",
+      "available": true,
+      "consumes": [
+        "application/octet-stream"
+      ],
+      "document_sha256": "3aa252e03ec722681e28cb19913566c5abc2fa3c4b02819f8418e85fab679623",
+      "method": "POST",
+      "operation_type": "readAndWrite",
+      "parameters": [
+        {
+          "format": "binary",
+          "location": "body",
+          "name": "body",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "Cache-Control",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "Content-Disposition",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "Content-Encoding",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "Content-MD5",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "Expires",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-meta-*",
+          "required": false,
+          "type": "object"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-object-acl",
+          "required": false,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-server-side-encryption",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-storage-class",
+          "required": false,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": "int64",
+          "location": "query",
+          "name": "position",
+          "required": true,
+          "type": "integer"
+        }
+      ],
+      "pathname": "/{key}?append",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [
+        "x-oss-hash-crc64ecma",
+        "x-oss-next-append-position"
+      ],
+      "sdk_method": "append_object"
+    },
+    {
+      "action": "AsyncProcessObject",
+      "available": false,
+      "consumes": [],
+      "document_sha256": "8287ace1ad98a9bb6771f529d526554e234747a681af0ed14cc96edea63d6288",
+      "method": null,
+      "operation_type": null,
+      "parameters": [],
+      "pathname": null,
+      "produces": [],
+      "response_headers": [],
+      "sdk_method": "async_process_object"
+    },
+    {
+      "action": "CompleteMultipartUpload",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "fcfed3a75727bda24fd78eaf78cf02ca0a1cb43b15bd1602d941bd760561b953",
+      "method": "POST",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "body",
+          "name": "body",
+          "required": false,
+          "type": "object"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-complete-all",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-forbid-overwrite",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "encoding-type",
+          "required": false,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "uploadId",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [
+        "x-oss-version-id"
+      ],
+      "sdk_method": "complete_multipart_upload"
+    },
+    {
+      "action": "CopyObject",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "e5eac88b5c74f7ff46ad894fc6a2d5f2a5737b829796307d88748fbaade38012",
+      "method": "PUT",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-copy-source",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-copy-source-if-match",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-copy-source-if-modified-since",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-copy-source-if-none-match",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-copy-source-if-unmodified-since",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-forbid-overwrite",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-meta-*",
+          "required": false,
+          "type": "object"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-metadata-directive",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-object-acl",
+          "required": false,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-server-side-data-encryption",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-server-side-encryption",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-server-side-encryption-key-id",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-storage-class",
+          "required": false,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-tagging",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-tagging-directive",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [
+        "x-oss-copy-source-version-id",
+        "x-oss-version-id"
+      ],
+      "sdk_method": "copy_object"
+    },
+    {
+      "action": "DeleteBucket",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "525eb46ca813280c37d6c7f726135e84bdc4ff7147a278707d1c912a5cefdd05",
+      "method": "DELETE",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "delete_bucket"
+    },
+    {
+      "action": "DeleteMultipleObjects",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "cec424cd7bd6a3320f1e984b905f7c01c257b55108f04ef0423a23836983d2c7",
+      "method": "POST",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "body",
+          "name": "body",
+          "required": false,
+          "type": "object"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "content-md5",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "encoding-type",
+          "required": false,
+          "type": null
+        }
+      ],
+      "pathname": "/?delete",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "delete_multiple_objects"
+    },
+    {
+      "action": "DeleteObject",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "61d5c9727009c838fcb194a5601b44e21bbf865881d36b340fc27b403fa9aec7",
+      "method": "DELETE",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "versionId",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}",
+      "produces": [],
+      "response_headers": [
+        "x-oss-delete-marker",
+        "x-oss-version-id"
+      ],
+      "sdk_method": "delete_object"
+    },
+    {
+      "action": "DeleteObjectTagging",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "4656cd4d163acb29ce9c731a3a72a13ce05cd4fa238c9f6711f4a470b20417b1",
+      "method": "DELETE",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "versionId",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}?tagging",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "delete_object_tagging"
+    },
+    {
+      "action": "DescribeRegions",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "1d8a6075ba7ea2ef32f43e541f4745ed7bfedf79fde3ba9f5d50344c4f7af32c",
+      "method": "GET",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "query",
+          "name": "regions",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "pathname": "/?regions",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "describe_regions"
+    },
+    {
+      "action": "DoDataPipelineAction",
+      "available": false,
+      "consumes": [],
+      "document_sha256": "8287ace1ad98a9bb6771f529d526554e234747a681af0ed14cc96edea63d6288",
+      "method": null,
+      "operation_type": null,
+      "parameters": [],
+      "pathname": null,
+      "produces": [],
+      "response_headers": [],
+      "sdk_method": "do_data_pipeline_action"
+    },
+    {
+      "action": "DoMetaQueryAction",
+      "available": false,
+      "consumes": [],
+      "document_sha256": "8287ace1ad98a9bb6771f529d526554e234747a681af0ed14cc96edea63d6288",
+      "method": null,
+      "operation_type": null,
+      "parameters": [],
+      "pathname": null,
+      "produces": [],
+      "response_headers": [],
+      "sdk_method": "do_meta_query_action"
+    },
+    {
+      "action": "GetBucketAcl",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "35ccc075d7dcea7dcaf575129b37c87fc980051b2f9f4da2252f657cae2094a6",
+      "method": "GET",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/?acl",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "get_bucket_acl"
+    },
+    {
+      "action": "GetBucketInfo",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "08642ec2dc7dcc23acd3d1d9e4252bd43abd1af62c12231e94ef0b8506242687",
+      "method": "GET",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/?bucketInfo",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "get_bucket_info"
+    },
+    {
+      "action": "GetBucketLocation",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "e9f74eb5eaeec4bdd04fc4f869c29f7d0e4362828a63f47bc810b8de59647d8a",
+      "method": "GET",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/?location",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "get_bucket_location"
+    },
+    {
+      "action": "GetBucketObjectWormConfiguration",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "a0d6847fb998f038bc48e7fbcf252d322c84dfadb3a163d3644561b33db37345",
+      "method": "GET",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/?objectWorm",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "get_bucket_object_worm_configuration"
+    },
+    {
+      "action": "GetBucketStat",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "995556580b9bd6012c0c0a0d674af17076efb6e469fe9b1da63241c86e24229a",
+      "method": "GET",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/?stat",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "get_bucket_stat"
+    },
+    {
+      "action": "GetBucketVersioning",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "2be2eb5daf2bc4e33acd3588fa26652e0e8858eb98fe99be18bf26a0ba8f847c",
+      "method": "GET",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/?versioning",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "get_bucket_versioning"
+    },
+    {
+      "action": "GetObject",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "f1eff2742b56bea8a7190ddf7cb6f12e24363e6f72ea32091f59770687bdf389",
+      "method": "GET",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "header",
+          "name": "Accept-Encoding",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "If-Match",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "If-Modified-Since",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "If-None-Match",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "If-Unmodified-Since",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "Range",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "response-cache-control",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "response-content-disposition",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "response-content-encoding",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "response-content-language",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "response-content-type",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "response-expires",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "versionId",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}",
+      "produces": [
+        "application/octet-stream"
+      ],
+      "response_headers": [
+        "Content-Length",
+        "Content-Md5",
+        "Content-Type",
+        "ETag",
+        "Last-Modified",
+        "x-oss-expiration",
+        "x-oss-hash-crc64ecma",
+        "x-oss-meta-*",
+        "x-oss-next-append-position",
+        "x-oss-object-type",
+        "x-oss-process-status",
+        "x-oss-request-charged",
+        "x-oss-restore",
+        "x-oss-server-side-encryption",
+        "x-oss-server-side-encryption-key-id",
+        "x-oss-storage-class",
+        "x\u2011oss\u2011tagging\u2011count"
+      ],
+      "sdk_method": "get_object"
+    },
+    {
+      "action": "GetObjectAcl",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "688686ccfe381e71e2e91913eb521451d9260feea2a99b3341f15280580a3dba",
+      "method": "GET",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "versionId",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}?acl",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "get_object_acl"
+    },
+    {
+      "action": "GetObjectLegalHold",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "16d70fad75ae4c1f7cc7230d42764805be4add0aabf0c315f06b324cdb7711e5",
+      "method": "GET",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}?legalHold",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "get_object_legal_hold"
+    },
+    {
+      "action": "GetObjectMeta",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "04db9cb086266d9759e0415f1b25abbce9b9e2bdd4be53783bcef3d174b9a1ef",
+      "method": "HEAD",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "versionId",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}?objectMeta",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [
+        "Content-Length",
+        "ETag",
+        "Last-Modifed",
+        "x-oss-last-access-time",
+        "x-oss-transition-time",
+        "x-oss-version-id"
+      ],
+      "sdk_method": "get_object_meta"
+    },
+    {
+      "action": "GetObjectRetention",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "046ca8a67cd8dcf45652c83988b6ea4bf116a3102a6c98c7aae0107037b2af69",
+      "method": "GET",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}?retention",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "get_object_retention"
+    },
+    {
+      "action": "GetObjectTagging",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "8925bcb5ff236a217bc6bc386428684712de8a4e4992cb40ea3778b8d747ce0a",
+      "method": "GET",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "versionId",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}?tagging",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "get_object_tagging"
+    },
+    {
+      "action": "GetSymlink",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "273dc4324fe1a1bcc00c2d6aeb56f9729a4a4e6fda4938696c8868399a74f4b1",
+      "method": "GET",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "versionId",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}?symlink",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [
+        "x-oss-symlink-target",
+        "x-oss-version-id"
+      ],
+      "sdk_method": "get_symlink"
+    },
+    {
+      "action": "HeadObject",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "2e2af5b36a218c490b86f042b336b0703c85efd27cfd9d93040bfa927b241ff4",
+      "method": "HEAD",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "header",
+          "name": "If-Match",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "If-Modified-Since",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "If-None-Match",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "If-Unmodified-Since",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "versionId",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [
+        "Content-Length",
+        "Content-Md5",
+        "Content-Type",
+        "ETag",
+        "Last-Modified",
+        "x-oss-expiration",
+        "x-oss-hash-crc64ecma",
+        "x-oss-meta-*",
+        "x-oss-next-append-position",
+        "x-oss-object-type",
+        "x-oss-process-status",
+        "x-oss-request-charged",
+        "x-oss-restore",
+        "x-oss-server-side-encryption",
+        "x-oss-server-side-encryption-key-id",
+        "x-oss-storage-class",
+        "x-oss-transition-time",
+        "x\u2011oss\u2011tagging\u2011count"
+      ],
+      "sdk_method": "head_object"
+    },
+    {
+      "action": "InitiateMultipartUpload",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "c7a24471fd206c52465b1db15b3e397d985abba7686d6ac2ce6ca5eec7592eed",
+      "method": "POST",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "header",
+          "name": "Cache-Control",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "Content-Disposition",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "Content-Encoding",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "Expires",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-forbid-overwrite",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-server-side-data-encryption",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-server-side-encryption",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-server-side-encryption-key-id",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-storage-class",
+          "required": false,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-tagging",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "encoding-type",
+          "required": false,
+          "type": null
+        }
+      ],
+      "pathname": "/{key}?uploads",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "initiate_multipart_upload"
+    },
+    {
+      "action": "ListBuckets",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "7f2cd856028c8472fa2c76da3dff4d59c6238551974e35e7f9bede6513bcc3f2",
+      "method": "GET",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-resource-group-id",
+          "required": false,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "marker",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": "int64",
+          "location": "query",
+          "name": "max-keys",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "prefix",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "tag-key",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "tag-value",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "tagging",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "pathname": "/",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "list_buckets"
+    },
+    {
+      "action": "ListMultipartUploads",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "df9d0de092da3b8a4ba8e2fc3beb16c47fe32cfb8b8b145ff44a5764c919c86c",
+      "method": "GET",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "delimiter",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "encoding-type",
+          "required": false,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "key-marker",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": "int64",
+          "location": "query",
+          "name": "max-uploads",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "prefix",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "upload-id-marker",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "pathname": "/?uploads",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "list_multipart_uploads"
+    },
+    {
+      "action": "ListObjectVersions",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "fe96f790f79b0e80f5cdeeb8cfc6de088b0cd23df5f9760e25d1979cf2c7c05c",
+      "method": "GET",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "delimiter",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "encoding-type",
+          "required": false,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "key-marker",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": "int64",
+          "location": "query",
+          "name": "max-keys",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "prefix",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "version-id-marker",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "pathname": "/?versions",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "list_object_versions"
+    },
+    {
+      "action": "ListObjects",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "c9f7a0b18b2e97a1e5057ce63bd9073aaba1834df490d048d5a0602fcb5584b0",
+      "method": "GET",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "delimiter",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "encoding-type",
+          "required": false,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "marker",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": "int64",
+          "location": "query",
+          "name": "max-keys",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "prefix",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "pathname": "/",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "list_objects"
+    },
+    {
+      "action": "ListObjectsV2",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "e5668dc020c8d23d2f8b3be6ce7200b2203fd903120f0c8a78a872d1e3a5d347",
+      "method": "GET",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "continuation-token",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "delimiter",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "encoding-type",
+          "required": false,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "fetch-owner",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "format": "int64",
+          "location": "query",
+          "name": "max-keys",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "prefix",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "start-after",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "pathname": "/?list-type=2",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "list_objects_v2"
+    },
+    {
+      "action": "ListParts",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "587ecbcb9c8b2546bc9a0d9e26c716d4028bf000f9a1f1d70686b832a0520074",
+      "method": "GET",
+      "operation_type": "read",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "encoding-type",
+          "required": false,
+          "type": null
+        },
+        {
+          "format": "int64",
+          "location": "query",
+          "name": "max-parts",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "format": "int64",
+          "location": "query",
+          "name": "part-number-marker",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "uploadId",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "list_parts"
+    },
+    {
+      "action": "ProcessObject",
+      "available": false,
+      "consumes": [],
+      "document_sha256": "8287ace1ad98a9bb6771f529d526554e234747a681af0ed14cc96edea63d6288",
+      "method": null,
+      "operation_type": null,
+      "parameters": [],
+      "pathname": null,
+      "produces": [],
+      "response_headers": [],
+      "sdk_method": "process_object"
+    },
+    {
+      "action": "PutBucket",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "b8e4faaa82fc79fb270869799f4e9b0ec3f4a505bd6678f0c6780d513b58f955",
+      "method": "PUT",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "body",
+          "name": "body",
+          "required": false,
+          "type": "object"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-acl",
+          "required": false,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-bucket-tagging",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-resource-group-id",
+          "required": false,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "put_bucket"
+    },
+    {
+      "action": "PutBucketAcl",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "a2ec67cc424a864c7a3c90474490de8406f89012d162ff661ac96f85b3ac7ded",
+      "method": "PUT",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-acl",
+          "required": true,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/?acl",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "put_bucket_acl"
+    },
+    {
+      "action": "PutBucketObjectWormConfiguration",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "52bfb38a68ba5eb9dfe73659f419e5bce772f2b5e67ae9f5621f011bded5f8da",
+      "method": "PUT",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "body",
+          "name": "body",
+          "required": false,
+          "type": "object"
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/?objectWorm",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "put_bucket_object_worm_configuration"
+    },
+    {
+      "action": "PutBucketVersioning",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "cf2e47d1804b08e40c3fe65f5f24f0930d454bbeb4b3ec16c222234d7bb0a396",
+      "method": "PUT",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "body",
+          "name": "body",
+          "required": false,
+          "type": "object"
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/?versioning",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "put_bucket_versioning"
+    },
+    {
+      "action": "PutObject",
+      "available": true,
+      "consumes": [
+        "application/octet-stream"
+      ],
+      "document_sha256": "f607aeef5c95028997b43633bbc84a3ab42055e30302ba488759a2c3ecbe0f21",
+      "method": "PUT",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": "binary",
+          "location": "body",
+          "name": "body",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-forbid-overwrite",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-meta-*",
+          "required": false,
+          "type": "object"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-object-acl",
+          "required": false,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-server-side-data-encryption",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-server-side-encryption",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-server-side-encryption-key-id",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-storage-class",
+          "required": false,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-tagging",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}",
+      "produces": [],
+      "response_headers": [
+        "x-oss-hash-crc64ecma",
+        "x-oss-version-id"
+      ],
+      "sdk_method": "put_object"
+    },
+    {
+      "action": "PutObjectAcl",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "990b3dd5dd6e5ce19497a061a064b4d5562d12ed3c40657c8a224cf65ef400a4",
+      "method": "PUT",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-object-acl",
+          "required": true,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "versionId",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}?acl",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [
+        "x-oss-version-id"
+      ],
+      "sdk_method": "put_object_acl"
+    },
+    {
+      "action": "PutObjectLegalHold",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "8896de5b87f9b84baeeff1815d422a08d378eb0783f9ee49b849bd0b65d9d9eb",
+      "method": "PUT",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "body",
+          "name": "body",
+          "required": false,
+          "type": "object"
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}?legalHold",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "put_object_legal_hold"
+    },
+    {
+      "action": "PutObjectRetention",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "e145f3db840bd468631a0450b24a4b56b3869d06fcdd3dd2591aa8292844bc9f",
+      "method": "PUT",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "body",
+          "name": "body",
+          "required": false,
+          "type": "object"
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}?retention",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "put_object_retention"
+    },
+    {
+      "action": "PutObjectTagging",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "0f07302755d657e380afa662fa05dac09439c7ee57e3b974aac9504b3b4ecc61",
+      "method": "PUT",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "body",
+          "name": "body",
+          "required": false,
+          "type": "object"
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "versionId",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}?tagging",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [
+        "x-oss-version-id"
+      ],
+      "sdk_method": "put_object_tagging"
+    },
+    {
+      "action": "PutSymlink",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "b6652fe2b69b1cf1f598a85475381e87b8d19309b652480e6b6c7e13faa1e1e3",
+      "method": "PUT",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-forbid-overwrite",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-object-acl",
+          "required": false,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-storage-class",
+          "required": false,
+          "type": null
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-symlink-target",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}?symlink",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [
+        "x-oss-version-id"
+      ],
+      "sdk_method": "put_symlink"
+    },
+    {
+      "action": "RestoreObject",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "09cd7416b1d1afdf5ae97942daa149150834a5872254cffde6365aa1f26e0a41",
+      "method": "POST",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "body",
+          "name": "body",
+          "required": false,
+          "type": "object"
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "versionId",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}?restore",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [
+        "x-oss-object-restore-priority",
+        "x-oss-version-id"
+      ],
+      "sdk_method": "restore_object"
+    },
+    {
+      "action": "SealAppendObject",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "34cca759fdd7f708449eeb7c6c6e591915d3c8fdcd47c4d846aad271bc52f310",
+      "method": "POST",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": "int64",
+          "location": "query",
+          "name": "position",
+          "required": true,
+          "type": "integer"
+        }
+      ],
+      "pathname": "/{key}?seal",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [
+        "x-oss-sealed-time"
+      ],
+      "sdk_method": "seal_append_object"
+    },
+    {
+      "action": "UploadPart",
+      "available": true,
+      "consumes": [
+        "application/octet-stream"
+      ],
+      "document_sha256": "cc5ffe2b2b1e916366617e6bda9acadd30abb8d6b65ed89d3ffb60f77fa9b5df",
+      "method": "PUT",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": "binary",
+          "location": "body",
+          "name": "body",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": "int64",
+          "location": "query",
+          "name": "partNumber",
+          "required": true,
+          "type": "integer"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "uploadId",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [],
+      "sdk_method": "upload_part"
+    },
+    {
+      "action": "UploadPartCopy",
+      "available": true,
+      "consumes": [
+        "application/xml"
+      ],
+      "document_sha256": "b1e45842ffdb0a91395b673316c706da7dc8c75e02cfa0861f384c852f4e435b",
+      "method": "PUT",
+      "operation_type": "write",
+      "parameters": [
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-copy-source",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-copy-source-if-match",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-copy-source-if-modified-since",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-copy-source-if-none-match",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-copy-source-if-unmodified-since",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "header",
+          "name": "x-oss-copy-source-range",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "host",
+          "name": "bucket",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": null,
+          "location": "path",
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "format": "int64",
+          "location": "query",
+          "name": "partNumber",
+          "required": true,
+          "type": "integer"
+        },
+        {
+          "format": null,
+          "location": "query",
+          "name": "uploadId",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "pathname": "/{key}",
+      "produces": [
+        "application/xml"
+      ],
+      "response_headers": [
+        "x-oss-copy-source-version-id"
+      ],
+      "sdk_method": "upload_part_copy"
+    }
+  ]
+}

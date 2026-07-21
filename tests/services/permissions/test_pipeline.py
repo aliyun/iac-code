@@ -14,7 +14,14 @@ from iac_code.tools.path_safety import get_iac_code_application_root
 from iac_code.tools.read_file import ReadFileTool
 from iac_code.tools.web_fetch import WebFetchTool
 from iac_code.tools.write_file import WriteFileTool
-from iac_code.types.permissions import PermissionMode, ToolPermissionContext
+from iac_code.types.permissions import (
+    InvocationBinding,
+    PermissionAuditMetadata,
+    PermissionDecisionReason,
+    PermissionMode,
+    PermissionResult,
+    ToolPermissionContext,
+)
 
 
 class FakeReadTool(Tool):
@@ -59,6 +66,20 @@ class DenyOnlyMCPTool(MCPTool):
         raise AssertionError("deny rules must not call full MCP permission checks")
 
 
+class RuntimeResultTool(FakeWriteTool):
+    def __init__(self, result):
+        self.result = result
+
+    async def check_permissions(self, input, context=None):
+        return self.result
+
+
+class RuntimeAliyunResultTool(RuntimeResultTool):
+    @property
+    def name(self):
+        return "aliyun_api"
+
+
 def _ctx(mode=PermissionMode.DEFAULT, deny=None, allow=None, ask=None):
     return ToolPermissionContext(
         mode=mode,
@@ -70,6 +91,87 @@ def _ctx(mode=PermissionMode.DEFAULT, deny=None, allow=None, ask=None):
 
 
 class TestPipeline:
+    @pytest.mark.parametrize(
+        ("result", "context", "expected_behavior"),
+        [
+            (PermissionResult(behavior="ask"), _ctx(), "ask"),
+            (
+                PermissionResult(
+                    behavior="ask",
+                    audit=PermissionAuditMetadata(scope="once", source="tool"),
+                ),
+                _ctx(ask={"user_settings": ["write_file"]}),
+                "ask",
+            ),
+            (
+                PermissionResult(
+                    behavior="allow",
+                    audit=PermissionAuditMetadata(scope="read_only", source="tool", is_read_only=True),
+                ),
+                _ctx(ask={"user_settings": ["write_file"]}),
+                "ask",
+            ),
+            (
+                PermissionResult(
+                    behavior="ask",
+                    audit=PermissionAuditMetadata(scope="once", source="tool"),
+                ),
+                _ctx(mode=PermissionMode.BYPASS_PERMISSIONS),
+                "allow",
+            ),
+            (
+                PermissionResult(behavior="passthrough"),
+                _ctx(allow={"user_settings": ["write_file"]}),
+                "allow",
+            ),
+            (PermissionResult(behavior="passthrough"), _ctx(), "ask"),
+            (
+                PermissionResult(
+                    behavior="ask",
+                    reason=PermissionDecisionReason(type="untrusted_write", detail="write"),
+                    audit=PermissionAuditMetadata(scope="once", source="tool"),
+                ),
+                _ctx(mode=PermissionMode.DONT_ASK),
+                "deny",
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_wrappers_preserve_runtime_permission_fields(self, result, context, expected_behavior):
+        binding = InvocationBinding("nonce", "session", "call", "write_file", "a" * 64)
+        result.invocation_binding = binding
+        result.snapshot_id = "snapshot"
+        result.security_digest = "digest"
+        result.execution_class = "serial"
+
+        wrapped = await check_tool_permission(RuntimeResultTool(result), {}, context)
+
+        assert wrapped.behavior == expected_behavior
+        assert wrapped.invocation_binding is binding
+        assert wrapped.snapshot_id == "snapshot"
+        assert wrapped.security_digest == "digest"
+        assert wrapped.execution_class == "serial"
+
+    @pytest.mark.asyncio
+    async def test_aliyun_secondary_sticky_reason_cannot_be_overridden_by_blanket_allow(self):
+        sticky = PermissionDecisionReason(type="path_constraint", detail="outside project")
+        primary = PermissionDecisionReason(type="untrusted_write", detail="write")
+        result = PermissionResult(
+            behavior="ask",
+            reason=primary,
+            reasons=[sticky, primary],
+            audit=PermissionAuditMetadata(scope="once", source="tool"),
+        )
+
+        wrapped = await check_tool_permission(
+            RuntimeAliyunResultTool(result),
+            {},
+            _ctx(allow={"user_settings": ["aliyun_api"]}),
+        )
+
+        assert wrapped.behavior == "ask"
+        assert wrapped.reasons == [sticky, primary]
+
     @pytest.mark.asyncio
     async def test_readonly_tool_auto_allowed(self):
         r = await check_tool_permission(FakeReadTool(), {}, _ctx())

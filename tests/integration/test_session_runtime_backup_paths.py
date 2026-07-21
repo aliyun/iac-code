@@ -17,6 +17,7 @@ from iac_code.services.permissions.audit import (
     emit_permission_audit,
 )
 from iac_code.services.session_backup import BackupReason, SessionBackupService
+from iac_code.services.session_backup_state import SessionBackupState
 from iac_code.services.session_layout import SessionPaths
 from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2
 from iac_code.services.session_storage import SessionStorage
@@ -198,7 +199,9 @@ def test_v2_session_runtime_paths_are_session_owned_and_backup_mirrored(
     _assert_same_file(session_dir, mirror, "a2a/context.json")
     _assert_same_file(session_dir, mirror, a2a_artifact_path.relative_to(session_dir).as_posix(), b"stack-id: s-123")
 
-    assert not (mirror / ".backup-state.json").exists()
+    shared_state = SessionBackupState.from_dict(_read_json(mirror / ".backup-state.json"), shared=True)
+    assert shared_state.generation == 1
+    assert shared_state.reason == BackupReason.TERMINAL.value
     assert not (mirror / ".backup-lock").exists()
     source_marker = _read_json(session_dir / ".backup-state.json")
     assert source_marker["status"] == "succeeded"

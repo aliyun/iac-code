@@ -1,0 +1,17 @@
+{
+  "products": [
+    {
+      "product": "Ecs",
+      "defaultVersion": "2014-05-26",
+      "versions": ["2014-05-26", "2016-04-28"],
+      "recommendVersions": ["2014-05-26"],
+      "style": "RPC",
+      "documentationUrl": "https://api.aliyun.com/product/Ecs"
+    },
+    {
+      "product": "FC",
+      "defaultVersion": "2023-03-30",
+      "versions": ["2023-03-30"]
+    }
+  ]
+}

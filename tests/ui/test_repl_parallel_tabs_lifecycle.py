@@ -351,7 +351,7 @@ async def test_user_input_required_escape_empty_input_returns_to_candidate_selec
     pipeline.pause_agent_loops.assert_called()
     pipeline.resume_agent_loops.assert_called()
     pipeline.resume.assert_called_once()
-    assert resumed_payloads == [{"selected_candidate_name": "c1", "selected_candidate_index": None}]
+    assert resumed_payloads == [{"selected_candidate_name": "c1", "selected_candidate_index": 0}]
 
     assert events.index("key:escape:selection") < events.index("pause")
     assert events.index("pause") < events.index("resume")

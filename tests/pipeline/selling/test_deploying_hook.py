@@ -20,11 +20,45 @@ def test_resolve_selected_candidate_prefers_index_for_duplicate_names():
 
 
 def test_resolve_selected_candidate_rejects_failed_candidate():
-    selected = parse_selected_candidate('{"selected_candidate_name": "Broken", "selected_candidate_index": 2}')
+    selected = parse_selected_candidate(
+        '{"selected_candidate_name": "Broken", "selected_candidate_index": 0, "selected_evaluated_candidate_index": 2}'
+    )
     assert selected is not None
     resolved = resolve_selected_candidate(selected, _evaluated_candidates())
     assert resolved.candidate is None
     assert "failed" in resolved.error
+
+
+def test_resolve_selected_candidate_maps_display_index_through_selectable_options():
+    evaluated = [
+        {"candidate": {"name": "Broken"}, "failed": True},
+        {"candidate": {"name": "First", "output_path": "templates/first.yml"}, "failed": False},
+        {"candidate": {"name": "Second", "output_path": "templates/second.yml"}, "failed": False},
+    ]
+    selected = parse_selected_candidate('{"selected_candidate_index": 0}')
+    assert selected is not None
+
+    resolved = resolve_selected_candidate(
+        selected,
+        evaluated,
+        options=[
+            {"name": "First", "candidate_index": 1},
+            {"name": "Second", "candidate_index": 2},
+        ],
+    )
+
+    assert resolved.error is None
+    assert resolved.candidate["output_path"] == "templates/first.yml"
+
+
+def test_resolve_selected_candidate_prefers_evaluated_index_over_display_index():
+    selected = parse_selected_candidate('{"selected_candidate_index": 0, "selected_evaluated_candidate_index": 1}')
+    assert selected is not None
+
+    resolved = resolve_selected_candidate(selected, _evaluated_candidates(), options=[])
+
+    assert resolved.error is None
+    assert resolved.candidate["output_path"] == "templates/b.yml"
 
 
 def test_normalize_selected_plan_adds_resolution_metadata():

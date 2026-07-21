@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from iac_code.i18n import _
 
 if TYPE_CHECKING:
-    from iac_code.types.permissions import PermissionResult
+    from iac_code.types.permissions import ExecutionClass, InvocationBinding, PermissionResult
 
 
 _DEFAULT_CWD = object()
@@ -38,6 +38,11 @@ class ToolContext:
     pipeline_mode: bool = False
     env_overrides: dict[str, str] = field(default_factory=dict)
     permission_context: Any = None
+    invocation_binding: InvocationBinding | None = None
+    snapshot_id: str | None = None
+    security_digest: str | None = None
+    execution_class: ExecutionClass | None = None
+    request_started: bool = False
 
     def __init__(
         self,
@@ -52,6 +57,10 @@ class ToolContext:
         pipeline_mode: bool = False,
         env_overrides: dict[str, str] | None = None,
         permission_context: Any = None,
+        invocation_binding: InvocationBinding | None = None,
+        snapshot_id: str | None = None,
+        security_digest: str | None = None,
+        execution_class: ExecutionClass | None = None,
     ) -> None:
         if isinstance(tool_use_id, list) and isinstance(additional_directories, list):
             old_additional_directories = tool_use_id
@@ -74,6 +83,14 @@ class ToolContext:
         self.read_path_violation_behavior = read_path_violation_behavior
         self.pipeline_mode = pipeline_mode
         self.env_overrides = {str(key): str(value) for key, value in (env_overrides or {}).items() if value is not None}
+        self.invocation_binding = invocation_binding
+        self.snapshot_id = snapshot_id
+        self.security_digest = security_digest
+        self.execution_class = execution_class
+        self.request_started = False
+        self.permission_context = permission_context
+
+    def set_permission_context(self, permission_context: Any) -> None:
         self.permission_context = permission_context
 
 
@@ -164,6 +181,27 @@ class Tool(ABC):
             return True, ""
         except jsonschema.ValidationError as e:
             return False, str(e.message)
+
+    def validation_error_result(self, tool_input: dict[str, Any]) -> ToolResult | None:
+        """Return a tool-specific safe validation error, or use the executor default."""
+
+        return None
+
+    def timeout_error_result(self, tool_input: dict[str, Any], timeout: float) -> ToolResult | None:
+        """Return a tool-specific safe timeout error, or use the executor default."""
+
+        return None
+
+    def timeout_error_result_with_context(
+        self,
+        tool_input: dict[str, Any],
+        timeout: float,
+        context: ToolContext,
+    ) -> ToolResult | None:
+        """Return a context-aware timeout error while preserving legacy overrides."""
+
+        del context
+        return self.timeout_error_result(tool_input, timeout)
 
     def to_api_format(self) -> dict[str, Any]:
         """Convert tool definition to LLM API format (legacy OpenAI format)."""
@@ -256,6 +294,12 @@ class Tool(ABC):
         By default, read-only tools are concurrency safe.
         """
         return self.is_read_only(tool_input)
+
+    @property
+    def requires_runtime_execution_class(self) -> bool:
+        """Whether concurrency must come from the approved permission handoff."""
+
+        return False
 
     def is_destructive(self, input: dict | None = None) -> bool:
         """Whether the tool performs destructive operations."""

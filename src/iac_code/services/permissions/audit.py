@@ -30,6 +30,13 @@ _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 _SAFE_RULE_TEXT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.*:-]{0,127}$")
 _SAFE_WRAPPED_RULE_TEXT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(([A-Za-z0-9][A-Za-z0-9_.*:-]{0,127})\)$")
 _SAFE_PATHNAME_SHAPE = re.compile(r"^/(?:\{segment\}(?:/\{segment\})*)?$")
+_SAFE_API_VERSION = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_ALIYUN_OPERATION_VALUES = {
+    "api_style": frozenset({"RPC", "ROA"}),
+    "http_method": frozenset({"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}),
+    "operation_type": frozenset({"read", "write", "readAndWrite"}),
+    "metadata_source": frozenset({"fresh", "cache", "stale_cache", "explicit_fallback"}),
+}
 _FINGERPRINT = re.compile(r"^sha256:[0-9a-f]{16}$")
 _SECRET_KEY_PARTS = (
     "accesskey",
@@ -814,6 +821,14 @@ def _sanitize_operation_metadata(operation: dict[str, Any]) -> dict[str, Any]:
         if isinstance(value, bool):
             sanitized[key] = value
 
+    api_version = operation.get("api_version")
+    if isinstance(api_version, str) and _SAFE_API_VERSION.fullmatch(api_version):
+        sanitized["api_version"] = api_version
+    for key, allowed in _ALIYUN_OPERATION_VALUES.items():
+        value = operation.get(key)
+        if isinstance(value, str) and value in allowed:
+            sanitized[key] = value
+
     return sanitized
 
 
@@ -863,6 +878,14 @@ def _telemetry_metadata(record: PermissionAuditRecord) -> dict[str, Any]:
         is_read_only = record.operation.get("isReadOnly")
     if isinstance(is_read_only, bool):
         metadata["is_read_only"] = is_read_only
+
+    api_version = record.operation.get("api_version")
+    if isinstance(api_version, str) and _SAFE_API_VERSION.fullmatch(api_version):
+        metadata["api_version"] = api_version
+    for key, allowed in _ALIYUN_OPERATION_VALUES.items():
+        value = record.operation.get(key)
+        if isinstance(value, str) and value in allowed:
+            metadata[key] = value
 
     rule_fingerprint = _safe_rule_fingerprint(record)
     if rule_fingerprint is not None:

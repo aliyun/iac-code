@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import stat
 import tempfile
 import time
+import uuid
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path, PureWindowsPath
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable, Literal, Mapping, NoReturn
 
 from iac_code.i18n import _
+from iac_code.services.session_backup_state import BackupPublicationProof, SessionBackupState, SessionBackupStateError
 from iac_code.services.session_layout import (
     UnsupportedSessionLayoutError,
     is_supported_session_dir_for_id,
@@ -65,6 +67,10 @@ class BackupResult:
     succeeded: bool = True
     error: str | None = None
     retry_count: int = 0
+    generation: int | None = None
+    commit_id: str | None = None
+    shared_committed: bool = False
+    requires_reconcile: bool = False
 
 
 @dataclass(frozen=True)
@@ -78,8 +84,27 @@ class SessionRestoreResult:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class SessionReconcileResult:
+    enabled: bool
+    action: Literal["disabled", "current", "initialized", "restored", "repaired", "metadata_repaired"]
+    state: SessionBackupState | None = None
+    copied_files: int = 0
+    deleted_files: int = 0
+    payload_changed: bool = False
+
+
 class SessionBackupError(Exception):
     """Base session backup error."""
+
+
+class SessionBackupConflict(SessionBackupError):  # noqa: N818 - protocol conflict is a public domain name.
+    """Raised before mirroring when local and shared generations diverge."""
+
+    def __init__(self, message: str, *, local_generation: int, shared_generation: int) -> None:
+        super().__init__(message)
+        self.local_generation = local_generation
+        self.shared_generation = shared_generation
 
 
 class SessionBackupBlocked(SessionBackupError):  # noqa: N818 - public API name required by backup callers.
@@ -105,6 +130,7 @@ class SessionBackupService:
     ) -> None:
         self._session_storage = session_storage or SessionStorage()
         self._retry_delays = tuple(retry_delays)
+        self._writer_id = "{}-{}-{}".format(os.getpid(), id(self), uuid.uuid4())
 
     def backup_session(
         self,
@@ -113,10 +139,13 @@ class SessionBackupService:
         *,
         reason: BackupReason,
         critical: bool,
+        publication_proofs: Mapping[str, BackupPublicationProof] | None = None,
     ) -> BackupResult:
         if not self._backup_enabled():
             return BackupResult(enabled=False)
         self._validate_session_id(session_id)
+        proofs = dict(publication_proofs or {})
+        operation_commit_id = str(uuid.uuid4())
 
         try:
             source = self._source_for_backup(cwd, session_id)
@@ -133,6 +162,9 @@ class SessionBackupService:
         last_error: Exception | None = None
         last_public_error: str | None = None
         destination: Path | None = None
+        base_state: SessionBackupState | None = None
+        shared_committed = False
+        operation_mirror_attempted = False
 
         for attempt, delay in enumerate(delays):
             if attempt:
@@ -144,14 +176,72 @@ class SessionBackupService:
                 source_verified = True
                 with self._session_backup_lock(source):
                     try:
+                        base_state = self._read_state(source, session_id=session_id, missing_ok=True)
+                        if base_state is None:
+                            base_state = SessionBackupState.bootstrap(session_id, writer_id=self._writer_id)
+                            self._write_state(source, base_state)
                         backup_root = self._backup_root()
                         if backup_root is None:
                             return BackupResult(enabled=False)
                         destination = backup_root / "projects" / source.parent.name / session_id
                         self._validate_mirror_paths(source, destination, backup_root)
                         self._ensure_private_dir(backup_root)
-                        result = self._mirror(source, destination)
-                        self._write_marker(source, reason=reason, status="succeeded", error=None)
+                        shared_state = self._read_state(
+                            destination, session_id=session_id, shared=True, missing_ok=True
+                        )
+                        retrying_operation = (
+                            base_state.status == "failed" and base_state.attempt_commit_id == operation_commit_id
+                        )
+                        if (
+                            shared_state is None
+                            and not (retrying_operation and operation_mirror_attempted)
+                            and self._contains_mirrored_payload(destination)
+                        ):
+                            raise SessionBackupError("shared session is missing backup state")
+                        idempotent_state = self._fence_backup(
+                            local=base_state,
+                            shared=shared_state,
+                            operation_commit_id=operation_commit_id,
+                        )
+                        if idempotent_state is not None:
+                            self._write_state(source, idempotent_state)
+                            return BackupResult(
+                                enabled=True,
+                                source=source,
+                                destination=destination,
+                                retry_count=attempt,
+                                generation=idempotent_state.generation,
+                                commit_id=idempotent_state.commit_id,
+                                shared_committed=True,
+                            )
+                        commit_base_state = shared_state if shared_state is not None else base_state
+                        committed_proofs = self._merge_publication_proofs(
+                            commit_base_state.publication_proofs,
+                            proofs,
+                        )
+                        try:
+                            result = self._mirror(source, destination)
+                        except Exception:
+                            if shared_state is None:
+                                with suppress(Exception):
+                                    operation_mirror_attempted = self._contains_mirrored_payload(destination)
+                            raise
+                        operation_mirror_attempted = True
+                        committed_state = commit_base_state.committed_next(
+                            commit_id=operation_commit_id,
+                            reason=reason.value,
+                            writer_id=self._writer_id,
+                            proofs=committed_proofs,
+                        )
+                        self._write_state(destination, committed_state)
+                        shared_committed = True
+                        self._write_marker(
+                            source,
+                            reason=reason,
+                            status="succeeded",
+                            error=None,
+                            committed_state=committed_state,
+                        )
                     except Exception as exc:
                         failed_marker_written = True
                         public_error = self._public_error_text(exc)
@@ -162,6 +252,10 @@ class SessionBackupService:
                             attempt=attempt + 1,
                             retry_count=attempt,
                             exhausted=attempt == len(delays) - 1,
+                            base_state=base_state,
+                            writer_id=self._writer_id,
+                            attempt_commit_id=operation_commit_id,
+                            attempted_proofs=proofs,
                         )
                         raise
             except Exception as exc:
@@ -175,9 +269,19 @@ class SessionBackupService:
                         attempt=attempt + 1,
                         retry_count=attempt,
                         exhausted=attempt == len(delays) - 1,
+                        base_state=base_state,
+                        writer_id=self._writer_id,
+                        attempt_commit_id=operation_commit_id,
+                        attempted_proofs=proofs,
                     )
                 continue
-            return replace(result, retry_count=attempt)
+            return replace(
+                result,
+                retry_count=attempt,
+                generation=committed_state.generation,
+                commit_id=committed_state.commit_id,
+                shared_committed=True,
+            )
 
         failure_result = BackupResult(
             enabled=True,
@@ -186,6 +290,8 @@ class SessionBackupService:
             succeeded=False,
             error=last_public_error,
             retry_count=max(0, len(delays) - 1),
+            shared_committed=shared_committed,
+            requires_reconcile=True,
         )
         if critical and last_error is not None:
             raise SessionBackupBlocked(
@@ -195,41 +301,281 @@ class SessionBackupService:
             ) from None
         return failure_result
 
-    def restore_session(self, cwd: str, session_id: str) -> SessionRestoreResult:
+    def initialize_session(self, cwd: str, session_id: str) -> SessionBackupState | None:
         if not self._backup_enabled():
-            return SessionRestoreResult(enabled=False)
+            return None
+        self._validate_session_id(session_id)
+        source = self._source_for_backup(cwd, session_id)
+        if source is None:
+            raise SessionBackupError(_("Session backup requires a supported session layout."))
+        with self._session_backup_lock(source):
+            existing = self._read_state(source, session_id=session_id, missing_ok=True)
+            if existing is not None:
+                return existing
+            state = SessionBackupState.bootstrap(session_id, writer_id=self._writer_id)
+            self._write_state(source, state)
+            return state
+
+    def read_local_state(self, cwd: str, session_id: str) -> SessionBackupState | None:
+        if not self._backup_enabled():
+            return None
+        self._validate_session_id(session_id)
+        source = self._source_for_backup(cwd, session_id)
+        if source is None:
+            return None
+        return self._read_state(source, session_id=session_id)
+
+    def reconcile_session(
+        self,
+        cwd: str,
+        session_id: str,
+        *,
+        attempted_proof_validator: Callable[[str, BackupPublicationProof], bool] | None = None,
+    ) -> SessionReconcileResult:
+        if not self._backup_enabled():
+            return SessionReconcileResult(enabled=False, action="disabled")
         self._validate_session_id(session_id)
         backup_root = self._backup_root()
         if backup_root is None:
-            return SessionRestoreResult(enabled=False)
+            return SessionReconcileResult(enabled=False, action="disabled")
 
         destination = Path(self._session_storage.session_dir(cwd, session_id))
-        if self._session_exists(cwd, session_id):
-            return SessionRestoreResult(enabled=True, restored=False, destination=destination)
-
-        source = self._source_for_restore(cwd, session_id, backup_root)
-        if source is None:
-            return SessionRestoreResult(enabled=True, restored=False, destination=destination)
-
         with self._session_restore_lock(destination):
-            destination = Path(self._session_storage.session_dir(cwd, session_id))
-            if self._session_exists(cwd, session_id):
-                return SessionRestoreResult(enabled=True, restored=False, source=source, destination=destination)
-            source = self._source_for_restore(cwd, session_id, backup_root)
-            if source is None:
-                return SessionRestoreResult(enabled=True, restored=False, destination=destination)
-            self._validate_restore_paths(source, destination, backup_root)
-            self._reject_existing_restore_destination(destination)
-            result = self._mirror(source, destination)
-            self._validate_restored_session(destination, session_id)
-            return SessionRestoreResult(
-                enabled=True,
-                restored=True,
-                source=source,
-                destination=destination,
-                copied_files=result.copied_files,
-                deleted_files=result.deleted_files,
-            )
+            local = self._source_for_backup(cwd, session_id)
+            local_state = self._read_state(local, session_id=session_id, missing_ok=True) if local is not None else None
+            shared = self._source_for_restore(cwd, session_id, backup_root)
+            shared_state = self._read_state(shared, session_id=session_id, shared=True) if shared is not None else None
+
+            if local is None:
+                if shared is None or shared_state is None:
+                    return SessionReconcileResult(enabled=True, action="initialized")
+                self._validate_restore_paths(shared, destination, backup_root)
+                self._reject_existing_restore_destination(destination)
+                result = self._mirror(shared, destination)
+                self._write_state(destination, shared_state)
+                self._validate_restored_session(destination, session_id)
+                return SessionReconcileResult(
+                    enabled=True,
+                    action="restored",
+                    state=shared_state,
+                    copied_files=result.copied_files,
+                    deleted_files=result.deleted_files,
+                    payload_changed=True,
+                )
+
+            if local_state is None:
+                raise SessionBackupError("existing session is missing backup state")
+            if shared_state is None:
+                if shared is not None:
+                    raise SessionBackupError("shared session is missing backup state")
+                if local_state.generation == 0 and local_state.status == "succeeded":
+                    return SessionReconcileResult(enabled=True, action="initialized", state=local_state)
+                if local_state.status == "failed" and local_state.generation == 0:
+                    return self._repair_failed_local(
+                        local,
+                        backup_root / "projects" / local.parent.name / session_id,
+                        local_state,
+                        None,
+                        attempted_proof_validator,
+                    )
+                self._raise_generation_conflict(local_state.generation, -1)
+
+            assert shared is not None and shared_state is not None
+            if local_state.status == "failed" and local_state.same_lineage(shared_state):
+                return self._repair_failed_local(
+                    local,
+                    shared,
+                    local_state,
+                    shared_state,
+                    attempted_proof_validator,
+                )
+            if local_state.same_lineage(shared_state) and local_state.status == "succeeded":
+                if local_state == shared_state:
+                    return SessionReconcileResult(enabled=True, action="current", state=local_state)
+                self._write_state(local, shared_state)
+                return SessionReconcileResult(
+                    enabled=True,
+                    action="metadata_repaired",
+                    state=shared_state,
+                    payload_changed=False,
+                )
+            if self._remote_is_committed_attempt(local_state, shared_state):
+                self._write_state(local, shared_state)
+                return SessionReconcileResult(
+                    enabled=True,
+                    action="metadata_repaired",
+                    state=shared_state,
+                    payload_changed=True,
+                )
+            if shared_state.generation > local_state.generation:
+                result = self._mirror(shared, local)
+                self._write_state(local, shared_state)
+                self._validate_restored_session(local, session_id)
+                return SessionReconcileResult(
+                    enabled=True,
+                    action="restored",
+                    state=shared_state,
+                    copied_files=result.copied_files,
+                    deleted_files=result.deleted_files,
+                    payload_changed=True,
+                )
+            self._raise_generation_conflict(local_state.generation, shared_state.generation)
+        raise AssertionError("unreachable")
+
+    def restore_session(self, cwd: str, session_id: str) -> SessionRestoreResult:
+        destination = Path(self._session_storage.session_dir(cwd, session_id))
+        backup_root = self._backup_root() if self._backup_enabled() else None
+        source = self._source_for_restore(cwd, session_id, backup_root) if backup_root is not None else None
+        result = self.reconcile_session(cwd, session_id)
+        return SessionRestoreResult(
+            enabled=result.enabled,
+            restored=result.action == "restored",
+            source=source,
+            destination=destination,
+            copied_files=result.copied_files,
+            deleted_files=result.deleted_files,
+        )
+
+    def _fence_backup(
+        self,
+        *,
+        local: SessionBackupState,
+        shared: SessionBackupState | None,
+        operation_commit_id: str,
+    ) -> SessionBackupState | None:
+        if self._remote_is_committed_attempt(local, shared, operation_commit_id=operation_commit_id):
+            return shared
+        if local.status == "failed":
+            if local.attempt_commit_id != operation_commit_id:
+                raise SessionBackupConflict(
+                    "local backup state requires reconciliation before writing",
+                    local_generation=local.generation,
+                    shared_generation=shared.generation if shared is not None else -1,
+                )
+            if shared is None:
+                if local.generation == 0 and local.commit_id is None:
+                    return None
+                self._raise_generation_conflict(local.generation, -1)
+            if not local.same_lineage(shared):
+                self._raise_generation_conflict(local.generation, shared.generation)
+            return None
+        if shared is None:
+            if local.generation == 0 and local.commit_id is None:
+                return None
+            self._raise_generation_conflict(local.generation, -1)
+        if not local.same_lineage(shared):
+            self._raise_generation_conflict(local.generation, shared.generation)
+        if local != shared:
+            self._raise_generation_conflict(local.generation, shared.generation)
+        return None
+
+    @staticmethod
+    def _remote_is_committed_attempt(
+        local: SessionBackupState,
+        shared: SessionBackupState | None,
+        *,
+        operation_commit_id: str | None = None,
+    ) -> bool:
+        if shared is None or shared.generation != local.generation + 1:
+            return False
+        attempted_commit_id = operation_commit_id or local.attempt_commit_id
+        return attempted_commit_id is not None and shared.commit_id == attempted_commit_id
+
+    @staticmethod
+    def _raise_generation_conflict(local_generation: int, shared_generation: int) -> NoReturn:
+        raise SessionBackupConflict(
+            "session backup generation conflict: local={}, shared={}".format(local_generation, shared_generation),
+            local_generation=local_generation,
+            shared_generation=shared_generation,
+        )
+
+    def _repair_failed_local(
+        self,
+        local: Path,
+        shared: Path,
+        local_state: SessionBackupState,
+        shared_state: SessionBackupState | None,
+        attempted_proof_validator: Callable[[str, BackupPublicationProof], bool] | None,
+    ) -> SessionReconcileResult:
+        for key, proof in local_state.attempt_publication_proofs.items():
+            if attempted_proof_validator is None or not attempted_proof_validator(key, proof):
+                raise SessionBackupError("failed backup publication proof could not be validated")
+        if local_state.attempt_commit_id is None:
+            raise SessionBackupError("failed backup state is missing attempt commit id")
+        commit_base_state = shared_state if shared_state is not None else local_state
+        proofs = self._merge_publication_proofs(
+            commit_base_state.publication_proofs,
+            local_state.attempt_publication_proofs,
+        )
+        self._validate_mirror_paths(local, shared, self._backup_root_required())
+        result = self._mirror(local, shared)
+        committed = commit_base_state.committed_next(
+            commit_id=local_state.attempt_commit_id,
+            reason=local_state.reason,
+            writer_id=self._writer_id,
+            proofs=proofs,
+        )
+        self._write_state(shared, committed)
+        self._write_state(local, committed)
+        return SessionReconcileResult(
+            enabled=True,
+            action="repaired",
+            state=committed,
+            copied_files=result.copied_files,
+            deleted_files=result.deleted_files,
+            payload_changed=True,
+        )
+
+    @staticmethod
+    def _merge_publication_proofs(
+        authoritative_proofs: Mapping[str, BackupPublicationProof],
+        candidate_proofs: Mapping[str, BackupPublicationProof],
+    ) -> dict[str, BackupPublicationProof]:
+        merged = dict(authoritative_proofs)
+        for key, proof in candidate_proofs.items():
+            authoritative = merged.get(key)
+            if authoritative is None or proof.sequence > authoritative.sequence:
+                merged[key] = proof
+            elif proof.sequence == authoritative.sequence and proof != authoritative:
+                raise SessionBackupError("backup publication proof conflicts with shared proof")
+        return merged
+
+    def _backup_root_required(self) -> Path:
+        backup_root = self._backup_root()
+        if backup_root is None:
+            raise SessionBackupError("session backup is disabled")
+        return backup_root
+
+    def _read_state(
+        self,
+        session_dir: Path,
+        *,
+        session_id: str,
+        shared: bool = False,
+        missing_ok: bool = False,
+    ) -> SessionBackupState | None:
+        marker = session_dir / BACKUP_STATE_FILENAME
+        if not marker.exists():
+            if missing_ok:
+                return None
+            raise SessionBackupError("session is missing {}".format(BACKUP_STATE_FILENAME))
+        if marker.is_symlink() or self._is_reparse_point(marker) or not marker.is_file():
+            raise SessionBackupError("session backup state is not a regular file")
+        try:
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+            state = SessionBackupState.from_dict(payload, shared=shared)
+        except (OSError, UnicodeError, json.JSONDecodeError, SessionBackupStateError) as exc:
+            raise SessionBackupError("invalid session backup state: {}".format(exc)) from exc
+        if state.session_id != session_id:
+            raise SessionBackupError("session backup state does not match session_id")
+        return state
+
+    def _write_state(self, session_dir: Path, state: SessionBackupState) -> None:
+        if not self._marker_source_is_safe(session_dir):
+            raise SessionBackupError(_("session source is not a directory: {source}").format(source=session_dir))
+        marker = session_dir / BACKUP_STATE_FILENAME
+        atomic_write_json(marker, state.to_dict(), durable=True)
+        ensure_private_file(marker)
 
     def _source_for_backup(self, cwd: str, session_id: str) -> Path | None:
         v2_session_dir = getattr(self._session_storage, "v2_session_dir", None)
@@ -333,7 +679,7 @@ class SessionBackupService:
         )
         for path in stale_paths:
             relative = path.relative_to(destination)
-            if relative not in included_files:
+            if self._included(relative) and relative not in included_files:
                 self._unlink(path)
                 self._fsync_parent_dir(path)
                 deleted_files += 1
@@ -991,6 +1337,15 @@ class SessionBackupService:
             for part in path.parts
         )
 
+    def _contains_mirrored_payload(self, session_dir: Path) -> bool:
+        if not session_dir.exists():
+            return False
+        for path in self._iter_tree(session_dir, include_reparse=True):
+            relative = path.relative_to(session_dir)
+            if self._included(relative):
+                return True
+        return False
+
     @staticmethod
     def _is_hidden_lock_file(name: str) -> bool:
         return name.startswith(".") and name.endswith(".lock")
@@ -1004,6 +1359,10 @@ class SessionBackupService:
         attempt: int | None = None,
         retry_count: int | None = None,
         exhausted: bool | None = None,
+        base_state: SessionBackupState | None = None,
+        writer_id: str | None = None,
+        attempt_commit_id: str | None = None,
+        attempted_proofs: Mapping[str, BackupPublicationProof] | None = None,
     ) -> None:
         if not self._marker_source_is_safe(source):
             return
@@ -1016,6 +1375,10 @@ class SessionBackupService:
                 attempt=attempt,
                 retry_count=retry_count,
                 exhausted=exhausted,
+                base_state=base_state,
+                writer_id=writer_id,
+                attempt_commit_id=attempt_commit_id,
+                attempted_proofs=attempted_proofs,
             )
         except Exception:
             return
@@ -1030,26 +1393,35 @@ class SessionBackupService:
         attempt: int | None = None,
         retry_count: int | None = None,
         exhausted: bool | None = None,
+        base_state: SessionBackupState | None = None,
+        writer_id: str | None = None,
+        attempt_commit_id: str | None = None,
+        attempted_proofs: Mapping[str, BackupPublicationProof] | None = None,
+        committed_state: SessionBackupState | None = None,
     ) -> None:
         if not self._marker_source_is_safe(source):
             raise SessionBackupError(_("session source is not a directory: {source}").format(source=source))
-        marker = source / BACKUP_STATE_FILENAME
-        payload: dict[str, Any] = {
-            "reason": reason.value,
-            "status": status,
-            "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        }
-        if status == "failed":
-            if attempt is not None:
-                payload["attempt"] = attempt
-            if retry_count is not None:
-                payload["retry_count"] = retry_count
-            if exhausted is not None:
-                payload["exhausted"] = exhausted
-        if error is not None:
-            payload["error"] = sanitize_public_text(error)[:500]
-        atomic_write_json(marker, payload, durable=True)
-        ensure_private_file(marker)
+        if status == "succeeded":
+            if committed_state is None:
+                raise SessionBackupError("committed backup state is required")
+            self._write_state(source, committed_state)
+            return
+        if status != "failed":
+            raise SessionBackupError("invalid backup state status")
+        if base_state is None:
+            base_state = self._read_state(source, session_id=source.name)
+        assert base_state is not None
+        failed_state = base_state.failed_attempt(
+            reason=reason.value,
+            writer_id=writer_id or self._writer_id,
+            attempt_commit_id=attempt_commit_id or str(uuid.uuid4()),
+            attempted_proofs=dict(attempted_proofs or {}),
+            error=sanitize_public_text(error or "session backup failed")[:500],
+            attempt=attempt or 1,
+            retry_count=retry_count or 0,
+            exhausted=bool(exhausted),
+        )
+        self._write_state(source, failed_state)
 
     @staticmethod
     def _public_error_text(exc: BaseException) -> str:

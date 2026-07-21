@@ -41,6 +41,22 @@ def _input_required_event(kind: str = "", *, step_id: str = "") -> dict:
     }
 
 
+def _pipeline_batch(*envelopes: dict) -> dict:
+    return {
+        "result": {
+            "statusUpdate": {
+                "metadata": {
+                    "iac_code": {
+                        "pipelineBatch": {
+                            "events": list(envelopes),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+
 def test_latest_input_required_kind_from_events_uses_latest_kind() -> None:
     runner = _load_runner()
 
@@ -52,6 +68,24 @@ def test_latest_input_required_kind_from_events_uses_latest_kind() -> None:
     )
 
     assert kind == "candidate_selection"
+
+
+def test_recovery_predicates_and_evidence_inspect_every_batched_event() -> None:
+    runner = _load_runner()
+    event = _pipeline_batch(
+        {"eventType": "text_delta", "data": {"text": "before"}},
+        {
+            "eventType": "input_required",
+            "step": {"id": "confirm_and_select"},
+            "data": {"kind": "candidate_selection", "stepId": "confirm_and_select"},
+        },
+        {"eventType": "rollback_completed", "data": {}},
+    )
+
+    assert runner._input_required_step("confirm_and_select")(event, None) is True
+    assert runner._event_type("rollback_completed")(event, None) is True
+    assert runner._latest_input_required_kind_from_events([event]) == "candidate_selection"
+    assert runner._latest_input_required_step_id_from_events([event]) == "confirm_and_select"
 
 
 def test_default_recovery_prompt_targets_previous_real_user_question() -> None:

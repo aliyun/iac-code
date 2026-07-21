@@ -532,6 +532,47 @@ class InlineREPL:
         cli_disallowed_tools: list[str] | None = None,
         cli_permission_mode: str | None = None,
         backup_service: SessionBackupService | None = None,
+        aliyun_delegated_executor_factory: Any | None = None,
+        aliyun_services: Any | None = None,
+    ) -> None:
+        owns_aliyun_services = aliyun_services is None
+        if aliyun_services is None:
+            from iac_code.tools.cloud.aliyun.runtime import create_aliyun_runtime_services
+
+            aliyun_services = create_aliyun_runtime_services(cache_dir=get_config_dir() / "openmeta-cache")
+        try:
+            self._initialize(
+                model=model,
+                resume_session_id=resume_session_id,
+                cli_allowed_tools=cli_allowed_tools,
+                cli_disallowed_tools=cli_disallowed_tools,
+                cli_permission_mode=cli_permission_mode,
+                backup_service=backup_service,
+                aliyun_delegated_executor_factory=aliyun_delegated_executor_factory,
+                aliyun_services=aliyun_services,
+            )
+        except BaseException:
+            close = getattr(aliyun_services, "aclose", None)
+            if owns_aliyun_services and callable(close):
+                from iac_code.services.agent_factory import _run_async_blocking
+
+                try:
+                    _run_async_blocking(close())
+                except Exception:
+                    logger.debug("Alibaba Cloud runtime services init cleanup failed", exc_info=True)
+            raise
+
+    def _initialize(
+        self,
+        *,
+        model: str,
+        resume_session_id: str | bool | None,
+        cli_allowed_tools: list[str] | None,
+        cli_disallowed_tools: list[str] | None,
+        cli_permission_mode: str | None,
+        backup_service: SessionBackupService | None,
+        aliyun_delegated_executor_factory: Any | None,
+        aliyun_services: Any,
     ) -> None:
         self.console = Console()
         # Lock the working directory for the lifetime of this REPL. All session
@@ -539,6 +580,30 @@ class InlineREPL:
         # `cd` mid-session via Bash, but those changes must not relocate the
         # session file or split it across two project dirs.
         self._original_cwd = os.getcwd()
+        self._aliyun_services = aliyun_services
+
+        def aliyun_default_region_provider() -> str:
+            from iac_code.services.cloud_credentials import CloudCredentials
+            from iac_code.services.providers.aliyun import DEFAULT_REGION
+
+            credential = CloudCredentials().get_provider("aliyun")
+            return credential.region_id if credential is not None and credential.region_id else DEFAULT_REGION
+
+        def aliyun_credential_provider() -> Any:
+            from iac_code.services.cloud_credentials import CloudCredentials
+
+            credential = CloudCredentials().get_provider("aliyun")
+            if credential is not None and credential.mode == "OAuth":
+                from iac_code.services.providers.aliyun import AliyunCredentials
+
+                credential = AliyunCredentials.refresh_oauth_if_needed(credential)
+            return credential
+
+        self._aliyun_services.credential_provider = aliyun_credential_provider
+        self._aliyun_services.default_region_provider = aliyun_default_region_provider
+        self._aliyun_delegated_executor_factory = (
+            aliyun_delegated_executor_factory or self._aliyun_services.delegated_executor_factory
+        )
         self._runtime_current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.store = AppStateStore(initial_state=AppState(model=model))
         self.command_registry = create_default_registry()
@@ -1093,7 +1158,7 @@ class InlineREPL:
         from iac_code.services.cloud_credentials import CloudCredentials
         from iac_code.tools.cloud.registry import register_cloud_tools
 
-        register_cloud_tools(self.tool_registry, CloudCredentials())
+        register_cloud_tools(self.tool_registry, CloudCredentials(), self._aliyun_services)
 
     def _refresh_memory_context(self):
         runtime = getattr(self, "_memory_runtime", None)
@@ -1362,7 +1427,10 @@ class InlineREPL:
                     # Terminal fd became invalid (e.g. after double Ctrl+C during response)
                     break
         finally:
-            await self._close_mcp_manager()
+            try:
+                await self._close_mcp_manager()
+            finally:
+                await self._close_aliyun_services()
             # Persist a tail-readable last-prompt entry so the /resume picker
             # can show what the user was last doing without parsing the whole
             # JSONL. Best-effort — failures must not block shutdown.
@@ -1402,7 +1470,20 @@ class InlineREPL:
             else:
                 await self._handle_chat(prompt)
         finally:
-            await self._close_mcp_manager()
+            try:
+                await self._close_mcp_manager()
+            finally:
+                await self._close_aliyun_services()
+
+    async def _close_aliyun_services(self) -> None:
+        services = getattr(self, "_aliyun_services", None)
+        close = getattr(services, "aclose", None)
+        if close is None:
+            return
+        try:
+            await close()
+        except Exception:
+            logger.debug("Alibaba Cloud runtime services close failed", exc_info=True)
 
     async def _close_mcp_manager(self) -> None:
         from iac_code.services.agent_factory import _close_mcp_auth_flows
@@ -3463,6 +3544,7 @@ class InlineREPL:
             prerequisite_resolution=prerequisite_resolution,
             mcp_manager=getattr(self, "_mcp_manager", None),
             mcp_config_warnings=getattr(self, "mcp_config_warnings", None),
+            aliyun_delegated_executor_factory=getattr(self, "_aliyun_delegated_executor_factory", None),
         )
         self._refresh_pipeline_display_recorder()
         restored = self._pipeline.sidecar_restore_result
@@ -3552,6 +3634,7 @@ class InlineREPL:
                 prerequisite_resolution=prerequisite_resolution,
                 mcp_manager=getattr(self, "_mcp_manager", None),
                 mcp_config_warnings=getattr(self, "mcp_config_warnings", None),
+                aliyun_delegated_executor_factory=getattr(self, "_aliyun_delegated_executor_factory", None),
             )
             self._refresh_pipeline_display_recorder()
             self._pipeline_backup_blocked = False
@@ -4784,7 +4867,7 @@ class InlineREPL:
             self._record_pipeline_display_candidate_selected(
                 step_id=getattr(self, "_pipeline_display_current_step_id", None),
                 candidate_name=selected.selected_candidate_name,
-                candidate_index=selected.selected_candidate_index,
+                candidate_index=selected.selected_evaluated_candidate_index,
             )
             self.renderer.console.print()
             self.renderer.console.print("  [green]✓[/] {} [bold]{}[/]".format(_("Selected:"), selected_label))
@@ -4803,6 +4886,7 @@ class InlineREPL:
             resume_payload = encode_selected_candidate(
                 selected.selected_candidate_name,
                 selected.selected_candidate_index,
+                evaluated_candidate_index=selected.selected_evaluated_candidate_index,
             )
             event_stream = self._pipeline.resume(resume_payload)
             try:
@@ -5979,6 +6063,7 @@ class InlineREPL:
                 prerequisite_resolution=prerequisite_resolution,
                 mcp_manager=getattr(self, "_mcp_manager", None),
                 mcp_config_warnings=getattr(self, "mcp_config_warnings", None),
+                aliyun_delegated_executor_factory=getattr(self, "_aliyun_delegated_executor_factory", None),
             )
             restored = self._pipeline.sidecar_restore_result
             if restored is None or restored.ok is False:

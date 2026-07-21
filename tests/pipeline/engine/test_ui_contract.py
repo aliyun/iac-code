@@ -31,12 +31,30 @@ def test_encode_selected_candidate_can_include_parameter_overrides():
     }
 
 
+def test_encode_selected_candidate_can_include_evaluated_candidate_index():
+    payload = json.loads(encode_selected_candidate("Same", 0, evaluated_candidate_index=2))
+    assert payload == {
+        "selected_candidate_name": "Same",
+        "selected_candidate_index": 0,
+        "selected_evaluated_candidate_index": 2,
+    }
+
+
 def test_parse_selected_candidate_accepts_structured_json_string():
     parsed = parse_selected_candidate('{"selected_candidate_name": "Same", "selected_candidate_index": 1}')
     assert parsed is not None
     assert parsed.selected_candidate_name == "Same"
     assert parsed.selected_candidate_index == 1
     assert parsed.parameter_overrides == {}
+
+
+def test_parse_selected_candidate_prefers_explicit_evaluated_candidate_coordinate():
+    parsed = parse_selected_candidate(
+        '{"selected_candidate_name": "Same", "selected_candidate_index": 0, "selected_evaluated_candidate_index": 2}'
+    )
+    assert parsed is not None
+    assert parsed.selected_candidate_index == 0
+    assert parsed.selected_evaluated_candidate_index == 2
 
 
 def test_parse_selected_candidate_accepts_parameter_overrides():

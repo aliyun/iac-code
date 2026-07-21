@@ -6,6 +6,7 @@ import pytest
 
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.tools.tool_executor import ToolCallRequest, ToolExecutor
+from iac_code.types.permissions import InvocationBinding
 
 
 class FakeReadTool(Tool):
@@ -50,6 +51,15 @@ class FakeWriteTool(Tool):
         return False
 
 
+class FakeRuntimeClassTool(FakeReadTool):
+    @property
+    def requires_runtime_execution_class(self) -> bool:
+        return True
+
+    def is_concurrency_safe(self, tool_input):
+        raise AssertionError("runtime-class tools must not use input heuristics")
+
+
 @pytest.mark.asyncio
 class TestToolExecutor:
     async def test_partition(self):
@@ -66,6 +76,22 @@ class TestToolExecutor:
         concurrent, serial = executor.partition(calls)
         assert len(concurrent) == 3
         assert len(serial) == 1
+
+    async def test_runtime_execution_class_controls_partition_and_missing_is_serial(self):
+        tool = FakeRuntimeClassTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        executor = ToolExecutor(registry=registry)
+        calls = [
+            ToolCallRequest(id="approved", name="read", input={}, execution_class="concurrent"),
+            ToolCallRequest(id="serial", name="read", input={}, execution_class="serial"),
+            ToolCallRequest(id="missing", name="read", input={}),
+        ]
+
+        concurrent, serial = executor.partition(calls)
+
+        assert [call.id for call in concurrent] == ["approved"]
+        assert [call.id for call in serial] == ["serial", "missing"]
 
     async def test_concurrent_parallel(self):
         class BlockingReadTool(FakeReadTool):
@@ -195,7 +221,9 @@ class TestToolExecutor:
         assert results[0].content == "written"
         assert results[1].content == "after"
 
-    async def test_error_no_block(self):
+    async def test_error_no_block(self, monkeypatch):
+        monkeypatch.setattr("iac_code.tools.tool_executor._", lambda message: "i18n:" + message)
+
         class ErrorTool(FakeReadTool):
             async def execute(self, *, tool_input, context):
                 raise RuntimeError("boom")
@@ -210,10 +238,12 @@ class TestToolExecutor:
         ]
         results = await executor.execute_batch(calls, ToolContext())
         assert results[0].is_error is True
-        assert "boom" in results[0].content
+        assert results[0].content == "i18n:Tool 'error' failed: boom"
         assert results[1].content == "read result"
 
-    async def test_timeout(self):
+    async def test_timeout(self, monkeypatch):
+        monkeypatch.setattr("iac_code.tools.tool_executor._", lambda message: "i18n:" + message)
+
         class SlowTool(FakeReadTool):
             async def execute(self, *, tool_input, context):
                 await asyncio.sleep(10)
@@ -226,7 +256,42 @@ class TestToolExecutor:
         calls = [ToolCallRequest(id="s1", name="slow", input={})]
         results = await executor.execute_batch(calls, ToolContext())
         assert results[0].is_error is True
-        assert "timed out" in results[0].content
+        assert results[0].content == "i18n:Tool 'slow' timed out after 0.1s"
+
+    async def test_unknown_tool_error_uses_gettext(self, monkeypatch):
+        monkeypatch.setattr("iac_code.tools.tool_executor._", lambda message: "i18n:" + message)
+        registry = MagicMock()
+        registry.get.return_value = None
+        executor = ToolExecutor(registry=registry)
+
+        results = await executor.execute_batch(
+            [ToolCallRequest(id="missing", name="missing", input={})],
+            ToolContext(),
+        )
+
+        assert results == [ToolResult.error("i18n:Unknown tool: missing")]
+
+    async def test_tool_specific_timeout_result_overrides_generic_message(self):
+        class SafeTimeoutTool(FakeReadTool):
+            async def execute(self, *, tool_input, context):
+                await asyncio.sleep(10)
+                return ToolResult.success("never")
+
+            def timeout_error_result(self, tool_input, timeout):
+                del tool_input, timeout
+                return ToolResult.error("safe tool-specific timeout")
+
+        tool = SafeTimeoutTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        executor = ToolExecutor(registry=registry, tool_timeout=0.01)
+
+        results = await executor.execute_batch(
+            [ToolCallRequest(id="safe-timeout", name="read", input={})],
+            ToolContext(),
+        )
+
+        assert results == [ToolResult.error("safe tool-specific timeout")]
 
     async def test_event_queue_is_passed_only_through_context(self):
         class QueueAwareTool(FakeReadTool):
@@ -285,6 +350,35 @@ class TestToolExecutor:
 
         assert results[0].content == "/tmp/bin"
 
+    async def test_runtime_permission_handoff_is_preserved_in_derived_tool_context(self):
+        binding = InvocationBinding("nonce", "session", "call", "read", "a" * 64)
+
+        class ContextAwareTool(FakeRuntimeClassTool):
+            async def execute(self, *, tool_input, context):
+                assert context.invocation_binding is binding
+                assert context.snapshot_id == "snapshot"
+                assert context.security_digest == "digest"
+                assert context.execution_class == "concurrent"
+                return ToolResult.success("preserved")
+
+        tool = ContextAwareTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        executor = ToolExecutor(registry=registry)
+        call = ToolCallRequest(
+            id="call",
+            name="read",
+            input={},
+            invocation_binding=binding,
+            snapshot_id="snapshot",
+            security_digest="digest",
+            execution_class="concurrent",
+        )
+
+        results = await executor.execute_batch([call], ToolContext())
+
+        assert results[0].content == "preserved"
+
 
 class FakeStrictTool(Tool):
     @property
@@ -324,7 +418,8 @@ class TestToolExecutorValidation:
         assert results[0].is_error is False
         assert "got /tmp/f" in results[0].content
 
-    async def test_invalid_input_returns_error(self):
+    async def test_invalid_input_returns_error(self, monkeypatch):
+        monkeypatch.setattr("iac_code.tools.tool_executor._", lambda message: "i18n:" + message)
         tool = FakeStrictTool()
         registry = MagicMock()
         registry.get = lambda name: tool
@@ -332,6 +427,7 @@ class TestToolExecutorValidation:
         calls = [ToolCallRequest(id="v2", name="strict", input={})]
         results = await executor.execute_batch(calls, ToolContext())
         assert results[0].is_error is True
+        assert results[0].content.startswith("i18n:Invalid input for tool 'strict':")
         assert "path" in results[0].content
 
     async def test_invalid_input_does_not_execute(self):

@@ -24,7 +24,7 @@ from iac_code.a2a.executor import (
 from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
-from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
+from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.agent.message import Message
 from iac_code.pipeline.engine.cleanup import (
@@ -195,24 +195,51 @@ async def test_pipeline_handoff_context_backfills_summary_without_cleanup_prompt
     storage = SessionStorage(projects_dir=tmp_path / "projects")
     prompt = "cleanup prompt for stack-123"
 
-    A2APipelineSnapshotStore(pipeline_dir).save(
-        {
-            "normalHandoff": {
-                "action": "switch_to_normal",
-                "targetMode": "normal",
-                "summary": "[Pipeline Handoff Context]\nPipeline: selling",
-                "data": {
-                    "cleanup": {
-                        "status": "pending",
-                        "resourceCount": 1,
-                        "statusMessage": "检测到 1 个回滚残留资源，开始清理流程。",
-                        "prompt": prompt,
-                        "ledgerPath": str(ledger_path),
-                    }
-                },
-            }
-        }
-    )
+    handoff = {
+        "schemaVersion": "1.0",
+        "eventId": "event-handoff",
+        "sequence": 1,
+        "eventType": "pipeline_handoff_ready",
+        "scope": "pipeline",
+        "pipelineRunId": context_id,
+        "taskId": "task-pipeline",
+        "contextId": context_id,
+        "pipelineName": "selling",
+        "status": "completed",
+        "visibility": "committed",
+        "data": {
+            "action": "switch_to_normal",
+            "targetMode": "normal",
+            "summary": "[Pipeline Handoff Context]\nPipeline: selling",
+            "cleanup": {
+                "status": "pending",
+                "resourceCount": 1,
+                "statusMessage": "检测到 1 个回滚残留资源，开始清理流程。",
+                "prompt": prompt,
+                "ledgerPath": str(ledger_path),
+            },
+        },
+    }
+    backup_ack = {
+        "schemaVersion": "1.0",
+        "eventId": "event-backup-committed",
+        "sequence": 2,
+        "eventType": "backup_committed",
+        "scope": "pipeline",
+        "pipelineRunId": context_id,
+        "taskId": "task-pipeline",
+        "contextId": context_id,
+        "pipelineName": "selling",
+        "status": "completed",
+        "data": {
+            "committedEventId": handoff["eventId"],
+            "committedEventType": handoff["eventType"],
+            "committedSequence": handoff["sequence"],
+        },
+    }
+    events = [handoff, backup_ack]
+    A2APipelineJournal(pipeline_dir).append_many(events, durable=True)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events(events))
 
     class StorageFactory:
         repair_interrupted = staticmethod(SessionStorage.repair_interrupted)

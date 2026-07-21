@@ -29,9 +29,20 @@ from iac_code.services.permissions.audit import (
 )
 from iac_code.services.session_usage import SessionUsageStore, SessionUsageTotals
 from iac_code.tools.base import ToolContext, ToolRegistry, ToolResult
+from iac_code.tools.cloud.aliyun.contract_store import (
+    PROCESS_RESOLVED_CONTRACT_STORE,
+    canonical_input_sha256,
+)
 from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY, ResultStorage
 from iac_code.tools.tool_executor import ToolCallRequest, ToolExecutor
-from iac_code.types.permissions import PermissionAuditMetadata, PermissionAuditSettings, PermissionResult
+from iac_code.types.permissions import (
+    MAX_PERMISSION_AUDIT_ITEMS,
+    InvocationBinding,
+    PermissionAuditMetadata,
+    PermissionAuditSettings,
+    PermissionResult,
+    ToolPermissionContext,
+)
 from iac_code.types.stream_events import (
     TOOL_RENDER_DISPLAY_NAME_KEY,
     TOOL_RENDER_METADATA_KEY,
@@ -135,31 +146,71 @@ def _emit_no_prompt_permission_audit(
     settings: PermissionAuditSettings | None,
     audit_log_path: str | None = None,
 ) -> bool:
-    audit = permission.audit
-    if audit is None or is_routine_read_only_allow(decision, audit):
-        return True
-
-    result = emit_permission_audit(
-        PermissionAuditRecord(
-            session_id=session_id,
-            cwd=cwd,
-            tool_name=request.name,
-            tool_use_id=request.id,
-            decision=decision,
-            scope=audit.scope,
-            source=audit.source,
-            rule_source=audit.rule_source,
-            rule=audit.rule,
-            reason_type=audit.reason_type,
-            reason_detail=audit.reason_detail,
-            operation=permission_audit_operation(audit),
-            input_summary=build_input_summary(request.name, request.input),
-            tool_input_redacted=redacted_tool_input_for_settings(request.input, settings),
-            audit_log_path=audit_log_path,
-        ),
+    return _emit_permission_audit_items(
+        session_id=session_id,
+        cwd=cwd,
+        request=request,
+        audits=_permission_audits(permission, include_primary=True),
+        decision=decision,
         settings=settings,
+        audit_log_path=audit_log_path,
     )
-    return result is not False
+
+
+def _permission_audits(
+    permission: PermissionResult,
+    *,
+    include_primary: bool,
+) -> tuple[PermissionAuditMetadata, ...]:
+    audits: list[PermissionAuditMetadata] = []
+    if include_primary and permission.audit is not None:
+        audits.append(permission.audit)
+    for audit in permission.audit_items[:MAX_PERMISSION_AUDIT_ITEMS]:
+        if audit == permission.audit or audit in audits:
+            continue
+        audits.append(audit)
+    return tuple(audits)
+
+
+def _emit_permission_audit_items(
+    *,
+    session_id: str,
+    cwd: str,
+    request: ToolCallRequest,
+    audits: tuple[PermissionAuditMetadata, ...],
+    decision: Literal["allow", "deny"],
+    settings: PermissionAuditSettings | None,
+    audit_log_path: str | None = None,
+) -> bool:
+    input_summary = build_input_summary(request.name, request.input)
+    redacted_input = redacted_tool_input_for_settings(request.input, settings)
+    all_written = True
+    for audit in audits:
+        if is_routine_read_only_allow(decision, audit):
+            continue
+
+        result = emit_permission_audit(
+            PermissionAuditRecord(
+                session_id=session_id,
+                cwd=cwd,
+                tool_name=request.name,
+                tool_use_id=request.id,
+                decision=decision,
+                scope=audit.scope,
+                source=audit.source,
+                rule_source=audit.rule_source,
+                rule=audit.rule,
+                reason_type=audit.reason_type,
+                reason_detail=audit.reason_detail,
+                operation=permission_audit_operation(audit),
+                input_summary=input_summary,
+                tool_input_redacted=redacted_input,
+                audit_log_path=audit_log_path,
+            ),
+            settings=settings,
+        )
+        all_written = result is not False and all_written
+    return all_written
 
 
 def _with_prompt_permission_metadata(tool: Any, tool_input: dict, permission: PermissionResult) -> PermissionResult:
@@ -257,6 +308,8 @@ class AgentLoop:
         self._max_turns = max_turns
         self._session_storage = session_storage
         self._session_id = session_id or str(uuid.uuid4())[:8]
+        self._runtime_nonce = uuid.uuid4().hex
+        self._owned_contract_snapshot_ids: set[str] = set()
         self._root_session_id = root_session_id or self._session_id
         self._transcript_id = transcript_id
         self._has_session_hierarchy = root_session_id is not None or transcript_id is not None
@@ -308,6 +361,20 @@ class AgentLoop:
     @property
     def current_turn_text(self) -> str:
         return self._current_turn_text
+
+    def _cancel_owned_contract_snapshots(self) -> None:
+        snapshot_ids = tuple(self._owned_contract_snapshot_ids)
+        self._owned_contract_snapshot_ids.clear()
+        for snapshot_id in snapshot_ids:
+            if PROCESS_RESOLVED_CONTRACT_STORE.is_pending(snapshot_id):
+                PROCESS_RESOLVED_CONTRACT_STORE.cancel(snapshot_id)
+
+    def _reject_owned_contract_snapshot(self, snapshot_id: str | None) -> None:
+        if snapshot_id is None:
+            return
+        if PROCESS_RESOLVED_CONTRACT_STORE.is_pending(snapshot_id):
+            PROCESS_RESOLVED_CONTRACT_STORE.reject(snapshot_id)
+        self._owned_contract_snapshot_ids.discard(snapshot_id)
 
     def inject_user_message(self, msg: str | list[ContentBlock]) -> None:
         """Schedule a user message to be injected before the next LLM turn."""
@@ -833,6 +900,7 @@ class AgentLoop:
                     log_event(Events.SESSION_CANCELLED, {"stage": "in_query"})
                     raise
             finally:
+                self._cancel_owned_contract_snapshots()
                 if not turn_cancelled:
                     # Recall prefetches are turn-scoped: ready results are consumed only at in-turn poll points.
                     self._discard_memory_prefetch_for_turn(memory_prefetch)
@@ -898,6 +966,7 @@ class AgentLoop:
                     log_event(Events.SESSION_CANCELLED, {"stage": "in_query"})
                     raise
             finally:
+                self._cancel_owned_contract_snapshots()
                 self.context_manager.set_system_prompt(self.system_prompt)
                 elapsed = time.monotonic() - interaction_started
                 add_metric(Metrics.ACTIVE_TIME_TOTAL, int(elapsed), {})
@@ -1056,6 +1125,10 @@ class AgentLoop:
                 for tu in completed_tools:
                     queue = None
                     tool = self.tool_registry.get(tu["name"])
+                    invocation_input = tu.get("input", {})
+                    prepare_invocation_input = getattr(tool, "prepare_invocation_input", None)
+                    if callable(prepare_invocation_input):
+                        invocation_input = prepare_invocation_input(invocation_input)
                     if tu["name"] in tools_with_progress or (tool is not None and tool.needs_event_queue()):
                         queue = asyncio.Queue()
                         event_queues[tu["id"]] = queue
@@ -1063,8 +1136,15 @@ class AgentLoop:
                         ToolCallRequest(
                             id=tu["id"],
                             name=tu["name"],
-                            input=tu.get("input", {}),
+                            input=invocation_input,
                             event_queue=queue,
+                            invocation_binding=InvocationBinding(
+                                runtime_nonce=self._runtime_nonce,
+                                session_id=self._session_id,
+                                tool_use_id=tu["id"],
+                                tool_name=tu["name"],
+                                canonical_input_sha256=canonical_input_sha256(invocation_input),
+                            ),
                         )
                     )
                 context = ToolContext(
@@ -1097,6 +1177,12 @@ class AgentLoop:
                             trusted_directories=self._tool_context_trusted_read_directories,
                             relative_directories=self._tool_context_relative_read_directories,
                         )
+                        if isinstance(effective_perm_ctx, ToolPermissionContext):
+                            effective_perm_ctx = replace(
+                                effective_perm_ctx,
+                                invocation_binding=request.invocation_binding,
+                                pipeline_mode=self._pipeline_mode,
+                            )
                         _extend_unique(context.additional_directories, list(effective_perm_ctx.additional_directories))
                         _extend_unique(
                             context.trusted_read_directories, list(effective_perm_ctx.trusted_read_directories)
@@ -1114,11 +1200,26 @@ class AgentLoop:
                             "read_path_violation_behavior",
                             context.read_path_violation_behavior,
                         )
-                        context.permission_context = effective_perm_ctx
+                        context.set_permission_context(effective_perm_ctx)
                         permission = await check_tool_permission(tool, request.input, effective_perm_ctx)
                     else:
-                        permission = await tool.check_permissions(request.input, {"cwd": context.cwd})
+                        permission = await tool.check_permissions(
+                            request.input,
+                            ToolPermissionContext(
+                                cwd=context.cwd,
+                                invocation_binding=request.invocation_binding,
+                                pipeline_mode=self._pipeline_mode,
+                            ),
+                        )
+
                     permission = _with_prompt_permission_metadata(tool, request.input, permission)
+                    request.snapshot_id = permission.snapshot_id
+                    request.security_digest = permission.security_digest
+                    request.execution_class = permission.execution_class
+                    if permission.invocation_binding is not None:
+                        request.invocation_binding = permission.invocation_binding
+                    if request.snapshot_id is not None:
+                        self._owned_contract_snapshot_ids.add(request.snapshot_id)
 
                     audit_context = {
                         "session_id": self._session_id,
@@ -1143,6 +1244,7 @@ class AgentLoop:
                             audit_log_path=self._audit_log_path,
                         )
                         if not audit_ok:
+                            self._reject_owned_contract_snapshot(request.snapshot_id)
                             denied_results.append((request, ToolResult.error(_("Permission denied."))))
                             continue
                         allowed_requests.append(request)
@@ -1157,6 +1259,7 @@ class AgentLoop:
                             settings=audit_context["settings"],
                             audit_log_path=self._audit_log_path,
                         )
+                        self._reject_owned_contract_snapshot(request.snapshot_id)
                         msg = permission.message or _("Permission denied.")
                         denied_results.append((request, ToolResult.error(msg)))
                         continue
@@ -1176,9 +1279,21 @@ class AgentLoop:
                         if not response_future.done():
                             response_future.set_result(False)
                         raise
+                    additional_audit_ok = _emit_permission_audit_items(
+                        session_id=self._session_id,
+                        cwd=context.cwd,
+                        request=request,
+                        audits=_permission_audits(permission, include_primary=False),
+                        decision="allow" if approved else "deny",
+                        settings=audit_context["settings"],
+                        audit_log_path=self._audit_log_path,
+                    )
+                    if approved and not additional_audit_ok:
+                        approved = False
                     if approved:
                         allowed_requests.append(request)
                     else:
+                        self._reject_owned_contract_snapshot(request.snapshot_id)
                         denied_results.append((request, ToolResult.error(_("Permission denied."))))
 
                 public_path_roots = build_public_path_roots(
@@ -1271,6 +1386,10 @@ class AgentLoop:
                         yield sub_event
 
                     results = await exec_task
+                    for request in requests:
+                        snapshot_id = request.snapshot_id
+                        if snapshot_id is not None and not PROCESS_RESOLVED_CONTRACT_STORE.is_pending(snapshot_id):
+                            self._owned_contract_snapshot_ids.discard(snapshot_id)
                 except asyncio.CancelledError:
                     if not exec_task.done():
                         exec_task.cancel()
@@ -1278,7 +1397,7 @@ class AgentLoop:
                         await exec_task
                     raise
 
-                # Process results and yield ToolResultEvents
+                # Process results and yield ToolResultEvents.
                 terminal_step_result = False
                 tool_result_blocks: list[ToolResultBlock] = [
                     ToolResultBlock(

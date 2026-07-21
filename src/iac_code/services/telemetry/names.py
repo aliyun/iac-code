@@ -2,6 +2,26 @@
 
 from __future__ import annotations
 
+ALIYUN_API_TARGET_OUTCOMES = frozenset(
+    {
+        "success",
+        "http_error",
+        "invalid_response",
+        "pre_connect_failure",
+        "unknown_after_transport_error",
+        "unknown_after_cancel",
+        "target_transport_failure",
+        "pool_unavailable",
+        "connect_timeout",
+        "connect_error",
+        "read_timeout",
+        "read_error",
+        "protocol_error",
+        "stream_read_error",
+        "retryable_status",
+    }
+)
+
 # =====================================================================
 # ARMS LLM semantic conventions (gen_ai.*)
 # https://help.aliyun.com/zh/arms/application-monitoring/developer-reference/llm-trace-field-definition-description
@@ -158,8 +178,10 @@ class Events:
     SKILL_INVOKED = "iac.skill.invoked"
     SKILL_COMPLETED = "iac.skill.completed"
 
-    # --- Aliyun API (1) ---
+    # --- Aliyun API (3) ---
     ALIYUN_API_CALLED = "iac.aliyun.api.called"
+    ALIYUN_API_LEGACY_CALLED = "iac.aliyun.api.legacy.called"
+    ALIYUN_PRODUCT_RESOLVED = "iac.aliyun.product.resolved"
 
     # --- Memory (2) ---
     MEMORY_COMPACT_SUCCEEDED = "iac.memory.compact.succeeded"
@@ -192,6 +214,7 @@ class Events:
     PIPELINE_USER_INPUT_REQUIRED = "iac.pipeline.user_input.required"
     PIPELINE_USER_INPUT_RECEIVED = "iac.pipeline.user_input.received"
     PIPELINE_SELECTION_MADE = "iac.pipeline.selection.made"
+    PIPELINE_SELECTION_REJECTED = "iac.pipeline.selection.rejected"
     PIPELINE_CANDIDATES_EVALUATED = "iac.pipeline.candidates.evaluated"
     PIPELINE_FUNNEL_STEP = "iac.pipeline.funnel.step"
 
@@ -217,6 +240,11 @@ class Metrics:
     RESOURCE_TYPE_OBSERVED_COUNT = "iac.resource_type.observed.count"
     ALIYUN_API_CALLED_COUNT = "iac.aliyun.api.called.count"
     ALIYUN_API_CALLED_DURATION = "iac.aliyun.api.called.duration"
+    ALIYUN_OPENMETA_REQUEST_COUNT = "iac.aliyun.openmeta.request.count"
+    ALIYUN_OPENMETA_CACHE_COUNT = "iac.aliyun.openmeta.cache.count"
+    ALIYUN_API_DOC_COUNT = "iac.aliyun.api.doc.count"
+    ALIYUN_ENDPOINT_RESOLUTION_COUNT = "iac.aliyun.endpoint.resolution.count"
+    ALIYUN_API_CONTRACT_ERROR_COUNT = "iac.aliyun.api.contract.error.count"
     TERRAFORM_PROVIDER_OBSERVED_COUNT = "iac.terraform.provider.observed.count"
 
     # Pipeline
@@ -227,6 +255,7 @@ class Metrics:
     PIPELINE_SUB_STEP_DURATION = "iac.pipeline.sub_step.duration"
     PIPELINE_CANDIDATE_CANCELLED_COUNT = "iac.pipeline.candidate.cancelled.count"
     PIPELINE_USER_INPUT_WAIT_DURATION = "iac.pipeline.user_input.wait.duration"
+    PIPELINE_SELECTION_REJECTED_COUNT = "iac.pipeline.selection.rejected.count"
     PIPELINE_CANDIDATE_COUNT = "iac.pipeline.candidate.count"
     PIPELINE_CANDIDATE_SUCCESS_COUNT = "iac.pipeline.candidate.success.count"
     PIPELINE_CANDIDATE_FAILED_COUNT = "iac.pipeline.candidate.failed.count"

@@ -71,6 +71,7 @@
 ```json
 {
   "selected_candidate_index": 0,
+  "selected_evaluated_candidate_index": 2,
   "parameter_overrides": {
     "ZoneId": "cn-hangzhou-k",
     "InstanceType": "ecs.g7.large"
@@ -79,7 +80,8 @@
 ```
 
 必须按以下规则处理：
-- `selected_candidate_index`：按 0 基下标选择对应候选方案
+- `selected_candidate_index`：按本次展示的 `options` 列表 0 基顺序选择候选方案
+- `selected_evaluated_candidate_index`：候选方案在 `evaluated_candidates` 数组中的 0 基下标；存在时优先于 `selected_candidate_index`
 - `selected_candidate_name`：如果用户提供名称，则按候选方案名称匹配
 - `parameter_overrides`：用户传入的部署参数覆盖字典，必须原样整理为 `parameter_overrides`
 - `parameters`：兼容字段，若用户传入 `parameters`，也必须整理为 `parameter_overrides`
@@ -87,10 +89,11 @@
 收到用户选择后再次调用 `complete_step` 提交最终结论，结论必须保留 `options`，并额外包含：
 - `user_input`：用户本次选择的原始文本
 - `selected_candidate_name`：最终选择的候选方案名称，必须取 `candidate.name`
-- `selected_candidate_index`：最终选择的候选方案在 `evaluated_candidates` 数组中的 0 基下标
+- `selected_candidate_index`：最终选择的候选方案在本次展示的 `options` 列表中的 0 基顺序
+- `selected_evaluated_candidate_index`：最终选择的候选方案在 `evaluated_candidates` 数组中的 0 基下标
 - `parameter_overrides`：用户选择方案时传入的部署参数覆盖字典；没有传入时可省略
 
-如果用户输入可以明确映射到某个方案编号（例如“方案0”），按 0 基下标选择对应方案。
+如果用户输入可以明确映射到某个方案编号（例如“方案0”），按本次展示的 `options` 列表 0 基顺序选择对应方案。
 如果用户输入匹配某个候选方案名称，选择该方案。
 如果用户用偏好描述选择方案，请根据候选方案摘要、架构特点、成本和用户偏好选择最匹配的方案。
 

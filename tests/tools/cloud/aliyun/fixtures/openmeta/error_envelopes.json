@@ -1,0 +1,5 @@
+{
+  "api_not_found": {"message": "api not found"},
+  "product_not_found": {"code": 1, "message": "product not found"},
+  "unknown_error": {"code": 9, "message": "unexpected upstream detail"}
+}

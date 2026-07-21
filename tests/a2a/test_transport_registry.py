@@ -1,3 +1,5 @@
+from unittest.mock import MagicMock
+
 import pytest
 
 from iac_code.a2a.transport import A2ATransportBinding, UnsupportedA2ATransportError, ensure_supported_transport
@@ -9,6 +11,12 @@ from iac_code.a2a.transports.base import (
     binding_from_url,
     normalize_transport_name,
     select_binding,
+)
+from iac_code.services.agent_factory import _filter_tool_registry_for_a2a_safe_mode
+from iac_code.tools.base import ToolRegistry
+from iac_code.tools.cloud.registry import (
+    ANONYMOUS_ALIYUN_TOOL_NAMES,
+    CREDENTIAL_GATED_ALIYUN_TOOL_NAMES,
 )
 
 
@@ -70,3 +78,26 @@ def test_runtime_options_are_plain_data() -> None:
 def test_runtime_transport_protocol_shape() -> None:
     assert hasattr(A2ARuntimeTransport, "create_server")
     assert hasattr(A2ARuntimeTransport, "create_client")
+
+
+def test_a2a_safe_mode_preserves_existing_aliyun_tools_and_adds_api_doc() -> None:
+    registry = ToolRegistry()
+    for name in (
+        "read_file",
+        "skill",
+        *ANONYMOUS_ALIYUN_TOOL_NAMES,
+        *CREDENTIAL_GATED_ALIYUN_TOOL_NAMES,
+        "ros_future_execution_tool",
+    ):
+        tool = MagicMock()
+        tool.name = name
+        registry.register(tool)
+
+    _filter_tool_registry_for_a2a_safe_mode(registry)
+
+    names = {tool.name for tool in registry.list_tools()}
+    assert set(ANONYMOUS_ALIYUN_TOOL_NAMES).issubset(names)
+    assert {"aliyun_api", "ros_stack"}.issubset(names)
+    assert "ros_stack_instances" not in names
+    assert "ros_future_execution_tool" not in names
+    assert {"read_file", "skill"}.issubset(names)

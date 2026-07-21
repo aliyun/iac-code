@@ -187,6 +187,14 @@ class SessionPaths:
     def a2a_artifacts_dir(self) -> Path:
         return self.a2a_dir / "artifacts"
 
+    @property
+    def logs_dir(self) -> Path:
+        return self.session_dir / "logs"
+
+    @property
+    def a2a_pipeline_flow_log_path(self) -> Path:
+        return self.logs_dir / "a2a-pipeline-flow.jsonl"
+
     def transcript_dir(self, transcript_id: str) -> Path:
         return self.session_dir / "pipeline" / "transcripts" / _validate_transcript_id(transcript_id)
 

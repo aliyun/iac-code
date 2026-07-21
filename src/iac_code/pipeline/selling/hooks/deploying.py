@@ -29,11 +29,19 @@ def _candidate_from_result(result: dict[str, Any]) -> dict[str, Any]:
 def resolve_selected_candidate(
     selected: SelectedCandidate,
     evaluated_candidates: list[dict[str, Any]],
+    *,
+    options: list[Any] | None = None,
 ) -> CandidateResolution:
-    if selected.selected_candidate_index is not None:
-        idx = selected.selected_candidate_index
+    idx = selected.selected_evaluated_candidate_index
+    if idx is None and selected.selected_candidate_index is not None:
+        display_idx = selected.selected_candidate_index
+        selectable_indices = _selectable_evaluated_indices(evaluated_candidates, options)
+        if display_idx < 0 or display_idx >= len(selectable_indices):
+            return CandidateResolution(None, None, f"selected candidate index {display_idx} not found")
+        idx = selectable_indices[display_idx]
+    if idx is not None:
         if idx < 0 or idx >= len(evaluated_candidates):
-            return CandidateResolution(None, None, f"selected candidate index {idx} not found")
+            return CandidateResolution(None, None, f"selected evaluated candidate index {idx} not found")
         result = evaluated_candidates[idx]
         candidate = _candidate_from_result(result)
         if selected.selected_candidate_name and candidate.get("name") != selected.selected_candidate_name:
@@ -68,6 +76,21 @@ def resolve_selected_candidate(
     )
 
 
+def _selectable_evaluated_indices(
+    evaluated_candidates: list[dict[str, Any]],
+    options: list[Any] | None,
+) -> list[int]:
+    if options:
+        indices: list[int] = []
+        for option in options:
+            candidate_index = option.get("candidate_index") if isinstance(option, dict) else None
+            if not isinstance(candidate_index, int) or isinstance(candidate_index, bool):
+                return []
+            indices.append(candidate_index)
+        return indices
+    return [index for index, result in enumerate(evaluated_candidates) if not result.get("failed")]
+
+
 def normalize_selected_plan(
     selected_plan: dict[str, Any] | None,
     evaluated_candidates: list[dict[str, Any]] | None,
@@ -80,7 +103,9 @@ def normalize_selected_plan(
         return plan
 
     candidates = evaluated_candidates or []
-    resolution = resolve_selected_candidate(selected, candidates)
+    raw_options = plan.get("options")
+    options = raw_options if isinstance(raw_options, list) else None
+    resolution = resolve_selected_candidate(selected, candidates, options=options)
     plan["selection"] = _selection_dict(selected)
     if resolution.error:
         plan["selection_valid"] = False
@@ -124,10 +149,14 @@ def _template_url_from_resolution(
 
 
 def _selection_payload(plan: dict[str, Any]) -> Any:
-    if "selected_candidate_index" in plan or "selected_candidate_name" in plan:
+    if any(
+        field in plan
+        for field in ("selected_candidate_index", "selected_evaluated_candidate_index", "selected_candidate_name")
+    ):
         payload = {
             "selected_candidate_name": plan.get("selected_candidate_name", ""),
             "selected_candidate_index": plan.get("selected_candidate_index"),
+            "selected_evaluated_candidate_index": plan.get("selected_evaluated_candidate_index"),
         }
         if "parameter_overrides" in plan:
             payload["parameter_overrides"] = plan.get("parameter_overrides")
@@ -142,6 +171,8 @@ def _selection_dict(selected: SelectedCandidate) -> dict[str, Any]:
         "selected_candidate_name": selected.selected_candidate_name,
         "selected_candidate_index": selected.selected_candidate_index,
     }
+    if selected.selected_evaluated_candidate_index is not None:
+        data["selected_evaluated_candidate_index"] = selected.selected_evaluated_candidate_index
     if selected.parameter_overrides:
         data["parameter_overrides"] = dict(selected.parameter_overrides)
     return data

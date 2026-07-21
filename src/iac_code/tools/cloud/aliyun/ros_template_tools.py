@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import copy
 import json
-from dataclasses import replace
+from collections.abc import Mapping
 from typing import Any
+
+import jsonschema
 
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
-from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
-from iac_code.tools.cloud.aliyun.template_source import (
-    check_local_template_url_read_permission,
-    is_local_template_url,
-    resolve_template_url_for_api,
+from iac_code.tools.cloud.aliyun.aliyun_api import (
+    LOCAL_TEMPLATE_BODY_SENTINEL,
+    LOCAL_TEMPLATE_PATH_FIELD,
+    AliyunApi,
 )
+from iac_code.tools.cloud.aliyun.public_errors import public_aliyun_error
+from iac_code.tools.cloud.aliyun.template_source import is_local_template_url
 from iac_code.types.permissions import PermissionResult, ToolPermissionContext
 
 _TEMPLATE_URL_PROPERTY = {
@@ -41,6 +45,37 @@ _TOOL_ACTIONS = {
 }
 
 
+def build_delegated_call_shape(tool_input: Mapping[str, Any], *, action: str) -> dict[str, Any]:
+    """Build the stable API call shape used by ROS permission and execution."""
+
+    params: dict[str, Any] = {}
+    template_url = tool_input.get("template_url")
+    if template_url is not None:
+        if isinstance(template_url, str) and is_local_template_url(template_url):
+            params["TemplateBody"] = LOCAL_TEMPLATE_BODY_SENTINEL
+        else:
+            params["TemplateURL"] = copy.deepcopy(template_url)
+    stack_name = tool_input.get("stack_name")
+    if stack_name is not None:
+        params["StackName"] = copy.deepcopy(stack_name)
+    parameters = tool_input.get("parameters")
+    if isinstance(parameters, Mapping):
+        for index, (key, value) in enumerate(parameters.items(), start=1):
+            params["Parameters.{}.ParameterKey".format(index)] = str(key)
+            params["Parameters.{}.ParameterValue".format(index)] = copy.deepcopy(value)
+    shape: dict[str, Any] = {
+        "product": "ros",
+        "version": "2019-09-10",
+        "action": action,
+        "params": params,
+    }
+    if region_id := tool_input.get("region_id"):
+        shape["region_id"] = copy.deepcopy(region_id)
+    if isinstance(template_url, str) and is_local_template_url(template_url):
+        shape[LOCAL_TEMPLATE_PATH_FIELD] = template_url
+    return shape
+
+
 def _schema(
     *,
     properties: dict[str, Any],
@@ -54,23 +89,41 @@ def _schema(
     }
 
 
-def _copy_delegate_context(context: ToolContext) -> ToolContext:
-    return ToolContext(
-        cwd=context.cwd,
-        event_queue=context.event_queue,
-        tool_use_id=context.tool_use_id,
-        additional_directories=context.additional_directories,
-        trusted_read_directories=context.trusted_read_directories,
-        relative_read_directories=context.relative_read_directories,
-        strict_read_directories=context.strict_read_directories,
-        read_path_violation_behavior=context.read_path_violation_behavior,
-        pipeline_mode=False,
-        permission_context=context.permission_context,
-    )
+def delegated_input_schema(action: str) -> dict[str, Any]:
+    properties: dict[str, Any] = {
+        "template_url": _TEMPLATE_URL_PROPERTY,
+        "region_id": _REGION_ID_PROPERTY,
+    }
+    required = ["template_url"]
+    if action == "ValidateTemplate":
+        return _schema(properties=properties, required=required)
+    if action == "GetTemplateParameterConstraints":
+        properties["parameters"] = _PARAMETERS_PROPERTY
+        return _schema(properties=properties, required=required)
+    if action == "PreviewStack":
+        properties.update(
+            {
+                "stack_name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Unique preview stack name. This is not a template parameter.",
+                },
+                "parameters": _PARAMETERS_PROPERTY,
+            }
+        )
+        return _schema(properties=properties, required=["template_url", "stack_name", "parameters"])
+    if action == "GetTemplateEstimateCost":
+        properties["parameters"] = _PARAMETERS_PROPERTY
+        return _schema(properties=properties, required=["template_url", "parameters"])
+    raise ValueError("unsupported_delegated_action")
 
 
-def _resolve_template_url_for_api(template_url: str, context: ToolContext) -> str:
-    return resolve_template_url_for_api(template_url, context)
+def validate_delegated_tool_input(tool_input: Mapping[str, Any], *, action: str) -> bool:
+    try:
+        jsonschema.validate(instance=dict(tool_input), schema=delegated_input_schema(action))
+    except (jsonschema.ValidationError, ValueError):
+        return False
+    return True
 
 
 def render_ros_template_tool_result_message(
@@ -84,7 +137,7 @@ def render_ros_template_tool_result_message(
     if action is None:
         return None
 
-    aliyun_api = AliyunApi()
+    aliyun_api = AliyunApi.isolated_for_tests()
     if not is_error and not verbose:
         try:
             parsed = json.loads(output)
@@ -99,82 +152,47 @@ def render_ros_template_tool_result_message(
 class _RosTemplateTool(Tool):
     action: str
 
-    def _aliyun_tool_input(self, *, tool_input: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
-        aliyun_input: dict[str, Any] = {
-            "product": "ros",
-            "action": self.action,
-        }
-        if params is not None:
-            aliyun_input["params"] = params
-        if region_id := tool_input.get("region_id"):
-            aliyun_input["region_id"] = region_id
-        return aliyun_input
+    def __init__(self, *, delegated_executor: Any | None = None) -> None:
+        self._delegated_executor = delegated_executor
+
+    @property
+    def requires_runtime_execution_class(self) -> bool:
+        return True
 
     async def _call_ros_api(
         self,
         *,
         tool_input: dict[str, Any],
         context: ToolContext,
-        params: dict[str, Any],
     ) -> ToolResult:
-        params = dict(params)
-        template_url = params.get("TemplateURL")
-        if isinstance(template_url, str) and template_url:
-            params["TemplateURL"] = _resolve_template_url_for_api(template_url, context)
-        aliyun_api = AliyunApi()
-        result = await aliyun_api.execute(
-            tool_input=self._aliyun_tool_input(tool_input=tool_input, params=params),
-            context=_copy_delegate_context(context),
-        )
-        self._last_action = getattr(aliyun_api, "_last_action", "")
-        self._last_result = getattr(aliyun_api, "_last_result", None)
+        if self._delegated_executor is None:
+            return ToolResult.error(self._delegated_executor_error())
+        result = await self._delegated_executor.execute(tool_input, context)
+        if not result.is_error:
+            try:
+                parsed = json.loads(result.content)
+            except (TypeError, ValueError):
+                parsed = None
+            self._last_action = self.action
+            self._last_result = parsed if isinstance(parsed, dict) else None
         return result
 
     def is_read_only(self, input: dict | None = None) -> bool:
         return True
 
-    def _check_local_template_url_read_permission(
-        self,
-        input: dict,
-        context: ToolPermissionContext,
-    ) -> PermissionResult | None:
-        template_url = input.get("template_url")
-        if not isinstance(template_url, str) or not template_url or not is_local_template_url(template_url):
-            return None
-
-        return check_local_template_url_read_permission(template_url, context)
-
-    @staticmethod
-    def _with_aliyun_audit(path_result: PermissionResult, aliyun_result: PermissionResult) -> PermissionResult:
-        if aliyun_result.audit is None:
-            return path_result
-        reason_type = path_result.reason.type if path_result.reason is not None else None
-        reason_detail = path_result.reason.detail if path_result.reason is not None else None
-        return PermissionResult(
-            behavior=path_result.behavior,
-            message=path_result.message,
-            reason=path_result.reason,
-            suggestions=path_result.suggestions,
-            audit=replace(
-                aliyun_result.audit,
-                scope="once",
-                rule_source=None,
-                rule=None,
-                reason_type=reason_type,
-                reason_detail=reason_detail,
-            ),
-        )
-
     async def check_permissions(self, input: dict, context=None):
-        aliyun_result = await AliyunApi().check_permissions(self._aliyun_tool_input(tool_input=input), context)
-        if aliyun_result.behavior == "deny":
-            return aliyun_result
+        if self._delegated_executor is None:
+            return PermissionResult(behavior="deny", message=self._delegated_executor_error())
+        if not isinstance(context, ToolPermissionContext):
+            context = ToolPermissionContext(cwd=context.get("cwd", "") if isinstance(context, dict) else "")
+        return await self._delegated_executor.check_permissions(input, context)
 
-        if isinstance(context, ToolPermissionContext):
-            if path_result := self._check_local_template_url_read_permission(input, context):
-                return self._with_aliyun_audit(path_result, aliyun_result)
-
-        return aliyun_result
+    def _delegated_executor_error(self) -> str:
+        return public_aliyun_error(
+            "aliyun_delegated_executor_required",
+            product="ROS",
+            action=self.action,
+        )
 
     def render_tool_use_message(self, input: dict, *, verbose: bool = False) -> str | None:
         return input.get("template_url")
@@ -208,20 +226,10 @@ class RosValidateTemplateTool(_RosTemplateTool):
 
     @property
     def input_schema(self) -> dict[str, Any]:
-        return _schema(
-            properties={
-                "template_url": _TEMPLATE_URL_PROPERTY,
-                "region_id": _REGION_ID_PROPERTY,
-            },
-            required=["template_url"],
-        )
+        return delegated_input_schema(self.action)
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
-        return await self._call_ros_api(
-            tool_input=tool_input,
-            context=context,
-            params={"TemplateURL": tool_input["template_url"]},
-        )
+        return await self._call_ros_api(tool_input=tool_input, context=context)
 
 
 class RosGetTemplateParameterConstraintsTool(_RosTemplateTool):
@@ -243,20 +251,10 @@ class RosGetTemplateParameterConstraintsTool(_RosTemplateTool):
 
     @property
     def input_schema(self) -> dict[str, Any]:
-        return _schema(
-            properties={
-                "template_url": _TEMPLATE_URL_PROPERTY,
-                "region_id": _REGION_ID_PROPERTY,
-                "parameters": _PARAMETERS_PROPERTY,
-            },
-            required=["template_url"],
-        )
+        return delegated_input_schema(self.action)
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
-        params: dict[str, Any] = {"TemplateURL": tool_input["template_url"]}
-        if "parameters" in tool_input:
-            params["Parameters"] = dict(tool_input["parameters"])
-        return await self._call_ros_api(tool_input=tool_input, context=context, params=params)
+        return await self._call_ros_api(tool_input=tool_input, context=context)
 
 
 class RosPreviewTemplateTool(_RosTemplateTool):
@@ -278,30 +276,10 @@ class RosPreviewTemplateTool(_RosTemplateTool):
 
     @property
     def input_schema(self) -> dict[str, Any]:
-        return _schema(
-            properties={
-                "template_url": _TEMPLATE_URL_PROPERTY,
-                "region_id": _REGION_ID_PROPERTY,
-                "stack_name": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Unique preview stack name. This is not a template parameter.",
-                },
-                "parameters": _PARAMETERS_PROPERTY,
-            },
-            required=["template_url", "stack_name", "parameters"],
-        )
+        return delegated_input_schema(self.action)
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
-        return await self._call_ros_api(
-            tool_input=tool_input,
-            context=context,
-            params={
-                "TemplateURL": tool_input["template_url"],
-                "StackName": tool_input["stack_name"],
-                "Parameters": dict(tool_input["parameters"]),
-            },
-        )
+        return await self._call_ros_api(tool_input=tool_input, context=context)
 
 
 class RosEstimateTemplateCostTool(_RosTemplateTool):
@@ -323,21 +301,7 @@ class RosEstimateTemplateCostTool(_RosTemplateTool):
 
     @property
     def input_schema(self) -> dict[str, Any]:
-        return _schema(
-            properties={
-                "template_url": _TEMPLATE_URL_PROPERTY,
-                "region_id": _REGION_ID_PROPERTY,
-                "parameters": _PARAMETERS_PROPERTY,
-            },
-            required=["template_url", "parameters"],
-        )
+        return delegated_input_schema(self.action)
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
-        return await self._call_ros_api(
-            tool_input=tool_input,
-            context=context,
-            params={
-                "TemplateURL": tool_input["template_url"],
-                "Parameters": dict(tool_input["parameters"]),
-            },
-        )
+        return await self._call_ros_api(tool_input=tool_input, context=context)

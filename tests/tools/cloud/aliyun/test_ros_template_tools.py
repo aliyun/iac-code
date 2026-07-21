@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from iac_code.tools.base import ToolContext, ToolResult
 from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
+from iac_code.tools.cloud.aliyun.public_errors import public_aliyun_error
 from iac_code.tools.cloud.aliyun.ros_template_tools import (
     RosEstimateTemplateCostTool,
     RosGetTemplateParameterConstraintsTool,
     RosPreviewTemplateTool,
     RosValidateTemplateTool,
+    render_ros_template_tool_result_message,
 )
-from iac_code.types.permissions import ToolPermissionContext
+from iac_code.types.permissions import PermissionResult, ToolPermissionContext
 
 
 def _permission_context(*, deny: dict[str, list[str]] | None = None) -> ToolPermissionContext:
@@ -124,17 +124,103 @@ def test_ros_template_tools_have_distinct_user_facing_names() -> None:
     assert RosEstimateTemplateCostTool().user_facing_name() == "ROS Estimate Cost"
 
 
+class _FakeDelegatedExecutor:
+    def __init__(
+        self,
+        *,
+        permission_result: PermissionResult | None = None,
+        tool_result: ToolResult | None = None,
+    ) -> None:
+        self.permission_calls = []
+        self.execution_calls = []
+        self.permission_result = permission_result or PermissionResult(behavior="allow", execution_class="concurrent")
+        self.tool_result = tool_result or ToolResult.success('{"RequestId": "delegated"}')
+
+    async def check_permissions(self, tool_input, context):
+        self.permission_calls.append((tool_input, context))
+        return self.permission_result
+
+    async def execute(self, tool_input, context):
+        self.execution_calls.append((tool_input, context))
+        return self.tool_result
+
+
 @pytest.mark.asyncio
-async def test_ros_template_tool_result_display_matches_aliyun_api(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ros_template_tool_uses_only_injected_delegated_executor() -> None:
+    delegated = _FakeDelegatedExecutor()
+    tool_input = {"template_url": "templates/app.yml", "region_id": "cn-hangzhou"}
+    tool = RosValidateTemplateTool(delegated_executor=delegated)
+    permission_context = ToolPermissionContext(cwd="/tmp")
+    execution_context = ToolContext(cwd="/tmp", pipeline_mode=True)
+
+    permission = await tool.check_permissions(tool_input, permission_context)
+    result = await tool.execute(tool_input=tool_input, context=execution_context)
+
+    assert permission.behavior == "allow"
+    assert result.is_error is False
+    assert delegated.permission_calls == [(tool_input, permission_context)]
+    assert delegated.execution_calls == [(tool_input, execution_context)]
+
+
+@pytest.mark.asyncio
+async def test_no_arg_ros_template_tool_is_discovery_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def forbidden_legacy_execute(*args, **kwargs):
+        raise AssertionError("no-arg discovery tool must not construct AliyunApi")
+
+    monkeypatch.setattr(AliyunApi, "execute", forbidden_legacy_execute)
+    monkeypatch.setattr(
+        "iac_code.tools.cloud.aliyun.public_errors._",
+        lambda message: "translated:" + message,
+    )
     tool = RosValidateTemplateTool()
+    result = await tool.execute(
+        tool_input={"template_url": "templates/app.yml"},
+        context=ToolContext(),
+    )
+    permission = await tool.check_permissions(
+        {"template_url": "templates/app.yml"},
+        ToolPermissionContext(cwd="/tmp"),
+    )
+
+    expected = public_aliyun_error(
+        "aliyun_delegated_executor_required",
+        product="ROS",
+        action="ValidateTemplate",
+    )
+    assert result == ToolResult.error(expected)
+    assert permission.behavior == "deny"
+    assert permission.message == expected
+    assert result.content.startswith("translated:")
+    assert "aliyun_delegated_executor_required" not in result.content
+
+
+def test_ros_template_renderer_cannot_reach_legacy_execution_credentials_or_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("renderer must remain pure-local")
+
+    async def forbidden_async(*_args, **_kwargs):
+        forbidden()
+
+    monkeypatch.setattr(AliyunApi, "execute", forbidden_async)
+    monkeypatch.setattr(AliyunApi, "call_action", forbidden_async)
+    monkeypatch.setattr("iac_code.tools.cloud.aliyun.aliyun_api.CloudCredentials", forbidden)
+    monkeypatch.setattr("iac_code.tools.cloud.aliyun.aliyun_api.OpenApiClient", forbidden)
+
+    rendered = render_ros_template_tool_result_message(
+        "ros_validate_template",
+        '{"RequestId":"REQ-42"}',
+    )
+
+    assert rendered == "Call succeeded (RequestId: REQ-42)"
+
+
+@pytest.mark.asyncio
+async def test_ros_template_tool_result_display_matches_aliyun_api() -> None:
     raw_output = '{\n  "RequestId": "REQ-42",\n  "Resources": ["long output"]\n}'
-
-    async def fake_execute(self, *, tool_input: dict, context: ToolContext) -> ToolResult:
-        self._last_action = tool_input["action"]
-        self._last_result = {"RequestId": "REQ-42", "Resources": ["long output"]}
-        return ToolResult.success(raw_output)
-
-    monkeypatch.setattr(AliyunApi, "execute", fake_execute)
+    delegated = _FakeDelegatedExecutor(tool_result=ToolResult.success(raw_output))
+    tool = RosValidateTemplateTool(delegated_executor=delegated)
 
     result = await tool.execute(
         tool_input={"template_url": "templates/app.yml"},
@@ -147,290 +233,100 @@ async def test_ros_template_tool_result_display_matches_aliyun_api(monkeypatch: 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("tool", "tool_input", "expected_action", "expected_params"),
+    ("tool_type", "tool_input"),
     [
         (
-            RosValidateTemplateTool(),
+            RosValidateTemplateTool,
             {"template_url": "templates/app.yml", "region_id": "cn-hangzhou"},
-            "ValidateTemplate",
-            {"TemplateURL": "templates/app.yml"},
         ),
         (
-            RosGetTemplateParameterConstraintsTool(),
+            RosGetTemplateParameterConstraintsTool,
             {
                 "template_url": "templates/app.yml",
                 "region_id": "cn-hangzhou",
                 "parameters": {"ZoneId": "cn-hangzhou-k"},
             },
-            "GetTemplateParameterConstraints",
-            {"TemplateURL": "templates/app.yml", "Parameters": {"ZoneId": "cn-hangzhou-k"}},
         ),
         (
-            RosPreviewTemplateTool(),
+            RosPreviewTemplateTool,
             {
                 "template_url": "templates/app.yml",
                 "region_id": "cn-hangzhou",
                 "stack_name": "preview-stack",
                 "parameters": {"ZoneId": "cn-hangzhou-k"},
             },
-            "PreviewStack",
-            {
-                "TemplateURL": "templates/app.yml",
-                "StackName": "preview-stack",
-                "Parameters": {"ZoneId": "cn-hangzhou-k"},
-            },
         ),
         (
-            RosEstimateTemplateCostTool(),
+            RosEstimateTemplateCostTool,
             {
                 "template_url": "templates/app.yml",
                 "region_id": "cn-hangzhou",
                 "parameters": {"ZoneId": "cn-hangzhou-k"},
             },
-            "GetTemplateEstimateCost",
-            {"TemplateURL": "templates/app.yml", "Parameters": {"ZoneId": "cn-hangzhou-k"}},
         ),
     ],
 )
-async def test_ros_template_tools_delegate_to_aliyun_api_with_template_url(
-    monkeypatch: pytest.MonkeyPatch,
-    tool,
+async def test_ros_template_tools_delegate_the_exact_outer_input(
+    tool_type,
     tool_input: dict,
-    expected_action: str,
-    expected_params: dict,
 ) -> None:
-    captured: dict = {}
-
-    async def fake_execute(self, *, tool_input: dict, context: ToolContext) -> ToolResult:
-        captured["tool_input"] = tool_input
-        captured["pipeline_mode"] = context.pipeline_mode
-        return ToolResult.success('{"ok": true}')
-
-    monkeypatch.setattr(AliyunApi, "execute", fake_execute)
-
+    delegated = _FakeDelegatedExecutor()
+    tool = tool_type(delegated_executor=delegated)
     context = ToolContext(pipeline_mode=True)
     result = await tool.execute(tool_input=tool_input, context=context)
 
-    expected_params = dict(expected_params)
-    expected_params["TemplateURL"] = os.path.realpath(os.path.join(context.cwd, expected_params["TemplateURL"]))
     assert not result.is_error
-    assert captured["tool_input"] == {
-        "product": "ros",
-        "action": expected_action,
-        "params": expected_params,
-        "region_id": "cn-hangzhou",
-    }
-    assert captured["pipeline_mode"] is False
+    assert delegated.execution_calls == [(tool_input, context)]
 
 
 @pytest.mark.asyncio
-async def test_ros_template_tool_delegates_without_region_id_for_aliyun_default(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict = {}
-
-    async def fake_execute(self, *, tool_input: dict, context: ToolContext) -> ToolResult:
-        captured["tool_input"] = tool_input
-        return ToolResult.success('{"ok": true}')
-
-    monkeypatch.setattr(AliyunApi, "execute", fake_execute)
-
-    result = await RosValidateTemplateTool().execute(
-        tool_input={"template_url": "templates/app.yml"},
-        context=ToolContext(pipeline_mode=True),
-    )
-
-    assert not result.is_error
-    assert captured["tool_input"] == {
-        "product": "ros",
-        "action": "ValidateTemplate",
-        "params": {"TemplateURL": os.path.realpath("templates/app.yml")},
-    }
-
-
-@pytest.mark.asyncio
-async def test_ros_template_tools_resolve_local_template_url_from_tool_context_cwd(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path,
-) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    captured: dict = {}
-
-    async def fake_execute(self, *, tool_input: dict, context: ToolContext) -> ToolResult:
-        captured["tool_input"] = tool_input
-        return ToolResult.success('{"ok": true}')
-
-    monkeypatch.setattr(AliyunApi, "execute", fake_execute)
-
-    result = await RosValidateTemplateTool().execute(
-        tool_input={"template_url": "templates/app.yml"},
-        context=ToolContext(cwd=str(project), pipeline_mode=True),
-    )
-
-    assert not result.is_error
-    assert captured["tool_input"]["params"] == {
-        "TemplateURL": os.path.realpath(project / "templates" / "app.yml"),
-    }
-
-
-@pytest.mark.asyncio
-async def test_ros_template_tools_preserve_remote_template_url_when_delegating(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path,
-) -> None:
-    captured: dict = {}
-
-    async def fake_execute(self, *, tool_input: dict, context: ToolContext) -> ToolResult:
-        captured["tool_input"] = tool_input
-        return ToolResult.success('{"ok": true}')
-
-    monkeypatch.setattr(AliyunApi, "execute", fake_execute)
-
-    result = await RosValidateTemplateTool().execute(
-        tool_input={"template_url": "HTTPS://example.com/template.yml"},
-        context=ToolContext(cwd=str(tmp_path), pipeline_mode=True),
-    )
-
-    assert not result.is_error
-    assert captured["tool_input"]["params"] == {"TemplateURL": "HTTPS://example.com/template.yml"}
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("tool", "tool_input", "expected_action"),
+    ("tool_type", "tool_input"),
     [
-        (RosValidateTemplateTool(), {"template_url": "templates/app.yml"}, "ValidateTemplate"),
+        (RosValidateTemplateTool, {"template_url": "templates/app.yml"}),
         (
-            RosGetTemplateParameterConstraintsTool(),
+            RosGetTemplateParameterConstraintsTool,
             {"template_url": "templates/app.yml", "parameters": {"ZoneId": "cn-hangzhou-k"}},
-            "GetTemplateParameterConstraints",
         ),
         (
-            RosPreviewTemplateTool(),
+            RosPreviewTemplateTool,
             {
                 "template_url": "templates/app.yml",
                 "stack_name": "preview-stack",
                 "parameters": {"ZoneId": "cn-hangzhou-k"},
             },
-            "PreviewStack",
         ),
         (
-            RosEstimateTemplateCostTool(),
+            RosEstimateTemplateCostTool,
             {"template_url": "templates/app.yml", "parameters": {"ZoneId": "cn-hangzhou-k"}},
-            "GetTemplateEstimateCost",
         ),
     ],
 )
-async def test_ros_template_tools_delegate_permission_audit_to_aliyun_api(
-    tool,
+async def test_ros_template_tools_delegate_permissions_without_local_preprocessing(
+    tool_type,
     tool_input: dict,
-    expected_action: str,
 ) -> None:
+    delegated = _FakeDelegatedExecutor()
+    tool = tool_type(delegated_executor=delegated)
+    context = _permission_context()
+    result = await tool.check_permissions(tool_input, context)
+
+    assert result.behavior == "allow"
+    assert delegated.permission_calls == [(tool_input, context)]
+
+
+@pytest.mark.asyncio
+async def test_ros_template_tool_preserves_delegated_permission_result() -> None:
+    expected = PermissionResult(behavior="ask", message="delegated_ask", execution_class="serial")
+    delegated = _FakeDelegatedExecutor(permission_result=expected)
+    tool = RosPreviewTemplateTool(delegated_executor=delegated)
+    tool_input = {
+        "template_url": "templates/app.yml",
+        "stack_name": "preview-stack",
+        "parameters": {"ZoneId": "cn-hangzhou-k"},
+    }
+
     result = await tool.check_permissions(tool_input, _permission_context())
 
-    assert result.behavior == "allow"
-    assert result.audit is not None
-    assert result.audit.is_read_only is True
-    assert result.audit.operation["product"] == "ros"
-    assert result.audit.operation["action"] == expected_action
-
-
-@pytest.mark.asyncio
-async def test_ros_template_tools_allow_local_template_url_under_cwd(tmp_path) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-
-    result = await RosValidateTemplateTool().check_permissions(
-        {"template_url": "templates/app.yml"},
-        ToolPermissionContext(cwd=str(project)),
-    )
-
-    assert result.behavior == "allow"
-    assert result.audit is not None
-    assert result.audit.operation["action"] == "ValidateTemplate"
-
-
-@pytest.mark.asyncio
-async def test_ros_template_tools_ask_before_reading_local_template_url_outside_cwd(tmp_path) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    outside_template = tmp_path / "outside.yml"
-
-    result = await RosValidateTemplateTool().check_permissions(
-        {"template_url": str(outside_template)},
-        ToolPermissionContext(cwd=str(project)),
-    )
-
-    assert result.behavior == "ask"
-    assert result.reason is not None
-    assert result.reason.type == "path_constraint"
-    assert result.audit is not None
-    assert result.audit.operation["product"] == "ros"
-    assert result.audit.operation["action"] == "ValidateTemplate"
-    assert result.audit.reason_type == "path_constraint"
-
-
-@pytest.mark.asyncio
-async def test_ros_template_tools_allow_local_template_url_under_additional_directory(tmp_path) -> None:
-    project = tmp_path / "project"
-    shared = tmp_path / "shared"
-    project.mkdir()
-    shared.mkdir()
-
-    result = await RosValidateTemplateTool().check_permissions(
-        {"template_url": str(shared / "template.yml")},
-        ToolPermissionContext(cwd=str(project), additional_directories=[str(shared)]),
-    )
-
-    assert result.behavior == "allow"
-    assert result.audit is not None
-    assert result.audit.operation["action"] == "ValidateTemplate"
-
-
-@pytest.mark.asyncio
-async def test_ros_template_tools_allow_local_template_url_under_trusted_read_directory(tmp_path) -> None:
-    project = tmp_path / "project"
-    trusted = tmp_path / "trusted"
-    project.mkdir()
-    trusted.mkdir()
-
-    result = await RosValidateTemplateTool().check_permissions(
-        {"template_url": str(trusted / "template.yml")},
-        ToolPermissionContext(cwd=str(project), trusted_read_directories=[str(trusted)]),
-    )
-
-    assert result.behavior == "allow"
-    assert result.audit is not None
-    assert result.audit.operation["action"] == "ValidateTemplate"
-
-
-@pytest.mark.asyncio
-async def test_ros_template_tools_ask_before_reading_sensitive_local_template_url(tmp_path) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-
-    result = await RosValidateTemplateTool().check_permissions(
-        {"template_url": ".env"},
-        ToolPermissionContext(cwd=str(project)),
-    )
-
-    assert result.behavior == "ask"
-    assert result.reason is not None
-    assert result.reason.type == "safety_check"
-
-
-@pytest.mark.asyncio
-async def test_ros_template_tools_honor_aliyun_api_action_deny_rule() -> None:
-    result = await RosPreviewTemplateTool().check_permissions(
-        {
-            "template_url": "templates/app.yml",
-            "stack_name": "preview-stack",
-            "parameters": {"ZoneId": "cn-hangzhou-k"},
-        },
-        _permission_context(deny={"session": ["aliyun_api(ros:PreviewStack)"]}),
-    )
-
-    assert result.behavior == "deny"
-    assert result.audit is not None
-    assert result.audit.rule == "ros:PreviewStack"
+    assert result is expected

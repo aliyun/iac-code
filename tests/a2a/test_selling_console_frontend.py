@@ -867,7 +867,10 @@ return {
         "count": 1,
         "index": 3,
         "cost": "¥33.89/月",
-        "prompt": "选择方案3",
+        "prompt": (
+            '{"selected_candidate_name":"低成本 ECS 方案","selected_candidate_index":0,'
+            '"selected_evaluated_candidate_index":3}'
+        ),
     }
 
 
@@ -1193,7 +1196,10 @@ return {
     assert output == {
         "sameState": True,
         "selected": 1,
-        "prompt": "选择方案1",
+        "prompt": (
+            '{"selected_candidate_name":"轻量应用服务器一体化方案","selected_candidate_index":1,'
+            '"selected_evaluated_candidate_index":1}'
+        ),
         "emptyPrompt": "",
     }
 
@@ -3652,7 +3658,10 @@ return {
     assert "思考过程" in output["stepText"]
     assert output["planText"] == "已选方案 1轻量应用服务器开箱即用预估价格¥0/月"
     assert output["selectedCandidateIndex"] == 1
-    assert output["composerValue"] == "选择方案1"
+    assert output["composerValue"] == (
+        '{"selected_candidate_name":"轻量应用服务器","selected_candidate_index":0,'
+        '"selected_evaluated_candidate_index":1}'
+    )
 
 
 def test_controller_step_four_selection_ui_syncs_with_right_plan_cards() -> None:
@@ -3738,7 +3747,9 @@ return {
         {"index": "1", "pressed": "true", "className": "plan-card selected recommended"},
     ]
     assert output["selectedCandidateIndex"] == 1
-    assert output["composerValue"] == "选择方案1"
+    assert output["composerValue"] == (
+        '{"selected_candidate_name":"VPC 含交换机","selected_candidate_index":1,"selected_evaluated_candidate_index":1}'
+    )
 
 
 def test_controller_step_four_waiting_input_keeps_thinking_process_available() -> None:
@@ -3828,7 +3839,10 @@ return {
         "cardCount": 1,
         "optionCount": 1,
         "selectedCandidateIndex": 1,
-        "composerValue": "选择方案1",
+        "composerValue": (
+            '{"selected_candidate_name":"轻量应用服务器","selected_candidate_index":0,'
+            '"selected_evaluated_candidate_index":1}'
+        ),
     }
 
 
@@ -3895,7 +3909,10 @@ return {
         "planClass": "plan-card selected recommended",
         "selectedCandidateIndex": 1,
         "selectedPendingInputOptionId": "balanced-plan",
-        "composerValue": "选择方案1",
+        "composerValue": (
+            '{"selected_candidate_name":"均衡型演示方案","selected_candidate_index":0,'
+            '"selected_evaluated_candidate_index":1}'
+        ),
     }
 
 
@@ -3929,7 +3946,10 @@ return {
             "index": "1",
             "pressed": "true",
         },
-        "prompt": "选择方案1",
+        "prompt": (
+            '{"selected_candidate_name":"轻量应用服务器一体化方案","selected_candidate_index":1,'
+            '"selected_evaluated_candidate_index":1}'
+        ),
     }
 
 
@@ -4030,7 +4050,10 @@ return {
             {"index": "0", "pressed": "false"},
             {"index": "1", "pressed": "true"},
         ],
-        "prompt": "选择方案1",
+        "prompt": (
+            '{"selected_candidate_name":"轻量应用服务器一体化方案","selected_candidate_index":1,'
+            '"selected_evaluated_candidate_index":1}'
+        ),
     }
 
 
@@ -4872,6 +4895,45 @@ return {
         "taskId": "task-1",
         "contextId": "ctx-1",
         "stepId": "architecture_planning",
+    }
+
+
+def test_reducer_applies_pipeline_batch_events_in_order() -> None:
+    output = reducer_harness(
+        """
+const state = reducers.createInitialState();
+state.currentStepId = "architecture_planning";
+state.steps.architecture_planning.status = "working";
+const next = reducers.reducePipelinePayload(state, {
+  metadata: {iac_code: {pipelineBatch: {events: [
+    {
+      eventType: "text_delta",
+      sequence: 10,
+      taskId: "task-1",
+      contextId: "ctx-1",
+      step: {id: "architecture_planning"},
+      data: {text: "first"}
+    },
+    {
+      eventType: "text_delta",
+      sequence: 11,
+      taskId: "task-1",
+      contextId: "ctx-1",
+      step: {id: "architecture_planning"},
+      data: {text: "second"}
+    }
+  ]}}}
+});
+return {
+  lastSequence: next.lastSequence,
+  texts: next.steps.architecture_planning.events.map((event) => event.data.text)
+};
+"""
+    )
+
+    assert output == {
+        "lastSequence": 11,
+        "texts": ["first", "second"],
     }
 
 

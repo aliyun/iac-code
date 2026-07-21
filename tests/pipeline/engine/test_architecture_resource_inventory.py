@@ -7,10 +7,12 @@ import pytest
 
 from iac_code.pipeline.engine.architecture_meta import ArchitectureMetaRepository
 from iac_code.pipeline.engine.architecture_resource_inventory import (
+    AliyunRosResourceTypeClient,
     RosResourceTypeDetail,
     build_resource_inventory_snapshot,
     collect_ros_resource_inventory,
 )
+from iac_code.tools.base import ToolResult
 
 
 def _meta_repo() -> ArchitectureMetaRepository:
@@ -181,3 +183,24 @@ async def test_collect_inventory_uses_cache_and_records_fetch_errors(tmp_path: P
     assert "ALIYUN::VPC::Cached" in cached
     assert "temporary throttling" in cached
     assert "access_key" not in cached.lower()
+
+
+@pytest.mark.asyncio
+async def test_aliyun_inventory_client_receives_only_bound_internal_caller() -> None:
+    class BoundInternalCaller:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def call(self, *, tool_input, context):
+            self.calls.append((tool_input, context))
+            if tool_input["action"] == "ListResourceTypes":
+                return ToolResult.success('{"ResourceTypes": ["ALIYUN::ECS::VPC"]}')
+            return ToolResult.success('{"ResourceType": "ALIYUN::ECS::VPC"}')
+
+    caller = BoundInternalCaller()
+    client = AliyunRosResourceTypeClient(caller)
+
+    assert await client.list_resource_types() == ["ALIYUN::ECS::VPC"]
+    assert (await client.get_resource_type("ALIYUN::ECS::VPC"))["ResourceType"] == "ALIYUN::ECS::VPC"
+    assert [call[0]["action"] for call in caller.calls] == ["ListResourceTypes", "GetResourceType"]
+    assert all(call[1].snapshot_id is None for call in caller.calls)

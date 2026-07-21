@@ -7,12 +7,14 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from iac_code.i18n import _
 from iac_code.services.telemetry import add_metric, log_event, start_span
 from iac_code.services.telemetry.config import should_capture_content_on_span
 from iac_code.services.telemetry.content_serializer import serialize_tool_arguments, serialize_tool_result
 from iac_code.services.telemetry.names import Events, GenAiAttr, GenAiOperationName, GenAiSpanKind, Metrics, Spans
 from iac_code.services.telemetry.sanitize import sanitize_error_message, sanitize_tool_name
 from iac_code.tools.base import ToolContext, ToolResult
+from iac_code.types.permissions import ExecutionClass, InvocationBinding
 
 if TYPE_CHECKING:
     from iac_code.tools.base import ToolRegistry
@@ -24,6 +26,10 @@ class ToolCallRequest:
     name: str
     input: dict
     event_queue: asyncio.Queue | None = None
+    invocation_binding: InvocationBinding | None = None
+    snapshot_id: str | None = None
+    security_digest: str | None = None
+    execution_class: ExecutionClass | None = None
 
 
 class ToolExecutor:
@@ -41,25 +47,37 @@ class ToolExecutor:
         """Partition calls into concurrent (read-only) and serial (write) batches."""
         concurrent, serial = [], []
         for call in calls:
-            tool = self._registry.get(call.name)
-            if tool and tool.is_concurrency_safe(call.input):
+            if self._is_concurrent(call):
                 concurrent.append(call)
             else:
                 serial.append(call)
         return concurrent, serial
 
+    def _is_concurrent(self, call: ToolCallRequest) -> bool:
+        tool = self._registry.get(call.name)
+        if tool is None:
+            return False
+        if getattr(tool, "requires_runtime_execution_class", False):
+            return call.execution_class == "concurrent"
+        return tool.is_concurrency_safe(call.input)
+
     async def _validate_and_execute(self, call: ToolCallRequest, context: ToolContext) -> ToolResult:
         """Validate input then execute. Returns error ToolResult on validation failure."""
         tool = self._registry.get(call.name)
         if not tool:
-            return ToolResult.error(f"Unknown tool: {call.name}")
+            return ToolResult.error(_("Unknown tool: {tool_name}").format(tool_name=call.name))
 
         # Input validation
         valid, error = tool.validate_input(call.input)
         if not valid:
+            tool_error = tool.validation_error_result(call.input)
+            if tool_error is not None:
+                return tool_error
             return ToolResult.error(
-                f"Invalid input for tool '{call.name}': {error}. "
-                f"Please provide all required parameters as defined in the tool schema."
+                _(
+                    "Invalid input for tool '{tool_name}': {error}. "
+                    "Please provide all required parameters as defined in the tool schema."
+                ).format(tool_name=call.name, error=error)
             )
 
         # Pass event_queue from call to context for tools that emit progress events.
@@ -78,6 +96,10 @@ class ToolExecutor:
             pipeline_mode=context.pipeline_mode,
             env_overrides=dict(context.env_overrides),
             permission_context=context.permission_context,
+            invocation_binding=call.invocation_binding,
+            snapshot_id=call.snapshot_id,
+            security_digest=call.security_digest,
+            execution_class=call.execution_class,
         )
 
         timeout = tool.timeout if tool.timeout is not None else self._tool_timeout
@@ -97,7 +119,7 @@ class ToolExecutor:
         if tool.description:
             span_attrs[GenAiAttr.TOOL_DESCRIPTION] = tool.description
         if should_capture_content_on_span():
-            span_attrs[GenAiAttr.TOOL_CALL_ARGUMENTS] = serialize_tool_arguments(call.input)
+            span_attrs[GenAiAttr.TOOL_CALL_ARGUMENTS] = serialize_tool_arguments(call.input, tool_name=call.name)
 
         try:
             with start_span(span_name, span_attrs) as span:
@@ -107,7 +129,7 @@ class ToolExecutor:
                 )
                 duration_ms = int((time.monotonic() - started) * 1000)
                 if should_capture_content_on_span():
-                    span.set_attribute(GenAiAttr.TOOL_CALL_RESULT, serialize_tool_result(result))
+                    span.set_attribute(GenAiAttr.TOOL_CALL_RESULT, serialize_tool_result(result, tool_name=call.name))
                 log_event(Events.TOOL_USE_SUCCEEDED, {"tool_name": tool_name, "duration_ms": duration_ms})
                 add_metric(Metrics.TOOL_USE_COUNT, 1, {"tool_name": tool_name, "outcome": "success"})
                 return result
@@ -121,7 +143,12 @@ class ToolExecutor:
                 },
             )
             add_metric(Metrics.TOOL_USE_COUNT, 1, {"tool_name": tool_name, "outcome": "error"})
-            return ToolResult.error(f"Tool '{call.name}' timed out after {timeout}s")
+            timeout_error = tool.timeout_error_result_with_context(call.input, timeout, context)
+            if timeout_error is not None:
+                return timeout_error
+            return ToolResult.error(
+                _("Tool '{tool_name}' timed out after {timeout}s").format(tool_name=call.name, timeout=timeout)
+            )
         except Exception as e:
             log_event(
                 Events.TOOL_USE_FAILED,
@@ -132,7 +159,7 @@ class ToolExecutor:
                 },
             )
             add_metric(Metrics.TOOL_USE_COUNT, 1, {"tool_name": tool_name, "outcome": "error"})
-            return ToolResult.error(f"Tool '{call.name}' failed: {e}")
+            return ToolResult.error(_("Tool '{tool_name}' failed: {error}").format(tool_name=call.name, error=e))
 
     async def _execute_concurrent(
         self, calls: list[ToolCallRequest], context: ToolContext
@@ -175,8 +202,7 @@ class ToolExecutor:
             concurrent_batch = []
 
         for call in calls:
-            tool = self._registry.get(call.name)
-            if tool and tool.is_concurrency_safe(call.input):
+            if self._is_concurrent(call):
                 concurrent_batch.append(call)
                 continue
             await flush_concurrent_batch()

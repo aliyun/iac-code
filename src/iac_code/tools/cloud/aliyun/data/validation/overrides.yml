@@ -1,0 +1,2757 @@
+schema_version: 1
+
+products:
+  AccountCenter:
+    "2024-12-09":
+      prefer:
+        - AccountContactQueryPageList
+  AIDeepSign:
+    "2026-05-11":
+      prefer:
+        - GetImageDetectionTaskResult
+  address-purification:
+    "2019-11-18":
+      prefer:
+        - GetZipcode
+  aiccs:
+    "2019-10-15":
+      prefer:
+        - ListTask
+      skip:
+        GetSeatInformation:
+          reason: live_validation_resource_precondition
+          note: API requires a real AICCS instance and seat context; same product-version has safer HTTP 200 task-list alternative.
+        QueryTickets:
+          reason: live_validation_resource_precondition
+          note: API requires a real AICCS instance and ticket context; same product-version has safer HTTP 200 task-list alternative.
+    "2023-05-16":
+      version_blocker:
+        category: live_validation_product_unsubscribed
+        reason: Multiple safe read alternatives reached the target service and returned isv.PRODUCT_UN_SUBSCRIPT.
+        note: Continue only after the account subscribes/enables the aiccs industry edition product.
+      skip:
+        AgentCancelCall:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API name and semantics cancel an outbound call despite read metadata; do not execute in automatic validation, continue with same-version safe alternatives.
+        AgentRecoverCall:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API name and semantics recover an outbound call despite read metadata; do not execute in automatic validation, continue with same-version safe alternatives.
+        TaskCancelCall:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API name and semantics cancel outbound tasks despite read metadata; do not execute in automatic validation, continue with same-version safe alternatives.
+        TaskRecoverCall:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API name and semantics recover outbound calls despite read metadata; do not execute in automatic validation, continue with same-version safe alternatives.
+        TaskList:
+          reason: live_validation_product_unsubscribed
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 isv.PRODUCT_UN_SUBSCRIPT; continue with same-version safe alternatives before keeping an account/product blocker.
+        TemplateList:
+          reason: live_validation_product_unsubscribed
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 isv.PRODUCT_UN_SUBSCRIPT; continue with same-version safe alternatives before keeping an account/product blocker.
+        Details:
+          reason: live_validation_product_unsubscribed
+          note: API requires a real TaskId and same product-version safe reads returned HTTP 400 isv.PRODUCT_UN_SUBSCRIPT on 2026-07-15; continue only after account/product subscription is available.
+        Page:
+          reason: live_validation_product_unsubscribed
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 isv.PRODUCT_UN_SUBSCRIPT; continue with same-version safe alternatives before keeping an account/product blocker.
+  AiSearchEngine:
+    "2026-04-17":
+      prefer:
+        - GetDatasetResourceUrl
+  AlikafkaKopilot:
+    "2026-04-14":
+      prefer:
+        - KopilotQueryStatus
+      skip:
+        KopilotFeedback:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API writes user feedback despite read metadata; do not execute in automatic validation, continue with same-version safe alternatives.
+        KopilotChatStream:
+          reason: live_validation_interactive_or_ai_inference_precondition
+          note: API sends a chat message to an agent stream; do not execute in automatic validation, continue with same-version safe alternatives.
+        KopilotListConversationChatMessages:
+          reason: live_validation_input_or_service_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 with public error code 400; continue with corrected input or same-version safe alternatives.
+  AiMiaoBi:
+    "2023-08-01":
+      skip:
+        GetHotTopicBroadcast:
+          reason: live_validation_resource_precondition
+          note: API requires a real workspace; continue with same-version no-resource read candidates first.
+        GetPptArtifact:
+          reason: live_validation_resource_or_account_precondition
+          note: API depends on account/workspace context; same-version no-resource read alternatives returned account permission constraints.
+        ListPptArtifacts:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the official cn-beijing endpoint on 2026-07-15 but returned HTTP 403 AccessForbid.
+        ListAutoClipsTask:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the official cn-beijing endpoint on 2026-07-15 but returned HTTP 403 AccessForbid.
+        GetClipsBuildInResource:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the official cn-beijing endpoint on 2026-07-15 but returned HTTP 403 AccessForbid.
+        ListPptTemplates:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403 AccessForbid.
+        ListEnterprisePptTemplates:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403 AccessForbid.
+        QueryAuditTask:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service in cn-beijing on 2026-07-15 but returned HTTP 403 AccessForbid.
+        ListGeneralConfigs:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service in cn-beijing on 2026-07-16 with WorkspaceId and pagination parameters but returned HTTP 403 AccessForbid; structured semantic judgment records this as account permission evidence for the version.
+        GetGeneralConfig:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service in cn-beijing on 2026-07-16 with WorkspaceId and ConfigKey but returned HTTP 403 AccessForbid.
+        ListVersions:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service in cn-beijing on 2026-07-16 with AgentKey but returned HTTP 403 Forbidden.
+        ListCustomText:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service in cn-beijing on 2026-07-16 with AgentKey and CommodityCode but returned HTTP 403 Forbidden.
+        ListHotTopics:
+          reason: live_validation_resource_precondition
+          note: API requires a real AgentKey; continue with same-version no-resource read candidates first.
+        SearchNews:
+          reason: live_validation_resource_precondition
+          note: API requires a real AgentKey; continue with same-version no-resource read candidates first.
+  airticketOpen:
+    "2023-01-17":
+      prefer:
+        - GetToken
+  acm:
+    "2020-02-06":
+      prefer:
+        - DescribeNamespaces
+      skip:
+        CheckConfigurationClone:
+          reason: live_validation_resource_precondition
+          note: API requires concrete namespace clone inputs; same product-version has safer HTTP 200 namespace list alternative.
+  alikafka:
+    "2019-09-16":
+      prefer:
+        - GetAllInstanceIdList
+      skip:
+        UpgradePostPayOrder:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API upgrades an instance despite read metadata and requires a real instance; same product-version has safer HTTP 200 instance-list alternative.
+  APIG:
+    "2024-03-27":
+      prefer:
+        - ListConsumers
+      skip:
+        DeployHttpApi:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API deploys an HTTP API despite read metadata; same product-version has safer HTTP 200 consumer-list alternative.
+  appflow:
+    "2023-09-04":
+      prefer:
+        - ListFlows
+      skip:
+        InvokeAction:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API invokes an action and requires real connector/action identifiers; same product-version has safer HTTP 200 flow-list alternative.
+  appstream-center:
+    "2021-02-18":
+      prefer:
+        - GetAuthCode
+      skip:
+        GetStsToken:
+          reason: live_validation_input_or_contract_precondition
+          note: Earlier cn-hangzhou probes returned generic HTTP 400 without enough service semantics; GetAuthCode in cn-shanghai with AutoCreateUser=false returned HTTP 200 and is the safer validation representative.
+    "2021-02-20":
+      prefer:
+        - FindIdpListByLoginIdentifier
+      skip:
+        GetLoginToken:
+          reason: live_validation_input_precondition
+          note: After Anonymous security support was enabled, live validation reached the target service in cn-shanghai on 2026-07-17 but returned HTTP 400 MissingLoginIdentifier; correct input is needed, so this API is not the version representative.
+        GetStsToken:
+          reason: live_validation_business_token_precondition
+          note: After Anonymous security support was enabled, live validation reached the target service in cn-shanghai on 2026-07-17 but returned HTTP 400 AuthCode.Invalid for a validation placeholder; FindIdpListByLoginIdentifier produced clearer tenant-domain semantics for the same version.
+    "2021-09-03":
+      prefer:
+        - ListRunningApps
+      skip:
+        ListPublishedAppInfo:
+          reason: live_validation_security_contract_precondition
+          note: Live validation reached the target service in cn-shanghai on 2026-07-17 with CategoryType and SortType but returned HTTP 400 InvalidParameter.loginToken; hidden client loginToken/session context is required, so this API is not a valid cloud-account probe.
+  avatar:
+    "2022-01-30":
+      prefer:
+        - QueryVideoTaskInfo
+  BssOpenApi:
+    "2017-12-14":
+      prefer:
+        - QuerySavingsPlansDiscount
+      skip:
+        DescribeProductAmortizedCostByConsumePeriod:
+          reason: live_validation_billing_resource_precondition
+          note: API requires amortized cost query context; same product-version has safer HTTP 200 savings-plan discount query alternative.
+  bailian:
+    "2023-06-01":
+      prefer:
+        - ListDocumentTags
+      skip:
+        DescribeDoc:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service in cn-beijing on 2026-07-17 with AgentKey and DocId placeholders but returned HTTP 403 Forbidden; the bare Forbidden code is not strong enough for service-reached success, so keep it as exploration evidence only.
+        ListDocs:
+          reason: live_validation_resource_precondition
+          note: API requires real AgentKey and document context; use ListDocumentTags as the least risky explored representative, but do not count the version as closed without stronger permission or tenant semantics.
+    "2023-12-29":
+      prefer:
+        - GetAlipayTransferStatus
+      skip:
+        ListChunks:
+          reason: live_validation_resource_precondition
+          note: API requires a real workspace and document/chunk context; same product-version has safer HTTP 200 status query alternative.
+        Retrieve:
+          reason: live_validation_resource_or_ai_inference_precondition
+          note: API performs retrieval against a real knowledge resource; same product-version has safer HTTP 200 status query alternative.
+  BailianVoiceBot:
+    "2025-01-01":
+      prefer:
+        - ListVoiceEngines
+      skip:
+        ExportVocabulary:
+          reason: live_validation_artifact_or_resource_precondition
+          note: API exports vocabulary content and depends on vocabulary context; same product-version has safer HTTP 200 voice-engine list alternative.
+  btripOpen:
+    "2022-05-17":
+      skip:
+        ScanMsgList:
+          reason: live_validation_security_contract_precondition
+          note: API metadata declares an authentication shape unsupported by the current AK/OAuth STS production chain; continue with same-version safe alternatives.
+    "2022-05-20":
+      prefer:
+        - VatInvoiceScanQuery
+      skip:
+        BatchSubmitPreBill:
+          reason: live_validation_business_credential_or_side_effect_precondition
+          note: Btrip pre-bill submission is not a safe read probe and requires enterprise btrip business credentials.
+        CarApplyAdd:
+          reason: live_validation_side_effect_and_business_credential_precondition
+          note: API synchronizes car approval data and requires enterprise btrip business credentials; do not execute in automatic validation.
+        CarSceneQuery:
+          reason: live_validation_business_credential_precondition
+          note: API metadata says the request must include x-acs-btrip-corp-token and approved business-control permission; current production cloud credential chain does not provide that business token.
+        ConfirmPreBill:
+          reason: live_validation_business_credential_or_side_effect_precondition
+          note: Pre-bill confirmation is not a safe read probe and requires enterprise btrip business credentials.
+        EstimatedPriceQueryV2:
+          reason: live_validation_business_credential_precondition
+          note: Live validation on 2026-07-17 with only cloud AK/OAuth STS credentials stopped before target request because this API authentication is unsupported; metadata requires x-acs-btrip-so-corp-token and value-added data permission approval.
+        IntlFlightReShopListSearch:
+          reason: live_validation_business_resource_and_credential_precondition
+          note: API requires real order/passenger journey inputs and btrip enterprise business credentials; do not construct placeholder order data for automated validation.
+  BPStudio:
+    "2021-09-31":
+      prefer:
+        - ListTemplate
+      skip:
+        GetLinkageAttributesTemplate:
+          reason: live_validation_resource_precondition
+          note: API requires linkage template context; same product-version has safer HTTP 200 template-list alternative.
+  cams:
+    "2020-06-06":
+      prefer:
+        - GetDownloadExcelList
+      skip:
+        ModifyChatappTemplate:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API modifies a ChatApp template despite validation being read-only; same product-version has safer HTTP 200 download-list alternative.
+  CarbonFootprint:
+    "2023-07-11":
+      prefer:
+        - GetSummaryData
+      skip:
+        QueryCarbonTrack:
+          reason: live_validation_input_or_service_precondition
+          note: Live validation reached the target service on 2026-07-15 with HTTP 400 code 30010; a 2026-07-16 retry with StartTime, EndTime, Group, TopNum, UseCode, and FilterRDAccount returned HTTP 400 code 34801. Numeric product codes remain insufficient for service-reached success without stronger semantic evidence; continue with corrected input or same-version safe alternatives.
+        QueryMultiAccountCarbonTrack:
+          reason: live_validation_metadata_or_method_precondition
+          note: Live validation on 2026-07-17 found aliyun_api_doc could not resolve this action while the target request returned HTTP 403 UnsupportedHTTPMethod; treat this as OpenMeta/API method-contract evidence, not product-version success.
+        Verify:
+          reason: live_validation_input_or_service_precondition
+          note: Live validation reached the target service on 2026-07-15 and again on 2026-07-17, including the no-parameter Verify probe, but returned HTTP 400 with public error code 34801; continue with corrected input or same-version safe alternatives.
+  cas:
+    "2020-06-30":
+      prefer:
+        - ListPcaCaCertificate
+      skip:
+        ListTagResources:
+          reason: live_validation_resource_precondition
+          note: API requires tag resource context; same product-version has safer HTTP 200 certificate-list alternative.
+  cloud-siem:
+    "2024-12-12":
+      prefer:
+        - ListNormalizationSecurityDomains
+      skip:
+        ListIncidents:
+          reason: live_validation_resource_precondition
+          note: API depends on incident data and tenant state; same product-version has safer HTTP 200 security-domain list alternative.
+  Chatbot:
+    "2017-10-11":
+      prefer:
+        - ListConversationLogs
+      skip:
+        Chat:
+          reason: live_validation_side_effect_or_interactive_precondition
+          note: API performs an interactive chat action; same product-version has safer HTTP 200 conversation-log list alternative.
+    "2022-04-08":
+      version_blocker:
+        category: live_validation_account_permission_precondition
+        reason: Multiple safe read alternatives reached the target service and returned HTTP 403.
+        note: Continue only after the account has Chatbot tenant/product permissions or a valid chatbot instance context.
+      skip:
+        BeginSession:
+          reason: live_validation_interactive_or_session_precondition
+          note: API starts a chatbot session and may create conversational state; do not execute in automatic validation, continue with same-version safe alternatives.
+        Chat:
+          reason: live_validation_interactive_or_ai_inference_precondition
+          note: API performs an interactive chatbot call and requires a real InstanceId; do not execute in automatic validation, continue with same-version safe alternatives.
+        DescribeFaq:
+          reason: live_validation_resource_precondition
+          note: API requires a real KnowledgeId; do not execute in automatic validation, continue with same-version safe alternatives.
+        DescribeDoc:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403; continue with same-version safe read alternatives before keeping a version-level account blocker.
+        DescribeIntent:
+          reason: live_validation_resource_precondition
+          note: API requires real chatbot InstanceId and IntentId resources; do not execute in automatic validation, continue with same-version safe alternatives.
+        GetAgentInfo:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403; continue with same-version safe read alternatives before keeping a version-level account blocker.
+        ListAgent:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403; continue with same-version safe read alternatives before keeping a version-level account blocker.
+        ListInstance:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403; continue with same-version safe read alternatives before keeping a version-level account blocker.
+        ListCategory:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403; continue with same-version safe read alternatives before keeping a version-level account blocker.
+        ListSolution:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403; continue with same-version safe read alternatives before keeping a version-level account blocker.
+        SearchFaq:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403; continue with same-version safe read alternatives before keeping a version-level account blocker.
+        SearchDoc:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403; continue with same-version safe read alternatives before keeping a version-level account blocker.
+  Cloudauth:
+    "2019-03-07":
+      prefer:
+        - DescribeVerifySearchPageList
+      skip:
+        DetectFaceAttributes:
+          reason: live_validation_account_permission_precondition
+          note: API returned account/service permission constraints during live validation; same product-version has safer HTTP 200 verification-search alternative.
+    "2022-11-25":
+      prefer:
+        - EntVerify
+      allow_non_read_fallback:
+        EntVerify:
+          reason: live_validation_identity_authorization_semantic_probe
+          note: Audited placeholder EntVerify probe with UserAuthorization=true reached the Cloudauth target service on 2026-07-18 and returned HTTP 403 Forbidden.NoUserAuthorization / Obtain user authorization; use only as semantic validation evidence and do not substitute real enterprise or person identity fields automatically.
+  cloudcontrol:
+    "2022-08-30":
+      prefer:
+        - ListResourceTypes
+      skip:
+        GetApiPrice:
+          reason: live_validation_price_or_input_precondition
+          note: API requires a valid pricing request body and may involve price lookup semantics; same product-version has safer HTTP 200 resource-type list alternative.
+  cloudsso:
+    "2021-05-15":
+      prefer:
+        - ListDirectories
+        - ListUsers
+      skip:
+        GetUserId:
+          reason: live_validation_resource_precondition
+          note: API requires a real external user identifier; same product-version has safer HTTP 200 directory/user list alternatives.
+  Cms:
+    "2024-03-30":
+      prefer:
+        - GetEntityStoreData
+        - ListContacts
+      skip:
+        QueryAlertRules:
+          reason: live_validation_resource_or_workspace_precondition
+          note: API depends on alert/workspace context; same product-version has safer HTTP 200 entity/contact alternatives.
+  ComputeNestSupplier:
+    "2021-05-21":
+      prefer:
+        - GetSupplierInformation
+      skip:
+        GetNetworkAvailableZones:
+          reason: live_validation_service_or_input_precondition
+          note: API returned service/input instability during live validation; same product-version has safer HTTP 200 supplier-information alternative.
+  ContactCenterAI:
+    "2024-06-03":
+      prefer:
+        - ListVocab
+      skip:
+        GetVocab:
+          reason: live_validation_input_precondition
+          note: Live validation reached the target service in catalog region cn-shanghai on 2026-07-15 but returned HTTP 400 MissingvocabularyId; continue with corrected input or same-version safe alternatives.
+  devops:
+    "2021-06-25":
+      prefer:
+        - ListJoinedOrganizations
+      skip:
+        GetTestcaseList:
+          reason: live_validation_resource_precondition
+          note: API requires a real organization/project/testcase context; same product-version has safer HTTP 200 joined-organization list alternative.
+  Devs:
+    "2023-07-14":
+      prefer:
+        - ListConnections
+      skip:
+        RenderServicesByTemplate:
+          reason: live_validation_resource_or_template_precondition
+          note: API renders services from a template and requires template input; same product-version has safer HTTP 200 connection-list alternative.
+  composer:
+    "2018-12-12":
+      prefer:
+        - ListFlows
+      skip:
+        ListTagResources:
+          reason: live_validation_resource_precondition
+          note: API requires tag resource context; same product-version has safer HTTP 200 flow-list alternative.
+  DAS:
+    "2020-01-16":
+      prefer:
+        - GetAutoIncrementUsageStatistic
+      skip:
+        DescribeSqlLogTasks:
+          reason: live_validation_input_or_resource_precondition
+          note: API requires SQL log task query context; same product-version has safer HTTP 200 auto-increment statistic alternative.
+  DataAnalysisGBI:
+    "2024-08-23":
+      prefer:
+        - ListColumn
+  dataworks-public:
+    "2020-05-18":
+      prefer:
+        - ListFiles
+      skip:
+        GetMetaTablePartition:
+          reason: live_validation_resource_precondition
+          note: API requires real metatable partition context; same product-version has safer HTTP 200 file-list alternative.
+        TestDataServiceApi:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API tests a concrete data service API; same product-version has safer HTTP 200 file-list alternative.
+  dataphin-public:
+    "2023-06-30":
+      prefer:
+        - GetMyTenants
+  dms-enterprise:
+    "2018-11-01":
+      prefer:
+        - ListInventoryJobs
+      skip:
+        GetDataCorrectBackupFiles:
+          reason: live_validation_resource_precondition
+          note: API requires a real data-correct backup context; same product-version has safer HTTP 200 inventory-job list alternative.
+        SearchWorkspaceRoles:
+          reason: live_validation_resource_precondition
+          note: API requires workspace role context; same product-version has safer HTTP 200 inventory-job list alternative.
+  Dts:
+    "2020-01-01":
+      prefer:
+        - DescribeMigrationJobs
+      skip:
+        ModifyDtsJob:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API modifies a DTS job despite validation being read-only; same product-version has safer HTTP 200 migration-job list alternative.
+  Dyplsapi:
+    "2017-05-25":
+      prefer:
+        - QueryPhoneNoAByTrackNo
+      skip:
+        CreatePickUpWaybillPreQuery:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API creates a pickup waybill pre-query and depends on business data; same product-version has safer HTTP 200 phone-number query alternative.
+  eds-aic:
+    "2023-09-30":
+      prefer:
+        - ListPolicyGroups
+      skip:
+        CreateCloudPhoneNode:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API creates cloud phone nodes despite validation being read-only; same product-version has safer HTTP 200 policy-group list alternative.
+  energyExpertExternal:
+    "2022-09-23":
+      prefer:
+        - GetChatList
+      skip:
+        AISearchResourceGetList:
+          reason: live_validation_service_or_input_precondition
+          note: API returned service/input instability during live validation; same product-version has safer HTTP 200 chat-list alternative.
+  Eiam-developerapi:
+    "2022-02-25":
+      prefer:
+        - ObtainCredential
+      skip:
+        ValidateAuthenticationToken:
+          reason: live_validation_superseded_by_stronger_safe_probe
+          note: The placeholder token probe returned HTTP 404 without public error semantics; the same version now has a stronger read-only ObtainCredential probe returning instance_not_found.
+        ListAuthenticationTokens:
+          reason: live_validation_superseded_by_stronger_safe_probe
+          note: The list API depends on a real IDaaS bearer context; the same version now has a read-only ObtainCredential placeholder probe with explicit instance_not_found business semantics.
+        ListUsers:
+          reason: live_validation_superseded_by_stronger_safe_probe
+          note: The list API depends on a real IDaaS bearer context; the same version now has a read-only ObtainCredential placeholder probe with explicit instance_not_found business semantics.
+        GetUserIdByEmail:
+          reason: live_validation_superseded_by_stronger_safe_probe
+          note: The lookup API depends on a real IDaaS bearer context; the same version now has a read-only ObtainCredential placeholder probe with explicit instance_not_found business semantics.
+  eventbridge:
+    "2020-04-01":
+      prefer:
+        - QueryTracedEvents
+      skip:
+        EventCenterQueryEvents:
+          reason: live_validation_resource_or_event_precondition
+          note: API depends on event-center query context; same product-version has safer HTTP 200 traced-event query alternative.
+  ExpressConnectRouter:
+    "2023-09-01":
+      prefer:
+        - ListExpressConnectRouterSupportedRegion
+      skip:
+        DescribeFlowLogs:
+          reason: live_validation_resource_precondition
+          note: API requires real ECR flow-log resources; same product-version has safer HTTP 200 supported-region list alternative.
+  Hologram:
+    "2022-06-01":
+      prefer:
+        - DescribeTags
+      skip:
+        ListDatabases:
+          reason: live_validation_resource_precondition
+          note: API requires a real Hologres instance or database context; same product-version has safer HTTP 200 tag-description alternative.
+  imm:
+    "2020-09-30":
+      prefer:
+        - ListProjects
+      skip:
+        CompareImageFaces:
+          reason: live_validation_resource_or_ai_inference_precondition
+          note: API performs image-face comparison and requires concrete media inputs; same product-version has safer HTTP 200 project-list alternative.
+        ContextualRetrieval:
+          reason: live_validation_resource_or_ai_inference_precondition
+          note: API performs contextual retrieval and requires a real project/dataset context; same product-version has safer HTTP 200 project-list alternative.
+  imp:
+    "2021-06-30":
+      prefer:
+        - DescribeMeterImpWatchLiveTimeByLiveId
+      skip:
+        ListConferenceUsers:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-17 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        ListLiveRoomsById:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-17 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        ListRooms:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-17 with an AppId placeholder and pagination parameters but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        GetConference:
+          reason: live_validation_resource_precondition
+          note: API requires a real ConferenceId; same version has already exercised safer list probes that reached the target service and returned HTTP 503, so do not leave this resource-bound action as untested.
+        DescribeMeterImpPlayBackTimeByLiveId:
+          reason: live_validation_resource_precondition
+          note: API requires a real AppId and LiveId time range; same version has already exercised safer list probes that reached the target service and returned HTTP 503, so do not leave this resource-bound action as untested.
+        ListClasses:
+          reason: live_validation_resource_precondition
+          note: API requires a real AppId and class context; same version has already exercised safer list probes that reached the target service and returned HTTP 503, so do not leave this resource-bound action as untested.
+  Kms:
+    "2016-01-20":
+      prefer:
+        - ListKmsInstances
+      skip:
+        Decrypt:
+          reason: live_validation_resource_precondition
+          note: API requires a real ciphertext/key context; same product-version has safer HTTP 200 KMS-instance list alternative.
+  Iot:
+    "2016-01-04":
+      version_blocker:
+        category: live_validation_stable_503_or_side_effect_precondition
+        reason: The only list-style representative reached the reviewed cn-shanghai IoT endpoint on 2026-07-17 but returned HTTP 503 ServiceUnavailable; remaining same-version APIs publish, subscribe, grant, revoke, or modify device state and are not safe automatic validation probes.
+        note: Continue only after service recovery for ListDevicePermits or with explicitly approved disposable IoT device resources; do not rotate to Pub/Sub/grant/revoke/modify actions in automatic validation.
+      skip:
+        ListDevicePermits:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-17 with AppKey and DeviceId placeholders but returned HTTP 503 ServiceUnavailable.
+    "2016-05-30":
+      version_blocker:
+        category: live_validation_stable_503_or_resource_precondition
+        reason: Multiple same-version safe read probes reached the target service through the reviewed cn-shanghai endpoint override on 2026-07-17 but returned HTTP 503 ServiceUnavailable; remaining candidates require real IoT product, rule or device resources.
+        attempted_actions:
+          - ListRule
+          - QueryProductByUserId
+          - GetCats
+          - GetRule
+          - QueryDevice
+          - QueryApplyStatus
+      skip:
+        ListRule:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service through the reviewed cn-shanghai endpoint override on 2026-07-17 with pagination parameters and returned HTTP 503 ServiceUnavailable across refreshed credential windows; continue with same-version safe read alternatives before keeping an official service blocker.
+        QueryProductByUserId:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service through the reviewed cn-shanghai endpoint override on 2026-07-17 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        GetCats:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service through the reviewed cn-shanghai endpoint override on 2026-07-17 with RootId=0 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        GetRule:
+          reason: live_validation_resource_precondition
+          note: API requires a real RuleId; same version has already exercised multiple safer read-like probes that reached the target service and returned HTTP 503, so do not leave this resource-bound action as untested.
+        QueryDevice:
+          reason: live_validation_resource_precondition
+          note: API requires a real ProductKey and device context; same version has already exercised multiple safer read-like probes that reached the target service and returned HTTP 503, so do not leave this resource-bound action as untested.
+        QueryApplyStatus:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service through the reviewed cn-shanghai endpoint override on 2026-07-17 with ApplyId=0 but returned HTTP 503 ServiceUnavailable; continue only after service recovery or with explicitly approved disposable IoT resources.
+    "2017-06-20":
+      prefer:
+        - GetCats
+    "2017-07-20":
+      prefer:
+        - QueryDeviceByPkAndVersion
+      skip:
+        QueryFirmwareByUid:
+          reason: live_validation_resource_precondition
+          note: API requires real firmware context; same product-version has safer HTTP 200 device-version query alternative.
+    "2018-01-20":
+      prefer:
+        - GetSpeechVoice
+      skip:
+        QueryCertUrlByApplyId:
+          reason: live_validation_resource_precondition
+          note: API requires a real certificate apply context; same product-version has safer HTTP 200 speech-voice query alternative in catalog-supported region.
+  Linkvisual:
+    "2018-01-20":
+      prefer:
+        - QueryTimeTemplate
+      skip:
+        QueryDevicePictureByList:
+          reason: live_validation_resource_precondition
+          note: API requires real device picture context; same product-version has safer HTTP 200 time-template query alternative.
+        QueryLiveStreaming:
+          reason: live_validation_resource_precondition
+          note: API requires real live streaming device context; same product-version has safer HTTP 200 time-template query alternative.
+    "2023-06-30":
+      prefer:
+        - QueryFreeStorage
+      skip:
+        ListBindingDeviceByAccount:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        GetSubDeviceList:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        QueryGenerateDevicesRecord:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-16 but returned HTTP 503 ServiceUnavailable; same-version QueryFreeStorage later reached the target service permission boundary and has a structured semantic judgment.
+        GetAccountById:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service in cn-shanghai on 2026-07-16 and returned HTTP 403 iot.vision.RequestAuthFailed; QueryFreeStorage records the version-level structured semantic judgment.
+  Linkcard:
+    "2021-05-20":
+      prefer:
+        - ListCardInfo
+      skip:
+        GetCardRealStatus:
+          reason: live_validation_resource_precondition
+          note: API requires real card identifiers; same product-version has safer HTTP 200 card-list alternative.
+  linkedmall:
+    "2018-01-16":
+      prefer:
+        - QuerySellerLicense
+      skip:
+        CreateOrder:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API creates an order and has business side effects; same product-version has safer HTTP 200 seller-license query alternative.
+        QueryUnfinishedSessions4Items:
+          reason: live_validation_resource_precondition
+          note: API requires real item/session context; same product-version has safer HTTP 200 seller-license query alternative.
+    "2023-09-30":
+      version_blocker:
+        category: live_validation_stable_5xx_or_service_precondition
+        reason: Multiple same-version order, purchaser, category, selection-pool, and logistics read/list probes reached cn-zhangjiakou but returned HTTP 500 RemoteServerError, HTTP 503 ServiceUnavailable, or hard media/input signals.
+        note: Retry after service recovery or with a documented linkedmall sandbox/resource context; do not rotate to purchase/refund/shipping mutation APIs in automatic validation.
+      skip:
+        GetOrder:
+          reason: live_validation_stable_5xx
+          note: Live validation reached the target service in cn-zhangjiakou on 2026-07-17 with a dummy orderId but returned HTTP 500 RemoteServerError; keep as explored same-version order-read evidence rather than a default representative.
+        GetRefundOrder:
+          reason: live_validation_stable_5xx
+          note: Live validation reached the target service in cn-zhangjiakou on 2026-07-17 with a dummy disputeId but returned HTTP 500 RemoteServerError; continue with same-version safe alternatives or retry later before keeping a version-level service blocker.
+        GetPurchaseOrderStatus:
+          reason: live_validation_stable_5xx
+          note: Live validation reached the target service in cn-zhangjiakou on 2026-07-17 with a dummy purchaseOrderId but returned HTTP 500 RemoteServerError; continue with same-version safe alternatives or retry later before keeping a version-level service blocker.
+        GetPurchaserShop:
+          reason: live_validation_stable_5xx
+          note: Live validation reached the target service in cn-zhangjiakou on 2026-07-17 with a dummy purchaserId but returned HTTP 500 RemoteServerError; continue with same-version safe alternatives or retry later before keeping a version-level service blocker.
+        GetSelectionProduct:
+          reason: live_validation_stable_5xx
+          note: Live validation reached the target service in cn-zhangjiakou on 2026-07-17 with dummy productId and purchaserId values but returned HTTP 500 RemoteServerError; same-version selection pool/list alternatives have also been explored before keeping a version-level service blocker.
+        GetSelectionProductSaleInfo:
+          reason: live_validation_stable_5xx
+          note: Live validation reached the target service in cn-zhangjiakou on 2026-07-17 with dummy productId and purchaserId values but returned HTTP 500 RemoteServerError; continue with same-version safe alternatives or retry later before keeping a version-level service blocker.
+        ListCategories:
+          reason: live_validation_media_type_or_service_precondition
+          note: Earlier probes started around the target request path; round31 on 2026-07-17 reached cn-zhangjiakou and returned HTTP 415 without a public error code. Treat this action as a media-type/contract hard signal while continuing same-version safe alternatives or retrying later.
+        ListLogisticsOrders:
+          reason: live_validation_stable_5xx
+          note: Live validation reached the target service in cn-zhangjiakou on 2026-07-17 with a dummy orderId but returned HTTP 500 RemoteServerError; keep as same-version logistics read evidence while preferring other safe alternatives or retrying later.
+        ListPurchaserShops:
+          reason: live_validation_stable_5xx
+          note: Live validation reached the target service in cn-zhangjiakou on 2026-07-17 and returned HTTP 500 RemoteServerError; continue with remaining same-version safe list alternatives or retry later before keeping a version-level service blocker.
+        ListSelectionProducts:
+          reason: live_validation_stable_5xx
+          note: Live validation reached the target service in cn-zhangjiakou on 2026-07-17 with purchaserId and pagination parameters but returned HTTP 500 RemoteServerError; keep as same-version selection-pool list evidence while preferring other safe alternatives or retrying later.
+        ListSelectionProductSaleInfos:
+          reason: live_validation_stable_5xx
+          note: Live validation reached the target service in cn-zhangjiakou on 2026-07-17 with a safe selection-pool sale-info body and returned HTTP 500 RemoteServerError; continue with remaining same-version safe alternatives or retry later before keeping a version-level service blocker.
+        ListSelectionSkuSaleInfos:
+          reason: live_validation_stable_5xx
+          note: Live validation reached the target service in cn-zhangjiakou on 2026-07-17 with a safe selection-pool SKU sale-info body and returned HTTP 500 RemoteServerError; continue with remaining same-version safe alternatives or retry later before keeping a version-level service blocker.
+        QueryOrders:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-zhangjiakou on 2026-07-17 across refreshed credential windows and returned HTTP 503 ServiceUnavailable; continue with remaining same-version safe list alternatives or retry later before keeping a version-level service blocker.
+        SearchProducts:
+          reason: live_validation_stable_503_or_transport
+          note: Live validation reached the target service in cn-zhangjiakou on 2026-07-16 and returned HTTP 503 ServiceUnavailable; later retries started but did not yield a stronger success signal, so this action should not remain the representative while safer list alternatives are explored.
+        SplitPurchaseOrder:
+          reason: live_validation_input_or_business_precondition
+          note: Live validation reached the target service in cn-zhangjiakou on 2026-07-17 with an empty body but returned HTTP 400 InvalidParameter.InvalidArrayLength; this is not counted as product-version success and should not remain the representative while safer alternatives are explored.
+  live:
+    "2016-11-01":
+      prefer:
+        - DescribeCasters
+      skip:
+        CreateMessageApp:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API creates a message app despite validation being read-only; same product-version has safer HTTP 200 caster-list alternative.
+  MaxCompute:
+    "2022-01-04":
+      prefer:
+        - ListMmsDataSources
+      skip:
+        QueryQuotaMetric:
+          reason: live_validation_resource_precondition
+          note: API requires quota metric dimensions; same product-version has safer HTTP 200 data-source list alternative.
+  OceanBasePro:
+    "2019-09-01":
+      prefer:
+        - DescribeInstanceSummary
+      skip:
+        DescribeTopSQLList:
+          reason: live_validation_resource_precondition
+          note: API requires real SQL/instance metric context; same product-version has safer HTTP 200 instance-summary alternative.
+  ocr-api:
+    "2021-07-07":
+      prefer:
+        - RecognizeMultiLanguage
+      skip:
+        RecognizeAllText:
+          reason: live_validation_input_or_account_precondition
+          note: Live validation reached the target service on 2026-07-17 with a syntactically valid but nonexistent image URL and returned HTTP 400 IllegalImageUrl; the same product-version has a safer RecognizeMultiLanguage probe that returned HTTP 401 ocrServiceNotOpen and is recorded as product activation evidence.
+  OpenITag:
+    "2022-06-16":
+      prefer:
+        - ListTasks
+      skip:
+        ListTenants:
+          reason: live_validation_input_or_tenant_precondition
+          note: Live validation reached the target service on 2026-07-16 with PageNumber/PageSize but returned HTTP 400 iTag.ParameterInvalid; the product-specific prefix shows service routing, but the semantic evidence is still parameter/tenant ambiguous and should not count as success without stronger judgment.
+        ListTemplates:
+          reason: live_validation_resource_precondition
+          note: API requires a real TenantId path parameter; continue only after ListTenants or another safe discovery path yields a valid tenant.
+        CreateTemplate:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API creates a template and requires a real TenantId/body despite read metadata; do not execute in automatic validation, continue with same-version safe alternatives.
+  OpenSearch:
+    "2017-12-25":
+      prefer:
+        - ListInterventionDictionaries
+      skip:
+        CreateABTestGroup:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API creates an AB test group despite the validation target being read-only; same product-version has safer HTTP 200 dictionary-list alternative.
+  Mns-open:
+    "2022-01-19":
+      prefer:
+        - GetEndpointAttribute
+      skip:
+        CreateTopic:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API creates an MNS topic despite the validation target being read-only; same product-version has safer HTTP 200 endpoint-attribute alternative.
+  milvus:
+    "2023-10-12":
+      prefer:
+        - ListInstances
+      skip:
+        TagResources:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API mutates tags despite validation being read-only; same product-version has safer HTTP 200 instance-list alternative.
+  OnsMqtt:
+    "2019-12-11":
+      prefer:
+        - ListGroupId
+    "2020-04-20":
+      prefer:
+        - ListInstances
+      skip:
+        ListGroupId:
+          reason: live_validation_resource_precondition
+          note: API requires a real MQTT group context; same product-version has safer HTTP 200 instance-list alternative.
+  openanalytics-open:
+    "2018-06-19":
+      prefer:
+        - ValidateVirtualClusterName
+      skip:
+        ListSparkJob:
+          reason: live_validation_resource_precondition
+          note: API requires real virtual cluster/job context; same product-version has safer HTTP 200 validation alternative.
+  pai-dlc:
+    "2020-12-03":
+      prefer:
+        - ListEcsSpecs
+      skip:
+        CreateTensorboard:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API creates TensorBoard resources; same product-version has safer HTTP 200 ECS spec list alternative.
+        GetDashboard:
+          reason: live_validation_resource_precondition
+          note: API requires real dashboard context; same product-version has safer HTTP 200 ECS spec list alternative.
+  PaiLLMTrace:
+    "2024-03-11":
+      prefer:
+        - GetEvaluationTemplates
+      skip:
+        GetOnlineEvalTask:
+          reason: live_validation_resource_precondition
+          note: API requires a real online evaluation task; same product-version has safer HTTP 200 evaluation-template alternative.
+  PaiRecService:
+    "2022-12-13":
+      prefer:
+        - ListRecallManagementJobs
+      skip:
+        CheckInstanceResources:
+          reason: live_validation_resource_precondition
+          note: API requires a real PaiRec instance path parameter; same product-version has service-reached recall-management job list alternative.
+        GetScene:
+          reason: live_validation_resource_precondition
+          note: API requires a real scene path parameter; same product-version has service-reached recall-management job list alternative.
+        ListABMetrics:
+          reason: live_validation_resource_precondition
+          note: API requires a real PaiRec InstanceId; same product-version has service-reached recall-management job list alternative.
+        ListRecallManagementServiceVersions:
+          reason: live_validation_resource_precondition
+          note: API requires a real recall-management service identifier; same product-version has service-reached recall-management job list alternative.
+  OutboundBot:
+    "2019-12-26":
+      prefer:
+        - ListAgentProfiles
+      skip:
+        ListInstances:
+          reason: live_validation_account_permission_precondition
+          note: API returned service-not-enabled constraints during live validation; same product-version has safer HTTP 200 agent-profile list alternative.
+  PAICopilot:
+    "2025-07-31":
+      prefer:
+        - ListSessions
+      skip:
+        ListChats:
+          reason: live_validation_resource_precondition
+          note: API requires real chat session context; same product-version has safer HTTP 200 session-list alternative.
+  PAIFlow:
+    "2021-02-02":
+      prefer:
+        - ListPipelineRunsStatus
+        - ListPipelines
+      skip:
+        GetPipelineRun:
+          reason: live_validation_resource_precondition
+          note: API requires a real pipeline run identifier; same product-version has safer HTTP 200 pipeline-list/status alternatives.
+  SchedulerX3:
+    "2024-06-24":
+      prefer:
+        - ListRegions
+      skip:
+        ExportWorkflows:
+          reason: live_validation_artifact_or_resource_precondition
+          note: API exports workflow data and depends on workflow context; same product-version has safer HTTP 200 region-list alternative.
+  searchengine:
+    "2021-10-25":
+      prefer:
+        - DescribeRegions
+      skip:
+        ListRestQueryResult:
+          reason: live_validation_resource_precondition
+          note: API requires query-result context; same product-version has safer HTTP 200 region-list alternative.
+  Sas:
+    "2018-12-03":
+      prefer:
+        - ListAegisContainerPluginRule
+      skip:
+        VerifyCheckCustomConfig:
+          reason: live_validation_input_or_policy_precondition
+          note: API validates custom check configuration input; same product-version has safer HTTP 200 container-plugin rule list alternative.
+    "2021-01-14":
+      prefer:
+        - ListGlobalUserConfig
+      skip:
+        GetFileDetectResultInner:
+          reason: live_validation_resource_precondition
+          note: API requires real file-detection task context; same product-version has safer HTTP 200 global-config list alternative.
+  PaiStudio:
+    "2021-02-02":
+      prefer:
+        - GetAlgoTree
+      skip:
+        QueryExperimentVisualizationData:
+          reason: live_validation_resource_precondition
+          note: API requires real experiment visualization context; same product-version has safer HTTP 200 algorithm-tree alternative.
+    "2022-01-12":
+      prefer:
+        - GetResourceGroup
+      skip:
+        ListNodes:
+          reason: live_validation_resource_precondition
+          note: API requires real workspace/resource node context; same product-version has safer HTTP 200 resource-group alternative.
+  RealTranslationAgent:
+    "2026-06-22":
+      prefer:
+        - ListTranslationTasks
+      skip:
+        GetTranslationTask:
+          reason: live_validation_resource_precondition
+          note: API requires a real translation task identifier; same product-version has safer HTTP 200 translation-task list alternative.
+  rtc:
+    "2018-01-11":
+      prefer:
+        - DescribeApps
+      skip:
+        StartStreamingOut:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API starts streaming output despite validation being read-only; same product-version has safer HTTP 200 app-list alternative.
+  Searchplat:
+    "2024-04-01":
+      prefer:
+        - ListOfflineTask
+      skip:
+        UpdateCapability:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API updates capability state despite validation being read-only; same product-version has safer service-reached offline-task alternative.
+  Tablestore:
+    "2020-12-09":
+      prefer:
+        - ListClusterType
+      skip:
+        CheckInstancePolicy:
+          reason: live_validation_policy_input_precondition
+          note: API validates instance policy input; same product-version has safer HTTP 200 cluster-type list alternative.
+  Workorder:
+    "2016-03-21":
+      prefer:
+        - QuestionList
+      allow_non_read_fallback:
+        QuestionList:
+          reason: live_validation_readandwrite_question_list_probe
+          note: OpenMeta marks QuestionList as readAndWrite, but the action is the historical workorder question-list query representative and is allowed only as an audited controlled validation sample.
+    "2016-04-18":
+      allow_non_read_fallback:
+        QuestionList:
+          reason: live_validation_readandwrite_question_list_probe
+          note: OpenMeta marks QuestionList as readAndWrite, but the action is the historical workorder question-list query representative and is allowed only as an audited controlled validation sample.
+    "2016-09-19":
+      skip:
+        QueryRecordList:
+          reason: live_validation_openmeta_route_precondition
+          note: Live validation reached the target service but returned HTTP 404 InvalidApi.NotFound; the version is excluded in data/openmeta/exclusions.yml after all same-version safe read APIs returned InvalidApi.NotFound.
+        QueryQuestionFromOtherSite:
+          reason: live_validation_openmeta_route_precondition
+          note: Live validation reached the target service on 2026-07-16 but returned HTTP 404 InvalidApi.NotFound.
+        QueryQuestionCountByAccount:
+          reason: live_validation_openmeta_route_precondition
+          note: Live validation reached the target service on 2026-07-16 but returned HTTP 404 InvalidApi.NotFound.
+        QueryUserStatByQuestionStatus:
+          reason: live_validation_openmeta_route_precondition
+          note: Live validation reached the target service on 2026-07-16 but returned HTTP 404 InvalidApi.NotFound.
+    "2020-08-01":
+      prefer:
+        - ListTickets
+      skip:
+        GetAttachmentUploadUrl:
+          reason: live_validation_side_effect_or_artifact_precondition
+          note: API issues an attachment upload URL and requires a FileName; same product-version has a live-validated HTTP 200 ListTickets read alternative in cn-hangzhou.
+    "2020-12-10":
+      prefer:
+        - GetTicketTemplate
+  Yundun-bastionhost:
+    "2019-12-09":
+      prefer:
+        - DescribeRegions
+      skip:
+        GetAutoOpsTask:
+          reason: live_validation_resource_precondition
+          note: API requires a real auto-ops task; same product-version has safer HTTP 200 region-list alternative.
+  servicecatalog:
+    "2021-09-01":
+      prefer:
+        - ListTagOptions
+      skip:
+        GetTask:
+          reason: live_validation_resource_precondition
+          note: API requires a real task identifier; same product-version has safer HTTP 200 tag-option list alternative when optional unsupported filters are omitted.
+  sophonsoar:
+    "2022-07-28":
+      prefer:
+        - DescribeComponentsJs
+      skip:
+        ConvertPlaybook:
+          reason: live_validation_input_or_resource_precondition
+          note: API requires valid playbook conversion input; same product-version has safer HTTP 200 component metadata alternative.
+        DescribeProcessTaskCount:
+          reason: live_validation_resource_precondition
+          note: API requires real process task entity identifiers; same product-version has safer HTTP 200 component metadata alternative.
+  tdsr:
+    "2020-01-01":
+      prefer:
+        - GetHotspotTag
+      skip:
+        UpdateSubScene:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API updates a sub-scene despite validation being read-only; same product-version has safer HTTP 200 hotspot-tag query alternative.
+  xtee:
+    "2021-09-10":
+      prefer:
+        - DescribeVersionPageList
+      skip:
+        DescribeVariableFee:
+          reason: live_validation_billing_resource_precondition
+          note: API requires fee variable identifiers and billing context; same product-version has safer HTTP 200 version-page list alternative.
+  Agency:
+    "2022-12-16":
+      prefer:
+        - ListCountries
+        - GetInviteStatus
+      skip:
+        GetCommissionableProducts:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 after retry but returned HTTP 503 ServiceUnavailable.
+  AgentLoop:
+    "2026-05-20":
+      prefer:
+        - DescribeRegions
+      skip:
+        SearchContext:
+          reason: live_validation_resource_precondition
+          note: API requires a real agent space and context store; same product-version has safer HTTP 200 read alternative after endpoint override.
+  AgentRun:
+    "2025-09-10":
+      prefer:
+        - ListMemoryCollections
+        - GetMemoryCollection
+      skip:
+        ConvertFlowDSL:
+          reason: live_validation_resource_precondition
+          note: API requires a valid flow DSL body; same product-version has safer HTTP 200 read alternative.
+  AgentTeams:
+    "2026-06-05":
+      prefer:
+        - ListInstances
+        - ListMcpTools
+      skip:
+        ListWorkers:
+          reason: live_validation_resource_precondition
+          note: API requires a real AgentTeams instance identifier; same product-version has safer HTTP 200 read alternative.
+  adb:
+    "2021-12-01":
+      prefer:
+        - DescribeRegions
+        - DescribeDBClusters
+      skip:
+        GetSparkReplStatement:
+          reason: live_validation_resource_precondition
+          note: API requires a real Spark app/session/statement context; same product-version has safer HTTP 200 read alternatives.
+  Airec:
+    "2018-10-12":
+      prefer:
+        - ListInstance
+        - DescribeRegions
+      skip:
+        Recommend:
+          reason: live_validation_resource_precondition
+          note: API requires a real instance and recommendation user context; same product-version has safer HTTP 200 read alternatives.
+    "2020-11-26":
+      prefer:
+        - ListInstance
+        - DescribeRegions
+      skip:
+        ListItems:
+          reason: live_validation_resource_precondition
+          note: API requires a real instance identifier; same product-version has safer HTTP 200 read alternatives.
+  AIWorkSpace:
+    "2021-02-04":
+      prefer:
+        - ListUserConfigs
+        - ListExperiment
+      skip:
+        AcceptDataworksEvent:
+          reason: live_validation_side_effect_or_event_precondition
+          note: API processes DataWorks events despite read metadata; same product-version has safer HTTP 200 read alternatives.
+        ListDatasetFileMetas:
+          reason: live_validation_resource_precondition
+          note: API requires a real workspace/dataset/version chain; same product-version has safer HTTP 200 read alternatives.
+  alimt:
+    "2018-10-12":
+      prefer:
+        - GetDetectLanguage
+    "2019-01-02":
+      prefer:
+        - TranslateGeneral
+      skip:
+        GetResource:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 after retry but returned HTTP 503 ServiceUnavailable.
+        ListMtConnector:
+          reason: live_validation_target_invalid_api
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 404 InvalidApi.NotFound; same product-version has safer HTTP 200 read alternative.
+    "2019-01-07":
+      prefer:
+        - TranslateGeneral
+  CC5G:
+    "2022-03-14":
+      prefer:
+        - ListRegions
+        - ListZones
+      skip:
+        AddWirelessCloudConnectorToGroup:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API is documented as read but adds connectors to a group and requires real connector identifiers; same product-version has safer HTTP 200 read alternatives.
+        ListDiagnoseInfoForSingleCard:
+          reason: live_validation_resource_precondition
+          note: API requires a real wireless cloud connector identifier; same product-version has safer HTTP 200 read alternatives.
+  CCC:
+    "2017-07-05":
+      prefer:
+        - ListTrunkProviders
+      skip:
+        CommitContactFlowVersionModification:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API implies committing contact-flow modifications and requires real contact-flow context; same product-version has safer HTTP 200 read alternative.
+        GetCallMeasureSummaryReport:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; same product-version has safer HTTP 200 read alternative.
+        ListPhoneTags:
+          reason: live_validation_resource_precondition
+          note: API requires phone-tag context; same product-version has safer HTTP 200 read alternative.
+    "2020-07-01":
+      prefer:
+        - ListInstances
+      skip:
+        ListDocuments:
+          reason: live_validation_resource_precondition
+          note: API requires a real document context; same product-version has safer HTTP 200 read alternative.
+        ListGroupChatMessages:
+          reason: live_validation_resource_precondition
+          note: API requires a real group chat context; same product-version has safer HTTP 200 read alternative.
+  csas:
+    "2023-01-20":
+      prefer:
+        - ListIdpConfigs
+      skip:
+        ExportUserDevices:
+          reason: live_validation_tenant_or_product_precondition
+          note: API depends on user-device data and product enablement; same product-version has safer HTTP 200 read alternative.
+        ListUserDevices:
+          reason: live_validation_tenant_or_product_precondition
+          note: API depends on user-device data and product enablement; same product-version has safer HTTP 200 read alternative.
+  ComputeNest:
+    "2021-06-01":
+      prefer:
+        - DescribeRegions
+        - ListServiceUsages
+        - ListSkills
+      skip:
+        GetNetworkAvailableZones:
+          reason: live_validation_service_or_input_precondition
+          note: API returned service/input instability during live validation; same product-version has safer HTTP 200 read alternatives.
+        GetServiceProvisions:
+          reason: live_validation_resource_precondition
+          note: API requires a real service identifier; same product-version has safer HTTP 200 read alternatives.
+  Config:
+    "2020-09-07":
+      prefer:
+        - ListConfigRules
+      skip:
+        UpdateConfigRule:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API modifies rules despite read metadata and requires a real config rule; same product-version has safer HTTP 200 read alternative.
+  cloudphone:
+    "2020-12-30":
+      prefer:
+        - ListImages
+        - ListInstances
+        - ListInstanceTypes
+      skip:
+        ListTagResources:
+          reason: live_validation_metadata_operation_mismatch
+          note: API is tagged readAndWrite by OpenMeta; same product-version has safer HTTP 200 List* alternatives.
+  Cloudauth-intl:
+    "2022-08-09":
+      prefer:
+        - QueryFaceGroup
+      skip:
+        CheckVerifyLog:
+          reason: live_validation_transaction_precondition
+          note: API reached the target service in catalog regions but requires a real transaction identifier; same product-version has safer HTTP 200 read alternative.
+  CS:
+    "2015-12-15":
+      prefer:
+        - DescribeRegions
+        - DescribePolicies
+        - CheckServiceRole
+      skip:
+        ListClusterKubeconfigStates:
+          reason: live_validation_resource_precondition
+          note: API requires cluster-specific kubeconfig context; same product-version has safer HTTP 200 read alternatives.
+  DBFS:
+    "2020-04-18":
+      prefer:
+        - DescribeInstanceTypes
+        - GetServiceLinkedRole
+        - ListSnapshot
+      skip:
+        ModifyAutoSnapshotPolicy:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API modifies snapshot policy despite read metadata and requires a real policy; same product-version has safer HTTP 200 read alternatives.
+  DlfNext:
+    "2025-03-10":
+      prefer:
+        - DescribeRegions
+        - GetRegionStatus
+      skip:
+        ListPartitionsByNames:
+          reason: live_validation_resource_precondition
+          note: API requires a real catalog/database/table chain; same product-version has safer HTTP 200 read alternatives.
+  Dm:
+    "2017-06-22":
+      prefer:
+        - DescAccountSummary
+      skip:
+        QueryTagByParam:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 after retry but returned HTTP 503 ServiceUnavailable.
+  Drds:
+    "2017-10-16":
+      prefer:
+        - DescribeRegions
+      skip:
+        DescribeRdsList:
+          reason: live_validation_resource_precondition
+          note: API requires a real DRDS instance/database chain; same product-version has safer HTTP 200 read alternative.
+  DFS:
+    "2018-06-20":
+      prefer:
+        - DescribeRegions
+      skip:
+        DescribeMountPointsVscAttachInfo:
+          reason: live_validation_resource_precondition
+          note: API requires mount-point/query context; same product-version has safer HTTP 200 read alternative.
+  Dypnsapi:
+    "2017-05-25":
+      prefer:
+        - QueryGateVerifyBillingPublic
+        - QueryGateVerifyStatisticPublic
+      skip:
+        DescribeVerifyScheme:
+          reason: live_validation_resource_precondition
+          note: API requires a real verification scheme ID; same product-version has safer HTTP 200 read alternatives.
+  DianJin:
+    "2024-06-28":
+      prefer:
+        - GetTaskResult
+      skip:
+        GetDialogLog:
+          reason: live_validation_insufficient_semantic_evidence
+          note: Live validation reached the target service on 2026-07-17 with a placeholder workspaceId and minimal body but returned HTTP 401 without a public error code; do not count as service-reached success without stronger permission or tenant semantics.
+        GetChatQuestionResp:
+          reason: live_validation_workspace_or_chat_context_precondition
+          note: API requires a real workspaceId and chat question context. Same-version placeholder read probes returned HTTP 401 without a public error code, so this sample is not suitable for the current automatic validation round.
+        GetLibraryList:
+          reason: live_validation_insufficient_semantic_evidence
+          note: Live validation reached the target service on 2026-07-17 with placeholder workspaceId and pagination parameters but returned HTTP 401 without a public error code; continue only with a documented workspace or stronger semantic error.
+        GetHistoryListByBizType:
+          reason: live_validation_insufficient_semantic_evidence
+          note: Live validation reached the target service on 2026-07-17 with placeholder workspaceId, bizType, bizId and pagination parameters but returned HTTP 401 without a public error code; continue only with a documented workspace or stronger semantic error.
+  EmrStudio:
+    "2023-10-09":
+      prefer:
+        - DescribeProject
+    "2024-04-30":
+      prefer:
+        - ListProjects
+  eas:
+    "2021-07-01":
+      prefer:
+        - DescribeRegions
+        - DescribeMachineSpec
+        - ListGateway
+      skip:
+        DescribeServiceSignedUrl:
+          reason: live_validation_resource_precondition
+          note: API requires real EAS cluster and service context; same product-version has safer HTTP 200 read alternatives.
+  ecd:
+    "2020-10-02":
+      prefer:
+        - DescribeRegions
+      skip:
+        DescribeOfficeSites:
+          reason: live_validation_input_or_security_contract_precondition
+          note: Live validation reached the target service on 2026-07-17 with RegionId and a public fake ClientId but returned HTTP 400 InvalidDirectoryId.Missing; this is not strong service-reached success evidence and should not be retried automatically without a documented desktop/client discovery path.
+        DescribeDirectories:
+          reason: live_validation_security_contract_precondition
+          note: Live validation with RegionId, public fake ClientId, and a placeholder DirectoryId reached the target request path on 2026-07-17 but did not produce a stable public HTTP status; continue only after a documented desktop client/session path or a reviewed response-normalization fix.
+        GetCloudDriveServiceMountToken:
+          reason: live_validation_security_contract_precondition
+          note: API requires a cloud desktop client login/session credential shape; do not retry with cloud-account credentials.
+        DescribeUserResources:
+          reason: live_validation_security_contract_precondition
+          note: API requires client LoginToken/SessionId style context; continue only after a documented safe discovery path exists.
+        GetLoginToken:
+          reason: live_validation_security_contract_precondition
+          note: API returns or depends on login-token flow credentials; do not execute in automatic validation with the current cloud-account credential chain.
+    "2020-09-30":
+      prefer:
+        - DescribeZones
+        - DescribeKmsKeys
+      skip:
+        QueryHistoryAvgMetricList:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 after retry but returned HTTP 503 ServiceUnavailable.
+        DescribeTemplates:
+          reason: live_validation_transport_or_service_unavailable
+          note: Live validation could not connect before the request was sent or returned service unavailable on 2026-07-15.
+    "2021-06-02":
+      prefer:
+        - ListSkills
+      skip:
+        GetOssStsToken:
+          reason: live_validation_sensitive_token_precondition
+          note: API returns temporary upload credentials; do not execute in automatic validation to avoid handling response tokens, continue with same-version safe alternatives.
+        ListSkillAuthedIdentities:
+          reason: live_validation_resource_precondition
+          note: API requires a real SkillId; do not execute in automatic validation, continue with same-version safe alternatives.
+        ListSecureSkillIdentities:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+    "2023-06-27":
+      skip:
+        DescribeBenefits:
+          reason: live_validation_openmeta_route_precondition
+          note: Live validation reached the catalog endpoint in cn-hangzhou on 2026-07-17 with ChannelId but returned HTTP 404 InvalidApi.NotFound; this hard metadata/route signal is not eligible for service-reached semantic success.
+        GetParseProgress:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+  ecs-workbench:
+    "2022-02-20":
+      prefer:
+        - ListInstanceRecords
+      allow_non_read_fallback:
+        ListInstanceRecords:
+          reason: live_validation_resource_state_probe
+          note: OpenMeta marks ListInstanceRecords as readAndWrite, but systemTags mark it as a list/free/none-risk query; round33 reached the target service in cn-hangzhou with fake InstanceId and returned HTTP 404 InvalidInstanceId.NotFound.
+      skip:
+        ListTerminalCommands:
+          reason: live_validation_business_token_precondition
+          note: API requires a real TerminalSessionToken from an ECS Workbench login session; live validation uses ListInstanceRecords because a fake InstanceId returns a clearer service-side resource-state error without a session token.
+        GetInstanceRecordConfig:
+          reason: live_validation_redundant_resource_probe
+          note: API requires a concrete ECS instance context; ListInstanceRecords is the representative service-reached probe for this product-version.
+  emas-appmonitor:
+    "2019-06-11":
+      prefer:
+        - GetIssues
+      skip:
+        GetErrors:
+          reason: live_validation_redundant_account_or_appkey_precondition
+          note: After fixing flat formData object encoding, live validation reached the target service on 2026-07-17 and returned HTTP 401 with public code 212018; GetIssues is the representative service-reached judgment for the same product-version.
+        GetIssue:
+          reason: live_validation_redundant_account_or_appkey_precondition
+          note: After fixing flat formData object encoding, live validation reached the target service on 2026-07-17 and returned HTTP 401 with public code 212018; GetIssues is the representative service-reached judgment for the same product-version.
+  Edas:
+    "2017-08-01":
+      prefer:
+        - ListAliyunRegion
+        - ListK8sSecrets
+      skip:
+        AddLogPath:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API adds application log paths despite read metadata and requires a real application; same product-version has safer HTTP 200 read alternatives.
+  EasyGene:
+    "2021-03-15":
+      prefer:
+        - ListRegions
+        - GetPublicDataset
+      skip:
+        ListApps:
+          reason: live_validation_resource_precondition
+          note: API requires a real workspace; same product-version has safer HTTP 200 read alternatives.
+  eflo-cnp:
+    "2023-08-28":
+      prefer:
+        - ListExperimentPlanTemplates
+        - ListExperimentPlans
+      skip:
+        ValidateResource:
+          reason: live_validation_resource_precondition
+          note: API validates a real cluster resource; same product-version has safer HTTP 200 read alternatives.
+  eflo-controller:
+    "2022-12-15":
+      prefer:
+        - ListUserClusterTypes
+        - ListHyperNodes
+      skip:
+        CreateDiagnosticTask:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API creates a diagnostic task despite read metadata; same product-version has safer HTTP 200 read alternatives.
+    "2026-06-12":
+      skip:
+        ListImages:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+  elasticsearch:
+    "2017-06-13":
+      prefer:
+        - DescribeRegions
+        - ListEventRecords
+        - ListInstanceHistoryEvents
+      skip:
+        CreateVpcEndpoint:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API creates a VPC endpoint despite read metadata and requires a real instance; same product-version has safer HTTP 200 read alternatives.
+    "2019-04-22":
+      skip:
+        DescribeVSwitches:
+          reason: live_validation_metadata_incompatible_precondition
+          note: OpenMeta metadata for this action returned an incompatible response during doc preflight on 2026-07-15; continue with same-version safe alternatives before keeping a metadata blocker.
+        DescribeVpcs:
+          reason: live_validation_metadata_incompatible_precondition
+          note: OpenMeta metadata for this action returned an incompatible response during doc preflight on 2026-07-15; continue with same-version safe alternatives before keeping a metadata blocker.
+  Emr:
+    "2021-03-20":
+      prefer:
+        - ListClusters
+      skip:
+        ListDoctorJobs:
+          reason: live_validation_resource_precondition
+          note: API requires a real EMR cluster identifier; same product-version has safer HTTP 200 read alternative.
+  emr-serverless-spark:
+    "2023-08-08":
+      prefer:
+        - ListWorkspaces
+      skip:
+        ListKyuubiSparkApplications:
+          reason: live_validation_resource_precondition
+          note: API requires real workspace and Kyuubi service path parameters; same product-version has safer HTTP 200 workspace-list alternative.
+        ListRayJob:
+          reason: live_validation_resource_precondition
+          note: API requires a real workspace path parameter despite version metadata not marking it required; same product-version has safer HTTP 200 workspace-list alternative.
+        StartJobRun:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API starts a Spark job and requires a real workspace path parameter; same product-version has safer HTTP 200 workspace-list alternative.
+        StopSessionCluster:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API stops a session cluster and requires a real workspace path parameter; same product-version has safer HTTP 200 workspace-list alternative.
+  Ens:
+    "2017-11-10":
+      prefer:
+        - DescribeAvailableResource
+        - ListTagResources
+      skip:
+        DescribeSDG:
+          reason: live_validation_input_or_resource_precondition
+          note: API returned input/service constraints during live validation; same product-version has safer HTTP 200 read alternatives.
+  Ess:
+    "2022-02-22":
+      prefer:
+        - DescribeRegions
+        - DescribeCandidateInstanceType
+      skip:
+        ModifyScalingGroup:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API modifies scaling groups despite read metadata and requires a real scaling group; same product-version has safer HTTP 200 read alternatives.
+  facebody:
+    "2019-12-30":
+      prefer:
+        - ListFaceDbs
+      skip:
+        DetectFace:
+          reason: live_validation_side_effect_or_media_precondition
+          note: API performs face analysis on supplied media despite read metadata; same product-version has safer HTTP 200 read alternative.
+  foasconsole:
+    "2019-06-01":
+      prefer:
+        - DescribeSupportedRegions
+        - DescribeSupportedZones
+      skip:
+        QueryRenewInstancePrice:
+          reason: live_validation_price_or_resource_precondition
+          note: API requires a real renewal request and is price-related; same product-version has safer HTTP 200 read alternatives.
+    "2021-10-28":
+      prefer:
+        - DescribeSupportedRegions
+        - DescribeSupportedZones
+      skip:
+        QueryCreateInstancePrice:
+          reason: live_validation_price_or_resource_precondition
+          note: API requires a real create-instance price request; same product-version has safer HTTP 200 read alternatives.
+  gpdb:
+    "2016-05-03":
+      prefer:
+        - DescribeRegions
+        - DescribeDBInstances
+      skip:
+        Rerank:
+          reason: live_validation_resource_or_ai_inference_precondition
+          note: API requires a real database instance and AI inference input; same product-version has safer HTTP 200 read alternatives.
+  Tag:
+    "2018-08-28":
+      prefer:
+        - DescribeRegions
+        - ListSupportResourceTypes
+      skip:
+        ListPolicies:
+          reason: live_validation_service_route_blocked
+          note: API returned endpoint/service route errors during live validation; same product-version has safer HTTP 200 read alternatives.
+  eds-user:
+    "2021-03-08":
+      prefer:
+        - DescribeUsers
+        - ListProperty
+  EHPC:
+    "2018-04-12":
+      prefer:
+        - ListRegions
+        - ListCurrentClientVersion
+      skip:
+        DescribeServerlessJobs:
+          reason: live_validation_resource_precondition
+          note: API requires real cluster and job identifiers; same product-version has safer HTTP 200 read alternatives.
+        ListInvocationResults:
+          reason: live_validation_resource_precondition
+          note: API requires real cluster and command identifiers; same product-version has safer HTTP 200 read alternatives.
+    "2024-07-30":
+      prefer:
+        - ListRegions
+        - ListCommonLogs
+      skip:
+        ListJobs:
+          reason: live_validation_resource_precondition
+          note: API requires a real cluster identifier; same product-version has safer HTTP 200 read alternatives.
+  paiAutoML:
+    "2022-08-28":
+      prefer:
+        - GetServiceIdentityRole
+      skip:
+        ListHpoExperiments:
+          reason: live_validation_input_or_workspace_precondition
+          note: API returned input/workspace constraint errors during live validation; same product-version has safer HTTP 200 read alternative.
+        ListHpoTrials:
+          reason: live_validation_resource_precondition
+          note: API requires a real HPO experiment; same product-version has safer HTTP 200 read alternative.
+  ICE:
+    "2020-11-09":
+      prefer:
+        - ListLiveRecordTemplates
+        - GetDefaultStorageLocation
+      skip:
+        ListMediaLiveInputs:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 after retry but returned HTTP 503 ServiceUnavailable.
+        SubmitTraceExtractJob:
+          reason: live_validation_resource_precondition
+          note: API requires a real input object; same product-version has safer HTTP 200 read alternatives.
+  idrsservice:
+    "2020-06-30":
+      prefer:
+        - ListUsers
+        - ListRules
+      allow_non_read_fallback:
+        ListUsers:
+          reason: live_validation_readandwrite_list_probe_http_200
+          note: OpenMeta marks ListUsers as readAndWrite, but it is a list-style query and returned HTTP 200 in cn-hangzhou on 2026-07-17; use only as an audited controlled validation representative.
+        ListRules:
+          reason: live_validation_readandwrite_list_probe_http_200
+          note: OpenMeta marks ListRules as readAndWrite, but it is a list-style query and returned HTTP 200 in cn-hangzhou on 2026-07-17; use only as an audited controlled validation representative.
+      skip:
+        GetPreSignedUrl:
+          reason: live_validation_artifact_or_url_precondition
+          note: API issues a presigned URL despite readAndWrite metadata; ListUsers and ListRules returned HTTP 200 in cn-hangzhou on 2026-07-17 and are safer product-version representatives.
+        ListTasks:
+          reason: live_validation_response_size_precondition
+          note: Live validation reached the target service in cn-hangzhou on 2026-07-17, but the response exceeded the validation byte limit; same product-version has smaller HTTP 200 list representatives.
+  IaCService:
+    "2021-07-22":
+      version_blocker:
+        category: live_validation_stable_503_or_resource_precondition
+        reason: All same-version safe read APIs reached the trusted cn-zhangjiakou endpoint and returned HTTP 503 ServiceUnavailable during live validation.
+        endpoint_region: cn-zhangjiakou
+        note: Retry after service recovery or with an account/resource context confirmed by an official IaCService discovery path; do not classify the version as missing endpoint or unstarted.
+      skip:
+        ListResources:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-zhangjiakou on 2026-07-17 and again on 2026-07-18 with provider/product/resource type, regionIds, and pagination parameters but returned HTTP 503 ServiceUnavailable.
+        ListDataSources:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-zhangjiakou on 2026-07-17 with provider/product/resource type and attributeName parameters but returned HTTP 503 ServiceUnavailable.
+        GetResource:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-zhangjiakou on 2026-07-17 with provider/product/resource type and validation resourceId parameters but returned HTTP 503 ServiceUnavailable.
+    "2021-08-06":
+      prefer:
+        - ListRegistryNamespaces
+      skip:
+        ListDetectConfigs:
+          reason: live_validation_target_or_service_precondition
+          note: API remained blocked during live validation; same product-version has safer HTTP 200 read alternative.
+        ListExplorerRegistryModules:
+          reason: live_validation_security_contract_precondition
+          note: API metadata declares an authentication contract unsupported by the production AK/OAuth STS chain; same product-version has safer HTTP 200 read alternative.
+        ListTerraformProviderVersions:
+          reason: live_validation_security_contract_precondition
+          note: API metadata declares an authentication contract unsupported by the production AK/OAuth STS chain; same product-version has safer HTTP 200 read alternative.
+  Sls:
+    "2019-10-23":
+      prefer:
+        - GetSlsService
+    "2020-12-30":
+      prefer:
+        - DescribeRegions
+      skip:
+        GetLogsV2:
+          reason: live_validation_resource_precondition
+          note: API requires a real project and logstore; same product-version has safer HTTP 200 read alternative.
+        GetMaterializedView:
+          reason: live_validation_resource_precondition
+          note: API requires a real project/materialized-view context; same product-version has safer HTTP 200 read alternative.
+        ListDashboard:
+          reason: live_validation_resource_precondition
+          note: API requires a real project host binding; same product-version has safer HTTP 200 read alternative.
+  SMQProxy:
+    "2026-04-09":
+      prefer:
+        - BatchPeekMessage
+  starrocks:
+    "2022-10-19":
+      prefer:
+        - DescribeRegions
+        - DescribeAvailableZones
+      skip:
+        DescribeNodeGroups:
+          reason: live_validation_resource_precondition
+          note: API targets cluster node groups; same product-version has safer HTTP 200 read alternatives.
+        UnTagResources:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API is documented as read but uses DELETE and unbinds tags; same product-version has safer HTTP 200 read alternatives.
+  viapi:
+    "2021-09-30":
+      prefer:
+        - QueryAiStoreRegions
+      skip:
+        ListAiStoreBuckets:
+          reason: live_validation_region_or_resource_precondition
+          note: API requires AI store context or supported region selection; same product-version has safer HTTP 200 region-list alternative.
+  ververica:
+    "2020-05-01":
+      prefer:
+        - ListNamespaces
+    "2022-07-18":
+      prefer:
+        - GetEvents
+  LingMou:
+    "2025-05-27":
+      prefer:
+        - ListPublicBroadcastSceneTemplates
+      skip:
+        QueryChatInstanceSessions:
+          reason: live_validation_resource_precondition
+          note: API requires a real chat instance context; same product-version has safer HTTP 200 public template list alternative with catalog region selection.
+  Mts:
+    "2021-07-28":
+      prefer:
+        - QueryTraceAb
+      skip:
+        QueryCopyright:
+          reason: live_validation_target_or_service_precondition
+          note: API returned target service/endpoint constraint errors during live validation; same product-version has safer HTTP 200 read alternative.
+  nis:
+    "2021-12-16":
+      prefer:
+        - ListNisInspectionResourceType
+      skip:
+        GetNisNetworkMetrics:
+          reason: live_validation_input_or_resource_dimension_precondition
+          note: API requires concrete network metric dimensions; same product-version has safer HTTP 200 resource-type list alternative with catalog region selection.
+  OpenAPIExplorer:
+    "2024-11-30":
+      prefer:
+        - ListProducts
+        - GetApiMcpServerUserConfig
+      skip:
+        GenerateCLICommand:
+          reason: live_validation_request_media_type_precondition
+          note: API uses an OpenMeta media-type shape the current runtime cannot safely construct; same product-version has safer HTTP 200 read alternatives.
+        GetCodeSample:
+          reason: live_validation_security_contract_precondition
+          note: API metadata declares anonymous-only security for the production AK/OAuth STS chain; same product-version has safer HTTP 200 read alternatives.
+  Ons:
+    "2019-02-14":
+      prefer:
+        - OnsRegionList
+        - OnsInstanceInServiceList
+      skip:
+        ListTagResources:
+          reason: live_validation_resource_precondition
+          note: API requires tag resource context; same product-version has safer HTTP 200 read alternatives.
+  ARMS:
+    "2018-12-19":
+      version_blocker:
+        category: live_validation_stable_503_or_service_precondition
+        reason: Multiple same-version trace/query read probes reached the target service but returned HTTP 503 ServiceUnavailable across refreshed credential windows.
+        note: Retry after ARMS service recovery; do not keep rotating trace/query actions as default representatives while the version is consistently returning 503.
+      skip:
+        ARMSQueryDataSet:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-18 with dataset and time-window parameters but returned HTTP 503 ServiceUnavailable.
+        SearchTraces:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service with time-window parameters across refreshed credential windows but returned HTTP 503 ServiceUnavailable; keep as explored trace-query evidence rather than a default representative.
+        GetServices:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        GetTrace:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-17 with a dummy TraceID and returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+    "2019-02-19":
+      version_blocker:
+        category: live_validation_stable_503_or_service_precondition
+        reason: Multiple same-version trace, tag, service, token, and alert-contact read probes reached the target service but returned HTTP 503 ServiceUnavailable across refreshed credential windows.
+        note: Retry after ARMS service recovery; do not keep rotating trace/query/list actions as default representatives while the version is consistently returning 503.
+      skip:
+        SearchTraces:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service with RegionId and time-window parameters across refreshed credential windows but returned HTTP 503 ServiceUnavailable; keep as explored trace-query evidence rather than a default representative.
+        GetIpOrHosts:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-17 with RegionId and time-window parameters but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        GetTagKey:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-17 with RegionId and time-window parameters but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        GetTagVal:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-17 with RegionId, ServiceName, SpanName, TagKey and time-window parameters but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        GetSpanNames:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        GetServices:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        GetTrace:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-17 with a dummy TraceID but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        GetToken:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-17 with AppType=XTRACE but returned HTTP 503 ServiceUnavailable; no response body or token value was recorded.
+        GetTraceApps:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-18 with RegionId but returned HTTP 503 ServiceUnavailable.
+        SearchAlertContact:
+          reason: live_validation_stable_503
+          note: After correcting the official required ContactName, Phone, and Email search filters, live validation reached the target service in cn-shanghai on 2026-07-18 but returned HTTP 503 ServiceUnavailable.
+        SearchTraceCount:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-17 with RegionId, time-window and PageSize parameters but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+    "2021-04-22":
+      version_blocker:
+        category: live_validation_stable_503_or_service_precondition
+        reason: Multiple same-version trace, alert, RetCode, Prometheus, and status read/list probes reached the target service but returned HTTP 503 ServiceUnavailable or no stable public HTTP status.
+        note: Retry after ARMS service recovery; do not keep rotating trace/query/list actions as default representatives while the version is consistently returning 503.
+      skip:
+        SearchTraces:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service with RegionId and time-window parameters across refreshed credential windows but returned HTTP 503 ServiceUnavailable; keep as explored trace-query evidence rather than a default representative.
+        CheckServiceStatus:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-17 with SvcCode=xtrace and returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        GetStack:
+          reason: live_validation_transport_or_input_precondition
+          note: Live validation doc preflight passed on 2026-07-17 with placeholder TraceID/RpcID and time-window parameters, but the target request did not start and no stable public HTTP status was available; keep exploring only with documented trace identifiers or another safe read API.
+        GetMultipleTrace:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        DescribeTraceLicenseKey:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-17 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        DescribeTraceLocation:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-17 with RegionId but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        ListAlertTemplates:
+          reason: live_validation_input_or_resource_precondition
+          note: Exact contract requires AlertProvider; continue with same-version safe read alternatives before keeping a resource/input blocker.
+        ListActivatedAlerts:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        ListTraceApps:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-18 with RegionId but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        ListRetcodeApps:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-18 with RegionId but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        ListPromClusters:
+          reason: live_validation_transport_or_service_precondition
+          note: Live validation started the target request in cn-shanghai on 2026-07-18 with RegionId but did not obtain a stable public HTTP status; continue only after retrying or finding another documented same-version safe API.
+        SearchAlertContact:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-18 with RegionId and pagination parameters but returned HTTP 503 ServiceUnavailable.
+        SearchAlertContactGroup:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-18 with RegionId and IsDetail parameters but returned HTTP 503 ServiceUnavailable.
+        ListPrometheusAlertTemplates:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-17 with RegionId but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        ListPrometheusAlertRules:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-17 with ClusterId and Status placeholders but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        SearchTracesByPage:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-17 with RegionId, pagination and time-window parameters but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+  BDRC:
+    "2023-08-08":
+      version_blocker:
+        category: live_validation_service_not_opened
+        reason: Multiple safe read alternatives reached the target service and returned ServiceNotOpened.
+        note: Continue only after Data Disaster Recovery Center is opened for the account/region.
+      skip:
+        DescribeResources:
+          reason: live_validation_service_not_opened
+          note: Live validation reached the target service in catalog region cn-shanghai on 2026-07-15 but returned HTTP 404 ServiceNotOpened; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        DescribeProductDataRedundancyTypeStat:
+          reason: live_validation_service_not_opened
+          note: Live validation reached the target service in catalog region cn-shanghai on 2026-07-15 but returned HTTP 404 ServiceNotOpened; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        DescribeProducts:
+          reason: live_validation_service_not_opened
+          note: Live validation reached the target service in catalog region cn-shanghai on 2026-07-15 but returned HTTP 404 ServiceNotOpened; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        GetMessage:
+          reason: live_validation_resource_precondition
+          note: API requires a real MessageId path resource; do not execute in automatic validation, continue with same-version safe alternatives.
+        DescribeTask:
+          reason: live_validation_resource_precondition
+          note: API requires a real TaskId path resource; do not execute in automatic validation, continue with same-version safe alternatives.
+        GetProtectionPolicy:
+          reason: live_validation_resource_precondition
+          note: API requires a real ProtectionPolicyId path resource; do not execute in automatic validation, continue with same-version safe alternatives.
+        ListProtectionPolicyApplications:
+          reason: live_validation_resource_precondition
+          note: API requires real ProtectionPolicyId and TaskId path/query resources; do not execute in automatic validation, continue with same-version safe alternatives.
+        ListProtectionPolicies:
+          reason: live_validation_service_not_opened
+          note: Live validation reached the target service in catalog region cn-shanghai on 2026-07-15 but returned HTTP 404 ServiceNotOpened; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        GetBdrcService:
+          reason: live_validation_service_not_opened
+          note: Live validation reached the target service in catalog region cn-shanghai on 2026-07-15 but returned HTTP 404 ServiceNotOpened; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        ListMessages:
+          reason: live_validation_service_not_opened
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 404 ServiceNotOpened; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        DescribeTopRiskyResources:
+          reason: live_validation_service_not_opened
+          note: Live validation reached the target service in catalog region cn-shanghai on 2026-07-15 but returned HTTP 404 ServiceNotOpened; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        DescribeTasks:
+          reason: live_validation_service_not_opened
+          note: Live validation reached the target service in catalog region cn-shanghai on 2026-07-15 but returned HTTP 404 ServiceNotOpened; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        DescribeRules:
+          reason: live_validation_service_not_opened
+          note: Live validation reached the target service in catalog region cn-shanghai on 2026-07-15 but returned HTTP 404 ServiceNotOpened; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        ListResourceCategories:
+          reason: live_validation_service_not_opened
+          note: Live validation reached the target service in catalog region cn-shanghai on 2026-07-15 but returned HTTP 404 ServiceNotOpened; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+  cloudesl:
+    "2019-08-01":
+      prefer:
+        - DescribeUsers
+      skip:
+        DescribeStores:
+          reason: live_validation_tenant_or_beta_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 405 BetaTestLabelError; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        DescribeApDevices:
+          reason: live_validation_tenant_or_beta_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 405 BetaTestLabelError; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        DescribeEslDevices:
+          reason: live_validation_tenant_or_beta_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 405 BetaTestLabelError; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        DescribeItems:
+          reason: live_validation_resource_precondition
+          note: API requires a real StoreId; do not execute in automatic validation, continue with same-version safe alternatives.
+        DescribeUserLog:
+          reason: live_validation_resource_precondition
+          note: API requires a real StoreId; do not execute in automatic validation, continue with same-version safe alternatives.
+        GetCompany:
+          reason: live_validation_tenant_or_beta_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 405 BetaTestLabelError; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        GetUser:
+          reason: live_validation_tenant_or_beta_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 405 BetaTestLabelError; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+    "2020-02-01":
+      version_blocker:
+        category: live_validation_tenant_or_beta_precondition
+        reason: Multiple safe read alternatives reached the target service and returned BetaTestLabelErrorPub.
+        note: Continue only after the tenant is eligible for the CloudESL public beta/product state.
+      skip:
+        DescribeStores:
+          reason: live_validation_tenant_or_beta_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 417 BetaTestLabelErrorPub; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        DescribeTemplateByModel:
+          reason: live_validation_tenant_or_beta_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 417 BetaTestLabelErrorPub; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        DescribeStoreByTemplateVersion:
+          reason: live_validation_tenant_or_beta_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 417 BetaTestLabelErrorPub; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        DescribeApDevices:
+          reason: live_validation_tenant_or_beta_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 417 BetaTestLabelErrorPub; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        DescribeItems:
+          reason: live_validation_resource_precondition
+          note: API requires a real StoreId; do not execute in automatic validation, continue with same-version safe alternatives.
+        DescribeUserLog:
+          reason: live_validation_tenant_or_beta_precondition
+          note: API requires a real StoreId and same product-version safe reads returned HTTP 417 BetaTestLabelErrorPub on 2026-07-15; continue only after tenant/beta eligibility is available.
+        DescribeAvailableEslModels:
+          reason: live_validation_tenant_or_beta_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 417 BetaTestLabelErrorPub; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        DescribeCompanyTemplateVersions:
+          reason: live_validation_tenant_or_beta_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 417 BetaTestLabelErrorPub; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        DescribeEslModelByTemplateVersion:
+          reason: live_validation_tenant_or_beta_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 417 BetaTestLabelErrorPub; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        DescribeEslDevice:
+          reason: live_validation_tenant_or_beta_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 417 BetaTestLabelErrorPub; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+        DescribeUsers:
+          reason: live_validation_tenant_or_beta_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 417 BetaTestLabelErrorPub; continue with same-version safe read alternatives before keeping a version-level account/service blocker.
+  FC:
+    "2023-03-30":
+      skip:
+        ListProvisionConfigs:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403 AccessDenied; continue with same-version safe read alternatives before keeping a version-level account blocker.
+        ListConcurrencyConfigs:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403 AccessDenied; continue with same-version safe read alternatives before keeping a version-level account blocker.
+        DescribeRegions:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403 AccessDenied; continue with same-version safe read alternatives before keeping a version-level account blocker.
+        ListLayers:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-16 with no-resource list parameters but returned HTTP 403 AccessDenied; structured semantic judgment records this as account permission evidence for the version.
+        ListCustomDomains:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-16 with no-resource list parameters but returned HTTP 403 AccessDenied.
+        ListScalingConfigs:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-16 with no-resource list parameters but returned HTTP 403 AccessDenied.
+  FC-Open:
+    "2021-04-06":
+      skip:
+        DescribeRegions:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-16 with AcceptLanguage but returned HTTP 403 AccessDenied; structured semantic judgment records this as account permission evidence for the version.
+        ListServices:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-16 with no-resource list parameters but returned HTTP 403 AccessDenied.
+  GEMP:
+    "2021-04-13":
+      prefer:
+        - BillingStatistics
+        - ListServiceGroupsByUserId
+      skip:
+        GetUser:
+          reason: live_validation_stable_service_error
+          note: Live validation reached the target service in cn-shanghai on 2026-07-17 after STS refresh but returned HTTP 500 InternalError.; same-version BillingStatistics and ListServiceGroupsByUserId returned HTTP 200 in cn-shanghai.
+        GetService:
+          reason: live_validation_input_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 InvalidParameter for the no-resource body candidate; continue with same-version safer input or read alternatives.
+        ListAlerts:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        GetProblem:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        ListConfigs:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        ListUsers:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-17 after STS refresh but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+  grace:
+    "2022-06-06":
+      prefer:
+        - GetFile
+      skip:
+        AnalyzeFile:
+          reason: live_validation_file_processing_side_effect_precondition
+          note: API analyzes file content and is not a safe automatic validation fallback while GetFile is the only read-style representative.
+        UploadFileByOSS:
+          reason: live_validation_file_upload_side_effect_precondition
+          note: API uploads or imports file content and is not a safe automatic validation fallback while GetFile is the only read-style representative.
+        UploadFileByURL:
+          reason: live_validation_file_upload_side_effect_precondition
+          note: API uploads or imports file content and is not a safe automatic validation fallback while GetFile is the only read-style representative.
+  Green:
+    "2017-08-23":
+      prefer:
+        - DescribeBizTypes
+        - DescribeOssStockStatus
+      skip:
+        DescribeAppInfo:
+          reason: live_validation_metadata_incompatible_precondition
+          note: OpenMeta metadata for this action returned an incompatible response during doc preflight on 2026-07-15; continue with same-version safe alternatives before keeping a metadata blocker.
+        GetAuditItemList:
+          reason: live_validation_metadata_incompatible_precondition
+          note: OpenMeta metadata for this action returned an incompatible response during doc preflight on 2026-07-15; continue with same-version safe alternatives before keeping a metadata blocker.
+    "2022-03-02":
+      prefer:
+        - DescribeFileModerationResult
+        - DescribeUploadToken
+      skip:
+        DescribeUrlModerationResult:
+          reason: live_validation_metadata_incompatible_precondition
+          note: OpenMeta metadata for this action returned an incompatible response during doc preflight on 2026-07-15; continue with same-version safe alternatives before keeping a metadata blocker.
+        DescribeImageModerationResult:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-16 but returned HTTP 503 ServiceUnavailable; same-version DescribeFileModerationResult and DescribeUploadToken returned HTTP 200 in ap-southeast-1.
+        DescribeImageResultExt:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-16 but returned HTTP 503 ServiceUnavailable; same-version DescribeFileModerationResult and DescribeUploadToken returned HTTP 200 in ap-southeast-1.
+    "2022-09-26":
+      prefer:
+        - GetStockOssCheckTasksList
+        - GetUserBuyStatus
+        - GetServiceConfig
+      skip:
+        ListKeywords:
+          reason: live_validation_metadata_incompatible_precondition
+          note: OpenMeta metadata for this action returned an incompatible response during doc preflight on 2026-07-15; continue with same-version safe alternatives before keeping a metadata blocker.
+        GetScanResult:
+          reason: live_validation_metadata_incompatible_precondition
+          note: OpenMeta metadata for this action returned an incompatible response during doc preflight on 2026-07-15; continue with same-version safe alternatives before keeping a metadata blocker.
+        GetTextScanResult:
+          reason: live_validation_metadata_incompatible_precondition
+          note: OpenMeta metadata for this action returned an incompatible response during doc preflight on 2026-07-15; continue with same-version safe alternatives before keeping a metadata blocker.
+        ListJob:
+          reason: live_validation_transport_or_service_unavailable
+          note: Live validation request started in cn-beijing on 2026-07-17 but failed before a stable public HTTP status; continue only after an official endpoint/routing correction or a reviewed transport fix for this API family.
+  IQS:
+    "2024-07-12":
+      skip:
+        QueryAttractions:
+          reason: live_validation_input_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 MissingParameter for the empty body candidate; continue with same-version safe read alternatives.
+        QueryHotelsNl:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403 NotActivate; continue with same-version safe read alternatives before keeping a version-level service activation blocker.
+        QueryRestaurantsNl:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403 NotActivate; continue with same-version safe read alternatives before keeping a version-level service activation blocker.
+        QueryAttractionsNl:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403 NotActivate; continue with same-version safe read alternatives before keeping a version-level service activation blocker.
+    "2024-11-11":
+      skip:
+        GetIqsUsage:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403 Forbidden; continue with same-version safe read alternatives before keeping a version-level account blocker.
+    "2024-11-21":
+      prefer:
+        - ListApiInfos
+      skip:
+        CheckAccountType:
+          reason: live_validation_account_permission_precondition
+          note: API returned account or service constraints during live validation; same product-version has safer HTTP 200 API-info list alternative.
+        ListApiNames:
+          reason: live_validation_account_permission_precondition
+          note: API returned HTTP 403 Forbidden during live validation; same product-version has safer HTTP 200 API-info list alternative.
+        ListLimitations:
+          reason: live_validation_stable_service_error
+          note: API reached the target service during live validation but returned HTTP 500 InternalServerError; same product-version has safer HTTP 200 API-info list alternative.
+  ImageSearch:
+    "2019-03-25":
+      prefer:
+        - SearchImage
+      skip:
+        AddImage:
+          reason: live_validation_side_effect_or_billing_precondition
+          note: API mutates an image-search instance and may process image payload; use SearchImage with a fake InstanceName as the safer read representative.
+        DeleteImage:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API deletes image records; do not execute in automatic validation, use SearchImage as the read representative.
+    "2020-12-14":
+      prefer:
+        - DumpMeta
+      skip:
+        SearchImageByPic:
+          reason: live_validation_image_payload_or_billing_precondition
+          note: API requires image payload content; live validation on 2026-07-17 used safer metadata export read probes instead.
+        DumpMetaList:
+          reason: live_validation_redundant_service_reached_evidence
+          note: Live validation reached the same target service on 2026-07-17 and returned HTTP 400 Console.InstanceNotFound, matching DumpMeta; prefer one representative action for this version.
+    "2021-05-01":
+      prefer:
+        - GetProductInfoByIds
+      skip:
+        SearchByPic:
+          reason: live_validation_image_payload_or_billing_precondition
+          note: API requires image payload content; live validation on 2026-07-17 used a safer product-info read probe instead.
+        SearchByUrl:
+          reason: live_validation_metadata_incompatible_precondition
+          note: Doc preflight on 2026-07-14 reported exact metadata/production contract incompatibility for this action; use the 2026-07-17 product-info permission probe as the representative instead.
+  IoTCC:
+    "2021-05-13":
+      skip:
+        ListConnectionPoolIps:
+          reason: live_validation_resource_precondition
+          note: Live validation reached the target service on 2026-07-16; missing connector context returned MissingParam, and a complete fake IoTCloudConnectorId plus ConnectionPoolId returned HTTP 404 ResourceNotFound.IoTCloudConnector. Structured semantic judgment records this as resource-scope evidence for the version.
+        ListDiagnoseInfoForSingleCard:
+          reason: live_validation_resource_precondition
+          note: Live validation reached the target service on 2026-07-16 with fake IoTCloudConnectorId, SourceType, Source, and pagination parameters but returned HTTP 400 ResourceNotFound.IoTCloudConnector.
+        GetDiagnoseResultForSingleCard:
+          reason: live_validation_stable_service_error
+          note: Live validation reached the target service on 2026-07-16 with fake DiagnoseTaskId but returned HTTP 500 without a public error code; prefer resource-scope evidence from same-version list APIs.
+  LinkWAN:
+    "2018-12-30":
+      skip:
+        CountNotifications:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        CountGateways:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        ListLabNodes:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        ListGateways:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+    "2019-03-01":
+      skip:
+        CheckUserChargeStatus:
+          reason: live_validation_product_activation_precondition
+          note: Live validation reached the target service in cn-shanghai on 2026-07-16 and returned HTTP 400 CloudProductNotActivated; structured semantic judgment records this as service-reached product activation evidence for the version.
+        CountNotifications:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        ListNodeGroups:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        ListOwnedJoinPermissions:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        ListRentedJoinPermissions:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+  Oss:
+    "2019-05-17":
+      prefer:
+        - ListBuckets
+      skip:
+        ListBucketAntiDDosInfo:
+          reason: live_validation_runtime_oss_api_precondition
+          note: Current runtime reported this OSS OpenMeta action as unsupported on 2026-07-15; continue with supported same-version OSS alternatives before keeping a version-level runtime blocker.
+  PAILangStudio:
+    "2024-07-10":
+      skip:
+        ListKnowledgeBases:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-16 with WorkspaceId and pagination parameters but returned HTTP 403 NoPermission; structured semantic judgment records this as account/workspace permission evidence for the version.
+        ListRuntimes:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-16 with WorkspaceId and pagination parameters but returned HTTP 403 NoPermission.
+        ListSnapshots:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-16 with WorkspaceId, SnapshotResourceType, and pagination parameters but returned HTTP 403 NoPermission.
+        GetKnowledgeBase:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-16 with WorkspaceId, KnowledgeBaseId, and VersionName but returned HTTP 403 NoPermission.
+        ListKnowledgeBaseChunks:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-16 with KnowledgeBaseId and pagination parameters but returned HTTP 403 NoPermission.
+        GetRuntime:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-16 with WorkspaceId and RuntimeId but returned HTTP 403 NoPermission.
+        ListDeployments:
+          reason: live_validation_input_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 BadRequest; continue with corrected input or same-version safe read alternatives.
+  Dysmsapi:
+    "2018-05-01":
+      prefer:
+        - QueryMessage
+      skip:
+        ConversionData:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API ingests conversion data despite read metadata; same product-version has a safer HTTP 200 message-query validation path in ap-southeast-1.
+  Dytnsapi:
+    "2023-01-01":
+      skip:
+        GetIdentificationResult:
+          reason: live_validation_resource_precondition
+          note: API requires real SessionId and AuthCode; do not execute in automatic validation, continue with same-version safe alternatives.
+        GetPhoneNumberIdentificationResult:
+          reason: live_validation_resource_precondition
+          note: API requires real phone/session authentication parameters; do not execute in automatic validation, continue with same-version safe alternatives.
+        GetPhoneNumberIdentificationUrl:
+          reason: live_validation_resource_precondition
+          note: API requires a real phone number, OutId, and AuthCode; do not execute in automatic validation, continue with same-version safe alternatives.
+        GetIdentificationSession:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 and again on 2026-07-17 after STS refresh with an AuthCode placeholder but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        DescribeNumberHLR:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        DescribeNumberMccMnc:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 and again on 2026-07-17 after STS refresh with PhoneNumber and AuthCode placeholders but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+  Dyvmsapi-intl:
+    "2021-10-15":
+      prefer:
+        - VoiceGroupCall
+      allow_non_read_fallback:
+        VoiceGroupCall:
+          reason: live_validation_voice_group_call_semantic_probe
+          note: Audited placeholder VoiceGroupCall probe with array CalledNumber and placeholder voice parameters returned HTTP 200 on 2026-07-18; keep real callable numbers and real voice templates out of automatic validation.
+      skip:
+        GroupCall:
+          reason: live_validation_voice_call_side_effect_precondition
+          note: API initiates or controls voice call behavior and is not a safe read probe; do not execute in automatic validation without isolated telecom resources and explicit approval.
+        SignalCall:
+          reason: live_validation_voice_call_side_effect_precondition
+          note: API initiates or controls voice call behavior and is not a safe read probe; do not execute in automatic validation without isolated telecom resources and explicit approval.
+        VoiceSingleCall:
+          reason: live_validation_voice_call_side_effect_precondition
+          note: API initiates or controls voice call behavior and is not a safe read probe; do not execute in automatic validation without isolated telecom resources and explicit approval.
+  cr:
+    "2018-12-01":
+      prefer:
+        - GetInstanceCount
+        - ListScanRule
+      skip:
+        ListInstanceRegion:
+          reason: live_validation_response_size_precondition
+          note: After fixing omitted-path RPC inference, doc preflight succeeds; live validation reached the target service on 2026-07-16 but the response exceeded the bounded validation output limit. Same product-version has HTTP 200 alternatives.
+  imageenhan:
+    "2019-09-30":
+      prefer:
+        - AssessComposition
+      allow_non_read_fallback:
+        AssessComposition:
+          reason: live_validation_readandwrite_image_assessment_activation_probe
+          note: OpenMeta marks AssessComposition as readAndWrite, but this version's only pure read API requires a real async JobId. Live validation used a safe missing ImageURL on 2026-07-18 and received HTTP 403 InvalidApi.NotPurchase before any image result was produced, so this action is allowed only as the audited product-version representative.
+      skip:
+        GetAsyncJobResult:
+          reason: live_validation_input_precondition
+          note: API requires a real async JobId; a syntactically valid placeholder JobId reached the cn-shanghai endpoint on 2026-07-17 but returned HTTP 400 InvalidParameter.BadRequest, so use the audited same-version image assessment probe instead.
+        AssessSharpness:
+          reason: live_validation_duplicate_product_activation_probe
+          note: Live validation reached the official cn-shanghai endpoint on 2026-07-18 with a safe missing ImageURL and returned HTTP 403 InvalidApi.NotPurchase; AssessComposition records the same product-activation semantics as the version representative.
+  imagerecog:
+    "2019-09-30":
+      prefer:
+        - TaggingImage
+      skip:
+        GetAsyncJobResult:
+          reason: live_validation_input_precondition
+          note: API requires a real async JobId; a syntactically valid placeholder JobId reached the cn-shanghai endpoint on 2026-07-17 but returned HTTP 400 InvalidParameter.BadRequest, so use same-version image read probes instead.
+        RecognizeScene:
+          reason: live_validation_duplicate_product_activation_probe
+          note: Live validation reached the official cn-shanghai endpoint on 2026-07-18 with a safe missing ImageURL and returned HTTP 403 InvalidApi.NotPurchase; TaggingImage records the same product-activation semantics as the version representative.
+  imageseg:
+    "2019-12-30":
+      prefer:
+        - SegmentCommonImage
+      skip:
+        GetAsyncJobResult:
+          reason: live_validation_input_precondition
+          note: API requires a real async JobId; a syntactically valid placeholder JobId reached the cn-shanghai endpoint on 2026-07-17 but returned HTTP 400 InvalidParameter.BadRequest, so use same-version image read probes instead.
+        SegmentCloth:
+          reason: live_validation_input_precondition
+          note: Earlier placeholder SegmentCloth probes returned HTTP 400 InvalidParameter.BadRequest; SegmentCommonImage reached the same official endpoint on 2026-07-18 and records the product-activation semantics for the version.
+  ocr:
+    "2019-12-30":
+      prefer:
+        - RecognizeBusinessLicense
+      skip:
+        GetAsyncJobResult:
+          reason: live_validation_async_job_input_precondition
+          note: API requires a real async JobId returned by a prior OCR task; placeholder JobId probes reached the endpoint across refreshed credential windows but returned HTTP 400 InvalidParameter.BadRequest, insufficient for product-version success.
+        RecognizeQrCode:
+          reason: live_validation_paid_image_inference_precondition
+          note: Official OpenMeta description states this API performs QR-code image recognition and is billed by detection task; do not execute in automatic validation without an approved free or isolated test path.
+        RecognizeBankCard:
+          reason: live_validation_image_url_input_precondition
+          note: Live validation reached the official cn-shanghai endpoint on 2026-07-18 with a safe missing ImageURL but returned HTTP 400 InvalidImage.URL, which is treated as insufficient input evidence rather than product-version success.
+        RecognizeLicensePlate:
+          reason: live_validation_image_url_input_precondition
+          note: Live validation reached the official cn-shanghai endpoint on 2026-07-18 with a safe missing ImageURL but returned HTTP 400 InvalidImage.URL, which is treated as insufficient input evidence rather than product-version success.
+        RecognizeVATInvoice:
+          reason: live_validation_image_url_input_precondition
+          note: Live validation reached the official cn-shanghai endpoint on 2026-07-18 with safe missing FileURL/FileType parameters but returned HTTP 400 InvalidImage.URL, which is treated as insufficient input evidence rather than product-version success.
+        RecognizeTable:
+          reason: live_validation_input_precondition
+          note: Live validation reached the official cn-shanghai endpoint on 2026-07-18 with a safe missing ImageURL and optional flags but returned HTTP 400 InvalidParameter, which is treated as insufficient input evidence rather than product-version success.
+  objectdet:
+    "2019-12-30":
+      prefer:
+        - DetectMainBody
+      skip:
+        GetAsyncJobResult:
+          reason: live_validation_input_precondition
+          note: API requires a real async RequestId returned by DetectVideoIPCObject; a syntactically valid placeholder JobId reached the cn-shanghai endpoint on 2026-07-18 but returned HTTP 400 InvalidParameter.BadRequest, so use same-version read probes instead.
+        DetectWhiteBaseImage:
+          reason: live_validation_product_activation_precondition
+          note: Live validation reached the official cn-shanghai endpoint on 2026-07-18 with a safe missing Shanghai OSS ImageURL and returned HTTP 403 InvalidApi.NotPurchase; DetectMainBody records the same product-activation semantics as the version representative.
+  pds:
+    "2022-03-01":
+      prefer:
+        - ListAssignment
+      skip:
+        SearchDomains:
+          reason: live_validation_input_or_header_precondition
+          note: Live validation reached the target service on 2026-07-17 with a minimal body but returned HTTP 400 InvalidHeader; official PDS call-methods documentation now confirms the separate domain API and admin endpoint patterns, and runtime host binding has been updated. Retry this product-version after credentials pass preflight.
+        ListDomains:
+          reason: live_validation_input_or_header_precondition
+          note: Live validation reached the target service on 2026-07-17 with a minimal body and again with limit=10 but returned HTTP 400 InvalidHeader; official PDS call-methods documentation now confirms this admin API should use the regional admin.aliyunpds.com endpoint. Retry after credentials pass preflight, then evaluate whether remaining InvalidHeader is a header/auth shape issue or account precondition.
+        GetDomainQuota:
+          reason: live_validation_route_or_header_precondition
+          note: Live validation reached the target endpoint on 2026-07-17 but returned HTTP 404 without a public error code; a later empty-body probe was rejected by the production contract before target request start. Retry after credentials pass preflight with the documented PDS endpoint split and corrected body/header handling, or switch to a safer same-version API.
+        ListMyGroupDrive:
+          reason: live_validation_security_contract_precondition
+          note: API metadata declares an authentication shape unsupported by the current production cloud credential chain; after the PDS domain-host fix, live validation on 2026-07-17 was still rejected before target request start. Same product-version has a safer ListAssignment probe that reached PDS domain business semantics.
+  Qualitycheck:
+    "2019-01-15":
+      prefer:
+        - GetAgentTaskResult
+      skip:
+        GetAsrVocab:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403 AccessDenied; continue with same-version safe read alternatives before keeping a version-level account blocker.
+        GetSchemeTaskConfig:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 403 AccessDenied; continue with same-version safe read alternatives before keeping a version-level account blocker.
+  QuanMiaoLightApp:
+    "2024-08-01":
+      prefer:
+        - GetVideoAnalysisTask
+      skip:
+        ListHotTopicSummaries:
+          reason: live_validation_resource_or_workspace_precondition
+          note: API requires a real workspace and optional hot topic context; GetVideoAnalysisConfig with a validation workspaceId reached the service permission boundary.
+        RunStyleWriting:
+          reason: live_validation_interactive_or_ai_inference_precondition
+          note: API performs AI writing and can consume inference capacity; same product-version now has a safer service-reached permission probe.
+  quickbi-public:
+    "2022-01-01":
+      version_blocker:
+        category: live_validation_tenant_or_organization_precondition
+        reason: Multiple safe read alternatives reached the target service and returned User.Not.In.Organization.
+        note: Continue only after the caller joins or selects a valid Quick BI organization/workspace.
+      skip:
+        QueryDataServiceList:
+          reason: live_validation_tenant_or_organization_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 Invalid.User.Organization; continue with same-version safe read alternatives before keeping a version-level tenant blocker.
+        QueryWorksByOrganization:
+          reason: live_validation_tenant_or_organization_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 User.Not.In.Organization; continue with same-version safe read alternatives before keeping a version-level tenant blocker.
+        QueryDataRange:
+          reason: live_validation_tenant_or_organization_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 User.Not.In.Organization; continue with same-version safe read alternatives before keeping a version-level tenant blocker.
+        QueryTicketInfo:
+          reason: live_validation_tenant_or_organization_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 User.Not.In.Organization; continue with same-version safe read alternatives before keeping a version-level tenant blocker.
+        GetUserGroupInfo:
+          reason: live_validation_tenant_or_organization_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 User.Not.In.Organization; continue with same-version safe read alternatives before keeping a version-level tenant blocker.
+        QueryOrganizationWorkspaceList:
+          reason: live_validation_tenant_or_organization_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 User.Not.In.Organization; continue with same-version safe read alternatives before keeping a version-level tenant blocker.
+        QueryDatasetList:
+          reason: live_validation_resource_precondition
+          note: API requires a real WorkspaceId; do not execute in automatic validation, continue with same-version safe alternatives.
+        QueryCopilotEmbedConfig:
+          reason: live_validation_tenant_or_organization_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 User.Not.In.Organization; continue with same-version safe read alternatives before keeping a version-level tenant blocker.
+        ListDynamicTag:
+          reason: live_validation_tenant_or_organization_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 User.Not.In.Organization; continue with same-version safe read alternatives before keeping a version-level tenant blocker.
+        QueryEmbeddedInfo:
+          reason: live_validation_tenant_or_organization_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 User.Not.In.Organization; continue with same-version safe read alternatives before keeping a version-level tenant blocker.
+        GetMailTaskList:
+          reason: live_validation_tenant_or_organization_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 User.Not.In.Organization; continue with same-version safe read alternatives before keeping a version-level tenant blocker.
+  retailadvqa:
+    "2019-10-27":
+      allow_non_read_fallback:
+        QueryBrandList:
+          reason: live_validation_readandwrite_query_probe
+          note: OpenMeta marks QueryBrandList as non-pure-read, but the action is a brand-list query representative; use only as an audited controlled validation sample when no safer pure read candidate exists.
+    "2023-04-17":
+      prefer:
+        - QueryMemberBasicInfo
+  safconsole:
+    "2021-01-12":
+      prefer:
+        - RevokeFeedback
+      allow_non_read_fallback:
+        RevokeFeedback:
+          reason: live_validation_nonexistent_sample_revoke_probe
+          note: Use only at cn-shanghai with SampleType=ACCOUNT and a deliberately fabricated nonexistent value; live validation returned HTTP 200 without creating or modifying a real sample.
+    "2025-05-21":
+      prefer:
+        - DescribeFileDownloadUrl
+      skip:
+        DescribeModelingProjectList:
+          reason: live_validation_metadata_incompatible_precondition
+          note: OpenMeta metadata for this action returned an incompatible response during doc preflight on 2026-07-15; continue with same-version safe alternatives before keeping a metadata blocker.
+        DescribeModelFeature:
+          reason: live_validation_stable_service_error
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 500 with public error code 1101; continue with same-version safe alternatives before keeping an official service blocker.
+        DescribeServiceAndScene:
+          reason: live_validation_stable_service_error
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 500 with public error code 500; continue with same-version safe alternatives before keeping an official service blocker.
+        DescribeModuleStatus:
+          reason: live_validation_metadata_incompatible_precondition
+          note: OpenMeta metadata for this action returned an incompatible response during doc preflight on 2026-07-15; continue with same-version safe alternatives before keeping a metadata blocker.
+        DescribeModuleServiceExist:
+          reason: live_validation_metadata_incompatible_precondition
+          note: OpenMeta metadata for this action returned an incompatible response during doc preflight on 2026-07-15; continue with same-version safe alternatives before keeping a metadata blocker.
+        DescribeCustomerModuleMetaInfo:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 NotAuthorized; continue with same-version safe alternatives before keeping a version-level account blocker.
+        DescribeCustomerModuleOutputInfo:
+          reason: live_validation_account_permission_precondition
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 400 NotAuthorized; continue with same-version safe alternatives before keeping a version-level account blocker.
+        DescribeUserModelList:
+          reason: live_validation_metadata_incompatible_precondition
+          note: OpenMeta metadata for this action returned an incompatible response during doc preflight on 2026-07-15; continue with same-version safe alternatives before keeping a metadata blocker.
+  rtc-white-board:
+    "2020-12-14":
+      version_blocker:
+        category: live_validation_stable_503_or_service_precondition
+        reason: Official SDK Center endpoint rtc-white-board.cn-shanghai.aliyuncs.com is now configured, but safe DescribeApps, DescribeWhiteBoards, and DescribeWhiteBoardRecordings probes reached the target endpoint and returned HTTP 503 ServiceUnavailable.
+        endpoint_region: cn-shanghai
+        note: Retry after service recovery; do not classify this product-version as missing endpoint, unstarted, or lacking same-version safe read exploration.
+      skip:
+        DescribeApps:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-17 after adding the official SDK Center endpoint override, and again on 2026-07-18 with pagination parameters, but returned HTTP 503 ServiceUnavailable.
+        DescribeWhiteBoards:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-18 with AppID and pagination parameters, but returned HTTP 503 ServiceUnavailable.
+        DescribeWhiteBoardRecordings:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service in cn-shanghai on 2026-07-18 with AppID, DocKey, and pagination parameters, but returned HTTP 503 ServiceUnavailable.
+  Sddp:
+    "2019-01-03":
+      prefer:
+        - DescribeRules
+      skip:
+        DescribeColumns:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        DescribeColumnsV2:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        DescribeUserStatus:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        DescribePackages:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        DescribeInstances:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        DescribeAuditLogs:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        DescribeTables:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        DescribeEvents:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+  scsp:
+    "2020-07-02":
+      prefer:
+        - GetOnlineTouchSessionList
+  STAROps:
+    "2026-04-28":
+      prefer:
+        - ListMcpServices
+      skip:
+        CreateThread:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API creates a thread and requires a real digital employee name despite read metadata; do not execute in automatic validation, continue with same-version safe alternatives.
+        CreateChat:
+          reason: live_validation_interactive_or_ai_inference_precondition
+          note: API starts a chat interaction despite read metadata; do not execute in automatic validation, continue with same-version safe alternatives.
+        FetchRemoteMcpTools:
+          reason: live_validation_input_precondition
+          note: Live validation reached the target service on 2026-07-15 and 2026-07-16 but returned HTTP 400 Missingconnection for an empty body; corrected input would require a remote MCP connection descriptor, so continue with same-version safe alternatives or a disposable external target before treating this action as usable.
+        ListDigitalEmployees:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        ListDigitalEmployeeSkills:
+          reason: live_validation_stable_503
+          note: Live validation reached the target service on 2026-07-15 but returned HTTP 503 ServiceUnavailable; continue with same-version safe read alternatives before keeping an official service blocker.
+        ListArtifacts:
+          reason: live_validation_resource_precondition
+          note: API requires a real digital employee name and artifactPath; do not execute in automatic validation, continue with same-version safe alternatives.
+        ListThreads:
+          reason: live_validation_resource_precondition
+          note: API requires a real digital employee name path parameter; do not execute in automatic validation, continue with same-version safe alternatives.
+  TrafficFxOpen:
+    "2024-08-15":
+      prefer:
+        - GetToken
+      skip:
+        Search:
+          reason: live_validation_business_token_precondition
+          note: API requires a business traffic search token/context; current production AK/OAuth STS chain cannot supply that credential, so do not keep it as a default representative.
+        ConvertUrl:
+          reason: live_validation_business_token_precondition
+          note: API requires a business token/security contract unsupported by the current production cloud-account credential chain.
+  fnf:
+    "2019-03-15":
+      prefer:
+        - DescribeRegions
+  iovcc:
+    "2018-05-01":
+      prefer:
+        - ListPreChecks
+      skip:
+        ConnectAssistDevice:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API asks a device to establish a diagnostic connection despite read metadata; same product-version has safer HTTP 200 pre-check list alternative.
+        ListClientSdks:
+          reason: live_validation_input_or_resource_precondition
+          note: API requires a concrete OS type input and remained less reliable than the no-parameter HTTP 200 pre-check list alternative.
+  Notifications:
+    "2024-12-25":
+      prefer:
+        - ReadMessageList
+        - ReadCategoryGroupList
+      skip:
+        ReadMessageContent:
+          reason: live_validation_stable_503
+          note: API reached the target service in catalog regions during live validation but returned HTTP 503 ServiceUnavailable; same product-version has safer HTTP 200 read alternatives.
+  PaiFeatureStore:
+    "2023-06-21":
+      prefer:
+        - ListInstances
+      skip:
+        CheckInstanceDatasource:
+          reason: live_validation_resource_precondition
+          note: API requires a real FeatureStore instance and datasource context; same product-version has safer HTTP 200 read alternative.
+        ListTasks:
+          reason: live_validation_resource_precondition
+          note: API requires a real FeatureStore instance identifier; same product-version has safer HTTP 200 read alternative.
+  PaiPlugin:
+    "2022-01-12":
+      prefer:
+        - ListAlgorithms
+      allow_non_read_fallback:
+        ListAlgorithms:
+          reason: live_validation_readandwrite_list_probe
+          note: OpenMeta marks ListAlgorithms as readAndWrite, but the action is a list-style query representative for this version; use only as an audited controlled validation sample.
+      skip:
+        ListGroups:
+          reason: live_validation_side_effect_or_safety_precondition
+          note: API is a readAndWrite metadata fallback and was not executed automatically; same product-version has safer HTTP 200 list alternative.
+  RdsAi:
+    "2025-05-07":
+      prefer:
+        - GetModelOperatorOrder
+      skip:
+        ChatMessages:
+          reason: live_validation_side_effect_or_interactive_precondition
+          note: API sends an AI chat message despite read metadata and requires a real query context; same product-version has safer HTTP 200 read alternative.
+        DescribeMonitorData:
+          reason: live_validation_resource_precondition
+          note: API requires concrete metric/time inputs for an RDS AI instance; same product-version has safer HTTP 200 read alternative.
+  saf:
+    "2019-05-21":
+      prefer:
+        - RequestDecision
+  servicemesh:
+    "2020-01-11":
+      prefer:
+        - DescribeVersions
+        - DescribeServiceMeshes
+      skip:
+        DescribeEipResources:
+          reason: live_validation_resource_precondition
+          note: API expects service mesh resource context; same product-version has safer HTTP 200 read alternatives.
+        GetDeploymentBySelector:
+          reason: live_validation_resource_precondition
+          note: API requires a real service mesh identifier and selector; same product-version has safer HTTP 200 read alternatives.
+        UntagResources:
+          reason: live_validation_side_effect_or_metadata_mismatch
+          note: API removes tags despite read metadata; same product-version has safer HTTP 200 read alternatives.
+  SOFA:
+    "2019-08-15":
+      prefer:
+        - DescribeCasComputers
+  AgentRetailVision:
+    "2026-05-06":
+      allow_non_read_fallback:
+        QueryRecognitionResult:
+          reason: live_validation_readandwrite_result_query_probe
+          note: OpenMeta marks QueryRecognitionResult as non-pure-read, but the action is a result-query probe; round32 reached the configured endpoint and returned InvalidApi.NotFound, so it remains an audited route/metadata evaluation sample only.
+  AIMath:
+    "2024-11-14":
+      skip:
+        GenStep:
+          reason: live_validation_ai_generation_or_billing_precondition
+          note: API performs AI step generation rather than a pure read; do not execute in automatic validation without an isolated account and explicit approval.
+  Cassandra:
+    "2019-01-01":
+      allow_non_read_fallback:
+        DescribeClusters:
+          reason: live_validation_readandwrite_describe_probe
+          note: OpenMeta marks DescribeClusters as non-pure-read, but the action is a Describe-style cluster inventory query; use only as an audited controlled validation sample when no safer pure read candidate exists.
+  DdosDiversion:
+    "2023-07-01":
+      allow_non_read_fallback:
+        QueryNetList:
+          reason: live_validation_readandwrite_query_probe
+          note: OpenMeta marks QueryNetList as non-pure-read, but the action is a network-list query representative; use only as an audited controlled validation sample when no safer pure read candidate exists.
+  FaRui:
+    "2024-06-28":
+      prefer:
+        - RunSearchLawQuery
+      allow_non_read_fallback:
+        RunSearchLawQuery:
+          reason: live_validation_workspace_auth_probe
+          note: api_overrides maps OpenMeta formData body fields to JSON body at runtime while keeping workspaceId in the path; round44 used a placeholder workspace and minimal search body, then the target service returned Auth.AccessDenied.WorkSpace before any legal-search workload could run, proving backend workspace authorization semantics without requiring a real business resource.
+  hcs-mgw:
+    "2024-06-26":
+      prefer:
+        - ListJob
+  ivpd:
+    "2019-06-25":
+      prefer:
+        - RecognizeImageColor
+      allow_non_read_fallback:
+        RecognizeImageColor:
+          reason: live_validation_nonexistent_image_activation_probe
+          note: Use only with a correctly formed but nonexistent public image URL; live validation returned NeedOpen before image processing.
+        SegmentImage:
+          reason: live_validation_nonexistent_image_activation_probe
+          note: Use only with a correctly formed but nonexistent public image URL; live validation returned NeedOpen before image processing.
+        DetectImageElements:
+          reason: live_validation_visual_analysis_probe_precondition
+          note: OpenMeta has no safer pure read representative for this version; DetectImageElements is retained only as an audited manual/isolated validation sample and must not be batch-executed without approved disposable image input.
+  metaspace:
+    "2022-03-07":
+      prefer:
+        - ApplyCoordinationWithCode
+      allow_non_read_fallback:
+        ApplyCoordinationWithCode:
+          reason: live_validation_readandwrite_business_token_probe
+          note: OpenMeta marks ApplyCoordinationWithCode as readAndWrite, but it validates a supplied coordination code/login token; round39 used placeholder values and received HTTP 400 REMOTE_VERIFY_LOGIN_TOKEN_EXCEPTION, proving backend business-token semantics without generating a new coordination code.
+      skip:
+        GenerateCoordinationCode:
+          reason: live_validation_code_generation_side_effect_precondition
+          note: API generates a coordination code and is not a safe read probe; do not execute in automatic validation without an isolated account and explicit approval.
+  nlp-automl:
+    "2019-07-01":
+      prefer:
+        - GetPredictDoc
+      allow_non_read_fallback:
+        GetPredictDoc:
+          reason: live_validation_readandwrite_result_query_http_200
+          note: OpenMeta marks GetPredictDoc as readAndWrite, but it is a prediction-result query; round38 called it with DocId and Product parameters and received HTTP 200, so it is the audited controlled representative for this product-version.
+  RAI:
+    "2024-07-01":
+      prefer:
+        - CheckAccount
+      allow_non_read_fallback:
+        CheckAccount:
+          reason: live_validation_readandwrite_account_check_http_200
+          note: OpenMeta marks CheckAccount as non-pure-read, but the action checks account/service availability and returned HTTP 200 for this product-version; use only as an audited controlled validation representative.
+      skip:
+        GetPolicyDefaultOptions:
+          reason: live_validation_account_or_service_precondition
+          note: Live validation reached the target service in cn-shanghai on 2026-07-17 but returned HTTP 403 01001; CheckAccount returned HTTP 200 for the same product-version and is the safer representative.
+        GetTopic:
+          reason: live_validation_input_or_account_precondition
+          note: Earlier live validation reached the target service but returned generic account/input errors; CheckAccount returned HTTP 200 for the same product-version and should be the online validation representative.
+  rds-data:
+    "2022-03-30":
+      skip:
+        InsertList:
+          reason: live_validation_database_write_side_effect_precondition
+          note: API inserts rows into a database and is a write side effect despite being selected as a fallback; do not execute in automatic validation without disposable database resources.
+  videoenhan:
+    "2020-03-20":
+      prefer:
+        - GetAsyncJobResult
+      skip:
+        QueryFaceVideoTemplate:
+          reason: live_validation_input_or_account_precondition
+          note: Live validation reached the target service on 2026-07-16 with empty parameters and with PageNo/PageSize/TemplateId, but both returned HTTP 400 InvalidParameter. Generic InvalidParameter is insufficient for service-reached success; continue with corrected input, account setup, or same-version safe alternatives.
+  videorecog:
+    "2020-03-20":
+      prefer:
+        - GetAsyncJobResult
+      allow_non_read_fallback:
+        GetAsyncJobResult:
+          reason: live_validation_readandwrite_async_result_probe
+          note: OpenMeta marks GetAsyncJobResult as non-pure-read, but the action is an async-result read probe and reached the target service in cn-shanghai on 2026-07-17 with HTTP 403 InvalidApi.NotPurchase.
+      skip:
+        DetectVideoShot:
+          reason: live_validation_side_effect_or_resource_precondition
+          note: API analyzes video content and requires a real VideoUrl; same product-version has a safer GetAsyncJobResult read probe that reached the target service in cn-shanghai on 2026-07-17 and returned HTTP 403 InvalidApi.NotPurchase.
+  vs:
+    "2018-12-12":
+      prefer:
+        - DescribeAccountStat
+        - DescribeVsUserResourcePackage
+      skip:
+        DescribeRenderingInstanceSettings:
+          reason: live_validation_input_or_account_precondition
+          note: API returned account/input constraints during live validation; same product-version has safer HTTP 200 read alternatives.
+        ListCloudApps:
+          reason: live_validation_account_permission_precondition
+          note: API returned account permission or service-state errors during live validation; same product-version has safer HTTP 200 read alternatives.
+  Yike:
+    "2026-03-19":
+      prefer:
+        - ListYikeWorkspaces
+    "2026-07-07":
+      prefer:
+        - BatchGetMedias
+      skip:
+        GetMedia:
+          reason: live_validation_missing_parameter_precondition
+          note: API reached the target service in cn-shanghai but returned HTTP 400 MissingParameter for empty and AuthTimeout-only calls; BatchGetMedias returned HTTP 200 with empty parameters.

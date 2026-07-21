@@ -21,6 +21,11 @@ from iac_code import __version__
 from iac_code.a2a.exposure import format_a2a_exposure_types
 from iac_code.a2a.parts import supported_input_mime_types
 from iac_code.a2a.pipeline_events import PIPELINE_EVENTS_EXTENSION_URI
+from iac_code.a2a.pipeline_outbound import (
+    OUTBOUND_HARD_MAX_BATCH_BYTES,
+    OUTBOUND_HARD_MAX_BATCH_EVENTS,
+    OUTBOUND_MAX_BATCH_DELAY_SECONDS,
+)
 from iac_code.a2a.signing import sign_agent_card_dict
 from iac_code.i18n import _
 from iac_code.pipeline.config import RunMode, get_run_mode
@@ -191,6 +196,11 @@ def build_agent_card(
             "schemaVersion": "1.0",
             "enabled": run_mode == RunMode.PIPELINE,
             "mode": run_mode.value,
+            "supportsEventBatching": True,
+            "eventBatchMetadataPath": "metadata.iac_code.pipelineBatch.events",
+            "maxBatchEvents": OUTBOUND_HARD_MAX_BATCH_EVENTS,
+            "maxBatchBytes": OUTBOUND_HARD_MAX_BATCH_BYTES,
+            "maxBatchDelayMs": round(OUTBOUND_MAX_BATCH_DELAY_SECONDS * 1000),
             "supportsSnapshot": True,
             "supportsReplay": True,
             "supportsInterrupts": True,

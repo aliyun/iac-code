@@ -91,13 +91,13 @@ msgid ""
 msgstr "回滚清理仍在进行中。请在清理完成后继续。"
 
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
+msgid "Task is already working."
+msgstr "任务已在运行。"
+
+#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
 #: src/iac_code/a2a/transports/dispatcher.py
 msgid "Task canceled."
 msgstr "任务已取消。"
-
-#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
-msgid "Task is already working."
-msgstr "任务已在运行。"
 
 #: src/iac_code/a2a/executor.py
 #, python-brace-format
@@ -3416,6 +3416,34 @@ msgstr "架构概览"
 msgid "Show the complete architecture diagram."
 msgstr "显示完整架构图。"
 
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "more"
+msgstr "其他"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#, python-brace-format
+msgid "across {kind} x{count}"
+msgstr "跨 {kind} x{count}"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "boundaries"
+msgstr "边界"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#, python-brace-format
+msgid "{label} (expand: {detail_label})"
+msgstr "{label}（展开：{detail_label}）"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#, python-brace-format
+msgid "{label}\\nexpand: {detail_label}"
+msgstr "{label}\\n展开：{detail_label}"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#, python-brace-format
+msgid "{layer_label} configuration\\n{details}"
+msgstr "{layer_label} 配置\\n{details}"
+
 #: src/iac_code/pipeline/engine/ask_user_question_tool.py
 msgid ""
 "Pipeline-only tool that asks the user to choose an option or type "
@@ -4443,6 +4471,11 @@ msgstr "会话备份需要受支持的 session layout。"
 
 #: src/iac_code/services/session_backup.py
 #, python-brace-format
+msgid "session source is not a directory: {source}"
+msgstr "会话源不是目录：{source}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
 msgid "backup root must be an absolute directory: {path}"
 msgstr "备份根目录必须是绝对目录：{path}"
 
@@ -4490,11 +4523,6 @@ msgstr "{label} 的上级路径包含符号链接：{path}"
 #, python-brace-format
 msgid "session source is a symlink: {source}"
 msgstr "会话源目录是符号链接：{source}"
-
-#: src/iac_code/services/session_backup.py
-#, python-brace-format
-msgid "session source is not a directory: {source}"
-msgstr "会话源不是目录：{source}"
 
 #: src/iac_code/services/session_backup.py
 #, python-brace-format
@@ -4600,6 +4628,7 @@ msgstr "无效的 --permission-mode {!r}。有效值：{}"
 
 #: src/iac_code/services/permissions/pipeline.py
 #: src/iac_code/tools/bash/permissions.py
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
 #, python-brace-format
 msgid "matched ask rule(s): {}"
 msgstr "匹配到询问规则：{}"
@@ -4848,6 +4877,28 @@ msgstr "正在读取 {path}"
 msgid "Reading file..."
 msgstr "正在读取文件..."
 
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
+msgid "Unknown tool: {tool_name}"
+msgstr "未知工具：{tool_name}"
+
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
+msgid ""
+"Invalid input for tool '{tool_name}': {error}. Please provide all "
+"required parameters as defined in the tool schema."
+msgstr "工具“{tool_name}”的输入无效：{error}。请按照工具架构提供所有必填参数。"
+
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
+msgid "Tool '{tool_name}' timed out after {timeout}s"
+msgstr "工具“{tool_name}”在 {timeout} 秒后超时"
+
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
+msgid "Tool '{tool_name}' failed: {error}"
+msgstr "工具“{tool_name}”执行失败：{error}"
+
 #: src/iac_code/tools/web_fetch.py
 msgid "URL cannot be empty."
 msgstr "URL 不能为空。"
@@ -4881,6 +4932,11 @@ msgstr "获取 {url} 时发生意外错误：{error}"
 #, python-brace-format
 msgid "Fetched {chars} chars, {lines} lines"
 msgstr "获取了 {chars} 个字符，{lines} 行"
+
+#: src/iac_code/tools/web_fetch.py
+#, python-brace-format
+msgid "... ({count} more lines)"
+msgstr "...（还有 {count} 行）"
 
 #: src/iac_code/tools/web_fetch.py
 msgid "Fetch"
@@ -5222,8 +5278,26 @@ msgstr "阿里云 API"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py
 #, python-brace-format
+msgid "matched deny rule: {rule}"
+msgstr "匹配到拒绝规则：{rule}"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#, python-brace-format
 msgid "Call succeeded (RequestId: {request_id})"
 msgstr "调用成功（RequestId: {request_id}）"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_api_doc.py
+msgid "Aliyun API Documentation"
+msgstr "阿里云 API 文档"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_api_doc.py
+#, python-brace-format
+msgid ""
+"{product}/{version} {action} | {style} {method} {path} | "
+"required={required} | optional={optional} | executable={executable}"
+msgstr ""
+"{product}/{version} {action} | {style} {method} {path} | 必填={required} | "
+"可选={optional} | 可执行={executable}"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
 msgid "DocSearch"
@@ -5271,12 +5345,479 @@ msgstr "未找到关键词为 {keywords} 的文档"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
 #, python-brace-format
+msgid "Link: {url}"
+msgstr "链接：{url}"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
+#, python-brace-format
 msgid "Found {count} documents (total {total})"
 msgstr "找到 {count} 篇文档（共 {total} 篇）"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
 msgid "Use web_fetch tool to read full document content if needed."
 msgstr "如需要，请使用 web_fetch 工具读取完整文档内容。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid "the requested product"
+msgstr "请求的产品"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid "the requested action"
+msgstr "请求的操作"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid "the requested region"
+msgstr "请求的地域"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid ""
+"Alibaba Cloud product must contain only letters, numbers, underscores, or"
+" hyphens."
+msgstr "阿里云产品只能包含字母、数字、下划线或连字符。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid ""
+"Alibaba Cloud API action must contain only letters, numbers, underscores,"
+" or hyphens."
+msgstr "阿里云 API 操作只能包含字母、数字、下划线或连字符。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid "Alibaba Cloud API version contains unsupported characters."
+msgstr "阿里云 API 版本包含不支持的字符。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid ""
+"Alibaba Cloud region must contain only lowercase letters, numbers, or "
+"hyphens."
+msgstr "阿里云地域只能包含小写字母、数字或连字符。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API protocol overrides are invalid for {operation}. Remove "
+"style, method, or pathname overrides and retry."
+msgstr "{operation} 的阿里云 API 协议覆盖无效。请移除 style、method 或 pathname 覆盖后重试。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API input is invalid for {operation}. Check product, "
+"action, version, region, and parameters."
+msgstr "{operation} 的阿里云 API 输入无效。请检查产品、操作、版本、地域和参数。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud API {operation} detail must be one of: summary, full."
+msgstr "阿里云 API {operation} 的 detail 必须是以下值之一：summary、full。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud product {product} was not found. Check the product code and"
+" try again."
+msgstr "未找到阿里云产品 {product}。请检查产品代码后重试。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid " Suggested product codes: {suggestions}."
+msgstr " 建议的产品代码：{suggestions}。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {product}/{version}/{action} was not found. Check the "
+"product, version, and action."
+msgstr "未找到阿里云 API {product}/{version}/{action}。请检查产品、版本和操作。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} was not found. Check the product, version, "
+"and action."
+msgstr "未找到阿里云 API {operation}。请检查产品、版本和操作。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API metadata for {operation} is temporarily unavailable; "
+"try again later."
+msgstr "{operation} 的阿里云 API 元数据暂时不可用，请稍后重试。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API metadata for {operation} returned an incompatible "
+"response. Check the API identifiers or try again later."
+msgstr "{operation} 的阿里云 API 元数据返回了不兼容的响应。请检查 API 标识或稍后重试。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"No valid Alibaba Cloud API version is available for {product}; provide an"
+" explicit version."
+msgstr "产品 {product} 没有可用的阿里云 API 版本；请显式提供版本。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} requires body_file for its binary request "
+"body."
+msgstr "阿里云 API {operation} 的二进制请求体需要 body_file。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud API {operation} requires parameter {parameter}."
+msgstr "阿里云 API {operation} 需要参数 {parameter}。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud API {operation} requires parameters {parameters}."
+msgstr "阿里云 API {operation} 需要参数 {parameters}。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud API {operation} is missing required parameters."
+msgstr "阿里云 API {operation} 缺少必填参数。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid "the requested parameter"
+msgstr "请求的参数"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} parameter {parameter} expects {expected} "
+"but received {actual}."
+msgstr "阿里云 API {operation} 的参数 {parameter} 需要 {expected}，但收到 {actual}。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} parameter {parameter} is not an allowed "
+"value."
+msgstr "阿里云 API {operation} 的参数 {parameter} 不是允许的值。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud API {operation} is missing path parameter {parameter}."
+msgstr "阿里云 API {operation} 缺少路径参数 {parameter}。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud API {operation} is missing path parameters {parameters}."
+msgstr "阿里云 API {operation} 缺少路径参数 {parameters}。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API path parameters are invalid or incomplete for "
+"{operation}."
+msgstr "阿里云 API {operation} 的路径参数无效或不完整。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} path parameter {parameter} expects "
+"{expected} but received {actual}."
+msgstr "阿里云 API {operation} 的路径参数 {parameter} 需要 {expected}，但收到 {actual}。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} parameter {parameter} expects a scalar "
+"header value without line breaks but received {actual}."
+msgstr "阿里云 API {operation} 的参数 {parameter} 需要不含换行符的标量请求头值，但收到 {actual}。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} parameter {parameter} expects a valid "
+"header name but received a {actual} with invalid syntax."
+msgstr "阿里云 API {operation} 的参数 {parameter} 需要有效的请求头名称，但收到语法无效的 {actual}。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} parameter {parameter} expects a valid DNS "
+"host-label string but received {actual} with invalid syntax."
+msgstr "阿里云 API {operation} 的参数 {parameter} 需要有效的 DNS 主机标签字符串，但收到语法无效的 {actual}。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} parameter {parameter} targets a reserved "
+"authentication header. Remove the parameter and retry."
+msgstr "阿里云 API {operation} 的参数 {parameter} 指向保留的身份验证请求头。请移除该参数后重试。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} uses a protocol shape this runtime cannot "
+"execute. Choose another API version or action."
+msgstr "阿里云 API {operation} 使用了当前运行时无法执行的协议形态。请选择其他 API 版本或操作。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} metadata uses a schema this runtime cannot "
+"execute. Choose another API version or action."
+msgstr "阿里云 API {operation} 的元数据使用了当前运行时无法执行的模式。请选择其他 API 版本或操作。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud OSS API {operation} is not supported by this runtime. "
+"Choose a supported OSS action or use another client."
+msgstr "当前运行时不支持阿里云 OSS API {operation}。请选择受支持的 OSS 操作或使用其他客户端。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} cannot be executed from its current "
+"metadata. Choose another API version or action."
+msgstr "无法根据当前元数据执行阿里云 API {operation}。请选择其他 API 版本或操作。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud endpoint cache could not be updated for {operation} in "
+"{region}. Check local configuration storage and retry."
+msgstr "无法更新 {region} 中 {operation} 的阿里云 endpoint 缓存。请检查本地配置存储后重试。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"No trusted Alibaba Cloud endpoint is available for {operation} in "
+"{region}. Check the region or endpoint configuration."
+msgstr "{region} 中没有可用于 {operation} 的可信阿里云 endpoint。请检查地域或 endpoint 配置。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud host parameters are invalid for {operation} in {region}."
+msgstr "{region} 中 {operation} 的阿里云主机参数无效。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud authentication is unsupported for {operation}. Check the "
+"API contract or choose an API that supports AccessKey authentication."
+msgstr "{operation} 不支持当前阿里云身份验证方式。请检查 API 契约或选择支持 AccessKey 身份验证的 API。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud credentials are unavailable. Configure credentials and "
+"retry {operation}."
+msgstr "阿里云凭证不可用。请配置凭证后重试 {operation}。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} parameter {parameter} is reserved for "
+"request signing and cannot be set."
+msgstr "阿里云 API {operation} 的参数 {parameter} 保留用于请求签名，不能设置。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud signing is unsupported for {operation}. Check the API "
+"contract."
+msgstr "{operation} 不支持当前阿里云签名方式。请检查 API 契约。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API execution is unavailable for {operation}. Retry from an"
+" active runtime."
+msgstr "阿里云 API {operation} 当前无法执行。请在活动运行时中重试。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API authorization expired or changed. Run {operation} again"
+" to approve the current contract."
+msgstr "阿里云 API 授权已过期或发生变化。请再次运行 {operation} 以批准当前契约。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} does not accept body_file. Use the body "
+"source declared by the API contract."
+msgstr "阿里云 API {operation} 不接受 body_file。请使用 API 契约声明的请求体来源。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} body_file exceeds the 32 MiB limit. Use a "
+"smaller regular file."
+msgstr "阿里云 API {operation} 的 body_file 超过 32 MiB 限制。请使用更小的常规文件。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} requires a body source compatible with its "
+"API contract."
+msgstr "阿里云 API {operation} 需要与其 API 契约兼容的请求体来源。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} received multiple body sources. Provide "
+"only one of body, body_file, or body parameters."
+msgstr "阿里云 API {operation} 收到多个请求体来源。body、body_file 或 body 参数只能提供一个。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} received multiple template sources. Provide"
+" only one."
+msgstr "阿里云 API {operation} 收到多个模板来源。请只提供一个。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} content_type does not match the request "
+"body. Use a compatible media type."
+msgstr "阿里云 API {operation} 的 content_type 与请求体不匹配。请使用兼容的媒体类型。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} has content_type without a request body. "
+"Remove content_type or provide a body."
+msgstr "阿里云 API {operation} 设置了 content_type，但没有请求体。请移除 content_type 或提供请求体。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} body is invalid. Provide a valid JSON or "
+"form request body."
+msgstr "阿里云 API {operation} 的请求体无效。请提供有效的 JSON 或表单请求体。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} body_file is invalid. Use a readable "
+"regular file within the allowed size."
+msgstr "阿里云 API {operation} 的 body_file 无效。请使用允许大小范围内且可读的常规文件。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} content_type is invalid. Use a valid media "
+"type such as application/json."
+msgstr "阿里云 API {operation} 的 content_type 无效。请使用 application/json 等有效媒体类型。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} template file is invalid. Use a readable "
+"regular template file."
+msgstr "阿里云 API {operation} 的模板文件无效。请使用可读的常规模板文件。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} template validation failed. Check the "
+"template syntax and resource definitions."
+msgstr "阿里云 API {operation} 模板验证失败。请检查模板语法和资源定义。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} max_response_bytes must be between 1 and "
+"16777216."
+msgstr "阿里云 API {operation} 的 max_response_bytes 必须介于 1 和 16777216 之间。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} returned HTTP {status} with error code "
+"{code}. Check the request and cloud permissions before retrying."
+msgstr "阿里云 API {operation} 返回 HTTP {status}，错误码为 {code}。请检查请求和云权限后重试。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} returned HTTP {status}. Check the request "
+"and cloud permissions before retrying."
+msgstr "阿里云 API {operation} 返回 HTTP {status}。请检查请求和云权限后重试。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} could not connect before the request was "
+"sent. Check network and endpoint access, then retry."
+msgstr "阿里云 API {operation} 在发送请求前无法建立连接。请检查网络和 endpoint 访问后重试。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} received a retryable service response, but "
+"the retry deadline expired. Retry the read-only request later."
+msgstr "阿里云 API {operation} 收到了可重试的服务响应，但已超过重试截止时间。请稍后重试只读请求。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} read-only request did not complete before "
+"the retry deadline. Check network and service health, then retry."
+msgstr "阿里云 API {operation} 的只读请求未能在重试截止时间前完成。请检查网络和服务运行状况后重试。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} timed out after the request may have been "
+"sent. Check cloud state before retrying to avoid duplicate changes."
+msgstr "阿里云 API {operation} 在请求可能已发送后超时。为避免重复变更，请在重试前检查云端状态。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} timed out before the request was sent. "
+"Retry the operation."
+msgstr "阿里云 API {operation} 在发送请求前超时。请重试该操作。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} returned an invalid response after the "
+"request was sent. Check cloud state before retrying to avoid duplicate "
+"changes."
+msgstr "阿里云 API {operation} 在请求发送后返回了无效响应。为避免重复变更，请在重试前检查云端状态。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} may have been sent before the connection "
+"failed. Check cloud state before retrying to avoid duplicate changes."
+msgstr "阿里云 API {operation} 可能已在连接失败前发送。为避免重复变更，请在重试前检查云端状态。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} response exceeded max_response_bytes. "
+"Increase the limit or narrow the request and retry."
+msgstr "阿里云 API {operation} 的响应超过 max_response_bytes。请提高限制或缩小请求范围后重试。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} error response exceeded the 1 MiB safety "
+"limit. Check Alibaba Cloud logs before retrying."
+msgstr "阿里云 API {operation} 的错误响应超过 1 MiB 安全限制。请在重试前检查阿里云日志。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud API parameters are invalid for {operation}."
+msgstr "{operation} 的阿里云 API 参数无效。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} could not be prepared safely. Check the "
+"request and try again."
+msgstr "无法安全准备阿里云 API {operation}。请检查请求后重试。"
 
 #: src/iac_code/tools/cloud/aliyun/ros_stack.py
 msgid "ROS Stack"
@@ -7623,4 +8164,40 @@ msgstr "拒绝打开非常规文件：{path}"
 
 #~ msgid "{option} expects KEY=VALUE, got {value!r}."
 #~ msgstr "{option} 需要 KEY=VALUE，收到 {value!r}。"
+
+#~ msgid "detail must be one of: summary, full."
+#~ msgstr ""
+
+#~ msgid "No API version available for {product}; provide 'version'."
+#~ msgstr ""
+
+#~ msgid "Unknown Alibaba Cloud product '{product}'."
+#~ msgstr ""
+
+#~ msgid "API {product}/{version}/{action} was not found in OpenMeta."
+#~ msgstr ""
+
+#~ msgid "Alibaba Cloud OpenMeta is temporarily unavailable; try again later."
+#~ msgstr ""
+
+#~ msgid "Alibaba Cloud OpenMeta returned an invalid response."
+#~ msgstr ""
+
+#~ msgid "Alibaba Cloud API version must use YYYY-MM-DD."
+#~ msgstr "阿里云 API 版本必须使用 YYYY-MM-DD 格式。"
+
+#~ msgid "Session does not support artifacts"
+#~ msgstr "当前会话不支持工件"
+
+#~ msgid ""
+#~ "This Alibaba Cloud API response requires"
+#~ " session artifact storage. Retry from "
+#~ "an active session."
+#~ msgstr "此阿里云 API 响应需要会话工件存储。请在活动会话中重试。"
+
+#~ msgid ""
+#~ "Alibaba Cloud API {operation} could not"
+#~ " save its artifact. Check the active"
+#~ " session storage quota and retry."
+#~ msgstr "阿里云 API {operation} 无法保存其工件。请检查活动会话的存储配额后重试。"
 

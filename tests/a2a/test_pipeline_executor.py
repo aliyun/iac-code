@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import json
 import os
 import shutil
@@ -20,6 +21,13 @@ from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
+from iac_code.a2a.pipeline_transport_delivery import (
+    acknowledge_pipeline_transport_delivery,
+    bind_pipeline_transport_delivery_tracker,
+    close_pipeline_transport_delivery_tracker,
+    create_pipeline_transport_delivery_tracker,
+    pipeline_transport_delivery_tracking,
+)
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.agent.message import ImageBlock
 from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource
@@ -28,6 +36,7 @@ from iac_code.pipeline.engine.interrupt import InterruptVerdict
 from iac_code.pipeline.engine.prerequisites import PrerequisiteDecision, PrerequisiteResolution
 from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pipeline_user_input
 from iac_code.services.session_backup import BackupReason, BackupResult, SessionBackupBlocked
+from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
 from iac_code.services.session_layout import UnsupportedSessionLayoutError
 from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
 from iac_code.services.session_storage import SessionStorage
@@ -38,6 +47,35 @@ from .fakes import FakeEventQueue, FakeRequestContext
 RETRY_TEXT = "A temporary error occurred. Please retry."
 AUTH_TEXT = "Authentication required. Configure credentials and retry."
 _A2A_ASYNC_TEST_TIMEOUT = 5
+
+
+@pytest.mark.asyncio
+async def test_stream_event_driver_preserves_generator_context_across_yields() -> None:
+    from iac_code.a2a.pipeline_executor import _drive_stream_events
+
+    marker = contextvars.ContextVar("stream_driver_test_marker", default="outside")
+
+    async def events():
+        token = marker.set("inside")
+        try:
+            yield marker.get()
+            yield marker.get()
+        finally:
+            marker.reset(token)
+
+    requests: asyncio.Queue[asyncio.Future[object]] = asyncio.Queue()
+    driver = asyncio.create_task(_drive_stream_events(events(), requests))
+
+    for _ in range(2):
+        completion = asyncio.get_running_loop().create_future()
+        requests.put_nowait(completion)
+        assert await completion == "inside"
+
+    exhausted = asyncio.get_running_loop().create_future()
+    requests.put_nowait(exhausted)
+    with pytest.raises(StopAsyncIteration):
+        await exhausted
+    await driver
 
 
 def _write_pipeline_yaml(pipeline_dir: Path) -> None:
@@ -60,7 +98,7 @@ def _write_pipeline_yaml(pipeline_dir: Path) -> None:
     )
 
 
-def _pipeline_executor():
+def _pipeline_executor(*, aliyun_delegated_executor_factory=None):
     from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
 
     return IacCodeA2APipelineExecutor(
@@ -72,6 +110,7 @@ def _pipeline_executor():
         permission_resolver=None,
         auto_approve_permissions=False,
         thinking_exposure_types=None,
+        aliyun_delegated_executor_factory=aliyun_delegated_executor_factory,
     )
 
 
@@ -128,7 +167,8 @@ def test_create_pipeline_inspects_prerequisites_for_fresh_a2a_run(
     monkeypatch.setattr(pipeline_executor_module, "inspect_prerequisites", fake_inspect, raising=False)
     monkeypatch.setattr(pipeline_executor_module, "create_pipeline", fake_create_pipeline)
 
-    _pipeline_executor()._create_pipeline(
+    delegated_factory = object()
+    _pipeline_executor(aliyun_delegated_executor_factory=delegated_factory)._create_pipeline(
         session_id="session-1",
         cwd=str(tmp_path),
         runtime=_fake_runtime(),
@@ -150,6 +190,36 @@ def test_create_pipeline_inspects_prerequisites_for_fresh_a2a_run(
     ]
     assert create_kwargs["surface"] == "a2a"
     assert create_kwargs["prerequisite_resolution"] == resolution.to_metadata()
+    assert create_kwargs["aliyun_delegated_executor_factory"] is delegated_factory
+
+
+def test_create_pipeline_uses_current_runtime_services_delegated_factory_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a import pipeline_executor as pipeline_executor_module
+
+    delegated_factory = object()
+    runtime = _fake_runtime()
+    runtime.aliyun_services = SimpleNamespace(delegated_executor_factory=delegated_factory)
+    create_kwargs: dict[str, object] = {}
+    executor = _pipeline_executor()
+    monkeypatch.setattr(executor, "_inspect_pipeline_prerequisite_metadata", lambda **kwargs: None)
+    monkeypatch.setattr(
+        pipeline_executor_module,
+        "create_pipeline",
+        lambda *args, **kwargs: create_kwargs.update(kwargs) or object(),
+    )
+
+    executor._create_pipeline(
+        session_id="session-1",
+        cwd=str(tmp_path),
+        runtime=runtime,
+        session_storage=MagicMock(),
+        resume_from_sidecar=False,
+    )
+
+    assert create_kwargs["aliyun_delegated_executor_factory"] is delegated_factory
 
 
 def test_create_pipeline_resume_sidecar_prerequisites_skip_a2a_inspection(
@@ -397,6 +467,86 @@ class FakePipeline:
         return self.handoff_summary
 
 
+class DelayedTransportEventQueue(FakeEventQueue):
+    async def enqueue_event(self, event) -> None:
+        await super().enqueue_event(event)
+        asyncio.get_running_loop().call_later(0.01, acknowledge_pipeline_transport_delivery, event)
+
+
+class QueueLifecyclePublisher:
+    def __init__(self, *, block_batch: bool = False, batch_error: Exception | None = None) -> None:
+        self.extreme_performance = True
+        self.event_queue = FakeEventQueue()
+        self.translator = SimpleNamespace(
+            context=SimpleNamespace(
+                task_id="task-1",
+                context_id="ctx-1",
+                iac_code_session_id="session-1",
+            )
+        )
+        self.last_envelope = None
+        self.calls: list[tuple[str, object]] = []
+        self.batch_started = asyncio.Event()
+        self.release_batch = asyncio.Event()
+        self.block_batch = block_batch
+        self.batch_error = batch_error
+        self.persisted_text: list[str] = []
+        self.delivered_text: list[str] = []
+        self.second_delta_persisted = asyncio.Event()
+        self._next_sequence = 0
+
+    async def publish_batch(self, events) -> None:
+        texts = [event["data"]["text"] if isinstance(event, dict) else event.text for event in events]
+        self.calls.append(("batch", texts))
+        self.batch_started.set()
+        if self.block_batch:
+            await self.release_batch.wait()
+        if self.batch_error is not None:
+            raise self.batch_error
+        self.delivered_text.extend(texts)
+
+    async def persist_batch_events(self, events):
+        persisted = []
+        for event in events:
+            self.persisted_text.append(event.text)
+            if len(self.persisted_text) >= 2:
+                self.second_delta_persisted.set()
+            self._next_sequence += 1
+            sequence = self._next_sequence
+            persisted.append(
+                {
+                    "schemaVersion": "1.0",
+                    "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+                    "eventId": f"evt-{sequence}",
+                    "sequence": sequence,
+                    "createdAt": f"2026-07-17T00:00:{sequence:02d}Z",
+                    "eventType": event.type,
+                    "scope": "pipeline",
+                    "pipelineRunId": "ctx-1",
+                    "taskId": "task-1",
+                    "contextId": "ctx-1",
+                    "pipelineName": "selling",
+                    "status": "working",
+                    "iacCodeSessionId": "session-1",
+                    "data": {"text": event.text},
+                }
+            )
+        return persisted
+
+    async def enqueue_persisted_batch(self, events, *, wait_for_transport: bool = False) -> None:
+        await self.publish_batch(events)
+
+    async def publish(self, event, **kwargs) -> str | None:
+        self.calls.append(("single", getattr(event, "type", None)))
+        return event.text if isinstance(event, TextDeltaEvent) else None
+
+    async def publish_interrupt_received(self, *, prompt: str) -> None:
+        self.calls.append(("interrupt", "interrupt_received"))
+
+    async def publish_interrupt(self, **kwargs) -> None:
+        self.calls.append(("interrupt", "interrupt_classified"))
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("legacy_sidecar_status", ["waiting_input", "completed", "failed"])
 async def test_select_stream_promotes_backup_blocked_pending_input_for_legacy_sidecar(
@@ -583,11 +733,21 @@ class RecordingBackupService:
         self.pipeline_snapshot_dir = pipeline_snapshot_dir
         self.on_backup = on_backup
         self.calls: list[tuple[str, str, BackupReason, bool]] = []
+        self.publication_proofs: list[dict[str, BackupPublicationProof] | None] = []
         self.session_snapshots: list[tuple[BackupReason, dict, dict]] = []
         self.pipeline_snapshots: list[tuple[BackupReason, dict]] = []
 
-    def backup_session(self, cwd: str, session_id: str, *, reason: BackupReason, critical: bool) -> None:
+    def backup_session(
+        self,
+        cwd: str,
+        session_id: str,
+        *,
+        reason: BackupReason,
+        critical: bool,
+        publication_proofs: dict[str, BackupPublicationProof] | None = None,
+    ) -> None:
         self.calls.append((cwd, session_id, reason, critical))
+        self.publication_proofs.append(publication_proofs)
         session_dir = SessionStorage().session_dir(cwd, session_id)
         task_snapshot = json.loads((session_dir / "a2a" / "task.json").read_text(encoding="utf-8"))
         context_snapshot = json.loads((session_dir / "a2a" / "context.json").read_text(encoding="utf-8"))
@@ -719,7 +879,7 @@ def test_a2a_pipeline_dir_for_session_reuses_legacy_flat_direct_a2a_sidecar(
     assert existing_a2a_pipeline_dir_for_session(cwd=str(cwd), session_id="legacy-a2a") == a2a_pipeline_dir
 
 
-def test_pipeline_publisher_prefers_session_artifact_store_when_session_available(
+def test_pipeline_publisher_uses_session_a2a_artifact_store_when_session_available(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -747,9 +907,10 @@ def test_pipeline_publisher_prefers_session_artifact_store_when_session_availabl
         thinking_exposure_types=None,
     )
 
+    pipeline = FakePipeline([], session_dir=session_dir / "pipeline")
     publisher = executor._publisher(
         event_queue=FakeEventQueue(),
-        pipeline=FakePipeline([], session_dir=session_dir / "pipeline"),
+        pipeline=pipeline,
         task_id="task-1",
         context_id="ctx-1",
         session_id=session_id,
@@ -759,6 +920,9 @@ def test_pipeline_publisher_prefers_session_artifact_store_when_session_availabl
     assert publisher.artifact_store is not None
     assert publisher.artifact_store.root == session_dir / "a2a" / "artifacts"
     assert publisher.artifact_store.root != global_store.root
+    assert publisher.flow_monitor is not None
+    assert publisher.flow_monitor.path == session_dir / "logs" / "a2a-pipeline-flow.jsonl"
+    assert publisher.flow_monitor.identity.session_id == session_id
 
 
 def test_pipeline_artifact_store_uses_global_store_for_legacy_session(
@@ -993,9 +1157,11 @@ async def test_pipeline_executor_refreshes_cloud_tools_with_aliyun_metadata_for_
 
     seen_access_key_ids: list[str | None] = []
     runtime = _fake_runtime()
+    runtime.aliyun_services = object()
 
-    def fake_register_cloud_tools(registry, credentials):
+    def fake_register_cloud_tools(registry, credentials, services):
         assert registry is runtime.tool_registry
+        assert services is runtime.aliyun_services
         credential = credentials.get_provider("aliyun")
         seen_access_key_ids.append(credential.access_key_id if credential else None)
 
@@ -1217,6 +1383,895 @@ async def test_executor_runs_pipeline_mode(monkeypatch: pytest.MonkeyPatch, tmp_
     record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
     assert record.state == "completed"
     assert "".join(record.output_text) == "pipeline output"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_executor_batches_deltas_before_semantic_event_and_drains_outbound_queue(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setenv("IAC_CODE_A2A_EXTREME_PERFORMANCE", "true")
+    fake_pipeline = FakePipeline(
+        [
+            TextDeltaEvent(text="a"),
+            TextDeltaEvent(text="b"),
+            TextDeltaEvent(text="c"),
+            PipelineEvent(
+                type=PipelineEventType.PIPELINE_STARTED,
+                step_id=None,
+                timestamp=1717821600.0,
+                data={"total_steps": 1, "step_names": ["intent_parsing"]},
+            ),
+            PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=1717821601.0,
+                data={"total_steps": 1},
+            ),
+        ],
+        session_dir=tmp_path / "sidecar",
+    )
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: fake_pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = DelayedTransportEventQueue()
+
+    with pipeline_transport_delivery_tracking():
+        await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    pipeline_updates = [
+        dump(event)["metadata"]["iac_code"]
+        for event in queue.events
+        if isinstance(event, TaskStatusUpdateEvent)
+        and (
+            "pipeline" in dump(event).get("metadata", {}).get("iac_code", {})
+            or "pipelineBatch" in dump(event).get("metadata", {}).get("iac_code", {})
+        )
+    ]
+    envelopes = [
+        envelope
+        for update in pipeline_updates
+        for envelope in (update["pipelineBatch"]["events"] if "pipelineBatch" in update else [update["pipeline"]])
+    ]
+    pipeline_started_index = next(
+        index for index, envelope in enumerate(envelopes) if envelope["eventType"] == "pipeline_started"
+    )
+    delta_envelopes = envelopes[:pipeline_started_index]
+    assert delta_envelopes
+    assert all(envelope["eventType"] == "text_delta" for envelope in delta_envelopes)
+    assert "".join(envelope["data"]["text"] for envelope in delta_envelopes) == "abc"
+    assert [envelope["sequence"] for envelope in delta_envelopes] == sorted(
+        envelope["sequence"] for envelope in delta_envelopes
+    )
+    assert delta_envelopes[-1]["sequence"] == 3
+    assert "".join((await store.get_or_create_task(task_id="task-1", context_id="ctx-1")).output_text) == "abc"
+    assert store._contexts["ctx-1"].runtime.outbound is None
+    assert not any("PipelineA2AOutboundQueue._run" in name for name in _pending_coro_names())
+
+
+@pytest.mark.asyncio
+async def test_pipeline_executor_flushes_outbound_before_terminal_handoff_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setenv("IAC_CODE_A2A_EXTREME_PERFORMANCE", "true")
+    fake_pipeline = FakePipeline(
+        [
+            TextDeltaEvent(text="a"),
+            TextDeltaEvent(text="b"),
+            PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=1717821601.0,
+                data={"total_steps": 1},
+            ),
+        ],
+        session_dir=tmp_path / "sidecar",
+    )
+    fake_pipeline.handoff_enabled = True
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: fake_pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = DelayedTransportEventQueue()
+
+    with pipeline_transport_delivery_tracking():
+        await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    pipeline_updates = [
+        dump(event)["metadata"]["iac_code"]
+        for event in queue.events
+        if isinstance(event, TaskStatusUpdateEvent)
+        and (
+            "pipeline" in dump(event).get("metadata", {}).get("iac_code", {})
+            or "pipelineBatch" in dump(event).get("metadata", {}).get("iac_code", {})
+        )
+    ]
+    assert [update["pipeline"]["eventType"] for update in pipeline_updates] == [
+        "text_delta",
+        "text_delta",
+        "pipeline_completed",
+        "backup_committed",
+        "pipeline_handoff_ready",
+        "backup_committed",
+    ]
+    assert [update["pipeline"]["data"]["text"] for update in pipeline_updates[:2]] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_executor_preserves_committed_terminal_when_transport_closes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setenv("IAC_CODE_A2A_EXTREME_PERFORMANCE", "true")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    context_record = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda _session_id: _fake_runtime(),
+    )
+    session_dir = SessionStorage().session_dir(str(tmp_path), context_record.session_id) / "pipeline"
+    pipeline_dir = session_dir.parent / "a2a" / "pipeline"
+    fake_pipeline = FakePipeline(
+        [
+            PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=1717821601.0,
+                data={"total_steps": 1},
+            ),
+        ],
+        session_dir=session_dir,
+    )
+    fake_pipeline.handoff_enabled = True
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: fake_pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+
+    tracker = create_pipeline_transport_delivery_tracker()
+
+    class ClosingTransportEventQueue(FakeEventQueue):
+        async def enqueue_event(self, event) -> None:
+            await super().enqueue_event(event)
+            metadata = dump(event).get("metadata", {}).get("iac_code", {})
+            envelope = metadata.get("pipeline")
+            if isinstance(envelope, dict) and envelope.get("eventType") == "pipeline_completed":
+                close_pipeline_transport_delivery_tracker(tracker)
+            else:
+                acknowledge_pipeline_transport_delivery(event)
+
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    try:
+        with bind_pipeline_transport_delivery_tracker(tracker):
+            await executor.execute(
+                FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}),
+                ClosingTransportEventQueue(),
+            )
+    finally:
+        close_pipeline_transport_delivery_tracker(tracker)
+
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    assert record.state == "completed"
+    journal_events = A2APipelineJournal(pipeline_dir).read_all()
+    assert any(event["eventType"] == "pipeline_completed" for event in journal_events)
+    assert any(event["eventType"] == "pipeline_handoff_ready" for event in journal_events)
+    assert not any(event["eventType"] == "pipeline_failed" for event in journal_events)
+    assert await executor._should_route_pipeline_handoff_to_normal(context_id="ctx-1", cwd=str(tmp_path)) is True
+    assert store._contexts["ctx-1"].runtime.outbound is None
+    assert not any("PipelineA2AOutboundQueue._run" in name for name in _pending_coro_names())
+
+
+@pytest.mark.asyncio
+async def test_pipeline_executor_keeps_individual_outbound_updates_when_extreme_performance_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setenv("IAC_CODE_A2A_EXTREME_PERFORMANCE", "false")
+    fake_pipeline = FakePipeline(
+        [TextDeltaEvent(text="a"), TextDeltaEvent(text="b")],
+        session_dir=tmp_path / "sidecar",
+    )
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: fake_pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    pipeline_updates = _pipeline_status_events(queue)
+    assert [item["data"]["text"] for item in pipeline_updates] == ["a", "b"]
+    assert all("pipelineBatch" not in dump(event).get("metadata", {}).get("iac_code", {}) for event in queue.events)
+
+
+@pytest.mark.asyncio
+async def test_outbound_close_error_does_not_mask_stream_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from iac_code.a2a import pipeline_executor as module
+
+    class FailingCloseOutbound:
+        async def start(self) -> None:
+            return None
+
+        async def close(self) -> None:
+            raise RuntimeError("close failed")
+
+    async def failing_stream():
+        raise ValueError("stream failed")
+        yield
+
+    outbound = FailingCloseOutbound()
+    monkeypatch.setattr(module, "PipelineA2AOutboundQueue", lambda publisher: outbound)
+    runtime = module.A2APipelineRuntime(agent_runtime=_fake_runtime())
+    publisher = SimpleNamespace(extreme_performance=True)
+    task = SimpleNamespace(active_task=None)
+
+    with pytest.raises(ValueError, match="stream failed"):
+        await _pipeline_executor()._consume_stream_until_restart(
+            stream=failing_stream(),
+            runtime=runtime,
+            publisher=publisher,
+            task=task,
+        )
+
+    assert runtime.outbound is None
+
+
+@pytest.mark.asyncio
+async def test_outbound_close_error_does_not_mask_stream_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from iac_code.a2a import pipeline_executor as module
+
+    class FailingCloseOutbound:
+        async def start(self) -> None:
+            return None
+
+        async def close(self) -> None:
+            raise RuntimeError("close failed")
+
+    stream_started = asyncio.Event()
+    block_stream = asyncio.Event()
+
+    async def blocked_stream():
+        stream_started.set()
+        await block_stream.wait()
+        yield
+
+    outbound = FailingCloseOutbound()
+    monkeypatch.setattr(module, "PipelineA2AOutboundQueue", lambda publisher: outbound)
+    runtime = module.A2APipelineRuntime(agent_runtime=_fake_runtime())
+    publisher = SimpleNamespace(extreme_performance=True)
+    task = SimpleNamespace(active_task=None)
+    consumer = asyncio.create_task(
+        _pipeline_executor()._consume_stream_until_restart(
+            stream=blocked_stream(),
+            runtime=runtime,
+            publisher=publisher,
+            task=task,
+        )
+    )
+    await asyncio.wait_for(stream_started.wait(), timeout=1)
+
+    consumer.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await consumer
+
+    assert runtime.outbound is None
+
+
+@pytest.mark.asyncio
+async def test_active_interrupt_marks_unsettled_before_outbound_callback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a import pipeline_executor as module
+
+    callback_started = asyncio.Event()
+    release_callback = asyncio.Event()
+
+    class BlockingSerializedOutbound:
+        async def run_serialized(self, callback):
+            callback_started.set()
+            await release_callback.wait()
+            return await callback()
+
+    class InterruptPipeline:
+        sidecar_status = None
+
+        async def handle_user_interrupt(self, prompt: str) -> InterruptVerdict:
+            return InterruptVerdict(action="continue", reason="keep going")
+
+    publisher = SimpleNamespace(
+        publish_interrupt=AsyncMock(),
+        publish_interrupt_received=AsyncMock(),
+    )
+    runtime = module.A2APipelineRuntime(
+        agent_runtime=_fake_runtime(),
+        pipeline=InterruptPipeline(),
+        publisher=publisher,
+        outbound=BlockingSerializedOutbound(),
+    )
+    ctx = SimpleNamespace(runtime=runtime, session_id="session-1")
+    task = SimpleNamespace(task_id="task-1", context_id="ctx-1", state="working")
+    monkeypatch.setattr(module, "_pending_pipeline_pause_input_from_sidecar", lambda *args, **kwargs: None)
+
+    route = asyncio.create_task(
+        _pipeline_executor()._route_active_pipeline_interrupt(
+            FakeEventQueue(),
+            task=task,
+            ctx=ctx,
+            task_id="task-1",
+            context_id="ctx-1",
+            cwd=str(tmp_path),
+            pipeline_input=normalize_pipeline_user_input("change course"),
+            preserve_task_record=True,
+        )
+    )
+    await asyncio.wait_for(callback_started.wait(), timeout=1)
+
+    try:
+        assert not runtime.interrupt_settled.is_set()
+    finally:
+        release_callback.set()
+        assert await route is True
+    assert runtime.interrupt_settled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_interrupt_settlement_survives_cancellation_while_waiting_for_lock() -> None:
+    from iac_code.a2a import pipeline_executor as module
+
+    runtime = module.A2APipelineRuntime(agent_runtime=_fake_runtime(), active_interrupt_count=1)
+    runtime.interrupt_settled.clear()
+    await runtime.outbound_lock.acquire()
+    settlement = asyncio.create_task(module._settle_active_interrupt_safely(runtime))
+    await asyncio.sleep(0)
+
+    settlement.cancel()
+    runtime.outbound_lock.release()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(settlement, timeout=1)
+
+    assert runtime.active_interrupt_count == 0
+    assert runtime.interrupt_settled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_non_retryable_exception_terminal_waits_for_active_interrupt(monkeypatch: pytest.MonkeyPatch) -> None:
+    from iac_code.a2a import pipeline_executor as module
+
+    executor = _pipeline_executor()
+    publish_terminal = AsyncMock(return_value=True)
+    monkeypatch.setattr(executor, "_publish_pipeline_terminal_event", publish_terminal)
+    runtime = module.A2APipelineRuntime(agent_runtime=_fake_runtime(), active_interrupt_count=1)
+    runtime.interrupt_settled.clear()
+    task = SimpleNamespace(task_id="task-1", context_id="ctx-1", state="working")
+
+    publication = asyncio.create_task(
+        executor._publish_exception_status(
+            FakeEventQueue(),
+            task=task,
+            task_id="task-1",
+            context_id="ctx-1",
+            exc=RuntimeError("failed"),
+            pipeline_publisher=SimpleNamespace(),
+            pipeline_runtime=runtime,
+        )
+    )
+    await asyncio.sleep(0)
+    publish_terminal.assert_not_awaited()
+
+    await module._settle_active_interrupt_safely(runtime)
+    await publication
+
+    publish_terminal.assert_awaited_once()
+    assert runtime.terminal_publication_started is True
+    assert await module._register_active_interrupt(runtime) is False
+
+
+@pytest.mark.asyncio
+async def test_cancel_before_outbound_registration_aborts_and_joins_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from iac_code.a2a import pipeline_executor as module
+
+    real_outbound_type = module.PipelineA2AOutboundQueue
+    worker_started = asyncio.Event()
+    created = []
+
+    class RecordingOutbound(real_outbound_type):
+        async def start(self) -> None:
+            await super().start()
+            worker_started.set()
+
+    def create_outbound(publisher):
+        outbound = RecordingOutbound(publisher)
+        created.append(outbound)
+        return outbound
+
+    monkeypatch.setattr(module, "PipelineA2AOutboundQueue", create_outbound)
+    publisher = QueueLifecyclePublisher()
+    runtime = module.A2APipelineRuntime(agent_runtime=_fake_runtime(), pipeline=SimpleNamespace())
+    task = SimpleNamespace(active_task=None, output_text=[])
+
+    async def stream():
+        yield TextDeltaEvent(text="not reached")
+
+    await runtime.outbound_lock.acquire()
+    consumer = asyncio.create_task(
+        _pipeline_executor()._consume_stream_until_restart(
+            stream=stream(),
+            runtime=runtime,
+            publisher=publisher,
+            task=task,
+        )
+    )
+    try:
+        await asyncio.wait_for(worker_started.wait(), timeout=1)
+        consumer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await consumer
+    finally:
+        runtime.outbound_lock.release()
+
+    outbound = created[0]
+    worker_done = outbound._worker is not None and outbound._worker.done()
+    if outbound._worker is not None and not outbound._worker.done():
+        await outbound.abort()
+
+    assert runtime.outbound is None
+    assert worker_done
+    assert not any(task.get_name() == "pipeline-a2a-outbound" and not task.done() for task in asyncio.all_tasks())
+
+
+@pytest.mark.asyncio
+async def test_cancelled_stream_aborts_queued_outbound_before_propagating() -> None:
+    from iac_code.a2a import pipeline_executor as module
+
+    publisher = QueueLifecyclePublisher(block_batch=True)
+    runtime = module.A2APipelineRuntime(agent_runtime=_fake_runtime(), pipeline=SimpleNamespace())
+    task = SimpleNamespace(active_task=None, output_text=[])
+    keep_stream_open = asyncio.Event()
+
+    async def stream():
+        yield TextDeltaEvent(text="a")
+        yield TextDeltaEvent(text="b")
+        await keep_stream_open.wait()
+
+    consumer = asyncio.create_task(
+        _pipeline_executor()._consume_stream_until_restart(
+            stream=stream(),
+            runtime=runtime,
+            publisher=publisher,
+            task=task,
+        )
+    )
+    await asyncio.wait_for(publisher.batch_started.wait(), timeout=1)
+    await asyncio.sleep(0)
+
+    consumer.cancel()
+    await asyncio.sleep(0)
+
+    assert not consumer.done()
+    assert publisher.persisted_text == ["a"]
+    assert publisher.delivered_text == []
+
+    publisher.release_batch.set()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(consumer, timeout=1)
+
+    assert publisher.persisted_text == ["a"]
+    assert publisher.delivered_text == ["a"]
+    assert task.output_text == ["a"]
+    assert runtime.outbound is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_real_outbound_close_aborts_and_joins_worker() -> None:
+    from iac_code.a2a import pipeline_executor as module
+
+    publisher = QueueLifecyclePublisher(block_batch=True)
+    runtime = module.A2APipelineRuntime(agent_runtime=_fake_runtime(), pipeline=SimpleNamespace())
+    task = SimpleNamespace(active_task=None, output_text=[])
+
+    async def stream():
+        yield TextDeltaEvent(text="not delivered")
+
+    consumer = asyncio.create_task(
+        _pipeline_executor()._consume_stream_until_restart(
+            stream=stream(),
+            runtime=runtime,
+            publisher=publisher,
+            task=task,
+        )
+    )
+    await asyncio.wait_for(publisher.batch_started.wait(), timeout=1)
+    outbound = runtime.outbound
+    assert outbound is not None
+    for _ in range(100):
+        if outbound._closing:
+            break
+        await asyncio.sleep(0.01)
+    assert outbound._closing
+
+    consumer.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await consumer
+
+    worker_done = outbound._worker is not None and outbound._worker.done()
+    output_text = list(task.output_text)
+    if outbound._worker is not None and not outbound._worker.done():
+        await outbound.abort()
+
+    assert runtime.outbound is None
+    assert worker_done
+    assert output_text == []
+    assert not any(task.get_name() == "pipeline-a2a-outbound" and not task.done() for task in asyncio.all_tasks())
+
+
+@pytest.mark.asyncio
+async def test_real_outbound_sender_failure_does_not_append_undelivered_text() -> None:
+    from iac_code.a2a import pipeline_executor as module
+
+    publisher = QueueLifecyclePublisher(batch_error=RuntimeError("sender failed"))
+    runtime = module.A2APipelineRuntime(agent_runtime=_fake_runtime(), pipeline=SimpleNamespace())
+    task = SimpleNamespace(active_task=None, output_text=[])
+
+    async def stream():
+        yield TextDeltaEvent(text="not delivered")
+
+    with pytest.raises(RuntimeError, match="sender failed"):
+        await _pipeline_executor()._consume_stream_until_restart(
+            stream=stream(),
+            runtime=runtime,
+            publisher=publisher,
+            task=task,
+        )
+
+    assert task.output_text == []
+    assert runtime.outbound is None
+
+
+@pytest.mark.asyncio
+async def test_real_outbound_flushes_delta_before_mcp_warning_discovered_at_stream_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from iac_code.a2a import pipeline_executor as module
+
+    publisher = QueueLifecyclePublisher()
+    agent_runtime = _fake_runtime()
+    agent_runtime.mcp_config_warnings = []
+    runtime = module.A2APipelineRuntime(agent_runtime=agent_runtime, pipeline=SimpleNamespace())
+    task = SimpleNamespace(active_task=None, output_text=[])
+
+    async def stream():
+        yield TextDeltaEvent(text="before warning")
+        agent_runtime.mcp_config_warnings = [SimpleNamespace(message="late warning")]
+
+    async def record_warning(*args, **kwargs) -> None:
+        pushed_count = getattr(agent_runtime, "_a2a_mcp_warnings_pushed_count", 0)
+        if pushed_count >= len(agent_runtime.mcp_config_warnings):
+            return
+        publisher.calls.append(("warning", "mcp"))
+        agent_runtime._a2a_mcp_warnings_pushed_count = len(agent_runtime.mcp_config_warnings)
+
+    monkeypatch.setattr(module, "publish_mcp_warnings", record_warning)
+
+    await _pipeline_executor()._consume_stream_until_restart(
+        stream=stream(),
+        runtime=runtime,
+        publisher=publisher,
+        task=task,
+    )
+
+    assert publisher.calls == [
+        ("batch", ["before warning"]),
+        ("warning", "mcp"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_real_outbound_serializes_delta_arriving_during_interrupt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a import pipeline_executor as module
+    from iac_code.a2a.pipeline_outbound import PipelineA2AOutboundQueue
+
+    handler_started = asyncio.Event()
+    release_handler = asyncio.Event()
+
+    class InterruptPipeline:
+        sidecar_status = None
+
+        async def handle_user_interrupt(self, prompt: str) -> InterruptVerdict:
+            handler_started.set()
+            await release_handler.wait()
+            return InterruptVerdict(action="continue", reason="keep going")
+
+    publisher = QueueLifecyclePublisher()
+    outbound = PipelineA2AOutboundQueue(publisher, max_batch_delay_seconds=1)
+    await outbound.start()
+    runtime = module.A2APipelineRuntime(
+        agent_runtime=_fake_runtime(),
+        pipeline=InterruptPipeline(),
+        publisher=publisher,
+        outbound=outbound,
+    )
+    ctx = SimpleNamespace(runtime=runtime, session_id="session-1")
+    task = SimpleNamespace(task_id="task-1", context_id="ctx-1", state="working")
+    monkeypatch.setattr(module, "_pending_pipeline_pause_input_from_sidecar", lambda *args, **kwargs: None)
+
+    route = asyncio.create_task(
+        _pipeline_executor()._route_active_pipeline_interrupt(
+            FakeEventQueue(),
+            task=task,
+            ctx=ctx,
+            task_id="task-1",
+            context_id="ctx-1",
+            cwd=str(tmp_path),
+            pipeline_input=normalize_pipeline_user_input("change course"),
+            preserve_task_record=True,
+        )
+    )
+    await asyncio.wait_for(handler_started.wait(), timeout=1)
+    await outbound.submit(TextDeltaEvent(text="during interrupt"))
+    release_handler.set()
+    assert await route is True
+    await outbound.close()
+
+    assert publisher.calls == [
+        ("interrupt", "interrupt_received"),
+        ("batch", ["during interrupt"]),
+        ("interrupt", "interrupt_classified"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_real_outbound_keeps_yielded_terminal_ahead_of_later_interrupt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a import pipeline_executor as module
+
+    terminal_decision_started = asyncio.Event()
+    release_terminal_decision = asyncio.Event()
+
+    class InterruptPipeline:
+        sidecar_status = None
+
+        def __init__(self) -> None:
+            self.handler_calls = 0
+
+        async def handle_user_interrupt(self, prompt: str) -> InterruptVerdict:
+            self.handler_calls += 1
+            return InterruptVerdict(action="continue", reason="keep going")
+
+    async def stream():
+        yield PipelineEvent(
+            type=PipelineEventType.PIPELINE_COMPLETED,
+            step_id=None,
+            timestamp=1717821601.0,
+            data={"total_steps": 1},
+        )
+
+    async def no_terminal_handoff(*args, **kwargs):
+        terminal_decision_started.set()
+        await release_terminal_decision.wait()
+        return module._TerminalHandoffPublishResult(attempted=False, terminal_available=False)
+
+    publisher = QueueLifecyclePublisher()
+    pipeline = InterruptPipeline()
+    runtime = module.A2APipelineRuntime(
+        agent_runtime=_fake_runtime(),
+        pipeline=pipeline,
+        publisher=publisher,
+    )
+    stream_task = SimpleNamespace(active_task=None, output_text=[])
+    ctx = SimpleNamespace(runtime=runtime, session_id="session-1")
+    task = SimpleNamespace(task_id="task-1", context_id="ctx-1", state="working")
+    executor = _pipeline_executor()
+    monkeypatch.setattr(executor, "_maybe_publish_terminal_with_normal_handoff", no_terminal_handoff)
+    monkeypatch.setattr(module, "_pending_pipeline_pause_input_from_sidecar", lambda *args, **kwargs: None)
+
+    consumer = asyncio.create_task(
+        executor._consume_stream_until_restart(
+            stream=stream(),
+            runtime=runtime,
+            publisher=publisher,
+            task=stream_task,
+        )
+    )
+    await asyncio.wait_for(terminal_decision_started.wait(), timeout=1)
+    interrupt = asyncio.create_task(
+        executor._route_active_pipeline_interrupt(
+            FakeEventQueue(),
+            task=task,
+            ctx=ctx,
+            task_id="task-1",
+            context_id="ctx-1",
+            cwd=str(tmp_path),
+            pipeline_input=normalize_pipeline_user_input("change course"),
+            preserve_task_record=True,
+        )
+    )
+    await asyncio.sleep(0)
+    release_terminal_decision.set()
+    assert await interrupt is True
+    await consumer
+
+    assert pipeline.handler_calls == 0
+    assert publisher.calls == [
+        ("single", PipelineEventType.PIPELINE_COMPLETED),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_real_outbound_terminal_waits_for_all_overlapping_interrupts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a import pipeline_executor as module
+    from iac_code.a2a.pipeline_outbound import PipelineA2AOutboundQueue
+
+    handler_started = [asyncio.Event(), asyncio.Event()]
+    release_handler = [asyncio.Event(), asyncio.Event()]
+
+    class InterruptPipeline:
+        sidecar_status = None
+
+        def __init__(self) -> None:
+            self.handler_calls = 0
+
+        async def handle_user_interrupt(self, prompt: str) -> InterruptVerdict:
+            index = self.handler_calls
+            self.handler_calls += 1
+            handler_started[index].set()
+            await release_handler[index].wait()
+            return InterruptVerdict(action="continue", reason=f"interrupt {index} settled")
+
+    publisher = QueueLifecyclePublisher()
+    outbound = PipelineA2AOutboundQueue(publisher, max_batch_delay_seconds=1)
+    await outbound.start()
+    pipeline = InterruptPipeline()
+    runtime = module.A2APipelineRuntime(
+        agent_runtime=_fake_runtime(),
+        pipeline=pipeline,
+        publisher=publisher,
+        outbound=outbound,
+    )
+    ctx = SimpleNamespace(runtime=runtime, session_id="session-1")
+    task = SimpleNamespace(task_id="task-1", context_id="ctx-1", state="working")
+    executor = _pipeline_executor()
+    monkeypatch.setattr(module, "_pending_pipeline_pause_input_from_sidecar", lambda *args, **kwargs: None)
+
+    async def route(prompt: str) -> bool:
+        return await executor._route_active_pipeline_interrupt(
+            FakeEventQueue(),
+            task=task,
+            ctx=ctx,
+            task_id="task-1",
+            context_id="ctx-1",
+            cwd=str(tmp_path),
+            pipeline_input=normalize_pipeline_user_input(prompt),
+            preserve_task_record=True,
+        )
+
+    first_interrupt = asyncio.create_task(route("first"))
+    await asyncio.wait_for(handler_started[0].wait(), timeout=1)
+    second_interrupt = asyncio.create_task(route("second"))
+    await asyncio.wait_for(handler_started[1].wait(), timeout=1)
+    terminal = asyncio.create_task(
+        executor._publish_terminal_stream_event(
+            runtime=runtime,
+            outbound=outbound,
+            publisher=publisher,
+            event=PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=1717821601.0,
+                data={"total_steps": 1},
+            ),
+        )
+    )
+
+    release_handler[0].set()
+    assert await first_interrupt is True
+    await asyncio.sleep(0.05)
+    assert not terminal.done()
+
+    release_handler[1].set()
+    assert await second_interrupt is True
+    terminal_result = await asyncio.wait_for(terminal, timeout=1)
+    await outbound.close()
+
+    assert terminal_result.handoff == module._TerminalHandoffPublishResult(
+        attempted=False,
+        terminal_available=False,
+    )
+    assert publisher.calls == [
+        ("interrupt", "interrupt_received"),
+        ("interrupt", "interrupt_received"),
+        ("interrupt", "interrupt_classified"),
+        ("interrupt", "interrupt_classified"),
+        ("single", PipelineEventType.PIPELINE_COMPLETED),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_interrupt_waits_for_concurrent_real_outbound_close(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a import pipeline_executor as module
+
+    class InterruptPipeline:
+        sidecar_status = None
+
+        async def handle_user_interrupt(self, prompt: str) -> InterruptVerdict:
+            return InterruptVerdict(action="continue", reason="keep going")
+
+    publisher = QueueLifecyclePublisher(block_batch=True)
+    runtime = module.A2APipelineRuntime(
+        agent_runtime=_fake_runtime(), pipeline=InterruptPipeline(), publisher=publisher
+    )
+    stream_task = SimpleNamespace(active_task=None, output_text=[])
+
+    async def stream():
+        yield TextDeltaEvent(text="delivered before interrupt")
+
+    executor = _pipeline_executor()
+    executor._publish_exception_status = AsyncMock()
+    consumer = asyncio.create_task(
+        executor._consume_stream_until_restart(
+            stream=stream(),
+            runtime=runtime,
+            publisher=publisher,
+            task=stream_task,
+        )
+    )
+    await asyncio.wait_for(publisher.batch_started.wait(), timeout=1)
+    outbound = runtime.outbound
+    assert outbound is not None
+    for _ in range(100):
+        if outbound._closing:
+            break
+        await asyncio.sleep(0.01)
+    assert outbound._closing
+
+    ctx = SimpleNamespace(runtime=runtime, session_id="session-1")
+    task = SimpleNamespace(task_id="task-1", context_id="ctx-1", state="working")
+    monkeypatch.setattr(module, "_pending_pipeline_pause_input_from_sidecar", lambda *args, **kwargs: None)
+    interrupt = asyncio.create_task(
+        executor._route_active_pipeline_interrupt(
+            FakeEventQueue(),
+            task=task,
+            ctx=ctx,
+            task_id="task-1",
+            context_id="ctx-1",
+            cwd=str(tmp_path),
+            pipeline_input=normalize_pipeline_user_input("change course"),
+            preserve_task_record=True,
+        )
+    )
+    await asyncio.sleep(0)
+    publisher.release_batch.set()
+
+    await consumer
+    assert await interrupt is True
+    executor._publish_exception_status.assert_not_awaited()
+    assert runtime.outbound is None
+    assert stream_task.output_text == ["delivered before interrupt"]
 
 
 @pytest.mark.asyncio
@@ -1688,6 +2743,14 @@ async def test_pipeline_executor_runs_critical_backups_for_terminal_and_handoff_
     ]
     committed_events = [event for event in pipeline_events if event["eventType"] != "backup_committed"]
     assert [event["visibility"] for event in committed_events] == ["committed", "committed"]
+    assert backup_service.publication_proofs[0] is None
+    handoff_proof = backup_service.publication_proofs[1][NORMAL_HANDOFF_PROOF_KEY]
+    handoff_event = committed_events[1]
+    assert handoff_proof == BackupPublicationProof(
+        event_id=handoff_event["eventId"],
+        event_type=handoff_event["eventType"],
+        sequence=int(handoff_event["sequence"]),
+    )
     assert [reason for reason, _snapshot in backup_service.pipeline_snapshots] == [BackupReason.HANDOFF_READY]
     handoff_backup_snapshot = backup_service.pipeline_snapshots[0][1]
     assert handoff_backup_snapshot["status"] == "working"
@@ -2755,6 +3818,7 @@ async def test_executor_returns_input_required_for_retryable_stream_error(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setenv("IAC_CODE_A2A_EXTREME_PERFORMANCE", "true")
     fake_pipeline = FakePipeline([TimeoutError("upstream timed out")], session_dir=tmp_path / "sidecar")
     monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: fake_pipeline)
     monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
@@ -2886,6 +3950,7 @@ async def test_executor_persists_pipeline_failed_event_for_nonretryable_stream_e
     assert snapshot is not None
     assert snapshot["status"] == "failed"
     assert _status_events(queue)[-1]["status"]["state"] == "TASK_STATE_FAILED"
+    assert store._contexts["ctx-1"].runtime.terminal_publication_started is True
 
 
 @pytest.mark.asyncio
@@ -3392,6 +4457,42 @@ async def test_executor_does_not_duplicate_existing_terminal_recovery_event_when
     assert snapshot is not None
     assert snapshot["status"] == "failed"
     assert _status_events(queue)[-1]["status"]["state"] == "TASK_STATE_FAILED"
+    assert store._contexts["ctx-1"].runtime.terminal_publication_started is True
+
+
+@pytest.mark.asyncio
+async def test_terminal_sidecar_recovery_reports_existing_matching_terminal_as_available(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
+    from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher
+
+    context = PipelineA2AContext(
+        pipeline_run_id="ctx-1",
+        task_id="task-1",
+        context_id="ctx-1",
+        pipeline_name="selling",
+    )
+    translator = PipelineEventTranslator(context)
+    terminal = translator.manual_event("pipeline_failed", "pipeline", status="failed", data={})
+    journal = A2APipelineJournal(tmp_path)
+    journal.append(terminal)
+    publisher = PipelineA2AEventPublisher(
+        event_queue=FakeEventQueue(),
+        translator=translator,
+        journal=journal,
+        snapshot_store=A2APipelineSnapshotStore(tmp_path),
+    )
+    pipeline = SimpleNamespace(sidecar_status="failed")
+
+    result = await _pipeline_executor()._publish_terminal_sidecar_recovery_event(
+        publisher,
+        pipeline,
+        task_id="task-1",
+        context_id="ctx-1",
+    )
+
+    assert result.available is True
+    assert result.published is False
+    assert [event["eventType"] for event in journal.read_all()] == ["pipeline_failed"]
 
 
 @pytest.mark.asyncio
@@ -4966,6 +6067,7 @@ async def test_live_paused_interrupt_releases_active_task_and_next_reply_clears_
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setenv("IAC_CODE_A2A_EXTREME_PERFORMANCE", "true")
 
     class PausingPipeline(FakePipeline):
         def __init__(self, *, session_dir: Path) -> None:
@@ -5530,6 +6632,8 @@ async def test_pipeline_executor_stops_at_ask_user_question_without_holding_acti
     tmp_path: Path,
 ) -> None:
     from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+
+    monkeypatch.setenv("IAC_CODE_A2A_EXTREME_PERFORMANCE", "true")
 
     class AskingPipeline(FakePipeline):
         def __init__(self, *, session_dir: Path) -> None:
@@ -6429,7 +7533,15 @@ async def test_cancel_waiting_input_backup_sees_committed_cancel_and_mirrored_ta
     from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
 
     class InspectingBackupService:
-        def backup_session(self, cwd_arg, session_id_arg, *, reason, critical) -> BackupResult:
+        def backup_session(
+            self,
+            cwd_arg,
+            session_id_arg,
+            *,
+            reason,
+            critical,
+            publication_proofs,
+        ) -> BackupResult:
             assert (cwd_arg, session_id_arg, reason, critical) == (
                 str(cwd),
                 session_id,
@@ -6438,6 +7550,14 @@ async def test_cancel_waiting_input_backup_sees_committed_cancel_and_mirrored_ta
             )
             events = A2APipelineJournal(pipeline_dir).read_all()
             assert [event.get("visibility") for event in events[-2:]] == ["committed", "committed"]
+            handoff = events[-1]
+            assert publication_proofs == {
+                NORMAL_HANDOFF_PROOF_KEY: BackupPublicationProof(
+                    event_id=handoff["eventId"],
+                    event_type="pipeline_handoff_ready",
+                    sequence=handoff["sequence"],
+                )
+            }
             task_snapshot = json.loads((session_dir / "a2a" / "task.json").read_text(encoding="utf-8"))
             context_snapshot = json.loads((session_dir / "a2a" / "context.json").read_text(encoding="utf-8"))
             assert task_snapshot["state"] == "input-required"
@@ -7499,6 +8619,8 @@ async def test_parent_hard_interrupt_closes_active_stream_and_restarts(
 ) -> None:
     from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
 
+    monkeypatch.setenv("IAC_CODE_A2A_EXTREME_PERFORMANCE", "true")
+
     class RestartablePipeline(FakePipeline):
         def __init__(self, *, session_dir: Path) -> None:
             super().__init__([], session_dir=session_dir)
@@ -7860,6 +8982,8 @@ async def test_canceled_pipeline_run_closes_blocked_stream_without_child_task_le
             self.primary_cancelled = asyncio.Event()
             self.primary_closed = asyncio.Event()
             self.release_stale = asyncio.Event()
+            self.interrupt_started = asyncio.Event()
+            self.release_interrupt = asyncio.Event()
 
         async def run(self, prompt: str):
             self.run_prompts.append(prompt)
@@ -7872,6 +8996,11 @@ async def test_canceled_pipeline_run_closes_blocked_stream_without_child_task_le
             finally:
                 self.primary_closed.set()
             yield TextDeltaEvent(text="stale")
+
+        async def handle_user_interrupt(self, message: str) -> SimpleNamespace:
+            self.interrupt_started.set()
+            await self.release_interrupt.wait()
+            return SimpleNamespace(action="continue", reason="keep going", paused=False)
 
     cwd = tmp_path / "workspace"
     cwd.mkdir()
@@ -7918,7 +9047,27 @@ async def test_canceled_pipeline_run_closes_blocked_stream_without_child_task_le
     await asyncio.wait_for(pipeline.generator_blocked.wait(), timeout=_A2A_ASYNC_TEST_TIMEOUT)
 
     try:
+        interrupt = asyncio.create_task(
+            executor.execute(
+                context=FakeRequestContext(
+                    text="keep going",
+                    metadata={"iac_code": {"cwd": str(cwd)}},
+                ),
+                event_queue=FakeEventQueue(),
+                task=active_task,
+                task_id="task-1",
+                context_id="ctx-1",
+                cwd=str(cwd),
+                prompt="keep going",
+            )
+        )
+        await asyncio.wait_for(pipeline.interrupt_started.wait(), timeout=_A2A_ASYNC_TEST_TIMEOUT)
         runner.cancel()
+        await asyncio.sleep(0.05)
+        assert runner.done() is False
+
+        pipeline.release_interrupt.set()
+        await asyncio.wait_for(interrupt, timeout=_A2A_ASYNC_TEST_TIMEOUT)
         await asyncio.wait_for(runner, timeout=_A2A_ASYNC_TEST_TIMEOUT)
         await asyncio.sleep(0)
 
@@ -7932,6 +9081,10 @@ async def test_canceled_pipeline_run_closes_blocked_stream_without_child_task_le
         assert pipeline.session.session_dir == session_dir / "pipeline"
         a2a_pipeline_dir = session_dir / "a2a" / "pipeline"
         events = A2APipelineJournal(a2a_pipeline_dir).read_all()
+        event_types = [event["eventType"] for event in events]
+        assert event_types.index("interrupt_classified") < event_types.index("pipeline_canceled")
+        assert "interrupt_classified" not in event_types[event_types.index("pipeline_canceled") + 1 :]
+        assert store._contexts["ctx-1"].runtime.terminal_publication_started is True
         assert [event["eventType"] for event in events[-4:]] == [
             "pipeline_canceled",
             "pipeline_handoff_ready",
@@ -7951,6 +9104,7 @@ async def test_canceled_pipeline_run_closes_blocked_stream_without_child_task_le
         assert snapshot["status"] == "canceled"
         assert snapshot["normalHandoff"]["outcome"] == "canceled"
     finally:
+        pipeline.release_interrupt.set()
         pipeline.release_stale.set()
         await asyncio.sleep(0)
 

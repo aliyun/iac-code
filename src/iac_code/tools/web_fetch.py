@@ -196,7 +196,7 @@ class WebFetchTool(Tool):
         if verbose:
             preview = "\n".join(lines[:50])
             if len(lines) > 50:
-                preview += f"\n... ({len(lines) - 50} more lines)"
+                preview += "\n" + _("... ({count} more lines)").format(count=len(lines) - 50)
             return f"{summary}\n{preview}"
         return summary
 

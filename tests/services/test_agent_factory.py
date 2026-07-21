@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -331,6 +333,7 @@ def test_create_agent_runtime_a2a_safe_mode_filters_tools_and_skips_mcp(tmp_path
         "grep",
         "aliyun_api",
         "aliyun_doc_search",
+        "aliyun_api_doc",
         "ros_stack",
         "skill",
         "read_memory",
@@ -379,11 +382,17 @@ def test_a2a_safe_mode_keeps_cloud_tool_refresh_filtered(tmp_path, monkeypatch) 
         )
     )
 
+    assert runtime.tool_registry.get("aliyun_doc_search") is not None
+    assert runtime.tool_registry.get("aliyun_api_doc") is not None
+    assert runtime.tool_registry.get("aliyun_api") is not None
     assert runtime.tool_registry.get("ros_stack") is not None
     assert runtime.tool_registry.get("ros_stack_instances") is None
 
     refresh_runtime_cloud_tools(runtime)
 
+    assert runtime.tool_registry.get("aliyun_doc_search") is not None
+    assert runtime.tool_registry.get("aliyun_api_doc") is not None
+    assert runtime.tool_registry.get("aliyun_api") is not None
     assert runtime.tool_registry.get("ros_stack") is not None
     assert runtime.tool_registry.get("ros_stack_instances") is None
 
@@ -508,3 +517,78 @@ def test_create_agent_runtime_includes_runtime_provider_and_model(tmp_path, monk
     runtime_line = "Provider & Model: Alibaba Cloud Bailian / qwen3.7-max"
     assert runtime_line not in static
     assert runtime_line in dynamic
+
+
+class _LifecycleAliyunServices:
+    def __init__(self) -> None:
+        self.openmeta = object()
+        self.contract_resolver = object()
+        self.internal_caller = object()
+        self.delegated_executor_factory = lambda action: SimpleNamespace(action=action)
+        self.aclose = AsyncMock()
+
+
+@pytest.mark.asyncio
+async def test_agent_runtime_reuses_one_aliyun_services_instance_and_closes_it_once(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    services = _LifecycleAliyunServices()
+    factory = MagicMock(return_value=services)
+    monkeypatch.setattr("iac_code.tools.cloud.aliyun.runtime.create_aliyun_runtime_services", factory)
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(model="qwen3.7-max", session_id="aliyun-runtime", cwd=str(tmp_path))
+    )
+
+    assert factory.call_count == 1
+    assert runtime.aliyun_services is services
+    assert runtime.tool_registry.get("aliyun_api_doc")._services is services
+    runtime.refresh_cloud_tools()
+    assert factory.call_count == 1
+    assert runtime.tool_registry.get("aliyun_api_doc")._services is services
+
+    await runtime.aclose()
+    await runtime.aclose()
+    services.aclose.assert_awaited_once()
+
+
+def test_create_agent_runtime_failure_closes_aliyun_services(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    services = _LifecycleAliyunServices()
+    monkeypatch.setattr(
+        "iac_code.tools.cloud.aliyun.runtime.create_aliyun_runtime_services",
+        MagicMock(return_value=services),
+    )
+    monkeypatch.setattr(
+        "iac_code.tools.base.ToolRegistry.register_default_tools",
+        MagicMock(side_effect=RuntimeError("tool-registry-setup")),
+    )
+
+    with pytest.raises(RuntimeError, match="tool-registry-setup"):
+        create_agent_runtime(AgentFactoryOptions(model="qwen3.7-max", session_id="failure", cwd=str(tmp_path)))
+
+    services.aclose.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_agent_runtime_mcp_close_failure_does_not_skip_aliyun_cleanup() -> None:
+    services = _LifecycleAliyunServices()
+    manager = SimpleNamespace(disconnect_all=AsyncMock(side_effect=RuntimeError("mcp-close")))
+    runtime = AgentRuntime(
+        agent_loop=object(),
+        session_id="session",
+        tool_registry=object(),
+        provider_manager=object(),
+        command_registry=object(),
+        task_manager=object(),
+        memory_manager=object(),
+        legacy_memory_manager=object(),
+        aliyun_services=services,
+        mcp_manager=manager,
+    )
+
+    await runtime.aclose()
+
+    manager.disconnect_all.assert_awaited_once()
+    services.aclose.assert_awaited_once()

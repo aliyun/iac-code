@@ -1,0 +1,992 @@
+schema_version: 1
+judgments:
+  - product: SMQProxy
+    version: "2026-04-09"
+    action: BatchPeekMessage
+    http_status: 404
+    error_code: QueueNotExist
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_state
+    confidence: high
+    reason: The account-scoped MNS endpoint accepted the signed BatchPeekMessage request and returned QueueNotExist for the deliberately absent queue; this proves the SMQProxy route reached MNS queue business semantics.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-18"
+  - product: AccessAnalyzer
+    version: "2024-02-01"
+    action: ListFindings
+    http_status: 404
+    error_code: EntityNotExist.Analyzer
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_scope
+    confidence: high
+    reason: The target service accepted the API route and returned HTTP 404 EntityNotExist.Analyzer for the supplied AnalyzerName.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: AgentRun
+    version: "2025-09-10"
+    action: GetMemoryCollection
+    http_status: 404
+    error_code: ERR_NOT_FOUND
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_scope
+    confidence: high
+    reason: The target service accepted the path resource name and returned HTTP 404 ERR_NOT_FOUND for a missing memory collection.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: AgentTeams
+    version: "2026-06-05"
+    action: ListMcpTools
+    http_status: 404
+    error_code: MagicResource.NotFound
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_scope
+    confidence: high
+    reason: The target service accepted InstanceId and Id and returned HTTP 404 MagicResource.NotFound for a missing service resource.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: DataLake
+    version: "2020-07-10"
+    action: GetPartition
+    http_status: 404
+    error_code: NoSuchObject
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_scope
+    confidence: high
+    reason: After correcting the body shape, the target service returned HTTP 404 NoSuchObject for the requested catalog database table partition.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: dcdn
+    version: "2018-01-15"
+    action: DescribeRoutine
+    http_status: 400
+    error_code: ErServiceNotFound
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_scope
+    confidence: high
+    reason: The target service accepted the routine Name parameter and returned HTTP 400 ErServiceNotFound for a missing edge routine.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: DtsAI
+    version: "2026-04-01"
+    action: DescribeDocParserJobStatus
+    http_status: 404
+    error_code: JobNotFound
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_scope
+    confidence: high
+    reason: After adding the documented endpoint override, the target service accepted JobId and RegionId and returned HTTP 404 JobNotFound.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: governance
+    version: "2021-01-20"
+    action: ListEvaluationResults
+    http_status: 404
+    error_code: InvalidEvaluation.NotFound
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_scope
+    confidence: high
+    reason: The target service returned HTTP 404 InvalidEvaluation.NotFound, which is a product-domain evaluation resource error.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: PaiRecService
+    version: "2022-12-13"
+    action: ListRecallManagementJobs
+    http_status: 400
+    error_code: InstanceNotExistsErrorProblem
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_scope
+    confidence: high
+    reason: The target service accepted pagination parameters and returned HTTP 400 InstanceNotExistsErrorProblem for a missing PaiRec instance.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: Searchplat
+    version: "2024-04-01"
+    action: ListOfflineTask
+    http_status: 404
+    error_code: App.NotFound
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_scope
+    confidence: high
+    reason: After switching to a catalog-supported region, the target service accepted workspace and task parameters and returned HTTP 404 App.NotFound.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: nlp-automl
+    version: "2019-11-11"
+    action: GetPredictResult
+    http_status: 400
+    error_code: InvalidParameter.ModelId
+    error_message: The target service rejected the supplied ModelId after required ModelId, Content, and ModelVersion fields were provided.
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_scope
+    confidence: high
+    reason: The target service accepted the GetPredictResult action with a well-typed model prediction request and returned the product-domain ModelId validation error, which proves the call reached backend model semantics rather than route, version, endpoint, signature, or input-shape hard failure.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-17"
+  - product: AnyTrans
+    version: "2025-07-07"
+    action: TextTranslate
+    http_status: 403
+    error_code: Auth.AccessDenied.WorkSpace
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_permission_scope
+    confidence: high
+    reason: The target service accepted the TextTranslate route and JSON body at the cn-beijing endpoint, then returned HTTP 403 Auth.AccessDenied.WorkSpace for Workspace business authorization.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: FaRui
+    version: "2024-06-28"
+    action: RunSearchLawQuery
+    http_status: 403
+    error_code: Auth.AccessDenied.WorkSpace
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_permission_scope
+    confidence: high
+    reason: After correcting the OpenMeta JSON body override, the target service accepted the RunSearchLawQuery path, JSON body, and placeholder workspace route at the cn-beijing endpoint, then returned HTTP 403 Auth.AccessDenied.WorkSpace for workspace authorization.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-18"
+  - product: aiccs
+    version: "2023-05-16"
+    action: Page
+    http_status: 400
+    error_code: isv.PRODUCT_UN_SUBSCRIPT
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_product_activation
+    confidence: high
+    reason: The target service accepted the industry-edition blacklist Page request and returned HTTP 400 isv.PRODUCT_UN_SUBSCRIPT, which is a product subscription state check.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: objectdet
+    version: "2019-12-30"
+    action: DetectMainBody
+    http_status: 403
+    error_code: InvalidApi.NotPurchase
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_product_activation
+    confidence: high
+    reason: After adding the official cn-shanghai endpoint override, the target objectdet service accepted the DetectMainBody read probe and ImageURL parameter, then returned HTTP 403 InvalidApi.NotPurchase for the account's product activation state.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-18"
+  - product: imageenhan
+    version: "2019-09-30"
+    action: AssessComposition
+    http_status: 403
+    error_code: InvalidApi.NotPurchase
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_product_activation
+    confidence: high
+    reason: The official cn-shanghai imageenhan endpoint accepted the audited AssessComposition ImageURL probe, then returned HTTP 403 InvalidApi.NotPurchase for the account's product activation state before any image result was produced.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-18"
+  - product: imagerecog
+    version: "2019-09-30"
+    action: TaggingImage
+    http_status: 403
+    error_code: InvalidApi.NotPurchase
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_product_activation
+    confidence: high
+    reason: The official cn-shanghai imagerecog endpoint accepted the documented TaggingImage read probe and ImageURL parameter, then returned HTTP 403 InvalidApi.NotPurchase for the account's product activation state.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-18"
+  - product: imageseg
+    version: "2019-12-30"
+    action: SegmentCommonImage
+    http_status: 403
+    error_code: InvalidApi.NotPurchase
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_product_activation
+    confidence: high
+    reason: The official cn-shanghai imageseg endpoint accepted the documented SegmentCommonImage read probe and ImageURL parameter, then returned HTTP 403 InvalidApi.NotPurchase for the account's product activation state.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-18"
+  - product: BDRC
+    version: "2023-08-08"
+    action: DescribeRules
+    http_status: 404
+    error_code: ServiceNotOpened
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_service_activation
+    confidence: high
+    reason: The target service accepted the catalog-region DescribeRules request and returned HTTP 404 ServiceNotOpened for the account/region service activation state.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: cloudesl
+    version: "2020-02-01"
+    action: DescribeUsers
+    http_status: 417
+    error_code: BetaTestLabelErrorPub
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_tenant_precondition
+    confidence: high
+    reason: The target service accepted the DescribeUsers route and returned HTTP 417 BetaTestLabelErrorPub for the public beta/product eligibility state.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: cloudesl
+    version: "2019-08-01"
+    action: DescribeUsers
+    http_status: 405
+    error_code: BetaTestLabelError
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_tenant_precondition
+    confidence: high
+    reason: The target service accepted the DescribeUsers route and returned HTTP 405 BetaTestLabelError for the CloudESL tenant or beta eligibility state; the public error code is not a method-contract error.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-17"
+  - product: ImageSearch
+    version: "2020-12-14"
+    action: DumpMeta
+    http_status: 400
+    error_code: Console.InstanceNotFound
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_scope
+    confidence: high
+    reason: The target service accepted the metadata export read probe in a catalog-supported region and returned HTTP 400 Console.InstanceNotFound for the supplied image-search instance name.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-17"
+  - product: Dypnsapi-intl
+    version: "2017-07-25"
+    action: SearchVerification
+    http_status: 400
+    error_code: BIZ_NOT_OPEN_STATUS
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_service_activation
+    confidence: high
+    reason: The target service accepted the international phone verification query and returned HTTP 400 BIZ_NOT_OPEN_STATUS for the business activation state.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: idaas-doraemon
+    version: "2021-05-20"
+    action: ListCostUnitOrders
+    http_status: 401
+    error_code: Operation.Failure.Tenant.ResourceNotExist
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_tenant_precondition
+    confidence: high
+    reason: The target service accepted the ListCostUnitOrders request and returned HTTP 401 Operation.Failure.Tenant.ResourceNotExist for tenant resource state.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: imgsearch
+    version: "2020-03-20"
+    action: ListImageDbs
+    http_status: 403
+    error_code: InvalidApi.NotPurchase
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_product_activation
+    confidence: high
+    reason: The target service accepted the no-parameter ListImageDbs request and returned HTTP 403 InvalidApi.NotPurchase for product purchase state.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: imageprocess
+    version: "2020-03-20"
+    action: DetectPanc
+    http_status: 403
+    error_code: InvalidApi.NotPurchase
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_product_activation
+    confidence: high
+    reason: The target service accepted the DetectPanc route in a catalog-supported region and returned HTTP 403 InvalidApi.NotPurchase for product purchase state.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: videoenhan
+    version: "2020-03-20"
+    action: GetAsyncJobResult
+    http_status: 403
+    error_code: InvalidApi.NotPurchase
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_product_activation
+    confidence: high
+    reason: The target service accepted GetAsyncJobResult in a catalog-supported region and returned HTTP 403 InvalidApi.NotPurchase for product purchase state before any successful async job lookup.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: videorecog
+    version: "2020-03-20"
+    action: GetAsyncJobResult
+    http_status: 403
+    error_code: InvalidApi.NotPurchase
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_product_activation
+    confidence: high
+    reason: The target service accepted GetAsyncJobResult in the catalog-supported cn-shanghai region and returned HTTP 403 InvalidApi.NotPurchase for product purchase state before any successful async job lookup.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-17"
+  - product: safconsole
+    version: "2025-05-21"
+    action: DescribeFileDownloadUrl
+    http_status: 400
+    error_code: "400"
+    error_message: 项目不存在或无权访问
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_scope
+    confidence: high
+    reason: The target service accepted a fake ProjectId for DescribeFileDownloadUrl and returned the product-specific message that the project does not exist or cannot be accessed; GetBastionHostCertification independently returned the same project-scope result.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-18"
+  - product: IQS
+    version: "2024-07-12"
+    action: PlaceSearchNova
+    http_status: 403
+    error_code: Retrieval.Deprecated
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_business_precondition
+    confidence: high
+    reason: The target service accepted the PlaceSearchNova request and returned HTTP 403 Retrieval.Deprecated from the product Retrieval domain.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: IQS
+    version: "2024-11-11"
+    action: GenericSearch
+    http_status: 403
+    error_code: Retrieval.NotActivate
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_service_activation
+    confidence: high
+    reason: The target service accepted the GenericSearch request and returned HTTP 403 Retrieval.NotActivate for the Retrieval service activation state.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: quickbi-public
+    version: "2022-01-01"
+    action: GetMailTaskList
+    http_status: 400
+    error_code: User.Not.In.Organization
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_tenant_precondition
+    confidence: high
+    reason: The target service accepted the GetMailTaskList request and returned HTTP 400 User.Not.In.Organization for Quick BI organization membership state.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: tingwu
+    version: "2022-09-30"
+    action: GetFileTrans
+    http_status: 400
+    error_code: BRK.InvalidTenant
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_tenant_precondition
+    confidence: high
+    reason: The target service accepted the GetFileTrans task route and returned HTTP 400 BRK.InvalidTenant for tenant state.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: tingwu
+    version: "2023-09-30"
+    action: ListTranscriptionPhrases
+    http_status: 400
+    error_code: BRK.InvalidTenant
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_tenant_precondition
+    confidence: high
+    reason: The target service accepted the no-parameter ListTranscriptionPhrases request and returned HTTP 400 BRK.InvalidTenant for tenant state.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: ContactCenterAI
+    version: "2024-06-03"
+    action: ListVocab
+    http_status: 403
+    error_code: CCAI.TenantPermission.NoAuth
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_tenant_precondition
+    confidence: high
+    reason: The target service accepted the ListVocab request in the catalog-supported region and returned HTTP 403 CCAI.TenantPermission.NoAuth for tenant authorization.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: LinkWAN
+    version: "2019-03-01"
+    action: CheckUserChargeStatus
+    http_status: 400
+    error_code: CloudProductNotActivated
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_product_activation
+    confidence: high
+    reason: The target service accepted the no-parameter CheckUserChargeStatus request in cn-shanghai and returned HTTP 400 CloudProductNotActivated for LinkWAN product activation state.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: address-purification
+    version: "2019-11-18"
+    action: GetZipcode
+    http_status: 400
+    error_code: UserStatusInvalid
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_account_precondition
+    confidence: high
+    reason: The target service accepted the documented GetZipcode form parameters and returned HTTP 400 UserStatusInvalid for account or product eligibility state.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: AIDeepSign
+    version: "2026-05-11"
+    action: GetImageDetectionTaskResult
+    http_status: 403
+    error_code: AccessDenied
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_account_precondition
+    confidence: high
+    reason: The target service accepted a read-only result request with a valid TaskId shape and returned HTTP 403 AccessDenied with a product eligibility message stating that the caller is not in the AIDeepSign whitelist; GetImageTaskResult independently returned the same result.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-18"
+  - product: IoTCC
+    version: "2021-05-13"
+    action: ListConnectionPoolIps
+    http_status: 404
+    error_code: ResourceNotFound.IoTCloudConnector
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_scope
+    confidence: high
+    reason: The target service accepted RegionId, IoTCloudConnectorId, ConnectionPoolId, and pagination parameters, then returned HTTP 404 ResourceNotFound.IoTCloudConnector for the fake connector resource instead of a metadata, endpoint, version, or signature failure.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-16"
+  - product: STAROps
+    version: "2026-04-28"
+    action: ListMcpServices
+    http_status: 404
+    error_code: DigitalEmployeeNotExist
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_scope
+    confidence: high
+    reason: The target service accepted the documented digital employee path parameter and returned HTTP 404 DigitalEmployeeNotExist for the supplied non-existent employee name, rather than a metadata, endpoint, version, signature, or input hard failure.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-16"
+  - product: Qualitycheck
+    version: "2019-01-15"
+    action: GetAgentTaskResult
+    http_status: 403
+    error_code: AccessDenied
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_account_precondition
+    confidence: high
+    reason: The target service accepted the read-only GetAgentTaskResult request and returned HTTP 403 AccessDenied with a product user lookup message stating that the current user does not exist; GetRuleById independently returned the same outerKey-scoped result.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-18"
+  - product: LinkWAN
+    version: "2018-12-30"
+    action: ListNotifications
+    http_status: 400
+    error_code: CloudProductNotActivated
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_product_activation
+    confidence: high
+    reason: The target service accepted the read-only ListNotifications request with Offset and Limit in cn-shanghai and returned HTTP 400 CloudProductNotActivated for the LinkWAN product activation state, rather than a metadata, endpoint, version, signature, or input hard failure.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-16"
+  - product: OnsMqtt
+    version: "2019-12-11"
+    action: ListGroupId
+    http_status: 400
+    error_code: InstanceNotFound
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_scope
+    confidence: high
+    reason: The target service accepted the documented InstanceId request for ListGroupId in cn-hangzhou and returned HTTP 400 InstanceNotFound for the supplied non-existent MQTT instance, rather than a metadata, endpoint, version, signature, or input hard failure.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-16"
+  - product: dataphin-public
+    version: "2023-06-30"
+    action: GetMyTenants
+    http_status: 403
+    error_code: DataphinOpenApiForbidden
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_account_permission
+    confidence: high
+    reason: The target service accepted the documented GetMyTenants request with OpTenantId in cn-hangzhou and returned HTTP 403 DataphinOpenApiForbidden, a Dataphin OpenAPI authorization outcome rather than metadata, endpoint, version, signature, or input failure.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-16"
+  - product: Oss
+    version: "2019-05-17"
+    action: ListBuckets
+    http_status: 403
+    error_code: AccessDenied
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_account_permission
+    confidence: high
+    reason: After enabling XML response handling, the OSS V4 adapter signed and sent the ListBuckets request to the cn-hangzhou OSS endpoint; the service returned HTTP 403 AccessDenied, which is an account permission outcome rather than metadata, endpoint, version, signature, or input failure.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-16"
+  - product: grace
+    version: "2022-06-06"
+    action: GetFile
+    http_status: 500
+    error_code: FILE_NOT_FOUND
+    error_message: File not found
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_state
+    confidence: high
+    reason: The grace target service accepted GetFile at the documented global endpoint with a placeholder file name, then returned HTTP 500 FILE_NOT_FOUND with Message File not found. This is a Grace file resource-state outcome rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure; the same version's AnalyzeFile and UploadFile actions process or upload file content and are not safer automatic fallbacks.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-18"
+  - product: Linkvisual
+    version: "2023-06-30"
+    action: QueryFreeStorage
+    http_status: 403
+    error_code: iot.vision.RequestAuthFailed
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_account_permission
+    confidence: high
+    reason: The target service accepted the documented no-resource QueryFreeStorage request in cn-shanghai and returned HTTP 403 iot.vision.RequestAuthFailed, a Linkvisual/IoT vision authorization outcome rather than metadata, endpoint, version, signature, or input failure.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-16"
+  - product: ocr-api
+    version: "2021-07-07"
+    action: RecognizeMultiLanguage
+    http_status: 401
+    error_code: ocrServiceNotOpen
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_product_activation
+    confidence: high
+    reason: The ocr-api target service accepted the documented RecognizeMultiLanguage request with URL and Languages parameters in cn-hangzhou and returned HTTP 401 ocrServiceNotOpen, a product activation outcome rather than metadata, endpoint, version, signature, or routing failure.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-17"
+  - product: pds
+    version: "2022-03-01"
+    action: ListAssignment
+    http_status: 404
+    error_code: NotFound.Domain
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_state
+    confidence: high
+    reason: The pds target service accepted the domain-host ListAssignment request after binding domain_id into the official PDS domain API host and returned HTTP 404 NotFound.Domain for the supplied validation domain; this is a PDS domain resource-state outcome rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-17"
+  - product: OpenITag
+    version: "2022-06-16"
+    action: ListTasks
+    http_status: 400
+    error_code: iTag.Tenant.NotExist
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_tenant_precondition
+    confidence: high
+    reason: The OpenITag target service accepted the documented TenantId path and pagination parameters for ListTasks in cn-hangzhou and returned HTTP 400 iTag.Tenant.NotExist for the supplied validation tenant; this is tenant-domain business semantics rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-17"
+  - product: QuanMiaoLightApp
+    version: "2024-08-01"
+    action: GetVideoAnalysisTask
+    http_status: 403
+    error_code: AccessForbid
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_permission_scope
+    confidence: high
+    reason: The target service accepted a correctly shaped 32-character taskId and fake workspaceId, then returned HTTP 403 AccessForbid stating that the current account lacks permission to the business workspace identified by workspaceId; GetVideoDetectShotTask independently returned the same workspace-domain result.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-18"
+  - product: appstream-center
+    version: "2021-02-20"
+    action: FindIdpListByLoginIdentifier
+    http_status: 400
+    error_code: InvalidTenantAlias.NotFound
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_tenant_precondition
+    confidence: high
+    reason: After enabling OpenMeta Anonymous security as an unsigned request, the appstream-center target service accepted the documented LoginIdentifier and ClientId parameters in cn-shanghai and returned HTTP 400 InvalidTenantAlias.NotFound; this is a tenant/login-domain business outcome rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-17"
+  - product: imp
+    version: "2021-06-30"
+    action: DescribeMeterImpWatchLiveTimeByLiveId
+    http_status: 403
+    error_code: Meter.AuthError
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_permission_scope
+    confidence: high
+    reason: The imp target service accepted the documented AppId and LiveId read-meter request at the catalog endpoint and returned HTTP 403 Meter.AuthError; this is product meter authorization semantics rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-17"
+  - product: emas-appmonitor
+    version: "2019-06-11"
+    action: GetIssues
+    http_status: 401
+    error_code: "212018"
+    error_message: Product-specific numeric EMAS AppMonitor account/AppKey context error after the documented BizModule, TimeRange, AppKey, Os, and pagination request shape was accepted.
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_account_permission
+    confidence: high
+    reason: After fixing flat formData object encoding for TimeRange, the emas-appmonitor target service accepted the documented BizModule, TimeRange, AppKey, Os, and pagination parameters at the catalog endpoint and returned HTTP 401 with product-specific numeric code 212018. The same corrected TimeRange shape produced the same code on GetErrors and GetIssue, making this an EMAS AppMonitor account/AppKey permission or app-context outcome rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_desensitized_execution_records
+    decided_on: "2026-07-17"
+  - product: imm
+    version: "2017-09-06"
+    action: GetSet
+    http_status: 404
+    error_code: InvalidProject.NotFound
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_state
+    confidence: high
+    reason: The imm target service accepted the documented GetSet request with Project and SetId parameters in cn-hangzhou and returned HTTP 404 InvalidProject.NotFound; this is an IMM project resource-state outcome rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-17"
+  - product: ImageSearch
+    version: "2019-03-25"
+    action: SearchImage
+    http_status: 400
+    error_code: InvalidInstance
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_state
+    confidence: high
+    reason: The ImageSearch target service accepted the documented SearchImage request at the ap-southeast-1 regional endpoint with InstanceName and image search parameters, then returned HTTP 400 InvalidInstance for the supplied validation instance name; this is an image-search instance resource-state outcome rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-17"
+  - product: ecs-workbench
+    version: "2022-02-20"
+    action: ListInstanceRecords
+    http_status: 404
+    error_code: InvalidInstanceId.NotFound
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_state
+    confidence: high
+    reason: The ECS Workbench target service accepted the documented ListInstanceRecords request at the cn-hangzhou endpoint with InstanceId, RegionId, and pagination parameters, then returned HTTP 404 InvalidInstanceId.NotFound for the supplied validation instance; this is ECS instance resource-state semantics rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-17"
+  - product: metaspace
+    version: "2022-03-07"
+    action: ApplyCoordinationWithCode
+    http_status: 400
+    error_code: REMOTE_VERIFY_LOGIN_TOKEN_EXCEPTION
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_business_token_precondition
+    confidence: high
+    reason: The metaspace target service accepted the documented ApplyCoordinationWithCode request at the cn-shanghai endpoint with placeholder coordination/login-token parameters, then returned HTTP 400 REMOTE_VERIFY_LOGIN_TOKEN_EXCEPTION; this is a product-domain login-token validation outcome rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-17"
+  - product: Cloudauth
+    version: "2022-11-25"
+    action: EntVerify
+    http_status: 403
+    error_code: Forbidden.NoUserAuthorization
+    error_message: Obtain user authorization.
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_permission_scope
+    confidence: high
+    reason: The Cloudauth target service accepted the audited EntVerify route and UserAuthorization probe at the catalog endpoint, then returned HTTP 403 Forbidden.NoUserAuthorization with Message Obtain user authorization. This is Cloudauth user authorization business permission semantics rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure; no real enterprise or person identity fields were supplied.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-18"
+  - product: DianJin
+    version: "2024-06-28"
+    action: GetTaskResult
+    http_status: 401
+    error_code:
+    error_message: 未开通点金服务，请联系点金工作人员进行开通。
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_service_activation
+    confidence: high
+    reason: The DianJin target service accepted GetTaskResult with the supplied workspaceId and taskId at the cn-beijing endpoint and returned HTTP 401 with a product-domain service activation message. This is DianJin service enablement or account-state semantics rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-18"
+  - product: CarbonFootprint
+    version: "2023-07-11"
+    action: GetSummaryData
+    http_status: 400
+    error_code: "34801"
+    error_message: 该用户没有授权
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_permission_scope
+    confidence: high
+    reason: The CarbonFootprint target service accepted GetSummaryData at the cn-hangzhou endpoint with a valid time range and grouping parameter, then returned HTTP 400 code 34801 with Message 该用户没有授权. The product-specific authorization message is a CarbonFootprint account permission outcome rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-18"
+  - product: bailian
+    version: "2023-06-01"
+    action: ListDocumentTags
+    http_status: 403
+    error_code: Forbidden
+    error_message: User not authorized to operate on the specified resource.
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_permission_scope
+    confidence: high
+    reason: The Bailian target service accepted ListDocumentTags at the cn-beijing endpoint with AgentKey and pagination parameters, then returned HTTP 403 Forbidden with Message User not authorized to operate on the specified resource. This is product resource authorization semantics rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-18"
+  - product: appstream-center
+    version: "2021-09-03"
+    action: ListRunningApps
+    http_status: 400
+    error_code: NOT_LOGIN
+    error_message: You are not logged in or your login token has expired.
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_business_token_precondition
+    confidence: high
+    reason: The appstream-center target service accepted ListRunningApps at the cn-shanghai endpoint with placeholder client and login token fields, then returned HTTP 400 NOT_LOGIN with Message You are not logged in or your login token has expired. This is appstream client login-token business state rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-18"
+  - product: Eiam-developerapi
+    version: "2022-02-25"
+    action: ObtainCredential
+    http_status: 404
+    error_code: instance_not_found
+    error_description: Instance not found by request.
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_state
+    confidence: high
+    reason: The Eiam-developerapi target service accepted the documented anonymous ROA Get request with its declared business Authorization header, instanceId path value, and credentialIdentifier query value, then returned HTTP 404 instance_not_found with the product-domain description Instance not found by request. An equivalent probe was independently corroborated by the internal troubleshooting view showing positive business-service processing time. This is an EIAM instance resource-state outcome rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_live_validation_probe_and_internal_troubleshooting
+    decided_on: "2026-07-18"
+    internal_troubleshoot:
+      verified_on: "2026-07-18"
+      business_processing_ms: 47
+      product: Eiam-developerapi
+      version: "2022-02-25"
+      action: ObtainCredential
+      confirms_target_business_service: true
+  - product: EmrStudio
+    version: "2023-10-09"
+    action: DescribeProject
+    http_status: 403
+    error_code: "403"
+    error_message: ram check error
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_account_permission
+    confidence: high
+    reason: The production runtime returned HTTP 403 ram check error for a safe DescribeProject probe. The internal troubleshooting view identified EmrStudio/2023-10-09/DescribeProject, the target httpClient business service, and 35 ms of positive business-service processing time. This proves that the response crossed the gateway and reached the target service permission boundary rather than failing at metadata, endpoint, version, signature, HTTP method, media type, or input-shape validation.
+    source: manual_review_from_live_validation_probe_and_internal_troubleshooting
+    decided_on: "2026-07-18"
+    internal_troubleshoot:
+      verified_on: "2026-07-18"
+      business_processing_ms: 35
+      product: EmrStudio
+      version: "2023-10-09"
+      action: DescribeProject
+      confirms_target_business_service: true
+  - product: EmrStudio
+    version: "2024-04-30"
+    action: DescribeProject
+    http_status: 403
+    error_code: "403"
+    error_message: ram check error
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_account_permission
+    confidence: high
+    reason: The production runtime returned HTTP 403 ram check error for a safe DescribeProject probe. The internal troubleshooting view identified EmrStudio/2024-04-30/DescribeProject, the target httpClient business service, and 33 ms of positive business-service processing time. This proves that the response crossed the gateway and reached the target service permission boundary rather than failing at metadata, endpoint, version, signature, HTTP method, media type, or input-shape validation.
+    source: manual_review_from_live_validation_probe_and_internal_troubleshooting
+    decided_on: "2026-07-18"
+    internal_troubleshoot:
+      verified_on: "2026-07-18"
+      business_processing_ms: 33
+      product: EmrStudio
+      version: "2024-04-30"
+      action: DescribeProject
+      confirms_target_business_service: true
+  - product: AiMiaoBi
+    version: "2023-08-01"
+    action: GetDocInfo
+    http_status: 403
+    error_code: NoPermission
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_permission_scope
+    confidence: high
+    reason: The production runtime returned HTTP 403 NoPermission for a safe GetDocInfo probe with deliberately nonexistent document and workspace identifiers. The internal troubleshooting view identified AiMiaoBi/2023-08-01/GetDocInfo, the target httpClient business service, and 31 ms of positive business-service processing time. This is a target-service permission outcome rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_live_validation_probe_and_internal_troubleshooting
+    decided_on: "2026-07-18"
+    internal_troubleshoot:
+      verified_on: "2026-07-18"
+      business_processing_ms: 31
+      product: AiMiaoBi
+      version: "2023-08-01"
+      action: GetDocInfo
+      confirms_target_business_service: true
+  - product: FC
+    version: "2023-03-30"
+    action: GetFunction
+    http_status: 403
+    error_code: AccessDenied
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_account_permission
+    confidence: high
+    reason: With refreshed runtime credentials, the production runtime passed the earlier SecurityToken boundary and returned HTTP 403 AccessDenied for a safe GetFunction probe. The internal troubleshooting view identified FC/2023-03-30/GetFunction, the target httpClient business service, and 26 ms of positive business-service processing time. This is a target-service account permission outcome rather than a credential, metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_live_validation_probe_and_internal_troubleshooting
+    decided_on: "2026-07-18"
+    internal_troubleshoot:
+      verified_on: "2026-07-18"
+      business_processing_ms: 26
+      product: FC
+      version: "2023-03-30"
+      action: GetFunction
+      confirms_target_business_service: true
+  - product: FC-Open
+    version: "2021-04-06"
+    action: GetFunction
+    http_status: 403
+    error_code: AccessDenied
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_account_permission
+    confidence: high
+    reason: With refreshed runtime credentials, the production runtime passed the earlier SecurityToken boundary and returned HTTP 403 AccessDenied for a safe GetFunction probe. The internal troubleshooting view identified FC-Open/2021-04-06/GetFunction, the target httpClient business service, and 24 ms of positive business-service processing time. This is a target-service account permission outcome rather than a credential, metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_live_validation_probe_and_internal_troubleshooting
+    decided_on: "2026-07-18"
+    internal_troubleshoot:
+      verified_on: "2026-07-18"
+      business_processing_ms: 24
+      product: FC-Open
+      version: "2021-04-06"
+      action: GetFunction
+      confirms_target_business_service: true
+  - product: ImageSearch
+    version: "2021-05-01"
+    action: GetProductInfoByIds
+    http_status: 403
+    error_code: NoPermission
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_account_permission
+    confidence: high
+    reason: The production runtime returned HTTP 403 NoPermission for the safe GetProductInfoByIds probe. The internal troubleshooting view identified ImageSearch/2021-05-01/GetProductInfoByIds, the target httpClient business service, and 5 ms of positive business-service processing time. This is a target-service account permission outcome rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_live_validation_probe_and_internal_troubleshooting
+    decided_on: "2026-07-18"
+    internal_troubleshoot:
+      verified_on: "2026-07-18"
+      business_processing_ms: 5
+      product: ImageSearch
+      version: "2021-05-01"
+      action: GetProductInfoByIds
+      confirms_target_business_service: true
+  - product: PAILangStudio
+    version: "2024-07-10"
+    action: GetKnowledgeBase
+    http_status: 403
+    error_code: NoPermission
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_permission_scope
+    confidence: high
+    reason: The production runtime returned HTTP 403 NoPermission for a safe GetKnowledgeBase probe with deliberately nonexistent knowledge-base and workspace identifiers. The internal troubleshooting view identified PAILangStudio/2024-07-10/GetKnowledgeBase, the target httpClient business service, and 55 ms of positive business-service processing time. This is a target-service permission outcome rather than metadata, endpoint, version, signature, HTTP method, media type, or input-shape failure.
+    source: manual_review_from_live_validation_probe_and_internal_troubleshooting
+    decided_on: "2026-07-18"
+    internal_troubleshoot:
+      verified_on: "2026-07-18"
+      business_processing_ms: 55
+      product: PAILangStudio
+      version: "2024-07-10"
+      action: GetKnowledgeBase
+      confirms_target_business_service: true
+  - product: Chatbot
+    version: "2022-04-08"
+    action: ListInstance
+    http_status: 403
+    error_code: Forbidden
+    error_message: User not authorized to operate on the specified resource.
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_account_permission
+    confidence: high
+    reason: After correcting the endpoint from the unsupported global host to the official cn-shanghai regional endpoint, the production runtime returned HTTP 403 Forbidden with a target-service authorization message for the safe ListInstance probe. The internal troubleshooting view identified Chatbot/2022-04-08/ListInstance, the target httpClient business service, and 16 ms of positive business-service processing time. This proves that the request reached the Chatbot account permission boundary rather than failing at metadata, endpoint, version, signature, HTTP method, media type, or input-shape validation.
+    source: aliyun_cli_endpoint_metadata_live_validation_and_internal_troubleshooting
+    decided_on: "2026-07-18"
+    internal_troubleshoot:
+      verified_on: "2026-07-18"
+      business_processing_ms: 16
+      product: Chatbot
+      version: "2022-04-08"
+      action: ListInstance
+      confirms_target_business_service: true
+  - product: btripOpen
+    version: "2022-05-20"
+    action: VatInvoiceScanQuery
+    http_status: 500
+    error_code: Service.Error
+    error_message: 应用不存在
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_business_credential_precondition
+    confidence: high
+    reason: The documented btripopen.alibtrip.com/api route accepted VatInvoiceScanQuery with deliberately invalid app and corp credential placeholders, then returned HTTP 500 Service.Error with Message 应用不存在. QueryGroupCorpList independently returned the same product-domain result. This proves the request reached Btrip application credential validation rather than failing at metadata, endpoint, version, signature, HTTP method, media type, or input shape.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-18"
+  - product: hcs-mgw
+    version: "2024-06-26"
+    action: ListJob
+    http_status: 404
+    error_code: NoSuchUser
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_resource_scope
+    confidence: high
+    reason: After adding the official SDK's required userid host parameter and OSS gateway contract, the production runtime accepted userid=xx and returned HTTP 404 NoSuchUser from the target service.
+    source: official_sdk_and_live_validation
+    decided_on: "2026-07-18"
+  - product: ivpd
+    version: "2019-06-25"
+    action: RecognizeImageColor
+    http_status: 403
+    error_code: NeedOpen
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_service_activation
+    confidence: high
+    reason: After switching away from the original 503 probe, the production runtime accepted a correctly formed but nonexistent image URL for RecognizeImageColor and returned HTTP 403 NeedOpen for IVPD service activation; SegmentImage independently returned the same result.
+    source: manual_review_from_live_validation_probe
+    decided_on: "2026-07-18"
+  - product: Yike
+    version: "2026-03-19"
+    action: ListYikeWorkspaces
+    http_status: 400
+    error_code: InvalidParameter
+    error_message: MainAccountUserNotFound
+    counts_as_product_version_success: true
+    status: 通过（服务端有效错误）
+    category: service_reached_account_precondition
+    confidence: high
+    reason: At the exact OpenMeta cn-shanghai endpoint, both the official SDK and production runtime accepted ListYikeWorkspaces and returned HTTP 400 InvalidParameter with the product-domain message MainAccountUserNotFound.
+    source: official_sdk_and_live_validation
+    decided_on: "2026-07-18"

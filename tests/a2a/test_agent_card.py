@@ -8,6 +8,11 @@ PIPELINE_EVENTS_EXTENSION_PARAMS = {
     "schemaVersion": "1.0",
     "enabled": False,
     "mode": "normal",
+    "supportsEventBatching": True,
+    "eventBatchMetadataPath": "metadata.iac_code.pipelineBatch.events",
+    "maxBatchEvents": 1024,
+    "maxBatchBytes": 1048576,
+    "maxBatchDelayMs": 20,
     "supportsSnapshot": True,
     "supportsReplay": True,
     "supportsInterrupts": True,
@@ -80,6 +85,18 @@ def test_agent_card_advertises_pipeline_events_extension() -> None:
     extension = _extension_by_uri(data, PIPELINE_EVENTS_EXTENSION_URI)
     assert extension.get("required", False) is False
     assert extension["params"] == PIPELINE_EVENTS_EXTENSION_PARAMS
+
+
+def test_agent_card_advertises_pipeline_event_batching_contract() -> None:
+    card = build_agent_card(host="127.0.0.1", port=41242, token_enabled=False)
+    data = agent_card_to_dict(card)
+
+    params = _extension_by_uri(data, PIPELINE_EVENTS_EXTENSION_URI)["params"]
+    assert params["supportsEventBatching"] is True
+    assert params["eventBatchMetadataPath"] == "metadata.iac_code.pipelineBatch.events"
+    assert params["maxBatchEvents"] == 1024
+    assert params["maxBatchBytes"] == 1048576
+    assert params["maxBatchDelayMs"] == 20
 
 
 def test_agent_card_marks_pipeline_events_extension_enabled_in_pipeline_mode(monkeypatch) -> None:
