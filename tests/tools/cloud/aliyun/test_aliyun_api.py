@@ -1883,7 +1883,7 @@ async def test_explicit_version_never_reads_remote_product_catalog_when_api_meta
 
 
 @pytest.mark.asyncio
-async def test_ros_hook_error_never_exposes_template_context_or_business_values(tmp_path: Path) -> None:
+async def test_ros_hook_syntax_error_preserves_original_detail(tmp_path: Path) -> None:
     services, _, _, transport = _production_services()
     tool = AliyunApi(services=services)
     secret = "CUSTOMER_TOKEN_123"
@@ -1905,15 +1905,67 @@ async def test_ros_hook_error_never_exposes_template_context_or_business_values(
     )
 
     assert result.is_error is True
-    assert result.content == public_aliyun_error(
-        "hook_validation_failed",
-        product="ROS",
-        version="2019-09-10",
-        action="ValidateTemplate",
-        region_id="cn-hangzhou",
-    )
-    assert secret not in result.content
+    assert result.content.startswith("Template YAML syntax error (line")
+    assert "Context:" in result.content
+    assert secret in result.content
     assert str(template) not in result.content
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_ros_hook_structure_error_preserves_actionable_detail(tmp_path: Path) -> None:
+    services, _, _, transport = _production_services()
+    tool = AliyunApi(services=services)
+    template = tmp_path / "existing-vpc-vswitch.yml"
+    template.write_text(
+        "ROSTemplateFormatVersion: '2015-09-01'\n"
+        "Parameters:\n"
+        "  VpcId:\n"
+        "    Type: String\n"
+        "    AssociationProperty: ALIYUN::ECS::VPC::VPCId\n"
+        "Resources:\n"
+        "  VSwitch:\n"
+        "    Type: ALIYUN::ECS::VSwitch\n"
+        "    Properties:\n"
+        "      VpcId: !Ref VpcId\n"
+        "      ZoneId: cn-hangzhou-k\n"
+        "      CidrBlock: 192.168.0.0/24\n",
+        encoding="utf-8",
+    )
+
+    result = await _production_execute(
+        tool,
+        {
+            "product": "ros",
+            "action": "ValidateTemplate",
+            "params": {"TemplateURL": str(template)},
+            "region_id": "cn-hangzhou",
+        },
+        cwd=str(tmp_path),
+    )
+
+    assert result.is_error is True
+    assert "CidrBlock must not be a static value" in result.content
+    assert "choose a non-overlapping CIDR" in result.content
+    assert str(template) not in result.content
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_openmeta_preserves_hook_error_result(monkeypatch) -> None:
+    services, _, _, transport = _production_services()
+    hook_detail = "actionable hook detail"
+    monkeypatch.setattr(
+        "iac_code.tools.cloud.aliyun.api_hooks.run_hooks",
+        lambda *_args, **_kwargs: ToolResult.error(hook_detail),
+    )
+
+    result = await _production_execute(
+        AliyunApi(services=services),
+        _target_test_input("DescribeInstances"),
+    )
+
+    assert result == ToolResult.error(hook_detail)
     assert transport.calls == []
 
 
