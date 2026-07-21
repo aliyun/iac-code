@@ -99,6 +99,7 @@ CLEANUP_EVENT_TYPES = frozenset(
 )
 CLEANUP_ACTIVE_STATUSES = frozenset({"pending", "started", "in_progress", "failed"})
 FAULT_AFTER_SNAPSHOT_POINT = "after_a2a_pipeline_snapshot_saved"
+PERFORMANCE_BACKUP_SCENARIOS = frozenset({"scenario1-performance-backup"})
 IMAGE_TEXT_PROMPT = "请读取图片中的文字，并将图片中的文字作为本轮用户输入执行。"
 STATIC_TEXT_IMAGE_FIXTURE_ROOT = E2E_SCRIPTS_DIR / "fixtures" / "text-images"
 STATIC_TEXT_IMAGE_FIXTURES = {
@@ -479,6 +480,8 @@ class ScenarioHarness:
         self.server_cwd = str(Path(args.server_cwd).expanduser().resolve())
         self.run_dir = _scenario_run_dir(args, scenario)
         self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.notes: list[str] = []
+        self.backup_root: Path | None = None
         self.image_fixtures = TextImageFixtureStore(self.run_dir / "image-fixtures")
         self.workspace_dir = Path(args.cwd).expanduser().resolve() if args.cwd else self.run_dir / "workspace"
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -497,6 +500,12 @@ class ScenarioHarness:
             model=args.model,
             api_base=args.api_base,
         )
+        if scenario in PERFORMANCE_BACKUP_SCENARIOS:
+            self.backup_root = (self.run_dir / "session-backup").resolve()
+            self.backup_root.mkdir(parents=True, exist_ok=True)
+            self.server_env["IAC_CODE_A2A_EXTREME_PERFORMANCE"] = "true"
+            self.server_env["IAC_CODE_CONFIG_BACKUP_DIR"] = str(self.backup_root)
+            self.notes.append(f"enabled A2A extreme performance and backup dir {self.backup_root}")
         if args.deterministic:
             self.server_env["IAC_CODE_A2A_DETERMINISTIC_RECOVERY"] = "1"
             self.server_env["IAC_CODE_TEST_FAULT_INJECTION"] = "1"
@@ -509,7 +518,6 @@ class ScenarioHarness:
         self.context_id = ""
         self.pipeline_task_id = ""
         self.checks: dict[str, bool] = {}
-        self.notes: list[str] = []
         self.summaries: dict[str, Any] = {}
         self.snapshots: dict[str, Any] = {}
 
@@ -846,6 +854,25 @@ def _run_with_harness(args: argparse.Namespace, scenario: str, callback: Callabl
 
 
 def run_scenario1(args: argparse.Namespace, scenario: str) -> int:
+    return _run_scenario1(args, scenario)
+
+
+def run_scenario1_performance_backup(args: argparse.Namespace, scenario: str) -> int:
+    return _run_scenario1(
+        args,
+        scenario,
+        omit_selection_task_id=True,
+        check_waiting_input_backup=True,
+    )
+
+
+def _run_scenario1(
+    args: argparse.Namespace,
+    scenario: str,
+    *,
+    omit_selection_task_id: bool = False,
+    check_waiting_input_backup: bool = False,
+) -> int:
     def callback(h: ScenarioHarness) -> None:
         initial = h.stream(prompt=args.initial_prompt, name="01-initial", context_id="", task_id="")
         initial = _answer_intervening_ask_inputs(h, initial, name_prefix="01-initial")
@@ -853,7 +880,27 @@ def run_scenario1(args: argparse.Namespace, scenario: str) -> int:
         h.checks["initial input_required is step4 confirm_and_select"] = (
             initial.last_input_required_step_id == "confirm_and_select"
         )
-        selection = h.stream(prompt=args.selection_prompt, name="02-select-candidate")
+        if check_waiting_input_backup:
+            h.checks["performance mode explicitly enabled"] = (
+                h.server_env.get("IAC_CODE_A2A_EXTREME_PERFORMANCE") == "true"
+            )
+            h.checks["backup dir explicitly enabled"] = bool(h.server_env.get("IAC_CODE_CONFIG_BACKUP_DIR"))
+            h.snapshots["step4_backup"] = _waiting_input_backup_snapshots(h)
+            h.checks["step4 backup task is input-required"] = (
+                h.snapshots["step4_backup"].get("task", {}).get("state") == "input-required"
+            )
+            h.checks["step4 backup context has no active task"] = (
+                h.snapshots["step4_backup"].get("context", {}).get("active_task_id") is None
+            )
+        selection = h.stream(
+            prompt=args.selection_prompt,
+            name="02-select-candidate",
+            task_id="" if omit_selection_task_id else None,
+        )
+        if omit_selection_task_id:
+            _add_hydrated_task_checks(h, selection, "selection")
+            h.checks["selection did not report already-working error"] = not _has_already_working_error(selection)
+            h.checks["selection did not report terminal-state error"] = not _has_terminal_state_error(selection)
         h.checks["selection completed pipeline"] = _pipeline_completed(selection)
         h.checks["selection produced normal handoff"] = selection.normal_handoff_ready
         h.snapshots["after_pipeline"] = h.fetch_state("after-pipeline")
@@ -1803,6 +1850,52 @@ def _add_hydrated_task_checks(h: ScenarioHarness, summary: StreamSummary, prefix
     h.checks[f"{prefix} omitted taskId"] = summary.request_task_id == ""
     h.checks[f"{prefix} stayed in recovered context"] = summary.context_id == h.context_id
     h.checks[f"{prefix} hydrated recovered taskId"] = summary.task_id == h.pipeline_task_id
+
+
+def _has_already_working_error(summary: StreamSummary) -> bool:
+    return "Task is already working" in summary.text
+
+
+def _has_terminal_state_error(summary: StreamSummary) -> bool:
+    return "terminal state" in summary.text
+
+
+def _waiting_input_backup_snapshots(h: ScenarioHarness) -> dict[str, Any]:
+    backup_root = getattr(h, "backup_root", None)
+    if backup_root is None:
+        _append_harness_note(h, "cannot inspect backup snapshots: backup root is not configured")
+        return {"error": "backup root is not configured"}
+    cwd, session_id = _pipeline_session_identity(h)
+    if not cwd or not session_id:
+        _append_harness_note(h, "cannot inspect backup snapshots: missing cwd/session_id")
+        return {"error": "missing cwd/session_id"}
+
+    storage = SessionStorage(projects_dir=Path(backup_root) / "projects")
+    deadline = time.monotonic() + 10.0
+    last_error = ""
+    while time.monotonic() < deadline:
+        try:
+            session_dir = storage.v2_session_dir(cwd, session_id)
+            if session_dir is None:
+                last_error = "backup session directory not found"
+            else:
+                task_path = session_dir / "a2a" / "task.json"
+                context_path = session_dir / "a2a" / "context.json"
+                task = json.loads(task_path.read_text(encoding="utf-8"))
+                context = json.loads(context_path.read_text(encoding="utf-8"))
+                if isinstance(task, dict) and isinstance(context, dict):
+                    return {
+                        "sessionDir": str(session_dir),
+                        "task": _redact_json_value(task, h.server_env),
+                        "context": _redact_json_value(context, h.server_env),
+                    }
+                last_error = "backup snapshots are not JSON objects"
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+        time.sleep(0.25)
+
+    _append_harness_note(h, f"cannot inspect backup snapshots: {last_error}")
+    return {"error": last_error}
 
 
 def _completed_snapshot_or_stream(h: ScenarioHarness, summary: StreamSummary) -> bool:
@@ -2964,6 +3057,7 @@ _REAL_CLOUD_SCENARIOS = {
     "image-normal-handoff",
     "image-selection-waiting",
     "scenario1",
+    "scenario1-performance-backup",
     "normal-running",
     "ask-waiting",
     "selection-waiting",
@@ -2980,6 +3074,7 @@ _SCENARIOS: dict[str, Callable[[argparse.Namespace, str], int]] = {
     "image-normal-handoff": run_image_normal_handoff,
     "image-selection-waiting": run_image_selection_waiting,
     "scenario1": run_scenario1,
+    "scenario1-performance-backup": run_scenario1_performance_backup,
     "normal-running": run_normal_running,
     "ask-waiting": run_ask_waiting,
     "selection-waiting": run_selection_waiting,

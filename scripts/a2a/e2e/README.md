@@ -46,6 +46,20 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --scenario scenario1
 ```
 
+Run the scenario1 variant that matches the production performance/backup
+configuration and sends the step4 selection without `taskId`:
+
+```bash
+PATH="$HOME/.local/bin:$PATH" \
+uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
+  --allow-real-cloud \
+  --provider dashscope \
+  --model qwen3.6-plus \
+  --stream-timeout 2400 \
+  --preflight-timeout 60 \
+  --scenario scenario1-performance-backup
+```
+
 Run the full real recovery matrix:
 
 ```bash
@@ -58,6 +72,7 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --event-timeout 300 \
   --preflight-timeout 60 \
   --scenario scenario1 \
+  --scenario scenario1-performance-backup \
   --scenario selection-waiting \
   --scenario ask-waiting \
   --scenario image-initial \
@@ -101,6 +116,7 @@ the rest of the tests.
 | Scenario | Cut point / special condition | Recovery input | Main assertion |
 | --- | --- | --- | --- |
 | `scenario1` | After pipeline completion and one normal-chat follow-up | Ask what the previous normal-chat question was | Normal-chat history survives restart; VSwitch evidence exists. |
+| `scenario1-performance-backup` | Full `scenario1` with `IAC_CODE_A2A_EXTREME_PERFORMANCE=true` and `IAC_CODE_CONFIG_BACKUP_DIR=<run-dir>/session-backup` | Step4 selection omits `taskId`; later normal-chat recovery also omits `taskId` | Step4 backup snapshot has no stale active task, omitted-`taskId` selection hydrates the recovered task, and full scenario1 completes. |
 | `selection-waiting` | Step 4 waits for candidate selection | `你随便选一个方案。` without `taskId` | Waiting step4 task is recovered and selected; VSwitch evidence exists. |
 | `ask-waiting` | `ask_user_question` waits for user input | Clarification answers without `taskId` | Pending ask input is recovered and pipeline completes; VSwitch evidence exists. |
 | `image-initial` | Initial user message is the static `initial.png` image fixture | Candidate selection text | The image starts the pipeline, reaches step4 selection, completes, and produces VSwitch evidence. |
@@ -165,15 +181,16 @@ When stabilizing changes, run the smaller or more diagnostic cases first:
 
 1. `fault-after-snapshot`
 2. `scenario1`
-3. `selection-waiting`
-4. `ask-waiting`
-5. `image-initial`, `image-ask-waiting`, and `image-selection-waiting`
-6. `image-normal-handoff` and `image-interrupt`
-7. `step1-running` through `step5-running`
-8. `normal-running`
-9. `cancel-step1` through `cancel-step5`
-10. `rollback-step1` through `rollback-step5`
-11. `rollback-step5-cleanup`, then `rollback-step5-cleanup-recovery`
+3. `scenario1-performance-backup`
+4. `selection-waiting`
+5. `ask-waiting`
+6. `image-initial`, `image-ask-waiting`, and `image-selection-waiting`
+7. `image-normal-handoff` and `image-interrupt`
+8. `step1-running` through `step5-running`
+9. `normal-running`
+10. `cancel-step1` through `cancel-step5`
+11. `rollback-step1` through `rollback-step5`
+12. `rollback-step5-cleanup`, then `rollback-step5-cleanup-recovery`
 
 ## Preflight
 

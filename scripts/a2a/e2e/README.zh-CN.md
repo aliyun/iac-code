@@ -42,6 +42,20 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --scenario scenario1
 ```
 
+如果要验证和生产性能/backup 配置一致的 scenario1 变体，并在 step4 选择时不带
+`taskId`，运行：
+
+```bash
+PATH="$HOME/.local/bin:$PATH" \
+uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
+  --allow-real-cloud \
+  --provider dashscope \
+  --model qwen3.6-plus \
+  --stream-timeout 2400 \
+  --preflight-timeout 60 \
+  --scenario scenario1-performance-backup
+```
+
 如果要跑完整真实恢复矩阵：
 
 ```bash
@@ -54,6 +68,7 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --event-timeout 300 \
   --preflight-timeout 60 \
   --scenario scenario1 \
+  --scenario scenario1-performance-backup \
   --scenario selection-waiting \
   --scenario ask-waiting \
   --scenario image-initial \
@@ -94,6 +109,7 @@ provider、tool、真实云调用场景默认会被保护住。只有确认要�
 | 场景 | 切点 / 特殊条件 | 恢复时输入 | 主要验收 |
 | --- | --- | --- | --- |
 | `scenario1` | pipeline 完成并完成一轮 normal-chat follow-up 后 | 询问上一条 normal-chat 问题是什么 | normal-chat 历史重启后仍可用；存在 VSwitch 证据。 |
+| `scenario1-performance-backup` | 完整 `scenario1`，并强制 `IAC_CODE_A2A_EXTREME_PERFORMANCE=true`、`IAC_CODE_CONFIG_BACKUP_DIR=<run-dir>/session-backup` | step4 选择不带 `taskId`；后续 normal-chat 恢复也不带 `taskId` | step4 backup 快照没有 stale active task；省略 `taskId` 的选择能 hydrate 到恢复 task；完整 scenario1 通过。 |
 | `selection-waiting` | step4 等待候选方案选择时 | 不带 `taskId` 发送 `你随便选一个方案。` | 能恢复等待中的 step4 task 并完成选择；存在 VSwitch 证据。 |
 | `ask-waiting` | `ask_user_question` 等待用户输入时 | 不带 `taskId` 发送澄清回答 | 能恢复 pending ask 输入并完成 pipeline；存在 VSwitch 证据。 |
 | `image-initial` | 首轮用户消息就是静态 `initial.png` 图片 fixture | 文本选择候选方案 | 图片能启动 pipeline，进入 step4 选择，最终完成并产生 VSwitch 证据。 |
@@ -157,15 +173,16 @@ CLI 覆盖后的文本，才会回退到运行时渲染图片。
 
 1. `fault-after-snapshot`
 2. `scenario1`
-3. `selection-waiting`
-4. `ask-waiting`
-5. `image-initial`、`image-ask-waiting` 和 `image-selection-waiting`
-6. `image-normal-handoff` 和 `image-interrupt`
-7. `step1-running` 到 `step5-running`
-8. `normal-running`
-9. `cancel-step1` 到 `cancel-step5`
-10. `rollback-step1` 到 `rollback-step5`
-11. `rollback-step5-cleanup`，再跑 `rollback-step5-cleanup-recovery`
+3. `scenario1-performance-backup`
+4. `selection-waiting`
+5. `ask-waiting`
+6. `image-initial`、`image-ask-waiting` 和 `image-selection-waiting`
+7. `image-normal-handoff` 和 `image-interrupt`
+8. `step1-running` 到 `step5-running`
+9. `normal-running`
+10. `cancel-step1` 到 `cancel-step5`
+11. `rollback-step1` 到 `rollback-step5`
+12. `rollback-step5-cleanup`，再跑 `rollback-step5-cleanup-recovery`
 
 ## Preflight
 

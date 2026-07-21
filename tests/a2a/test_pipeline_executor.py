@@ -7526,6 +7526,147 @@ def test_cancel_waiting_input_sidecar_appends_cancel_handoff_as_durable_group(
 
 
 @pytest.mark.asyncio
+async def test_waiting_input_backup_snapshot_drops_active_task_without_mutating_live_context(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.state = "working"
+    task.active_task = asyncio.current_task()
+    ctx = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda _session_id: _fake_runtime(),
+    )
+    ctx.active_task_id = "task-1"
+    store.mirror_task(task)
+    store.mirror_context(ctx)
+
+    executor = IacCodeA2APipelineExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    executor._mirror_a2a_snapshots_for_pipeline_publication(
+        {
+            "schemaVersion": "1.0",
+            "eventType": "input_required",
+            "status": "input_required",
+            "taskId": "task-1",
+            "contextId": "ctx-1",
+        },
+        task=task,
+        ctx=ctx,
+    )
+
+    session_dir = SessionStorage().session_dir(str(tmp_path), ctx.session_id)
+    task_snapshot = json.loads((session_dir / "a2a" / "task.json").read_text(encoding="utf-8"))
+    context_snapshot = json.loads((session_dir / "a2a" / "context.json").read_text(encoding="utf-8"))
+
+    assert task_snapshot["state"] == "input-required"
+    assert context_snapshot["active_task_id"] is None
+    assert task.state == "working"
+    assert ctx.active_task_id == "task-1"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_executor_resumes_waiting_input_after_stale_active_task_restore(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    context_id = "ctx-1"
+    task_id = "task-1"
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    ctx = await store.get_or_create_context(
+        context_id=context_id,
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: _fake_runtime(),
+    )
+    task = await store.get_or_create_task(task_id=task_id, context_id=context_id)
+    task.state = "input-required"
+    ctx.active_task_id = task_id
+    store.mirror_task(task)
+    store.mirror_context(ctx)
+
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=ctx.session_id)
+    pending_input = {
+        "inputId": "input-confirm_and_select-1",
+        "kind": "candidate_selection",
+        "prompt": "请选择方案",
+        "options": [{"name": "方案A", "candidate_index": 0}],
+    }
+    pending_event = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-selection",
+        "sequence": 1,
+        "createdAt": "2026-06-08T10:00:00Z",
+        "eventType": "input_required",
+        "scope": "step",
+        "pipelineRunId": context_id,
+        "taskId": task_id,
+        "contextId": context_id,
+        "pipelineName": "selling",
+        "status": "input_required",
+        "step": {"runId": "step-confirm_and_select-1", "id": "confirm_and_select", "attempt": 1},
+        "input": pending_input,
+        "data": pending_input,
+    }
+    A2APipelineJournal(pipeline_dir).append(pending_event)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending_event]))
+
+    session_dir = SessionStorage().session_dir(str(cwd), ctx.session_id)
+    fake_pipeline = FakePipeline([], session_dir=session_dir / "pipeline")
+    fake_pipeline.sidecar_status = "waiting_input"
+    executor = IacCodeA2APipelineExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+    monkeypatch.setattr(executor, "_create_pipeline", lambda **_kwargs: fake_pipeline)
+    queue = FakeEventQueue()
+
+    await executor.execute(
+        context=FakeRequestContext(
+            task_id=task_id,
+            context_id=context_id,
+            text="0",
+            metadata={"iac_code": {"cwd": str(cwd)}},
+        ),
+        event_queue=queue,
+        task=task,
+        task_id=task_id,
+        context_id=context_id,
+        cwd=str(cwd),
+        prompt="0",
+    )
+
+    assert fake_pipeline.resume_prompts == ["0"]
+    assert task.state == "input-required"
+    assert ctx.active_task_id is None
+    assert all(
+        event["status"].get("message", {}).get("parts", [{}])[0].get("text") != "Task is already working."
+        for event in _status_events(queue)
+    )
+
+
+@pytest.mark.asyncio
 async def test_cancel_waiting_input_backup_sees_committed_cancel_and_mirrored_task(
     tmp_path: Path,
 ) -> None:

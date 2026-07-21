@@ -245,6 +245,19 @@ def test_image_recovery_scenarios_are_registered() -> None:
         assert scenario in runner._REAL_CLOUD_SCENARIOS
 
 
+def test_scenario1_performance_backup_is_registered_and_requires_real_cloud() -> None:
+    runner = _load_runner()
+
+    assert runner._SCENARIOS["scenario1-performance-backup"] is runner.run_scenario1_performance_backup
+    args = SimpleNamespace(allow_real_cloud=False, deterministic=False)
+    try:
+        runner._validate_scenario_execution(args, "scenario1-performance-backup")
+    except SystemExit as exc:
+        assert "--allow-real-cloud" in str(exc)
+    else:
+        raise AssertionError("scenario1-performance-backup should require --allow-real-cloud")
+
+
 def test_answer_intervening_ask_inputs_reaches_selection(tmp_path: Path) -> None:
     runner = _load_runner()
     initial = runner.StreamSummary(
@@ -600,6 +613,152 @@ def test_fault_after_snapshot_defaults_crash_point(tmp_path: Path) -> None:
     harness = runner.ScenarioHarness(args, scenario="fault-after-snapshot")
 
     assert harness.server_env["IAC_CODE_TEST_CRASH_AT"] == runner.FAULT_AFTER_SNAPSHOT_POINT
+
+
+def test_scenario1_performance_backup_configures_server_env(tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = SimpleNamespace(
+        server_cwd=str(tmp_path),
+        run_dir=str(tmp_path / "run"),
+        run_root=str(tmp_path),
+        cwd="",
+        host="127.0.0.1",
+        port=0,
+        no_auto_approve_permissions=False,
+        provider="",
+        model="",
+        api_base="",
+        deterministic=False,
+        fault_at="",
+    )
+
+    harness = runner.ScenarioHarness(args, scenario="scenario1-performance-backup")
+
+    assert harness.server_env["IAC_CODE_A2A_EXTREME_PERFORMANCE"] == "true"
+    assert harness.server_env["IAC_CODE_CONFIG_BACKUP_DIR"] == str((tmp_path / "run" / "session-backup").resolve())
+    assert harness.backup_root == (tmp_path / "run" / "session-backup").resolve()
+
+
+def test_scenario1_performance_backup_omits_selection_task_id_and_checks_backup(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    runner = _load_runner()
+    harnesses = []
+
+    class FakeHarness:
+        def __init__(self, args) -> None:
+            self.args = args
+            self.run_dir = tmp_path
+            self.workspace_dir = tmp_path / "workspace"
+            self.workspace_dir.mkdir()
+            self.server_env = {
+                "IAC_CODE_A2A_EXTREME_PERFORMANCE": "true",
+                "IAC_CODE_CONFIG_BACKUP_DIR": str(tmp_path / "backup"),
+            }
+            self.context_id = ""
+            self.pipeline_task_id = ""
+            self.checks = {}
+            self.notes = []
+            self.summaries = {}
+            self.snapshots = {}
+            self.stream_request_task_ids = {}
+
+        def stream(
+            self,
+            *,
+            prompt: str,
+            name: str,
+            context_id: str | None = None,
+            task_id: str | None = None,
+            **_kwargs,
+        ):
+            if context_id == "":
+                self.context_id = "ctx-1"
+            if not self.context_id:
+                self.context_id = "ctx-1"
+            if not self.pipeline_task_id:
+                self.pipeline_task_id = "task-1"
+            request_task_id = self.pipeline_task_id if task_id is None else task_id
+            self.stream_request_task_ids[name] = request_task_id
+            if name == "01-initial":
+                summary = runner.StreamSummary(
+                    name=name,
+                    prompt=prompt,
+                    request_task_id=request_task_id,
+                    context_id=self.context_id,
+                    task_id=self.pipeline_task_id,
+                    status_states=["TASK_STATE_INPUT_REQUIRED"],
+                    pipeline_event_types=["input_required"],
+                    last_input_required_step_id="confirm_and_select",
+                )
+            elif name == "02-select-candidate":
+                summary = runner.StreamSummary(
+                    name=name,
+                    prompt=prompt,
+                    request_task_id=request_task_id,
+                    context_id=self.context_id,
+                    task_id=self.pipeline_task_id,
+                    status_states=["TASK_STATE_COMPLETED"],
+                    pipeline_event_types=["input_received", "step_completed", "pipeline_completed"],
+                    normal_handoff_ready=True,
+                    text="created ALIYUN::ECS::VSwitch",
+                )
+            else:
+                summary = runner.StreamSummary(
+                    name=name,
+                    prompt=prompt,
+                    request_task_id=request_task_id,
+                    context_id=self.context_id,
+                    task_id=f"{name}-task",
+                    status_states=["TASK_STATE_COMPLETED"],
+                    text="created ALIYUN::ECS::VSwitch",
+                )
+            self.summaries[name] = summary
+            return summary
+
+        def fetch_state(self, name: str):
+            return {
+                "snapshot": {
+                    "contextId": self.context_id,
+                    "taskId": self.pipeline_task_id,
+                    "status": "completed",
+                    "normalHandoff": {"action": "switch_to_normal", "targetMode": "normal"},
+                }
+            }
+
+        def kill9_and_restart(self) -> None:
+            pass
+
+    def fake_run_with_harness(args, _scenario, callback):
+        harness = FakeHarness(args)
+        harnesses.append(harness)
+        callback(harness)
+        return 0 if all(harness.checks.values()) else 1
+
+    monkeypatch.setattr(runner, "_run_with_harness", fake_run_with_harness)
+    monkeypatch.setattr(
+        runner,
+        "_waiting_input_backup_snapshots",
+        lambda _h: {"task": {"state": "input-required"}, "context": {"active_task_id": None}},
+    )
+    monkeypatch.setattr(runner, "_a2a_session_contains_user_message", lambda _h, _text: True)
+    monkeypatch.setattr(runner, "_all_evidence", lambda _h: "ALIYUN::ECS::VSwitch")
+    monkeypatch.setattr(runner, "_run_dir_has_cleanup_events", lambda _run_dir: False)
+    monkeypatch.setattr(runner, "_session_has_cleanup_prompt", lambda _h: False)
+    monkeypatch.setattr(runner, "_cleanup_ledger_has_required_resources", lambda _h: False)
+    args = SimpleNamespace(
+        initial_prompt=runner.DEFAULT_INITIAL_PROMPT,
+        selection_prompt=runner.DEFAULT_SELECTION_PROMPT,
+        normal_followup_prompt=runner.DEFAULT_NORMAL_FOLLOWUP_PROMPT,
+        recovery_prompt=runner.DEFAULT_RECOVERY_PROMPT,
+    )
+
+    assert runner.run_scenario1_performance_backup(args, "scenario1-performance-backup") == 0
+    assert harnesses[0].stream_request_task_ids["02-select-candidate"] == ""
+    assert harnesses[0].checks["selection omitted taskId"] is True
+    assert harnesses[0].checks["selection hydrated recovered taskId"] is True
+    assert harnesses[0].checks["step4 backup context has no active task"] is True
 
 
 def test_fault_after_snapshot_requires_real_cloud_opt_in_even_when_deterministic() -> None:
