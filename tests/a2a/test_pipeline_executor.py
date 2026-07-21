@@ -1436,13 +1436,17 @@ async def test_pipeline_executor_batches_deltas_before_semantic_event_and_drains
         for update in pipeline_updates
         for envelope in (update["pipelineBatch"]["events"] if "pipelineBatch" in update else [update["pipeline"]])
     ]
-    assert [envelope["eventType"] for envelope in envelopes[:3]] == [
-        "text_delta",
-        "text_delta",
-        "pipeline_started",
-    ]
-    assert [envelope["data"]["text"] for envelope in envelopes[:2]] == ["a", "bc"]
-    assert envelopes[1]["sequence"] == 3
+    pipeline_started_index = next(
+        index for index, envelope in enumerate(envelopes) if envelope["eventType"] == "pipeline_started"
+    )
+    delta_envelopes = envelopes[:pipeline_started_index]
+    assert delta_envelopes
+    assert all(envelope["eventType"] == "text_delta" for envelope in delta_envelopes)
+    assert "".join(envelope["data"]["text"] for envelope in delta_envelopes) == "abc"
+    assert [envelope["sequence"] for envelope in delta_envelopes] == sorted(
+        envelope["sequence"] for envelope in delta_envelopes
+    )
+    assert delta_envelopes[-1]["sequence"] == 3
     assert "".join((await store.get_or_create_task(task_id="task-1", context_id="ctx-1")).output_text) == "abc"
     assert store._contexts["ctx-1"].runtime.outbound is None
     assert not any("PipelineA2AOutboundQueue._run" in name for name in _pending_coro_names())

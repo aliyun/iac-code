@@ -1680,7 +1680,7 @@ async def test_delegated_local_template_is_materialized_only_after_contract_cons
 
     template = tmp_path / "template.yml"
     template_body = "ROSTemplateFormatVersion: '2015-09-01'\nResources:\n  Vpc:\n    Type: ALIYUN::ECS::VPC\n"
-    template.write_text(template_body, encoding="utf-8")
+    template.write_bytes(template_body.encode("utf-8"))
     contract = _canonical_contract(
         product="ROS",
         version="2019-09-10",

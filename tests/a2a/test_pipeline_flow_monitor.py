@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import stat
 import threading
 from datetime import datetime, timezone
@@ -93,8 +94,9 @@ async def test_healthy_flow_writes_only_session_summary(tmp_path: Path) -> None:
     assert records[0]["queue_wait_mean_ms"] == 40.0
     assert records[0]["queue_wait_max_ms"] == 40.0
     assert records[0]["phase_total_ms"]["downstream_transport"] == 0.0
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    if os.name != "nt":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
 
 
 @pytest.mark.asyncio

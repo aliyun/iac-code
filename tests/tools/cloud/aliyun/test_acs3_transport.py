@@ -1579,9 +1579,11 @@ async def _record(values: list[float], value: float) -> None:
 @pytest.mark.asyncio
 async def test_cancellation_closes_response() -> None:
     gate = asyncio.Event()
+    started = asyncio.Event()
 
     class BlockingStream(TrackingStream):
         async def __aiter__(self):
+            started.set()
             yield b"partial"
             await gate.wait()
 
@@ -1597,7 +1599,7 @@ async def test_cancellation_closes_response() -> None:
             budget=budget(),
         )
     )
-    await asyncio.sleep(0.01)
+    await asyncio.wait_for(started.wait(), timeout=1)
     task.cancel()
 
     with pytest.raises(asyncio.CancelledError):

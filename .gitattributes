@@ -1,0 +1,3 @@
+# Hash-pinned Aliyun metadata and generated catalogs use canonical LF bytes.
+src/iac_code/tools/cloud/aliyun/data/** text eol=lf
+tests/tools/cloud/aliyun/fixtures/** text eol=lf
