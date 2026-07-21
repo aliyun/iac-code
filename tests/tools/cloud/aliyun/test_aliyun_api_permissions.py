@@ -1710,6 +1710,59 @@ async def test_delegated_local_template_is_materialized_only_after_contract_cons
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("template_url_kind", ("relative", "absolute"))
+async def test_delegated_local_template_materializes_from_symlinked_logical_cwd(
+    tmp_path,
+    template_url_kind: str,
+) -> None:
+    from iac_code.tools.cloud.aliyun.runtime import AliyunDelegatedExecutor
+
+    physical_root = tmp_path / "mount-root" / "oss" / "bucket"
+    physical_cwd = physical_root / "ctx-1"
+    physical_templates = physical_cwd / "templates"
+    physical_templates.mkdir(parents=True)
+    logical_root = tmp_path / "workspace"
+    try:
+        logical_root.symlink_to(physical_root, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlinks are unavailable: {error}")
+    logical_cwd = logical_root / "ctx-1"
+
+    template_body = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n"
+    (physical_templates / "template.yml").write_bytes(template_body.encode("utf-8"))
+    template_url = (
+        "templates/template.yml"
+        if template_url_kind == "relative"
+        else str(logical_cwd / "templates" / "template.yml")
+    )
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action="ValidateTemplate",
+    )
+    stages: list[str] = []
+    tool, runtime = _execution_runtime(contract, stages=stages)
+    delegated = AliyunDelegatedExecutor(tool, action="ValidateTemplate")
+    outer_input = {"template_url": template_url, "region_id": "cn-hangzhou"}
+    permission_context = _bound_context(
+        outer_input,
+        tool_name="ros_validate_template",
+        cwd=str(logical_cwd),
+        pipeline_mode=True,
+    )
+
+    permission = await delegated.check_permissions(outer_input, permission_context)
+    assert permission.behavior == "allow"
+    result = await delegated.execute(outer_input, _execution_context(permission_context, permission))
+
+    assert result.is_error is False
+    builder_input = runtime.request_builder.inputs[0]
+    assert builder_input["params"]["TemplateBody"] == template_body
+    assert "TemplateURL" not in builder_input["params"]
+    assert stages.index("contract") < stages.index("materialize") < stages.index("request_builder")
+
+
+@pytest.mark.asyncio
 async def test_delegated_local_template_symlink_fails_before_hooks_and_request_builder(tmp_path) -> None:
     from iac_code.tools.cloud.aliyun.runtime import AliyunDelegatedExecutor
 

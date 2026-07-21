@@ -530,12 +530,46 @@ def _runtime_json_type_name(value: Any) -> str:
     return "unknown"
 
 
+def _path_is_lexically_under(path: str, root: str) -> bool:
+    path_norm = os.path.normcase(os.path.abspath(path))
+    root_norm = os.path.normcase(os.path.abspath(root))
+    try:
+        return os.path.commonpath((path_norm, root_norm)) == root_norm
+    except ValueError:
+        return False
+
+
+def _materialization_root(root: str) -> tuple[str, str]:
+    logical = os.path.abspath(os.path.expanduser(root or "."))
+    return logical, os.path.realpath(logical)
+
+
+def _absolute_materialization_path(path: str, roots: list[str]) -> Path:
+    absolute = os.path.abspath(path)
+    for root in roots:
+        logical_root, real_root = _materialization_root(root)
+        if not _path_is_lexically_under(absolute, logical_root):
+            continue
+        relative = os.path.relpath(absolute, logical_root)
+        mapped = real_root if relative == "." else os.path.join(real_root, relative)
+        return Path(mapped)
+    return Path(absolute)
+
+
+def _relative_materialization_candidates(path: str, roots: list[str]) -> list[Path]:
+    candidates: list[Path] = []
+    for root in roots:
+        _logical_root, real_root = _materialization_root(root)
+        candidates.append(Path(os.path.abspath(os.path.join(real_root, path))))
+    return candidates
+
+
 def _runtime_materialization_path(path: str, context: ToolContext) -> Path:
     expanded = os.path.expanduser(path)
-    if os.path.isabs(expanded):
-        return Path(os.path.abspath(expanded))
     roots = [context.cwd or ".", *context.relative_read_directories]
-    candidates = [Path(os.path.abspath(os.path.join(root, expanded))) for root in roots]
+    if os.path.isabs(expanded):
+        return _absolute_materialization_path(expanded, roots)
+    candidates = _relative_materialization_candidates(expanded, roots)
     return next((candidate for candidate in candidates if os.path.lexists(candidate)), candidates[0])
 
 
