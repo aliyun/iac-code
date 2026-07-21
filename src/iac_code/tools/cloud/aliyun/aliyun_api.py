@@ -1931,16 +1931,6 @@ class AliyunApi(BaseCloudApi):
 
             hook_result = run_hooks(contract.product.casefold(), contract.action, params)
             if hook_result is not None:
-                if hook_result.is_error:
-                    return ToolResult.error(
-                        public_aliyun_error(
-                            "hook_validation_failed",
-                            product=contract.product,
-                            version=contract.version,
-                            action=contract.action,
-                            region_id=final_shape.region_id,
-                        )
-                    )
                 return hook_result
             post_hook_shape = _runtime_call_shape(materialized, contract=contract)
             if post_hook_shape.security_view() != final_shape.security_view():
