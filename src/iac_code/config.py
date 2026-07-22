@@ -119,6 +119,12 @@ _LEGACY_KEY_NAME_ALIASES: dict[str, str] = {
 # Model-name prefix → provider key_name.  Used by _detect_provider_name (in
 # providers/manager.py) and load_credentials to infer the provider from the
 # model string when no explicit provider is configured.
+_MODEL_EXACT_TO_PROVIDER: dict[str, str] = {
+    "qwen3.8-max-preview": "dashscope_token_plan",
+    "kimi/kimi-k3": "dashscope",
+    "minimax/minimax-m3": "dashscope",
+}
+
 _MODEL_PREFIX_TO_PROVIDER: tuple[tuple[str, str], ...] = (
     ("claude-", "anthropic"),
     ("gpt-", "openai"),
@@ -370,7 +376,10 @@ def get_provider_config(key_name: str) -> dict[str, Any]:
 
 
 def load_saved_model() -> str | None:
-    """Load the active provider's saved model from settings.yml."""
+    """Load the environment override or active provider's saved model."""
+    env_model = _get_env_overrides()["model"]
+    if env_model:
+        return env_model
     key = get_active_provider_key()
     if not key:
         return None
@@ -398,6 +407,9 @@ def load_active_provider_config() -> dict[str, Any] | None:
 def _infer_provider_key_from_model(model: str) -> str | None:
     """Return the provider key_name inferred from a model name prefix, or None."""
     model_lower = model.lower()
+    exact_provider = _MODEL_EXACT_TO_PROVIDER.get(model_lower)
+    if exact_provider is not None:
+        return exact_provider
     for prefix, provider in _MODEL_PREFIX_TO_PROVIDER:
         if model_lower.startswith(prefix):
             return provider

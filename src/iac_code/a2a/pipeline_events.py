@@ -288,6 +288,8 @@ class PipelineEventTranslator:
         if isinstance(event, TextDeltaEvent):
             return [self._translate_text_delta_event(event)]
         if isinstance(event, ThinkingDeltaEvent):
+            if event.is_metadata_only:
+                return []
             return [self._translate_thinking_delta_event(event)]
         if isinstance(event, AskUserQuestionEvent):
             return [self._translate_ask_user_question_event(event)]

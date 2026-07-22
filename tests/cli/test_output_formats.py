@@ -27,6 +27,7 @@ from iac_code.types.stream_events import (
     SubAgentToolEvent,
     SubPipelineStreamEvent,
     TextDeltaEvent,
+    ThinkingDeltaEvent,
     ToolInputDeltaEvent,
     ToolResultEvent,
     ToolUseEndEvent,
@@ -104,6 +105,17 @@ class TestJsonWriter:
             "cache_creation_input_tokens": 0,
             "cache_read_input_tokens": 0,
         }
+
+    def test_tool_end_replaces_fragmentary_start_name(self) -> None:
+        stream = io.StringIO()
+        writer = JsonWriter(stream)
+        writer.handle(ToolUseStartEvent(tool_use_id="tu_1", name="read_"))
+        writer.handle(ToolUseEndEvent(tool_use_id="tu_1", name="read_file", input={"path": "main.py"}))
+        writer.finalize()
+
+        tool = json.loads(stream.getvalue())["tool_uses"][0]
+        assert tool["name"] == "read_file"
+        assert tool["input_summary"]["tool_name"] == "read_file"
 
     def test_empty_output(self) -> None:
         stream = io.StringIO()
@@ -226,6 +238,34 @@ class TestStreamJsonWriter:
         data = json.loads(lines[0])
         assert data["type"] == "text_delta"
         assert data["text"] == "hi"
+
+    def test_thinking_delta_omits_internal_provider_metadata(self) -> None:
+        stream = io.StringIO()
+        writer = StreamJsonWriter(stream)
+        writer.handle(
+            ThinkingDeltaEvent(
+                text="reasoning",
+                block_index=2,
+                provider_metadata={"provider": "anthropic", "signature": "opaque-signature"},
+            )
+        )
+
+        data = json.loads(stream.getvalue())
+        assert data == {"text": "reasoning", "type": "thinking_delta"}
+        assert "opaque-signature" not in stream.getvalue()
+
+    def test_metadata_only_thinking_delta_is_not_emitted(self) -> None:
+        stream = io.StringIO()
+        writer = StreamJsonWriter(stream)
+
+        writer.handle(
+            ThinkingDeltaEvent(
+                text="",
+                provider_metadata={"provider": "gemini", "extra_content": {"google": {"thought_signature": "sig"}}},
+            )
+        )
+
+        assert stream.getvalue() == ""
 
     def test_tool_events_emitted(self) -> None:
         stream = io.StringIO()

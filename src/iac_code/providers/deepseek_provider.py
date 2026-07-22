@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from iac_code.providers.openai_provider import OpenAIProvider
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
@@ -10,8 +12,8 @@ DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
 class DeepSeekProvider(OpenAIProvider):
     """Provider backed by DeepSeek's OpenAI-compatible endpoint.
 
-    Wire format is identical to ``OpenAIProvider`` (``reasoning_effort`` +
-    ``extra_body.thinking.type=enabled``); the registry's ``allowed_efforts``
+    DeepSeek uses ``reasoning_effort`` plus
+    ``extra_body.thinking.type=enabled``; the registry's ``allowed_efforts``
     constrains the effort vocabulary to ``high`` / ``max`` for DeepSeek V4.
 
     Reasoning content is captured via ``reasoning_content`` in the stream
@@ -44,3 +46,10 @@ class DeepSeekProvider(OpenAIProvider):
             max_completion_tokens=max_completion_tokens,
             provider_key=provider_key,
         )
+
+    def _build_thinking_kwargs(self) -> dict[str, Any]:
+        kwargs = super()._build_thinking_kwargs()
+        if not kwargs:
+            return {}
+        kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+        return kwargs

@@ -730,6 +730,14 @@ def test_top_level_thinking_delta_has_pipeline_envelope() -> None:
     assert envelope["data"] == {"type": "raw_thinking", "text": "thinking out loud"}
 
 
+def test_metadata_only_thinking_delta_has_no_pipeline_envelope() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    envelopes = translator.translate(ThinkingDeltaEvent(text="", provider_metadata={"provider": "gemini"}))
+
+    assert envelopes == []
+
+
 def test_candidate_stream_thinking_has_parent_and_candidate_coordinates() -> None:
     translator = PipelineEventTranslator(_ctx())
     translator.translate(

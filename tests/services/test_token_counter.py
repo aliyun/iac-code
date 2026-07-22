@@ -83,6 +83,27 @@ class TestTokenCounter:
         count = counter.count_message(msg)
         assert count > 20  # text + tool overhead + name + input
 
+    def test_count_tool_use_includes_gemini_thought_signature_metadata(self):
+        counter = TokenCounter(model="gemini-3.5-pro")
+        signature = "signed-function-call-state-" * 10_000
+        msg = {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "t1",
+                    "name": "read_file",
+                    "input": {"path": "/tmp/f"},
+                    "provider_metadata": {
+                        "provider": "gemini",
+                        "extra_content": {"google": {"thought_signature": signature}},
+                    },
+                }
+            ],
+        }
+
+        assert counter.count_message(msg) > counter.count_text(signature)
+
     def test_count_message_with_tool_result(self):
         counter = TokenCounter()
         msg = {
@@ -93,6 +114,42 @@ class TestTokenCounter:
         }
         count = counter.count_message(msg)
         assert count > 5
+
+    def test_count_message_with_redacted_thinking(self):
+        counter = TokenCounter()
+        data = "x" * 100_000
+        msg = {
+            "role": "assistant",
+            "content": [{"type": "redacted_thinking", "data": data}],
+        }
+
+        assert counter.count_message(msg) > counter.count_text(data)
+
+    def test_count_message_with_visible_thinking(self):
+        counter = TokenCounter()
+        thinking = "reason carefully " * 10_000
+        msg = {
+            "role": "assistant",
+            "content": [{"type": "thinking", "thinking": thinking}],
+        }
+
+        assert counter.count_message(msg) > counter.count_text(thinking)
+
+    def test_count_message_with_opaque_thinking_metadata(self):
+        counter = TokenCounter()
+        signature = "signed-state-" * 10_000
+        msg = {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "thinking",
+                    "thinking": "",
+                    "provider_metadata": {"provider": "anthropic", "model": "claude-fable-5", "signature": signature},
+                }
+            ],
+        }
+
+        assert counter.count_message(msg) > counter.count_text(signature)
 
     def test_count_messages_sums(self):
         counter = TokenCounter()

@@ -192,6 +192,8 @@ class ACPEventConverter:
                     )
                 ]
             case ThinkingDeltaEvent(text=text):
+                if event.is_metadata_only:
+                    return []
                 return [
                     acp.schema.AgentThoughtChunk(
                         session_update="agent_thought_chunk",

@@ -22,6 +22,7 @@ class ToolUseBlock(BaseModel):
     id: str = Field(default_factory=lambda: f"toolu_{uuid.uuid4().hex[:24]}")
     name: str
     input: dict[str, Any] = Field(default_factory=dict)
+    provider_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ToolResultBlock(BaseModel):
@@ -43,6 +44,15 @@ class ThinkingBlock(BaseModel):
 
     type: Literal["thinking"] = "thinking"
     thinking: str
+    provider_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RedactedThinkingBlock(BaseModel):
+    """Opaque encrypted thinking that must be returned unchanged."""
+
+    type: Literal["redacted_thinking"] = "redacted_thinking"
+    data: str
+    provider_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ImageBlock(BaseModel):
@@ -53,7 +63,7 @@ class ImageBlock(BaseModel):
 
 
 # Union type for all content blocks
-ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock | ImageBlock
+ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock | RedactedThinkingBlock | ImageBlock
 
 RECALLED_MEMORY_METADATA_TYPE = "recalled_memory"
 RECALLED_MEMORY_MARKER = "Relevant persistent memories recalled for this conversation"
@@ -120,19 +130,20 @@ class Message(BaseModel):
         if isinstance(self.content, str):
             return {"role": self.role, "content": self.content}
 
-        content_list = []
+        content_list: list[dict[str, Any]] = []
         for block in self.content:
             if isinstance(block, TextBlock):
                 content_list.append({"type": "text", "text": block.text})
             elif isinstance(block, ToolUseBlock):
-                content_list.append(
-                    {
-                        "type": "tool_use",
-                        "id": block.id,
-                        "name": block.name,
-                        "input": block.input,
-                    }
-                )
+                tool_item: dict[str, Any] = {
+                    "type": "tool_use",
+                    "id": block.id,
+                    "name": block.name,
+                    "input": block.input,
+                }
+                if block.provider_metadata:
+                    tool_item["provider_metadata"] = block.provider_metadata
+                content_list.append(tool_item)
             elif isinstance(block, ToolResultBlock):
                 content_list.append(
                     {
@@ -143,7 +154,15 @@ class Message(BaseModel):
                     }
                 )
             elif isinstance(block, ThinkingBlock):
-                content_list.append({"type": "thinking", "thinking": block.thinking})
+                thinking_item: dict[str, Any] = {"type": "thinking", "thinking": block.thinking}
+                if block.provider_metadata:
+                    thinking_item["provider_metadata"] = block.provider_metadata
+                content_list.append(thinking_item)
+            elif isinstance(block, RedactedThinkingBlock):
+                redacted_item: dict[str, Any] = {"type": "redacted_thinking", "data": block.data}
+                if block.provider_metadata:
+                    redacted_item["provider_metadata"] = block.provider_metadata
+                content_list.append(redacted_item)
             elif isinstance(block, ImageBlock):
                 content_list.append({"type": "image", "media_type": block.media_type, "data": block.data})
         return {"role": self.role, "content": content_list}

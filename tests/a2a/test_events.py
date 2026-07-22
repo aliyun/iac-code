@@ -465,6 +465,21 @@ async def test_thinking_delta_publishes_raw_metadata_when_enabled() -> None:
 
 
 @pytest.mark.asyncio
+async def test_metadata_only_thinking_delta_is_not_published_when_raw_thinking_enabled() -> None:
+    queue = FakeEventQueue()
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ThinkingDeltaEvent(text="", provider_metadata={"provider": "gemini"}),
+        exposure_types={A2AExposureType.RAW_THINKING},
+    )
+
+    assert queue.events == []
+
+
+@pytest.mark.asyncio
 async def test_tool_events_are_suppressed_when_tool_trace_is_not_enabled() -> None:
     queue = FakeEventQueue()
 

@@ -12,20 +12,43 @@ from iac_code.providers.thinking import (
 class TestGetThinkingSpec:
     def test_anthropic_claude_opus_7(self):
         spec = get_thinking_spec("anthropic", "claude-opus-4-7")
-        assert spec.family is ThinkingFamily.ANTHROPIC
+        assert spec.family is ThinkingFamily.ANTHROPIC_ADAPTIVE
         assert spec.supports_effort is True
         assert spec.default_effort is EffortLevel.HIGH
+
+    def test_anthropic_haiku_supports_manual_thinking_budget(self):
+        spec = get_thinking_spec("anthropic", "claude-haiku-4-5-20251001")
+        assert spec.family is ThinkingFamily.ANTHROPIC
+        assert spec.supports_thinking_budget is True
 
     def test_openai_gpt55(self):
         spec = get_thinking_spec("openai", "gpt-5.5")
         assert spec.family is ThinkingFamily.OPENAI
         assert spec.allowed_efforts == (
+            EffortLevel.NONE,
             EffortLevel.LOW,
             EffortLevel.MEDIUM,
             EffortLevel.HIGH,
             EffortLevel.XHIGH,
         )
-        assert spec.default_effort is EffortLevel.HIGH
+        assert spec.default_effort is EffortLevel.MEDIUM
+
+    def test_openai_codex_and_o_series_have_generation_specific_efforts(self):
+        codex = get_thinking_spec("openai", "gpt-5.3-codex")
+        codex_52 = get_thinking_spec("openai", "gpt-5.2-codex")
+        o3 = get_thinking_spec("openai", "o3")
+        o4_mini = get_thinking_spec("openai", "o4-mini")
+
+        assert codex.allowed_efforts == (
+            EffortLevel.LOW,
+            EffortLevel.MEDIUM,
+            EffortLevel.HIGH,
+            EffortLevel.XHIGH,
+        )
+        assert codex_52.allowed_efforts == codex.allowed_efforts
+        assert o3.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH)
+        assert o4_mini.allowed_efforts == o3.allowed_efforts
+        assert EffortLevel.NONE not in o3.allowed_efforts
 
     def test_deepseek_official_uses_openai_family_with_high_max(self):
         spec = get_thinking_spec("deepseek", "deepseek-v4-pro")
@@ -47,22 +70,74 @@ class TestGetThinkingSpec:
     def test_dashscope_glm(self):
         spec = get_thinking_spec("dashscope", "glm-5.1")
         assert spec.family is ThinkingFamily.DASHSCOPE
-        assert spec.allowed_efforts == ()
+        assert spec.allowed_efforts == (
+            EffortLevel.NONE,
+            EffortLevel.MINIMAL,
+            EffortLevel.LOW,
+            EffortLevel.MEDIUM,
+            EffortLevel.HIGH,
+            EffortLevel.XHIGH,
+        )
+        assert spec.uses_reasoning_effort_param is True
 
-    def test_dashscope_glm52_has_bounded_default_request_policy(self):
+    def test_dashscope_glm52_uses_effort_and_total_output_limit_without_thinking_budget(self):
         spec = get_thinking_spec("dashscope", "glm-5.2")
         assert spec.family is ThinkingFamily.DASHSCOPE
         assert spec.allowed_efforts == (
+            EffortLevel.NONE,
+            EffortLevel.MINIMAL,
             EffortLevel.LOW,
             EffortLevel.MEDIUM,
             EffortLevel.HIGH,
             EffortLevel.XHIGH,
             EffortLevel.MAX,
         )
-        assert spec.default_thinking_budget == 8192
-        assert spec.supports_thinking_budget is True
+        assert spec.default_thinking_budget is None
+        assert spec.supports_thinking_budget is False
         assert spec.use_max_completion_tokens is True
         assert spec.uses_reasoning_effort_param is True
+
+    def test_token_plan_qwen38_is_visual_always_thinking_with_three_efforts(self):
+        spec = get_thinking_spec("dashscope_token_plan", "qwen3.8-max-preview")
+        assert spec.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.XHIGH)
+        assert spec.default_effort is EffortLevel.XHIGH
+        assert spec.supports_disable is False
+
+    def test_anthropic_46_excludes_xhigh_but_keeps_max(self):
+        spec = get_thinking_spec("anthropic", "claude-sonnet-4-6")
+        assert EffortLevel.XHIGH not in spec.allowed_efforts
+        assert EffortLevel.MAX in spec.allowed_efforts
+
+    def test_gemini_efforts_and_defaults_are_per_model(self):
+        latest_flash = get_thinking_spec("gemini", "gemini-3.6-flash")
+        flash = get_thinking_spec("gemini", "gemini-3.5-flash")
+        latest_lite = get_thinking_spec("gemini", "gemini-3.5-flash-lite")
+        pro = get_thinking_spec("gemini", "gemini-3.1-pro-preview")
+        lite = get_thinking_spec("gemini", "gemini-2.5-flash-lite")
+
+        assert latest_flash.default_effort is EffortLevel.MEDIUM
+        assert latest_lite.default_effort is EffortLevel.MINIMAL
+        assert latest_flash.allowed_efforts == (
+            EffortLevel.MINIMAL,
+            EffortLevel.LOW,
+            EffortLevel.MEDIUM,
+            EffortLevel.HIGH,
+        )
+        assert latest_lite.allowed_efforts == latest_flash.allowed_efforts
+        assert EffortLevel.MINIMAL in flash.allowed_efforts
+        assert flash.default_effort is EffortLevel.MEDIUM
+        assert pro.default_effort is EffortLevel.HIGH
+        assert pro.supports_disable is False
+        assert EffortLevel.MINIMAL in lite.allowed_efforts
+        assert lite.default_effort is EffortLevel.NONE
+        assert lite.supports_disable is True
+
+    def test_direct_glm52_supports_high_and_max_effort(self):
+        for provider_key in ("zhipu_cn", "zhipu_intl", "zhipu_cn_codingplan", "zhipu_intl_codingplan"):
+            spec = get_thinking_spec(provider_key, "glm-5.2")
+            assert spec.allowed_efforts == (EffortLevel.HIGH, EffortLevel.MAX)
+            assert spec.default_effort is EffortLevel.MAX
+            assert spec.uses_reasoning_effort_param is True
 
     def test_dashscope_kimi_k27_code_has_bounded_default_request_policy(self):
         spec = get_thinking_spec("dashscope", "kimi-k2.7-code")
@@ -73,7 +148,7 @@ class TestGetThinkingSpec:
         assert spec.use_max_completion_tokens is True
         assert spec.uses_reasoning_effort_param is False
 
-    def test_token_plan_glm52_and_kimi_k27_code_have_bounded_default_request_policy(self):
+    def test_token_plan_glm52_and_kimi_k27_code_use_model_specific_request_policies(self):
         from iac_code.providers.thinking import MODEL_THINKING
 
         glm = get_thinking_spec("dashscope_token_plan", "glm-5.2")
@@ -82,8 +157,8 @@ class TestGetThinkingSpec:
         assert "glm-5.2" in MODEL_THINKING["dashscope_token_plan"]
         assert "kimi-k2.7-code" in MODEL_THINKING["dashscope_token_plan"]
         assert glm.family is ThinkingFamily.DASHSCOPE
-        assert glm.default_thinking_budget == 8192
-        assert glm.supports_thinking_budget is True
+        assert glm.default_thinking_budget is None
+        assert glm.supports_thinking_budget is False
         assert glm.use_max_completion_tokens is True
         assert glm.uses_reasoning_effort_param is True
 
@@ -124,9 +199,7 @@ class TestGetThinkingSpec:
 
             for model, spec in MODEL_THINKING[provider_key].items():
                 if (provider_key, model) in {
-                    ("dashscope", "glm-5.2"),
                     ("dashscope", "kimi-k2.7-code"),
-                    ("dashscope_token_plan", "glm-5.2"),
                     ("dashscope_token_plan", "kimi-k2.7-code"),
                 }:
                     continue
@@ -145,6 +218,13 @@ class TestGetThinkingSpec:
     def test_token_plan_glm5(self):
         spec = get_thinking_spec("dashscope_token_plan", "glm-5")
         assert spec.family is ThinkingFamily.DASHSCOPE
+        assert spec.allowed_efforts[-1] is EffortLevel.XHIGH
+        assert EffortLevel.MAX not in spec.allowed_efforts
+        assert spec.uses_reasoning_effort_param is True
+
+    def test_zhipu_intl_coding_plan_follows_nested_thinking_fallback(self):
+        spec = get_thinking_spec("zhipu_intl_codingplan", "glm-5.1")
+        assert spec.family is ThinkingFamily.ZHIPU
 
     def test_token_plan_minimax_m25(self):
         spec = get_thinking_spec("dashscope_token_plan", "MiniMax-M2.5")

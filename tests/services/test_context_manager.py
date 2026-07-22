@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from iac_code.agent.message import TextBlock, ToolResultBlock, ToolUseBlock
 from iac_code.pipeline.engine.cleanup import (
     CLEANUP_PROMPT_METADATA_TYPE,
@@ -16,11 +18,95 @@ class TestContextWindowConfig:
 
     def test_qwen_model(self):
         config = get_context_window_config("qwen3.6-plus")
-        assert config.context_window == 131_072
+        assert config.context_window == 1_000_000
 
     def test_gpt4_model(self):
         config = get_context_window_config("gpt-4-turbo")
         assert config.context_window == 128_000
+
+    def test_dashscope_kimi_k3_uses_documented_context_window(self):
+        config = get_context_window_config("kimi/kimi-k3")
+        assert config.context_window == 1_000_000
+        assert config.max_output_tokens == 8_192
+
+    @pytest.mark.parametrize("model", ["gpt-5.6-sol", "gpt-5.6", "gpt-5.6-terra", "gpt-5.6-luna"])
+    def test_gpt56_models_use_documented_capacity(self, model):
+        config = get_context_window_config(model)
+        assert config.context_window == 1_050_000
+        assert config.max_output_tokens == 128_000
+
+    def test_claude_fable5_uses_documented_capacity(self):
+        config = get_context_window_config("claude-fable-5")
+        assert config.context_window == 1_000_000
+        assert config.max_output_tokens == 128_000
+
+    def test_claude_sonnet5_uses_documented_capacity(self):
+        config = get_context_window_config("claude-sonnet-5")
+        assert config.context_window == 1_000_000
+        assert config.max_output_tokens == 128_000
+
+    @pytest.mark.parametrize("model", ["claude-opus-4-8", "gpt-5.5", "gpt-5.4"])
+    def test_new_frontier_models_use_documented_long_context_capacity(self, model):
+        config = get_context_window_config(model)
+        assert config.context_window in {1_000_000, 1_050_000}
+        assert config.max_output_tokens == 128_000
+
+    @pytest.mark.parametrize("model", ["gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.3-codex", "gpt-5.2"])
+    def test_openai_400k_models_use_documented_capacity(self, model):
+        config = get_context_window_config(model)
+        assert config.context_window == 400_000
+        assert config.max_output_tokens == 128_000
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-pro-preview",
+            "gemini-3.1-pro-preview-customtools",
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+        ],
+    )
+    def test_gemini_models_use_documented_capacity(self, model):
+        config = get_context_window_config(model)
+        assert config.context_window == 1_048_576
+        assert config.max_output_tokens == 65_536
+
+    @pytest.mark.parametrize("model", ["kimi-k2.7-code", "kimi-k2.6", "kimi-k2.5"])
+    def test_kimi_k2_models_use_documented_context_capacity(self, model):
+        assert get_context_window_config(model).context_window == 262_144
+
+    @pytest.mark.parametrize(
+        ("model", "context_window"),
+        [
+            ("qwen3.8-max-preview", 1_000_000),
+            ("qwen3.7-max", 1_000_000),
+            ("qwen3.7-plus", 1_000_000),
+            ("qwen3.6-flash", 1_000_000),
+            ("deepseek-v4-pro", 1_000_000),
+            ("deepseek-v4-flash", 1_000_000),
+            ("glm-5.1", 202_752),
+            ("MiniMax-M3", 1_000_000),
+            ("MiniMax/MiniMax-M3", 196_608),
+        ],
+    )
+    def test_current_dashscope_models_use_documented_context_capacity(self, model, context_window):
+        assert get_context_window_config(model).context_window == context_window
+
+    def test_direct_glm52_uses_documented_context_and_output_capacity(self):
+        config = get_context_window_config("glm-5.2")
+        assert config.context_window == 1_000_000
+        assert config.max_output_tokens == 128_000
+
+    def test_direct_kimi_k3_uses_documented_context_window(self):
+        config = get_context_window_config("kimi-k3")
+        assert config.context_window == 1_000_000
+        assert config.max_output_tokens == 8_192
 
     def test_unknown_model_uses_default(self):
         config = get_context_window_config("unknown-model-xyz")
@@ -60,6 +146,14 @@ class TestContextManager:
         cm = ContextManager(system_prompt="Short.", model="qwen")
         cm.add_user_message("Hello")
         assert cm.needs_compaction() is False
+
+    def test_sonnet5_compaction_uses_one_million_token_threshold(self, monkeypatch):
+        cm = ContextManager(system_prompt="Short.", model="claude-sonnet-5")
+        monkeypatch.setattr(cm, "get_total_tokens", lambda: 900_000)
+        assert cm.needs_compaction() is False
+
+        monkeypatch.setattr(cm, "get_total_tokens", lambda: 940_000)
+        assert cm.needs_compaction() is True
 
     def test_get_usage_returns_breakdown(self):
         cm = ContextManager(system_prompt="You are helpful.", model="qwen")

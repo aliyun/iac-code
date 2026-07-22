@@ -277,6 +277,8 @@ async def publish_stream_event(
         return event.text
 
     if isinstance(event, ThinkingDeltaEvent):
+        if event.is_metadata_only:
+            return None
         if A2AExposureType.RAW_THINKING not in enabled_exposure_types:
             return None
         await _enqueue_status(

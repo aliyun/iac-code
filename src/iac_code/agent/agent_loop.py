@@ -16,7 +16,14 @@ from typing import Any, Literal
 
 from loguru import logger
 
-from iac_code.agent.message import ContentBlock, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
+from iac_code.agent.message import (
+    ContentBlock,
+    RedactedThinkingBlock,
+    TextBlock,
+    ThinkingBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+)
 from iac_code.i18n import _
 from iac_code.services.context_manager import ContextManager
 from iac_code.services.permissions.audit import (
@@ -786,6 +793,11 @@ class AgentLoop:
                                 is_error=block.get("is_error", False),
                                 media_type=block.get("media_type"),
                                 data=block.get("data"),
+                                provider_metadata=(
+                                    dict(block["provider_metadata"])
+                                    if isinstance(block.get("provider_metadata"), dict)
+                                    else {}
+                                ),
                             )
                         )
                 provider_messages.append(ProviderMessage(role=role, content=blocks))
@@ -1018,7 +1030,7 @@ class AgentLoop:
                 # Collect tool uses from this turn (keyed by tool_use_id)
                 pending_tool_uses_by_id: dict[str, dict[str, Any]] = {}
                 text_chunks: list[str] = []
-                thinking_chunks: list[str] = []
+                thinking_blocks_by_index: dict[int, dict[str, Any]] = {}
                 message_ended = False
                 turn_stop_reason = "stop"
 
@@ -1044,7 +1056,8 @@ class AgentLoop:
                                 self.tool_registry.get(event.name),
                             ),
                         )
-                    yield event  # Forward all provider events to UI
+                    if not (isinstance(event, ThinkingDeltaEvent) and event.is_metadata_only):
+                        yield event
 
                     # Collect data from events
                     if isinstance(event, TextDeltaEvent):
@@ -1052,19 +1065,47 @@ class AgentLoop:
                         if self._pause_event is not None:
                             self._current_turn_text += event.text
                     elif isinstance(event, ThinkingDeltaEvent):
-                        thinking_chunks.append(event.text)
+                        thinking_block = thinking_blocks_by_index.setdefault(
+                            event.block_index,
+                            {
+                                "type": event.block_type,
+                                "text": "",
+                                "provider_metadata": {},
+                            },
+                        )
+                        thinking_block["type"] = event.block_type
+                        thinking_block["text"] += event.text
+                        if event.provider_metadata:
+                            for key, value in event.provider_metadata.items():
+                                if (
+                                    key == "signature"
+                                    and isinstance(value, str)
+                                    and isinstance(thinking_block["provider_metadata"].get(key), str)
+                                ):
+                                    thinking_block["provider_metadata"][key] += value
+                                else:
+                                    thinking_block["provider_metadata"][key] = value
                     elif isinstance(event, ToolUseStartEvent):
                         pending_tool_uses_by_id.setdefault(event.tool_use_id, {})
                         pending_tool_uses_by_id[event.tool_use_id]["id"] = event.tool_use_id
                         pending_tool_uses_by_id[event.tool_use_id]["name"] = event.name
+                        if event.provider_metadata:
+                            pending_tool_uses_by_id[event.tool_use_id]["provider_metadata"] = dict(
+                                event.provider_metadata
+                            )
                     elif isinstance(event, ToolUseEndEvent):
                         pending_tool_uses_by_id.setdefault(event.tool_use_id, {})
                         pending_tool_uses_by_id[event.tool_use_id]["id"] = event.tool_use_id
+                        pending_tool_uses_by_id[event.tool_use_id]["name"] = event.name
                         pending_tool_uses_by_id[event.tool_use_id]["input"] = event.input
+                        if event.provider_metadata:
+                            pending_tool_uses_by_id[event.tool_use_id]["provider_metadata"] = dict(
+                                event.provider_metadata
+                            )
                     elif isinstance(event, TombstoneEvent):
                         pending_tool_uses_by_id.clear()
                         text_chunks.clear()
-                        thinking_chunks.clear()
+                        thinking_blocks_by_index.clear()
                         self._accepting_injected_user_messages = False
                     elif isinstance(event, MessageEndEvent):
                         message_ended = True
@@ -1078,9 +1119,22 @@ class AgentLoop:
 
                 # Build assistant message for context
                 assistant_blocks = []
-                full_thinking = "".join(thinking_chunks)
-                if full_thinking:
-                    assistant_blocks.append(ThinkingBlock(thinking=full_thinking))
+                for block_index in sorted(thinking_blocks_by_index):
+                    thinking_block = thinking_blocks_by_index[block_index]
+                    provider_metadata = thinking_block["provider_metadata"]
+                    if thinking_block["type"] == "redacted_thinking":
+                        data = provider_metadata.get("data")
+                        if isinstance(data, str) and data:
+                            assistant_blocks.append(
+                                RedactedThinkingBlock(data=data, provider_metadata=provider_metadata)
+                            )
+                    elif thinking_block["text"] or provider_metadata:
+                        assistant_blocks.append(
+                            ThinkingBlock(
+                                thinking=thinking_block["text"],
+                                provider_metadata=provider_metadata,
+                            )
+                        )
                 full_text = "".join(text_chunks)
                 if full_text:
                     assistant_blocks.append(TextBlock(text=full_text))
@@ -1095,7 +1149,14 @@ class AgentLoop:
                 for tu in pending_tool_uses_by_id.values():
                     if "name" in tu and "input" in tu:
                         completed_tools.append(tu)
-                        assistant_blocks.append(ToolUseBlock(id=tu["id"], name=tu["name"], input=tu.get("input", {})))
+                        assistant_blocks.append(
+                            ToolUseBlock(
+                                id=tu["id"],
+                                name=tu["name"],
+                                input=tu.get("input", {}),
+                                provider_metadata=tu.get("provider_metadata", {}),
+                            )
+                        )
                 self._accepting_injected_user_messages = bool(completed_tools) and _turn < self._max_turns - 1
 
                 if assistant_blocks:
@@ -1778,6 +1839,9 @@ class AgentLoop:
         self._cancel_pending_memory_prefetches()
         self._memory_recall_generation += 1
         self._last_provider_request_snapshot = None
+        reset_provider_state = getattr(self._provider_manager, "reset_conversation_state", None)
+        if callable(reset_provider_state):
+            reset_provider_state()
         self._session_id = session_id
         self._root_session_id = session_id
         self._transcript_id = None
@@ -1838,6 +1902,9 @@ class AgentLoop:
         self._cancel_pending_memory_prefetches()
         self._memory_recall_generation += 1
         self._last_provider_request_snapshot = None
+        reset_provider_state = getattr(self._provider_manager, "reset_conversation_state", None)
+        if callable(reset_provider_state):
+            reset_provider_state()
         self._auto_loaded_skills.clear()
         self.context_manager.reset()
         reset_recall_stats = getattr(self._memory_recall_service, "reset_stats", None)

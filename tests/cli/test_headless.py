@@ -848,7 +848,7 @@ class TestCLIFlags:
             provider_key_override="dashscope",
             request_policy_override=captured["options"].request_policy_override,
         )
-        assert provider._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True, "thinking_budget": 8192}}
+        assert provider._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True}}
 
     def test_max_turns_passed_to_headless(self):
         from iac_code.cli.main import app

@@ -1,10 +1,22 @@
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
+import httpx
 import pytest
+from anthropic import APIConnectionError as AnthropicAPIConnectionError
+from anthropic import APITimeoutError as AnthropicAPITimeoutError
+from openai import APIConnectionError as OpenAIAPIConnectionError
+from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from iac_code.providers.base import Message, NonStreamingResponse
-from iac_code.providers.manager import ProviderManager, _detect_provider_name, create_provider
+from iac_code.providers.manager import (
+    _PROVIDER_MODEL_FALLBACK_MAP,
+    MODEL_FALLBACK_MAP,
+    ProviderManager,
+    _detect_provider_name,
+    create_provider,
+)
+from iac_code.providers.registry import PROVIDER_REGISTRY
 from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.types.stream_events import MessageEndEvent, MessageStartEvent, TextDeltaEvent, Usage
 
@@ -88,6 +100,18 @@ class TestCreateProvider:
         assert getattr(p, "_thinking_budget", None) == 2048
         assert getattr(p, "_max_completion_tokens", None) == 12288
 
+    def test_claude_46_request_budget_reaches_manual_thinking_wire_format(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic")
+        monkeypatch.setattr("iac_code.config.get_provider_config", lambda name: {})
+
+        p = create_provider(
+            "claude-sonnet-4-6",
+            credentials={"anthropic": "key"},
+            request_policy_override=ProviderRequestPolicy(thinking_budget=2048),
+        )
+
+        assert p._build_thinking_kwargs() == {"thinking": {"type": "enabled", "budget_tokens": 2048}}
+
     def test_openai_compatible_qwen_request_policy_disabled_uses_model_thinking_wire_format(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "openai_compatible")
         monkeypatch.setattr("iac_code.config.get_provider_config", lambda name: {})
@@ -151,28 +175,72 @@ class TestCreateProvider:
         assert getattr(p, "_thinking_budget", None) is None
         assert getattr(p, "_max_completion_tokens", None) is None
 
-    def test_non_openai_provider_ignores_request_policy_config(self, monkeypatch):
+    def test_anthropic_loads_model_thinking_budget_but_ignores_max_completion_tokens(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic")
         monkeypatch.setattr(
             "iac_code.config.get_provider_config",
             lambda name: {
                 "thinkingBudget": 2048,
                 "maxCompletionTokens": 10000,
+                "models": {"claude-sonnet-4-6": {"thinkingBudget": 3072}},
             },
         )
 
         p = create_provider("claude-sonnet-4-6", credentials={"anthropic": "key"})
 
         assert p.get_model_name() == "claude-sonnet-4-6"
-        assert not hasattr(p, "_thinking_budget")
+        assert p._build_thinking_kwargs() == {"thinking": {"type": "enabled", "budget_tokens": 3072}}
         assert not hasattr(p, "_max_completion_tokens")
 
     def test_effort_override_takes_precedence_over_settings(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
         monkeypatch.setattr("iac_code.config.get_provider_config", lambda name: {"effort": "high"})
         p = create_provider("qwen3.7-max", credentials={"dashscope": "key"}, effort_override="none")
-        assert getattr(p, "_effort", None) == "none"
+        assert getattr(p, "_effort", None) is None
         assert getattr(p, "_thinking_enabled", None) is False
+        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": False}}
+
+    def test_anthropic_legacy_none_disables_thinking_without_high_effort(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic")
+        monkeypatch.setattr("iac_code.config.get_provider_config", lambda name: {"effort": "high"})
+
+        p = create_provider("claude-sonnet-4-6", credentials={"anthropic": "key"}, effort_override="none")
+
+        assert getattr(p, "_effort", None) is None
+        assert p._build_thinking_kwargs() == {"thinking": {"type": "disabled"}}
+
+    @pytest.mark.parametrize(
+        "provider_config, request_policy",
+        [
+            ({"effort": "none"}, None),
+            ({}, ProviderRequestPolicy(effort="none")),
+        ],
+    )
+    def test_anthropic_legacy_none_from_final_policy_disables_thinking(
+        self, monkeypatch, provider_config, request_policy
+    ):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic")
+        monkeypatch.setattr("iac_code.config.get_provider_config", lambda name: provider_config)
+
+        p = create_provider(
+            "claude-sonnet-4-6",
+            credentials={"anthropic": "key"},
+            request_policy_override=request_policy,
+        )
+
+        assert getattr(p, "_effort", None) is None
+        assert getattr(p, "_thinking_enabled", None) is False
+        assert p._build_thinking_kwargs() == {"thinking": {"type": "disabled"}}
+
+    def test_supported_none_effort_is_not_reinterpreted_as_legacy_disable(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "openai")
+        monkeypatch.setattr("iac_code.config.get_provider_config", lambda name: {"effort": "none"})
+
+        p = create_provider("gpt-5.6", credentials={"openai": "key"})
+
+        assert getattr(p, "_effort", None) == "none"
+        assert getattr(p, "_thinking_enabled", None) is None
+        assert p._build_thinking_kwargs() == {"reasoning_effort": "none"}
 
     def test_unknown_raises(self, monkeypatch):
         """Unknown model with no saved provider config raises ValueError."""
@@ -203,7 +271,8 @@ class TestCreateProvider:
 
         assert isinstance(p, DashScopeProvider)
         assert getattr(p, "_PROVIDER_KEY", None) == "dashscope"
-        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True, "thinking_budget": 8192}}
+        assert getattr(p, "_logical_provider_key", None) == "openai_compatible"
+        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True}}
 
     def test_openai_compatible_dashscope_base_uses_dashscope_thinking_wire_format(self, monkeypatch):
         from iac_code.providers.dashscope_provider import DashScopeProvider
@@ -260,6 +329,12 @@ class TestProviderManager:
         m = ProviderManager(model="claude-opus-4-7", credentials={})
         assert m._get_fallback_model() == "claude-haiku-4-5-20251001"
 
+    def test_fable_fallback_uses_approved_opus_target(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic")
+        manager = ProviderManager(model="claude-fable-5", credentials={})
+
+        assert manager._get_fallback_model() == "claude-opus-4-8"
+
     def test_no_fallback_cheapest(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic")
         m = ProviderManager(model="claude-haiku-4-5-20251001", credentials={})
@@ -291,6 +366,13 @@ class TestProviderManager:
         m = ProviderManager(model="some-model-without-fallback", credentials={})
         assert m._get_fallback_model() is None
 
+    @pytest.mark.parametrize("provider_key", ["azure_openai", "openai_compatible", "ollama"])
+    def test_custom_model_catalogs_do_not_use_public_model_fallbacks(self, provider_key):
+        manager = ProviderManager.__new__(ProviderManager)
+        manager._model = "gpt-5.6-sol"
+
+        assert manager._get_fallback_model(provider_key=provider_key) is None
+
     def test_provider_key_and_display_use_runtime_override(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "openai")
         monkeypatch.setattr("iac_code.config.get_provider_config", lambda name: {})
@@ -313,7 +395,7 @@ class TestProviderManager:
         )
 
         assert m._provider is not None
-        assert getattr(m._provider, "_effort", None) == "none"
+        assert getattr(m._provider, "_effort", None) is None
         assert getattr(m._provider, "_thinking_enabled", None) is False
 
     def test_reconfigure_swaps_model_and_credentials(self, monkeypatch):
@@ -400,6 +482,86 @@ class TestProviderManagerStreaming:
         events = [e async for e in mgr.stream(messages=[Message.user("hi")], system="sys")]
         types = [e.type for e in events]
         assert "message_start" in types and "text_delta" in types and "message_end" in types
+
+    async def test_fable_accepted_stream_preserves_event_order(self, monkeypatch):
+        expected = [
+            MessageStartEvent(message_id="fable-accepted"),
+            TextDeltaEvent(text="accepted response"),
+            MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=2, output_tokens=3)),
+        ]
+
+        class FableProvider:
+            _PROVIDER_KEY = "anthropic"
+            _logical_provider_key = "anthropic"
+
+            async def stream(self, messages, system, tools=None, max_tokens=8192):
+                for event in expected:
+                    yield event
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                raise AssertionError("accepted Fable stream must not use fallback completion")
+
+        monkeypatch.setattr("iac_code.providers.manager.create_provider", lambda *args, **kwargs: FableProvider())
+        manager = ProviderManager(model="claude-fable-5", credentials={"anthropic": "k"})
+
+        events = await _collect_stream_events(manager.stream(messages=[Message.user("hi")], system="sys"))
+
+        assert events == expected
+        assert manager.get_model_name() == "claude-fable-5"
+
+    async def test_fable_stream_refusal_discards_partial_output_and_falls_back_to_opus(self, monkeypatch):
+        class FableProvider:
+            _PROVIDER_KEY = "anthropic"
+            _logical_provider_key = "anthropic"
+
+            async def stream(self, messages, system, tools=None, max_tokens=8192):
+                yield MessageStartEvent(message_id="fable-refusal")
+                yield TextDeltaEvent(text="incomplete refusal text")
+                yield MessageEndEvent(stop_reason="refusal", usage=Usage(input_tokens=3, output_tokens=4))
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                raise AssertionError("stream refusal must fall back without retrying Fable")
+
+        class OpusProvider:
+            _PROVIDER_KEY = "anthropic"
+            _logical_provider_key = "anthropic"
+
+            async def stream(self, messages, system, tools=None, max_tokens=8192):
+                yield MessageStartEvent(message_id="opus-follow-up")
+                yield TextDeltaEvent(text="continued with opus")
+                yield MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=2, output_tokens=3))
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                return NonStreamingResponse(
+                    message_id="opus-fallback",
+                    text="complete answer",
+                    tool_uses=[],
+                    stop_reason="end_turn",
+                    usage=Usage(input_tokens=5, output_tokens=6),
+                )
+
+        created_models: list[str] = []
+
+        def fake_create_provider(model, credentials, **kwargs):
+            created_models.append(model)
+            return FableProvider() if model == "claude-fable-5" else OpusProvider()
+
+        monkeypatch.setattr("iac_code.providers.manager.create_provider", fake_create_provider)
+        manager = ProviderManager(model="claude-fable-5", credentials={"anthropic": "k"})
+
+        events = await _collect_stream_events(manager.stream(messages=[Message.user("hi")], system="sys"))
+        follow_up_events = await _collect_stream_events(
+            manager.stream(messages=[Message.user("continue")], system="sys")
+        )
+
+        assert [event.type for event in events] == ["message_start", "text_delta", "message_end"]
+        assert events[0].message_id == "opus-fallback"
+        assert events[1].text == "complete answer"
+        assert all(getattr(event, "text", None) != "incomplete refusal text" for event in events)
+        assert events[-1].stop_reason == "end_turn"
+        assert follow_up_events[1].text == "continued with opus"
+        assert manager.get_model_name() == "claude-opus-4-8"
+        assert created_models == ["claude-fable-5", "claude-opus-4-8"]
 
     async def test_stream_fallback_tombstone(self):
         mock_provider = AsyncMock()
@@ -743,6 +905,153 @@ class TestProviderManagerCompleteRetry:
         assert result.text == "ok"
         assert mock_provider.complete.call_count == 2
 
+    async def test_any_5xx_status_retries_then_succeeds(self):
+        from iac_code.providers.base import NonStreamingResponse
+        from iac_code.providers.retry import RetryConfig
+        from iac_code.types.stream_events import Usage
+
+        class GatewayTimeoutError(Exception):
+            status_code = 504
+
+        mock_provider = AsyncMock()
+        mock_provider.complete = AsyncMock(
+            side_effect=[
+                GatewayTimeoutError("upstream timed out"),
+                NonStreamingResponse(message_id="m", text="ok", tool_uses=[], stop_reason="end_turn", usage=Usage()),
+            ]
+        )
+        manager = ProviderManager(
+            model="claude-sonnet-4-6",
+            credentials={"anthropic": "k"},
+            retry_config=RetryConfig(max_retries=1, base_delay=0.01, jitter_factor=0.0),
+        )
+        manager._provider = mock_provider
+
+        result = await manager.complete(messages=[Message.user("hi")], system="")
+
+        assert result.text == "ok"
+        assert mock_provider.complete.call_count == 2
+
+    async def test_fable_non_streaming_refusal_falls_back_without_retrying_fable(self, monkeypatch):
+        class FakeProvider:
+            _PROVIDER_KEY = "anthropic"
+            _logical_provider_key = "anthropic"
+
+            def __init__(self, model: str):
+                self.model = model
+                self.complete_calls = 0
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                self.complete_calls += 1
+                if self.model == "claude-fable-5":
+                    return NonStreamingResponse(
+                        message_id="fable-refusal",
+                        text="incomplete refusal text",
+                        tool_uses=[],
+                        stop_reason="refusal",
+                        usage=Usage(input_tokens=3, output_tokens=4),
+                    )
+                return NonStreamingResponse(
+                    message_id="opus-fallback",
+                    text="complete answer",
+                    tool_uses=[],
+                    stop_reason="end_turn",
+                    usage=Usage(input_tokens=5, output_tokens=6),
+                )
+
+        providers: dict[str, FakeProvider] = {}
+
+        def fake_create_provider(model, credentials, **kwargs):
+            provider = FakeProvider(model)
+            providers[model] = provider
+            return provider
+
+        monkeypatch.setattr("iac_code.providers.manager.create_provider", fake_create_provider)
+        manager = ProviderManager(model="claude-fable-5", credentials={"anthropic": "k"})
+
+        response = await manager.complete(messages=[Message.user("hi")], system="")
+        follow_up = await manager.complete(messages=[Message.user("continue")], system="")
+
+        assert response.message_id == "opus-fallback"
+        assert response.text == "complete answer"
+        assert follow_up.message_id == "opus-fallback"
+        assert providers["claude-fable-5"].complete_calls == 1
+        assert providers["claude-opus-4-8"].complete_calls == 2
+        assert manager.get_model_name() == "claude-opus-4-8"
+
+        manager.reset_conversation_state()
+
+        assert manager.get_model_name() == "claude-fable-5"
+
+    async def test_opus_refusal_does_not_continue_to_unapproved_target(self, monkeypatch):
+        provider = AsyncMock()
+        provider._PROVIDER_KEY = "anthropic"
+        provider._logical_provider_key = "anthropic"
+        provider.complete = AsyncMock(
+            return_value=NonStreamingResponse(
+                message_id="opus-refusal",
+                text="",
+                tool_uses=[],
+                stop_reason="refusal",
+                usage=Usage(),
+            )
+        )
+        manager = ProviderManager(model="claude-opus-4-8", credentials={"anthropic": "k"})
+        manager._provider = provider
+        fallback_factory = Mock()
+        monkeypatch.setattr("iac_code.providers.manager.create_provider", fallback_factory)
+
+        with pytest.raises(RuntimeError, match="claude-opus-4-8.*refused"):
+            await manager.complete(messages=[Message.user("hi")], system="")
+
+        provider.complete.assert_awaited_once()
+        fallback_factory.assert_not_called()
+
+    async def test_fable_refusal_opus_transport_failure_does_not_degrade_to_sonnet(self, monkeypatch):
+        from iac_code.providers.retry import RetryConfig
+
+        class Status503Error(Exception):
+            status_code = 503
+
+        class FakeProvider:
+            _PROVIDER_KEY = "anthropic"
+            _logical_provider_key = "anthropic"
+
+            def __init__(self, model):
+                self.model = model
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                if self.model == "claude-fable-5":
+                    return NonStreamingResponse(
+                        message_id="fable-refusal",
+                        text="",
+                        tool_uses=[],
+                        stop_reason="refusal",
+                        usage=Usage(),
+                    )
+                if self.model == "claude-opus-4-8":
+                    raise Status503Error("temporary Opus outage")
+                raise AssertionError(f"unapproved refusal fallback: {self.model}")
+
+        created_models: list[str] = []
+
+        def fake_create_provider(model, credentials, **kwargs):
+            created_models.append(model)
+            return FakeProvider(model)
+
+        monkeypatch.setattr("iac_code.providers.manager.create_provider", fake_create_provider)
+        manager = ProviderManager(
+            model="claude-fable-5",
+            credentials={"anthropic": "k"},
+            retry_config=RetryConfig(max_retries=0, base_delay=0, jitter_factor=0),
+        )
+
+        with pytest.raises(RuntimeError, match="claude-fable-5.*refused"):
+            await manager.complete(messages=[Message.user("hi")], system="")
+
+        assert created_models == ["claude-fable-5", "claude-opus-4-8"]
+        assert manager.get_model_name() == "claude-fable-5"
+
     async def test_connection_error_is_retryable(self):
         from iac_code.providers.base import NonStreamingResponse
         from iac_code.providers.retry import RetryConfig
@@ -766,7 +1075,78 @@ class TestProviderManagerCompleteRetry:
         assert result.text == "ok"
         assert mock_provider.complete.call_count == 2
 
-    async def test_non_retryable_error_propagates(self):
+    @pytest.mark.parametrize(
+        "error_type",
+        [
+            OpenAIAPIConnectionError,
+            OpenAIAPITimeoutError,
+            AnthropicAPIConnectionError,
+            AnthropicAPITimeoutError,
+        ],
+    )
+    async def test_sdk_transport_errors_are_retryable(self, error_type):
+        from iac_code.providers.base import NonStreamingResponse
+        from iac_code.providers.retry import RetryConfig
+        from iac_code.types.stream_events import Usage
+
+        request = httpx.Request("POST", "https://api.example.test/v1/messages")
+        mock_provider = AsyncMock()
+        mock_provider.complete = AsyncMock(
+            side_effect=[
+                error_type(request=request),
+                NonStreamingResponse(message_id="m", text="ok", tool_uses=[], stop_reason="end_turn", usage=Usage()),
+            ]
+        )
+        manager = ProviderManager(
+            model="claude-sonnet-4-6",
+            credentials={"anthropic": "k"},
+            retry_config=RetryConfig(max_retries=1, base_delay=0, jitter_factor=0),
+        )
+        manager._provider = mock_provider
+
+        result = await manager.complete(messages=[Message.user("hi")], system="")
+
+        assert result.text == "ok"
+        assert mock_provider.complete.call_count == 2
+
+    async def test_sdk_transport_error_triggers_model_fallback(self, monkeypatch):
+        from iac_code.providers.retry import RetryConfig
+
+        request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+
+        class PrimaryProvider:
+            _PROVIDER_KEY = "openai"
+            _logical_provider_key = "openai"
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                raise OpenAIAPIConnectionError(request=request)
+
+        fallback_provider = AsyncMock()
+        fallback_provider.complete = AsyncMock(
+            return_value=NonStreamingResponse(
+                message_id="fallback",
+                text="fallback ok",
+                tool_uses=[],
+                stop_reason="end_turn",
+                usage=Usage(),
+            )
+        )
+        fallback_provider._PROVIDER_KEY = "openai"
+        fallback_provider._logical_provider_key = "openai"
+        monkeypatch.setattr("iac_code.providers.manager.create_provider", Mock(return_value=fallback_provider))
+        manager = ProviderManager(
+            model="gpt-5.6-sol",
+            credentials={"openai": "k"},
+            retry_config=RetryConfig(max_retries=0, base_delay=0, jitter_factor=0),
+        )
+        manager._provider = PrimaryProvider()
+
+        result = await manager.complete(messages=[Message.user("hi")], system="")
+
+        assert result.text == "fallback ok"
+        fallback_provider.complete.assert_awaited_once()
+
+    async def test_non_retryable_error_propagates(self, monkeypatch):
         from iac_code.providers.retry import RetryConfig
 
         mock_provider = AsyncMock()
@@ -777,12 +1157,42 @@ class TestProviderManagerCompleteRetry:
             retry_config=RetryConfig(max_retries=3, base_delay=0.01, jitter_factor=0.0),
         )
         mgr._provider = mock_provider
+        fallback_factory = Mock()
+        monkeypatch.setattr("iac_code.providers.manager.create_provider", fallback_factory)
 
         with pytest.raises(ValueError, match="bad input"):
             await mgr.complete(messages=[Message.user("hi")], system="")
         # ValueError has no status_code and isn't ConnectionError/TimeoutError/OSError,
         # so it should NOT be retried.
         assert mock_provider.complete.call_count == 1
+        fallback_factory.assert_not_called()
+
+    async def test_authentication_error_does_not_trigger_model_fallback(self, monkeypatch):
+        from iac_code.providers.retry import RetryConfig
+
+        class Status401Error(Exception):
+            status_code = 401
+
+        class FakeProvider:
+            _PROVIDER_KEY = "openai"
+            _logical_provider_key = "openai"
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                raise Status401Error("invalid api key")
+
+        manager = ProviderManager(
+            model="gpt-5.6-sol",
+            credentials={"openai": "key"},
+            retry_config=RetryConfig(max_retries=0, base_delay=0, jitter_factor=0),
+        )
+        manager._provider = FakeProvider()
+        fallback_factory = Mock()
+        monkeypatch.setattr("iac_code.providers.manager.create_provider", fallback_factory)
+
+        with pytest.raises(Status401Error, match="invalid api key"):
+            await manager.complete(messages=[Message.user("hi")], system="")
+
+        fallback_factory.assert_not_called()
 
     async def test_fallback_success_does_not_mutate_manager_state(self, monkeypatch):
         from iac_code.providers.retry import RetryConfig
@@ -829,6 +1239,146 @@ class TestProviderManagerCompleteRetry:
         assert created_models == ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"]
         assert mgr.get_model_name() == "claude-sonnet-4-6"
         assert mgr._provider is original_provider
+
+    async def test_fallback_preserves_runtime_provider_identity(self, monkeypatch):
+        from iac_code.providers.retry import RetryConfig
+
+        class Status503Error(Exception):
+            status_code = 503
+
+        class FakeProvider:
+            def __init__(self, model: str, provider_key: str, *, fail: bool):
+                self.model = model
+                self._PROVIDER_KEY = provider_key
+                self._logical_provider_key = provider_key
+                self.fail = fail
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                if self.fail:
+                    raise Status503Error("temporary outage")
+                return NonStreamingResponse(
+                    message_id="fallback-response",
+                    text="fallback ok",
+                    tool_uses=[],
+                    stop_reason="end_turn",
+                    usage=Usage(),
+                )
+
+        created: list[tuple[str, str | None]] = []
+
+        def fake_create_provider(model, credentials, *, base_url=None, provider_key_override=None):
+            created.append((model, provider_key_override))
+            provider_key = provider_key_override or "dashscope_token_plan"
+            return FakeProvider(model, provider_key, fail=model == "qwen3.8-max-preview")
+
+        monkeypatch.setattr("iac_code.providers.manager.create_provider", fake_create_provider)
+        manager = ProviderManager(
+            model="qwen3.8-max-preview",
+            credentials={"dashscope_token_plan": "key", "dashscope": ""},
+            retry_config=RetryConfig(max_retries=0, base_delay=0, jitter_factor=0),
+        )
+
+        response = await manager.complete(messages=[Message.user("hi")], system="")
+
+        assert response.text == "fallback ok"
+        assert created == [
+            ("qwen3.8-max-preview", None),
+            ("qwen3.7-plus", "dashscope_token_plan"),
+        ]
+
+    async def test_provider_specific_fallback_uses_wire_key_and_preserves_logical_provider(self, monkeypatch):
+        from iac_code.providers.retry import RetryConfig
+
+        class Status503Error(Exception):
+            status_code = 503
+
+        class FakeProvider:
+            _PROVIDER_KEY = "dashscope_token_plan"
+
+            def __init__(self, logical_provider_key: str, *, fail: bool):
+                self._logical_provider_key = logical_provider_key
+                self.fail = fail
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                if self.fail:
+                    raise Status503Error("temporary outage")
+                return NonStreamingResponse(
+                    message_id="fallback-response",
+                    text="fallback ok",
+                    tool_uses=[],
+                    stop_reason="end_turn",
+                    usage=Usage(),
+                )
+
+        created: list[tuple[str, str | None]] = []
+
+        def fake_create_provider(model, credentials, *, base_url=None, provider_key_override=None):
+            created.append((model, provider_key_override))
+            if provider_key_override == "openai_compatible":
+                assert credentials["openai_compatible"] == "compat-key"
+            return FakeProvider(
+                provider_key_override or "openai_compatible",
+                fail=model == "qwen3.6-plus",
+            )
+
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "openai_compatible")
+        monkeypatch.setattr("iac_code.providers.manager.create_provider", fake_create_provider)
+        manager = ProviderManager(
+            model="qwen3.6-plus",
+            credentials={"openai_compatible": "compat-key", "dashscope_token_plan": ""},
+            retry_config=RetryConfig(max_retries=0, base_delay=0, jitter_factor=0),
+        )
+
+        response = await manager.complete(messages=[Message.user("hi")], system="")
+
+        assert response.text == "fallback ok"
+        assert created == [
+            ("qwen3.6-plus", None),
+            ("qwen3.6-flash", "openai_compatible"),
+        ]
+
+    async def test_fallback_walks_declared_chain_until_success(self, monkeypatch):
+        from iac_code.providers.retry import RetryConfig
+
+        class Status503Error(Exception):
+            status_code = 503
+
+        class FakeProvider:
+            _PROVIDER_KEY = "openai"
+            _logical_provider_key = "openai"
+
+            def __init__(self, model: str):
+                self.model = model
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                if self.model != "gpt-5.6-luna":
+                    raise Status503Error(f"{self.model} unavailable")
+                return NonStreamingResponse(
+                    message_id="luna-response",
+                    text="luna ok",
+                    tool_uses=[],
+                    stop_reason="end_turn",
+                    usage=Usage(),
+                )
+
+        created_models: list[str] = []
+
+        def fake_create_provider(model, credentials, *, base_url=None, provider_key_override=None):
+            created_models.append(model)
+            assert provider_key_override in {None, "openai"}
+            return FakeProvider(model)
+
+        monkeypatch.setattr("iac_code.providers.manager.create_provider", fake_create_provider)
+        manager = ProviderManager(
+            model="gpt-5.6-sol",
+            credentials={"openai": "key"},
+            retry_config=RetryConfig(max_retries=0, base_delay=0, jitter_factor=0),
+        )
+
+        response = await manager.complete(messages=[Message.user("hi")], system="")
+
+        assert response.text == "luna ok"
+        assert created_models == ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]
 
     async def test_fallback_provider_creation_failure_preserves_original_error(self, monkeypatch):
         from iac_code.providers.retry import RetryableError, RetryConfig
@@ -927,6 +1477,18 @@ class TestModelPrefixAutoMapping:
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "openai")
         assert _detect_provider_name("claude-sonnet-4-6") == "openai"
 
+    @pytest.mark.parametrize(
+        "model, expected_provider",
+        [
+            ("qwen3.8-max-preview", "dashscope_token_plan"),
+            ("kimi/kimi-k3", "dashscope"),
+            ("MiniMax/MiniMax-M3", "dashscope"),
+        ],
+    )
+    def test_exact_hosted_models_override_generic_prefixes(self, monkeypatch, model, expected_provider):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: None)
+        assert _detect_provider_name(model) == expected_provider
+
     def test_unknown_model_still_raises(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: None)
         with pytest.raises(ValueError, match="Cannot determine provider"):
@@ -937,3 +1499,51 @@ class TestModelPrefixAutoMapping:
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: None)
         with pytest.raises(ValueError, match="No API key configured for provider"):
             create_provider("claude-sonnet-4-6", credentials={"anthropic": ""})
+
+
+def test_qwen38_multimodal_fallback_preserves_image_support():
+    source_model = "qwen3.8-max-preview"
+    fallback_model = MODEL_FALLBACK_MAP[source_model]
+    entries = {model.id: model for model in PROVIDER_REGISTRY["dashscope_token_plan"].models}
+
+    assert fallback_model == "qwen3.7-plus"
+    assert entries[source_model].support_multimodal is True
+    assert entries[fallback_model].support_multimodal is True
+
+
+def test_static_provider_fallbacks_stay_within_each_model_catalog():
+    for provider_key, descriptor in PROVIDER_REGISTRY.items():
+        models = {model.id: model for model in descriptor.models}
+        for source_model, fallback_model in MODEL_FALLBACK_MAP.items():
+            if source_model in models:
+                assert fallback_model in models, (
+                    f"{provider_key} fallback {source_model} -> {fallback_model} leaves the provider catalog"
+                )
+                if models[source_model].support_multimodal:
+                    assert models[fallback_model].support_multimodal, (
+                        f"{provider_key} fallback {source_model} -> {fallback_model} loses image support"
+                    )
+    for provider_key, fallbacks in _PROVIDER_MODEL_FALLBACK_MAP.items():
+        models = {model.id: model for model in PROVIDER_REGISTRY[provider_key].models}
+        for source_model, fallback_model in fallbacks.items():
+            assert source_model in models
+            assert fallback_model in models
+            if models[source_model].support_multimodal:
+                assert models[fallback_model].support_multimodal, (
+                    f"{provider_key} fallback {source_model} -> {fallback_model} loses image support"
+                )
+
+
+@pytest.mark.parametrize(
+    "provider_key, expected_fallback",
+    [
+        ("dashscope", "qwen3.6-flash"),
+        ("dashscope_token_plan", "qwen3.6-flash"),
+        ("aliyun_codingplan", "qwen3.5-plus"),
+        ("aliyun_codingplan_intl", "qwen3.5-plus"),
+    ],
+)
+def test_qwen36_fallback_is_available_on_each_endpoint(provider_key, expected_fallback):
+    assert _PROVIDER_MODEL_FALLBACK_MAP[provider_key]["qwen3.6-plus"] == expected_fallback
+    assert expected_fallback in {model.id for model in PROVIDER_REGISTRY[provider_key].models}
+    assert "qwen3.6-plus" not in MODEL_FALLBACK_MAP

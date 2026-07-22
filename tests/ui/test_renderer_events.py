@@ -451,6 +451,24 @@ async def _idle_key_listener(*_args, **_kwargs):
 
 class TestRendererToolResultFallback:
     @pytest.mark.asyncio
+    async def test_tool_end_replaces_partial_start_name(self, monkeypatch):
+        monkeypatch.setattr(Renderer, "_key_listener", _idle_key_listener)
+        renderer = _make_renderer_for_tool_result_fallback_test()
+
+        await renderer.run_streaming_output(
+            _tool_result_events(
+                ToolUseStartEvent(tool_use_id="tool-a", name="read_"),
+                ToolUseEndEvent(tool_use_id="tool-a", name="read_file", input={"path": "main.py"}),
+                ToolResultEvent(tool_use_id="tool-a", tool_name="read_file", result="content"),
+            ),
+            _allow_permission,
+        )
+
+        archived_tool = renderer.message_history[-1].segments[0].tool
+        assert archived_tool is not None
+        assert archived_tool.tool_name == "read_file"
+
+    @pytest.mark.asyncio
     async def test_uses_render_metadata_when_tool_registry_missing(self, monkeypatch):
         monkeypatch.setattr(Renderer, "_key_listener", _idle_key_listener)
         renderer = _make_renderer_for_tool_result_fallback_test()
