@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from iac_code.pipeline.engine import architecture_semantic_planning
+
 
 def _load_script_module():
     script_path = Path("scripts/rendering/preview_template_architecture_llm.py")
@@ -16,6 +18,22 @@ def _load_script_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_semantic_plan_uses_lowest_effort_when_thinking_cannot_be_disabled(monkeypatch):
+    monkeypatch.setattr(architecture_semantic_planning, "get_active_provider_key", lambda: "dashscope_token_plan")
+
+    effort = architecture_semantic_planning._resolve_semantic_plan_effort("qwen3.8-max-preview", "none")
+
+    assert effort == "low"
+
+
+def test_semantic_plan_keeps_none_when_thinking_can_be_disabled(monkeypatch):
+    monkeypatch.setattr(architecture_semantic_planning, "get_active_provider_key", lambda: "dashscope_token_plan")
+
+    effort = architecture_semantic_planning._resolve_semantic_plan_effort("qwen3.7-plus", "none")
+
+    assert effort == "none"
 
 
 def test_extract_semantic_plan_json_accepts_fenced_json():
