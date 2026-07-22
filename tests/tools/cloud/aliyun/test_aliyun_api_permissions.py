@@ -1731,9 +1731,7 @@ async def test_delegated_local_template_materializes_from_symlinked_logical_cwd(
     template_body = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n"
     (physical_templates / "template.yml").write_bytes(template_body.encode("utf-8"))
     template_url = (
-        "templates/template.yml"
-        if template_url_kind == "relative"
-        else str(logical_cwd / "templates" / "template.yml")
+        "templates/template.yml" if template_url_kind == "relative" else str(logical_cwd / "templates" / "template.yml")
     )
     contract = _canonical_contract(
         product="ROS",
