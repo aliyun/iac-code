@@ -30,7 +30,7 @@ from typing import Any, NamedTuple
 from rich.console import Console
 
 from iac_code.agent.system_prompt import DYNAMIC_BOUNDARY, split_by_dynamic_boundary
-from iac_code.config import DEFAULT_MODEL, load_credentials, load_saved_model
+from iac_code.config import DEFAULT_MODEL, get_active_provider_key, load_credentials, load_saved_model
 from iac_code.i18n import setup_i18n
 from iac_code.pipeline.engine.architecture_graph import (
     ArchitectureMultiViewRenderResult,
@@ -39,6 +39,7 @@ from iac_code.pipeline.engine.architecture_graph import (
 )
 from iac_code.providers.base import Message
 from iac_code.providers.manager import ProviderManager
+from iac_code.providers.thinking import get_thinking_spec
 from iac_code.ui.diagram_rendering import style_attachment_lines
 
 MAX_SEMANTIC_PLAN_ATTEMPTS = 3
@@ -2153,6 +2154,18 @@ async def create_semantic_plan_with_llm(
     return response.text, semantic_plan, response.usage, parse_error
 
 
+def _resolve_semantic_plan_effort(model: str, effort_override: str | None) -> str | None:
+    if effort_override != "none":
+        return effort_override
+    provider_key = get_active_provider_key()
+    if not provider_key:
+        return effort_override
+    spec = get_thinking_spec(provider_key, model)
+    if spec.supports_disable or not spec.allowed_efforts:
+        return effort_override
+    return spec.allowed_efforts[0].value
+
+
 async def create_semantic_plan_for_architecture_with_llm(
     architecture_context: dict[str, Any],
     template_content: str,
@@ -2165,6 +2178,7 @@ async def create_semantic_plan_for_architecture_with_llm(
     """Create a repaired semantic plan using the same LLM loop as the preview script."""
     llm_architecture_context = build_llm_architecture_context(architecture_context)
     selected_model = model or load_saved_model() or DEFAULT_MODEL
+    effective_effort = _resolve_semantic_plan_effort(selected_model, effort_override)
     max_attempts = max(1, max_attempts)
 
     validation_issues: list[str] = []
@@ -2187,7 +2201,7 @@ async def create_semantic_plan_for_architecture_with_llm(
             llm_architecture_context,
             model=selected_model,
             max_tokens=max_tokens,
-            effort_override=effort_override,
+            effort_override=effective_effort,
             user_prompt=user_prompt,
             messages=request_messages,
             attempt=attempt,
