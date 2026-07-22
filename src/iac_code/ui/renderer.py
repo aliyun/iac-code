@@ -1306,6 +1306,8 @@ class Renderer:
 
                 # ── Thinking delta ─────────────────────────────
                 elif isinstance(event, ThinkingDeltaEvent):
+                    if event.is_metadata_only:
+                        continue
                     if thinking_start_time is None:
                         thinking_start_time = time.monotonic()
                     thinking_buffer += event.text
@@ -1436,6 +1438,7 @@ class Renderer:
                 elif isinstance(event, ToolUseEndEvent):
                     rec = tool_records.get(event.tool_use_id)
                     if rec:
+                        rec.tool_name = event.name
                         rec.tool_input = event.input
                     _update_live()
 

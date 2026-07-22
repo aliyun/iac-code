@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from iac_code.providers.openai_provider import OpenAIProvider
-from iac_code.providers.thinking import ThinkingFamily, get_thinking_spec
+from iac_code.providers.thinking import ThinkingFamily, get_thinking_spec, normalize_effort
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 
@@ -37,6 +37,7 @@ class GeminiProvider(OpenAIProvider):
             thinking_budget=thinking_budget,
             max_completion_tokens=max_completion_tokens,
             provider_key=provider_key,
+            **kwargs,
         )
 
     def _build_thinking_kwargs(self) -> dict[str, Any]:
@@ -44,10 +45,12 @@ class GeminiProvider(OpenAIProvider):
         if spec.family is not ThinkingFamily.GEMINI:
             return {}
         if self._thinking_disabled():
-            return {}
+            return {"reasoning_effort": "none"} if spec.supports_disable else {}
         effort = self._effective_effort(spec)
         if effort is None:
             return {}
+        if effort == "none" and self._thinking_forced() and normalize_effort(self._effort) in {None, "auto"}:
+            effort = next((item.value for item in spec.allowed_efforts if item.value != "none"), effort)
         allowed = {e.value for e in spec.allowed_efforts}
         if effort not in allowed:
             if spec.default_effort is None:

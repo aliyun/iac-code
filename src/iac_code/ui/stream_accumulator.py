@@ -126,6 +126,8 @@ class StreamAccumulator:
             return "text"
 
         if isinstance(event, ThinkingDeltaEvent):
+            if event.is_metadata_only:
+                return "none"
             if self._thinking_start_time is None:
                 self._thinking_start_time = time.monotonic()
             self.thinking_buffer += event.text
@@ -155,6 +157,7 @@ class StreamAccumulator:
         if isinstance(event, ToolUseEndEvent):
             rec = self.tool_records.get(event.tool_use_id)
             if rec:
+                rec.tool_name = event.name
                 rec.tool_input = event.input
             return "tool_update"
 

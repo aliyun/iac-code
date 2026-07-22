@@ -21,6 +21,7 @@ from iac_code.types.stream_events import (
     MessageStartEvent,
     QueuedInputSubmittedEvent,
     TextDeltaEvent,
+    ThinkingDeltaEvent,
     ToolResultEvent,
     ToolUseEndEvent,
     ToolUseStartEvent,
@@ -190,7 +191,21 @@ class TestAgentLoopInit:
                 "role": "assistant",
                 "content": [
                     {"type": "text", "text": "hi"},
-                    {"type": "tool_use", "id": "toolu_1", "name": "read_file", "input": {"path": "a.txt"}},
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": "read_file",
+                        "input": {"path": "a.txt"},
+                        "provider_metadata": {
+                            "provider": "gemini",
+                            "extra_content": {"google": {"thought_signature": "sig"}},
+                        },
+                    },
+                    {
+                        "type": "redacted_thinking",
+                        "data": "opaque",
+                        "provider_metadata": {"provider": "anthropic", "data": "opaque"},
+                    },
                     "ignored",
                 ],
             },
@@ -201,7 +216,10 @@ class TestAgentLoopInit:
         assert len(messages) == 2
         assert messages[0].role == "user"
         assert messages[0].content == "hello"
-        assert len(messages[1].content) == 2
+        assert len(messages[1].content) == 3
+        assert messages[1].content[1].provider_metadata["provider"] == "gemini"
+        assert messages[1].content[2].type == "redacted_thinking"
+        assert messages[1].content[2].data == "opaque"
 
     def test_apply_context_modifier(self, mock_provider, mock_registry):
         loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
@@ -233,6 +251,111 @@ class TestAgentLoopStreaming:
         events = [e async for e in loop.run_streaming("Hi")]
         types = [e.type for e in events]
         assert "text_delta" in types
+
+    async def test_opaque_thinking_metadata_round_trips_through_context(self, mock_provider, mock_registry):
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield MessageStartEvent(message_id="m1")
+            yield ThinkingDeltaEvent(text="reasoning", block_index=0)
+            yield ThinkingDeltaEvent(
+                text="",
+                block_index=0,
+                provider_metadata={"provider": "anthropic", "signature": "signed-"},
+            )
+            yield ThinkingDeltaEvent(
+                text="",
+                block_index=0,
+                provider_metadata={"provider": "anthropic", "signature": "thinking"},
+            )
+            yield ThinkingDeltaEvent(
+                text="",
+                block_index=1,
+                block_type="redacted_thinking",
+                provider_metadata={"provider": "anthropic", "data": "encrypted-thinking"},
+            )
+            yield TextDeltaEvent(text="answer")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+
+        events = [event async for event in loop.run_streaming("question")]
+
+        exposed_thinking = [event.text for event in events if isinstance(event, ThinkingDeltaEvent)]
+        assert exposed_thinking == ["reasoning"]
+
+        assistant = next(message for message in loop.context_manager.get_messages() if message.role == "assistant")
+        assert assistant.content[0].thinking == "reasoning"
+        assert assistant.content[0].provider_metadata == {
+            "provider": "anthropic",
+            "signature": "signed-thinking",
+        }
+        assert assistant.content[1].type == "redacted_thinking"
+        assert assistant.content[1].data == "encrypted-thinking"
+
+        provider_assistant = next(message for message in loop._get_provider_messages() if message.role == "assistant")
+        assert provider_assistant.content[0].provider_metadata["signature"] == "signed-thinking"
+        assert provider_assistant.content[1].data == "encrypted-thinking"
+
+    async def test_tool_provider_metadata_reaches_next_provider_turn(self, mock_provider, mock_registry):
+        captured_messages = []
+        provider_metadata = {
+            "provider": "gemini",
+            "extra_content": {"google": {"thought_signature": "signed-thought"}},
+        }
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            captured_messages.append(messages)
+            yield MessageStartEvent(message_id=f"m{len(captured_messages)}")
+            if len(captured_messages) == 1:
+                yield ToolUseStartEvent(tool_use_id="toolu_1", name="read_file")
+                yield ToolUseEndEvent(
+                    tool_use_id="toolu_1",
+                    name="read_file",
+                    input={"path": "a.txt"},
+                    provider_metadata=provider_metadata,
+                )
+                yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+                return
+            yield TextDeltaEvent(text="done")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        loop._tool_executor.execute_batch = AsyncMock(return_value=[ToolResult(content="file", is_error=False)])
+
+        _ = [event async for event in loop.run_streaming("read")]
+
+        assistant = next(message for message in captured_messages[1] if message.role == "assistant")
+        tool_use = next(block for block in assistant.content if block.type == "tool_use")
+        assert tool_use.provider_metadata == provider_metadata
+
+    async def test_tool_end_event_corrects_fragmentary_start_name(self, mock_provider, mock_registry):
+        captured_messages = []
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            captured_messages.append(messages)
+            yield MessageStartEvent(message_id=f"m{len(captured_messages)}")
+            if len(captured_messages) == 1:
+                yield ToolUseStartEvent(tool_use_id="toolu_1", name="read_")
+                yield ToolUseEndEvent(
+                    tool_use_id="toolu_1",
+                    name="read_file",
+                    input={"path": "a.txt"},
+                )
+                yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+                return
+            yield TextDeltaEvent(text="done")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        loop._tool_executor.execute_batch = AsyncMock(return_value=[ToolResult(content="file", is_error=False)])
+
+        _ = [event async for event in loop.run_streaming("read")]
+
+        assistant = next(message for message in captured_messages[1] if message.role == "assistant")
+        tool_use = next(block for block in assistant.content if block.type == "tool_use")
+        assert tool_use.name == "read_file"
 
     async def test_run_returns_text(self, mock_provider, mock_registry):
         async def fake_stream(messages, system, tools=None, max_tokens=8192):
@@ -1485,6 +1608,14 @@ class TestAgentLoopStreaming:
 
         assert loop.get_last_provider_request_snapshot() == {}
 
+    async def test_replace_session_clears_conversation_scoped_provider_state(self, mock_provider, mock_registry):
+        mock_provider.reset_conversation_state = MagicMock()
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+
+        loop.replace_session("new-session", resume_messages=None)
+
+        mock_provider.reset_conversation_state.assert_called_once_with()
+
     async def test_reset_clears_last_provider_request_snapshot(self, mock_provider, mock_registry):
         async def fake_stream(messages, system, tools=None, max_tokens=8192):
             yield MessageStartEvent(message_id="m1")
@@ -1500,6 +1631,14 @@ class TestAgentLoopStreaming:
         loop.reset()
 
         assert loop.get_last_provider_request_snapshot() == {}
+
+    async def test_reset_clears_conversation_scoped_provider_state(self, mock_provider, mock_registry):
+        mock_provider.reset_conversation_state = MagicMock()
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+
+        loop.reset()
+
+        mock_provider.reset_conversation_state.assert_called_once_with()
 
     async def test_read_memory_tool_marks_file_as_read_for_recall_dedupe(self, mock_provider, mock_registry):
         class FakeRecallService:

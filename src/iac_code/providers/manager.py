@@ -8,7 +8,9 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any
 
+from anthropic import APIConnectionError as AnthropicAPIConnectionError
 from loguru import logger
+from openai import APIConnectionError as OpenAIAPIConnectionError
 
 from iac_code.i18n import _
 from iac_code.providers.base import Message, NonStreamingResponse, Provider, ToolDefinition
@@ -53,11 +55,29 @@ class ProviderConfigurationError(RuntimeError):
     """Raised when provider configuration cannot be loaded during a request."""
 
 
+class _ModelRefusalError(RuntimeError):
+    """Raised when a model returns a successful response that is unusable due to refusal."""
+
+    def __init__(self, model: str):
+        super().__init__(f"Model '{model}' refused the request")
+        self.model = model
+
+
+_RETRYABLE_TRANSPORT_ERRORS = (
+    ConnectionError,
+    TimeoutError,
+    OSError,
+    OpenAIAPIConnectionError,
+    AnthropicAPIConnectionError,
+)
+
+
 @dataclass(frozen=True)
 class _CompletionResult:
     response: NonStreamingResponse
     model: str
     provider_name: str
+    provider: Provider
 
 
 def _error_event_from_exception(exc: BaseException) -> ErrorEvent:
@@ -67,15 +87,63 @@ def _error_event_from_exception(exc: BaseException) -> ErrorEvent:
 
 
 MODEL_FALLBACK_MAP = {
+    "claude-fable-5": "claude-opus-4-8",
+    "claude-opus-4-8": "claude-sonnet-5",
     "claude-opus-4-7": "claude-haiku-4-5-20251001",
     "claude-opus-4-6": "claude-haiku-4-5-20251001",
+    "claude-sonnet-5": "claude-haiku-4-5-20251001",
     "claude-sonnet-4-6": "claude-haiku-4-5-20251001",
     "claude-sonnet-4-6-1m": "claude-haiku-4-5-20251001",
+    "gpt-5.6-sol": "gpt-5.6-terra",
+    "gpt-5.6": "gpt-5.6-terra",
+    "gpt-5.6-terra": "gpt-5.6-luna",
     "gpt-5.5": "gpt-5.4",
     "gpt-5.4": "gpt-5.4-mini",
-    "qwen3.6-plus": "qwen3.5-plus",
+    "qwen3.8-max-preview": "qwen3.7-plus",
+    "qwen3.7-max": "qwen3.7-plus",
+    "kimi/kimi-k3": "kimi-k2.7-code",
+    "kimi-k3": "kimi-k2.7-code",
+    "glm-5.2": "glm-5.1",
     "deepseek-v4-pro": "deepseek-v4-flash",
 }
+
+_MODEL_REFUSAL_FALLBACK_MAP = {
+    "claude-fable-5": "claude-opus-4-8",
+}
+
+_PROVIDER_MODEL_FALLBACK_MAP = {
+    "dashscope": {"qwen3.6-plus": "qwen3.6-flash"},
+    "dashscope_token_plan": {"qwen3.6-plus": "qwen3.6-flash"},
+    "aliyun_codingplan": {"qwen3.6-plus": "qwen3.5-plus"},
+    "aliyun_codingplan_intl": {"qwen3.6-plus": "qwen3.5-plus"},
+}
+
+_LEGACY_DISABLE_EFFORTS = {"none", "off", "disable", "disabled", "false", "0"}
+
+
+def _legacy_effort_disables_thinking(effort: str | None) -> bool:
+    return isinstance(effort, str) and effort.strip().lower() in _LEGACY_DISABLE_EFFORTS
+
+
+def _normalize_configured_effort(
+    effort: str | None,
+    thinking_enabled: bool | None,
+    *,
+    provider_key: str,
+    model: str,
+) -> tuple[str | None, bool | None]:
+    """Interpret legacy disable aliases without consuming a supported ``none`` effort."""
+    if not _legacy_effort_disables_thinking(effort):
+        return effort, thinking_enabled
+    assert isinstance(effort, str)
+    normalized_effort = effort.strip().lower()
+    if normalized_effort == "none":
+        from iac_code.providers.thinking import get_thinking_spec
+
+        spec = get_thinking_spec(provider_key, model)
+        if any(item.value == normalized_effort for item in spec.allowed_efforts):
+            return normalized_effort, thinking_enabled
+    return None, False
 
 
 def _detect_provider_name(model: str) -> str:
@@ -85,16 +153,15 @@ def _detect_provider_name(model: str) -> str:
     1. Saved config in settings.yml (set by /auth or /model).
     2. Model-name prefix matching for mainstream models.
     """
-    from iac_code.config import _KEY_NAME_TO_CRED_SLOT, _MODEL_PREFIX_TO_PROVIDER, get_active_provider_key
+    from iac_code.config import _KEY_NAME_TO_CRED_SLOT, _infer_provider_key_from_model, get_active_provider_key
 
     key_name = get_active_provider_key() or ""
     if key_name in _KEY_NAME_TO_CRED_SLOT:
         return _KEY_NAME_TO_CRED_SLOT[key_name]
 
-    model_lower = model.lower()
-    for prefix, provider in _MODEL_PREFIX_TO_PROVIDER:
-        if model_lower.startswith(prefix):
-            return provider
+    inferred_provider = _infer_provider_key_from_model(model)
+    if inferred_provider is not None:
+        return inferred_provider
 
     raise ProviderNotConfiguredError(
         _("Cannot determine provider for model: {model}. Run /auth to configure.").format(model=model)
@@ -144,6 +211,16 @@ def create_provider(
         provider_key,
         effective_base_url,
     )
+    if _legacy_effort_disables_thinking(effort_override):
+        effort = None
+        thinking_enabled = False
+    else:
+        effort, thinking_enabled = _normalize_configured_effort(
+            effort,
+            thinking_enabled,
+            provider_key=wire_provider_key,
+            model=model,
+        )
     api_key = credentials.get(provider_key, "")
     if not api_key and wire_provider_key != provider_key:
         api_key = credentials.get(wire_provider_key, "")
@@ -172,13 +249,9 @@ def create_provider(
     else:
         from iac_code.providers.anthropic_provider import AnthropicProvider
 
-        if (
-            request_policy_override is not None
-            and request_policy_override.thinking_budget is not None
-            and issubclass(provider_cls, AnthropicProvider)
-        ):
-            request_policy_kwargs["thinking_budget"] = request_policy_override.thinking_budget
-    return provider_cls(
+        if thinking_budget is not None and issubclass(provider_cls, AnthropicProvider):
+            request_policy_kwargs["thinking_budget"] = thinking_budget
+    provider = provider_cls(
         model=model,
         api_key=api_key or None,
         base_url=effective_base_url,
@@ -186,6 +259,8 @@ def create_provider(
         provider_key=wire_provider_key,
         **request_policy_kwargs,
     )
+    setattr(provider, "_logical_provider_key", provider_key)
+    return provider
 
 
 def _import_provider_class(dotted_path: str):
@@ -264,9 +339,6 @@ def _active_request_policy(policy: ProviderRequestPolicy | None) -> ProviderRequ
     return policy
 
 
-_LEGACY_DISABLE_EFFORTS = {"none", "off", "disable", "disabled", "false", "0"}
-
-
 def _request_policy_with_effort_override(
     policy: ProviderRequestPolicy | None,
     effort_override: str | None,
@@ -278,12 +350,14 @@ def _request_policy_with_effort_override(
     if not effort:
         return policy
     thinking_enabled = policy.thinking_enabled if policy is not None else None
-    if effort.lower() in _LEGACY_DISABLE_EFFORTS:
+    effective_effort: str | None = effort
+    if _legacy_effort_disables_thinking(effort):
         thinking_enabled = False
+        effective_effort = None
     return _active_request_policy(
         ProviderRequestPolicy(
             thinking_enabled=thinking_enabled,
-            effort=effort,
+            effort=effective_effort,
             thinking_budget=policy.thinking_budget if policy is not None else None,
             max_completion_tokens=policy.max_completion_tokens if policy is not None else None,
         )
@@ -315,10 +389,13 @@ class ProviderManager:
         self._stream_idle_timeout = stream_idle_timeout
         self._provider_key_override = provider_key_override
         self._base_url_override = base_url_override
+        self._effort_override = effort_override
         self._request_policy_override = _request_policy_with_effort_override(request_policy_override, effort_override)
         # Lazy: first startup may have no active provider yet. Defer errors
         # until the user actually tries to send a message, so /auth is reachable.
         self._provider: Provider | None = None
+        self._pinned_provider: Provider | None = None
+        self._pinned_model: str | None = None
         try:
             self._provider = create_provider(
                 model,
@@ -358,6 +435,11 @@ class ProviderManager:
             )
         return self._provider
 
+    def _active_provider_and_model(self) -> tuple[Provider, str]:
+        if self._pinned_provider is not None and self._pinned_model is not None:
+            return self._pinned_provider, self._pinned_model
+        return self._ensure_provider(), self._model
+
     def _provider_create_kwargs(self) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "base_url": self._base_url_override,
@@ -365,6 +447,8 @@ class ProviderManager:
         }
         if self._request_policy_override is not None:
             kwargs["request_policy_override"] = self._request_policy_override
+        if self._effort_override is not None:
+            kwargs["effort_override"] = self._effort_override
         return kwargs
 
     def reconfigure(
@@ -387,7 +471,9 @@ class ProviderManager:
         self._credentials = credentials
         self._provider_key_override = provider_key_override
         self._base_url_override = base_url_override
+        self._effort_override = effort_override
         self._request_policy_override = _request_policy_with_effort_override(request_policy_override, effort_override)
+        self.reset_conversation_state()
         self._provider = None
         try:
             self._provider = create_provider(
@@ -399,7 +485,12 @@ class ProviderManager:
             logger.warning(f"Provider not configured after reconfigure: {e}")
 
     def get_model_name(self) -> str:
-        return self._model
+        return self._pinned_model or self._model
+
+    def reset_conversation_state(self) -> None:
+        """Clear conversation-scoped model selection such as refusal fallback pinning."""
+        self._pinned_provider = None
+        self._pinned_model = None
 
     def get_provider_key(self) -> str:
         """Return the runtime provider key without forcing provider creation."""
@@ -423,8 +514,36 @@ class ProviderManager:
         descriptor = PROVIDER_REGISTRY.get(key)
         return descriptor.display_name if descriptor is not None else key
 
-    def _get_fallback_model(self) -> str | None:
-        return MODEL_FALLBACK_MAP.get(self._model)
+    def _get_fallback_model(self, model: str | None = None, provider_key: str | None = None) -> str | None:
+        current_model = model or self._model
+        resolved_provider_key = provider_key or self.get_provider_key()
+        provider_fallbacks = _PROVIDER_MODEL_FALLBACK_MAP.get(resolved_provider_key, {})
+        provider_fallback = provider_fallbacks.get(current_model)
+        if provider_fallback is not None:
+            return provider_fallback
+
+        fallback = MODEL_FALLBACK_MAP.get(current_model)
+        if fallback is None:
+            return None
+        from iac_code.providers.registry import PROVIDER_REGISTRY
+
+        descriptor = PROVIDER_REGISTRY.get(resolved_provider_key)
+        if descriptor is None or not descriptor.models:
+            return None
+        model_ids = {entry.id for entry in descriptor.models}
+        return fallback if current_model in model_ids and fallback in model_ids else None
+
+    def _get_refusal_fallback_model(self, model: str, provider_key: str) -> str | None:
+        fallback = _MODEL_REFUSAL_FALLBACK_MAP.get(model)
+        if fallback is None:
+            return None
+        from iac_code.providers.registry import PROVIDER_REGISTRY
+
+        descriptor = PROVIDER_REGISTRY.get(provider_key)
+        if descriptor is None or not descriptor.models:
+            return None
+        model_ids = {entry.id for entry in descriptor.models}
+        return fallback if model in model_ids and fallback in model_ids else None
 
     async def stream(
         self, messages: list[Message], system: str, tools: list[ToolDefinition] | None = None, max_tokens: int = 8192
@@ -434,9 +553,9 @@ class ProviderManager:
         except ProviderConfigurationError as exc:
             yield _error_event_from_exception(exc)
             return
-        provider = self._ensure_provider()
+        provider, model = self._active_provider_and_model()
         provider_name = type(provider).__name__.replace("Provider", "").lower()
-        sanitized_model = sanitize_model_name(self._model)
+        sanitized_model = sanitize_model_name(model)
 
         log_event(
             Events.API_REQUEST_STARTED,
@@ -448,12 +567,12 @@ class ProviderManager:
         )
         started = time.monotonic()
 
-        span_name = f"{Spans.LLM_CHAT} {self._model}"
+        span_name = f"{Spans.LLM_CHAT} {model}"
         span_attrs = {
             GenAiAttr.SPAN_KIND: GenAiSpanKind.LLM,
             GenAiAttr.OPERATION_NAME: GenAiOperationName.CHAT,
             GenAiAttr.PROVIDER_NAME: provider_name,
-            GenAiAttr.REQUEST_MODEL: self._model,
+            GenAiAttr.REQUEST_MODEL: model,
             GenAiAttr.REQUEST_MAX_TOKENS: max_tokens,
             GenAiAttr.CONVERSATION_ID: get_session_id(),
             GenAiAttr.OUTPUT_TYPE: "text",
@@ -466,7 +585,10 @@ class ProviderManager:
 
         with start_span(span_name, span_attrs) as span:
             orphaned_message_ids: list[str] = []
+            buffer_until_accepted = model in _MODEL_REFUSAL_FALLBACK_MAP
+            buffered_events: list[StreamEvent] = []
             streaming_failed = False
+            refusal_detected = False
             first_token_received = False
             try:
                 watchdog = StreamWatchdog(idle_timeout=self._stream_idle_timeout)
@@ -485,12 +607,24 @@ class ProviderManager:
                         first_token_received = True
                         ttft_ns = int((time.monotonic() - started) * 1_000_000_000)
                         span.set_attribute(GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN, ttft_ns)
-                    yield event
                     if isinstance(event, MessageEndEvent):
                         watchdog.stop()
-                        self._set_llm_response_span_attrs(span, event, self._model)
+                        if event.stop_reason == "refusal":
+                            refusal_detected = True
+                            streaming_failed = True
+                            logger.warning("Streaming response was refused, falling back to an approved model")
+                            break
+                        if buffer_until_accepted:
+                            for buffered_event in buffered_events:
+                                yield buffered_event
+                        yield event
+                        self._set_llm_response_span_attrs(span, event, model)
                         self._emit_success_telemetry(provider_name, sanitized_model, started, event.usage)
                         return
+                    if buffer_until_accepted:
+                        buffered_events.append(event)
+                    else:
+                        yield event
                 streaming_failed = True
             except asyncio.CancelledError:
                 raise
@@ -498,10 +632,17 @@ class ProviderManager:
                 streaming_failed = True
                 logger.warning(f"Streaming failed, falling back to non-streaming: {e}")
             if streaming_failed:
-                for msg_id in orphaned_message_ids:
-                    yield TombstoneEvent(message_id=msg_id)
+                if not buffer_until_accepted:
+                    for msg_id in orphaned_message_ids:
+                        yield TombstoneEvent(message_id=msg_id)
                 try:
-                    completion = await self._complete_with_retry_result(messages, system, tools, max_tokens)
+                    completion = await self._complete_with_retry_result(
+                        messages,
+                        system,
+                        tools,
+                        max_tokens,
+                        refusal_detected=refusal_detected,
+                    )
                 except Exception as e:
                     self._emit_failure_telemetry(provider_name, sanitized_model, started, e)
                     yield _error_event_from_exception(e)
@@ -512,13 +653,35 @@ class ProviderManager:
                 self._set_llm_response_span_attrs_from_response(span, response, completion.model)
                 self._emit_success_telemetry(completion.provider_name, response_model, started, response.usage)
                 yield MessageStartEvent(message_id=response.message_id)
-                if response.thinking:
+                if response.thinking_blocks:
+                    for block_index, block in enumerate(response.thinking_blocks):
+                        yield ThinkingDeltaEvent(
+                            text=str(block.get("text") or ""),
+                            block_index=block_index,
+                            block_type=block.get("type", "thinking"),
+                            provider_metadata=(
+                                dict(block["provider_metadata"])
+                                if isinstance(block.get("provider_metadata"), dict)
+                                else None
+                            ),
+                        )
+                elif response.thinking:
                     yield ThinkingDeltaEvent(text=response.thinking)
                 if response.text:
                     yield TextDeltaEvent(text=response.text)
                 for tu in response.tool_uses:
-                    yield ToolUseStartEvent(tool_use_id=tu["id"], name=tu["name"])
-                    yield ToolUseEndEvent(tool_use_id=tu["id"], name=tu["name"], input=tu["input"])
+                    provider_metadata = tu.get("provider_metadata")
+                    yield ToolUseStartEvent(
+                        tool_use_id=tu["id"],
+                        name=tu["name"],
+                        provider_metadata=provider_metadata,
+                    )
+                    yield ToolUseEndEvent(
+                        tool_use_id=tu["id"],
+                        name=tu["name"],
+                        input=tu["input"],
+                        provider_metadata=provider_metadata,
+                    )
                 yield MessageEndEvent(stop_reason=response.stop_reason, usage=response.usage)
 
     @staticmethod
@@ -610,7 +773,6 @@ class ProviderManager:
             system,
             tools,
             max_tokens,
-            is_fallback=False,
             cache_policy=cache_policy,
         )
 
@@ -620,7 +782,6 @@ class ProviderManager:
         system,
         tools,
         max_tokens,
-        is_fallback=False,
         provider_override: Provider | None = None,
         model_override: str | None = None,
         cache_policy: str = "default",
@@ -630,7 +791,6 @@ class ProviderManager:
             system,
             tools,
             max_tokens,
-            is_fallback=is_fallback,
             provider_override=provider_override,
             model_override=model_override,
             cache_policy=cache_policy,
@@ -643,13 +803,20 @@ class ProviderManager:
         system,
         tools,
         max_tokens,
-        is_fallback=False,
         provider_override: Provider | None = None,
         model_override: str | None = None,
         cache_policy: str = "default",
+        fallback_visited: frozenset[str] | None = None,
+        refusal_detected: bool = False,
+        allow_model_fallback: bool = True,
     ) -> _CompletionResult:
-        provider = provider_override or self._ensure_provider()
-        model = model_override or self._model
+        if provider_override is None and model_override is None:
+            provider, model = self._active_provider_and_model()
+        else:
+            provider = provider_override or self._ensure_provider()
+            model = model_override or self._model
+        visited = set(fallback_visited or ())
+        visited.add(model)
         provider_name = type(provider).__name__.replace("Provider", "").lower()
         sanitized_model = sanitize_model_name(model)
 
@@ -666,53 +833,93 @@ class ProviderManager:
 
         async def operation():
             try:
+                if refusal_detected:
+                    raise _ModelRefusalError(model)
                 kwargs = {"cache_policy": cache_policy} if cache_policy != "default" else {}
                 response = await provider.complete(messages, system, tools, max_tokens, **kwargs)
-                return _CompletionResult(response=response, model=model, provider_name=provider_name)
+                if response.stop_reason == "refusal":
+                    raise _ModelRefusalError(model)
+                return _CompletionResult(
+                    response=response,
+                    model=model,
+                    provider_name=provider_name,
+                    provider=provider,
+                )
             except Exception as e:
                 status = getattr(e, "status_code", None) or getattr(e, "status", None)
-                if status and status in {408, 409, 429, 500, 502, 503, 529}:
+                retryable_status = status in {408, 409, 429} or (isinstance(status, int) and 500 <= status < 600)
+                if retryable_status:
                     raise RetryableError(f"{type(e).__name__}: {e}", status_code=status) from e
-                if isinstance(e, (ConnectionError, TimeoutError, OSError)):
+                if isinstance(e, _RETRYABLE_TRANSPORT_ERRORS):
                     raise RetryableError(f"{type(e).__name__}: {e}") from e
                 raise
 
         try:
             return await with_retry(operation, self._retry_config, on_retry=_on_retry)
         except Exception as original_exc:
-            if not is_fallback:
-                fallback = self._get_fallback_model()
-                if fallback is not None:
-                    log_event(
-                        Events.MODEL_FALLBACK_TRIGGERED,
-                        {
-                            "from_model": sanitized_model,
-                            "to_model": sanitize_model_name(fallback),
-                            "reason": "model_degradation",
-                        },
+            if not isinstance(original_exc, (RetryableError, _ModelRefusalError)):
+                raise
+            logical_provider_key = getattr(provider, "_logical_provider_key", None)
+            if not isinstance(logical_provider_key, str) or not logical_provider_key:
+                logical_provider_key = self._provider_key_override
+            wire_provider_key = getattr(provider, "_PROVIDER_KEY", None)
+            if not isinstance(wire_provider_key, str) or not wire_provider_key:
+                wire_provider_key = None
+            if not logical_provider_key or not wire_provider_key:
+                try:
+                    detected_provider_key = _detect_provider_name(model)
+                except ValueError:
+                    detected_provider_key = ""
+                logical_provider_key = logical_provider_key or detected_provider_key
+                wire_provider_key = wire_provider_key or logical_provider_key
+
+            if not allow_model_fallback:
+                fallback = None
+                fallback_reason = "model_degradation"
+            elif isinstance(original_exc, _ModelRefusalError):
+                fallback = self._get_refusal_fallback_model(model, wire_provider_key)
+                fallback_reason = "model_refusal"
+            else:
+                fallback = self._get_fallback_model(model, wire_provider_key)
+                fallback_reason = "model_degradation"
+            if fallback is not None and fallback not in visited:
+                log_event(
+                    Events.MODEL_FALLBACK_TRIGGERED,
+                    {
+                        "from_model": sanitized_model,
+                        "to_model": sanitize_model_name(fallback),
+                        "reason": fallback_reason,
+                    },
+                )
+                try:
+                    fallback_kwargs: dict[str, Any] = {
+                        "base_url": self._base_url_override,
+                        "provider_key_override": logical_provider_key,
+                    }
+                    if self._request_policy_override is not None:
+                        fallback_kwargs["request_policy_override"] = self._request_policy_override
+                    if self._effort_override is not None:
+                        fallback_kwargs["effort_override"] = self._effort_override
+                    fallback_provider = create_provider(
+                        fallback,
+                        self._credentials,
+                        **fallback_kwargs,
                     )
-                    try:
-                        fallback_kwargs: dict[str, Any] = {
-                            "base_url": self._base_url_override,
-                            "provider_key_override": self._provider_key_override,
-                        }
-                        if self._request_policy_override is not None:
-                            fallback_kwargs["request_policy_override"] = self._request_policy_override
-                        fallback_provider = create_provider(
-                            fallback,
-                            self._credentials,
-                            **fallback_kwargs,
-                        )
-                        return await self._complete_with_retry_result(
-                            messages,
-                            system,
-                            tools,
-                            max_tokens,
-                            is_fallback=True,
-                            provider_override=fallback_provider,
-                            model_override=fallback,
-                            cache_policy=cache_policy,
-                        )
-                    except Exception:
-                        raise original_exc from None
+                    result = await self._complete_with_retry_result(
+                        messages,
+                        system,
+                        tools,
+                        max_tokens,
+                        provider_override=fallback_provider,
+                        model_override=fallback,
+                        cache_policy=cache_policy,
+                        fallback_visited=frozenset(visited),
+                        allow_model_fallback=not isinstance(original_exc, _ModelRefusalError),
+                    )
+                    if isinstance(original_exc, _ModelRefusalError):
+                        self._pinned_provider = result.provider
+                        self._pinned_model = result.model
+                    return result
+                except Exception:
+                    raise original_exc from None
             raise

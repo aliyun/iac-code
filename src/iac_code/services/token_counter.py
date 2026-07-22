@@ -125,9 +125,23 @@ class TokenCounter:
                         count += _TOOL_USE_OVERHEAD
                         count += self.count_text(block.get("name", ""))
                         count += self.count_text(json.dumps(block.get("input", {})))
+                        metadata = block.get("provider_metadata")
+                        if isinstance(metadata, dict) and metadata:
+                            count += self.count_text(
+                                json.dumps(metadata, ensure_ascii=False, sort_keys=True, default=str)
+                            )
                     elif block_type == "tool_result":
                         count += self.count_text(block.get("content", ""))
                         count += _TOOL_USE_OVERHEAD
+                    elif block_type == "thinking":
+                        count += self.count_text(block.get("thinking", ""))
+                        metadata = block.get("provider_metadata")
+                        if isinstance(metadata, dict) and metadata:
+                            count += self.count_text(
+                                json.dumps(metadata, ensure_ascii=False, sort_keys=True, default=str)
+                            )
+                    elif block_type == "redacted_thinking":
+                        count += self.count_text(block.get("data", ""))
         return count
 
     def count_messages(self, messages: list[dict[str, Any]]) -> int:

@@ -83,7 +83,160 @@ class TestAnthropicProvider:
         p = AnthropicProvider(model="claude-sonnet-4-6", api_key="test")
         block = ContentBlock(type="thinking", text="deep thought")
         d = p._convert_content_block(block)
-        assert d == {"type": "thinking", "thinking": "deep thought"}
+        assert d is None
+
+    def test_convert_thinking_and_redacted_blocks_echo_anthropic_metadata(self):
+        from iac_code.providers.base import ContentBlock
+
+        p = AnthropicProvider(model="claude-sonnet-5", api_key="test")
+        thinking = ContentBlock(
+            type="thinking",
+            text="deep thought",
+            provider_metadata=p._provider_metadata(signature="signed-thinking"),
+        )
+        redacted = ContentBlock(
+            type="redacted_thinking",
+            data="encrypted-thinking",
+            provider_metadata=p._provider_metadata(data="encrypted-thinking"),
+        )
+
+        assert p._convert_content_block(thinking) == {
+            "type": "thinking",
+            "thinking": "deep thought",
+            "signature": "signed-thinking",
+        }
+        assert p._convert_content_block(redacted) == {
+            "type": "redacted_thinking",
+            "data": "encrypted-thinking",
+        }
+
+    def test_convert_thinking_does_not_echo_foreign_provider_metadata(self):
+        from iac_code.providers.base import ContentBlock
+
+        p = AnthropicProvider(model="claude-sonnet-5", api_key="test")
+        block = ContentBlock(
+            type="thinking",
+            text="deep thought",
+            provider_metadata={"provider": "other", "signature": "not-an-anthropic-signature"},
+        )
+
+        assert p._convert_content_block(block) is None
+
+    def test_anthropic_metadata_is_not_sent_to_minimax(self):
+        from iac_code.providers.base import ContentBlock
+        from iac_code.providers.minimax_provider import MiniMaxProvider
+
+        provider = MiniMaxProvider(model="MiniMax-M3", api_key="test")
+        blocks = [
+            ContentBlock(
+                type="thinking",
+                text="deep thought",
+                provider_metadata={"provider": "anthropic", "signature": "signed-thinking"},
+            ),
+            ContentBlock(
+                type="redacted_thinking",
+                data="encrypted-thinking",
+                provider_metadata={"provider": "anthropic", "data": "encrypted-thinking"},
+            ),
+        ]
+
+        assert provider._convert_message_content(blocks) == []
+
+    def test_anthropic_compatible_metadata_is_scoped_to_endpoint(self):
+        from iac_code.providers.base import ContentBlock
+
+        source = AnthropicProvider(
+            model="custom-model",
+            api_key="test",
+            base_url="https://first.example/v1",
+            provider_key="anthropic_compatible",
+        )
+        target = AnthropicProvider(
+            model="custom-model",
+            api_key="test",
+            base_url="https://second.example/v1",
+            provider_key="anthropic_compatible",
+        )
+        block = ContentBlock(
+            type="thinking",
+            text="deep thought",
+            provider_metadata=source._provider_metadata(signature="signed-thinking"),
+        )
+
+        assert target._convert_content_block(block) is None
+
+    def test_anthropic_metadata_is_scoped_to_wire_model(self):
+        from iac_code.providers.base import ContentBlock
+
+        source = AnthropicProvider(model="claude-fable-5", api_key="test")
+        target = AnthropicProvider(model="claude-sonnet-5", api_key="test")
+        thinking = ContentBlock(
+            type="thinking",
+            text="deep thought",
+            provider_metadata=source._provider_metadata(signature="signed-thinking"),
+        )
+        redacted = ContentBlock(
+            type="redacted_thinking",
+            data="encrypted-thinking",
+            provider_metadata=source._provider_metadata(data="encrypted-thinking"),
+        )
+
+        assert target._convert_message_content([thinking, redacted]) == []
+
+    def test_anthropic_model_alias_accepts_metadata_from_same_wire_model(self):
+        from iac_code.providers.base import ContentBlock
+
+        source = AnthropicProvider(model="claude-sonnet-4-6-1m", api_key="test")
+        target = AnthropicProvider(model="claude-sonnet-4-6", api_key="test")
+        block = ContentBlock(
+            type="thinking",
+            text="deep thought",
+            provider_metadata=source._provider_metadata(signature="signed-thinking"),
+        )
+
+        assert target._convert_content_block(block) == {
+            "type": "thinking",
+            "thinking": "deep thought",
+            "signature": "signed-thinking",
+        }
+
+    def test_convert_messages_drops_empty_assistant_after_foreign_thinking_is_filtered(self):
+        from iac_code.providers.base import ContentBlock, Message
+
+        provider = AnthropicProvider(model="claude-sonnet-5", api_key="test")
+        messages = [
+            Message.user("before"),
+            Message(
+                role="assistant",
+                content=[
+                    ContentBlock(
+                        type="thinking",
+                        text="old reasoning",
+                        provider_metadata={"provider": "other", "signature": "foreign"},
+                    )
+                ],
+            ),
+            Message.user("after"),
+        ]
+
+        assert provider._convert_messages(messages) == [{"role": "user", "content": "before\n\nafter"}]
+
+    def test_metadata_uses_sdk_endpoint_from_environment(self, monkeypatch):
+        from iac_code.providers.base import ContentBlock
+
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://first.example/v1")
+        source = AnthropicProvider(model="claude-sonnet-4-6", api_key="test")
+        block = ContentBlock(
+            type="thinking",
+            text="deep thought",
+            provider_metadata=source._provider_metadata(signature="signed-thinking"),
+        )
+
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://second.example/v1")
+        target = AnthropicProvider(model="claude-sonnet-4-6", api_key="test")
+
+        assert source._metadata_endpoint_id != target._metadata_endpoint_id
+        assert target._convert_content_block(block) is None
 
     def test_convert_unknown_block_type(self):
         from iac_code.providers.base import ContentBlock
@@ -104,20 +257,20 @@ class TestAnthropicProvider:
 
 
 class TestAnthropicBuildThinkingKwargs:
-    def test_high_returns_thinking_block_and_bumps_max(self):
+    def test_high_returns_adaptive_thinking_and_effort(self):
         from iac_code.providers.anthropic_provider import AnthropicProvider
 
         p = AnthropicProvider(model="claude-opus-4-7", api_key="k", effort="high")
         kwargs = p._build_thinking_kwargs()
-        assert kwargs == {"thinking": {"type": "enabled", "budget_tokens": 16384}}
-        assert p._adjust_max_tokens(8192) >= 16384 + 4096
+        assert kwargs == {"thinking": {"type": "adaptive"}, "output_config": {"effort": "high"}}
+        assert p._adjust_max_tokens(8192) == 8192
 
-    def test_max_uses_64k_budget(self):
+    def test_max_uses_adaptive_output_effort(self):
         from iac_code.providers.anthropic_provider import AnthropicProvider
 
         p = AnthropicProvider(model="claude-opus-4-7", api_key="k", effort="max")
-        assert p._build_thinking_kwargs()["thinking"]["budget_tokens"] == 64000
-        assert p._adjust_max_tokens(8192) >= 64000 + 4096
+        assert p._build_thinking_kwargs() == {"thinking": {"type": "adaptive"}, "output_config": {"effort": "max"}}
+        assert p._adjust_max_tokens(8192) == 8192
 
     def test_auto_returns_empty(self):
         from iac_code.providers.anthropic_provider import AnthropicProvider
@@ -137,10 +290,10 @@ class TestAnthropicBuildThinkingKwargs:
         from iac_code.providers.anthropic_provider import AnthropicProvider
 
         p = AnthropicProvider(model="claude-opus-4-7", api_key="k", thinking_enabled=True)
-        assert p._build_thinking_kwargs() == {"thinking": {"type": "enabled", "budget_tokens": 16384}}
-        assert p._adjust_max_tokens(8192) >= 16384 + 4096
+        assert p._build_thinking_kwargs() == {"thinking": {"type": "adaptive"}, "output_config": {"effort": "high"}}
+        assert p._adjust_max_tokens(8192) == 8192
 
-    def test_enabled_false_suppresses_effort_and_budget(self):
+    def test_enabled_false_disables_configurable_adaptive_thinking(self):
         from iac_code.providers.anthropic_provider import AnthropicProvider
 
         p = AnthropicProvider(
@@ -150,16 +303,92 @@ class TestAnthropicBuildThinkingKwargs:
             thinking_budget=2048,
             thinking_enabled=False,
         )
-        assert p._build_thinking_kwargs() == {}
+        assert p._build_thinking_kwargs() == {
+            "thinking": {"type": "disabled"},
+            "output_config": {"effort": "high"},
+        }
         assert p._adjust_max_tokens(8192) == 8192
 
-    def test_explicit_thinking_budget_enables_thinking_and_bumps_max(self):
+    def test_disabled_thinking_ignores_invalid_manual_budget(self):
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+
+        p = AnthropicProvider(
+            model="claude-sonnet-4-6",
+            api_key="k",
+            thinking_budget=1023,
+            thinking_enabled=False,
+        )
+
+        assert p._build_thinking_kwargs() == {"thinking": {"type": "disabled"}}
+        assert p._adjust_max_tokens(8192) == 8192
+
+    def test_explicit_thinking_budget_is_ignored_without_manual_budget_support(self):
         from iac_code.providers.anthropic_provider import AnthropicProvider
 
         p = AnthropicProvider(model="claude-opus-4-7", api_key="k", thinking_budget=2048)
 
+        assert p._build_thinking_kwargs() == {}
+        assert p._adjust_max_tokens(8192) == 8192
+
+    def test_claude_46_explicit_thinking_budget_uses_manual_mode(self):
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+
+        p = AnthropicProvider(model="claude-sonnet-4-6", api_key="k", thinking_budget=2048)
+
         assert p._build_thinking_kwargs() == {"thinking": {"type": "enabled", "budget_tokens": 2048}}
-        assert p._adjust_max_tokens(8192) >= 2048 + 4096
+        assert p._adjust_max_tokens(8192) == 8192
+
+    def test_claude_46_manual_budget_preserves_explicit_effort(self):
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+
+        p = AnthropicProvider(
+            model="claude-sonnet-4-6",
+            api_key="k",
+            thinking_budget=2048,
+            effort="low",
+        )
+
+        assert p._build_thinking_kwargs() == {
+            "thinking": {"type": "enabled", "budget_tokens": 2048},
+            "output_config": {"effort": "low"},
+        }
+
+    def test_claude_46_rejects_manual_thinking_budget_below_minimum(self):
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+
+        p = AnthropicProvider(model="claude-sonnet-4-6", api_key="k", thinking_budget=1023)
+
+        with pytest.raises(ValueError, match="at least 1024"):
+            p._build_thinking_kwargs()
+
+    def test_legacy_haiku_uses_budget_tokens(self):
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+
+        p = AnthropicProvider(model="claude-haiku-4-5-20251001", api_key="k", effort="high")
+
+        assert p._build_thinking_kwargs() == {"thinking": {"type": "enabled", "budget_tokens": 16384}}
+        assert p._adjust_max_tokens(8192) >= 16384 + 4096
+
+    def test_legacy_haiku_rejects_manual_thinking_budget_below_minimum(self):
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+
+        p = AnthropicProvider(model="claude-haiku-4-5-20251001", api_key="k", thinking_budget=1023)
+
+        with pytest.raises(ValueError, match="at least 1024"):
+            p._build_thinking_kwargs()
+
+    def test_always_on_adaptive_models_do_not_send_thinking_switch(self):
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+
+        p = AnthropicProvider(model="claude-fable-5", api_key="k", effort="high")
+
+        assert p._build_thinking_kwargs() == {"output_config": {"effort": "high"}}
+        assert AnthropicProvider(
+            model="claude-fable-5",
+            api_key="k",
+            effort="high",
+            thinking_enabled=False,
+        )._build_thinking_kwargs() == {"output_config": {"effort": "high"}}
 
 
 @pytest.mark.asyncio
@@ -277,6 +506,50 @@ class TestAnthropicStream:
         ev = next(e for e in out if e.type == "thinking_delta")
         assert ev.text == "reasoning..."
 
+    async def test_thinking_signature_and_redacted_block_are_preserved(self):
+        events = [
+            ns(type="message_start", message=ns(id="msg_signed")),
+            ns(type="content_block_start", index=0, content_block=ns(type="thinking", thinking="", signature="")),
+            ns(type="content_block_delta", index=0, delta=ns(type="thinking_delta", thinking="reasoning")),
+            ns(type="content_block_delta", index=0, delta=ns(type="signature_delta", signature="signed-")),
+            ns(type="content_block_delta", index=0, delta=ns(type="signature_delta", signature="thinking")),
+            ns(type="content_block_stop", index=0),
+            ns(
+                type="content_block_start",
+                index=1,
+                content_block=ns(type="redacted_thinking", data="encrypted-thinking"),
+            ),
+            ns(type="content_block_stop", index=1),
+        ]
+        final = ns(
+            usage=ns(input_tokens=1, output_tokens=1, cache_creation_input_tokens=0, cache_read_input_tokens=0),
+            stop_reason="end_turn",
+        )
+        provider = AnthropicProvider(
+            model="claude-sonnet-5",
+            client=FakeAnthropicClient(stream_events=events, stream_final=final),
+        )
+
+        out = [e async for e in provider.stream(messages=[Message.user("?")], system="")]
+        thinking_events = [event for event in out if event.type == "thinking_delta"]
+
+        assert [(event.block_index, event.block_type) for event in thinking_events] == [
+            (0, "thinking"),
+            (0, "thinking"),
+            (0, "thinking"),
+            (1, "redacted_thinking"),
+        ]
+        assert thinking_events[1].provider_metadata == {
+            "provider": "anthropic",
+            "model": "claude-sonnet-5",
+            "signature": "signed-",
+        }
+        assert thinking_events[-1].provider_metadata == {
+            "provider": "anthropic",
+            "model": "claude-sonnet-5",
+            "data": "encrypted-thinking",
+        }
+
 
 @pytest.mark.asyncio
 class TestAnthropicComplete:
@@ -317,3 +590,42 @@ class TestAnthropicComplete:
         assert result.text == "calling tool"
         assert result.tool_uses == [{"id": "toolu_9", "name": "bash", "input": {"cmd": "ls"}}]
         assert result.stop_reason == "tool_use"
+
+    async def test_thinking_signature_and_redacted_block_are_preserved(self):
+        response = ns(
+            id="msg_signed",
+            content=[
+                ns(type="thinking", thinking="reasoning", signature="signed-thinking"),
+                ns(type="redacted_thinking", data="encrypted-thinking"),
+                ns(type="text", text="answer"),
+            ],
+            usage=ns(input_tokens=2, output_tokens=3, cache_creation_input_tokens=0, cache_read_input_tokens=0),
+            stop_reason="end_turn",
+        )
+        provider = AnthropicProvider(
+            model="claude-sonnet-5",
+            client=FakeAnthropicClient(create_response=response),
+        )
+
+        result = await provider.complete(messages=[Message.user("?")], system="")
+
+        assert result.thinking == "reasoning"
+        assert result.thinking_blocks == [
+            {
+                "type": "thinking",
+                "text": "reasoning",
+                "provider_metadata": {
+                    "provider": "anthropic",
+                    "model": "claude-sonnet-5",
+                    "signature": "signed-thinking",
+                },
+            },
+            {
+                "type": "redacted_thinking",
+                "provider_metadata": {
+                    "provider": "anthropic",
+                    "model": "claude-sonnet-5",
+                    "data": "encrypted-thinking",
+                },
+            },
+        ]

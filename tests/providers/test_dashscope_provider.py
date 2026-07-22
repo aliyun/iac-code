@@ -6,6 +6,7 @@ from iac_code.agent.system_prompt import DYNAMIC_BOUNDARY
 from iac_code.providers.base import Message, ToolDefinition
 from iac_code.providers.dashscope_provider import (
     _EXPLICIT_CACHE_MODEL_PREFIXES,
+    _PRESERVE_THINKING_MODEL_PREFIXES,
     DASHSCOPE_BASE_URL,
     DashScopeProvider,
 )
@@ -64,7 +65,7 @@ class TestDashScopeBaseUrl:
 class TestDashScopeBuildThinkingKwargs:
     def test_qwen_returns_enable_thinking(self):
         p = DashScopeProvider(model="qwen3.6-plus", api_key="k")
-        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True}}
+        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True, "preserve_thinking": True}}
 
     def test_enabled_false_returns_disable_thinking(self):
         p = DashScopeProvider(model="qwen3.6-plus", api_key="k", thinking_enabled=False)
@@ -73,7 +74,7 @@ class TestDashScopeBuildThinkingKwargs:
     def test_qwen_with_effort_still_only_enable_thinking(self):
         # Bailian Qwen does not honor effort — provider ignores it gracefully.
         p = DashScopeProvider(model="qwen3.6-plus", api_key="k", effort="high")
-        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True}}
+        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True, "preserve_thinking": True}}
 
     def test_qwen_with_effort_none_disables_thinking(self):
         p = DashScopeProvider(model="qwen3.7-max", api_key="k", effort="none")
@@ -81,7 +82,28 @@ class TestDashScopeBuildThinkingKwargs:
 
     def test_kimi(self):
         p = DashScopeProvider(model="kimi-k2.6", api_key="k")
-        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True}}
+        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True, "preserve_thinking": True}}
+
+    def test_kimi_k3_preserves_thinking_without_enable_flag(self):
+        p = DashScopeProvider(model="kimi/kimi-k3", api_key="k")
+        assert p._build_thinking_kwargs() == {"extra_body": {"preserve_thinking": True}}
+
+    def test_qwen38_uses_always_on_thinking_without_enable_flag(self):
+        p = DashScopeProvider(
+            model="qwen3.8-max-preview",
+            api_key="k",
+            provider_key="dashscope_token_plan",
+        )
+        assert p._build_thinking_kwargs() == {"extra_body": {"preserve_thinking": True}}
+
+    @pytest.mark.parametrize("prefix", _PRESERVE_THINKING_MODEL_PREFIXES)
+    def test_documented_models_support_preserve_thinking(self, prefix):
+        p = DashScopeProvider(model=prefix, api_key="k")
+        assert p._supports_preserve_thinking()
+
+    def test_qwen36_flash_preserves_thinking_for_tool_loops(self):
+        p = DashScopeProvider(model="qwen3.6-flash", api_key="k")
+        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True, "preserve_thinking": True}}
 
     def test_glm(self):
         p = DashScopeProvider(model="glm-5.1", api_key="k")
@@ -105,7 +127,51 @@ class TestDashScopeBuildThinkingKwargs:
 
 @pytest.mark.asyncio
 class TestDashScopeThinkingBudgetRequestPolicy:
-    async def test_glm52_defaults_to_bounded_thinking_budget_and_max_completion_tokens(self):
+    async def test_qwen38_stream_uses_token_plan_always_on_payload(self):
+        chunks = [
+            ns(
+                usage=ns(prompt_tokens=1, completion_tokens=1),
+                choices=[ns(finish_reason="stop", delta=ns(content="ok", tool_calls=None))],
+            ),
+        ]
+        client = FakeOpenAIClient(stream_chunks=chunks)
+        provider = DashScopeProvider(
+            model="qwen3.8-max-preview",
+            api_key="k",
+            provider_key="dashscope_token_plan",
+            thinking_enabled=True,
+        )
+        provider._client = client
+
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="")]
+
+        call_kwargs = client.chat.completions.calls[0]
+        assert call_kwargs["extra_body"] == {"preserve_thinking": True}
+        assert call_kwargs["reasoning_effort"] == "xhigh"
+        assert "enable_thinking" not in call_kwargs["extra_body"]
+
+    async def test_qwen38_complete_default_omits_enable_thinking(self):
+        response = ns(
+            id="cmpl_qwen38",
+            choices=[ns(finish_reason="stop", message=ns(content="ok", tool_calls=None))],
+            usage=ns(prompt_tokens=1, completion_tokens=1),
+        )
+        client = FakeOpenAIClient(create_response=response)
+        provider = DashScopeProvider(
+            model="qwen3.8-max-preview",
+            api_key="k",
+            provider_key="dashscope_token_plan",
+        )
+        provider._client = client
+
+        await provider.complete(messages=[Message.user("hi")], system="")
+
+        call_kwargs = client.chat.completions.calls[0]
+        assert call_kwargs["extra_body"] == {"preserve_thinking": True}
+        assert "reasoning_effort" not in call_kwargs
+        assert "enable_thinking" not in call_kwargs["extra_body"]
+
+    async def test_glm52_uses_total_output_limit_without_qwen_thinking_budget(self):
         chunks = [
             ns(
                 usage=ns(prompt_tokens=1, completion_tokens=1),
@@ -119,9 +185,9 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
 
         call_kwargs = client.chat.completions.calls[0]
-        assert call_kwargs["max_completion_tokens"] == 16384
+        assert call_kwargs["max_completion_tokens"] == 8192
         assert "max_tokens" not in call_kwargs
-        assert call_kwargs["extra_body"] == {"enable_thinking": True, "thinking_budget": 8192}
+        assert call_kwargs["extra_body"] == {"enable_thinking": True}
         assert "reasoning_effort" not in call_kwargs
 
     async def test_glm52_enabled_false_disables_budget_and_max_completion_tokens(self):
@@ -159,7 +225,11 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         call_kwargs = client.chat.completions.calls[0]
         assert call_kwargs["max_completion_tokens"] == 16384
         assert "max_tokens" not in call_kwargs
-        assert call_kwargs["extra_body"] == {"enable_thinking": True, "thinking_budget": 8192}
+        assert call_kwargs["extra_body"] == {
+            "enable_thinking": True,
+            "preserve_thinking": True,
+            "thinking_budget": 8192,
+        }
         assert "reasoning_effort" not in call_kwargs
 
     async def test_qwen_request_policy_keeps_existing_max_tokens_behavior(self):
@@ -178,9 +248,9 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         call_kwargs = client.chat.completions.calls[0]
         assert call_kwargs["max_tokens"] == 8192
         assert "max_completion_tokens" not in call_kwargs
-        assert call_kwargs["extra_body"] == {"enable_thinking": True}
+        assert call_kwargs["extra_body"] == {"enable_thinking": True, "preserve_thinking": True}
 
-    async def test_token_plan_glm52_uses_same_bounded_request_policy(self):
+    async def test_token_plan_glm52_uses_same_budget_free_request_policy(self):
         chunks = [
             ns(
                 usage=ns(prompt_tokens=1, completion_tokens=1),
@@ -194,9 +264,9 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
 
         call_kwargs = client.chat.completions.calls[0]
-        assert call_kwargs["max_completion_tokens"] == 16384
+        assert call_kwargs["max_completion_tokens"] == 8192
         assert "max_tokens" not in call_kwargs
-        assert call_kwargs["extra_body"] == {"enable_thinking": True, "thinking_budget": 8192}
+        assert call_kwargs["extra_body"] == {"enable_thinking": True}
 
     async def test_glm52_uses_user_configured_reasoning_effort(self):
         chunks = [
@@ -213,6 +283,53 @@ class TestDashScopeThinkingBudgetRequestPolicy:
 
         call_kwargs = client.chat.completions.calls[0]
         assert call_kwargs["reasoning_effort"] == "low"
+
+    @pytest.mark.parametrize(
+        ("provider_key", "model"),
+        [
+            ("dashscope", "glm-5.1"),
+            ("dashscope_token_plan", "glm-5.1"),
+            ("dashscope_token_plan", "glm-5"),
+        ],
+    )
+    async def test_glm51_family_stream_uses_user_configured_reasoning_effort(self, provider_key, model):
+        chunks = [
+            ns(
+                usage=ns(prompt_tokens=1, completion_tokens=1),
+                choices=[ns(finish_reason="stop", delta=ns(content="ok", tool_calls=None))],
+            ),
+        ]
+        client = FakeOpenAIClient(stream_chunks=chunks)
+        provider = DashScopeProvider(model=model, api_key="k", provider_key=provider_key, effort="xhigh")
+        provider._client = client
+
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="")]
+
+        call_kwargs = client.chat.completions.calls[0]
+        assert call_kwargs["reasoning_effort"] == "xhigh"
+        assert call_kwargs["extra_body"]["enable_thinking"] is True
+
+    @pytest.mark.parametrize("model", ["glm-5.1", "glm-5"])
+    async def test_token_plan_glm51_family_complete_uses_user_configured_reasoning_effort(self, model):
+        response = ns(
+            id="cmpl_glm51",
+            choices=[ns(finish_reason="stop", message=ns(content="ok", tool_calls=None))],
+            usage=ns(prompt_tokens=1, completion_tokens=1),
+        )
+        client = FakeOpenAIClient(create_response=response)
+        provider = DashScopeProvider(
+            model=model,
+            api_key="k",
+            provider_key="dashscope_token_plan",
+            effort="high",
+        )
+        provider._client = client
+
+        await provider.complete(messages=[Message.user("hi")], system="")
+
+        call_kwargs = client.chat.completions.calls[0]
+        assert call_kwargs["reasoning_effort"] == "high"
+        assert call_kwargs["extra_body"]["enable_thinking"] is True
 
     async def test_kimi_k27_code_ignores_reasoning_effort(self):
         chunks = [
@@ -243,11 +360,11 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         await provider.complete(messages=[Message.user("hi")], system="", max_tokens=8192)
 
         call_kwargs = client.chat.completions.calls[0]
-        assert call_kwargs["max_completion_tokens"] == 16384
+        assert call_kwargs["max_completion_tokens"] == 8192
         assert "max_tokens" not in call_kwargs
-        assert call_kwargs["extra_body"] == {"enable_thinking": True, "thinking_budget": 8192}
+        assert call_kwargs["extra_body"] == {"enable_thinking": True}
 
-    async def test_configured_request_policy_overrides_default_request_payload(self):
+    async def test_glm52_ignores_unsupported_thinking_budget_but_uses_output_limit(self):
         chunks = [
             ns(
                 usage=ns(prompt_tokens=1, completion_tokens=1),
@@ -268,7 +385,7 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         call_kwargs = client.chat.completions.calls[0]
         assert call_kwargs["max_completion_tokens"] == 10000
         assert "max_tokens" not in call_kwargs
-        assert call_kwargs["extra_body"] == {"enable_thinking": True, "thinking_budget": 2048}
+        assert call_kwargs["extra_body"] == {"enable_thinking": True}
 
     async def test_float_request_policy_values_are_rejected_not_truncated(self):
         chunks = [
@@ -289,8 +406,8 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
 
         call_kwargs = client.chat.completions.calls[0]
-        assert call_kwargs["max_completion_tokens"] == 16384
-        assert call_kwargs["extra_body"] == {"enable_thinking": True, "thinking_budget": 8192}
+        assert call_kwargs["max_completion_tokens"] == 8192
+        assert call_kwargs["extra_body"] == {"enable_thinking": True}
 
 
 class TestDashScopeTokenPlanBaseUrl:
@@ -351,8 +468,9 @@ class TestDashScopeExplicitCache:
         p = DashScopeProvider(model=model, api_key="k")
         assert p._supports_explicit_cache()
 
-    def test_unsupported_model_returns_false(self):
-        p = DashScopeProvider(model="kimi-k2.6", api_key="k")
+    @pytest.mark.parametrize("model", ["kimi-k2.6", "kimi/kimi-k3"])
+    def test_unsupported_model_returns_false(self, model):
+        p = DashScopeProvider(model=model, api_key="k")
         assert not p._supports_explicit_cache()
 
     def test_unknown_model_returns_false(self):

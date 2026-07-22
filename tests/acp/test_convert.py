@@ -41,6 +41,14 @@ def test_thinking_delta_event_to_thought_chunk() -> None:
     assert updates[0].content.text == "Let me think..."
 
 
+def test_metadata_only_thinking_delta_is_not_exposed() -> None:
+    converter = ACPEventConverter(turn_id="turn-1")
+
+    updates = converter.event_to_updates(ThinkingDeltaEvent(text="", provider_metadata={"provider": "gemini"}))
+
+    assert updates == []
+
+
 # ---------------------------------------------------------------------------
 # ToolInputDeltaEvent accumulates args
 # ---------------------------------------------------------------------------

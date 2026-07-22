@@ -1,4 +1,11 @@
-from iac_code.types.stream_events import TOOL_RENDER_METADATA_KEY, MCPProgressEvent, ToolResultEvent, ToolUseStartEvent
+from iac_code.types.stream_events import (
+    TOOL_RENDER_METADATA_KEY,
+    MCPProgressEvent,
+    ThinkingDeltaEvent,
+    ToolResultEvent,
+    ToolUseEndEvent,
+    ToolUseStartEvent,
+)
 from iac_code.ui.stream_accumulator import StreamAccumulator
 
 
@@ -9,6 +16,26 @@ def test_tool_result_with_unknown_id_does_not_fallback_by_name() -> None:
     acc.process(ToolResultEvent(tool_use_id="stale-id", tool_name="read_file", result="wrong"))
 
     assert acc.tool_records["tool-a"].done is False
+
+
+def test_tool_end_replaces_partial_start_name() -> None:
+    acc = StreamAccumulator()
+    acc.process(ToolUseStartEvent(tool_use_id="tool-a", name="read_"))
+
+    acc.process(ToolUseEndEvent(tool_use_id="tool-a", name="read_file", input={"path": "main.py"}))
+
+    assert acc.tool_records["tool-a"].tool_name == "read_file"
+    assert acc.tool_records["tool-a"].tool_input == {"path": "main.py"}
+
+
+def test_metadata_only_thinking_does_not_start_ui_thinking_state() -> None:
+    acc = StreamAccumulator()
+
+    action = acc.process(ThinkingDeltaEvent(text="", provider_metadata={"provider": "gemini"}))
+
+    assert action == "none"
+    assert acc._thinking_start_time is None
+    assert acc.thinking_buffer == ""
 
 
 def test_orphan_tool_result_fallback_requires_unique_pending_tool_name() -> None:

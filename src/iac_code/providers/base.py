@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from iac_code.types.stream_events import StreamEvent, Usage
@@ -23,7 +23,7 @@ class ToolDefinition:
 class ContentBlock:
     """A block of content within a message."""
 
-    type: str  # "text", "tool_use", "tool_result", "thinking", "image"
+    type: str  # "text", "tool_use", "tool_result", "thinking", "redacted_thinking", "image"
     text: str | None = None
     tool_use_id: str | None = None
     name: str | None = None
@@ -32,6 +32,7 @@ class ContentBlock:
     is_error: bool = False
     media_type: str | None = None
     data: str | None = None
+    provider_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -88,6 +89,7 @@ class NonStreamingResponse:
     stop_reason: str
     usage: Usage
     thinking: str = ""
+    thinking_blocks: list[dict[str, Any]] = field(default_factory=list)
 
 
 class Provider(ABC):

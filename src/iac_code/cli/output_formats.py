@@ -26,6 +26,7 @@ from iac_code.types.stream_events import (
     SubAgentToolEvent,
     SubPipelineStreamEvent,
     TextDeltaEvent,
+    ThinkingDeltaEvent,
     ToolInputDeltaEvent,
     ToolResultEvent,
     ToolUseEndEvent,
@@ -88,6 +89,10 @@ def _sanitize_public_value(value: Any, *, public_path_roots: list[dict[str, str]
 
 def stream_json_event_data(event: StreamEvent) -> dict[str, Any]:
     """Return the public stream-json representation for a stream event."""
+    if isinstance(event, ThinkingDeltaEvent):
+        # Provider signatures and encrypted thinking payloads are internal
+        # round-trip state, not part of the public stream-json contract.
+        return {"text": event.text, "type": event.type}
     if isinstance(event, ToolUseStartEvent):
         return {
             "tool_use_id": event.tool_use_id,
@@ -205,9 +210,9 @@ class JsonWriter:
         elif isinstance(event, ToolUseStartEvent):
             self._tool_uses.setdefault(event.tool_use_id, {})["name"] = event.name
         elif isinstance(event, ToolUseEndEvent):
-            self._tool_uses.setdefault(event.tool_use_id, {})["input_summary"] = build_input_summary(
-                event.name, event.input
-            )
+            entry = self._tool_uses.setdefault(event.tool_use_id, {})
+            entry["name"] = event.name
+            entry["input_summary"] = build_input_summary(event.name, event.input)
         elif isinstance(event, ToolResultEvent):
             entry = self._tool_uses.setdefault(event.tool_use_id, {})
             entry["result"] = _public_tool_result(event)
@@ -250,6 +255,8 @@ class StreamJsonWriter:
         self._stream = stream or sys.stdout
 
     def handle(self, event: StreamEvent) -> None:
+        if isinstance(event, ThinkingDeltaEvent) and event.is_metadata_only:
+            return
         data = stream_json_event_data(event)
         self._stream.write(json.dumps(data, ensure_ascii=False, default=str))
         self._stream.write("\n")

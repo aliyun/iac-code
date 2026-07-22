@@ -1,11 +1,11 @@
-"""Tests for provider model updates captured in provider-model-research.md."""
+"""Tests for updates described by scripts/provider-update-guide.zh-CN.md."""
 
 from __future__ import annotations
 
 from iac_code.providers.kimi_provider import KimiProvider
 from iac_code.providers.minimax_provider import MiniMaxProvider
 from iac_code.providers.registry import PROVIDER_REGISTRY, ModelEntry
-from iac_code.providers.thinking import ThinkingFamily, get_thinking_spec
+from iac_code.providers.thinking import EffortLevel, ThinkingFamily, get_thinking_spec
 from iac_code.providers.zhipu_provider import ZhiPuProvider
 
 
@@ -34,11 +34,13 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
         "qwen-flash",
         "deepseek-v4-pro",
         "deepseek-v4-flash",
+        "kimi/kimi-k3",
         "kimi-k2.7-code",
         "kimi-k2.6",
         "kimi-k2.5",
         "glm-5.2",
         "glm-5.1",
+        "MiniMax/MiniMax-M3",
         "MiniMax-M2.5",
     ):
         assert model_id in models
@@ -57,14 +59,19 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
         "qwen3.5-plus",
         "qwen3.5-flash",
         "kimi-k2.7-code",
+        "MiniMax/MiniMax-M3",
     ):
         assert _model_entry("dashscope", model_id).support_multimodal
+    # The public adapter can only send local attachments as data URLs, but
+    # Moonshot-hosted K3 on DashScope accepts public image URLs only.
+    assert not _model_entry("dashscope", "kimi/kimi-k3").support_multimodal
 
 
 def test_dashscope_token_plan_uses_exact_supported_chat_models() -> None:
     models = _model_ids("dashscope_token_plan")
 
     for model_id in (
+        "qwen3.8-max-preview",
         "qwen3.7-max",
         "qwen3.7-plus",
         "qwen3.6-plus",
@@ -84,43 +91,58 @@ def test_dashscope_token_plan_uses_exact_supported_chat_models() -> None:
 
     assert "glm-5-turbo" not in models
     assert "MiniMax-M2.7" not in models
-    assert PROVIDER_REGISTRY["dashscope_token_plan"].default_model == "qwen3.7-max"
+    assert PROVIDER_REGISTRY["dashscope_token_plan"].default_model == "qwen3.8-max-preview"
+    assert _model_entry("dashscope_token_plan", "qwen3.8-max-preview").support_multimodal
     assert not _model_entry("dashscope_token_plan", "qwen3.7-max").support_multimodal
     for model_id in ("qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash", "kimi-k2.7-code", "kimi-k2.5", "kimi-k2.6"):
         assert _model_entry("dashscope_token_plan", model_id).support_multimodal
 
 
 def test_openai_azure_anthropic_and_gemini_models_are_updated() -> None:
-    for model_id in ("gpt-5.5-pro", "gpt-5.4-pro", "gpt-5.4-nano"):
+    for model_id in (
+        "gpt-5.6-sol",
+        "gpt-5.6",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.3-codex",
+        "gpt-5.2",
+    ):
         assert model_id in _model_ids("openai")
         assert get_thinking_spec("openai", model_id).family is ThinkingFamily.OPENAI
 
-    expected_azure = {
-        "gpt-5.5",
-        "gpt-5.4",
-        "gpt-5.4-pro",
-        "gpt-5.4-mini",
-        "gpt-5.4-nano",
-        "gpt-5.3-codex",
-        "gpt-5.2-codex",
-        "gpt-5.2",
-    }
-    assert set(_model_ids("azure_openai")) == expected_azure
-    assert PROVIDER_REGISTRY["azure_openai"].default_model == "gpt-5.5"
-    assert get_thinking_spec("azure_openai", "gpt-5.4-pro").family is ThinkingFamily.OPENAI
+    for responses_only_model in ("gpt-5.5-pro", "gpt-5.4-pro", "gpt-5.2-pro"):
+        assert responses_only_model not in _model_ids("openai")
+        assert get_thinking_spec("openai", responses_only_model).family is ThinkingFamily.NONE
 
-    assert PROVIDER_REGISTRY["anthropic"].default_model == "claude-opus-4-8"
-    assert get_thinking_spec("anthropic", "claude-opus-4-8").family is ThinkingFamily.ANTHROPIC
+    assert PROVIDER_REGISTRY["openai"].default_model == "gpt-5.6-sol"
 
-    assert "gemini-3.1-pro-preview-customtools" in _model_ids("gemini")
+    assert _model_ids("azure_openai") == []
+    assert PROVIDER_REGISTRY["azure_openai"].default_model == ""
+
+    assert PROVIDER_REGISTRY["anthropic"].default_model == "claude-fable-5"
+    assert get_thinking_spec("anthropic", "claude-fable-5").family is ThinkingFamily.ANTHROPIC_ADAPTIVE
+    assert get_thinking_spec("anthropic", "claude-opus-4-8").family is ThinkingFamily.ANTHROPIC_ADAPTIVE
+    assert get_thinking_spec("anthropic", "claude-sonnet-5").family is ThinkingFamily.ANTHROPIC_ADAPTIVE
+
+    for model_id in ("gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview-customtools"):
+        assert model_id in _model_ids("gemini")
+        assert _model_entry("gemini", model_id).support_multimodal
+        assert get_thinking_spec("gemini", model_id).family is ThinkingFamily.GEMINI
+    assert PROVIDER_REGISTRY["gemini"].default_model == "gemini-3.6-flash"
+    assert "gemini-3.1-flash-lite-preview" not in _model_ids("gemini")
+    assert "gemini-2.0-flash" not in _model_ids("gemini")
     assert get_thinking_spec("gemini", "gemini-2.5-flash-lite").family is ThinkingFamily.GEMINI
 
 
 def test_direct_kimi_minimax_and_zhipu_models_are_updated() -> None:
     for provider_key in ("kimi_cn", "kimi_intl"):
-        assert PROVIDER_REGISTRY[provider_key].default_model == "kimi-k2.7-code"
+        assert PROVIDER_REGISTRY[provider_key].default_model == "kimi-k3"
+        assert "kimi-k3" in _model_ids(provider_key)
         assert "kimi-k2.7-code" in _model_ids(provider_key)
+        assert "kimi-k2.7-code-highspeed" in _model_ids(provider_key)
+        assert _model_entry(provider_key, "kimi-k3").support_multimodal
         assert _model_entry(provider_key, "kimi-k2.7-code").support_multimodal
+        assert get_thinking_spec(provider_key, "kimi-k3").family is ThinkingFamily.KIMI
         assert get_thinking_spec(provider_key, "kimi-k2.6").family is ThinkingFamily.KIMI
 
     for provider_key in ("minimax_cn", "minimax_intl"):
@@ -145,9 +167,32 @@ def test_provider_specific_thinking_wire_formats_do_not_use_openai_or_anthropic_
     kimi = KimiProvider(model="kimi-k2.6", api_key="k", effort="high")
     assert kimi._build_thinking_kwargs() == {"extra_body": {"thinking": {"type": "enabled"}}}
     assert KimiProvider(model="kimi-k2.7-code", api_key="k", effort="high")._build_thinking_kwargs() == {}
+    assert KimiProvider(model="kimi-k2.7-code-highspeed", api_key="k", effort="high")._build_thinking_kwargs() == {}
+    assert KimiProvider(model="kimi-k2.7-code", api_key="k", thinking_enabled=False)._build_thinking_kwargs() == {}
+    assert (
+        KimiProvider(model="kimi-k2.7-code-highspeed", api_key="k", thinking_enabled=False)._build_thinking_kwargs()
+        == {}
+    )
+    assert KimiProvider(model="kimi-k3", api_key="k", effort="high")._build_thinking_kwargs() == {
+        "reasoning_effort": "high"
+    }
 
     zhipu = ZhiPuProvider(model="glm-5.1", api_key="k", effort="high")
     assert zhipu._build_thinking_kwargs() == {"extra_body": {"thinking": {"type": "enabled"}}}
+    assert ZhiPuProvider(model="glm-5.2", api_key="k", effort="high")._build_thinking_kwargs() == {
+        "extra_body": {"thinking": {"type": "enabled"}},
+        "reasoning_effort": "high",
+    }
+    assert ZhiPuProvider(model="glm-5.2", api_key="k", effort="max")._build_thinking_kwargs() == {
+        "extra_body": {"thinking": {"type": "enabled"}},
+        "reasoning_effort": "max",
+    }
+    assert ZhiPuProvider(model="glm-5.2", api_key="k")._build_thinking_kwargs() == {
+        "extra_body": {"thinking": {"type": "enabled"}}
+    }
+    assert ZhiPuProvider(model="glm-5.2", api_key="k", thinking_enabled=False)._build_thinking_kwargs() == {
+        "extra_body": {"thinking": {"type": "disabled"}}
+    }
 
     minimax = MiniMaxProvider(model="MiniMax-M3", api_key="k", effort="high")
     assert minimax._build_thinking_kwargs() == {"thinking": {"type": "adaptive"}}
@@ -169,11 +214,11 @@ def test_provider_specific_thinking_enabled_false_disables_native_wire_formats()
     }
 
 
-def test_gemini_thinking_enabled_uses_default_effort_and_false_suppresses() -> None:
+def test_gemini_thinking_rules_match_each_model_generation() -> None:
     from iac_code.providers.gemini_provider import GeminiProvider
 
     assert GeminiProvider(model="gemini-2.5-pro", api_key="k", thinking_enabled=True)._build_thinking_kwargs() == {
-        "reasoning_effort": "medium"
+        "reasoning_effort": "high"
     }
     assert (
         GeminiProvider(
@@ -184,3 +229,79 @@ def test_gemini_thinking_enabled_uses_default_effort_and_false_suppresses() -> N
         )._build_thinking_kwargs()
         == {}
     )
+    assert GeminiProvider(model="gemini-2.5-flash", api_key="k", thinking_enabled=False)._build_thinking_kwargs() == {
+        "reasoning_effort": "none"
+    }
+    assert GeminiProvider(model="gemini-2.5-flash", api_key="k", effort="minimal")._build_thinking_kwargs() == {
+        "reasoning_effort": "minimal"
+    }
+    assert GeminiProvider(
+        model="gemini-3.1-flash-lite",
+        api_key="k",
+        thinking_enabled=True,
+    )._build_thinking_kwargs() == {"reasoning_effort": "minimal"}
+    assert GeminiProvider(model="gemini-3.6-flash", api_key="k", effort="low")._build_thinking_kwargs() == {
+        "reasoning_effort": "low"
+    }
+    assert GeminiProvider(model="gemini-3.5-flash-lite", api_key="k", effort="low")._build_thinking_kwargs() == {
+        "reasoning_effort": "low"
+    }
+
+    flash_lite = get_thinking_spec("gemini", "gemini-3.1-flash-lite")
+    assert flash_lite.default_effort is EffortLevel.MINIMAL
+    assert flash_lite.supports_disable is False
+
+
+def test_anthropic_effort_and_disable_rules_are_model_specific() -> None:
+    from iac_code.providers.anthropic_provider import AnthropicProvider
+
+    sonnet_5 = get_thinking_spec("anthropic", "claude-sonnet-5")
+    assert sonnet_5.adaptive_always_on is False
+    assert AnthropicProvider(
+        model="claude-sonnet-5",
+        api_key="k",
+        thinking_enabled=False,
+    )._build_thinking_kwargs() == {"thinking": {"type": "disabled"}}
+
+    opus_46 = get_thinking_spec("anthropic", "claude-opus-4-6")
+    assert EffortLevel.XHIGH not in opus_46.allowed_efforts
+    assert EffortLevel.MAX in opus_46.allowed_efforts
+    assert opus_46.supports_thinking_budget is True
+
+
+def test_dashscope_new_model_protocols_are_not_flattened() -> None:
+    from iac_code.providers.dashscope_provider import DashScopeProvider
+
+    qwen = get_thinking_spec("dashscope_token_plan", "qwen3.8-max-preview")
+    assert qwen.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.XHIGH)
+    assert qwen.default_effort is EffortLevel.XHIGH
+    assert qwen.supports_disable is False
+    assert DashScopeProvider(
+        model="qwen3.8-max-preview",
+        api_key="k",
+        provider_key="dashscope_token_plan",
+        thinking_enabled=False,
+    )._build_thinking_kwargs() == {"extra_body": {"preserve_thinking": True}}
+    assert DashScopeProvider(
+        model="qwen3.8-max-preview",
+        api_key="k",
+        provider_key="dashscope_token_plan",
+        thinking_enabled=True,
+    )._build_thinking_kwargs() == {
+        "extra_body": {"preserve_thinking": True},
+        "reasoning_effort": "xhigh",
+    }
+
+    assert DashScopeProvider(
+        model="kimi/kimi-k3",
+        api_key="k",
+        thinking_enabled=True,
+    )._build_thinking_kwargs() == {
+        "extra_body": {"preserve_thinking": True},
+        "reasoning_effort": "max",
+    }
+    assert DashScopeProvider(
+        model="MiniMax/MiniMax-M3",
+        api_key="k",
+        thinking_enabled=False,
+    )._build_thinking_kwargs() == {"extra_body": {"thinking": {"type": "disabled"}}}

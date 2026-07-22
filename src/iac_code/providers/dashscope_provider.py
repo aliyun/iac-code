@@ -17,6 +17,7 @@ DASHSCOPE_TOKEN_PLAN_BASE_URL = "https://token-plan.cn-beijing.maas.aliyuncs.com
 # Prefix-matched against the model name.  Extend when new models are added.
 # Ref: https://help.aliyun.com/zh/model-studio/context-cache
 _EXPLICIT_CACHE_MODEL_PREFIXES: tuple[str, ...] = (
+    "qwen3.8-max-preview",
     "qwen3.7-max",
     "qwen3.7-plus",
     "qwen3-coder-plus",
@@ -27,6 +28,22 @@ _EXPLICIT_CACHE_MODEL_PREFIXES: tuple[str, ...] = (
     "qwen3.5-flash",
     "qwen3.6-flash",
     "qwen-flash",
+)
+
+# Models documented to accept extra_body.preserve_thinking. Keep this list
+# separate from thinking support: sending the parameter to other models fails.
+_PRESERVE_THINKING_MODEL_PREFIXES: tuple[str, ...] = (
+    "qwen3.8-max-preview",
+    "qwen3.7-max",
+    "qwen3.7-plus",
+    "qwen3.6-max-preview",
+    "qwen3.6-plus",
+    "qwen3.6-flash",
+    "kimi-k2.7-code",
+    "kimi-k2.6",
+    "kimi/kimi-k3",
+    "kimi/kimi-k2.7-code",
+    "kimi/kimi-k2.6",
 )
 
 _RECALLED_MEMORY_REMINDER_PREFIX = f"<system-reminder>\n{RECALLED_MEMORY_MARKER}:"
@@ -125,12 +142,32 @@ class DashScopeProvider(OpenAIProvider):
 
     def _build_thinking_kwargs(self) -> dict[str, Any]:
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
+        if spec.family is ThinkingFamily.MINIMAX:
+            thinking_type = "disabled" if self._thinking_disabled() else "adaptive"
+            return {"extra_body": {"thinking": {"type": thinking_type}}}
         if spec.family is not ThinkingFamily.DASHSCOPE:
             return {}
         effort = normalize_effort(self._effort)
-        if self._thinking_disabled() or effort in _DISABLE_THINKING_EFFORTS:
+        allowed = {e.value for e in spec.allowed_efforts}
+        if self._model in {"kimi/kimi-k3", "qwen3.8-max-preview"}:
+            kwargs: dict[str, Any] = {"extra_body": {"preserve_thinking": True}}
+            if self._thinking_disabled():
+                return kwargs
+            if effort in {None, "auto"} and self._thinking_forced() and spec.default_effort is not None:
+                effort = spec.default_effort.value
+            if effort in allowed:
+                kwargs["reasoning_effort"] = effort
+            elif effort not in {None, "auto"} and spec.default_effort is not None:
+                kwargs["reasoning_effort"] = spec.default_effort.value
+            return kwargs
+        disabled_by_effort = effort in _DISABLE_THINKING_EFFORTS and effort not in allowed
+        if self._thinking_disabled() or disabled_by_effort:
+            if not spec.supports_disable:
+                return self._preserve_thinking_kwargs()
             return {"extra_body": {"enable_thinking": False}}
         extra_body: dict[str, Any] = {"enable_thinking": True}
+        if self._supports_preserve_thinking():
+            extra_body["preserve_thinking"] = True
         thinking_budget = self._effective_thinking_budget()
         if thinking_budget is not None:
             extra_body["thinking_budget"] = thinking_budget
@@ -138,14 +175,23 @@ class DashScopeProvider(OpenAIProvider):
         kwargs: dict[str, Any] = {"extra_body": extra_body}
         if not spec.uses_reasoning_effort_param:
             return kwargs
+        if effort in {None, "auto"} and self._thinking_forced() and spec.default_effort is not None:
+            effort = spec.default_effort.value
         if effort is None or effort == "auto":
             return kwargs
-        allowed = {e.value for e in spec.allowed_efforts}
         if effort in allowed:
             kwargs["reasoning_effort"] = effort
         elif spec.default_effort is not None:
             kwargs["reasoning_effort"] = spec.default_effort.value
         return kwargs
+
+    def _supports_preserve_thinking(self) -> bool:
+        return self._model.startswith(_PRESERVE_THINKING_MODEL_PREFIXES)
+
+    def _preserve_thinking_kwargs(self) -> dict[str, Any]:
+        if not self._supports_preserve_thinking():
+            return {}
+        return {"extra_body": {"preserve_thinking": True}}
 
 
 def _mark_message_content_cacheable(msg: dict[str, Any]) -> None:

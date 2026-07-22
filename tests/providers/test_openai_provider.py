@@ -66,6 +66,126 @@ class TestOpenAIProvider:
         assert api[0]["content"] == "hello"
         assert api[0]["reasoning_content"] == "my reasoning"
 
+    def test_gemini_tool_call_echoes_thought_signature(self):
+        from iac_code.providers.base import ContentBlock
+        from iac_code.providers.gemini_provider import GeminiProvider
+
+        provider = GeminiProvider(model="gemini-3-flash-preview", api_key="test")
+        provider_metadata = provider._gemini_provider_metadata({"google": {"thought_signature": "signed-thought"}})
+        blocks = [
+            ContentBlock(
+                type="tool_use",
+                tool_use_id="call_1",
+                name="bash",
+                input={"cmd": "ls"},
+                provider_metadata=provider_metadata,
+            )
+        ]
+
+        api = provider._convert_content_blocks("assistant", blocks)
+
+        assert api[0]["tool_calls"][0]["extra_content"] == {"google": {"thought_signature": "signed-thought"}}
+
+    def test_gemini_message_echoes_non_tool_thought_signature(self):
+        from iac_code.providers.base import ContentBlock
+        from iac_code.providers.gemini_provider import GeminiProvider
+
+        provider = GeminiProvider(model="gemini-3-flash-preview", api_key="test")
+        provider_metadata = provider._gemini_provider_metadata({"google": {"thought_signature": "signed-text-thought"}})
+        blocks = [
+            ContentBlock(
+                type="thinking",
+                text="",
+                provider_metadata=provider_metadata,
+            ),
+            ContentBlock(type="text", text="answer"),
+        ]
+
+        api = provider._convert_content_blocks("assistant", blocks)
+
+        assert api == [
+            {
+                "role": "assistant",
+                "content": "answer",
+                "extra_content": {"google": {"thought_signature": "signed-text-thought"}},
+            }
+        ]
+
+    def test_gemini_metadata_is_scoped_to_endpoint(self):
+        from iac_code.providers.base import ContentBlock
+        from iac_code.providers.gemini_provider import GeminiProvider
+
+        source = GeminiProvider(
+            model="gemini-3-flash-preview",
+            api_key="test",
+            base_url="https://first.example/v1",
+        )
+        target = GeminiProvider(
+            model="gemini-3-flash-preview",
+            api_key="test",
+            base_url="https://second.example/v1",
+        )
+        blocks = [
+            ContentBlock(
+                type="tool_use",
+                tool_use_id="call_1",
+                name="bash",
+                input={},
+                provider_metadata=source._gemini_provider_metadata({"google": {"thought_signature": "signed-thought"}}),
+            )
+        ]
+
+        api = target._convert_content_blocks("assistant", blocks)
+
+        assert "extra_content" not in api[0]["tool_calls"][0]
+
+    def test_gemini_metadata_is_scoped_to_model(self):
+        from iac_code.providers.base import ContentBlock
+        from iac_code.providers.gemini_provider import GeminiProvider
+
+        source = GeminiProvider(model="gemini-3-flash-preview", api_key="test")
+        target = GeminiProvider(model="gemini-3.1-pro-preview", api_key="test")
+        provider_metadata = source._gemini_provider_metadata(
+            {"google": {"thought_signature": "signed-for-source-model"}}
+        )
+        blocks = [
+            ContentBlock(type="thinking", text="", provider_metadata=provider_metadata),
+            ContentBlock(type="text", text="answer"),
+            ContentBlock(
+                type="tool_use",
+                tool_use_id="call_1",
+                name="bash",
+                input={},
+                provider_metadata=provider_metadata,
+            ),
+        ]
+
+        api = target._convert_content_blocks("assistant", blocks)
+
+        assert "extra_content" not in api[0]
+        assert "extra_content" not in api[0]["tool_calls"][0]
+
+    def test_non_gemini_provider_does_not_echo_gemini_metadata(self):
+        from iac_code.providers.base import ContentBlock
+
+        provider = OpenAIProvider(model="gpt-5.4", api_key="test")
+        blocks = [
+            ContentBlock(
+                type="tool_use",
+                tool_use_id="call_1",
+                name="bash",
+                input={},
+                provider_metadata={
+                    "provider": "gemini",
+                    "extra_content": {"google": {"thought_signature": "signed-thought"}},
+                },
+            )
+        ]
+
+        api = provider._convert_content_blocks("assistant", blocks)
+
+        assert "extra_content" not in api[0]["tool_calls"][0]
+
     def test_convert_multiple_messages(self):
         p = OpenAIProvider(model="gpt-4.1", api_key="test")
         msgs = [
@@ -81,23 +201,17 @@ class TestOpenAIProvider:
 
 
 class TestOpenAIBuildThinkingKwargs:
-    def test_medium_returns_reasoning_effort_and_extra_body(self):
+    def test_medium_returns_reasoning_effort(self):
         from iac_code.providers.openai_provider import OpenAIProvider
 
         p = OpenAIProvider(model="gpt-5.5", api_key="k", effort="medium")
-        assert p._build_thinking_kwargs() == {
-            "reasoning_effort": "medium",
-            "extra_body": {"thinking": {"type": "enabled"}},
-        }
+        assert p._build_thinking_kwargs() == {"reasoning_effort": "medium"}
 
     def test_xhigh_returns_extras(self):
         from iac_code.providers.openai_provider import OpenAIProvider
 
         p = OpenAIProvider(model="gpt-5.5", api_key="k", effort="xhigh")
-        assert p._build_thinking_kwargs() == {
-            "reasoning_effort": "xhigh",
-            "extra_body": {"thinking": {"type": "enabled"}},
-        }
+        assert p._build_thinking_kwargs() == {"reasoning_effort": "xhigh"}
 
     def test_no_effort_returns_empty(self):
         from iac_code.providers.openai_provider import OpenAIProvider
@@ -109,15 +223,21 @@ class TestOpenAIBuildThinkingKwargs:
         from iac_code.providers.openai_provider import OpenAIProvider
 
         p = OpenAIProvider(model="gpt-5.5", api_key="k", thinking_enabled=True)
-        assert p._build_thinking_kwargs() == {
-            "reasoning_effort": "high",
-            "extra_body": {"thinking": {"type": "enabled"}},
-        }
+        assert p._build_thinking_kwargs() == {"reasoning_effort": "medium"}
 
-    def test_enabled_false_suppresses_effort(self):
+    def test_enabled_false_sends_none_when_model_supports_it(self):
         from iac_code.providers.openai_provider import OpenAIProvider
 
         p = OpenAIProvider(model="gpt-5.5", api_key="k", effort="high", thinking_enabled=False)
+        assert p._build_thinking_kwargs() == {"reasoning_effort": "none"}
+
+        latest = OpenAIProvider(model="gpt-5.6", api_key="k", thinking_enabled=False)
+        assert latest._build_thinking_kwargs() == {"reasoning_effort": "none"}
+
+    def test_enabled_false_omits_effort_when_model_cannot_disable_reasoning(self):
+        from iac_code.providers.openai_provider import OpenAIProvider
+
+        p = OpenAIProvider(model="o3", api_key="k", effort="high", thinking_enabled=False)
         assert p._build_thinking_kwargs() == {}
 
     def test_auto_returns_empty(self):
@@ -130,10 +250,7 @@ class TestOpenAIBuildThinkingKwargs:
         from iac_code.providers.openai_provider import OpenAIProvider
 
         p = OpenAIProvider(model="gpt-5.5", api_key="k", effort="ultra")
-        assert p._build_thinking_kwargs() == {
-            "reasoning_effort": "high",
-            "extra_body": {"thinking": {"type": "enabled"}},
-        }
+        assert p._build_thinking_kwargs() == {"reasoning_effort": "medium"}
 
     def test_unknown_model_returns_empty(self):
         from iac_code.providers.openai_provider import OpenAIProvider
@@ -241,6 +358,281 @@ class TestOpenAIStream:
         assert end_tool.tool_use_id == "call_1"
         assert end_tool.input == {"cmd": "ls"}
         assert out[-1].stop_reason == "tool_use"
+
+    async def test_tool_call_waits_for_late_id_before_emitting_events(self):
+        chunks = [
+            ns(
+                usage=None,
+                choices=[
+                    ns(
+                        finish_reason=None,
+                        delta=ns(
+                            content=None,
+                            tool_calls=[
+                                ns(
+                                    index=0,
+                                    id=None,
+                                    function=ns(name="bash", arguments='{"cmd":'),
+                                )
+                            ],
+                        ),
+                    )
+                ],
+            ),
+            ns(
+                usage=None,
+                choices=[
+                    ns(
+                        finish_reason=None,
+                        delta=ns(
+                            content=None,
+                            tool_calls=[
+                                ns(
+                                    index=0,
+                                    id="call_late",
+                                    function=ns(name=None, arguments='"ls"}'),
+                                )
+                            ],
+                        ),
+                    )
+                ],
+            ),
+            ns(
+                usage=ns(prompt_tokens=5, completion_tokens=3),
+                choices=[ns(finish_reason="tool_calls", delta=ns(content=None, tool_calls=None))],
+            ),
+        ]
+        provider = OpenAIProvider(model="gpt-4.1", client=FakeOpenAIClient(stream_chunks=chunks))
+
+        out = [e async for e in provider.stream(messages=[Message.user("run")], system="")]
+
+        tool_events = [event for event in out if event.type.startswith("tool_")]
+        assert [event.type for event in tool_events] == [
+            "tool_use_start",
+            "tool_input_delta",
+            "tool_use_end",
+        ]
+        assert {event.tool_use_id for event in tool_events} == {"call_late"}
+        assert tool_events[-1].input == {"cmd": "ls"}
+
+    @pytest.mark.parametrize(
+        ("name_parts", "expected_name"),
+        [
+            (("get_", "weather"), "get_weather"),
+            (("a", "abc"), "aabc"),
+        ],
+    )
+    async def test_tool_call_accumulates_fragmented_function_name(self, name_parts, expected_name):
+        chunks = [
+            ns(
+                usage=None,
+                choices=[
+                    ns(
+                        finish_reason=None,
+                        delta=ns(
+                            content=None,
+                            tool_calls=[ns(index=0, id="call_1", function=ns(name=name_parts[0], arguments=None))],
+                        ),
+                    )
+                ],
+            ),
+            ns(
+                usage=None,
+                choices=[
+                    ns(
+                        finish_reason=None,
+                        delta=ns(
+                            content=None,
+                            tool_calls=[ns(index=0, id=None, function=ns(name=name_parts[1], arguments="{}"))],
+                        ),
+                    )
+                ],
+            ),
+            ns(
+                usage=ns(prompt_tokens=3, completion_tokens=2),
+                choices=[ns(finish_reason="tool_calls", delta=ns(content=None, tool_calls=None))],
+            ),
+        ]
+        provider = OpenAIProvider(model="gpt-4.1", client=FakeOpenAIClient(stream_chunks=chunks))
+
+        out = [event async for event in provider.stream(messages=[Message.user("run")], system="")]
+
+        start = next(event for event in out if event.type == "tool_use_start")
+        end = next(event for event in out if event.type == "tool_use_end")
+        assert start.name == expected_name
+        assert end.name == expected_name
+        assert end.input == {}
+
+    async def test_tool_call_does_not_start_while_name_and_arguments_are_both_fragmenting(self):
+        chunks = [
+            ns(
+                usage=None,
+                choices=[
+                    ns(
+                        finish_reason=None,
+                        delta=ns(
+                            content=None,
+                            tool_calls=[ns(index=0, id="call_1", function=ns(name="read_", arguments="{"))],
+                        ),
+                    )
+                ],
+            ),
+            ns(
+                usage=None,
+                choices=[
+                    ns(
+                        finish_reason=None,
+                        delta=ns(
+                            content=None,
+                            tool_calls=[ns(index=0, id=None, function=ns(name="file", arguments='"path":"main.py"}'))],
+                        ),
+                    )
+                ],
+            ),
+            ns(
+                usage=ns(prompt_tokens=3, completion_tokens=2),
+                choices=[ns(finish_reason="tool_calls", delta=ns(content=None, tool_calls=None))],
+            ),
+        ]
+        provider = OpenAIProvider(model="gpt-4.1", client=FakeOpenAIClient(stream_chunks=chunks))
+
+        out = [event async for event in provider.stream(messages=[Message.user("run")], system="")]
+
+        start = next(event for event in out if event.type == "tool_use_start")
+        end = next(event for event in out if event.type == "tool_use_end")
+        assert start.name == "read_file"
+        assert end.name == "read_file"
+        assert end.input == {"path": "main.py"}
+
+    async def test_parallel_tool_calls_start_in_api_index_order(self):
+        chunks = [
+            ns(
+                usage=None,
+                choices=[
+                    ns(
+                        finish_reason=None,
+                        delta=ns(
+                            content=None,
+                            tool_calls=[
+                                ns(index=0, id="call_0", function=ns(name="write_a", arguments=None)),
+                                ns(index=1, id="call_1", function=ns(name="write_b", arguments=None)),
+                            ],
+                        ),
+                    )
+                ],
+            ),
+            ns(
+                usage=None,
+                choices=[
+                    ns(
+                        finish_reason=None,
+                        delta=ns(
+                            content=None,
+                            tool_calls=[ns(index=1, id=None, function=ns(name=None, arguments="{}"))],
+                        ),
+                    )
+                ],
+            ),
+            ns(
+                usage=None,
+                choices=[
+                    ns(
+                        finish_reason=None,
+                        delta=ns(
+                            content=None,
+                            tool_calls=[ns(index=0, id=None, function=ns(name=None, arguments="{}"))],
+                        ),
+                    )
+                ],
+            ),
+            ns(
+                usage=ns(prompt_tokens=3, completion_tokens=2),
+                choices=[ns(finish_reason="tool_calls", delta=ns(content=None, tool_calls=None))],
+            ),
+        ]
+        provider = OpenAIProvider(model="gpt-4.1", client=FakeOpenAIClient(stream_chunks=chunks))
+
+        out = [event async for event in provider.stream(messages=[Message.user("run")], system="")]
+
+        starts = [event for event in out if event.type == "tool_use_start"]
+        ends = [event for event in out if event.type == "tool_use_end"]
+        assert [event.tool_use_id for event in starts] == ["call_0", "call_1"]
+        assert [event.tool_use_id for event in ends] == ["call_0", "call_1"]
+
+    async def test_gemini_tool_call_preserves_thought_signature(self):
+        from iac_code.providers.gemini_provider import GeminiProvider
+
+        chunks = [
+            ns(
+                usage=None,
+                choices=[
+                    ns(
+                        finish_reason=None,
+                        delta=ns(
+                            content=None,
+                            tool_calls=[
+                                ns(
+                                    index=0,
+                                    id="call_1",
+                                    function=ns(name="bash", arguments='{"cmd":"ls"}'),
+                                    extra_content={"google": {"thought_signature": "signed-thought"}},
+                                )
+                            ],
+                        ),
+                    )
+                ],
+            ),
+            ns(
+                usage=ns(prompt_tokens=3, completion_tokens=2),
+                choices=[ns(finish_reason="tool_calls", delta=ns(content=None, tool_calls=None))],
+            ),
+        ]
+        provider = GeminiProvider(
+            model="gemini-3-flash-preview",
+            client=FakeOpenAIClient(stream_chunks=chunks),
+        )
+
+        out = [e async for e in provider.stream(messages=[Message.user("run")], system="")]
+        start = next(event for event in out if event.type == "tool_use_start")
+        end = next(event for event in out if event.type == "tool_use_end")
+        expected = provider._gemini_provider_metadata({"google": {"thought_signature": "signed-thought"}})
+        assert start.provider_metadata == expected
+        assert end.provider_metadata == expected
+
+    async def test_gemini_text_response_preserves_thought_signature(self):
+        from iac_code.providers.gemini_provider import GeminiProvider
+
+        chunks = [
+            ns(
+                usage=None,
+                choices=[
+                    ns(
+                        finish_reason=None,
+                        delta=ns(
+                            content="answer",
+                            tool_calls=None,
+                            extra_content={"google": {"thought_signature": "signed-text-thought"}},
+                        ),
+                    )
+                ],
+            ),
+            ns(
+                usage=ns(prompt_tokens=3, completion_tokens=2),
+                choices=[ns(finish_reason="stop", delta=ns(content=None, tool_calls=None))],
+            ),
+        ]
+        provider = GeminiProvider(
+            model="gemini-3-flash-preview",
+            client=FakeOpenAIClient(stream_chunks=chunks),
+        )
+
+        out = [e async for e in provider.stream(messages=[Message.user("run")], system="")]
+
+        metadata_event = next(event for event in out if event.type == "thinking_delta")
+        assert metadata_event.text == ""
+        assert metadata_event.provider_metadata == provider._gemini_provider_metadata(
+            {"google": {"thought_signature": "signed-text-thought"}}
+        )
 
     async def test_finish_reason_length_maps_to_max_tokens(self):
         chunks = [
@@ -356,6 +748,78 @@ class TestOpenAIComplete:
         assert result.stop_reason == "tool_use"
         assert result.text == ""
         assert result.tool_uses == [{"id": "call_x", "name": "bash", "input": {"cmd": "ls"}}]
+
+    async def test_gemini_tool_call_preserves_thought_signature(self):
+        from iac_code.providers.gemini_provider import GeminiProvider
+
+        response = ns(
+            id="cmpl_gemini",
+            choices=[
+                ns(
+                    finish_reason="tool_calls",
+                    message=ns(
+                        content=None,
+                        tool_calls=[
+                            ns(
+                                id="call_x",
+                                function=ns(name="bash", arguments='{"cmd":"ls"}'),
+                                extra_content={"google": {"thought_signature": "signed-thought"}},
+                            )
+                        ],
+                    ),
+                )
+            ],
+            usage=ns(prompt_tokens=3, completion_tokens=2),
+        )
+        provider = GeminiProvider(
+            model="gemini-3-flash-preview",
+            client=FakeOpenAIClient(create_response=response),
+        )
+
+        result = await provider.complete(messages=[Message.user("run")], system="")
+
+        provider_metadata = provider._gemini_provider_metadata({"google": {"thought_signature": "signed-thought"}})
+        assert result.tool_uses == [
+            {
+                "id": "call_x",
+                "name": "bash",
+                "input": {"cmd": "ls"},
+                "provider_metadata": provider_metadata,
+            }
+        ]
+
+    async def test_gemini_text_response_preserves_thought_signature(self):
+        from iac_code.providers.gemini_provider import GeminiProvider
+
+        response = ns(
+            id="cmpl_gemini_text",
+            choices=[
+                ns(
+                    finish_reason="stop",
+                    message=ns(
+                        content="answer",
+                        tool_calls=None,
+                        extra_content={"google": {"thought_signature": "signed-text-thought"}},
+                    ),
+                )
+            ],
+            usage=ns(prompt_tokens=3, completion_tokens=2),
+        )
+        provider = GeminiProvider(
+            model="gemini-3-flash-preview",
+            client=FakeOpenAIClient(create_response=response),
+        )
+
+        result = await provider.complete(messages=[Message.user("run")], system="")
+
+        provider_metadata = provider._gemini_provider_metadata({"google": {"thought_signature": "signed-text-thought"}})
+        assert result.thinking_blocks == [
+            {
+                "type": "thinking",
+                "text": "",
+                "provider_metadata": provider_metadata,
+            }
+        ]
 
     async def test_finish_reason_length(self):
         response = ns(

@@ -3,7 +3,9 @@
 from iac_code.agent.message import (
     Conversation,
     Message,
+    RedactedThinkingBlock,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
 )
@@ -218,6 +220,32 @@ class TestMessage:
                 }
             ],
         }
+
+    def test_provider_metadata_round_trips_for_opaque_thinking_and_tool_calls(self):
+        tool_metadata = {
+            "provider": "gemini",
+            "extra_content": {"google": {"thought_signature": "signed-thought"}},
+        }
+        thinking_metadata = {"provider": "anthropic", "signature": "signed-thinking"}
+        message = Message(
+            role="assistant",
+            content=[
+                ThinkingBlock(thinking="reasoning", provider_metadata=thinking_metadata),
+                RedactedThinkingBlock(
+                    data="encrypted-thinking",
+                    provider_metadata={"provider": "anthropic", "data": "encrypted-thinking"},
+                ),
+                ToolUseBlock(id="call_1", name="bash", input={}, provider_metadata=tool_metadata),
+            ],
+        )
+
+        serialized = message.to_api_format()
+        restored = Message.model_validate(serialized)
+
+        assert restored.content[0].provider_metadata == thinking_metadata
+        assert restored.content[1].type == "redacted_thinking"
+        assert restored.content[1].data == "encrypted-thinking"
+        assert restored.content[2].provider_metadata == tool_metadata
 
 
 class TestConversation:

@@ -24,6 +24,8 @@ def key(k: str, ctrl: bool = False) -> KeyEvent:
 
 class TestEffortLevel:
     def test_values(self):
+        assert EffortLevel.NONE.value == "none"
+        assert EffortLevel.MINIMAL.value == "minimal"
         assert EffortLevel.LOW.value == "low"
         assert EffortLevel.MEDIUM.value == "medium"
         assert EffortLevel.HIGH.value == "high"
@@ -33,6 +35,8 @@ class TestEffortLevel:
 
     def test_effort_order(self):
         assert _EFFORT_ORDER == [
+            EffortLevel.NONE,
+            EffortLevel.MINIMAL,
             EffortLevel.LOW,
             EffortLevel.MEDIUM,
             EffortLevel.HIGH,
@@ -42,6 +46,8 @@ class TestEffortLevel:
         ]
 
     def test_effort_symbols(self):
+        assert EFFORT_SYMBOLS[EffortLevel.NONE] == "◇"
+        assert EFFORT_SYMBOLS[EffortLevel.MINIMAL] == "◈"
         assert EFFORT_SYMBOLS[EffortLevel.LOW] == "◆"
         assert EFFORT_SYMBOLS[EffortLevel.MEDIUM] == "◆◆"
         assert EFFORT_SYMBOLS[EffortLevel.HIGH] == "◆◆◆"
@@ -165,7 +171,7 @@ class TestModelPickerEffortCycle:
             initial_model="gpt-5.5",
             configured_providers=["openai", "anthropic"],
         )
-        assert picker._efforts[("openai", "gpt-5.5")] == EffortLevel.HIGH
+        assert picker._efforts[("openai", "gpt-5.5")] == EffortLevel.MEDIUM
         assert picker._efforts[("anthropic", "claude-opus-4-7")] == EffortLevel.HIGH
 
     def test_effort_cycle_up_from_high(self):
@@ -189,9 +195,9 @@ class TestModelPickerEffortCycle:
 
     def test_effort_cycle_down_clamps_at_range_min(self):
         picker = make_picker(configured_providers=["openai"])
-        picker._efforts[("openai", "gpt-5.5")] = EffortLevel.LOW
+        picker._efforts[("openai", "gpt-5.5")] = EffortLevel.NONE
         picker._cycle_effort(("openai", "gpt-5.5"), -1)
-        assert picker._efforts[("openai", "gpt-5.5")] == EffortLevel.LOW
+        assert picker._efforts[("openai", "gpt-5.5")] == EffortLevel.NONE
 
     def test_effort_cycle_no_op_for_non_effort_model(self):
         picker = make_picker(configured_providers=["dashscope"])
@@ -221,7 +227,7 @@ class TestModelPickerEffortCycle:
 
         picker._cycle_effort(pair, 1)
 
-        assert picker._efforts[pair] == EffortLevel.LOW
+        assert picker._efforts[pair] == EffortLevel.NONE
 
     def test_effort_cycle_down_initializes_model_without_default_effort_to_max(self):
         picker = make_picker(configured_providers=["dashscope"])
@@ -467,7 +473,7 @@ class TestModelPickerRun:
             mock_dialog.return_value.run.side_effect = fake_dialog_run
             result = picker.run()
 
-        assert result == ("gpt-5.5", EffortLevel.HIGH)
+        assert result == ("gpt-5.5", EffortLevel.MEDIUM)
 
     def test_run_returns_none_on_cancel(self):
         picker = make_picker(initial_model="qwen3.6-plus", configured_providers=["dashscope"])

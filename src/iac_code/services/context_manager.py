@@ -31,8 +31,79 @@ class ContextWindowConfig:
     preserve_recent_turns: int
 
 
+_LONG_CONTEXT_BUFFER = 20_000
+_COMPACT_THRESHOLD = 0.93
+_PRESERVE_RECENT_TURNS = 3
+
+
+def _context_config(context_window: int, max_output_tokens: int = 8_192) -> ContextWindowConfig:
+    return ContextWindowConfig(
+        context_window,
+        max_output_tokens,
+        _LONG_CONTEXT_BUFFER,
+        _COMPACT_THRESHOLD,
+        _PRESERVE_RECENT_TURNS,
+    )
+
+
+_MODEL_EXACT_CONFIGS: dict[str, ContextWindowConfig] = {
+    "claude-fable-5": _context_config(1_000_000, 128_000),
+    "claude-opus-4-8": _context_config(1_000_000, 128_000),
+    "claude-sonnet-5": _context_config(1_000_000, 128_000),
+    "claude-sonnet-4-6-1m": _context_config(1_000_000, 64_000),
+    "gpt-5.5": _context_config(1_050_000, 128_000),
+    "gpt-5.4": _context_config(1_050_000, 128_000),
+    "gpt-5.4-mini": _context_config(400_000, 128_000),
+    "gpt-5.4-nano": _context_config(400_000, 128_000),
+    "gpt-5.3-codex": _context_config(400_000, 128_000),
+    "gpt-5.2": _context_config(400_000, 128_000),
+    "gemini-3.6-flash": _context_config(1_048_576, 65_536),
+    "gemini-3.5-flash": _context_config(1_048_576, 65_536),
+    "gemini-3.5-flash-lite": _context_config(1_048_576, 65_536),
+    "gemini-3.1-pro-preview": _context_config(1_048_576, 65_536),
+    "gemini-3.1-pro-preview-customtools": _context_config(1_048_576, 65_536),
+    "gemini-3-flash-preview": _context_config(1_048_576, 65_536),
+    "gemini-3.1-flash-lite": _context_config(1_048_576, 65_536),
+    "gemini-2.5-pro": _context_config(1_048_576, 65_536),
+    "gemini-2.5-flash": _context_config(1_048_576, 65_536),
+    "gemini-2.5-flash-lite": _context_config(1_048_576, 65_536),
+    "kimi-k3": _context_config(1_000_000),
+    # DashScope's Moonshot-hosted K3 advertises a 1M-token context window.
+    # Keep the output cap conservative until the endpoint documents a limit.
+    "kimi/kimi-k3": _context_config(1_000_000),
+    "kimi-k2.7-code": _context_config(262_144),
+    "kimi-k2.7-code-highspeed": _context_config(262_144),
+    "kimi-k2.6": _context_config(262_144),
+    "kimi-k2.5": _context_config(262_144),
+    "qwen3.8-max-preview": _context_config(1_000_000),
+    "qwen3.7-max": _context_config(1_000_000),
+    "qwen3.7-plus": _context_config(1_000_000),
+    "qwen3.6-plus": _context_config(1_000_000),
+    "qwen3.6-flash": _context_config(1_000_000),
+    "qwen3.5-plus": _context_config(1_000_000),
+    "qwen3.5-flash": _context_config(1_000_000),
+    "qwen-plus": _context_config(1_000_000),
+    "qwen-flash": _context_config(1_000_000),
+    "qwen3-coder-plus": _context_config(1_000_000),
+    "qwen3.6-max-preview": _context_config(262_144),
+    "qwen3-max": _context_config(262_144),
+    "qwen3-coder-next": _context_config(262_144),
+    "deepseek-v4-pro": _context_config(1_000_000),
+    "deepseek-v4-flash": _context_config(1_000_000),
+    "glm-5.2": _context_config(1_000_000, 128_000),
+    "glm-5.1": _context_config(202_752),
+    "glm-5": _context_config(202_752),
+    "minimax-m3": _context_config(1_000_000),
+    "minimax/minimax-m3": _context_config(196_608),
+    "minimax-m2.7": _context_config(196_608),
+    "minimax-m2.7-highspeed": _context_config(196_608),
+    "minimax-m2.5": _context_config(196_608),
+    "minimax-m2.5-highspeed": _context_config(196_608),
+}
+
 _MODEL_CONFIGS: dict[str, ContextWindowConfig] = {
     "claude": ContextWindowConfig(200_000, 8_192, 20_000, 0.93, 3),
+    "gpt-5.6": ContextWindowConfig(1_050_000, 128_000, 20_000, 0.93, 3),
     "gpt-5": ContextWindowConfig(200_000, 8_192, 20_000, 0.93, 3),
     "gpt-4": ContextWindowConfig(128_000, 8_192, 15_000, 0.93, 3),
     "qwen": ContextWindowConfig(131_072, 8_192, 15_000, 0.93, 3),
@@ -45,6 +116,9 @@ _DEFAULT_CONFIG = ContextWindowConfig(128_000, 8_192, 15_000, 0.93, 3)
 
 def get_context_window_config(model: str) -> ContextWindowConfig:
     model_lower = model.lower()
+    exact_config = _MODEL_EXACT_CONFIGS.get(model_lower)
+    if exact_config is not None:
+        return exact_config
     for prefix, config in _MODEL_CONFIGS.items():
         if model_lower.startswith(prefix):
             return config

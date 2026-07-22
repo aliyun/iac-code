@@ -27,6 +27,23 @@ class TestStreamEventTypes:
     def test_thinking_delta(self):
         event = ThinkingDeltaEvent(text="reasoning...")
         assert event.type == "thinking_delta"
+        assert event.is_metadata_only is False
+
+    def test_metadata_only_thinking_delta(self):
+        event = ThinkingDeltaEvent(text="", provider_metadata={"provider": "gemini"})
+        assert event.is_metadata_only is True
+
+    def test_new_provider_fields_do_not_break_positional_construction(self):
+        thinking = ThinkingDeltaEvent("reasoning", "thinking_delta")
+        start = ToolUseStartEvent("t1", "bash", {"display": "Bash"}, "tool_use_start")
+        end = ToolUseEndEvent("t1", "bash", {"cmd": "pwd"}, "tool_use_end")
+
+        assert thinking.type == "thinking_delta"
+        assert thinking.block_index == 0
+        assert start.type == "tool_use_start"
+        assert start.metadata == {"display": "Bash"}
+        assert end.type == "tool_use_end"
+        assert end.provider_metadata is None
 
     def test_tool_use_start(self):
         event = ToolUseStartEvent(tool_use_id="t1", name="read_file")

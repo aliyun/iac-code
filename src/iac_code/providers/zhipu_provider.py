@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from iac_code.providers.openai_provider import OpenAIProvider
-from iac_code.providers.thinking import ThinkingFamily, get_thinking_spec
+from iac_code.providers.thinking import ThinkingFamily, get_thinking_spec, normalize_effort
 
 
 class ZhiPuProvider(OpenAIProvider):
@@ -43,4 +43,13 @@ class ZhiPuProvider(OpenAIProvider):
             return {}
         if self._thinking_disabled():
             return {"extra_body": {"thinking": {"type": "disabled"}}}
-        return {"extra_body": {"thinking": {"type": "enabled"}}}
+        kwargs: dict[str, Any] = {"extra_body": {"thinking": {"type": "enabled"}}}
+        if not spec.uses_reasoning_effort_param:
+            return kwargs
+        effort = normalize_effort(self._effort)
+        allowed = {item.value for item in spec.allowed_efforts}
+        if effort in allowed:
+            kwargs["reasoning_effort"] = effort
+        elif effort not in {None, "auto"} and spec.default_effort is not None:
+            kwargs["reasoning_effort"] = spec.default_effort.value
+        return kwargs

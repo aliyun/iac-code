@@ -19,6 +19,7 @@
 | `observability/local_observe.py` | 本地 OTLP observability server 入口。 |
 | `observability/local_observe/` | 本地 observe server 实现和静态 Web UI。 |
 | `observability/local_observe.md` | 本地 observe 工具的手工使用说明。 |
+| `provider-update-guide.zh-CN.md` | Provider 模型调研、代码更新、测试与提交的中文维护指南。 |
 | `rendering/test_diagram_render.py` | 手工图表渲染检查。 |
 | `repl/e2e/` | 基于真实 PTY 驱动的 REPL pipeline 端到端场景 runner。因为使用 `pexpect`，仅支持 POSIX 环境。 |
 

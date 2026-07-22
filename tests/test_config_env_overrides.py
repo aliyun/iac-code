@@ -453,6 +453,26 @@ class TestLoadCredentials:
             creds = load_credentials(model="claude-sonnet-4-6")
             assert creds["anthropic"] == "sk-from-env"
 
+    @pytest.mark.parametrize(
+        "model, expected_slot",
+        [
+            ("qwen3.8-max-preview", "dashscope_token_plan"),
+            ("kimi/kimi-k3", "dashscope"),
+            ("MiniMax/MiniMax-M3", "dashscope"),
+        ],
+    )
+    def test_api_key_env_routed_via_exact_hosted_model(self, monkeypatch, tmp_path, model, expected_slot):
+        from unittest.mock import patch
+
+        monkeypatch.delenv("IAC_CODE_PROVIDER", raising=False)
+        self._write(tmp_path, settings="", creds="")
+        monkeypatch.setenv("IAC_CODE_API_KEY", "sk-from-env")
+        with patch("iac_code.config.Path.home", return_value=tmp_path):
+            from iac_code.config import load_credentials
+
+            creds = load_credentials(model=model)
+            assert creds[expected_slot] == "sk-from-env"
+
     def test_api_key_env_model_prefix_does_not_override_explicit_provider(self, monkeypatch, tmp_path):
         from unittest.mock import patch
 
@@ -483,6 +503,18 @@ class TestDashScopeTokenPlanProviderEnv:
         from iac_code.config import _PROVIDER_CANONICAL_NAMES
 
         assert "DashScope Token Plan" in _PROVIDER_CANONICAL_NAMES
+
+
+class TestLoadSavedModelEnv:
+    def test_model_env_works_without_active_provider_or_settings(self, monkeypatch, tmp_path):
+        from unittest.mock import patch
+
+        monkeypatch.setenv("IAC_CODE_MODEL", "qwen3.8-max-preview")
+        monkeypatch.delenv("IAC_CODE_PROVIDER", raising=False)
+        with patch("iac_code.config.Path.home", return_value=tmp_path):
+            from iac_code.config import load_saved_model
+
+            assert load_saved_model() == "qwen3.8-max-preview"
 
 
 class TestDashScopeTokenPlanCredSlot:

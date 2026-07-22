@@ -56,6 +56,14 @@ class ThinkingDeltaEvent:
 
     text: str
     type: Literal["thinking_delta"] = "thinking_delta"
+    block_index: int = field(default=0, kw_only=True)
+    block_type: Literal["thinking", "redacted_thinking"] = field(default="thinking", kw_only=True)
+    provider_metadata: dict[str, Any] | None = field(default=None, kw_only=True)
+
+    @property
+    def is_metadata_only(self) -> bool:
+        """Whether this event carries internal provider state without display text."""
+        return not self.text and bool(self.provider_metadata)
 
 
 @dataclass
@@ -66,6 +74,7 @@ class ToolUseStartEvent:
     name: str
     metadata: dict[str, Any] | None = None
     type: Literal["tool_use_start"] = "tool_use_start"
+    provider_metadata: dict[str, Any] | None = field(default=None, kw_only=True)
 
 
 @dataclass
@@ -85,6 +94,7 @@ class ToolUseEndEvent:
     name: str
     input: dict[str, Any]
     type: Literal["tool_use_end"] = "tool_use_end"
+    provider_metadata: dict[str, Any] | None = field(default=None, kw_only=True)
 
 
 @dataclass
