@@ -4,6 +4,7 @@ from iac_code.tools.path_safety import (
     _path_hits_sensitive,
     _path_is_under,
     check_read_path,
+    check_read_path_with_resolution,
     get_iac_code_application_root,
     is_sensitive_path,
 )
@@ -18,6 +19,23 @@ def test_project_file_is_allowed(tmp_path):
     result = check_read_path(str(target), cwd=str(tmp_path), additional_directories=[], trusted_read_directories=[])
 
     assert result == ReadPathDecision("allow")
+
+
+def test_read_path_decision_returns_the_same_resolved_symlink_target(tmp_path):
+    target = tmp_path / "target.txt"
+    target.write_text("approved", encoding="utf-8")
+    link = tmp_path / "link.txt"
+    link.symlink_to(target)
+
+    decision, resolution = check_read_path_with_resolution(
+        str(link),
+        cwd=str(tmp_path),
+        additional_directories=[],
+        trusted_read_directories=[],
+    )
+
+    assert decision == ReadPathDecision("allow")
+    assert resolution.path == str(target)
 
 
 def test_additional_directory_file_is_allowed(tmp_path):

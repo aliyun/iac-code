@@ -13,7 +13,7 @@ import os
 import re
 import time
 from collections.abc import Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal
@@ -42,6 +42,7 @@ from iac_code.tools.cloud.aliyun.api_contract import (
 )
 from iac_code.tools.cloud.aliyun.api_identifiers import SAFE_API_VERSION
 from iac_code.tools.cloud.aliyun.contract_store import (
+    AuthorizedReadPath,
     ResolvedContractError,
     ResolvedContractRecovery,
     ResolvedContractStore,
@@ -65,6 +66,7 @@ from iac_code.tools.cloud.aliyun.template_source import (
 )
 from iac_code.tools.cloud.aliyun.user_agent import build_user_agent
 from iac_code.tools.cloud.base_api import BaseCloudApi
+from iac_code.tools.path_safety import check_read_path_with_resolution
 from iac_code.types.permissions import (
     MAX_PERMISSION_AUDIT_ITEMS,
     ExecutionClass,
@@ -78,6 +80,14 @@ from iac_code.types.permissions import (
 from iac_code.types.stream_events import ResourceObservedEvent
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _RuntimeFileAuthorization:
+    source: Literal["template", "body_file"]
+    resolved_path: str
+    permission: PermissionResult | None
+
 
 VERSION_MAP = {
     "ros": "2019-09-10",
@@ -571,6 +581,17 @@ def _runtime_materialization_path(path: str, context: ToolContext) -> Path:
         return _absolute_materialization_path(expanded, roots)
     candidates = _relative_materialization_candidates(expanded, roots)
     return next((candidate for candidate in candidates if os.path.lexists(candidate)), candidates[0])
+
+
+def _authorized_materialization_path(
+    source: Literal["template", "body_file"],
+    authorized_read_paths: tuple[AuthorizedReadPath, ...],
+) -> Path:
+    """Return the physical path bound to the one-shot authorization snapshot."""
+    matches = [entry.path for entry in authorized_read_paths if entry.source == source]
+    if len(matches) != 1 or not os.path.isabs(matches[0]):
+        raise ApiContractError("snapshot_read_path_mismatch")
+    return Path(matches[0])
 
 
 def _runtime_contract_error_stage(error: ApiContractError) -> str | None:
@@ -1148,7 +1169,11 @@ class AliyunApi(BaseCloudApi):
 
         pending_reasons: list[PermissionDecisionReason] = []
         observe("file_permission")
-        for path_result in self._runtime_file_permission_results(normalized, context):
+        file_authorizations = self._runtime_file_authorizations(normalized, context)
+        for authorization in file_authorizations:
+            path_result = authorization.permission
+            if path_result is None:
+                continue
             if path_result.behavior == "deny":
                 return path_result
             if path_result.behavior == "ask" and path_result.reason is not None:
@@ -1225,7 +1250,11 @@ class AliyunApi(BaseCloudApi):
                 )
             if error := _runtime_pipeline_guard(canonical_normalized, pipeline_mode=context.pipeline_mode):
                 return PermissionResult(behavior="deny", message=error)
-            for path_result in self._runtime_file_permission_results(canonical_normalized, context):
+            file_authorizations = self._runtime_file_authorizations(canonical_normalized, context)
+            for authorization in file_authorizations:
+                path_result = authorization.permission
+                if path_result is None:
+                    continue
                 if path_result.behavior == "deny":
                     return path_result
                 if path_result.behavior == "ask" and path_result.reason is not None:
@@ -1320,6 +1349,10 @@ class AliyunApi(BaseCloudApi):
                 contract=contract,
                 security_digest=digest,
                 execution_class=execution_class,
+                authorized_read_paths=tuple(
+                    AuthorizedReadPath(authorization.source, authorization.resolved_path)
+                    for authorization in file_authorizations
+                ),
             )
         except (ResolvedContractError, RuntimeError) as error:
             return PermissionResult(
@@ -1384,20 +1417,46 @@ class AliyunApi(BaseCloudApi):
         input: dict[str, Any],
         context: ToolPermissionContext | ToolContext,
     ) -> list[PermissionResult]:
-        results: list[PermissionResult] = []
-        if path_result := self._check_local_template_url_read_permission(input, context):
-            results.append(path_result)
-        body_file = input.get("body_file")
-        if isinstance(body_file, str) and body_file:
-            if path_result := check_local_template_url_read_permission(body_file, context):
-                results.append(path_result)
-        return results
+        return [
+            authorization.permission
+            for authorization in self._runtime_file_authorizations(input, context)
+            if authorization.permission is not None
+        ]
 
-    def _check_local_template_url_read_permission(
+    def _runtime_file_authorizations(
         self,
         input: dict[str, Any],
         context: ToolPermissionContext | ToolContext,
-    ) -> PermissionResult | None:
+    ) -> list[_RuntimeFileAuthorization]:
+        authorizations: list[_RuntimeFileAuthorization] = []
+        template_url = self._local_template_url(input)
+        if template_url is not None:
+            authorizations.append(self._authorize_runtime_file("template", template_url, context))
+        body_file = input.get("body_file")
+        if isinstance(body_file, str) and body_file:
+            authorizations.append(self._authorize_runtime_file("body_file", body_file, context))
+        return authorizations
+
+    @staticmethod
+    def _authorize_runtime_file(
+        source: Literal["template", "body_file"],
+        path: str,
+        context: ToolPermissionContext | ToolContext,
+    ) -> _RuntimeFileAuthorization:
+        decision, resolution = check_read_path_with_resolution(
+            path,
+            cwd=context.cwd or ".",
+            additional_directories=list(context.additional_directories),
+            trusted_read_directories=list(context.trusted_read_directories),
+            relative_read_directories=list(context.relative_read_directories),
+            strict_read_directories=list(context.strict_read_directories),
+            read_path_violation_behavior=context.read_path_violation_behavior,
+        )
+        permission = None if decision.behavior == "allow" else decision.to_permission_result()
+        return _RuntimeFileAuthorization(source, resolution.path, permission)
+
+    @staticmethod
+    def _local_template_url(input: dict[str, Any]) -> str | None:
         product = input.get("product", "")
         product = _PRODUCT_CANONICAL.get(str(product).lower(), product)
         if product != "ros":
@@ -1406,7 +1465,17 @@ class AliyunApi(BaseCloudApi):
         if not isinstance(params, dict):
             return None
         template_url = input.get(LOCAL_TEMPLATE_PATH_FIELD, params.get("TemplateURL", ""))
-        if not isinstance(template_url, str) or not is_local_template_url(template_url):
+        if not isinstance(template_url, str) or not template_url or not is_local_template_url(template_url):
+            return None
+        return template_url
+
+    def _check_local_template_url_read_permission(
+        self,
+        input: dict[str, Any],
+        context: ToolPermissionContext | ToolContext,
+    ) -> PermissionResult | None:
+        template_url = self._local_template_url(input)
+        if template_url is None:
             return None
         return check_local_template_url_read_permission(template_url, context)
 
@@ -1784,6 +1853,7 @@ class AliyunApi(BaseCloudApi):
 
         recovery_claim: ResolvedContractRecovery | None = None
         contract: CanonicalWireContract | None = None
+        authorized_read_paths: tuple[AuthorizedReadPath, ...] = ()
         try:
             observe("normalize_trust")
             if trust_path == "internal":
@@ -1824,9 +1894,10 @@ class AliyunApi(BaseCloudApi):
             observe("local_authorization")
             if error := _runtime_pipeline_guard(normalized, pipeline_mode=context.pipeline_mode):
                 raise ApiContractError(error)
-            for result in self._runtime_file_permission_results(normalized, context):
-                if result.behavior == "deny" or (trust_path == "internal" and result.behavior == "ask"):
-                    raise ApiContractError(result.message or "aliyun_file_permission_required")
+            if trust_path == "internal":
+                for result in self._runtime_file_permission_results(normalized, context):
+                    if result.behavior in {"ask", "deny"}:
+                        raise ApiContractError(result.message or "aliyun_file_permission_required")
 
             observe("contract")
             recovery_metadata_contract: CanonicalWireContract | None = None
@@ -1841,6 +1912,7 @@ class AliyunApi(BaseCloudApi):
                     binding=context.invocation_binding,
                     security_digest=context.security_digest,
                 )
+                authorized_read_paths = handoff.authorized_read_paths
                 if isinstance(handoff, ResolvedContractRecovery):
                     recovery_claim = handoff
                     contract = await runtime.contract_resolver.resolve(
@@ -1861,9 +1933,10 @@ class AliyunApi(BaseCloudApi):
                 canonical_normalized = _with_canonical_runtime_product(normalized, contract.product)
                 if error := _runtime_pipeline_guard(canonical_normalized, pipeline_mode=context.pipeline_mode):
                     raise ApiContractError(error)
-                for result in self._runtime_file_permission_results(canonical_normalized, context):
-                    if result.behavior == "deny" or (trust_path == "internal" and result.behavior == "ask"):
-                        raise ApiContractError(result.message or "aliyun_file_permission_required")
+                if trust_path == "internal":
+                    for result in self._runtime_file_permission_results(canonical_normalized, context):
+                        if result.behavior in {"ask", "deny"}:
+                            raise ApiContractError(result.message or "aliyun_file_permission_required")
                 normalized = canonical_normalized
             final_shape = _runtime_call_shape(normalized, contract=contract)
             digest = contract.security_digest(final_shape)
@@ -1905,7 +1978,11 @@ class AliyunApi(BaseCloudApi):
             if params.get("TemplateBody") is LOCAL_TEMPLATE_BODY_SENTINEL:
                 if not isinstance(template_path, str) or not template_path:
                     raise ApiContractError("invalid_template_file")
-                resolved_template = _runtime_materialization_path(template_path, context)
+                resolved_template = (
+                    _runtime_materialization_path(template_path, context)
+                    if trust_path == "internal"
+                    else _authorized_materialization_path("template", authorized_read_paths)
+                )
                 template_bytes = await asyncio.to_thread(_read_body_file, resolved_template)
                 try:
                     params["TemplateBody"] = template_bytes.decode("utf-8")
@@ -1913,7 +1990,11 @@ class AliyunApi(BaseCloudApi):
                     raise ApiContractError("invalid_template_file") from error
             body_file = materialized.get("body_file")
             if isinstance(body_file, str):
-                resolved_body_file = _runtime_materialization_path(body_file, context)
+                resolved_body_file = (
+                    _runtime_materialization_path(body_file, context)
+                    if trust_path == "internal"
+                    else _authorized_materialization_path("body_file", authorized_read_paths)
+                )
                 materialized["body_file"] = await asyncio.to_thread(_read_body_file, resolved_body_file)
             region_id = materialized.get("region_id")
             if isinstance(region_id, str) and region_id:

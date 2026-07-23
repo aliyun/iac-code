@@ -1761,11 +1761,54 @@ async def test_delegated_local_template_materializes_from_symlinked_logical_cwd(
 
 
 @pytest.mark.asyncio
-async def test_delegated_local_template_symlink_fails_before_hooks_and_request_builder(tmp_path) -> None:
+async def test_delegated_local_template_materializes_from_authorized_path_alias(tmp_path: Path) -> None:
     from iac_code.tools.cloud.aliyun.runtime import AliyunDelegatedExecutor
 
+    project = tmp_path / "project"
+    project.mkdir()
+    physical_temp = tmp_path / "private" / "tmp"
+    physical_temp.mkdir(parents=True)
+    logical_temp = tmp_path / "tmp"
+    try:
+        logical_temp.symlink_to(physical_temp, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlinks are unavailable: {error}")
+    template_body = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n"
+    physical_template = physical_temp / "template.yml"
+    physical_template.write_text(template_body, encoding="utf-8")
+    logical_template = logical_temp / physical_template.name
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action="ValidateTemplate",
+    )
+    tool, runtime = _execution_runtime(contract)
+    delegated = AliyunDelegatedExecutor(tool, action="ValidateTemplate")
+    outer_input = {"template_url": str(logical_template), "region_id": "cn-hangzhou"}
+    permission_context = _bound_context(
+        outer_input,
+        tool_name="ros_validate_template",
+        cwd=str(project),
+        pipeline_mode=True,
+    )
+
+    permission = await delegated.check_permissions(outer_input, permission_context)
+    assert permission.behavior == "ask"
+    result = await delegated.execute(outer_input, _execution_context(permission_context, permission))
+
+    assert result.is_error is False
+    assert runtime.request_builder.inputs[0]["params"]["TemplateBody"] == template_body
+
+
+@pytest.mark.asyncio
+async def test_delegated_local_template_uses_symlink_target_approved_in_snapshot(tmp_path) -> None:
+    from iac_code.tools.cloud.aliyun.runtime import AliyunDelegatedExecutor
+
+    approved_body = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n"
     template = tmp_path / "template.yml"
-    template.write_text("Resources: {}\n", encoding="utf-8")
+    template.write_text(approved_body, encoding="utf-8")
+    replacement = tmp_path / "replacement.yml"
+    replacement.write_text("ROSTemplateFormatVersion: '2015-09-01'\nDescription: replacement\n", encoding="utf-8")
     symlink = tmp_path / "template-link.yml"
     symlink.symlink_to(template)
     contract = _canonical_contract(
@@ -1785,14 +1828,14 @@ async def test_delegated_local_template_symlink_fails_before_hooks_and_request_b
     )
     permission = await delegated.check_permissions(outer_input, permission_context)
     assert permission.behavior == "allow"
+    symlink.unlink()
+    symlink.symlink_to(replacement)
 
     result = await delegated.execute(outer_input, _execution_context(permission_context, permission))
 
-    assert result == ToolResult.error(
-        _expected_public_error("invalid_body_file", {"region_id": "cn-hangzhou"}, contract=contract)
-    )
-    assert stages[-1] == "materialize"
-    assert runtime.request_builder.inputs == []
+    assert result.is_error is False
+    assert runtime.request_builder.inputs[0]["params"]["TemplateBody"] == approved_body
+    assert stages.index("contract") < stages.index("materialize") < stages.index("request_builder")
 
 
 @pytest.mark.asyncio
@@ -1842,7 +1885,7 @@ async def test_delegated_local_template_rejects_parent_symlink_swap_at_materiali
 
 
 @pytest.mark.asyncio
-async def test_body_file_is_materialized_no_follow_before_request_builder(tmp_path) -> None:
+async def test_body_file_symlink_is_materialized_from_approved_physical_path(tmp_path) -> None:
     target = tmp_path / "payload.bin"
     target.write_bytes(b"approved-payload")
     symlink = tmp_path / "payload-link.bin"
@@ -1863,9 +1906,9 @@ async def test_body_file_is_materialized_no_follow_before_request_builder(tmp_pa
 
     result = await tool.execute(tool_input=tool_input, context=_execution_context(permission_context, permission))
 
-    assert result == ToolResult.error(_expected_public_error("invalid_body_file", tool_input, contract=contract))
-    assert "request_builder_call" not in calls
-    assert runtime.transport_router.requests == []
+    assert result.is_error is False
+    assert "request_builder_call" in calls
+    assert runtime.transport_router.requests[0].body == b"approved-payload"
 
 
 @pytest.mark.asyncio
@@ -2044,6 +2087,39 @@ async def test_expired_snapshot_re_resolves_and_requires_the_same_digest() -> No
     result = await tool.execute(tool_input=tool_input, context=context)
 
     assert result.is_error is False
+    assert len(runtime.contract_resolver.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_expired_snapshot_preserves_the_authorized_body_file_target(tmp_path) -> None:
+    now = [100.0]
+    store = ResolvedContractStore(ttl_seconds=1.0, clock=lambda: now[0])
+    approved = tmp_path / "approved.bin"
+    approved.write_bytes(b"approved-payload")
+    replacement = tmp_path / "replacement.bin"
+    replacement.write_bytes(b"replacement-payload")
+    body_file = tmp_path / "payload-link.bin"
+    body_file.symlink_to(approved)
+    contract = _canonical_contract(request_body_type="byte")
+    tool, runtime = _execution_runtime(contract, contract_store=store)
+    tool_input = {
+        "product": "ecs",
+        "version": contract.version,
+        "action": contract.action,
+        "region_id": "cn-hangzhou",
+        "body_file": str(body_file),
+    }
+    permission_context = _bound_context(tool_input, cwd=str(tmp_path))
+    permission = await tool.check_permissions(tool_input, permission_context)
+    assert permission.behavior == "allow"
+    now[0] += 2.0
+    body_file.unlink()
+    body_file.symlink_to(replacement)
+
+    result = await tool.execute(tool_input=tool_input, context=_execution_context(permission_context, permission))
+
+    assert result.is_error is False
+    assert runtime.transport_router.requests[0].body == b"approved-payload"
     assert len(runtime.contract_resolver.calls) == 2
 
 

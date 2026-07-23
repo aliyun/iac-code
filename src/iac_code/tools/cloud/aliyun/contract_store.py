@@ -28,11 +28,20 @@ class ResolvedContractError(ValueError):
 
 
 @dataclass(frozen=True)
+class AuthorizedReadPath:
+    """Physical file path approved together with an API contract."""
+
+    source: Literal["template", "body_file"]
+    path: str
+
+
+@dataclass(frozen=True)
 class ResolvedContractSnapshot:
     binding: InvocationBinding
     contract: CanonicalWireContract
     security_digest: str
     execution_class: ExecutionClass
+    authorized_read_paths: tuple[AuthorizedReadPath, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -42,6 +51,7 @@ class ResolvedContractRecovery:
     binding: InvocationBinding
     security_digest: str
     execution_class: ExecutionClass
+    authorized_read_paths: tuple[AuthorizedReadPath, ...]
     claim_id: str
 
 
@@ -56,6 +66,7 @@ class _RecoverableSnapshot:
     binding: InvocationBinding
     security_digest: str
     execution_class: ExecutionClass
+    authorized_read_paths: tuple[AuthorizedReadPath, ...]
     state: Literal["evicted", "expired", "recovering"]
     claim_id: str | None = None
 
@@ -112,12 +123,14 @@ class ResolvedContractStore:
         contract: CanonicalWireContract,
         security_digest: str,
         execution_class: ExecutionClass,
+        authorized_read_paths: tuple[AuthorizedReadPath, ...] = (),
     ) -> str:
         snapshot = ResolvedContractSnapshot(
             binding=binding,
             contract=contract,
             security_digest=security_digest,
             execution_class=execution_class,
+            authorized_read_paths=authorized_read_paths,
         )
         with self._lock:
             now = self._clock()
@@ -274,6 +287,7 @@ class ResolvedContractStore:
             binding=recoverable.binding,
             security_digest=recoverable.security_digest,
             execution_class=recoverable.execution_class,
+            authorized_read_paths=recoverable.authorized_read_paths,
             state="recovering",
             claim_id=claim_id,
         )
@@ -283,6 +297,7 @@ class ResolvedContractStore:
             binding=claimed.binding,
             security_digest=claimed.security_digest,
             execution_class=claimed.execution_class,
+            authorized_read_paths=claimed.authorized_read_paths,
             claim_id=claim_id,
         )
 
@@ -308,6 +323,7 @@ class ResolvedContractStore:
             binding=snapshot.binding,
             security_digest=snapshot.security_digest,
             execution_class=snapshot.execution_class,
+            authorized_read_paths=snapshot.authorized_read_paths,
             state=state,
         )
         return True
