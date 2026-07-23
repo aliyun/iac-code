@@ -278,26 +278,56 @@ def check_read_path(
     read_path_violation_behavior: Literal["ask", "deny"] = "ask",
 ) -> ReadPathDecision:
     """Decide whether a read path is safe or should ask for confirmation."""
-    resolved = resolve_read_path(
+    decision, _resolution = check_read_path_with_resolution(
+        path,
+        cwd=cwd,
+        additional_directories=additional_directories,
+        trusted_read_directories=trusted_read_directories,
+        relative_read_directories=relative_read_directories,
+        strict_read_directories=strict_read_directories,
+        read_path_violation_behavior=read_path_violation_behavior,
+    )
+    return decision
+
+
+def check_read_path_with_resolution(
+    path: str,
+    *,
+    cwd: str,
+    additional_directories: list[str],
+    trusted_read_directories: list[str],
+    relative_read_directories: list[str] | None = None,
+    strict_read_directories: list[str] | None = None,
+    read_path_violation_behavior: Literal["ask", "deny"] = "ask",
+) -> tuple[ReadPathDecision, ReadPathResolution]:
+    """Resolve a read path once and return both its decision and physical path."""
+    resolution = resolve_read_path_with_source(
         path,
         cwd,
         relative_read_directories=relative_read_directories,
     )
+    resolved = resolution.path
 
     if strict_read_directories:
         if _is_in_allowed_roots(resolved, strict_read_directories):
-            return ReadPathDecision("allow")
-        return ReadPathDecision(
-            read_path_violation_behavior,
-            reason_type="path_constraint",
-            detail=_("path outside allowed read directories"),
+            return ReadPathDecision("allow"), resolution
+        return (
+            ReadPathDecision(
+                read_path_violation_behavior,
+                reason_type="path_constraint",
+                detail=_("path outside allowed read directories"),
+            ),
+            resolution,
         )
 
     if _is_in_allowed_roots(resolved, trusted_read_directories):
-        return ReadPathDecision("allow")
+        return ReadPathDecision("allow"), resolution
 
     if _path_hits_sensitive(resolved):
-        return ReadPathDecision("ask", reason_type="safety_check", detail=_("read touches a sensitive path"))
+        return (
+            ReadPathDecision("ask", reason_type="safety_check", detail=_("read touches a sensitive path")),
+            resolution,
+        )
 
     allowed_roots = [
         cwd,
@@ -305,9 +335,12 @@ def check_read_path(
         str(get_iac_code_application_root()),
     ]
     if _is_in_allowed_roots(resolved, allowed_roots):
-        return ReadPathDecision("allow")
+        return ReadPathDecision("allow"), resolution
 
-    return ReadPathDecision("ask", reason_type="path_constraint", detail=_("path outside allowed directories"))
+    return (
+        ReadPathDecision("ask", reason_type="path_constraint", detail=_("path outside allowed directories")),
+        resolution,
+    )
 
 
 def check_write_path(

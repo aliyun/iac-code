@@ -170,6 +170,11 @@ class TestSkillContentRosOnly:
     def test_contains_validate_template(self, body):
         assert "ros_validate_template" in body
 
+    def test_template_path_examples_use_the_working_directory(self, body):
+        assert "`./template.yml`" in body
+        assert 'template_url="./ros-template.yml"' in body
+        assert "/tmp/" not in body
+
     def test_skips_validate_template_when_template_unchanged(self, body):
         assert "避免在成本预估前重复校验" in body
 

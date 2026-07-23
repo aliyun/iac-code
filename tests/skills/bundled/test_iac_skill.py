@@ -58,6 +58,15 @@ class TestIacSkill:
         assert "ros_validate_template" not in iac_skill.content
         assert "ros_estimate_template_cost" not in iac_skill.content
 
+    def test_iac_skill_keeps_generated_templates_in_working_directory(self):
+        init_bundled_skills()
+        skills = get_bundled_skills()
+        iac_skill = next(s for s in skills if s.name == "iac-aliyun")
+
+        assert "生成的模板默认放在当前工作目录" in iac_skill.content
+        assert '"TemplateURL": "./ros-ecs-nginx-template.yml"' in iac_skill.content
+        assert "/tmp/" not in iac_skill.content
+
     def test_iac_skill_delegates_infraguard_work_to_pac_skill(self):
         init_bundled_skills()
         skills = get_bundled_skills()
