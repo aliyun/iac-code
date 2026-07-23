@@ -37,6 +37,7 @@ class ToolContext:
     # True when this tool call is being executed as part of a pipeline step.
     pipeline_mode: bool = False
     env_overrides: dict[str, str] = field(default_factory=dict)
+    telemetry_attributes: dict[str, str | int] = field(default_factory=dict)
     permission_context: Any = None
     invocation_binding: InvocationBinding | None = None
     snapshot_id: str | None = None
@@ -61,6 +62,7 @@ class ToolContext:
         snapshot_id: str | None = None,
         security_digest: str | None = None,
         execution_class: ExecutionClass | None = None,
+        telemetry_attributes: dict[str, str | int] | None = None,
     ) -> None:
         if isinstance(tool_use_id, list) and isinstance(additional_directories, list):
             old_additional_directories = tool_use_id
@@ -83,6 +85,7 @@ class ToolContext:
         self.read_path_violation_behavior = read_path_violation_behavior
         self.pipeline_mode = pipeline_mode
         self.env_overrides = {str(key): str(value) for key, value in (env_overrides or {}).items() if value is not None}
+        self.telemetry_attributes = dict(telemetry_attributes or {})
         self.invocation_binding = invocation_binding
         self.snapshot_id = snapshot_id
         self.security_digest = security_digest

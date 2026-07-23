@@ -1,5 +1,6 @@
 import asyncio
-from unittest.mock import AsyncMock, Mock
+from contextlib import nullcontext
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import httpx
 import pytest
@@ -18,7 +19,15 @@ from iac_code.providers.manager import (
 )
 from iac_code.providers.registry import PROVIDER_REGISTRY
 from iac_code.providers.request_policy import ProviderRequestPolicy
-from iac_code.types.stream_events import MessageEndEvent, MessageStartEvent, TextDeltaEvent, Usage
+from iac_code.services.telemetry.names import GenAiAttr, IacCodeAttr, PipelineAttr, Spans
+from iac_code.services.telemetry.scope import use_span_attributes
+from iac_code.types.stream_events import (
+    MessageEndEvent,
+    MessageStartEvent,
+    TextDeltaEvent,
+    ThinkingDeltaEvent,
+    Usage,
+)
 
 STREAM_IDLE_TEST_TIMEOUT = 0.2
 
@@ -482,6 +491,53 @@ class TestProviderManagerStreaming:
         events = [e async for e in mgr.stream(messages=[Message.user("hi")], system="sys")]
         types = [e.type for e in events]
         assert "message_start" in types and "text_delta" in types and "message_end" in types
+
+    async def test_stream_records_first_non_empty_thinking_delta_and_pipeline_scope(self):
+        mock_provider = AsyncMock()
+
+        async def fake_stream(*args, **kwargs):
+            yield MessageStartEvent(message_id="m1")
+            yield ThinkingDeltaEvent(text="", provider_metadata={"signature": "opaque"})
+            yield ThinkingDeltaEvent(text="reasoning")
+            yield TextDeltaEvent(text="answer")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = fake_stream
+        span = MagicMock()
+        manager = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
+        manager._provider = mock_provider
+        scope = {
+            IacCodeAttr.MODE: "pipeline",
+            PipelineAttr.NAME: "selling",
+            PipelineAttr.STEP_ID: "intent_parsing",
+        }
+
+        with (
+            use_span_attributes(scope),
+            patch("iac_code.providers.manager.start_span", return_value=nullcontext(span)) as start_span,
+            patch("iac_code.providers.manager.get_session_id", return_value="iac_sess_1"),
+        ):
+            events = [event async for event in manager.stream(messages=[Message.user("hi")], system="sys")]
+
+        assert [event.type for event in events] == [
+            "message_start",
+            "thinking_delta",
+            "thinking_delta",
+            "text_delta",
+            "message_end",
+        ]
+        assert start_span.call_args.args[0] == f"{Spans.LLM_CHAT} claude-sonnet-4-6"
+        initial_attrs = start_span.call_args.args[1]
+        assert initial_attrs[GenAiAttr.SESSION_ID] == "iac_sess_1"
+        assert initial_attrs[GenAiAttr.CONVERSATION_ID] == "iac_sess_1"
+        assert initial_attrs[IacCodeAttr.MODE] == "pipeline"
+        assert initial_attrs[PipelineAttr.NAME] == "selling"
+        assert initial_attrs[PipelineAttr.STEP_ID] == "intent_parsing"
+        ttft_calls = [
+            call for call in span.set_attribute.call_args_list if call.args[0] == GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN
+        ]
+        assert len(ttft_calls) == 1
+        assert ttft_calls[0].args[1] >= 0
 
     async def test_fable_accepted_stream_preserves_event_order(self, monkeypatch):
         expected = [

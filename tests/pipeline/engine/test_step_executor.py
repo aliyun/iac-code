@@ -12,6 +12,7 @@ from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.step_executor import StepExecutor
 from iac_code.pipeline.engine.step_spec import IncludeExcludeConfig, LoadedPipeline, StepSpec, StepSurfaceOverride
 from iac_code.pipeline.engine.types import StepResult, StepStatus
+from iac_code.services.telemetry.names import IacCodeAttr, PipelineAttr
 from iac_code.skills.frontmatter import SkillFrontmatter
 from iac_code.skills.skill_definition import SkillDefinition
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
@@ -183,11 +184,42 @@ class TestStepExecutorToolSetup:
         executor = _make_executor(tmp_path)
         step = _make_step()
         ctx = PipelineContext(SIMPLE_DEPS)
+        executor.set_telemetry_correlation(pipeline_run_id="run-1")
 
         agent_context = executor.build_agent_loop_context(step, ctx, "test_session")
 
         assert agent_context.agent_loop is not None
         assert agent_context.agent_loop._pipeline_mode is True
+        assert agent_context.agent_loop._telemetry_attributes == {
+            IacCodeAttr.MODE: "pipeline",
+            PipelineAttr.NAME: "test",
+            PipelineAttr.RUN_ID: "run-1",
+            PipelineAttr.STEP_ID: "intent_parsing",
+        }
+
+    def test_agent_loop_context_marks_sub_step_scope(self, tmp_path):
+        executor = _make_executor(tmp_path)
+        executor.set_telemetry_correlation(pipeline_run_id="run-1")
+        executor.set_telemetry_scope(
+            parent_step_id="evaluate_candidates",
+            sub_pipeline_name="candidate_evaluation",
+            sub_pipeline_id="candidate_evaluation_abc",
+            candidate_index=2,
+        )
+
+        agent_context = executor.build_agent_loop_context(_make_step(), PipelineContext(SIMPLE_DEPS), "test_session")
+
+        assert agent_context.agent_loop is not None
+        assert agent_context.agent_loop._telemetry_attributes == {
+            IacCodeAttr.MODE: "pipeline",
+            PipelineAttr.NAME: "test",
+            PipelineAttr.RUN_ID: "run-1",
+            PipelineAttr.PARENT_STEP_ID: "evaluate_candidates",
+            PipelineAttr.SUB_PIPELINE_NAME: "candidate_evaluation",
+            PipelineAttr.SUB_PIPELINE_ID: "candidate_evaluation_abc",
+            PipelineAttr.CANDIDATE_INDEX: 2,
+            PipelineAttr.SUB_STEP_ID: "intent_parsing",
+        }
 
     def test_agent_loop_context_preserves_ros_deploy_owned_stack_ids_from_seed(self, tmp_path):
         executor = _make_executor(tmp_path)

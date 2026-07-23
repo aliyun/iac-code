@@ -310,6 +310,7 @@ def _delegated_tool_context(context: ToolContext) -> ToolContext:
         read_path_violation_behavior=context.read_path_violation_behavior,
         pipeline_mode=False,
         env_overrides=dict(context.env_overrides),
+        telemetry_attributes=dict(context.telemetry_attributes),
         permission_context=context.permission_context,
         invocation_binding=context.invocation_binding,
         snapshot_id=context.snapshot_id,

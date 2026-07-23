@@ -129,6 +129,20 @@ class IacCodeAttr:
     """iac-code-specific attribute keys shared by telemetry signals."""
 
     CHANNEL = "iac_code.channel"
+    MODE = "iac_code.mode"
+
+
+class PipelineAttr:
+    """Pipeline span dimensions shared by nested runtime signals."""
+
+    NAME = "pipeline_name"
+    RUN_ID = "pipeline_run_id"
+    STEP_ID = "step_id"
+    PARENT_STEP_ID = "parent_step_id"
+    SUB_PIPELINE_NAME = "sub_pipeline_name"
+    SUB_PIPELINE_ID = "sub_pipeline_id"
+    SUB_STEP_ID = "sub_step_id"
+    CANDIDATE_INDEX = "candidate_index"
 
 
 class AliyunApiAttr:

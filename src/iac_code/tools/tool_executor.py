@@ -95,6 +95,7 @@ class ToolExecutor:
             tool_use_id=call.id,
             pipeline_mode=context.pipeline_mode,
             env_overrides=dict(context.env_overrides),
+            telemetry_attributes=dict(context.telemetry_attributes),
             permission_context=context.permission_context,
             invocation_binding=call.invocation_binding,
             snapshot_id=call.snapshot_id,

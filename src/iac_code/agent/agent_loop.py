@@ -35,6 +35,8 @@ from iac_code.services.permissions.audit import (
     redacted_tool_input_for_settings,
 )
 from iac_code.services.session_usage import SessionUsageStore, SessionUsageTotals
+from iac_code.services.telemetry.names import IacCodeAttr
+from iac_code.services.telemetry.scope import normalize_span_attributes, use_span_attributes
 from iac_code.tools.base import ToolContext, ToolRegistry, ToolResult
 from iac_code.tools.cloud.aliyun.contract_store import (
     PROCESS_RESOLVED_CONTRACT_STORE,
@@ -275,6 +277,10 @@ def _filter_recalled_memory_content(content: str, selected_files: list[str]) -> 
     return "\n\n".join(part for part in parts if part)
 
 
+def _is_first_output_delta(event: Any) -> bool:
+    return isinstance(event, (TextDeltaEvent, ThinkingDeltaEvent)) and bool(event.text)
+
+
 class AgentLoop:
     """The main agent execution loop.
 
@@ -308,6 +314,7 @@ class AgentLoop:
         transcript_id: str | None = None,
         result_storage_dir: str | Path | None = None,
         audit_log_path: str | Path | None = None,
+        telemetry_attributes: dict[str, Any] | None = None,
     ) -> None:
         self._provider_manager = provider_manager
         self.system_prompt = system_prompt
@@ -329,6 +336,11 @@ class AgentLoop:
         self._tool_context_trusted_read_directories = list(tool_context_trusted_read_directories or [])
         self._tool_context_relative_read_directories = list(tool_context_relative_read_directories or [])
         self._pipeline_mode = pipeline_mode
+        scope_attributes: dict[str, Any] = {
+            IacCodeAttr.MODE: "pipeline" if pipeline_mode else "normal",
+        }
+        scope_attributes.update(telemetry_attributes or {})
+        self._telemetry_attributes = normalize_span_attributes(scope_attributes)
         self._tool_context_env_overrides = dict(tool_context_env_overrides or {})
         self._auto_trigger_skills = auto_trigger_skills or []
         self._auto_loaded_skills: set[str] = set()
@@ -846,6 +858,7 @@ class AgentLoop:
             GenAiAttr.USER_ID: get_user_id(),
             GenAiAttr.FRAMEWORK: FRAMEWORK_IAC_CODE,
         }
+        entry_attrs.update(self._telemetry_attributes)
         if should_capture_content_on_span():
             from iac_code.services.telemetry.content_serializer import (
                 serialize_system_instructions,
@@ -895,7 +908,7 @@ class AgentLoop:
                         queued_input_provider=queued_input_provider,
                         memory_prefetch=memory_prefetch,
                     ):
-                        if isinstance(event, TextDeltaEvent) and not first_token_received:
+                        if _is_first_output_delta(event) and not first_token_received:
                             first_token_received = True
                             ttft_ns = int((time.monotonic() - interaction_started) * 1_000_000_000)
                             entry_span.set_attribute(GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN, ttft_ns)
@@ -953,6 +966,7 @@ class AgentLoop:
             GenAiAttr.USER_ID: get_user_id(),
             GenAiAttr.FRAMEWORK: FRAMEWORK_IAC_CODE,
         }
+        entry_attrs.update(self._telemetry_attributes)
         with start_span(Spans.ENTRY, entry_attrs) as entry_span:
             await self._start_background_tasks()
             interaction_started = time.monotonic()
@@ -963,7 +977,7 @@ class AgentLoop:
                 self._refresh_git_branch()
                 try:
                     async for event in self._run_streaming_inner("", memory_prefetch=None):
-                        if isinstance(event, TextDeltaEvent) and not first_token_received:
+                        if _is_first_output_delta(event) and not first_token_received:
                             first_token_received = True
                             ttft_ns = int((time.monotonic() - interaction_started) * 1_000_000_000)
                             entry_span.set_attribute(GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN, ttft_ns)
@@ -987,6 +1001,17 @@ class AgentLoop:
                         GenAiAttr.OUTPUT_MESSAGES,
                         serialize_output_messages("".join(final_text_chunks), final_stop_reason),
                     )
+
+    async def _stream_provider(
+        self,
+        *,
+        messages: list[Any],
+        system: str,
+        tools: list[Any] | None,
+    ) -> AsyncGenerator[StreamEvent, None]:
+        with use_span_attributes(self._telemetry_attributes):
+            async for event in self._provider_manager.stream(messages=messages, system=system, tools=tools):
+                yield event
 
     async def _run_streaming_inner(
         self,
@@ -1025,6 +1050,7 @@ class AgentLoop:
                 GenAiAttr.OPERATION_NAME: GenAiOperationName.REACT,
                 GenAiAttr.REACT_ROUND: _turn + 1,
             }
+            step_attrs.update(self._telemetry_attributes)
 
             with start_span(Spans.REACT_STEP, step_attrs) as step_span:
                 # Collect tool uses from this turn (keyed by tool_use_id)
@@ -1043,7 +1069,7 @@ class AgentLoop:
                 }
 
                 # Stream from provider
-                async for event in self._provider_manager.stream(
+                async for event in self._stream_provider(
                     messages=provider_messages,
                     system=system_prompt,
                     tools=provider_tools,
@@ -1214,6 +1240,7 @@ class AgentLoop:
                     relative_read_directories=list(self._tool_context_relative_read_directories),
                     pipeline_mode=self._pipeline_mode,
                     env_overrides=dict(self._tool_context_env_overrides),
+                    telemetry_attributes=dict(self._telemetry_attributes),
                 )
 
                 allowed_requests: list[ToolCallRequest] = []

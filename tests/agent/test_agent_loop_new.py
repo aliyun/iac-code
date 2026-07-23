@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 
 from iac_code.agent.agent_loop import AgentLoop
+from iac_code.services.telemetry.names import GenAiAttr, IacCodeAttr, PipelineAttr, Spans
 from iac_code.tools.base import ToolResult
 from iac_code.tools.tool_executor import ToolExecutor
 from iac_code.types.permissions import PermissionResult
@@ -251,6 +252,80 @@ class TestAgentLoopStreaming:
         events = [e async for e in loop.run_streaming("Hi")]
         types = [e.type for e in events]
         assert "text_delta" in types
+
+    async def test_entry_ttft_uses_first_non_empty_thinking_delta_and_keeps_scope(
+        self,
+        mock_provider,
+        mock_registry,
+    ):
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield MessageStartEvent(message_id="m1")
+            yield ThinkingDeltaEvent(text="", provider_metadata={"signature": "opaque"})
+            yield ThinkingDeltaEvent(text="reasoning")
+            yield TextDeltaEvent(text="answer")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        class CapturedSpan:
+            def __init__(self, name, attrs):
+                self.name = name
+                self.attrs = dict(attrs or {})
+
+            def set_attribute(self, key, value):
+                self.attrs[key] = value
+
+        class CapturedContext:
+            def __init__(self, span):
+                self.span = span
+
+            def __enter__(self):
+                return self.span
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        captured = []
+
+        def capture_span(name, attrs=None):
+            span = CapturedSpan(name, attrs)
+            captured.append(span)
+            return CapturedContext(span)
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            pipeline_mode=True,
+            telemetry_attributes={
+                PipelineAttr.NAME: "selling",
+                PipelineAttr.STEP_ID: "intent_parsing",
+            },
+        )
+
+        with (
+            patch("iac_code.services.telemetry.start_span", side_effect=capture_span),
+            patch("iac_code.services.telemetry.get_session_id", return_value="sess"),
+            patch("iac_code.services.telemetry.get_user_id", return_value="user"),
+            patch("iac_code.services.telemetry.log_event"),
+            patch("iac_code.services.telemetry.add_metric"),
+        ):
+            events = [event async for event in loop.run_streaming("Hi")]
+
+        assert [event.type for event in events] == [
+            "message_start",
+            "thinking_delta",
+            "text_delta",
+            "message_end",
+        ]
+        entry_span = next(span for span in captured if span.name == Spans.ENTRY)
+        assert entry_span.attrs[GenAiAttr.USER_TIME_TO_FIRST_TOKEN] >= 0
+        assert (
+            entry_span.attrs[GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN]
+            == entry_span.attrs[GenAiAttr.USER_TIME_TO_FIRST_TOKEN]
+        )
+        assert entry_span.attrs[IacCodeAttr.MODE] == "pipeline"
+        assert entry_span.attrs[PipelineAttr.NAME] == "selling"
+        assert entry_span.attrs[PipelineAttr.STEP_ID] == "intent_parsing"
 
     async def test_opaque_thinking_metadata_round_trips_through_context(self, mock_provider, mock_registry):
         async def fake_stream(messages, system, tools=None, max_tokens=8192):

@@ -18,6 +18,7 @@ from iac_code.services.telemetry.names import (
     GenAiAttr,
     GenAiOperationName,
     GenAiSpanKind,
+    IacCodeAttr,
     Metrics,
     Spans,
 )
@@ -294,6 +295,7 @@ class PipelineObservability:
             GenAiAttr.OPERATION_NAME: operation_name,
             GenAiAttr.FRAMEWORK: FRAMEWORK_IAC_CODE,
             GenAiAttr.AGENT_NAME: self.pipeline_name,
+            IacCodeAttr.MODE: "pipeline",
         }
         if react_round is not None:
             attrs[GenAiAttr.REACT_ROUND] = react_round
@@ -417,6 +419,16 @@ class PipelineObservability:
                 total_steps=total_steps,
             ),
         )
+
+    @staticmethod
+    def record_user_time_to_first_token(span: Any, started_at: float) -> None:
+        if span is None:
+            return
+        ttft_ns = max(0, int((time.monotonic() - started_at) * 1_000_000_000))
+        try:
+            span.set_attribute(GenAiAttr.USER_TIME_TO_FIRST_TOKEN, ttft_ns)
+        except Exception:
+            logger.warning("Pipeline telemetry failed to record time to first token", exc_info=True)
 
     def step_span(
         self,

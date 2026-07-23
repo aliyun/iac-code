@@ -33,6 +33,7 @@ from iac_code.services.telemetry.names import (
     Spans,
 )
 from iac_code.services.telemetry.sanitize import sanitize_error_message, sanitize_model_name
+from iac_code.services.telemetry.scope import get_span_attributes
 from iac_code.types.stream_events import (
     ErrorEvent,
     MessageEndEvent,
@@ -568,15 +569,18 @@ class ProviderManager:
         started = time.monotonic()
 
         span_name = f"{Spans.LLM_CHAT} {model}"
+        session_id = get_session_id()
         span_attrs = {
             GenAiAttr.SPAN_KIND: GenAiSpanKind.LLM,
             GenAiAttr.OPERATION_NAME: GenAiOperationName.CHAT,
             GenAiAttr.PROVIDER_NAME: provider_name,
             GenAiAttr.REQUEST_MODEL: model,
             GenAiAttr.REQUEST_MAX_TOKENS: max_tokens,
-            GenAiAttr.CONVERSATION_ID: get_session_id(),
+            GenAiAttr.SESSION_ID: session_id,
+            GenAiAttr.CONVERSATION_ID: session_id,
             GenAiAttr.OUTPUT_TYPE: "text",
         }
+        span_attrs.update(get_span_attributes())
         if should_capture_content_on_span():
             span_attrs[GenAiAttr.INPUT_MESSAGES] = serialize_input_messages(messages)
             span_attrs[GenAiAttr.SYSTEM_INSTRUCTIONS] = serialize_system_instructions(system)
@@ -603,7 +607,11 @@ class ProviderManager:
                     if isinstance(event, MessageStartEvent):
                         orphaned_message_ids.append(event.message_id)
                         span.set_attribute(GenAiAttr.RESPONSE_ID, event.message_id)
-                    elif isinstance(event, TextDeltaEvent) and not first_token_received:
+                    elif (
+                        isinstance(event, (TextDeltaEvent, ThinkingDeltaEvent))
+                        and event.text
+                        and not first_token_received
+                    ):
                         first_token_received = True
                         ttft_ns = int((time.monotonic() - started) * 1_000_000_000)
                         span.set_attribute(GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN, ttft_ns)

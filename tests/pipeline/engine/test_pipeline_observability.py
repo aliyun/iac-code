@@ -9,12 +9,21 @@ import pytest
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.interrupt import InterruptVerdict
 from iac_code.pipeline.engine.observability import PipelineObservability
-from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
+from iac_code.pipeline.engine.pipeline_runner import PipelineRunner, _is_first_output_delta
 from iac_code.pipeline.engine.session import RestoreResult
 from iac_code.pipeline.engine.step_spec import LoadedPipeline, StepSpec, SubPipelineSpec
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.services.telemetry.config import ContentCaptureMode
-from iac_code.services.telemetry.names import Events, GenAiAttr, GenAiOperationName, GenAiSpanKind, Metrics, Spans
+from iac_code.services.telemetry.names import (
+    Events,
+    GenAiAttr,
+    GenAiOperationName,
+    GenAiSpanKind,
+    IacCodeAttr,
+    Metrics,
+    Spans,
+)
+from iac_code.types.stream_events import SubPipelineStreamEvent, TextDeltaEvent, ThinkingDeltaEvent
 
 
 def test_pipeline_started_emits_event_and_span_attrs():
@@ -43,6 +52,7 @@ def test_pipeline_started_emits_event_and_span_attrs():
     assert start_span.call_args.args[1][GenAiAttr.USER_ID] == "iac_user_uid"
     assert start_span.call_args.args[1][GenAiAttr.FRAMEWORK] == "iac-code-cli"
     assert start_span.call_args.args[1][GenAiAttr.AGENT_NAME] == "selling"
+    assert start_span.call_args.args[1][IacCodeAttr.MODE] == "pipeline"
     log_event.assert_called_once_with(
         Events.PIPELINE_STARTED,
         {
@@ -1087,6 +1097,36 @@ def test_duration_ms_uses_monotonic_clock():
         assert PipelineObservability.duration_ms(start) == 1250.0
 
 
+def test_pipeline_ttft_uses_nanoseconds_and_is_best_effort():
+    span = MagicMock()
+
+    with patch("iac_code.pipeline.engine.observability.time.monotonic", return_value=10.25):
+        PipelineObservability.record_user_time_to_first_token(span, 10.0)
+
+    span.set_attribute.assert_called_once_with(GenAiAttr.USER_TIME_TO_FIRST_TOKEN, 250_000_000)
+
+
+@pytest.mark.parametrize(
+    ("event", "expected"),
+    [
+        (TextDeltaEvent(text=""), False),
+        (ThinkingDeltaEvent(text=""), False),
+        (TextDeltaEvent(text="answer"), True),
+        (ThinkingDeltaEvent(text="reasoning"), True),
+        (
+            SubPipelineStreamEvent(
+                sub_pipeline_id="candidate-1",
+                candidate_index=0,
+                inner=ThinkingDeltaEvent(text="candidate reasoning"),
+            ),
+            True,
+        ),
+    ],
+)
+def test_pipeline_first_output_delta_accepts_text_thinking_and_nested_events(event, expected):
+    assert _is_first_output_delta(event) is expected
+
+
 def test_pipeline_user_aborted_emits_terminal_event_and_metric():
     obs = PipelineObservability(pipeline_name="selling", session_id="sid", cwd="/repo")
     obs.pipeline_started_at = 10.0
@@ -1210,6 +1250,29 @@ async def test_runner_emits_parent_lifecycle_telemetry(runner):
     )
     assert [call[1]["step_id"] for call in calls if call[0] == "step_started"] == ["a", "b"]
     assert [call[1]["step_id"] for call in calls if call[0] == "step_completed"] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_runner_records_first_non_empty_thinking_delta_on_pipeline_span(runner):
+    pipeline_span = MagicMock()
+    runner._observability.pipeline_run_span = MagicMock(return_value=nullcontext(pipeline_span))
+    runner._observability.record_user_time_to_first_token = MagicMock()
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        if step.step_id == "a":
+            yield ThinkingDeltaEvent(text="")
+            yield ThinkingDeltaEvent(text="reasoning")
+            yield TextDeltaEvent(text="answer")
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    async for _event in runner.run("hello"):
+        pass
+
+    runner._observability.record_user_time_to_first_token.assert_called_once_with(pipeline_span, ANY)
 
 
 @pytest.mark.asyncio

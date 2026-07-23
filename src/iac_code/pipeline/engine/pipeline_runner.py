@@ -54,6 +54,8 @@ from iac_code.types.stream_events import (
     ResourceObservedEvent,
     StreamEvent,
     SubPipelineStreamEvent,
+    TextDeltaEvent,
+    ThinkingDeltaEvent,
 )
 from iac_code.utils.public_errors import sanitize_public_text
 
@@ -396,6 +398,11 @@ def _unwrap_sub_pipeline_stream_event(event: Any) -> Any:
     while isinstance(event, SubPipelineStreamEvent):
         event = event.inner
     return event
+
+
+def _is_first_output_delta(event: Any) -> bool:
+    inner = _unwrap_sub_pipeline_stream_event(event)
+    return isinstance(inner, (TextDeltaEvent, ThinkingDeltaEvent)) and bool(inner.text)
 
 
 def _parallel_sub_pipeline_event_priority(event: Any) -> int:
@@ -2397,6 +2404,7 @@ class PipelineRunner:
         self, user_input: str | list[ContentBlock] | PipelineUserInput
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         """Start the pipeline from the first step."""
+        pipeline_started_at = self._observability.now()
         await self._start_mcp_reconnect_tasks()
         pipeline_input = normalize_pipeline_user_input(user_input)
         self._set_current_step_user_input(pipeline_input)
@@ -2426,8 +2434,12 @@ class PipelineRunner:
         mcp_status_event = self._mcp_status_event(force=True)
         if mcp_status_event is not None:
             yield mcp_status_event
-        with self._observability.pipeline_run_span(total_steps=self.state_machine.total_steps):
+        with self._observability.pipeline_run_span(total_steps=self.state_machine.total_steps) as pipeline_span:
+            first_output_received = False
             async for event in self._continue_from_current(**self._continue_input_kwargs(pipeline_input)):
+                if not first_output_received and _is_first_output_delta(event):
+                    first_output_received = True
+                    self._observability.record_user_time_to_first_token(pipeline_span, pipeline_started_at)
                 yield event
 
     async def resume(
