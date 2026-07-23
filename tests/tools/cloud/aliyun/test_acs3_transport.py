@@ -415,6 +415,9 @@ def test_shared_header_filter_is_case_insensitive_and_denies_secrets_after_allow
     headers = httpx.Headers(
         [
             ("X-Acs-Request-Id", "request-1"),
+            ("X-Log-Request-Id", "request-log-1"),
+            ("X-Oss-Request-Id", "request-oss-1"),
+            ("X-Acs-Error-Code", "Throttling.Api"),
             ("Content-Type", "application/json"),
             ("X-Result-Token", "visible"),
             ("Set-Cookie", "secret"),
@@ -461,6 +464,9 @@ def test_shared_header_filter_is_case_insensitive_and_denies_secrets_after_allow
 
     assert filtered == {
         "x-acs-request-id": "request-1",
+        "x-log-request-id": "request-log-1",
+        "x-oss-request-id": "request-oss-1",
+        "x-acs-error-code": "Throttling.Api",
         "content-type": "application/json",
         "x-result-token": "visible",
     }

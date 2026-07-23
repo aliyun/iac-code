@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 from typing import Any
@@ -19,7 +20,7 @@ from iac_code.services.telemetry import set_client
 from iac_code.services.telemetry.client import TelemetryClient
 from iac_code.services.telemetry.events import EventEmitter
 from iac_code.services.telemetry.metrics import MetricsRegistry
-from iac_code.services.telemetry.names import Events, Metrics
+from iac_code.services.telemetry.names import AliyunApiAttr, Events, GenAiAttr, Metrics, Spans
 from iac_code.services.telemetry.sink import AnalyticsSink
 from iac_code.tools.base import ToolContext, ToolRegistry, ToolResult
 from iac_code.tools.cloud.aliyun import aliyun_api as aliyun_api_module
@@ -2176,6 +2177,165 @@ async def test_target_outcome_reaches_real_production_event_and_metric_sinks_onc
         target_outcome=target_outcome,
         legacy_outcome=legacy_outcome,
     )
+
+
+def _recorded_span_attributes(span: MagicMock) -> dict[str, Any]:
+    return {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
+
+
+@pytest.mark.parametrize("key", ["RequestId", "requestId", "request_id", "REQUEST-ID"])
+def test_response_request_id_accepts_body_key_variants(key: str) -> None:
+    response = SimpleNamespace(body={key: "request-body-1"}, headers={})
+
+    assert aliyun_api_module._response_request_id(response) == "request-body-1"
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["Request-Id", "X-Acs-Request-Id", "X-Log-RequestId", "x_oss_request_id", "x-request-id"],
+)
+def test_response_request_id_accepts_header_key_variants(key: str) -> None:
+    response = SimpleNamespace(body={}, headers={key: "request-header-1"})
+
+    assert aliyun_api_module._response_request_id(response) == "request-header-1"
+
+
+@pytest.mark.parametrize("key", ["ErrorCode", "errorCode", "error_code", "ERROR-CODE", "Code", "error"])
+def test_response_error_code_accepts_body_key_variants(key: str) -> None:
+    response = SimpleNamespace(body={key: "Throttling.Api"}, headers={})
+
+    assert aliyun_api_module._response_error_code(response) == "Throttling.Api"
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["Error-Code", "X-Acs-Error-Code", "X-Log-Error-Code", "x_oss_error_code", "x-error-code"],
+)
+def test_response_error_code_accepts_header_key_variants(key: str) -> None:
+    response = SimpleNamespace(body={}, headers={key: "Throttling.Api"})
+
+    assert aliyun_api_module._response_error_code(response) == "Throttling.Api"
+
+
+def test_exception_telemetry_accepts_properties_data_and_header_variants() -> None:
+    class ApiError(RuntimeError):
+        @property
+        def status_code(self) -> str:
+            return "429"
+
+        @property
+        def request_id(self) -> None:
+            return None
+
+    error = ApiError("failed")
+    error.data = {"error_code": "Throttling.Api"}
+    error.response_headers = {"X-Log-Request-Id": "request-exception-1"}
+
+    assert aliyun_api_module._exception_telemetry_attrs(error) == {
+        AliyunApiAttr.HTTP_STATUS_CODE: 429,
+        AliyunApiAttr.REQUEST_ID: "request-exception-1",
+        AliyunApiAttr.ERROR_CODE: "Throttling.Api",
+    }
+
+
+@pytest.mark.asyncio
+async def test_target_success_emits_queryable_api_call_span() -> None:
+    services, _, _, transport = _production_services()
+    transport.responses["DescribeInstances"] = NormalizedApiResponse(
+        status=200,
+        headers=MappingProxyType({}),
+        body={"RequestId": "request-success-1", "Instances": []},
+        content_type="application/json",
+        content_encoding=None,
+        size=64,
+    )
+    span = MagicMock()
+
+    with (
+        patch.object(aliyun_api_module, "start_span", return_value=nullcontext(span)) as start_span,
+        patch.object(aliyun_api_module, "get_session_id", return_value="iac_sess_1"),
+        patch.object(aliyun_api_module, "get_user_id", return_value="iac_user_1"),
+    ):
+        result = await _production_execute(
+            AliyunApi(services=services),
+            {"product": "Ecs", "action": "DescribeInstances", "region_id": "cn-hangzhou"},
+        )
+
+    assert result.is_error is False
+    start_span.assert_called_once()
+    assert start_span.call_args.args[0] == Spans.ALIYUN_API_CALL
+    initial_attrs = start_span.call_args.args[1]
+    assert initial_attrs[AliyunApiAttr.SERVICE] == "ECS"
+    assert initial_attrs[AliyunApiAttr.PRODUCT] == "Ecs"
+    assert initial_attrs[AliyunApiAttr.ACTION] == "DescribeInstances"
+    assert initial_attrs[AliyunApiAttr.VERSION] == "2014-05-26"
+    assert initial_attrs[AliyunApiAttr.REGION] == "cn-hangzhou"
+    assert initial_attrs[AliyunApiAttr.HTTP_METHOD] == "POST"
+    assert initial_attrs[GenAiAttr.TOOL_CALL_ID] == "production-call"
+    assert initial_attrs[GenAiAttr.SESSION_ID] == "iac_sess_1"
+    assert initial_attrs[GenAiAttr.USER_ID] == "iac_user_1"
+    result_attrs = _recorded_span_attributes(span)
+    assert result_attrs == {
+        AliyunApiAttr.OUTCOME: "success",
+        AliyunApiAttr.TARGET_OUTCOME: "success",
+        AliyunApiAttr.HTTP_STATUS_CODE: 200,
+        AliyunApiAttr.REQUEST_ID: "request-success-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_target_http_error_span_records_status_error_code_and_header_request_id() -> None:
+    services, _, _, transport = _production_services()
+    transport.responses["DescribeInstances"] = NormalizedApiResponse(
+        status=429,
+        headers=MappingProxyType({"x-acs-request-id": "request-http-1"}),
+        body={"ErrorCode": 30010, "Message": "retry later"},
+        content_type="application/json",
+        content_encoding=None,
+        size=64,
+    )
+    span = MagicMock()
+
+    with patch.object(aliyun_api_module, "start_span", return_value=nullcontext(span)):
+        result = await _production_execute(
+            AliyunApi(services=services),
+            {"product": "Ecs", "action": "DescribeInstances", "region_id": "cn-hangzhou"},
+        )
+
+    assert result.is_error is True
+    result_attrs = _recorded_span_attributes(span)
+    assert result_attrs == {
+        AliyunApiAttr.OUTCOME: "failure",
+        AliyunApiAttr.TARGET_OUTCOME: "http_error",
+        AliyunApiAttr.HTTP_STATUS_CODE: 429,
+        AliyunApiAttr.REQUEST_ID: "request-http-1",
+        AliyunApiAttr.ERROR_CODE: "30010",
+    }
+
+
+@pytest.mark.asyncio
+async def test_target_transport_failure_span_records_outcome_without_response_fields() -> None:
+    services, _, _, transport = _production_services()
+    error = TransportFailure(outcome="connect_timeout", reason=None)
+    error.request_id = "request-transport-1"
+    error.code = "NetworkTimeout"
+    transport.errors["DescribeInstances"] = error
+    span = MagicMock()
+
+    with patch.object(aliyun_api_module, "start_span", return_value=nullcontext(span)):
+        result = await _production_execute(
+            AliyunApi(services=services),
+            {"product": "Ecs", "action": "DescribeInstances", "region_id": "cn-hangzhou"},
+        )
+
+    assert result.is_error is True
+    result_attrs = _recorded_span_attributes(span)
+    assert result_attrs == {
+        AliyunApiAttr.OUTCOME: "failure",
+        AliyunApiAttr.TARGET_OUTCOME: "connect_timeout",
+        AliyunApiAttr.REQUEST_ID: "request-transport-1",
+        AliyunApiAttr.ERROR_CODE: "NetworkTimeout",
+    }
 
 
 @pytest.mark.asyncio

@@ -131,6 +131,22 @@ class IacCodeAttr:
     CHANNEL = "iac_code.channel"
 
 
+class AliyunApiAttr:
+    """Alibaba Cloud API call span attribute keys."""
+
+    SERVICE = "aliyun.api.service"
+    PRODUCT = "aliyun.api.product"
+    ACTION = "aliyun.api.action"
+    VERSION = "aliyun.api.version"
+    REGION = "aliyun.api.region"
+    OUTCOME = "aliyun.api.outcome"
+    TARGET_OUTCOME = "aliyun.api.target_outcome"
+    REQUEST_ID = "aliyun.api.request_id"
+    ERROR_CODE = "aliyun.api.error_code"
+    HTTP_METHOD = "http.request.method"
+    HTTP_STATUS_CODE = "http.response.status_code"
+
+
 class ArmsResourceAttr:
     """ARMS-specific resource attribute keys."""
 
@@ -288,3 +304,4 @@ class Spans:
     PIPELINE_SUB_STEP = "iac.pipeline.sub_step"
     PIPELINE_QUESTION_ANSWERED = "iac.pipeline.question.answered"
     PIPELINE_SELECTION_READY = "iac.pipeline.selection.ready"
+    ALIYUN_API_CALL = "iac.aliyun.api.call"
