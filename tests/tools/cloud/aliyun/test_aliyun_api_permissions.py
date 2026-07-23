@@ -1775,7 +1775,7 @@ async def test_delegated_local_template_materializes_from_authorized_path_alias(
         pytest.skip(f"directory symlinks are unavailable: {error}")
     template_body = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n"
     physical_template = physical_temp / "template.yml"
-    physical_template.write_text(template_body, encoding="utf-8")
+    physical_template.write_bytes(template_body.encode("utf-8"))
     logical_template = logical_temp / physical_template.name
     contract = _canonical_contract(
         product="ROS",
@@ -1806,9 +1806,9 @@ async def test_delegated_local_template_uses_symlink_target_approved_in_snapshot
 
     approved_body = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n"
     template = tmp_path / "template.yml"
-    template.write_text(approved_body, encoding="utf-8")
+    template.write_bytes(approved_body.encode("utf-8"))
     replacement = tmp_path / "replacement.yml"
-    replacement.write_text("ROSTemplateFormatVersion: '2015-09-01'\nDescription: replacement\n", encoding="utf-8")
+    replacement.write_bytes(b"ROSTemplateFormatVersion: '2015-09-01'\nDescription: replacement\n")
     symlink = tmp_path / "template-link.yml"
     symlink.symlink_to(template)
     contract = _canonical_contract(
