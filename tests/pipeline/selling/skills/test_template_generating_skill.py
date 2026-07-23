@@ -122,6 +122,9 @@ class TestSkillContentRosOnly:
 
     def test_file_write_details_stay_in_step_prompt(self, body):
         assert "并写入文件" in body
+        assert "生成的模板默认放在当前工作目录" in body
+        assert "`./template.yml`" in body
+        assert "/tmp/" not in body
         assert "write_file" not in body
         assert "无需提前创建目录" not in body
         assert "bash" not in body.lower()

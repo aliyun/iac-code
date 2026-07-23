@@ -122,7 +122,7 @@ ros_validate_template(
 3. 修复模板并**写回原文件路径**（后续部署步骤从此路径读取，不写回会导致后续步骤使用错误模板）
 4. 重新校验（最多 7 轮）
 
-> **模板路径支持本地文件**：`template_url` 可传本地路径（如 `/tmp/template.yml`）。避免将大模板内容直接作为参数传递。
+> **模板路径支持本地文件**：`template_url` 可传当前工作目录内的本地路径（如 `./template.yml`）。避免将大模板内容直接作为参数传递。
 
 ## 询价参数推荐与传递
 
@@ -147,7 +147,7 @@ PreviewStack 不是硬门禁。它要求完整部署参数，常比询价工具�
 
 ```python
 ros_estimate_template_cost(
-    template_url="/tmp/ros-template.yml",
+    template_url="./ros-template.yml",
     parameters={
         "ZoneId": "cn-hangzhou-k",
         "InstanceType": "ecs.g7.large",

@@ -85,12 +85,13 @@ auto_trigger:
 2. 查阅 [references/cloud-products/](references/cloud-products/) 下对应产品文件，了解选型策略和库存相关属性
 3. **必须**阅读 [references/ros-template.md](references/ros-template.md)，了解 ROS 模板最佳实践（RunCommand、嵌套栈、条件部署、常用函数等），未阅读不得生成模板
 4. 生成模板（库存相关属性按「参数化规则」定义为 Parameters，所有 Parameters 必须添加 AssociationProperty）并写入文件
+   - 生成的模板默认放在当前工作目录；仅当用户指定其他路径时才写入该路径，不要默认使用 `/tmp` 等工作目录外路径
    - **Terraform**：生成 `.tf` 等文件后，必须先用 `tf2ros.py` 打包为 ROS Terraform 类型模板（用法见 [references/terraform-template.md](references/terraform-template.md) 的「与 ROS 集成」节），后续步骤校验/部署的都是这份打包后的 `.yml`
 5. 调用 aliyun_api(product="ros", action="ValidateTemplate", params={"TemplateURL": <模板文件路径>}) 校验
 6. 校验失败 → 分析错误 → 修复 → 重试（最多 5 轮）
 7. 校验通过 → 展示模板 → 询问是否部署（**ROS 与 Terraform 一致**，禁止用 `terraform init/apply` 等本地 CLI 步骤替代部署确认）
 
-> **TemplateURL 支持本地文件路径**：aliyun_api（product=ros）和 ros_stack 中，TemplateURL 可传本地文件路径（如 `/tmp/template.yml`），工具会自动读取文件内容。避免将大模板内容直接作为参数传递。
+> **TemplateURL 支持本地文件路径**：aliyun_api（product=ros）和 ros_stack 中，TemplateURL 可传当前工作目录内的本地文件路径（如 `./template.yml`），工具会自动读取文件内容。避免将大模板内容直接作为参数传递。
 
 ## 部署流程
 
@@ -122,7 +123,7 @@ auto_trigger:
        product="ros",
        action="GetTemplateEstimateCost",
        params={
-           "TemplateURL": "/tmp/ros-ecs-nginx-template.yml",
+           "TemplateURL": "./ros-ecs-nginx-template.yml",
            "Parameters": {
                "zone_id": "cn-hangzhou-k",
                "instance_type": "ecs.g7.large",

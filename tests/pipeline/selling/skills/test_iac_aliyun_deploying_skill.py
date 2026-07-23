@@ -143,6 +143,10 @@ class TestSkillContentRosOnly:
         assert "ros_validate_template" in body
         assert "模板校验" in body
 
+    def test_template_path_example_uses_the_working_directory(self, body):
+        assert "`./template.yml`" in body
+        assert "/tmp/" not in body
+
     def test_dedicated_tool_boundary_covers_validation_and_deploy_lifecycle(self, body):
         assert "不要通过 `aliyun_api` 调用 ROS 模板校验或部署生命周期接口" in body
         assert "ROS `ValidateTemplate` 接口" not in body
