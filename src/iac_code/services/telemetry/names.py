@@ -280,3 +280,5 @@ class Spans:
     PIPELINE_STEP = "iac.pipeline.step"
     PIPELINE_SUB_PIPELINE = "iac.pipeline.sub_pipeline"
     PIPELINE_SUB_STEP = "iac.pipeline.sub_step"
+    PIPELINE_QUESTION_ANSWERED = "iac.pipeline.question.answered"
+    PIPELINE_SELECTION_READY = "iac.pipeline.selection.ready"

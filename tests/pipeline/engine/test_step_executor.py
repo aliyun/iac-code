@@ -1436,8 +1436,18 @@ class TestInjectTools:
 
         registry = executor._build_step_tools(step, PipelineContext({"intent": []}))
 
-        assert registry.get("ask_user_question") is not None
+        ask_tool = registry.get("ask_user_question")
+        assert ask_tool is not None
         assert registry.get("complete_step") is not None
+
+        executor._observability.question_answered = MagicMock()
+        ask_tool._question_answered_observer("tool-1", 2, "free_text")
+        executor._observability.question_answered.assert_called_once_with(
+            step_id="intent_parsing",
+            tool_call_id="tool-1",
+            option_count=2,
+            answer_type="free_text",
+        )
 
     def test_no_inject_tools_only_has_complete_step(self, tmp_path):
         (tmp_path / "prompts").mkdir(exist_ok=True)

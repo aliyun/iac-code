@@ -120,6 +120,48 @@ def test_pipeline_nested_spans_emit_genai_semantics_and_keep_pipeline_attrs():
         assert attrs[GenAiAttr.AGENT_NAME] == "selling"
 
 
+def test_pipeline_boundary_spans_include_session_and_stable_dimensions():
+    obs = PipelineObservability(pipeline_name="selling", session_id="raw-sid", cwd="/repo")
+
+    with (
+        patch("iac_code.pipeline.engine.observability.get_session_id", return_value="iac_sess_sid", create=True),
+        patch("iac_code.pipeline.engine.observability.get_user_id", return_value="iac_user_uid", create=True),
+        patch("iac_code.pipeline.engine.observability.start_span", return_value=nullcontext()) as start_span,
+    ):
+        obs.question_answered(
+            step_id="intent_parsing",
+            tool_call_id="tool-1",
+            option_count=3,
+            answer_type="option",
+        )
+        obs.selection_ready(
+            step_id="confirm_and_select",
+            step_index=4,
+            step_attempt=2,
+            total_steps=5,
+            step_type="llm",
+            ui_mode="candidate_selection",
+            option_count=3,
+        )
+
+    question_call, selection_call = start_span.call_args_list
+    assert question_call.args[0] == Spans.PIPELINE_QUESTION_ANSWERED
+    assert question_call.args[1]["step_id"] == "intent_parsing"
+    assert question_call.args[1]["answer_type"] == "option"
+    assert question_call.args[1]["option_count"] == 3
+    assert question_call.args[1][GenAiAttr.TOOL_CALL_ID] == "tool-1"
+    assert question_call.args[1][GenAiAttr.SESSION_ID] == "iac_sess_sid"
+    assert question_call.args[1][GenAiAttr.USER_ID] == "iac_user_uid"
+
+    assert selection_call.args[0] == Spans.PIPELINE_SELECTION_READY
+    assert selection_call.args[1]["step_id"] == "confirm_and_select"
+    assert selection_call.args[1]["step_attempt"] == 2
+    assert selection_call.args[1]["ui_mode"] == "candidate_selection"
+    assert selection_call.args[1]["option_count"] == 3
+    assert selection_call.args[1][GenAiAttr.SESSION_ID] == "iac_sess_sid"
+    assert selection_call.args[1][GenAiAttr.USER_ID] == "iac_user_uid"
+
+
 def test_event_sanitizer_replaces_sensitive_fields_by_default():
     obs = PipelineObservability(pipeline_name="selling", session_id="sid", cwd="/repo/customer-a")
 

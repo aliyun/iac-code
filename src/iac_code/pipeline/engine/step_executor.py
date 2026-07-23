@@ -830,12 +830,17 @@ class StepExecutor:
 
         inject_tools = step.inject_tools_for_surface(self._surface)
         if inject_tools:
-            self._register_injectable_tools(registry, inject_tools, guard_state)
+            self._register_injectable_tools(registry, inject_tools, guard_state, step=step)
 
         return registry
 
     def _register_injectable_tools(
-        self, registry: ToolRegistry, tool_names: list[str], completion_guard_state: dict[str, Any]
+        self,
+        registry: ToolRegistry,
+        tool_names: list[str],
+        completion_guard_state: dict[str, Any],
+        *,
+        step: StepSpec,
     ) -> None:
         from iac_code.pipeline.engine.ask_user_question_tool import AskUserQuestionTool
         from iac_code.pipeline.engine.show_diagram_tool import ShowArchitectureDiagramTool
@@ -850,7 +855,22 @@ class StepExecutor:
                 tool_cls = engine_tools.get(name)
             if tool_cls is not None:
                 if name == "ask_user_question":
-                    registry.register(AskUserQuestionTool(completion_guard_state))
+                    def observe_question_answered(
+                        tool_call_id: str | None, option_count: int, answer_type: str
+                    ) -> None:
+                        self._observability.question_answered(
+                            step_id=step.step_id,
+                            tool_call_id=tool_call_id,
+                            option_count=option_count,
+                            answer_type=answer_type,
+                        )
+
+                    registry.register(
+                        AskUserQuestionTool(
+                            completion_guard_state,
+                            question_answered_observer=observe_question_answered,
+                        )
+                    )
                 elif name == "ros_deploy":
                     registry.register(tool_cls(completion_guard_state=completion_guard_state))
                 else:

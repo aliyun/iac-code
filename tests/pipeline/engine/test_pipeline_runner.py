@@ -1396,6 +1396,64 @@ async def test_user_input_required_saves_waiting_input(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_candidate_selection_emits_selection_ready_before_waiting_for_user(tmp_path):
+    runner = _build_two_step_runner(tmp_path, auto_advance_first=False)
+    runner.session = RecordingPipelineSession()
+    runner.state_machine.current_step.ui_mode = "candidate_selection"
+    order: list[str] = []
+    runner._observability.selection_ready = MagicMock(side_effect=lambda **_kwargs: order.append("selection_ready"))
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        conclusion = {"user_prompt": "choose", "options": ["one", "two"]}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    events = []
+    async for event in runner._continue_from_current():
+        events.append(event)
+        if isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_REQUIRED:
+            order.append("user_input_required")
+
+    waiting_event = next(
+        event
+        for event in events
+        if isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_REQUIRED
+    )
+    assert waiting_event.data["options"] == ["one", "two"]
+    assert order == ["selection_ready", "user_input_required"]
+    runner._observability.selection_ready.assert_called_once_with(
+        step_id="a",
+        step_index=1,
+        step_attempt=1,
+        total_steps=2,
+        step_type="normal",
+        ui_mode="candidate_selection",
+        option_count=2,
+    )
+
+
+@pytest.mark.asyncio
+async def test_non_selection_input_does_not_emit_selection_ready(tmp_path):
+    runner = _build_two_step_runner(tmp_path, auto_advance_first=False)
+    runner.session = RecordingPipelineSession()
+    runner._observability.selection_ready = MagicMock()
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        conclusion = {"user_prompt": "continue", "options": []}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    async for _event in runner._continue_from_current():
+        pass
+
+    runner._observability.selection_ready.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_sidecar_save_failure_stops_before_next_step(tmp_path):
     runner = _build_two_step_runner(tmp_path)
     runner.session = FailingAfterAdvancePipelineSession()

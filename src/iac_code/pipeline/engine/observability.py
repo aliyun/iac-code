@@ -441,6 +441,58 @@ class PipelineObservability:
             ),
         )
 
+    def question_answered(
+        self,
+        *,
+        step_id: str,
+        tool_call_id: str | None,
+        option_count: int,
+        answer_type: str,
+    ) -> None:
+        attrs = self.span_attrs(
+            span_kind=GenAiSpanKind.STEP,
+            operation_name=GenAiOperationName.REACT,
+            step_id=step_id,
+            input_kind="ask_user_question",
+            option_count=option_count,
+            answer_type=answer_type,
+        )
+        if tool_call_id is not None:
+            attrs[GenAiAttr.TOOL_CALL_ID] = tool_call_id
+        with self._span(
+            Spans.PIPELINE_QUESTION_ANSWERED,
+            attrs,
+        ):
+            pass
+
+    def selection_ready(
+        self,
+        *,
+        step_id: str,
+        step_index: int,
+        step_attempt: int | None,
+        total_steps: int,
+        step_type: str | None,
+        ui_mode: str,
+        option_count: int,
+    ) -> None:
+        with self._span(
+            Spans.PIPELINE_SELECTION_READY,
+            self.span_attrs(
+                span_kind=GenAiSpanKind.STEP,
+                operation_name=GenAiOperationName.REACT,
+                react_round=step_index,
+                step_id=step_id,
+                step_index=step_index,
+                step_attempt=step_attempt,
+                total_steps=total_steps,
+                step_type=step_type,
+                ui_mode=ui_mode,
+                option_count=option_count,
+            ),
+        ):
+            pass
+
     def sub_pipeline_span(self, **attrs: Any):
         return self._span(
             Spans.PIPELINE_SUB_PIPELINE,

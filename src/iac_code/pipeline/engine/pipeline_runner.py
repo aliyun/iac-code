@@ -4190,6 +4190,16 @@ class PipelineRunner:
                     ui_mode=step.ui_mode,
                     duration_ms=duration_ms,
                 )
+                if step.ui_mode == "candidate_selection":
+                    self._observability.selection_ready(
+                        step_id=step.step_id,
+                        step_index=step_index,
+                        step_attempt=step_attempt,
+                        total_steps=self.state_machine.total_steps,
+                        step_type=step.step_type,
+                        ui_mode=step.ui_mode,
+                        option_count=len(options),
+                    )
                 yield PipelineEvent(
                     type=PipelineEventType.USER_INPUT_REQUIRED,
                     step_id=step.step_id,
