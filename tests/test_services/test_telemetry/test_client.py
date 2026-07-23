@@ -20,6 +20,7 @@ def _disable_default_backend(monkeypatch):
     flushes would attempt real HTTP calls during test teardown.
     """
     monkeypatch.setenv("DISABLE_TELEMETRY", "1")
+    monkeypatch.delenv("IAC_CODE_CHANNEL", raising=False)
 
 
 def test_default_construction_does_not_crash(tmp_path, monkeypatch):
@@ -52,7 +53,19 @@ def test_add_metric_delegates_to_registry(tmp_path, monkeypatch):
     registry = MetricsRegistry(instruments={Metrics.SESSION_COUNT: counter})
     client = TelemetryClient(metrics=registry)
     client.add_metric(Metrics.SESSION_COUNT, 1, {"os.type": "linux"})
-    counter.add.assert_called_once_with(1, {"os.type": "linux"})
+    counter.add.assert_called_once_with(1, {"os.type": "linux", "iac_code.channel": "unknown"})
+
+
+def test_add_metric_uses_configured_channel(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("IAC_CODE_CHANNEL", "partner_acme")
+    counter = MagicMock()
+    registry = MetricsRegistry(instruments={Metrics.SESSION_COUNT: counter})
+    client = TelemetryClient(metrics=registry)
+
+    client.add_metric(Metrics.SESSION_COUNT, 1, {"iac_code.channel": "spoofed"})
+
+    counter.add.assert_called_once_with(1, {"iac_code.channel": "partner_acme"})
 
 
 def test_start_span_delegates_to_factory(tmp_path, monkeypatch):
@@ -63,7 +76,27 @@ def test_start_span_delegates_to_factory(tmp_path, monkeypatch):
     client = TelemetryClient(tracer=factory)
     with client.start_span(Spans.ENTRY, {"k": 1}):
         pass
-    tracer.start_as_current_span.assert_called_once()
+    tracer.start_as_current_span.assert_called_once_with(
+        Spans.ENTRY,
+        attributes={"k": 1, "iac_code.channel": "unknown"},
+    )
+
+
+def test_start_span_uses_configured_channel(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("IAC_CODE_CHANNEL", "ros_official")
+    tracer = MagicMock()
+    factory = SpanFactory()
+    factory.attach(tracer)
+    client = TelemetryClient(tracer=factory)
+
+    with client.start_span(Spans.ENTRY, {"iac_code.channel": "spoofed"}):
+        pass
+
+    tracer.start_as_current_span.assert_called_once_with(
+        Spans.ENTRY,
+        attributes={"iac_code.channel": "ros_official"},
+    )
 
 
 def test_bootstrap_with_no_default_endpoint_does_not_crash(tmp_path, monkeypatch):

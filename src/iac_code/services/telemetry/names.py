@@ -125,6 +125,12 @@ class GenAiAttr:
     REACT_ROUND = "gen_ai.react.round"
 
 
+class IacCodeAttr:
+    """iac-code-specific attribute keys shared by telemetry signals."""
+
+    CHANNEL = "iac_code.channel"
+
+
 class ArmsResourceAttr:
     """ARMS-specific resource attribute keys."""
 

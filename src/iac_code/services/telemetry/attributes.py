@@ -15,7 +15,12 @@ from iac_code.services.telemetry.names import (
     ARMS_FEATURE_GENAI_APP,
     FRAMEWORK_IAC_CODE,
     ArmsResourceAttr,
+    IacCodeAttr,
 )
+
+_CHANNEL_ENV = "IAC_CODE_CHANNEL"
+_DEFAULT_CHANNEL = "unknown"
+_MAX_CHANNEL_LENGTH = 128
 
 
 def _detect_service_version() -> str:
@@ -51,8 +56,13 @@ class AttributeBuilder:
         self._identity = identity
         self._service_name = service_name
         self._service_version = service_version or _detect_service_version()
+        self._channel = os.environ.get(_CHANNEL_ENV, "").strip()[:_MAX_CHANNEL_LENGTH] or _DEFAULT_CHANNEL
         self._sequence = itertools.count(1)
         self._sequence_lock = Lock()
+
+    def build_signal_attributes(self) -> dict[str, str]:
+        """Attributes attached directly to every exported signal."""
+        return {IacCodeAttr.CHANNEL: self._channel}
 
     def build_resource(self) -> dict[str, str]:
         """Identity + app + device attributes. Called once at startup, usually."""
@@ -68,6 +78,7 @@ class AttributeBuilder:
             "user.id": self._identity.get_user_id(),
             "session.id": self._identity.get_session_id(),
         }
+        attrs.update(self.build_signal_attributes())
         tenant = self._identity.get_tenant_id()
         if tenant is not None:
             attrs["tenant.id"] = tenant

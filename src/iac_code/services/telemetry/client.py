@@ -100,16 +100,21 @@ class TelemetryClient:
         self._sink.log_event(event_name, metadata or {})
 
     def add_metric(self, name: str, value: int | float, attrs: dict[str, Any] | None = None) -> None:
-        self._metrics.add(name, value, attrs or {})
+        self._metrics.add(name, value, self._with_signal_attributes(attrs))
 
     def start_span(self, name: str, attrs: dict[str, Any] | None = None):
-        return self._tracer.start(name, attrs)
+        return self._tracer.start(name, self._with_signal_attributes(attrs))
 
     def get_session_id(self) -> str:
         return self._identity.get_session_id()
 
     def get_user_id(self) -> str:
         return self._identity.get_user_id()
+
+    def _with_signal_attributes(self, attrs: dict[str, Any] | None) -> dict[str, Any]:
+        merged = dict(attrs or {})
+        merged.update(self._attributes.build_signal_attributes())
+        return merged
 
     # -------- Lifecycle --------
 

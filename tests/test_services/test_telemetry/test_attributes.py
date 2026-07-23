@@ -56,6 +56,21 @@ def test_resource_default_deployment_environment_is_production(builder, monkeypa
     assert builder.build_resource()["deployment.environment"] == "production"
 
 
+def test_resource_channel_defaults_to_unknown(identity, monkeypatch):
+    monkeypatch.delenv("IAC_CODE_CHANNEL", raising=False)
+    attrs = AttributeBuilder(identity, "iac-code", "0.1.0").build_resource()
+
+    assert attrs["iac_code.channel"] == "unknown"
+
+
+def test_resource_channel_comes_from_environment(identity, monkeypatch):
+    monkeypatch.setenv("IAC_CODE_CHANNEL", "  ros_official  ")
+    builder = AttributeBuilder(identity, "iac-code", "0.1.0")
+
+    assert builder.build_resource()["iac_code.channel"] == "ros_official"
+    assert builder.build_signal_attributes() == {"iac_code.channel": "ros_official"}
+
+
 def test_resource_deployment_environment_overridable(builder, monkeypatch):
     monkeypatch.setenv("IAC_CODE_ENV", "staging")
     assert builder.build_resource()["deployment.environment"] == "staging"
