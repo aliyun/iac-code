@@ -46,6 +46,7 @@ See [Alibaba Cloud Credentials](./alibaba-cloud-credentials.md) for more details
 | `IAC_CODE_TELEMETRY_METRICS_ENDPOINT` | Override endpoint for metrics |
 | `IAC_CODE_TELEMETRY_LOGS_ENDPOINT` | Override endpoint for logs |
 | `IAC_CODE_TELEMETRY_HEADERS` | Custom OTLP headers (JSON or key=value format) |
+| `IAC_CODE_CHANNEL` | Stable, low-cardinality telemetry source channel (default: `unknown`), for example `ros_official` or `partner_acme` |
 
 ## Other
 

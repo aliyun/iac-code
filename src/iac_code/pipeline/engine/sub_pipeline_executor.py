@@ -175,6 +175,11 @@ class SubPipelineExecutor:
             tool_context_env_overrides=self._tool_context_env_overrides,
             aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
         )
+        step_executor.set_telemetry_scope(
+            sub_pipeline_name=sub_spec.name,
+            sub_pipeline_id=sub_pipeline_id,
+            candidate_index=candidate_index,
+        )
         self._apply_telemetry_correlation(step_executor)
 
         if event_callback:
@@ -416,6 +421,14 @@ class SubPipelineExecutor:
         else:
             state_machine = StateMachine(sub_spec.steps, sub_spec.max_rollbacks)
         step_executor = self._make_step_executor()
+        set_telemetry_scope = getattr(step_executor, "set_telemetry_scope", None)
+        if callable(set_telemetry_scope):
+            set_telemetry_scope(
+                parent_step_id=parent_step_id,
+                sub_pipeline_name=sub_spec.name,
+                sub_pipeline_id=sub_pipeline_id,
+                candidate_index=candidate_index,
+            )
         self._active_step_executor = step_executor
         candidate_name = candidate.get("name", _("Candidate {index}").format(index=candidate_index + 1))
         sub_pipeline_started_at = self._observability.now()

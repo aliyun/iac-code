@@ -1358,7 +1358,6 @@ class IacCodeA2APipelineExecutor:
         )
         next_event: asyncio.Future[Any] | None = None
         restart_task: asyncio.Task[Any] | None = None
-        close_stream_on_exit = False
         terminal_handoff_unavailable = False
         stream_exception: BaseException | None = None
         try:
@@ -1378,7 +1377,6 @@ class IacCodeA2APipelineExecutor:
                 if runtime.pause_after_interrupt and restart_event.is_set():
                     restart_event.clear()
                     runtime.pause_after_interrupt = False
-                    await _close_stream_safely(stream_iter)
                     return _StreamConsumeResult(
                         had_events=had_events,
                         restart_requested=False,
@@ -1387,7 +1385,6 @@ class IacCodeA2APipelineExecutor:
                 if runtime.restart_after_interrupt and restart_event.is_set():
                     restart_event.clear()
                     runtime.restart_after_interrupt = False
-                    await _close_stream_safely(stream_iter)
                     return _StreamConsumeResult(
                         had_events=had_events,
                         restart_requested=True,
@@ -1409,7 +1406,6 @@ class IacCodeA2APipelineExecutor:
                     next_event = None
                     await _cancel_task_safely(restart_task)
                     restart_task = None
-                    await _close_stream_safely(stream_iter)
                     return _StreamConsumeResult(
                         had_events=had_events,
                         restart_requested=True,
@@ -1422,7 +1418,6 @@ class IacCodeA2APipelineExecutor:
                     next_event = None
                     await _cancel_task_safely(restart_task)
                     restart_task = None
-                    await _close_stream_safely(stream_iter)
                     return _StreamConsumeResult(
                         had_events=had_events,
                         restart_requested=False,
@@ -1456,14 +1451,12 @@ class IacCodeA2APipelineExecutor:
                         event=event,
                     )
                     if terminal_publication.interrupt_action == "restart":
-                        close_stream_on_exit = True
                         return _StreamConsumeResult(
                             had_events=had_events,
                             restart_requested=True,
                             terminal_handoff_unavailable=terminal_handoff_unavailable,
                         )
                     if terminal_publication.interrupt_action == "pause":
-                        close_stream_on_exit = True
                         return _StreamConsumeResult(
                             had_events=had_events,
                             restart_requested=False,
@@ -1516,7 +1509,6 @@ class IacCodeA2APipelineExecutor:
                 if text:
                     task.output_text.append(text)
                 if _ask_user_question_from(event) is not None:
-                    close_stream_on_exit = True
                     return _StreamConsumeResult(
                         had_events=had_events,
                         restart_requested=False,
@@ -1524,7 +1516,6 @@ class IacCodeA2APipelineExecutor:
                     )
         except asyncio.CancelledError as exc:
             stream_exception = exc
-            close_stream_on_exit = True
             raise
         except BaseException as exc:
             stream_exception = exc
@@ -1535,8 +1526,6 @@ class IacCodeA2APipelineExecutor:
             await _cancel_task_safely(stream_driver)
             if restart_task is not None:
                 await _cancel_task_safely(restart_task)
-            if close_stream_on_exit:
-                await _close_stream_safely(stream_iter)
             if runtime.current_stream is stream_iter:
                 runtime.current_stream = None
             if outbound is not None:
@@ -3875,21 +3864,24 @@ async def _drive_stream_events(
     stream: AsyncIterator[Any],
     requests: asyncio.Queue[asyncio.Future[Any]],
 ) -> None:
-    while True:
-        completion = await requests.get()
-        if completion.cancelled():
-            continue
-        try:
-            event = await anext(stream)
-        except asyncio.CancelledError:
-            completion.cancel()
-            raise
-        except BaseException as exc:
+    try:
+        while True:
+            completion = await requests.get()
+            if completion.cancelled():
+                continue
+            try:
+                event = await anext(stream)
+            except asyncio.CancelledError:
+                completion.cancel()
+                raise
+            except BaseException as exc:
+                if not completion.done():
+                    completion.set_exception(exc)
+                return
             if not completion.done():
-                completion.set_exception(exc)
-            return
-        if not completion.done():
-            completion.set_result(event)
+                completion.set_result(event)
+    finally:
+        await _close_stream_safely(stream)
 
 
 async def _cancel_task_safely(task: asyncio.Task[Any]) -> None:

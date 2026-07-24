@@ -647,6 +647,12 @@ class TestDashScopeCacheMetrics:
         assert end.usage.cache_read_input_tokens == 800
         assert end.usage.cache_creation_input_tokens == 0
         assert end.usage.input_tokens == 1000
+        assert end.usage.total_input_tokens == 1000
+        assert end.usage.standard_input_tokens == 200
+        assert end.usage.total_tokens == 1850
+        assert end.usage.normalized_total_tokens == 1050
+        assert end.usage.cache_hit_rate == 0.8
+        assert end.usage.usage_reported is True
 
     async def test_stream_without_cache_details(self):
         chunks = [

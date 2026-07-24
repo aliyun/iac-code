@@ -44,6 +44,20 @@ _MODEL_ALIAS: dict[str, tuple[str, tuple[str, ...]]] = {
 _MIN_MANUAL_THINKING_BUDGET = 1024
 
 
+def _anthropic_usage(raw_usage: Any) -> Usage:
+    """Preserve Anthropic's separate input and cache counters for normalized reporting."""
+    cache_creation = getattr(raw_usage, "cache_creation_input_tokens", 0) or 0
+    cache_read = getattr(raw_usage, "cache_read_input_tokens", 0) or 0
+    return Usage(
+        input_tokens=getattr(raw_usage, "input_tokens", 0) or 0,
+        output_tokens=getattr(raw_usage, "output_tokens", 0) or 0,
+        cache_creation_input_tokens=cache_creation,
+        cache_read_input_tokens=cache_read,
+        input_tokens_include_cache=False,
+        reported=True,
+    )
+
+
 class AnthropicProvider(Provider):
     """Provider implementation backed by ``anthropic.AsyncAnthropic``."""
 
@@ -271,12 +285,7 @@ class AnthropicProvider(Provider):
 
             # After the stream ends, emit the final message event
             final = await stream.get_final_message()
-            usage = Usage(
-                input_tokens=final.usage.input_tokens,
-                output_tokens=final.usage.output_tokens,
-                cache_creation_input_tokens=getattr(final.usage, "cache_creation_input_tokens", 0) or 0,
-                cache_read_input_tokens=getattr(final.usage, "cache_read_input_tokens", 0) or 0,
-            )
+            usage = _anthropic_usage(final.usage)
             yield MessageEndEvent(stop_reason=final.stop_reason or "end_turn", usage=usage)
 
     async def complete(
@@ -322,12 +331,7 @@ class AnthropicProvider(Provider):
                     }
                 )
 
-        usage = Usage(
-            input_tokens=response.usage.input_tokens,
-            output_tokens=response.usage.output_tokens,
-            cache_creation_input_tokens=getattr(response.usage, "cache_creation_input_tokens", 0) or 0,
-            cache_read_input_tokens=getattr(response.usage, "cache_read_input_tokens", 0) or 0,
-        )
+        usage = _anthropic_usage(response.usage)
 
         return NonStreamingResponse(
             message_id=response.id,

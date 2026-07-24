@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -87,9 +88,44 @@ class TestAskUserQuestionToolExecute:
         }
 
     @pytest.mark.asyncio
+    async def test_notifies_observer_after_answer_is_submitted(self):
+        queue: asyncio.Queue = asyncio.Queue()
+        observer = MagicMock()
+        tool = AskUserQuestionTool(question_answered_observer=observer)
+        task = asyncio.create_task(
+            tool.execute(tool_input=_input(), context=ToolContext(event_queue=queue, tool_use_id="tu_1"))
+        )
+
+        event = await asyncio.wait_for(queue.get(), timeout=1)
+        event.response_future.set_result(
+            {"selected_id": "deploy_to_aliyun", "selected_label": "部署到阿里云", "free_text": "预算 500/月"}
+        )
+
+        result = await asyncio.wait_for(task, timeout=1)
+
+        assert result.is_error is False
+        observer.assert_called_once_with("tu_1", 2, "option_and_free_text")
+
+    @pytest.mark.asyncio
+    async def test_observer_failure_does_not_fail_answer_submission(self):
+        queue: asyncio.Queue = asyncio.Queue()
+        observer = MagicMock(side_effect=RuntimeError("telemetry unavailable"))
+        tool = AskUserQuestionTool(question_answered_observer=observer)
+        task = asyncio.create_task(tool.execute(tool_input=_input(), context=ToolContext(event_queue=queue)))
+
+        event = await asyncio.wait_for(queue.get(), timeout=1)
+        event.response_future.set_result({"selected_id": "not_iac", "selected_label": "不是基础设施需求"})
+
+        result = await asyncio.wait_for(task, timeout=1)
+
+        assert result.is_error is False
+        observer.assert_called_once_with(None, 2, "option")
+
+    @pytest.mark.asyncio
     async def test_cancelled_question_returns_error(self):
         queue: asyncio.Queue = asyncio.Queue()
-        tool = AskUserQuestionTool()
+        observer = MagicMock()
+        tool = AskUserQuestionTool(question_answered_observer=observer)
         task = asyncio.create_task(tool.execute(tool_input=_input(), context=ToolContext(event_queue=queue)))
 
         event = await asyncio.wait_for(queue.get(), timeout=1)
@@ -98,6 +134,7 @@ class TestAskUserQuestionToolExecute:
         result = await asyncio.wait_for(task, timeout=1)
         assert result.is_error is True
         assert "cancelled" in result.content.lower()
+        observer.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_cancelled_task_resolves_response_future(self):

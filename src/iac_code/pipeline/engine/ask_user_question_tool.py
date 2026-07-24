@@ -4,18 +4,29 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+from collections.abc import Callable
 from typing import Any
 
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.types.stream_events import AskUserQuestionEvent
 
+QuestionAnsweredObserver = Callable[[str | None, int, str], None]
+logger = logging.getLogger(__name__)
+
 
 class AskUserQuestionTool(Tool):
     """Emit a user question event and wait for the UI to resolve it."""
 
-    def __init__(self, completion_guard_state: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        completion_guard_state: dict[str, Any] | None = None,
+        *,
+        question_answered_observer: QuestionAnsweredObserver | None = None,
+    ) -> None:
         self._completion_guard_state = completion_guard_state
+        self._question_answered_observer = question_answered_observer
 
     @property
     def name(self) -> str:
@@ -101,6 +112,20 @@ class AskUserQuestionTool(Tool):
             raise
         if answer is None:
             return ToolResult.error(_("User cancelled ask_user_question."))
+
+        if answer.get("selected_id") and answer.get("free_text"):
+            answer_type = "option_and_free_text"
+        elif answer.get("selected_id"):
+            answer_type = "option"
+        elif answer.get("free_text"):
+            answer_type = "free_text"
+        else:
+            answer_type = "empty"
+        if self._question_answered_observer is not None:
+            try:
+                self._question_answered_observer(context.tool_use_id, len(tool_input["options"]), answer_type)
+            except Exception:
+                logger.warning("Failed to observe submitted pipeline question answer", exc_info=True)
 
         payload = {
             "selected_id": answer.get("selected_id", ""),

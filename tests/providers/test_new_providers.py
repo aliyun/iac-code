@@ -78,6 +78,7 @@ class TestNewProviderImports:
             "HTTP-Referer": "https://github.com/aliyun/iac-code",
             "X-Title": "iac-code",
         }
+        assert "max_retries" not in calls[0]
 
     def test_azure_openai_provider(self):
         from iac_code.providers.azure_openai_provider import AzureOpenAIProvider

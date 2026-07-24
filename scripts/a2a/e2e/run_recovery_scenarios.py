@@ -16,6 +16,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import signal
 import sys
 import tempfile
@@ -77,6 +78,7 @@ from debugger import (  # noqa: E402
 )
 
 from iac_code.services.session_storage import SessionStorage  # noqa: E402
+from iac_code.utils.project_paths import get_projects_dir  # noqa: E402
 
 ASK_TRIGGER_PROMPT = "我有个产品要上线"
 ASK_FIRST_ANSWER = "我要创建云网络资源；本次只选择已有 VPC 创建一个 VSwitch，不部署 ECS、EIP、SLB 或 Nginx。"
@@ -557,10 +559,13 @@ class ScenarioHarness:
         wait_for_server(self.server_url, timeout=self.args.server_timeout)
 
     def kill9_and_restart(self) -> None:
+        self.kill9()
+        self.start_server()
+
+    def kill9(self) -> None:
         if self.server is None:
             raise RuntimeError("server is not running")
         self.server.kill9()
-        self.start_server()
 
     def terminate(self) -> None:
         if self.server is not None and not self.args.leave_server_running:
@@ -892,6 +897,19 @@ def _run_scenario1(
             h.checks["step4 backup context has no active task"] = (
                 h.snapshots["step4_backup"].get("context", {}).get("active_task_id") is None
             )
+            h.kill9()
+            backup_restore = _remove_primary_session_for_backup_restore(h)
+            h.snapshots["step4_backup_only_restore"] = backup_restore
+            h.start_server()
+            primary_session_dir = Path(backup_restore["primarySessionDir"])
+            primary_session_file = Path(backup_restore["primarySessionFile"])
+            backup_restore["primaryAbsentAfterRestart"] = not primary_session_dir.exists()
+            backup_restore["primarySessionFileAbsentAfterRestart"] = not primary_session_file.exists()
+            h.checks["primary session stayed absent after restart"] = (
+                backup_restore["primaryAbsentAfterRestart"]
+                and backup_restore["primarySessionFileAbsentAfterRestart"]
+            )
+            _write_json(h.run_dir / "step4.backup-only-restore.json", backup_restore)
         selection = h.stream(
             prompt=args.selection_prompt,
             name="02-select-candidate",
@@ -901,6 +919,16 @@ def _run_scenario1(
             _add_hydrated_task_checks(h, selection, "selection")
             h.checks["selection did not report already-working error"] = not _has_already_working_error(selection)
             h.checks["selection did not report terminal-state error"] = not _has_terminal_state_error(selection)
+        if check_waiting_input_backup:
+            backup_restore["primaryRestoredAfterSelection"] = primary_session_dir.is_dir()
+            backup_restore["primarySessionFileRestoredAfterSelection"] = primary_session_file.is_file()
+            backup_restore["backupStillPresentAfterSelection"] = Path(backup_restore["backupSessionDir"]).is_dir()
+            h.checks["selection restored primary session from backup"] = (
+                backup_restore["primaryRestoredAfterSelection"]
+                and backup_restore["primarySessionFileRestoredAfterSelection"]
+                and backup_restore["backupStillPresentAfterSelection"]
+            )
+            _write_json(h.run_dir / "step4.backup-only-restore.json", backup_restore)
         h.checks["selection completed pipeline"] = _pipeline_completed(selection)
         h.checks["selection produced normal handoff"] = selection.normal_handoff_ready
         h.snapshots["after_pipeline"] = h.fetch_state("after-pipeline")
@@ -1896,6 +1924,62 @@ def _waiting_input_backup_snapshots(h: ScenarioHarness) -> dict[str, Any]:
 
     _append_harness_note(h, f"cannot inspect backup snapshots: {last_error}")
     return {"error": last_error}
+
+
+def _remove_primary_session_for_backup_restore(h: ScenarioHarness) -> dict[str, Any]:
+    backup_root = getattr(h, "backup_root", None)
+    if backup_root is None:
+        raise RuntimeError("backup root is not configured")
+    cwd, session_id = _pipeline_session_identity(h)
+    if not cwd or not session_id:
+        raise RuntimeError("cannot remove primary session: missing cwd/session_id")
+
+    primary_storage = SessionStorage()
+    backup_storage = SessionStorage(projects_dir=Path(backup_root) / "projects")
+    primary_session_dir = primary_storage.v2_session_dir(cwd, session_id)
+    backup_session_dir = backup_storage.v2_session_dir(cwd, session_id)
+    if primary_session_dir is None or not primary_session_dir.is_dir():
+        raise RuntimeError("primary session directory not found")
+    if backup_session_dir is None or not backup_session_dir.is_dir():
+        raise RuntimeError("backup session directory not found")
+    if primary_session_dir.is_symlink() or backup_session_dir.is_symlink():
+        raise RuntimeError("refusing to remove session through a symlink")
+
+    primary_projects_dir = get_projects_dir().resolve()
+    backup_projects_dir = (Path(backup_root) / "projects").resolve()
+    primary_resolved = primary_session_dir.resolve()
+    backup_resolved = backup_session_dir.resolve()
+    if primary_resolved.name != session_id or primary_resolved == primary_projects_dir:
+        raise RuntimeError("refusing to remove an unexpected primary session path")
+    if primary_projects_dir not in primary_resolved.parents:
+        raise RuntimeError("primary session resolves outside the active projects directory")
+    if backup_projects_dir not in backup_resolved.parents:
+        raise RuntimeError("backup session resolves outside the configured backup directory")
+    if (
+        primary_resolved == backup_resolved
+        or backup_resolved in primary_resolved.parents
+        or primary_resolved in backup_resolved.parents
+    ):
+        raise RuntimeError("primary session path overlaps the backup session path")
+
+    primary_session_file = primary_storage.session_path(cwd, session_id)
+    evidence = {
+        "cwd": cwd,
+        "sessionId": session_id,
+        "primaryProjectsDir": str(primary_projects_dir),
+        "primarySessionDir": str(primary_resolved),
+        "primarySessionFile": str(primary_session_file),
+        "backupSessionDir": str(backup_resolved),
+        "primaryExistedBeforeRemoval": True,
+        "backupExistedBeforeRemoval": True,
+    }
+    shutil.rmtree(primary_session_dir)
+    evidence["primaryRemovedBeforeRestart"] = not primary_session_dir.exists()
+    evidence["backupPresentAfterRemoval"] = backup_session_dir.is_dir()
+    if not evidence["primaryRemovedBeforeRestart"] or not evidence["backupPresentAfterRemoval"]:
+        raise RuntimeError("failed to establish backup-only restore preconditions")
+    _write_json(h.run_dir / "step4.backup-only-restore.json", evidence)
+    return evidence
 
 
 def _completed_snapshot_or_stream(h: ScenarioHarness, summary: StreamSummary) -> bool:

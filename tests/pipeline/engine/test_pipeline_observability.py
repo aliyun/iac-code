@@ -9,12 +9,26 @@ import pytest
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.interrupt import InterruptVerdict
 from iac_code.pipeline.engine.observability import PipelineObservability
-from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
+from iac_code.pipeline.engine.pipeline_runner import PipelineRunner, _is_first_output_delta
 from iac_code.pipeline.engine.session import RestoreResult
 from iac_code.pipeline.engine.step_spec import LoadedPipeline, StepSpec, SubPipelineSpec
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.services.telemetry.config import ContentCaptureMode
-from iac_code.services.telemetry.names import Events, GenAiAttr, GenAiOperationName, GenAiSpanKind, Metrics, Spans
+from iac_code.services.telemetry.names import (
+    Events,
+    GenAiAttr,
+    GenAiOperationName,
+    GenAiSpanKind,
+    IacCodeAttr,
+    Metrics,
+    Spans,
+)
+from iac_code.types.stream_events import (
+    AskUserQuestionEvent,
+    SubPipelineStreamEvent,
+    TextDeltaEvent,
+    ThinkingDeltaEvent,
+)
 
 
 def test_pipeline_started_emits_event_and_span_attrs():
@@ -43,6 +57,7 @@ def test_pipeline_started_emits_event_and_span_attrs():
     assert start_span.call_args.args[1][GenAiAttr.USER_ID] == "iac_user_uid"
     assert start_span.call_args.args[1][GenAiAttr.FRAMEWORK] == "iac-code-cli"
     assert start_span.call_args.args[1][GenAiAttr.AGENT_NAME] == "selling"
+    assert start_span.call_args.args[1][IacCodeAttr.MODE] == "pipeline"
     log_event.assert_called_once_with(
         Events.PIPELINE_STARTED,
         {
@@ -118,6 +133,48 @@ def test_pipeline_nested_spans_emit_genai_semantics_and_keep_pipeline_attrs():
         assert attrs[GenAiAttr.USER_ID] == "iac_user_uid"
         assert attrs[GenAiAttr.FRAMEWORK] == "iac-code-cli"
         assert attrs[GenAiAttr.AGENT_NAME] == "selling"
+
+
+def test_pipeline_boundary_spans_include_session_and_stable_dimensions():
+    obs = PipelineObservability(pipeline_name="selling", session_id="raw-sid", cwd="/repo")
+
+    with (
+        patch("iac_code.pipeline.engine.observability.get_session_id", return_value="iac_sess_sid", create=True),
+        patch("iac_code.pipeline.engine.observability.get_user_id", return_value="iac_user_uid", create=True),
+        patch("iac_code.pipeline.engine.observability.start_span", return_value=nullcontext()) as start_span,
+    ):
+        obs.question_answered(
+            step_id="intent_parsing",
+            tool_call_id="tool-1",
+            option_count=3,
+            answer_type="option",
+        )
+        obs.selection_ready(
+            step_id="confirm_and_select",
+            step_index=4,
+            step_attempt=2,
+            total_steps=5,
+            step_type="llm",
+            ui_mode="candidate_selection",
+            option_count=3,
+        )
+
+    question_call, selection_call = start_span.call_args_list
+    assert question_call.args[0] == Spans.PIPELINE_QUESTION_ANSWERED
+    assert question_call.args[1]["step_id"] == "intent_parsing"
+    assert question_call.args[1]["answer_type"] == "option"
+    assert question_call.args[1]["option_count"] == 3
+    assert question_call.args[1][GenAiAttr.TOOL_CALL_ID] == "tool-1"
+    assert question_call.args[1][GenAiAttr.SESSION_ID] == "iac_sess_sid"
+    assert question_call.args[1][GenAiAttr.USER_ID] == "iac_user_uid"
+
+    assert selection_call.args[0] == Spans.PIPELINE_SELECTION_READY
+    assert selection_call.args[1]["step_id"] == "confirm_and_select"
+    assert selection_call.args[1]["step_attempt"] == 2
+    assert selection_call.args[1]["ui_mode"] == "candidate_selection"
+    assert selection_call.args[1]["option_count"] == 3
+    assert selection_call.args[1][GenAiAttr.SESSION_ID] == "iac_sess_sid"
+    assert selection_call.args[1][GenAiAttr.USER_ID] == "iac_user_uid"
 
 
 def test_event_sanitizer_replaces_sensitive_fields_by_default():
@@ -626,6 +683,7 @@ def test_user_input_received_records_event_and_wait_metric():
             step_index=4,
             total_steps=5,
             ui_mode="candidate_selection",
+            input_kind="candidate_selection",
             user_input="Plan A",
             wait_duration_ms=1200.0,
         )
@@ -633,6 +691,7 @@ def test_user_input_received_records_event_and_wait_metric():
     assert log_event.call_args.args[0] == Events.PIPELINE_USER_INPUT_RECEIVED
     attrs = log_event.call_args.args[1]
     assert attrs["input_length_bucket"] == "1-50"
+    assert attrs["input_kind"] == "candidate_selection"
     assert attrs["wait_duration_ms"] == 1200.0
     add_metric.assert_called_once_with(
         Metrics.PIPELINE_USER_INPUT_WAIT_DURATION,
@@ -643,6 +702,7 @@ def test_user_input_received_records_event_and_wait_metric():
             "step_index": 4,
             "total_steps": 5,
             "ui_mode": "candidate_selection",
+            "input_kind": "candidate_selection",
             "input_length_bucket": "1-50",
         },
     )
@@ -664,6 +724,7 @@ def test_user_input_required_records_event_with_sanitized_prompt():
             total_steps=5,
             step_type="selection_step",
             ui_mode="candidate_selection",
+            input_kind="candidate_selection",
             option_count=3,
             prompt="Choose a plan",
         )
@@ -675,6 +736,7 @@ def test_user_input_required_records_event_with_sanitized_prompt():
     assert attrs["total_steps"] == 5
     assert attrs["step_type"] == "selection_step"
     assert attrs["ui_mode"] == "candidate_selection"
+    assert attrs["input_kind"] == "candidate_selection"
     assert attrs["option_count"] == 3
     assert "prompt" not in attrs
     assert attrs["prompt_present"] is True
@@ -1045,6 +1107,36 @@ def test_duration_ms_uses_monotonic_clock():
         assert PipelineObservability.duration_ms(start) == 1250.0
 
 
+def test_pipeline_ttft_uses_nanoseconds_and_is_best_effort():
+    span = MagicMock()
+
+    with patch("iac_code.pipeline.engine.observability.time.monotonic", return_value=10.25):
+        PipelineObservability.record_user_time_to_first_token(span, 10.0)
+
+    span.set_attribute.assert_called_once_with(GenAiAttr.USER_TIME_TO_FIRST_TOKEN, 250_000_000)
+
+
+@pytest.mark.parametrize(
+    ("event", "expected"),
+    [
+        (TextDeltaEvent(text=""), False),
+        (ThinkingDeltaEvent(text=""), False),
+        (TextDeltaEvent(text="answer"), True),
+        (ThinkingDeltaEvent(text="reasoning"), True),
+        (
+            SubPipelineStreamEvent(
+                sub_pipeline_id="candidate-1",
+                candidate_index=0,
+                inner=ThinkingDeltaEvent(text="candidate reasoning"),
+            ),
+            True,
+        ),
+    ],
+)
+def test_pipeline_first_output_delta_accepts_text_thinking_and_nested_events(event, expected):
+    assert _is_first_output_delta(event) is expected
+
+
 def test_pipeline_user_aborted_emits_terminal_event_and_metric():
     obs = PipelineObservability(pipeline_name="selling", session_id="sid", cwd="/repo")
     obs.pipeline_started_at = 10.0
@@ -1168,6 +1260,29 @@ async def test_runner_emits_parent_lifecycle_telemetry(runner):
     )
     assert [call[1]["step_id"] for call in calls if call[0] == "step_started"] == ["a", "b"]
     assert [call[1]["step_id"] for call in calls if call[0] == "step_completed"] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_runner_records_first_non_empty_thinking_delta_on_pipeline_span(runner):
+    pipeline_span = MagicMock()
+    runner._observability.pipeline_run_span = MagicMock(return_value=nullcontext(pipeline_span))
+    runner._observability.record_user_time_to_first_token = MagicMock()
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        if step.step_id == "a":
+            yield ThinkingDeltaEvent(text="")
+            yield ThinkingDeltaEvent(text="reasoning")
+            yield TextDeltaEvent(text="answer")
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    async for _event in runner.run("hello"):
+        pass
+
+    runner._observability.record_user_time_to_first_token.assert_called_once_with(pipeline_span, ANY)
 
 
 @pytest.mark.asyncio
@@ -1386,6 +1501,39 @@ async def test_runner_emits_user_input_required_and_waiting_funnel_telemetry(run
 
 
 @pytest.mark.asyncio
+async def test_runner_emits_user_input_required_for_ask_user_question(runner):
+    runner._observability.user_input_required = MagicMock()
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        yield AskUserQuestionEvent(
+            tool_use_id="ask-1",
+            question="Which runtime?",
+            options=[{"id": "nginx", "label": "Nginx"}],
+        )
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    async for _event in runner.run("hello"):
+        pass
+
+    first_call = runner._observability.user_input_required.call_args_list[0]
+    assert first_call.kwargs == {
+        "step_id": "a",
+        "step_index": 1,
+        "step_attempt": 1,
+        "total_steps": 2,
+        "step_type": "normal",
+        "ui_mode": None,
+        "input_kind": "ask_user_question",
+        "option_count": 1,
+        "prompt": "Which runtime?",
+    }
+
+
+@pytest.mark.asyncio
 async def test_runner_emits_completed_and_failed_funnel_step_telemetry(runner):
     runner._observability.funnel_step = MagicMock()
 
@@ -1461,6 +1609,130 @@ async def test_runner_resume_emits_user_input_received_and_selection_telemetry(r
     )
     assert "a" not in runner._waiting_input_started_at
     assert "a" not in runner._waiting_input_options_by_step
+
+
+@pytest.mark.asyncio
+async def test_runner_resume_emits_selection_after_free_text_is_resolved(runner):
+    runner.state_machine.current_step.auto_advance = False
+    runner.state_machine.current_step.ui_mode = "candidate_selection"
+    runner._waiting_input_options_by_step["a"] = [{"name": "Plan A"}, {"name": "Plan B"}]
+    runner._observability.user_input_received = MagicMock()
+    runner._observability.selection_made = MagicMock()
+
+    async def fake_continue(user_input=None, **kwargs):
+        yield PipelineEvent(
+            type=PipelineEventType.STEP_COMPLETED,
+            step_id="a",
+            timestamp=1.0,
+            data={
+                "conclusion": {
+                    "selected_candidate_index": 0,
+                    "selected_candidate_name": "Plan A",
+                }
+            },
+        )
+
+    runner._continue_from_current = fake_continue
+
+    async for _event in runner.resume("你随便选一个方案。"):
+        pass
+
+    runner._observability.selection_made.assert_called_once_with(
+        step_id="a",
+        step_attempt=1,
+        ui_mode="candidate_selection",
+        option_count=2,
+        selected_index=0,
+        selected_value="Plan A",
+    )
+
+
+@pytest.mark.asyncio
+async def test_runner_resume_emits_only_available_selection_after_step_completes(runner):
+    runner.state_machine.current_step.auto_advance = False
+    runner.state_machine.current_step.ui_mode = "candidate_selection"
+    runner._waiting_input_options_by_step["a"] = [{"name": "Plan A"}]
+    runner._observability.selection_made = MagicMock()
+
+    async def fake_continue(user_input=None, **kwargs):
+        yield PipelineEvent(
+            type=PipelineEventType.STEP_COMPLETED,
+            step_id="a",
+            timestamp=1.0,
+            data={"conclusion": {"options": [{"name": "Plan A"}]}},
+        )
+
+    runner._continue_from_current = fake_continue
+
+    async for _event in runner.resume("你随便选一个方案。"):
+        pass
+
+    runner._observability.selection_made.assert_called_once_with(
+        step_id="a",
+        step_attempt=1,
+        ui_mode="candidate_selection",
+        option_count=1,
+        selected_index=0,
+        selected_value="Plan A",
+    )
+
+
+@pytest.mark.asyncio
+async def test_runner_resume_does_not_emit_out_of_range_resolved_selection(runner):
+    runner.state_machine.current_step.auto_advance = False
+    runner.state_machine.current_step.ui_mode = "candidate_selection"
+    runner._waiting_input_options_by_step["a"] = [{"name": "Plan A"}]
+    runner._observability.selection_made = MagicMock()
+
+    async def fake_continue(user_input=None, **kwargs):
+        yield PipelineEvent(
+            type=PipelineEventType.STEP_COMPLETED,
+            step_id="a",
+            timestamp=1.0,
+            data={"conclusion": {"selected_candidate_index": 4}},
+        )
+
+    runner._continue_from_current = fake_continue
+
+    async for _event in runner.resume("你随便选一个方案。"):
+        pass
+
+    runner._observability.selection_made.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_runner_resume_ask_user_question_emits_input_telemetry(runner):
+    runner._observability.user_input_received = MagicMock()
+    runner._observability.question_answered = MagicMock()
+
+    async def fake_continue(**kwargs):
+        if False:
+            yield
+
+    runner._continue_from_current = fake_continue
+
+    async for _event in runner.resume_ask_user_question(
+        {"selected_id": "nginx", "selected_label": "Nginx", "free_text": ""},
+        tool_use_id="ask-1",
+        pending_input={"options": [{"id": "nginx", "label": "Nginx"}]},
+    ):
+        pass
+
+    runner._observability.user_input_received.assert_called_once_with(
+        step_id="a",
+        step_index=1,
+        step_attempt=1,
+        total_steps=2,
+        ui_mode=None,
+        input_kind="ask_user_question",
+        user_input="Nginx",
+    )
+    runner._observability.question_answered.assert_called_once_with(
+        step_id="a",
+        tool_call_id="ask-1",
+        option_count=1,
+        answer_type="option",
+    )
 
 
 @pytest.mark.asyncio

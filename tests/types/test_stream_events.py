@@ -65,6 +65,44 @@ class TestStreamEventTypes:
         assert event.usage.input_tokens == 100
         assert event.usage.total_tokens == 150
 
+    def test_usage_cache_fields_are_breakdowns_of_total_input(self):
+        usage = Usage(
+            input_tokens=100,
+            output_tokens=20,
+            cache_read_input_tokens=60,
+            cache_creation_input_tokens=10,
+        )
+
+        assert usage.total_input_tokens == 100
+        assert usage.standard_input_tokens == 30
+        assert usage.total_tokens == 190
+        assert usage.normalized_total_tokens == 120
+        assert usage.cache_hit_rate == 0.6
+        assert usage.usage_reported is True
+
+    def test_usage_normalizes_separate_anthropic_cache_counters(self):
+        usage = Usage(
+            input_tokens=10,
+            output_tokens=5,
+            cache_read_input_tokens=70,
+            cache_creation_input_tokens=20,
+            input_tokens_include_cache=False,
+            reported=True,
+        )
+
+        assert usage.total_input_tokens == 100
+        assert usage.standard_input_tokens == 10
+        assert usage.total_tokens == 105
+        assert usage.normalized_total_tokens == 105
+        assert usage.cache_hit_rate == 0.7
+
+    def test_usage_distinguishes_missing_from_reported_zero(self):
+        assert Usage().usage_reported is False
+        assert Usage(reported=True).usage_reported is True
+
+    def test_usage_cache_hit_rate_is_zero_without_input(self):
+        assert Usage().cache_hit_rate == 0.0
+
     def test_tombstone(self):
         event = TombstoneEvent(message_id="msg-1")
         assert event.type == "tombstone"

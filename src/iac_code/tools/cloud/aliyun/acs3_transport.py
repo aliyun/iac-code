@@ -70,9 +70,23 @@ _TEA_RESPONSE_HEADERS_ATTRIBUTE = "_iac_response_headers"
 _TEA_RESPONSE_SIZE_ATTRIBUTE = "_iac_response_body_size"
 _BASE_RESPONSE_HEADERS = frozenset(
     {
+        "requestid",
         "request-id",
+        "x-request-id",
         "x-acs-request-id",
+        "x-aliyun-request-id",
+        "x-log-request-id",
+        "x-log-requestid",
         "x-oss-request-id",
+        "x-mns-request-id",
+        "errorcode",
+        "error-code",
+        "x-error-code",
+        "x-acs-error-code",
+        "x-aliyun-error-code",
+        "x-log-error-code",
+        "x-oss-error-code",
+        "x-mns-error-code",
         "content-type",
         "content-length",
         "etag",

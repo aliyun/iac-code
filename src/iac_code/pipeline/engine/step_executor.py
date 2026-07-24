@@ -35,6 +35,7 @@ from iac_code.services.session_layout import (
     require_supported_session_layout,
 )
 from iac_code.services.session_usage import SessionUsageStore
+from iac_code.services.telemetry.names import PipelineAttr
 from iac_code.tools.base import ToolRegistry
 from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY
 from iac_code.types.stream_events import StreamEvent, ToolResultEvent, ToolUseEndEvent, ToolUseStartEvent
@@ -115,6 +116,8 @@ class StepExecutor:
         self._tool_context_env_overrides = dict(tool_context_env_overrides or {})
         self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
         self._current_agent_loop = None
+        self._telemetry_correlation: dict[str, str] = {}
+        self._telemetry_scope: dict[str, str | int] = {}
         pipeline_name = getattr(pipeline, "name", "")
         if not isinstance(pipeline_name, str):
             pipeline_name = ""
@@ -131,11 +134,49 @@ class StepExecutor:
         context_id: str | None = None,
         pipeline_run_id: str | None = None,
     ) -> None:
+        self._telemetry_correlation = {
+            key: value
+            for key, value in {
+                PipelineAttr.RUN_ID: pipeline_run_id,
+            }.items()
+            if value
+        }
         self._observability.set_correlation(
             task_id=task_id,
             context_id=context_id,
             pipeline_run_id=pipeline_run_id,
         )
+
+    def set_telemetry_scope(
+        self,
+        *,
+        parent_step_id: str | None = None,
+        sub_pipeline_name: str | None = None,
+        sub_pipeline_id: str | None = None,
+        candidate_index: int | None = None,
+    ) -> None:
+        self._telemetry_scope = {
+            key: value
+            for key, value in {
+                PipelineAttr.PARENT_STEP_ID: parent_step_id,
+                PipelineAttr.SUB_PIPELINE_NAME: sub_pipeline_name,
+                PipelineAttr.SUB_PIPELINE_ID: sub_pipeline_id,
+                PipelineAttr.CANDIDATE_INDEX: candidate_index,
+            }.items()
+            if value is not None
+        }
+
+    def _agent_telemetry_attributes(self, step: StepSpec) -> dict[str, str | int]:
+        attributes: dict[str, str | int] = {
+            PipelineAttr.NAME: self._pipeline.name,
+            **self._telemetry_correlation,
+            **self._telemetry_scope,
+        }
+        if PipelineAttr.SUB_PIPELINE_ID in self._telemetry_scope:
+            attributes[PipelineAttr.SUB_STEP_ID] = step.step_id
+        else:
+            attributes[PipelineAttr.STEP_ID] = step.step_id
+        return attributes
 
     @property
     def current_agent_loop(self):
@@ -485,6 +526,7 @@ class StepExecutor:
             tool_context_relative_read_directories=step_skill_roots,
             pipeline_mode=True,
             tool_context_env_overrides=self._tool_context_env_overrides,
+            telemetry_attributes=self._agent_telemetry_attributes(step),
         )
         return StepAgentLoopContext(
             agent_loop=agent_loop,
@@ -830,12 +872,17 @@ class StepExecutor:
 
         inject_tools = step.inject_tools_for_surface(self._surface)
         if inject_tools:
-            self._register_injectable_tools(registry, inject_tools, guard_state)
+            self._register_injectable_tools(registry, inject_tools, guard_state, step=step)
 
         return registry
 
     def _register_injectable_tools(
-        self, registry: ToolRegistry, tool_names: list[str], completion_guard_state: dict[str, Any]
+        self,
+        registry: ToolRegistry,
+        tool_names: list[str],
+        completion_guard_state: dict[str, Any],
+        *,
+        step: StepSpec,
     ) -> None:
         from iac_code.pipeline.engine.ask_user_question_tool import AskUserQuestionTool
         from iac_code.pipeline.engine.show_diagram_tool import ShowArchitectureDiagramTool
@@ -850,7 +897,22 @@ class StepExecutor:
                 tool_cls = engine_tools.get(name)
             if tool_cls is not None:
                 if name == "ask_user_question":
-                    registry.register(AskUserQuestionTool(completion_guard_state))
+                    def observe_question_answered(
+                        tool_call_id: str | None, option_count: int, answer_type: str
+                    ) -> None:
+                        self._observability.question_answered(
+                            step_id=step.step_id,
+                            tool_call_id=tool_call_id,
+                            option_count=option_count,
+                            answer_type=answer_type,
+                        )
+
+                    registry.register(
+                        AskUserQuestionTool(
+                            completion_guard_state,
+                            question_answered_observer=observe_question_answered,
+                        )
+                    )
                 elif name == "ros_deploy":
                     registry.register(tool_cls(completion_guard_state=completion_guard_state))
                 else:

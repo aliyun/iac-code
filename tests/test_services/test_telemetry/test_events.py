@@ -10,7 +10,8 @@ from iac_code.services.telemetry.identity import Identity
 
 
 @pytest.fixture
-def emitter(tmp_path):
+def emitter(tmp_path, monkeypatch):
+    monkeypatch.delenv("IAC_CODE_CHANNEL", raising=False)
     identity = Identity(tmp_path / "settings.yml")
     attrs = AttributeBuilder(identity, "iac-code", "0.1.0")
     return EventEmitter(attrs)
@@ -38,7 +39,21 @@ def test_emit_merges_resource_event_caller_metadata(emitter):
     record = logger.emit.call_args.args[0]
     assert record.attributes["event.name"] == "iac.test.happened"
     assert record.attributes["service.name"] == "iac-code"
+    assert record.attributes["iac_code.channel"] == "unknown"
     assert record.attributes["k"] == 1
+
+
+def test_emit_uses_configured_channel_over_caller_metadata(tmp_path, monkeypatch):
+    monkeypatch.setenv("IAC_CODE_CHANNEL", "partner_acme")
+    identity = Identity(tmp_path / "settings.yml")
+    emitter = EventEmitter(AttributeBuilder(identity, "iac-code", "0.1.0"))
+    logger = MagicMock()
+    emitter.attach(logger)
+
+    emitter.emit("iac.test.happened", {"iac_code.channel": "spoofed"})
+
+    record = logger.emit.call_args.args[0]
+    assert record.attributes["iac_code.channel"] == "partner_acme"
 
 
 def test_emit_without_logger_is_noop(emitter):

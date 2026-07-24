@@ -46,6 +46,7 @@ CLI 引数 > 環境変数 > 設定ファイル
 | `IAC_CODE_TELEMETRY_METRICS_ENDPOINT` | メトリクス用のオーバーライドエンドポイント |
 | `IAC_CODE_TELEMETRY_LOGS_ENDPOINT` | ログ用のオーバーライドエンドポイント |
 | `IAC_CODE_TELEMETRY_HEADERS` | カスタム OTLP ヘッダー（JSON またはキー=値形式） |
+| `IAC_CODE_CHANNEL` | 安定した低カーディナリティのテレメトリソースチャネル（デフォルト：`unknown`）。例：`ros_official`、`partner_acme` |
 
 ## その他
 

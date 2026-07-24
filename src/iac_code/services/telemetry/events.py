@@ -33,6 +33,7 @@ class EventEmitter:
         attrs.update(self._attributes.build_resource())
         attrs.update(self._attributes.build_event(event_name))
         attrs.update({k: v for k, v in metadata.items() if v is not None})
+        attrs.update(self._attributes.build_signal_attributes())
         logger.debug("[event:export] {} {}", event_name, attrs)
         record = LogRecord(
             body=event_name,

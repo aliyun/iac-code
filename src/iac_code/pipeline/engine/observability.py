@@ -18,6 +18,7 @@ from iac_code.services.telemetry.names import (
     GenAiAttr,
     GenAiOperationName,
     GenAiSpanKind,
+    IacCodeAttr,
     Metrics,
     Spans,
 )
@@ -33,6 +34,7 @@ _METRIC_ATTR_KEYS = frozenset(
         "critical",
         "error_type",
         "from_step",
+        "input_kind",
         "input_length_bucket",
         "parent_step_id",
         "persisted",
@@ -294,6 +296,7 @@ class PipelineObservability:
             GenAiAttr.OPERATION_NAME: operation_name,
             GenAiAttr.FRAMEWORK: FRAMEWORK_IAC_CODE,
             GenAiAttr.AGENT_NAME: self.pipeline_name,
+            IacCodeAttr.MODE: "pipeline",
         }
         if react_round is not None:
             attrs[GenAiAttr.REACT_ROUND] = react_round
@@ -418,6 +421,16 @@ class PipelineObservability:
             ),
         )
 
+    @staticmethod
+    def record_user_time_to_first_token(span: Any, started_at: float) -> None:
+        if span is None:
+            return
+        ttft_ns = max(0, int((time.monotonic() - started_at) * 1_000_000_000))
+        try:
+            span.set_attribute(GenAiAttr.USER_TIME_TO_FIRST_TOKEN, ttft_ns)
+        except Exception:
+            logger.warning("Pipeline telemetry failed to record time to first token", exc_info=True)
+
     def step_span(
         self,
         *,
@@ -440,6 +453,58 @@ class PipelineObservability:
                 step_type=step_type,
             ),
         )
+
+    def question_answered(
+        self,
+        *,
+        step_id: str,
+        tool_call_id: str | None,
+        option_count: int,
+        answer_type: str,
+    ) -> None:
+        attrs = self.span_attrs(
+            span_kind=GenAiSpanKind.STEP,
+            operation_name=GenAiOperationName.REACT,
+            step_id=step_id,
+            input_kind="ask_user_question",
+            option_count=option_count,
+            answer_type=answer_type,
+        )
+        if tool_call_id is not None:
+            attrs[GenAiAttr.TOOL_CALL_ID] = tool_call_id
+        with self._span(
+            Spans.PIPELINE_QUESTION_ANSWERED,
+            attrs,
+        ):
+            pass
+
+    def selection_ready(
+        self,
+        *,
+        step_id: str,
+        step_index: int,
+        step_attempt: int | None,
+        total_steps: int,
+        step_type: str | None,
+        ui_mode: str,
+        option_count: int,
+    ) -> None:
+        with self._span(
+            Spans.PIPELINE_SELECTION_READY,
+            self.span_attrs(
+                span_kind=GenAiSpanKind.STEP,
+                operation_name=GenAiOperationName.REACT,
+                react_round=step_index,
+                step_id=step_id,
+                step_index=step_index,
+                step_attempt=step_attempt,
+                total_steps=total_steps,
+                step_type=step_type,
+                ui_mode=ui_mode,
+                option_count=option_count,
+            ),
+        ):
+            pass
 
     def sub_pipeline_span(self, **attrs: Any):
         return self._span(
@@ -625,6 +690,7 @@ class PipelineObservability:
         total_steps: int,
         step_type: str | None = None,
         ui_mode: str | None = None,
+        input_kind: str | None = None,
         option_count: int | None = None,
         prompt: str | None = None,
     ) -> None:
@@ -637,6 +703,7 @@ class PipelineObservability:
                 total_steps=total_steps,
                 step_type=step_type,
                 ui_mode=ui_mode,
+                input_kind=input_kind,
                 option_count=option_count,
                 prompt=prompt,
             ),
@@ -650,6 +717,7 @@ class PipelineObservability:
         step_attempt: int | None = None,
         total_steps: int,
         ui_mode: str | None = None,
+        input_kind: str | None = None,
         user_input: str | None = None,
         wait_duration_ms: float | None = None,
     ) -> None:
@@ -660,6 +728,7 @@ class PipelineObservability:
             step_attempt=step_attempt,
             total_steps=total_steps,
             ui_mode=ui_mode,
+            input_kind=input_kind,
             input_length_bucket=input_length_bucket,
             wait_duration_ms=wait_duration_ms,
         )
@@ -674,6 +743,7 @@ class PipelineObservability:
                     step_attempt=step_attempt,
                     total_steps=total_steps,
                     ui_mode=ui_mode,
+                    input_kind=input_kind,
                     input_length_bucket=input_length_bucket,
                 ),
             )

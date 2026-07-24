@@ -29,8 +29,17 @@ from iac_code.services.permissions.audit import fingerprint_text
 from iac_code.services.permissions.rule_scope import scope_for_rule_source
 from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredential, AliyunCredentials
 from iac_code.services.providers.aliyun_oauth import AliyunOAuthError
-from iac_code.services.telemetry import add_metric, log_event
-from iac_code.services.telemetry.names import ALIYUN_API_TARGET_OUTCOMES, Events, Metrics
+from iac_code.services.telemetry import add_metric, get_session_id, get_user_id, log_event, start_span
+from iac_code.services.telemetry.names import (
+    ALIYUN_API_TARGET_OUTCOMES,
+    AliyunApiAttr,
+    Events,
+    GenAiAttr,
+    GenAiOperationName,
+    GenAiSpanKind,
+    Metrics,
+    Spans,
+)
 from iac_code.tools.base import ToolContext, ToolResult
 from iac_code.tools.cloud.aliyun.api_contract import (
     ApiCallShape,
@@ -211,7 +220,30 @@ def _string_value(value: Any) -> str | None:
 
 
 _SAFE_RULE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+_SAFE_REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/=-]{0,255}$")
 _SAFE_WILDCARD_SEGMENT = re.compile(r"^[A-Za-z0-9_*-]{1,128}$")
+_REQUEST_ID_BODY_KEYS = ("requestid",)
+_REQUEST_ID_HEADER_KEYS = (
+    "requestid",
+    "xacsrequestid",
+    "xaliyunrequestid",
+    "xlogrequestid",
+    "xossrequestid",
+    "xmnsrequestid",
+    "xrequestid",
+)
+_ERROR_CODE_BODY_KEYS = ("errorcode", "code", "error")
+_ERROR_CODE_HEADER_KEYS = (
+    "errorcode",
+    "xacserrorcode",
+    "xaliyunerrorcode",
+    "xlogerrorcode",
+    "xosserrorcode",
+    "xmnserrorcode",
+    "xerrorcode",
+)
+_HTTP_STATUS_KEYS = ("httpstatuscode", "statuscode", "httpstatus", "httpcode", "status")
+_RESPONSE_HEADERS_KEYS = ("responseheaders", "iacresponseheaders", "headers")
 _RULE_SOURCE_ORDER = {
     "session": 5,
     "cli_arg": 4,
@@ -250,6 +282,162 @@ def _aliyun_api_metric_attrs(
     if detailed not in ALIYUN_API_TARGET_OUTCOMES:
         detailed = "target_transport_failure"
     return {"api_service": api_service, "outcome": outcome, "target_outcome": detailed}
+
+
+def _aliyun_api_span_attrs(
+    contract: CanonicalWireContract,
+    shape: ApiCallShape,
+    context: ToolContext,
+) -> dict[str, Any]:
+    attrs: dict[str, Any] = {
+        GenAiAttr.SPAN_KIND: GenAiSpanKind.TOOL,
+        GenAiAttr.OPERATION_NAME: GenAiOperationName.EXECUTE_TOOL,
+        GenAiAttr.TOOL_NAME: "aliyun_api",
+        AliyunApiAttr.SERVICE: _aliyun_api_metric_attrs(contract.product, "success")["api_service"],
+        AliyunApiAttr.PRODUCT: contract.product,
+        AliyunApiAttr.ACTION: contract.action,
+        AliyunApiAttr.VERSION: contract.version,
+        AliyunApiAttr.REGION: shape.region_id,
+        AliyunApiAttr.HTTP_METHOD: contract.method,
+    }
+    if context.tool_use_id:
+        attrs[GenAiAttr.TOOL_CALL_ID] = context.tool_use_id
+    for key, getter in (
+        (GenAiAttr.SESSION_ID, get_session_id),
+        (GenAiAttr.USER_ID, get_user_id),
+    ):
+        try:
+            attrs[key] = getter()
+        except Exception:
+            logger.debug("Failed to resolve %s for Aliyun API telemetry", key, exc_info=True)
+    return attrs
+
+
+def _safe_request_id(value: Any) -> str | None:
+    return value if isinstance(value, str) and _SAFE_REQUEST_ID.fullmatch(value) else None
+
+
+def _safe_error_code(value: Any) -> str | None:
+    if type(value) is int:
+        value = str(value)
+    return value if isinstance(value, str) and _TARGET_ERROR_CODE.fullmatch(value) else None
+
+
+def _normalized_telemetry_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value).casefold())
+
+
+def _mapping_value(mapping: Mapping[str, Any], normalized_keys: tuple[str, ...]) -> Any | None:
+    normalized_items = tuple((_normalized_telemetry_key(key), value) for key, value in mapping.items())
+    for normalized_key in normalized_keys:
+        for key, value in normalized_items:
+            if value is not None and key == normalized_key:
+                return value
+    return None
+
+
+def _object_value(value: Any, normalized_keys: tuple[str, ...], attribute_names: tuple[str, ...]) -> Any | None:
+    fields = vars(value) if hasattr(value, "__dict__") else {}
+    candidate = _mapping_value(fields, normalized_keys)
+    if candidate is not None:
+        return candidate
+    for attribute_name in attribute_names:
+        try:
+            candidate = getattr(value, attribute_name)
+        except Exception:
+            continue
+        if candidate is not None:
+            return candidate
+    return None
+
+
+def _safe_http_status(value: Any) -> int | None:
+    if isinstance(value, str) and value.isdecimal():
+        value = int(value)
+    return value if type(value) is int and 100 <= value <= 599 else None
+
+
+def _response_request_id(response: Any) -> str | None:
+    if isinstance(response.body, Mapping):
+        request_id = _safe_request_id(_mapping_value(response.body, _REQUEST_ID_BODY_KEYS))
+        if request_id is not None:
+            return request_id
+    if isinstance(response.headers, Mapping):
+        return _safe_request_id(_mapping_value(response.headers, _REQUEST_ID_HEADER_KEYS))
+    return None
+
+
+def _response_error_code(response: Any) -> str | None:
+    if not isinstance(response.body, Mapping):
+        body_code = None
+    else:
+        body_code = _safe_error_code(_mapping_value(response.body, _ERROR_CODE_BODY_KEYS))
+    if body_code is not None:
+        return body_code
+    if isinstance(response.headers, Mapping):
+        return _safe_error_code(_mapping_value(response.headers, _ERROR_CODE_HEADER_KEYS))
+    return None
+
+
+def _exception_telemetry_attrs(error: BaseException) -> dict[str, Any]:
+    attrs: dict[str, Any] = {}
+    status = _safe_http_status(
+        _object_value(
+            error,
+            _HTTP_STATUS_KEYS,
+            ("status_code", "statusCode", "http_status_code", "httpStatusCode", "http_code", "status"),
+        )
+    )
+    if status is not None:
+        attrs[AliyunApiAttr.HTTP_STATUS_CODE] = status
+    request_id = _safe_request_id(
+        _object_value(error, _REQUEST_ID_BODY_KEYS, ("request_id", "requestId", "RequestId"))
+    )
+    error_code = _safe_error_code(
+        _object_value(error, _ERROR_CODE_BODY_KEYS, ("error_code", "errorCode", "ErrorCode", "code"))
+    )
+    data = getattr(error, "data", None)
+    if isinstance(data, Mapping):
+        request_id = request_id or _safe_request_id(_mapping_value(data, _REQUEST_ID_BODY_KEYS))
+        error_code = error_code or _safe_error_code(_mapping_value(data, _ERROR_CODE_BODY_KEYS))
+    headers = _object_value(error, _RESPONSE_HEADERS_KEYS, ("response_headers", "headers", "_iac_response_headers"))
+    if isinstance(headers, Mapping):
+        request_id = request_id or _safe_request_id(_mapping_value(headers, _REQUEST_ID_HEADER_KEYS))
+        error_code = error_code or _safe_error_code(_mapping_value(headers, _ERROR_CODE_HEADER_KEYS))
+    if request_id is not None:
+        attrs[AliyunApiAttr.REQUEST_ID] = request_id
+    if error_code is not None:
+        attrs[AliyunApiAttr.ERROR_CODE] = error_code
+    return attrs
+
+
+def _record_aliyun_api_span_result(
+    span: Any,
+    *,
+    target_outcome: str,
+    response: Any | None,
+    error: BaseException | None,
+) -> None:
+    attrs: dict[str, Any] = {
+        AliyunApiAttr.OUTCOME: "success" if target_outcome == "success" else "failure",
+        AliyunApiAttr.TARGET_OUTCOME: target_outcome,
+    }
+    if response is not None:
+        attrs[AliyunApiAttr.HTTP_STATUS_CODE] = int(response.status)
+        request_id = _response_request_id(response)
+        if request_id is not None:
+            attrs[AliyunApiAttr.REQUEST_ID] = request_id
+        if not 200 <= response.status < 300:
+            error_code = _response_error_code(response)
+            if error_code is not None:
+                attrs[AliyunApiAttr.ERROR_CODE] = error_code
+    elif error is not None:
+        attrs.update(_exception_telemetry_attrs(error))
+    try:
+        for key, value in attrs.items():
+            span.set_attribute(key, value)
+    except Exception:
+        logger.warning("Failed to attach Aliyun API span result attributes", exc_info=True)
 
 
 _TARGET_ERROR_CODE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
@@ -2085,50 +2273,63 @@ class AliyunApi(BaseCloudApi):
             target_outcome = "target_transport_failure"
             target_error_message: str | None = None
             target_error_detail: str | None = None
-            try:
-                response = await prepared_transport.execute(budget=budget)
-                if not 200 <= response.status < 300:
-                    target_outcome = "http_error"
-                    target_error_message = _target_http_error_message(response)
-                    target_error_detail = _target_http_error_detail(response)
-                else:
-                    target_outcome = "success"
-            except asyncio.CancelledError:
-                target_outcome = "unknown_after_cancel"
-                raise
-            except Exception as error:
-                target_outcome = _target_failure_outcome(error)
-                target_error_message = _target_failure_message(error)
-            finally:
-                duration_ms = max(0, int((time.monotonic() - target_started) * 1000))
-                emit_aliyun_api_called(
-                    metadata_source=contract.metadata_source,
-                    api_style=contract.style,
-                    http_method=contract.method,
-                    transport=contract.transport,
-                    signature_scheme=contract.signature_scheme,
-                    endpoint_source=endpoint.source,
-                    host_template_applied=endpoint.host_template is not None,
-                    contract_override_used=bool(final_shape.explicit_overrides),
-                    openmeta_cache_status=contract.openmeta_cache_status,
-                    outcome=target_outcome,
-                )
-                legacy_outcome = "success" if target_outcome == "success" else "failure"
-                log_event(Events.ALIYUN_API_LEGACY_CALLED, {"outcome": legacy_outcome})
-                metric_attributes = _aliyun_api_metric_attrs(
-                    contract.product,
-                    legacy_outcome,
-                    target_outcome,
-                )
-                add_metric(
-                    Metrics.ALIYUN_API_CALLED_COUNT,
-                    1,
-                    metric_attributes,
-                )
-                add_metric(Metrics.ALIYUN_API_CALLED_DURATION, duration_ms, metric_attributes)
-                outcome_observer = getattr(runtime, "target_outcome_observer", None)
-                if callable(outcome_observer):
-                    outcome_observer({"outcome": target_outcome, "duration_ms": duration_ms})
+            target_error: BaseException | None = None
+            with start_span(
+                Spans.ALIYUN_API_CALL,
+                _aliyun_api_span_attrs(contract, final_shape, context),
+            ) as api_span:
+                try:
+                    response = await prepared_transport.execute(budget=budget)
+                    if not 200 <= response.status < 300:
+                        target_outcome = "http_error"
+                        target_error_message = _target_http_error_message(response)
+                        target_error_detail = _target_http_error_detail(response)
+                    else:
+                        target_outcome = "success"
+                except asyncio.CancelledError as error:
+                    target_outcome = "unknown_after_cancel"
+                    target_error = error
+                    raise
+                except Exception as error:
+                    target_outcome = _target_failure_outcome(error)
+                    target_error_message = _target_failure_message(error)
+                    target_error = error
+                finally:
+                    duration_ms = max(0, int((time.monotonic() - target_started) * 1000))
+                    _record_aliyun_api_span_result(
+                        api_span,
+                        target_outcome=target_outcome,
+                        response=response,
+                        error=target_error,
+                    )
+                    emit_aliyun_api_called(
+                        metadata_source=contract.metadata_source,
+                        api_style=contract.style,
+                        http_method=contract.method,
+                        transport=contract.transport,
+                        signature_scheme=contract.signature_scheme,
+                        endpoint_source=endpoint.source,
+                        host_template_applied=endpoint.host_template is not None,
+                        contract_override_used=bool(final_shape.explicit_overrides),
+                        openmeta_cache_status=contract.openmeta_cache_status,
+                        outcome=target_outcome,
+                    )
+                    legacy_outcome = "success" if target_outcome == "success" else "failure"
+                    log_event(Events.ALIYUN_API_LEGACY_CALLED, {"outcome": legacy_outcome})
+                    metric_attributes = _aliyun_api_metric_attrs(
+                        contract.product,
+                        legacy_outcome,
+                        target_outcome,
+                    )
+                    add_metric(
+                        Metrics.ALIYUN_API_CALLED_COUNT,
+                        1,
+                        metric_attributes,
+                    )
+                    add_metric(Metrics.ALIYUN_API_CALLED_DURATION, duration_ms, metric_attributes)
+                    outcome_observer = getattr(runtime, "target_outcome_observer", None)
+                    if callable(outcome_observer):
+                        outcome_observer({"outcome": target_outcome, "duration_ms": duration_ms})
             if target_error_message is not None:
                 self._last_action = ""
                 self._last_result = None

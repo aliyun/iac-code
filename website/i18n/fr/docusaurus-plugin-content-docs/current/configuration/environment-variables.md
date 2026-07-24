@@ -46,6 +46,7 @@ Consultez [Identifiants Alibaba Cloud](./alibaba-cloud-credentials.md) pour plus
 | `IAC_CODE_TELEMETRY_METRICS_ENDPOINT` | Point de terminaison de remplacement pour les métriques |
 | `IAC_CODE_TELEMETRY_LOGS_ENDPOINT` | Point de terminaison de remplacement pour les journaux |
 | `IAC_CODE_TELEMETRY_HEADERS` | En-têtes OTLP personnalisés (format JSON ou clé=valeur) |
+| `IAC_CODE_CHANNEL` | Canal source de télémétrie stable et à faible cardinalité (par défaut : `unknown`), par exemple `ros_official` ou `partner_acme` |
 
 ## Autres
 

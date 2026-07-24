@@ -41,6 +41,7 @@ async def run_sub_agent(
     parent_system_prompt: str = "",
     event_queue: asyncio.Queue | None = None,
     permission_context: Any = None,
+    telemetry_attributes: dict[str, str | int] | None = None,
 ) -> tuple[str, AgentProgress]:
     """Run a sub-agent and return (final_text, progress)."""
     from iac_code.agent.agent_loop import AgentLoop
@@ -67,6 +68,7 @@ async def run_sub_agent(
         max_turns=defn.max_turns,
         cwd=cwd,
         permission_context=permission_context,
+        telemetry_attributes=telemetry_attributes,
     )
 
     progress = AgentProgress(summary=_("Running {agent_type} agent").format(agent_type=agent_type))
@@ -228,6 +230,7 @@ class AgentTool(Tool):
                 parent_system_prompt=self._system_prompt,
                 event_queue=event_queue,
                 permission_context=self._permission_context,
+                telemetry_attributes=context.telemetry_attributes,
             )
             if event_queue is not None:
                 await event_queue.put(None)
@@ -262,6 +265,7 @@ class AgentTool(Tool):
                 parent_tool_registry=self._tool_registry,
                 parent_system_prompt=self._system_prompt,
                 permission_context=self._permission_context,
+                telemetry_attributes=context.telemetry_attributes,
             )
             self._task_manager.complete(task_id, result=result_text)
             self._task_manager.update_progress(
