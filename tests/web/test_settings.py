@@ -733,7 +733,7 @@ def test_model_payload_exposes_family_aware_thinking_default(_isolate_config):
     assert _default_model("openai")["thinkingDefault"] is False
 
 
-def test_model_payload_exposes_thinking_budget_capability(_isolate_config):
+def test_model_payload_reflects_thinking_budget_capability(_isolate_config):
     # 「思考预算」字段能力门控:仅 supports_thinking_budget 的模型可见,前端据此显隐。
     payload = web_settings.providers_payload()
 
@@ -742,8 +742,8 @@ def test_model_payload_exposes_thinking_budget_capability(_isolate_config):
         return next(m for m in entry["models"] if m["id"] == model_id)
 
     glm = _model("dashscope", "glm-5.2")
-    assert glm["supportsThinkingBudget"] is True
-    assert glm["defaultThinkingBudget"] == 8192
+    assert glm["supportsThinkingBudget"] is False
+    assert glm["defaultThinkingBudget"] is None
     kimi = _model("dashscope", "kimi-k2.7-code")
     assert kimi["supportsThinkingBudget"] is True
     # 效应驱动家族用 effort 控件,不暴露独立预算字段。

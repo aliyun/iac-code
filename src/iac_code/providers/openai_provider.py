@@ -164,9 +164,7 @@ class OpenAIProvider(Provider):
         # extra_body 单独下发。故最终额度 = 可见输出上限 + 思考预算,否则推理会挤占用户要的输出。
         # configured 与 budget 均可覆盖默认,configured 分支同样要叠加预算(与留空分支一致)。
         thinking_budget = self._effective_thinking_budget()
-        if thinking_budget is None:
-            return {"max_completion_tokens": configured} if configured is not None else {"max_tokens": max_tokens}
-        return {"max_completion_tokens": (configured or max_tokens) + thinking_budget}
+        return {"max_completion_tokens": (configured or max_tokens) + (thinking_budget or 0)}
 
     def _thinking_disabled(self) -> bool:
         return bool_or_none(getattr(self, "_thinking_enabled", None)) is False

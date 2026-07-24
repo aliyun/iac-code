@@ -383,8 +383,8 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
 
         call_kwargs = client.chat.completions.calls[0]
-        # max_completion_tokens 限制含推理的总量:配置的可见输出上限须叠加思考预算 → 10000 + 2048。
-        assert call_kwargs["max_completion_tokens"] == 12048
+        # glm-5.2 由 effort 驱动思考，不支持独立思考预算；显式输出上限不叠加 2048。
+        assert call_kwargs["max_completion_tokens"] == 10000
         assert "max_tokens" not in call_kwargs
         assert call_kwargs["extra_body"] == {"enable_thinking": True}
 

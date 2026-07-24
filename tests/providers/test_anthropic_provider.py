@@ -420,17 +420,17 @@ class TestAnthropicMaxOutputTokens:
         kwargs = p._build_kwargs([Message.user("hi")], "sys", None, 8192)
         assert kwargs["max_tokens"] == 32000
 
-    def test_configured_cap_still_keeps_thinking_budget_headroom(self):
+    def test_configured_cap_is_respected_for_adaptive_thinking(self):
         from iac_code.providers.anthropic_provider import AnthropicProvider
 
-        # 上限低于思考预算+4096 时,仍抬高以预留正文空间。
+        # Adaptive thinking has no separate manual budget in the current capability table.
         p = AnthropicProvider(
             model="claude-opus-4-7",
             api_key="k",
             effort="high",  # 16384 budget
             max_completion_tokens=1000,
         )
-        assert p._adjust_max_tokens(8192) == 16384 + 4096
+        assert p._adjust_max_tokens(8192) == 1000
 
     def test_blank_config_falls_back_to_request_default(self):
         from iac_code.providers.anthropic_provider import AnthropicProvider

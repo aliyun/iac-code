@@ -162,6 +162,9 @@ class TestContextManager:
 
     def test_sonnet5_compaction_uses_one_million_token_threshold(self, monkeypatch):
         cm = ContextManager(system_prompt="Short.", model="claude-sonnet-5")
+        for index in range(4):
+            cm.add_user_message(f"message {index}")
+            cm.add_assistant_message(f"response {index}")
         monkeypatch.setattr(cm, "get_total_tokens", lambda: 900_000)
         assert cm.needs_compaction() is False
 
