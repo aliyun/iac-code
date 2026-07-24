@@ -109,7 +109,7 @@ provider、tool、真实云调用场景默认会被保护住。只有确认要�
 | 场景 | 切点 / 特殊条件 | 恢复时输入 | 主要验收 |
 | --- | --- | --- | --- |
 | `scenario1` | pipeline 完成并完成一轮 normal-chat follow-up 后 | 询问上一条 normal-chat 问题是什么 | normal-chat 历史重启后仍可用；存在 VSwitch 证据。 |
-| `scenario1-performance-backup` | 完整 `scenario1`，并强制 `IAC_CODE_A2A_EXTREME_PERFORMANCE=true`、`IAC_CODE_CONFIG_BACKUP_DIR=<run-dir>/session-backup` | step4 选择不带 `taskId`；后续 normal-chat 恢复也不带 `taskId` | step4 backup 快照没有 stale active task；省略 `taskId` 的选择能 hydrate 到恢复 task；完整 scenario1 通过。 |
+| `scenario1-performance-backup` | 完整 `scenario1`，并强制 `IAC_CODE_A2A_EXTREME_PERFORMANCE=true`、`IAC_CODE_CONFIG_BACKUP_DIR=<run-dir>/session-backup` | step4 backup 落盘后停服并删除主 `projects` 下对应 session，重启后不带 `taskId` 选择；后续 normal-chat 恢复也不带 `taskId` | 重启前只有 backup session；重启本身不会重建主 session；省略 `taskId` 的选择会从 backup restore 主 session 并 hydrate 到恢复 task；完整 scenario1 通过。 |
 | `selection-waiting` | step4 等待候选方案选择时 | 不带 `taskId` 发送 `你随便选一个方案。` | 能恢复等待中的 step4 task 并完成选择；存在 VSwitch 证据。 |
 | `ask-waiting` | `ask_user_question` 等待用户输入时 | 不带 `taskId` 发送澄清回答 | 能恢复 pending ask 输入并完成 pipeline；存在 VSwitch 证据。 |
 | `image-initial` | 首轮用户消息就是静态 `initial.png` 图片 fixture | 文本选择候选方案 | 图片能启动 pipeline，进入 step4 选择，最终完成并产生 VSwitch 证据。 |

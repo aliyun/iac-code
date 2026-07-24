@@ -663,6 +663,8 @@ def test_scenario1_performance_backup_omits_selection_task_id_and_checks_backup(
             self.summaries = {}
             self.snapshots = {}
             self.stream_request_task_ids = {}
+            self.kill9_count = 0
+            self.start_server_count = 0
 
         def stream(
             self,
@@ -693,6 +695,9 @@ def test_scenario1_performance_backup_omits_selection_task_id_and_checks_backup(
                     last_input_required_step_id="confirm_and_select",
                 )
             elif name == "02-select-candidate":
+                restored_dir = tmp_path / "primary-session"
+                restored_dir.mkdir(exist_ok=True)
+                (restored_dir / "session.jsonl").write_text("{}\n", encoding="utf-8")
                 summary = runner.StreamSummary(
                     name=name,
                     prompt=prompt,
@@ -730,6 +735,12 @@ def test_scenario1_performance_backup_omits_selection_task_id_and_checks_backup(
         def kill9_and_restart(self) -> None:
             pass
 
+        def kill9(self) -> None:
+            self.kill9_count += 1
+
+        def start_server(self) -> None:
+            self.start_server_count += 1
+
     def fake_run_with_harness(args, _scenario, callback):
         harness = FakeHarness(args)
         harnesses.append(harness)
@@ -742,6 +753,16 @@ def test_scenario1_performance_backup_omits_selection_task_id_and_checks_backup(
         "_waiting_input_backup_snapshots",
         lambda _h: {"task": {"state": "input-required"}, "context": {"active_task_id": None}},
     )
+    monkeypatch.setattr(
+        runner,
+        "_remove_primary_session_for_backup_restore",
+        lambda _h: {
+            "primarySessionDir": str(tmp_path / "primary-session"),
+            "primarySessionFile": str(tmp_path / "primary-session" / "session.jsonl"),
+            "backupSessionDir": str(tmp_path / "backup-session"),
+        },
+    )
+    (tmp_path / "backup-session").mkdir()
     monkeypatch.setattr(runner, "_a2a_session_contains_user_message", lambda _h, _text: True)
     monkeypatch.setattr(runner, "_all_evidence", lambda _h: "ALIYUN::ECS::VSwitch")
     monkeypatch.setattr(runner, "_run_dir_has_cleanup_events", lambda _run_dir: False)
@@ -759,6 +780,54 @@ def test_scenario1_performance_backup_omits_selection_task_id_and_checks_backup(
     assert harnesses[0].checks["selection omitted taskId"] is True
     assert harnesses[0].checks["selection hydrated recovered taskId"] is True
     assert harnesses[0].checks["step4 backup context has no active task"] is True
+    assert harnesses[0].checks["primary session stayed absent after restart"] is True
+    assert harnesses[0].checks["selection restored primary session from backup"] is True
+    assert harnesses[0].kill9_count == 1
+    assert harnesses[0].start_server_count == 1
+
+
+def test_remove_primary_session_for_backup_restore_keeps_backup(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    from iac_code.agent.message import Message
+    from iac_code.services.session_storage import SessionStorage
+
+    config_dir = tmp_path / "config"
+    backup_root = tmp_path / "backup"
+    run_dir = tmp_path / "run"
+    workspace = tmp_path / "workspace"
+    context_id = "ctx-1"
+    session_id = "session-1"
+    workspace.mkdir()
+    context_dir = run_dir / "a2a-persistence" / "contexts"
+    context_dir.mkdir(parents=True)
+    (context_dir / f"{context_id}.json").write_text(
+        json.dumps({"context_id": context_id, "session_id": session_id, "cwd": str(workspace)}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+
+    primary_storage = SessionStorage(projects_dir=config_dir / "projects")
+    backup_storage = SessionStorage(projects_dir=backup_root / "projects")
+    primary_storage.save(str(workspace), session_id, [Message(role="user", content="primary")])
+    backup_storage.save(str(workspace), session_id, [Message(role="user", content="backup")])
+    primary_session_dir = primary_storage.v2_session_dir(str(workspace), session_id)
+    backup_session_dir = backup_storage.v2_session_dir(str(workspace), session_id)
+    assert primary_session_dir is not None
+    assert backup_session_dir is not None
+
+    harness = SimpleNamespace(
+        backup_root=backup_root,
+        context_id=context_id,
+        cwd=str(workspace),
+        run_dir=run_dir,
+    )
+    evidence = runner._remove_primary_session_for_backup_restore(harness)
+
+    assert evidence["primaryRemovedBeforeRestart"] is True
+    assert evidence["backupPresentAfterRemoval"] is True
+    assert not primary_session_dir.exists()
+    assert backup_session_dir.is_dir()
+    assert (run_dir / "step4.backup-only-restore.json").is_file()
 
 
 def test_fault_after_snapshot_requires_real_cloud_opt_in_even_when_deterministic() -> None:

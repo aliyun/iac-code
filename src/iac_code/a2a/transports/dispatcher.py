@@ -84,6 +84,7 @@ from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.i18n import _
 from iac_code.pipeline.config import RunMode, get_run_mode
 from iac_code.services.session_backup import SessionBackupService
+from iac_code.services.session_storage import SessionStorage
 from iac_code.utils.public_errors import public_exception_summary
 
 logger = logging.getLogger(__name__)
@@ -549,6 +550,10 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             return
         try:
             context_record = await self.task_store.get_context_record(context_id)
+            if not SessionStorage().exists(context_record.cwd, context_record.session_id):
+                reconcile = getattr(self.agent_executor, "_reconcile_session_before_route", None)
+                if callable(reconcile):
+                    await reconcile(context_id=context_id, cwd=context_record.cwd)
             task_id = recoverable_task_id_from_sidecar(
                 cwd=context_record.cwd,
                 session_id=context_record.session_id,

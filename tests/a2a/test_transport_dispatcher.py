@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import shutil
 from types import SimpleNamespace
 
 import httpx
@@ -29,6 +30,7 @@ from iac_code.a2a.transports.dispatcher import (
     create_runtime_components,
 )
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.services.session_backup import BackupReason, SessionBackupService
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import TextDeltaEvent
 
@@ -200,6 +202,74 @@ async def test_handler_reconciles_terminal_task_when_pipeline_sidecar_is_waiting
     session_dir = SessionStorage().session_dir(str(cwd), ctx.session_id)
     context_snapshot = json.loads((session_dir / "a2a" / "context.json").read_text(encoding="utf-8"))
     assert context_snapshot["active_task_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_handler_restores_backup_before_hydrating_omitted_pipeline_task_id(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(tmp_path / "backup"))
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    context_id = "ctx-restore"
+    task_id = "task-restore"
+    store = A2ATaskStore()
+    ctx = await store.get_or_create_context(
+        context_id=context_id,
+        cwd=str(cwd),
+        runtime_factory=lambda session_id: SimpleNamespace(session_id=session_id),
+    )
+    storage = SessionStorage()
+    storage.save(str(cwd), ctx.session_id, [])
+    pending_input = {
+        "inputId": "input-confirm_and_select-1",
+        "kind": "candidate_selection",
+        "prompt": "请选择方案",
+        "options": [{"name": "方案A", "candidate_index": 0}],
+    }
+    pending_event = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-selection",
+        "sequence": 1,
+        "createdAt": "2026-06-08T10:00:00Z",
+        "eventType": "input_required",
+        "scope": "step",
+        "pipelineRunId": context_id,
+        "taskId": task_id,
+        "contextId": context_id,
+        "pipelineName": "selling",
+        "status": "input_required",
+        "step": {"runId": "step-confirm_and_select-1", "id": "confirm_and_select", "attempt": 1},
+        "input": pending_input,
+        "data": pending_input,
+    }
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=ctx.session_id)
+    A2APipelineJournal(pipeline_dir).append(pending_event)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending_event]))
+    backup_service = SessionBackupService(storage, retry_delays=())
+    backup_service.initialize_session(str(cwd), ctx.session_id)
+    backup_service.backup_session(str(cwd), ctx.session_id, reason=BackupReason.INPUT_REQUIRED, critical=True)
+    primary_session_dir = storage.session_dir(str(cwd), ctx.session_id)
+    shutil.rmtree(primary_session_dir)
+
+    class FakeExecutor:
+        async def _reconcile_session_before_route(self, *, context_id: str, cwd: str):
+            assert context_id == "ctx-restore"
+            return await asyncio.to_thread(backup_service.reconcile_session, cwd, ctx.session_id)
+
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler.agent_executor = FakeExecutor()
+    params = SimpleNamespace(message=SimpleNamespace(task_id=None, context_id=context_id))
+
+    await handler._hydrate_recoverable_pipeline_task_id(params)
+
+    assert params.message.task_id == task_id
+    assert storage.session_dir(str(cwd), ctx.session_id).is_dir()
 
 
 @pytest.mark.asyncio
