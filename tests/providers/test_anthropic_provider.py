@@ -405,6 +405,40 @@ class TestAnthropicBuildThinkingKwargs:
         )._build_thinking_kwargs() == {"output_config": {"effort": "high"}}
 
 
+class TestAnthropicMaxOutputTokens:
+    def test_configured_cap_overrides_request_default_without_thinking(self):
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+
+        p = AnthropicProvider(
+            model="claude-opus-4-7",
+            api_key="k",
+            effort="auto",
+            max_completion_tokens=32000,
+        )
+        # 无思考预算时,配置的输出上限直接覆盖调用方默认(8192)。
+        assert p._adjust_max_tokens(8192) == 32000
+        kwargs = p._build_kwargs([Message.user("hi")], "sys", None, 8192)
+        assert kwargs["max_tokens"] == 32000
+
+    def test_configured_cap_still_keeps_thinking_budget_headroom(self):
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+
+        # 上限低于思考预算+4096 时,仍抬高以预留正文空间。
+        p = AnthropicProvider(
+            model="claude-opus-4-7",
+            api_key="k",
+            effort="high",  # 16384 budget
+            max_completion_tokens=1000,
+        )
+        assert p._adjust_max_tokens(8192) == 16384 + 4096
+
+    def test_blank_config_falls_back_to_request_default(self):
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+
+        p = AnthropicProvider(model="claude-opus-4-7", api_key="k", effort="auto")
+        assert p._adjust_max_tokens(8192) == 8192
+
+
 @pytest.mark.asyncio
 class TestAnthropicStream:
     async def test_text_only_response(self):

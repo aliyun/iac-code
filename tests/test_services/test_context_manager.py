@@ -325,25 +325,28 @@ class TestApplyCompaction:
         assert original_tokens > 0
         assert new_tokens > 0
 
-    def test_replaces_old_messages_preserves_recent(self):
+    def test_preserves_full_history_effective_context_is_recent(self):
         cm = ContextManager(system_prompt="")
         for i in range(6):
             cm.add_user_message(f"Message {i}")
             cm.add_assistant_message(f"Response {i}")
         cm.apply_compaction("This is the summary.")
+        # 新语义:完整历史保留(只插标记不删),get_messages 返回 12 原始 + 1 标记。
         messages = cm.get_messages()
-        # 1 summary + 3 recent turns (6 messages)
-        assert len(messages) == 7
+        assert len(messages) == 13
         assert messages[0].role == "user"
+        assert "Message 0" in messages[0].get_text()
+        # 有效上下文=标记 + 尾部(1 summary + 3 recent turns = 7)。
+        assert len(cm.get_context_messages()) == 7
 
-    def test_summary_content_in_message(self):
+    def test_summary_content_in_effective_context(self):
         cm = ContextManager(system_prompt="")
         for i in range(6):
             cm.add_user_message(f"Hello {i}")
             cm.add_assistant_message(f"Response {i}")
         cm.apply_compaction("The user said hello.")
-        messages = cm.get_messages()
-        assert "The user said hello." in messages[0].get_text()
+        # 新语义:摘要进入有效切片首条,而非 get_messages()[0]。
+        assert "The user said hello." in cm.get_context_messages()[0].get_text()
 
     def test_compaction_reduces_tokens_with_long_history(self):
         cm = ContextManager(system_prompt="")

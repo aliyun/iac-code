@@ -213,6 +213,40 @@ def test_start_background_update_check_swallows_and_logs_exceptions(caplog):
     assert "Background update check failed" in caplog.text
 
 
+def test_start_background_update_check_loops_until_stopped(tmp_path):
+    stop_event = Event()
+    calls = []
+
+    def fake_check_func(**kwargs):
+        calls.append(kwargs)
+        if len(calls) >= 2:
+            stop_event.set()  # 攒够两轮就让循环退出,保持测试确定且快速
+        return UpdateState()
+
+    thread = start_background_update_check(
+        path=tmp_path / "update-state.yml",
+        current_version="0.3.0",
+        release_date="2026-05-01",
+        python_executable="/python",
+        check_func=fake_check_func,
+        interval_seconds=0.01,
+        stop_event=stop_event,
+    )
+
+    thread.join(timeout=2.0)
+
+    assert not thread.is_alive()
+    assert len(calls) >= 2
+    # 每轮 check_func 仍只收原有 4 个 kwargs(interval/stop 不得泄漏进去)。
+    for call in calls:
+        assert call == {
+            "path": tmp_path / "update-state.yml",
+            "current_version": "0.3.0",
+            "release_date": "2026-05-01",
+            "python_executable": "/python",
+        }
+
+
 def test_get_pending_update_ignores_not_newer_version(tmp_path):
     path = tmp_path / "update-state.yml"
     path.write_text(

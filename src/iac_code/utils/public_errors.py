@@ -5,13 +5,37 @@ from __future__ import annotations
 import hashlib
 import ntpath
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, unquote, urlsplit
 
 from iac_code.i18n import _
 from iac_code.utils.public_paths import relativize_public_file_uri, sanitize_public_paths
+
+# 本地 Web workbench 绑定 loopback，转录里出现真实文件路径与密钥既安全又有用（数据只落本地磁盘），
+# 因此需要一个开关关闭「全部脱敏」——路径 [PATH] 与密钥 [REDACTED]/*** 都不再处理。默认 False：
+# 面向远端的调用方(如 a2a serve)仍全量脱敏。用 ContextVar 而非全局量，便于按请求/执行上下文
+# 精确生效并自动复位，避免测试间污染。
+_ALL_REDACTION_SUPPRESSED: ContextVar[bool] = ContextVar("iac_code_all_redaction_suppressed", default=False)
+
+
+def all_redaction_suppressed() -> bool:
+    """Return True when ALL public redaction (paths + secrets) is disabled for this context."""
+    return _ALL_REDACTION_SUPPRESSED.get()
+
+
+@contextmanager
+def suppress_all_redaction() -> Iterator[None]:
+    """Disable ALL public redaction (paths + secrets) within this context."""
+    token = _ALL_REDACTION_SUPPRESSED.set(True)
+    try:
+        yield
+    finally:
+        _ALL_REDACTION_SUPPRESSED.reset(token)
+
 
 _SECRET_VALUE_PATTERN = r"""(?:\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}|"[^"]*"|'[^']*'|[^\s,;}]+)"""
 
@@ -197,6 +221,9 @@ def _sanitize_public_summary(value: str, *, public_path_roots: Iterable[Mapping[
 
 
 def _apply_public_patterns(value: str, *, public_path_roots: Iterable[Mapping[str, str]] | None = None) -> str:
+    if all_redaction_suppressed():
+        # 环回 web 上下文：整段不脱敏（路径 + 密钥都原样），供 journal 重载/展示还原真实内容。
+        return value
     sanitized = value
     for pattern in _SECRET_PATTERNS:
         if pattern.groups:
@@ -208,6 +235,7 @@ def _apply_public_patterns(value: str, *, public_path_roots: Iterable[Mapping[st
         sanitized,
     )
     sanitized = _SECRET_ASSIGNMENT_PATTERN.sub(lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]", sanitized)
+    # 到这里必然未抑制，路径脱敏无条件执行。
     sanitized = sanitize_public_paths(sanitized, public_path_roots)
     for pattern in _PATH_PATTERNS:
         sanitized = pattern.sub("[PATH]", sanitized)
@@ -215,6 +243,9 @@ def _apply_public_patterns(value: str, *, public_path_roots: Iterable[Mapping[st
 
 
 def _replace_file_uri_tokens(value: str, *, public_path_roots: Iterable[Mapping[str, str]] | None = None) -> str:
+    if all_redaction_suppressed():
+        return value
+
     def replace_file_uri(match: re.Match[str]) -> str:
         uri = match.group(0)
         trailing = ""
@@ -258,7 +289,7 @@ def _replace_public_artifact_uri_tokens(
             trailing = uri[-1] + trailing
             uri = uri[:-1]
         if not _is_valid_public_artifact_uri(uri):
-            return "[PATH]"
+            return match.group(0) if all_redaction_suppressed() else "[PATH]"
         placeholder = f"{prefix}{len(placeholders)}__"
         placeholders[placeholder] = uri
         return f"{placeholder}{trailing}"

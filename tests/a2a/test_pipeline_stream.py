@@ -47,6 +47,7 @@ from iac_code.types.stream_events import (
     ToolResultEvent,
     ToolUseEndEvent,
 )
+from iac_code.utils.public_errors import suppress_all_redaction
 
 from .fakes import FakeEventQueue
 
@@ -143,6 +144,10 @@ def test_mcp_status_is_metadata_only_not_recovery_semantic() -> None:
     envelope = _envelope("mcp_status")
 
     assert is_recovery_semantic_event(envelope) is False
+
+
+def test_message_tombstone_is_display_only_not_recovery_semantic() -> None:
+    assert is_recovery_semantic_event(_envelope("message_tombstone")) is False
 
 
 @pytest.mark.asyncio
@@ -1224,9 +1229,14 @@ async def test_publish_pipeline_write_file_result_does_not_infer_artifact_from_t
         )
     )
 
-    assert len(queue.events) == 1
+    assert len(queue.events) == 2
     assert isinstance(queue.events[0], TaskStatusUpdateEvent)
-    status = dump(queue.events[0])["metadata"]["iac_code"]["pipeline"]
+    started = dump(queue.events[0])["metadata"]["iac_code"]["pipeline"]
+    assert started["eventType"] == "tool_started"
+    assert started["scope"] == "pipeline"
+    assert started["data"]["toolUseId"] == "toolu-write"
+    assert isinstance(queue.events[1], TaskStatusUpdateEvent)
+    status = dump(queue.events[1])["metadata"]["iac_code"]["pipeline"]
     assert status["eventType"] == "tool_result"
     assert status["scope"] == "pipeline"
     assert status["data"]["toolUseId"] == "toolu-write"
@@ -1234,6 +1244,94 @@ async def test_publish_pipeline_write_file_result_does_not_infer_artifact_from_t
     assert snapshot is not None
     assert snapshot["display"]["artifacts"] == []
     assert snapshot["display"]["toolResults"][0]["toolUseId"] == "toolu-write"
+
+
+@pytest.mark.asyncio
+async def test_publish_tool_trace_preserves_paths_in_journal_when_suppressed(tmp_path: Path) -> None:
+    # 环回 web(expose_local_paths)下抑制路径脱敏时:journal / 远程状态 / 快照均保留真实路径,
+    # 以便「重新加载」会话时能从 journal 重建出真路径(否则重载会退回 [PATH])。密钥恒脱敏。
+    # 真正远程 A2A 服务从不设该抑制标志,其脱敏由下方 without-suppression 用例锁定。
+    publisher, queue = _publisher(tmp_path, exposure_types=[A2AExposureType.TOOL_TRACE])
+    raw_path = "/Users/alice/.iac-code/settings.yml"
+
+    with suppress_all_redaction():
+        await publisher.publish(
+            ToolUseEndEvent(
+                tool_use_id="toolu-secret",
+                name="bash",
+                input={"api_key": "sk-test-secret", "path": raw_path},
+            )
+        )
+        await publisher.publish(
+            ToolResultEvent(
+                tool_use_id="toolu-secret",
+                tool_name="bash",
+                result={"note": raw_path, "api_key": "sk-result-secret"},
+                is_error=False,
+            )
+        )
+
+    published = [dump(event)["metadata"]["iac_code"]["pipeline"] for event in queue.events]
+    journal = publisher.journal.read_all()
+    snapshot = publisher.snapshot_store.load()
+    assert snapshot is not None
+    # journal 里明确保留真实路径(重载数据源)。
+    assert any(raw_path in json.dumps(entry) for entry in journal)
+    rendered = json.dumps((published, journal, snapshot))
+    assert raw_path in rendered
+    assert "[PATH]" not in rendered
+    # 全抑制上下文(环回 web):journal/远程状态/快照连密钥也原样,供重载还原完整 YAML/结论。
+    assert "sk-test-secret" in rendered
+    assert "sk-result-secret" in rendered
+
+
+@pytest.mark.asyncio
+async def test_publish_tool_trace_redacts_paths_without_suppression(tmp_path: Path) -> None:
+    # 无抑制(真正远程 A2A 服务的默认上下文):本地通道 + 远程状态 + journal + 快照一律把路径脱敏
+    # 成 [PATH],密钥 ***。这锁定远程边界:只有 loopback web 显式 suppress_all_redaction() 时才
+    # 放行真路径(见 ..._preserves_paths_in_journal_when_suppressed),默认绝不外泄本地路径。
+    class LocalAwareQueue(FakeEventQueue):
+        def __init__(self) -> None:
+            super().__init__()
+            self.local_envelopes: list[dict[str, Any]] = []
+
+        async def enqueue_local_pipeline_envelope(self, envelope: dict[str, Any]) -> None:
+            self.local_envelopes.append(envelope)
+
+    queue = LocalAwareQueue()
+    context = PipelineA2AContext(
+        pipeline_run_id="run-1",
+        task_id="task-1",
+        context_id="ctx-1",
+        pipeline_name="selling",
+    )
+    pipeline_dir = tmp_path / "pipeline"
+    publisher = PipelineA2AEventPublisher(
+        event_queue=queue,
+        translator=PipelineEventTranslator(context),
+        journal=A2APipelineJournal(pipeline_dir),
+        snapshot_store=A2APipelineSnapshotStore(pipeline_dir),
+        exposure_types=[A2AExposureType.TOOL_TRACE],
+    )
+    raw_path = "/Users/alice/project/template.yml"
+
+    # 不进入 suppress_all_redaction():模拟远程服务的默认上下文。
+    await publisher.publish(
+        ToolUseEndEvent(
+            tool_use_id="toolu-local",
+            name="read_file",
+            input={"api_key": "sk-test-secret", "path": raw_path},
+        )
+    )
+
+    # 直通后本地 sink 拿到原始 input（web 实时流用）；远程/journal/快照仍由 serve 层脱敏。
+    assert queue.local_envelopes[0]["data"]["input"] == {"api_key": "sk-test-secret", "path": raw_path}
+    remote = dump(queue.events[0])["metadata"]["iac_code"]["pipeline"]
+    assert remote["data"]["input"] == {"api_key": "***", "path": "[PATH]"}
+    assert publisher.journal.read_all()[0]["data"]["input"]["path"] == "[PATH]"
+    snapshot = publisher.snapshot_store.load()
+    assert snapshot is not None
+    assert raw_path not in json.dumps(snapshot)
 
 
 @pytest.mark.asyncio
@@ -2163,3 +2261,25 @@ async def test_publish_hard_interrupt_false_parent_without_candidate_does_not_em
 
     event_types = [event["eventType"] for event in publisher.journal.read_all()]
     assert event_types == ["interrupt_received", "interrupt_classified"]
+
+
+def test_sanitize_remote_envelope_exempts_complete_step_conclusion() -> None:
+    from iac_code.a2a.pipeline_stream import _sanitize_remote_envelope
+
+    envelope = {
+        "data": {
+            "toolName": "complete_step",
+            "toolUseId": "toolu-x",
+            "input": {"deployment_parameters": {"RdsMasterPassword": "S3cret!"}},
+        }
+    }
+    out = _sanitize_remote_envelope(envelope)
+    assert out["data"]["input"]["deployment_parameters"]["RdsMasterPassword"] == "S3cret!"
+
+
+def test_sanitize_remote_envelope_still_redacts_non_complete_step() -> None:
+    from iac_code.a2a.pipeline_stream import _sanitize_remote_envelope
+
+    envelope = {"data": {"toolName": "write_file", "input": {"password": "S3cret!"}}}
+    out = _sanitize_remote_envelope(envelope)
+    assert out["data"]["input"]["password"] == "***"

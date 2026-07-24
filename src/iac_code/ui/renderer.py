@@ -1666,7 +1666,7 @@ class Renderer:
                             event.response_future.set_result(answer)
 
                 # ── Compaction ────────────────────────────────
-                elif isinstance(event, CompactionEvent):
+                elif isinstance(event, CompactionEvent) and event.phase == "finished":
                     compact_msg = _("Context auto-compacted: {original} → {compacted} tokens").format(
                         original=event.original_tokens,
                         compacted=event.compacted_tokens,

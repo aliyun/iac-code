@@ -155,3 +155,14 @@ class TestStreamEventTypes:
             QueuedInputSubmittedEvent(text="queued"),
         ]
         assert len(events) == 14
+
+
+def test_compaction_event_summary_defaults_empty():
+    ev = CompactionEvent(phase="finished")
+    assert ev.summary == ""
+
+
+def test_compaction_event_carries_summary():
+    ev = CompactionEvent(original_tokens=100, compacted_tokens=10, summary="S")
+    assert ev.summary == "S"
+    assert ev.phase == "finished"

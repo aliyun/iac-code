@@ -1,0 +1,3324 @@
+# French translations for iac-code.
+# Copyright (C) 2026 ORGANIZATION
+# This file is distributed under the same license as the iac-code project.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: iac-code 0.9.1\n"
+"Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
+"POT-Creation-Date: 2026-07-21 23:40+0800\n"
+"PO-Revision-Date: 2026-07-21 23:40+0800\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: fr\n"
+"Language-Team: fr <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: src/iac_code/web/static/index.html
+msgid "Session"
+msgstr "Session"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+msgid "Open navigation"
+msgstr "Ouvrir la navigation"
+
+#: src/iac_code/web/static/index.html
+msgid "Menu"
+msgstr "Menu"
+
+#: src/iac_code/web/static/index.html
+msgid "Global actions"
+msgstr "Actions globales"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+msgid "New chat"
+msgstr "Nouvelle discussion"
+
+#: src/iac_code/web/static/index.html
+msgid "Search"
+msgstr "Rechercher"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Plugins"
+msgstr "Modules d’extension"
+
+#: src/iac_code/web/static/index.html
+msgid "Pinned conversations"
+msgstr "Conversations épinglées"
+
+#: src/iac_code/web/static/index.html
+msgid "Pinned"
+msgstr "Épinglées"
+
+#: src/iac_code/web/static/index.html
+msgid "Projects"
+msgstr "Projets"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+msgid "Collapse all sessions"
+msgstr "Réduire toutes les sessions"
+
+#: src/iac_code/web/static/index.html
+msgid "Projects and conversations"
+msgstr "Projets et conversations"
+
+#: src/iac_code/web/static/index.html
+msgid "Settings"
+msgstr "Paramètres"
+
+#: src/iac_code/web/static/index.html
+msgid "Resize sidebar"
+msgstr "Redimensionner la barre latérale"
+
+#: src/iac_code/web/static/index.html
+msgid "Conversation actions"
+msgstr "Actions de conversation"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+msgid "Pin conversation"
+msgstr "Épingler la conversation"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+msgid "Rename conversation"
+msgstr "Renommer la conversation"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+msgid "Archive conversation"
+msgstr "Archiver la conversation"
+
+#: src/iac_code/web/static/index.html
+msgid "View pipeline"
+msgstr "Voir le pipeline"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Output"
+msgstr "Sortie"
+
+#: src/iac_code/web/static/index.html
+msgid ""
+"This conversation was created outside the web entry point and is read-"
+"only."
+msgstr ""
+"Cette conversation a été créée en dehors du point d’entrée web et est en "
+"lecture seule."
+
+#: src/iac_code/web/static/index.html
+msgid "Enter your requirement"
+msgstr "Saisissez votre besoin"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Describe your infrastructure needs"
+msgstr "Décrivez vos besoins en infrastructure"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Approval requested"
+msgstr "Approbation demandée"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+msgid "Thinking"
+msgstr "Réflexion"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Configure model"
+msgstr "Configurer le modèle"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Send"
+msgstr "Envoyer"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Select project"
+msgstr "Sélectionner un projet"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Normal mode"
+msgstr "Mode normal"
+
+#: src/iac_code/web/static/index.html
+msgid "Close output"
+msgstr "Fermer la sortie"
+
+#: src/iac_code/web/static/index.html
+msgid "File preview"
+msgstr "Aperçu du fichier"
+
+#: src/iac_code/web/static/index.html
+msgid "Close settings"
+msgstr "Fermer les paramètres"
+
+#: src/iac_code/web/static/index.html
+msgid "Back to app"
+msgstr "Retour à l’application"
+
+#: src/iac_code/web/static/index.html
+msgid "Workspace views"
+msgstr "Vues de l’espace de travail"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Configuration"
+msgstr "Configuration"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "General"
+msgstr "Général"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Models"
+msgstr "Modèles"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Cloud credentials"
+msgstr "Identifiants cloud"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Memory"
+msgstr "Mémoire"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "History"
+msgstr "Historique"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Archived conversations"
+msgstr "Conversations archivées"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Status"
+msgstr "État"
+
+#: src/iac_code/web/static/index.html
+msgid "Loading session controls."
+msgstr "Chargement des contrôles de session."
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Pipeline"
+msgstr "Pipeline"
+
+#: src/iac_code/web/static/index.html
+msgid "Search chats or run a command"
+msgstr "Rechercher des discussions ou exécuter une commande"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+msgid "Close"
+msgstr "Fermer"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Cancel"
+msgstr "Annuler"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Save"
+msgstr "Enregistrer"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Start a new working conversation."
+msgstr "Démarrez une nouvelle conversation de travail."
+
+#: src/iac_code/web/static/js/app.js
+msgid "General configuration"
+msgstr "Configuration générale"
+
+#: src/iac_code/web/static/js/app.js
+msgid "General options and foreign session visibility."
+msgstr "Options générales et visibilité des sessions externes."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Configure models and providers."
+msgstr "Configurez les modèles et les fournisseurs."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Configure cloud account access credentials."
+msgstr "Configurez les identifiants d’accès du compte cloud."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Edit project and user memory."
+msgstr "Modifiez la mémoire du projet et de l’utilisateur."
+
+#: src/iac_code/web/static/js/app.js
+msgid "View and enable IaC plugins."
+msgstr "Consultez et activez les modules d’extension IaC."
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Sales pipeline"
+msgstr "Pipeline de vente"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pipeline planning, generation, and validation for sales scenarios"
+msgstr ""
+"Planification, génération et validation du pipeline pour les scénarios de"
+" vente"
+
+#: src/iac_code/web/static/js/app.js
+msgid "No context usage recorded yet"
+msgstr "Aucune utilisation du contexte enregistrée pour l’instant"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "{percent} left (used {used} of {limit})"
+msgstr "{percent} restant (utilisé {used} sur {limit})"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "Used {n} tokens"
+msgstr "{n} tokens utilisés"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "Input {n}"
+msgstr "Entrée {n}"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "Output {n}"
+msgstr "Sortie {n}"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Session:"
+msgstr "Session :"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Context:"
+msgstr "Contexte :"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Copy session ID"
+msgstr "Copier l’ID de session"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Session ID copied"
+msgstr "ID de session copié"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Copy failed"
+msgstr "Échec de la copie"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Authenticated"
+msgstr "Authentifié"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Authentication required"
+msgstr "Authentification requise"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Authentication failed"
+msgstr "Échec de l’authentification"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Not authenticated"
+msgstr "Non authentifié"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Authentication not supported"
+msgstr "Authentification non prise en charge"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Disabled"
+msgstr "Désactivé"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Enabled"
+msgstr "Activé"
+
+#: src/iac_code/web/static/js/app.js
+msgid "No MCP servers configured"
+msgstr "Aucun serveur MCP configuré"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Conversation"
+msgstr "Conversation"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Unread"
+msgstr "Non lu"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Awaiting approval"
+msgstr "En attente d’approbation"
+
+#: src/iac_code/web/static/js/app.js
+msgid "In progress"
+msgstr "En cours"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Chats"
+msgstr "Discussions"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Unread chats"
+msgstr "Discussions non lues"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Commands"
+msgstr "Commandes"
+
+#: src/iac_code/web/static/js/app.js
+msgid "No matching results."
+msgstr "Aucun résultat correspondant."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Failed to search sessions. Please try again."
+msgstr "Échec de la recherche de sessions. Veuillez réessayer."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Close navigation"
+msgstr "Fermer la navigation"
+
+#: src/iac_code/web/static/js/app.js
+msgid "No project"
+msgstr "Aucun projet"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Just now"
+msgstr "À l’instant"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "{n}m"
+msgstr "{n} min"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "{n}h"
+msgstr "{n} h"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "{n}d"
+msgstr "{n} j"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "{n}w"
+msgstr "{n} sem"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "{n}y"
+msgstr "{n} an"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Read-only"
+msgstr "Lecture seule"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Unpin conversation"
+msgstr "Désépingler la conversation"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Please enter content"
+msgstr "Veuillez saisir du contenu"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Please enter a name"
+msgstr "Veuillez saisir un nom"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Operation failed"
+msgstr "Échec de l’opération"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Archive failed"
+msgstr "Échec de l’archivage"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "Remove {label}?"
+msgstr "Retirer {label} ?"
+
+#: src/iac_code/web/static/js/app.js
+msgid ""
+"This will remove the project from Codex. Files on disk will not be "
+"deleted."
+msgstr ""
+"Cette action retirera le projet de Codex. Les fichiers sur le disque ne "
+"seront pas supprimés."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Remove"
+msgstr "Retirer"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Unable to reveal the project in Finder"
+msgstr "Impossible d’afficher le projet dans le Finder"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Rename project"
+msgstr "Renommer le projet"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Keep it short and recognizable"
+msgstr "Restez concis et reconnaissable"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Unpin project"
+msgstr "Désépingler le projet"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pin project"
+msgstr "Épingler le projet"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Reveal in Finder"
+msgstr "Afficher dans le Finder"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "{label} project actions"
+msgstr "Actions du projet {label}"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "New chat in {label}"
+msgstr "Nouvelle discussion dans {label}"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Loading..."
+msgstr "Chargement..."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Show less"
+msgstr "Afficher moins"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Show more"
+msgstr "Afficher plus"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Expand all sessions"
+msgstr "Développer toutes les sessions"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Select this option"
+msgstr "Sélectionner cette option"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Waiting for input"
+msgstr "En attente de saisie"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "Processed {elapsed}"
+msgstr "Traité {elapsed}"
+
+#: src/iac_code/web/static/js/app.js
+msgid "View diagram"
+msgstr "Voir le schéma"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Optimizing"
+msgstr "Optimisation"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pending optimization"
+msgstr "En attente d’optimisation"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Selected"
+msgstr "Sélectionné"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Confirm selection?"
+msgstr "Confirmer la sélection ?"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Selecting…"
+msgstr "Sélection…"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pipeline completed"
+msgstr "Pipeline terminé"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pipeline failed"
+msgstr "Échec du pipeline"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pipeline canceled"
+msgstr "Pipeline annulé"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pipeline exited early"
+msgstr "Le pipeline s’est arrêté prématurément"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pipeline ended"
+msgstr "Pipeline terminé"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Context automatically compacted"
+msgstr "Contexte compacté automatiquement"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Thinking done"
+msgstr "Réflexion terminée"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Attached image"
+msgstr "Image jointe"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Processing"
+msgstr "Traitement"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Executing"
+msgstr "Exécution"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Running"
+msgstr "En cours d’exécution"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Auto-compacting context"
+msgstr "Compactage automatique du contexte"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Compacting context"
+msgstr "Compactage du contexte"
+
+#: src/iac_code/web/static/js/app.js
+msgid "The conversation is short; no context compaction needed yet."
+msgstr ""
+"La conversation est courte ; aucun compactage du contexte n’est "
+"nécessaire pour l’instant."
+
+#: src/iac_code/web/static/js/app.js
+msgid "There is no context to compact."
+msgstr "Il n’y a aucun contexte à compacter."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Context compaction failed. Please try again later."
+msgstr "Échec du compactage du contexte. Veuillez réessayer plus tard."
+
+#: src/iac_code/web/static/js/app.js
+msgid "A task is already running; this compaction was skipped."
+msgstr "Une tâche est déjà en cours ; ce compactage a été ignoré."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Processed"
+msgstr "Traité"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Loading session…"
+msgstr "Chargement de la session…"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Start building your infrastructure"
+msgstr "Commencez à construire votre infrastructure"
+
+#: src/iac_code/web/static/js/app.js
+msgid ""
+"Describe a task, command, or infrastructure change and hand it to IaC "
+"Code."
+msgstr ""
+"Décrivez une tâche, une commande ou une modification d’infrastructure et "
+"confiez-la à IaC Code."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Submit now"
+msgstr "Soumettre maintenant"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Steer"
+msgstr "Orienter"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Delete"
+msgstr "Supprimer"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Delete queued message"
+msgstr "Supprimer le message en file d’attente"
+
+#: src/iac_code/web/static/js/app.js
+msgid "More"
+msgstr "Plus"
+
+#: src/iac_code/web/static/js/app.js
+msgid "More actions"
+msgstr "Plus d’actions"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Edit queued message"
+msgstr "Modifier le message en file d’attente"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Multiple lines supported; ⌘/Ctrl + Enter to save"
+msgstr "Plusieurs lignes prises en charge ; ⌘/Ctrl + Entrée pour enregistrer"
+
+#: src/iac_code/web/static/js/app.js
+msgid ""
+"The queued messages changed (one has started processing or was modified)."
+" Please edit again."
+msgstr ""
+"Les messages en file d’attente ont changé (l’un d’eux a commencé à être "
+"traité ou a été modifié). Veuillez modifier à nouveau."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Save failed. Please try again."
+msgstr "Échec de l’enregistrement. Veuillez réessayer."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Edit message"
+msgstr "Modifier le message"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Search projects"
+msgstr "Rechercher des projets"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Use directory"
+msgstr "Utiliser le répertoire"
+
+#: src/iac_code/web/static/js/app.js
+msgid "No matching projects"
+msgstr "Aucun projet correspondant"
+
+#: src/iac_code/web/static/js/app.js
+msgid "New project"
+msgstr "Nouveau projet"
+
+#: src/iac_code/web/static/js/app.js
+msgid "New blank project"
+msgstr "Nouveau projet vierge"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Use existing folder"
+msgstr "Utiliser un dossier existant"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enter the standard conversational IaC assistant"
+msgstr "Accéder à l’assistant IaC conversationnel standard"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Pipeline mode"
+msgstr "Mode pipeline"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Plan, generate, and validate with the pipeline"
+msgstr "Planifier, générer et valider avec le pipeline"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Elapsed {n}s"
+msgstr "{n} s écoulées"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Failed to load session. Please try again."
+msgstr "Échec du chargement de la session. Veuillez réessayer."
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "New version v{latest} available (current v{current})"
+msgstr "Nouvelle version v{latest} disponible (actuelle v{current})"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Update now"
+msgstr "Mettre à jour maintenant"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Don't remind me about this version"
+msgstr "Ne plus me rappeler cette version"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Update complete. Please refresh manually."
+msgstr "Mise à jour terminée. Veuillez actualiser manuellement."
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "Update failed: {error}"
+msgstr "Échec de la mise à jour : {error}"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Retry"
+msgstr "Réessayer"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Update complete. Restarting…"
+msgstr "Mise à jour terminée. Redémarrage…"
+
+#: src/iac_code/web/static/js/app.js
+msgid "The update is taking a while. Please refresh manually later."
+msgstr "La mise à jour prend du temps. Veuillez actualiser manuellement plus tard."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Updating…"
+msgstr "Mise à jour…"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "Failed to start update: {error}"
+msgstr "Échec du démarrage de la mise à jour : {error}"
+
+#: src/iac_code/web/static/js/mermaid_render.js
+#, python-brace-format
+msgid "View {n}"
+msgstr "Vue {n}"
+
+#: src/iac_code/web/static/js/mermaid_render.js
+msgid "No pricing information"
+msgstr "Aucune information tarifaire"
+
+#: src/iac_code/web/static/js/mermaid_render.js
+msgid "Estimated monthly cost"
+msgstr "Coût mensuel estimé"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Authorization required"
+msgstr "Autorisation requise"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Submit"
+msgstr "Soumettre"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Input required"
+msgstr "Saisie requise"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Additional details"
+msgstr "Détails complémentaires"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Select"
+msgstr "Sélectionner"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Enter sends; Shift+Enter inserts a newline."
+msgstr "Entrée envoie ; Maj+Entrée insère un saut de ligne."
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Continue adding or adjusting requirements"
+msgstr "Continuer à ajouter ou ajuster les besoins"
+
+#: src/iac_code/web/static/js/components/composer.js
+#, python-brace-format
+msgid "(Used {percent}%)"
+msgstr "(Utilisé {percent} %)"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Compact"
+msgstr "Compacter"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Compact this session's context"
+msgstr "Compacter le contexte de cette session"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Show current session status"
+msgstr "Afficher l’état de la session actuelle"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Show MCP server status"
+msgstr "Afficher l’état du serveur MCP"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Attachments can be sent after the current turn finishes."
+msgstr ""
+"Les pièces jointes pourront être envoyées une fois le tour en cours "
+"terminé."
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "This session was created outside the web entry point and is read-only."
+msgstr ""
+"Cette session a été créée en dehors du point d’entrée web et est en "
+"lecture seule"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "How should IaC Code actions be approved?"
+msgstr "Comment les actions d’IaC Code doivent-elles être approuvées ?"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Model"
+msgstr "Modèle"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Provider"
+msgstr "Fournisseur"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Normal chat"
+msgstr "Conversation normale"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Loading model configuration..."
+msgstr "Chargement de la configuration du modèle..."
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Model configuration unavailable"
+msgstr "Configuration du modèle indisponible"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Reasoning"
+msgstr "Raisonnement"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Not supported"
+msgstr "Non pris en charge"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Stop"
+msgstr "Arrêter"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Stop the current reply"
+msgstr "Arrêter la réponse en cours"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Success"
+msgstr "Succès"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "In progress / failed"
+msgstr "En cours / échec"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Architecture diagram"
+msgstr "Schéma d’architecture"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "No architecture diagram"
+msgstr "Aucun schéma d’architecture"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Details"
+msgstr "Détails"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Alibaba Cloud API"
+msgstr "API Alibaba Cloud"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Completing step"
+msgstr "Réalisation de l’étape"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Completed step"
+msgstr "Étape terminée"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Is infrastructure intent"
+msgstr "Est une intention d’infrastructure"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Confidence"
+msgstr "Confiance"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Requirement summary"
+msgstr "Résumé du besoin"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Cloud platform"
+msgstr "Plateforme cloud"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Business type"
+msgstr "Type d’activité"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Core requirements"
+msgstr "Besoins essentiels"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Resource intents"
+msgstr "Intentions de ressources"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Non-functional requirements"
+msgstr "Besoins non fonctionnels"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Additional notes"
+msgstr "Notes complémentaires"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Candidates"
+msgstr "Candidats"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Name"
+msgstr "Nom"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Output path"
+msgstr "Chemin de sortie"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Cloud products"
+msgstr "Produits cloud"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Action"
+msgstr "Action"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Role"
+msgstr "Rôle"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Source"
+msgstr "Source"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Notes"
+msgstr "Notes"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Region preference"
+msgstr "Préférence de région"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Scale hint"
+msgstr "Indication d’échelle"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Topology"
+msgstr "Topologie"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Monthly estimate"
+msgstr "Estimation mensuelle"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Pros"
+msgstr "Avantages"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Cons"
+msgstr "Inconvénients"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Cost"
+msgstr "Coût"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Currency"
+msgstr "Devise"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Summary"
+msgstr "Résumé"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Description"
+msgstr "Description"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Reason"
+msgstr "Raison"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Stack ID"
+msgstr "ID de la pile"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Template"
+msgstr "Modèle"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Template SHA256"
+msgstr "SHA256 du modèle"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Template fixed"
+msgstr "Modèle corrigé"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "File path"
+msgstr "Chemin du fichier"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Region"
+msgstr "Région"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Validated"
+msgstr "Validé"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Type"
+msgstr "Type"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Key"
+msgstr "Identifiant"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Review passed"
+msgstr "Révision réussie"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Review issues"
+msgstr "Problèmes de révision"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Selected review aspects"
+msgstr "Aspects de révision sélectionnés"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Skipped review aspects"
+msgstr "Aspects de révision ignorés"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Resolved InfraGuard policies"
+msgstr "Politiques InfraGuard appliquées"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "InfraGuard summary"
+msgstr "Résumé InfraGuard"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Passed"
+msgstr "Réussi"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Blocking findings"
+msgstr "Constatations bloquantes"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Total violations"
+msgstr "Total des infractions"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Severity counts"
+msgstr "Nombre par niveau de gravité"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Files scanned"
+msgstr "Fichiers analysés"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Files with violations"
+msgstr "Fichiers en infraction"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Fix summary"
+msgstr "Résumé du correctif"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "High risk"
+msgstr "Risque élevé"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Medium risk"
+msgstr "Risque moyen"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Low risk"
+msgstr "Risque faible"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Resource inventory"
+msgstr "Inventaire des ressources"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Deployment parameters"
+msgstr "Paramètres de déploiement"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Missing deployment parameters"
+msgstr "Paramètres de déploiement manquants"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Parameter set summary"
+msgstr "Résumé du jeu de paramètres"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "API summary"
+msgstr "Résumé de l’API"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Error"
+msgstr "Erreur"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Resources created"
+msgstr "Ressources créées"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Outputs"
+msgstr "Sorties"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Stack name"
+msgstr "Nom de la pile"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Status reason"
+msgstr "Motif de l’état"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Progress percentage"
+msgstr "Pourcentage de progression"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Elapsed seconds"
+msgstr "Secondes écoulées"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Is success"
+msgstr "Est un succès"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Error code"
+msgstr "Code d’erreur"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Recommended action"
+msgstr "Action recommandée"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Message"
+msgstr "Message"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "User prompt"
+msgstr "Invite de l’utilisateur"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "User input"
+msgstr "Saisie de l’utilisateur"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Options"
+msgstr "Options"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Candidate index"
+msgstr "Indice du candidat"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Selected candidate name"
+msgstr "Nom du candidat sélectionné"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Selected candidate index"
+msgstr "Indice du candidat sélectionné"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Question"
+msgstr "Question"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Selected ID"
+msgstr "ID sélectionné"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Selected item"
+msgstr "Élément sélectionné"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Free text"
+msgstr "Texte libre"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Command"
+msgstr "Commande"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Exit code"
+msgstr "Code de sortie"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Mode"
+msgstr "Mode"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Findings"
+msgstr "Constatations"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "File SHA256"
+msgstr "SHA256 du fichier"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Error output"
+msgstr "Sortie d’erreur"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Parameters"
+msgstr "Paramètres"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Resources"
+msgstr "Ressources"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Resource types"
+msgstr "Types de ressources"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Request ID"
+msgstr "ID de requête"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Stack"
+msgstr "Pile"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Parameter constraints"
+msgstr "Contraintes des paramètres"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Update info"
+msgstr "Informations de mise à jour"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Creating"
+msgstr "Création"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Create failed"
+msgstr "Échec de la création"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Create complete"
+msgstr "Création terminée"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Updating"
+msgstr "Mise à jour"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Update failed"
+msgstr "Échec de la mise à jour"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Update complete"
+msgstr "Mise à jour terminée"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Rolling back"
+msgstr "Restauration en cours"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Rollback failed"
+msgstr "Échec de la restauration"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Rollback complete"
+msgstr "Restauration terminée"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Deleting"
+msgstr "Suppression"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Delete failed"
+msgstr "Échec de la suppression"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Delete complete"
+msgstr "Suppression terminée"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Checking"
+msgstr "Vérification"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Check failed"
+msgstr "Échec de la vérification"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Check complete"
+msgstr "Vérification terminée"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Yes"
+msgstr "Oui"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "No"
+msgstr "Non"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Conclusion"
+msgstr "Conclusion"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Read memory"
+msgstr "Mémoire lue"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Saved memory"
+msgstr "Mémoire enregistrée"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Ran InfraGuard scan"
+msgstr "Analyse InfraGuard exécutée"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Showed architecture diagram"
+msgstr "Schéma d’architecture affiché"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Showed candidate details"
+msgstr "Détails du candidat affichés"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Validated template"
+msgstr "Modèle validé"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Fetched template parameter constraints"
+msgstr "Contraintes des paramètres du modèle récupérées"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Previewed stack changes"
+msgstr "Modifications de la pile prévisualisées"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Estimated resource cost"
+msgstr "Coût des ressources estimé"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Deployed stack"
+msgstr "Pile déployée"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Operated ROS stack"
+msgstr "Pile ROS gérée"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Queried ROS stack instances"
+msgstr "Instances de pile ROS interrogées"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Searched Alibaba Cloud docs"
+msgstr "Documentation Alibaba Cloud recherchée"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Asked the user"
+msgstr "A interrogé l’utilisateur"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Reading memory"
+msgstr "Lecture de la mémoire"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Saving memory"
+msgstr "Enregistrement de la mémoire"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Running InfraGuard scan"
+msgstr "Exécution de l’analyse InfraGuard"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Showing architecture diagram"
+msgstr "Affichage du schéma d’architecture"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Showing candidate details"
+msgstr "Affichage des détails du candidat"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Validating template"
+msgstr "Validation du modèle"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Fetching template parameter constraints"
+msgstr "Récupération des contraintes des paramètres du modèle"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Previewing stack changes"
+msgstr "Prévisualisation des modifications de la pile"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Estimating resource cost"
+msgstr "Estimation du coût des ressources"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Deploying stack"
+msgstr "Déploiement de la pile"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Operating ROS stack"
+msgstr "Gestion de la pile ROS"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Querying ROS stack instances"
+msgstr "Interrogation des instances de pile ROS"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Searching Alibaba Cloud docs"
+msgstr "Recherche dans la documentation Alibaba Cloud"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Asking the user"
+msgstr "Interrogation de l’utilisateur"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Step failed"
+msgstr "Échec de l’étape"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Calling {label}"
+msgstr "Appel de {label}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Call failed: {label}"
+msgstr "Échec de l’appel : {label}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Called {label}"
+msgstr "A appelé {label}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Running {command}"
+msgstr "Exécution de {command}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Run failed: {command}"
+msgstr "Échec de l’exécution : {command}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Ran {command}"
+msgstr "A exécuté {command}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Reading file"
+msgstr "Lecture du fichier"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Read failed"
+msgstr "Échec de la lecture"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Read file"
+msgstr "Fichier lu"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Reading {target}"
+msgstr "Lecture de {target}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Read failed: {target}"
+msgstr "Échec de la lecture : {target}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Read {target}"
+msgstr "{target} lu"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Listing files"
+msgstr "Listage des fichiers"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "List failed"
+msgstr "Échec de la liste"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Listed files"
+msgstr "Fichiers listés"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Listing {target}"
+msgstr "Listage de {target}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "List failed: {target}"
+msgstr "Échec de la liste : {target}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Listed {target}"
+msgstr "{target} listé"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Modifying {target}"
+msgstr "Modification de {target}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Modify failed: {target}"
+msgstr "Échec de la modification : {target}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Modified {target}"
+msgstr "{target} modifié"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Using {name}"
+msgstr "Utilisation de {name}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Use failed: {name}"
+msgstr "Échec de l’utilisation : {name}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Used {name}"
+msgstr "A utilisé {name}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Canceled {target}"
+msgstr "{target} annulé"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Canceled"
+msgstr "Annulé"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Denied {target}"
+msgstr "{target} refusé"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Denied"
+msgstr "Refusé"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Exit code {code}"
+msgstr "Code de sortie {code}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Failed"
+msgstr "Échec"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Waiting"
+msgstr "En attente"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "running {n} command"
+msgstr "exécution de {n} commande"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "running {n} commands"
+msgstr "exécution de {n} commandes"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "ran {n} command"
+msgstr "{n} commande exécutée"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "ran {n} commands"
+msgstr "{n} commandes exécutées"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "calling {n} Alibaba Cloud API"
+msgstr "appel de {n} API Alibaba Cloud"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "calling {n} Alibaba Cloud APIs"
+msgstr "appel de {n} API Alibaba Cloud"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "called {n} Alibaba Cloud API"
+msgstr "a appelé {n} API Alibaba Cloud"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "called {n} Alibaba Cloud APIs"
+msgstr "a appelé {n} API Alibaba Cloud"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "reading {n} file"
+msgstr "lecture de {n} fichier"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "reading {n} files"
+msgstr "lecture de {n} fichiers"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "read {n} file"
+msgstr "{n} fichier lu"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "read {n} files"
+msgstr "{n} fichiers lus"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "listing files"
+msgstr "listage des fichiers"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "listing {n} times"
+msgstr "listage {n} fois"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "listed files"
+msgstr "fichiers listés"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "listed {n} times"
+msgstr "listé {n} fois"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "modifying {n} item"
+msgstr "modification de {n} élément"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "modifying {n} items"
+msgstr "modification de {n} éléments"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "modified {n} item"
+msgstr "{n} élément modifié"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "modified {n} items"
+msgstr "{n} éléments modifiés"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "using {n} tool"
+msgstr "utilisation de {n} outil"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "using {n} tools"
+msgstr "utilisation de {n} outils"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "used {n} tool"
+msgstr "{n} outil utilisé"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "used {n} tools"
+msgstr "{n} outils utilisés"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Canceled {n} tool"
+msgstr "{n} outil annulé"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Canceled {n} tools"
+msgstr "{n} outils annulés"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "{phrase} {count} times"
+msgstr "{phrase} {count} fois"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "No output"
+msgstr "Aucune sortie"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Input"
+msgstr "Entrée"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Result"
+msgstr "Résultat"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Artifacts"
+msgstr "Artefacts"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Sub-tools"
+msgstr "Sous-outils"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "No details yet"
+msgstr "Aucun détail pour l’instant"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Stack: {name} ({id})"
+msgstr "Pile : {name} ({id})"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Stack: {name}"
+msgstr "Pile : {name}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Account"
+msgstr "Compte"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Resource"
+msgstr "Ressource"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Alibaba Cloud"
+msgstr "Alibaba Cloud"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "RAM role"
+msgstr "Rôle RAM"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "OAuth browser login"
+msgstr "Connexion OAuth via le navigateur"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Environment variables"
+msgstr "Variables d’environnement"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Saved locally"
+msgstr "Enregistré en local"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "aliyun CLI config"
+msgstr "configuration de la CLI aliyun"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "North China 1 (Qingdao)"
+msgstr "Chine du Nord 1 (Qingdao)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "North China 2 (Beijing)"
+msgstr "Chine du Nord 2 (Pékin)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "North China 3 (Zhangjiakou)"
+msgstr "Chine du Nord 3 (Zhangjiakou)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "North China 5 (Hohhot)"
+msgstr "Chine du Nord 5 (Hohhot)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "North China 6 (Ulanqab)"
+msgstr "Chine du Nord 6 (Ulanqab)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "East China 1 (Hangzhou)"
+msgstr "Chine de l’Est 1 (Hangzhou)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "East China 2 (Shanghai)"
+msgstr "Chine de l’Est 2 (Shanghai)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "East China 5 (Nanjing - Local Region)"
+msgstr "Chine de l’Est 5 (Nankin - Région locale)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "East China 6 (Fuzhou - Local Region)"
+msgstr "Chine de l’Est 6 (Fuzhou - Région locale)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "South China 1 (Shenzhen)"
+msgstr "Chine du Sud 1 (Shenzhen)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "South China 2 (Heyuan)"
+msgstr "Chine du Sud 2 (Heyuan)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "South China 3 (Guangzhou)"
+msgstr "Chine du Sud 3 (Guangzhou)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Central China 1 (Wuhan - Local Region)"
+msgstr "Chine centrale 1 (Wuhan - Région locale)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Southwest China 1 (Chengdu)"
+msgstr "Chine du Sud-Ouest 1 (Chengdu)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Hong Kong, China"
+msgstr "Hong Kong, Chine"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Singapore"
+msgstr "Singapour"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Australia (Sydney)"
+msgstr "Australie (Sydney)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Malaysia (Kuala Lumpur)"
+msgstr "Malaisie (Kuala Lumpur)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Indonesia (Jakarta)"
+msgstr "Indonésie (Jakarta)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Philippines (Manila)"
+msgstr "Philippines (Manille)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Thailand (Bangkok)"
+msgstr "Thaïlande (Bangkok)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Japan (Tokyo)"
+msgstr "Japon (Tokyo)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "South Korea (Seoul)"
+msgstr "Corée du Sud (Séoul)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "India (Mumbai)"
+msgstr "Inde (Mumbai)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "US (Silicon Valley)"
+msgstr "États-Unis (Silicon Valley)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "US (Virginia)"
+msgstr "États-Unis (Virginie)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Germany (Frankfurt)"
+msgstr "Allemagne (Francfort)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "UK (London)"
+msgstr "Royaume-Uni (Londres)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "UAE (Dubai)"
+msgstr "Émirats arabes unis (Dubaï)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Saudi Arabia (Riyadh)"
+msgstr "Arabie saoudite (Riyad)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Show secret"
+msgstr "Afficher le secret"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Hide secret"
+msgstr "Masquer le secret"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Expand list"
+msgstr "Développer la liste"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Provider groups"
+msgstr "Groupes de fournisseurs"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Model providers"
+msgstr "Fournisseurs de modèles"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enter or select a model"
+msgstr "Saisissez ou sélectionnez un modèle"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enter or select reasoning effort"
+msgstr "Saisissez ou sélectionnez l’effort de raisonnement"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enter API key"
+msgstr "Saisissez la clé d’API"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Leave blank to use model default"
+msgstr "Laissez vide pour utiliser la valeur par défaut du modèle"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Max output tokens"
+msgstr "Nombre maximal de tokens de sortie"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Max output tokens per reply; leave blank to use model default"
+msgstr ""
+"Nombre maximal de tokens de sortie par réponse ; laissez vide pour "
+"utiliser la valeur par défaut du modèle"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Thinking budget"
+msgstr "Budget de réflexion"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Token budget allocated to the thinking process; leave blank to use model "
+"default"
+msgstr ""
+"Budget de tokens alloué au processus de réflexion ; laissez vide pour "
+"utiliser la valeur par défaut du modèle"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Advanced settings"
+msgstr "Paramètres avancés"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Save configuration"
+msgstr "Enregistrer la configuration"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Set as current model"
+msgstr "Définir comme modèle actuel"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Clear configuration"
+msgstr "Effacer la configuration"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Select a provider on the left to view and edit its configuration."
+msgstr ""
+"Sélectionnez un fournisseur à gauche pour afficher et modifier sa "
+"configuration."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The model used for generation under this provider"
+msgstr "Le modèle utilisé pour la génération avec ce fournisseur"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Reasoning effort"
+msgstr "Effort de raisonnement"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "How deeply the model thinks; higher is slower but more detailed"
+msgstr ""
+"À quel point le modèle réfléchit en profondeur ; plus la valeur est "
+"élevée, plus c’est lent mais détaillé"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "API base URL"
+msgstr "URL de base de l’API"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Custom API Base URL; leave blank to use default"
+msgstr ""
+"URL de base d’API personnalisée ; laissez vide pour utiliser la valeur "
+"par défaut"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "API key"
+msgstr "Clé d’API"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The key required to call this provider; stored locally only"
+msgstr "La clé requise pour appeler ce fournisseur ; conservée uniquement en local"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Leave blank to use model default ({value})"
+msgstr "Laissez vide pour utiliser la valeur par défaut du modèle ({value})"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Other"
+msgstr "Autre"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Current"
+msgstr "Actuel"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Available"
+msgstr "Disponible"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Unavailable"
+msgstr "Indisponible"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Managed by external login"
+msgstr "Géré par une connexion externe"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid ""
+"This source is managed by an external application login and cannot be "
+"edited here. Current provider: {provider}"
+msgstr ""
+"Cette source est gérée par la connexion d’une application externe et ne "
+"peut pas être modifiée ici. Fournisseur actuel : {provider}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"This source is managed by an external application login and cannot be "
+"edited here."
+msgstr ""
+"Cette source est gérée par la connexion d’une application externe et ne "
+"peut pas être modifiée ici."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Configure this provider's model and credentials."
+msgstr "Configurez le modèle et les identifiants de ce fournisseur."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The current model cannot be cleared; switch to another model first"
+msgstr ""
+"Le modèle actuel ne peut pas être effacé ; basculez d’abord vers un autre"
+" modèle"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Current model"
+msgstr "Modèle actuel"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Configured"
+msgstr "Configuré"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Not configured"
+msgstr "Non configuré"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading model configuration…"
+msgstr "Chargement de la configuration du modèle…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Saving configuration…"
+msgstr "Enregistrement de la configuration…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Configuration saved."
+msgstr "Configuration enregistrée."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Setting as current model…"
+msgstr "Définition comme modèle actuel…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Set as current model."
+msgstr "Défini comme modèle actuel."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Clearing configuration…"
+msgstr "Effacement de la configuration…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Configuration cleared."
+msgstr "Configuration effacée."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Cloud provider"
+msgstr "Fournisseur cloud"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Select or enter a region, e.g. cn-hangzhou"
+msgstr "Sélectionnez ou saisissez une région, par ex. cn-hangzhou"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "STS token"
+msgstr "Jeton STS"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Session name"
+msgstr "Nom de la session"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "China (aliyun.com)"
+msgstr "Chine (aliyun.com)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "International (alibabacloud.com)"
+msgstr "International (alibabacloud.com)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Log in with browser"
+msgstr "Se connecter via le navigateur"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Save cloud credentials"
+msgstr "Enregistrer les identifiants cloud"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Read from {source} · {shown}"
+msgstr "Lu depuis {source} · {shown}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Region for deployment and resource queries"
+msgstr "Région pour le déploiement et les requêtes de ressources"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Alibaba Cloud access key ID"
+msgstr "ID de clé d’accès Alibaba Cloud"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Access key secret; stored locally only"
+msgstr "Secret de la clé d’accès ; conservé uniquement en local"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Temporary security token"
+msgstr "Jeton de sécurité temporaire"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The RAM role ARN to assume"
+msgstr "L’ARN du rôle RAM à assumer"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Role session name (optional)"
+msgstr "Nom de la session de rôle (facultatif)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Login site"
+msgstr "Site de connexion"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Select the site your Alibaba Cloud account belongs to"
+msgstr "Sélectionnez le site auquel appartient votre compte Alibaba Cloud"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Access token expiry"
+msgstr "Expiration du jeton d’accès"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Current access token expiry time (local time zone)"
+msgstr "Heure d’expiration du jeton d’accès actuel (fuseau horaire local)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Refresh token expiry"
+msgstr "Expiration du jeton d’actualisation"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Unknown (Alibaba Cloud did not provide an expiry)"
+msgstr "Inconnu (Alibaba Cloud n’a pas fourni d’expiration)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Refresh token expiry time (local time zone); re-login required after "
+"expiry"
+msgstr ""
+"Heure d’expiration du jeton d’actualisation (fuseau horaire local) ; une "
+"reconnexion est nécessaire après expiration"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "STS expiry"
+msgstr "Expiration STS"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Unknown (STS credentials not yet obtained)"
+msgstr "Inconnu (identifiants STS pas encore obtenus)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Expiry time of the STS temporary credentials derived from OAuth (local "
+"time zone)"
+msgstr ""
+"Heure d’expiration des identifiants temporaires STS dérivés d’OAuth "
+"(fuseau horaire local)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Currently saved: {mode}"
+msgstr "Actuellement enregistré : {mode}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "No cloud credentials saved yet"
+msgstr "Aucun identifiant cloud enregistré pour l’instant"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading cloud credentials…"
+msgstr "Chargement des identifiants cloud…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Saving cloud credentials…"
+msgstr "Enregistrement des identifiants cloud…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Opening the browser; please complete login on the Alibaba Cloud page… (if"
+" the browser did not open or was closed, click Cancel)"
+msgstr ""
+"Ouverture du navigateur ; veuillez terminer la connexion sur la page "
+"Alibaba Cloud… (si le navigateur ne s’est pas ouvert ou a été fermé, "
+"cliquez sur Annuler)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Login succeeded."
+msgstr "Connexion réussie."
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Login failed: {error}"
+msgstr "Échec de la connexion : {error}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Login canceled. You can start again or switch to another authentication "
+"method."
+msgstr ""
+"Connexion annulée. Vous pouvez recommencer ou passer à une autre méthode "
+"d’authentification."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Select the Alibaba Cloud region for deployment and resource queries."
+msgstr ""
+"Sélectionnez la région Alibaba Cloud pour le déploiement et les requêtes "
+"de ressources."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Credentials"
+msgstr "Identifiants"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Select the authentication method for accessing Alibaba Cloud; stored "
+"locally only."
+msgstr ""
+"Sélectionnez la méthode d’authentification pour accéder à Alibaba Cloud ;"
+" conservée uniquement en local."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Authentication method"
+msgstr "Méthode d’authentification"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Different methods require different parameters; only relevant fields are "
+"shown"
+msgstr ""
+"Les différentes méthodes requièrent des paramètres différents ; seuls les"
+" champs pertinents sont affichés"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "User"
+msgstr "Utilisateur"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Feedback"
+msgstr "Retour"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Project"
+msgstr "Projet"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Reference"
+msgstr "Référence"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Global memory"
+msgstr "Mémoire globale"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Project memory"
+msgstr "Mémoire du projet"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "No memory entries yet"
+msgstr "Aucune entrée de mémoire pour l’instant"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Write project-level instructions to inject into every conversation turn; "
+"Markdown supported"
+msgstr ""
+"Rédigez les instructions au niveau projet à injecter à chaque tour de "
+"conversation ; Markdown pris en charge"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Write personal preferences to inject across all projects; Markdown "
+"supported"
+msgstr ""
+"Rédigez les préférences personnelles à injecter dans tous les projets ; "
+"Markdown pris en charge"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Selected project"
+msgstr "Projet sélectionné"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Persistent memory"
+msgstr "Mémoire persistante"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Long-term instructions injected to the Agent every conversation turn, "
+"split into two layers: Selected project and All projects."
+msgstr ""
+"Instructions à long terme injectées à l’Agent à chaque tour de "
+"conversation, réparties en deux niveaux : projet sélectionné et tous les "
+"projets."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "User memory"
+msgstr "Mémoire de l’utilisateur"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "All projects"
+msgstr "Tous les projets"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Automatic memory"
+msgstr "Mémoire automatique"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Let the Agent automatically record noteworthy facts while working."
+msgstr ""
+"Laisser l’Agent enregistrer automatiquement les faits notables pendant "
+"qu’il travaille."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Auto-record"
+msgstr "Enregistrement automatique"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, the Agent writes noteworthy facts into the memory library "
+"below at appropriate times."
+msgstr ""
+"Une fois activé, l’Agent inscrit les faits notables dans la bibliothèque "
+"de mémoire ci-dessous au moment opportun."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Search memory…"
+msgstr "Rechercher dans la mémoire…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Search memory"
+msgstr "Rechercher dans la mémoire"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Memory library"
+msgstr "Bibliothèque de mémoire"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Structured memory automatically recorded by the Agent; searchable and "
+"deletable."
+msgstr ""
+"Mémoire structurée enregistrée automatiquement par l’Agent ; consultable "
+"et supprimable."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Delete this memory"
+msgstr "Supprimer cette mémoire"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Confirm delete?"
+msgstr "Confirmer la suppression ?"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Delete failed: {error}"
+msgstr "Échec de la suppression : {error}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "No matching memory found"
+msgstr "Aucune mémoire correspondante trouvée"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Load failed: {error}"
+msgstr "Échec du chargement : {error}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "{label} (current)"
+msgstr "{label} (actuel)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading…"
+msgstr "Chargement…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "File: {path}"
+msgstr "Fichier : {path}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Saving…"
+msgstr "Enregistrement…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Saved · {name}"
+msgstr "Enregistré · {name}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Saved"
+msgstr "Enregistré"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Save failed: {error}"
+msgstr "Échec de l’enregistrement : {error}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Automatic memory enabled"
+msgstr "Mémoire automatique activée"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Automatic memory disabled"
+msgstr "Mémoire automatique désactivée"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Built-in"
+msgstr "Intégré"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Skills"
+msgstr "Compétences"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Each skill can be invoked by the Agent or used as a / command. Built-in "
+"skills are always on and cannot be disabled."
+msgstr ""
+"Chaque compétence peut être invoquée par l’Agent ou utilisée comme "
+"commande /. Les compétences intégrées sont toujours actives et ne peuvent"
+" pas être désactivées."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Search skills…"
+msgstr "Rechercher des compétences…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Unknown"
+msgstr "Inconnu"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Locked"
+msgstr "Verrouillé"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "/command"
+msgstr "/commande"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Built-in skills cannot be disabled"
+msgstr "Les compétences intégrées ne peuvent pas être désactivées"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "No skills available yet."
+msgstr "Aucune compétence disponible pour l’instant."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "No matching skills found."
+msgstr "Aucune compétence correspondante trouvée."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Updated."
+msgstr "Mis à jour."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading skills…"
+msgstr "Chargement des compétences…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Local"
+msgstr "Local"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Connected"
+msgstr "Connecté"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Connection failed"
+msgstr "Échec de la connexion"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Needs authentication"
+msgstr "Authentification nécessaire"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Pending connection"
+msgstr "En attente de connexion"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Not checked"
+msgstr "Non vérifié"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Pending approval"
+msgstr "En attente d’approbation"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Missing environment variables"
+msgstr "Variables d’environnement manquantes"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Invalid configuration"
+msgstr "Configuration non valide"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Authentication error"
+msgstr "Erreur d’authentification"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "stdio (local command)"
+msgstr "stdio (commande locale)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "http (remote)"
+msgstr "http (distant)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "sse (remote)"
+msgstr "sse (distant)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "User (~/.iac-code/settings.yml)"
+msgstr "Utilisateur (~/.iac-code/settings.yml)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Local (.iac-code/settings.local.yml)"
+msgstr "Local (.iac-code/settings.local.yml)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Project (.mcp.json)"
+msgstr "Projet (.mcp.json)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "MCP servers"
+msgstr "Serveurs MCP"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Manage MCP servers: add/edit/delete, enable/disable, approve project-"
+"level configs, connection checks, view capabilities, and OAuth "
+"authentication."
+msgstr ""
+"Gérez les serveurs MCP : ajout/modification/suppression, "
+"activation/désactivation, approbation des configurations au niveau "
+"projet, vérifications de connexion, consultation des capacités et "
+"authentification OAuth."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Add server"
+msgstr "Ajouter un serveur"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Refresh"
+msgstr "Actualiser"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Check all connections"
+msgstr "Vérifier toutes les connexions"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Edit server: {name}"
+msgstr "Modifier le serveur : {name}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Add MCP server"
+msgstr "Ajouter un serveur MCP"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Server name"
+msgstr "Nom du serveur"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "e.g. npx"
+msgstr "par ex. npx"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "One argument per line"
+msgstr "Un argument par ligne"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid ""
+"KEY=${VAR}\n"
+"one per line"
+msgstr ""
+"KEY=${VAR}\n"
+"un par ligne"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid ""
+"Name: ${VAR}\n"
+"one per line"
+msgstr ""
+"Name: ${VAR}\n"
+"un par ligne"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Client Secret environment variable name"
+msgstr "Nom de la variable d’environnement Client Secret"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Callback port (optional)"
+msgstr "Port de rappel (facultatif)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Authorization server metadata URL (optional)"
+msgstr "URL des métadonnées du serveur d’autorisation (facultatif)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The executable command for the stdio server."
+msgstr "La commande exécutable pour le serveur stdio."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Arguments"
+msgstr "Arguments"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "One command argument per line."
+msgstr "Un argument de commande par ligne."
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "KEY=VALUE; reference secrets with ${VAR}, no plaintext."
+msgstr "KEY=VALUE ; référencez les secrets avec ${VAR}, pas de texte en clair."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Remote server address for http/sse/ws."
+msgstr "Adresse du serveur distant pour http/sse/ws."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Request headers"
+msgstr "En-têtes de requête"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid ""
+"Name: Value; reference secrets with ${VAR} (ws does not support request "
+"headers)."
+msgstr ""
+"Name: Value ; référencez les secrets avec ${VAR} (ws ne prend pas en "
+"charge les en-têtes de requête)."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "OAuth (optional)"
+msgstr "OAuth (facultatif)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Client Secret environment variable"
+msgstr "Variable d’environnement Client Secret"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Name of the environment variable storing the secret (do not enter the "
+"plaintext secret)."
+msgstr ""
+"Nom de la variable d’environnement contenant le secret (ne saisissez pas "
+"le secret en clair)."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Callback port"
+msgstr "Port de rappel"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Edit configuration directly as JSON"
+msgstr "Modifier directement la configuration au format JSON"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Configuration JSON"
+msgstr "JSON de configuration"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"MCP server configuration object (with command/args/env or "
+"type/url/headers/oauth)."
+msgstr ""
+"Objet de configuration du serveur MCP (avec command/args/env ou "
+"type/url/headers/oauth)."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Create"
+msgstr "Créer"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Please enter a server name."
+msgstr "Veuillez saisir un nom de serveur."
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "JSON parse failed: {error}"
+msgstr "Échec de l’analyse JSON : {error}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Saved."
+msgstr "Enregistré."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Created."
+msgstr "Créé."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Scope"
+msgstr "Portée"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Transport type"
+msgstr "Type de transport"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Connecting and fetching capabilities…"
+msgstr "Connexion et récupération des capacités…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Not supported: {error}"
+msgstr "Non pris en charge : {error}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "None"
+msgstr "Aucun"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Tools"
+msgstr "Outils"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Prompts"
+msgstr "Invites"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Starting authentication flow…"
+msgstr "Démarrage du flux d’authentification…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Open the following address in your browser to complete authorization; the"
+" system detects the callback automatically once done."
+msgstr ""
+"Ouvrez l’adresse suivante dans votre navigateur pour terminer "
+"l’autorisation ; le système détecte automatiquement le rappel une fois "
+"l’opération effectuée."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "If automatic detection fails, paste the callback URL"
+msgstr "Si la détection automatique échoue, collez l’URL de rappel"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Submit callback URL"
+msgstr "Soumettre l’URL de rappel"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Cancel authentication"
+msgstr "Annuler l’authentification"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Authentication succeeded."
+msgstr "Authentification réussie."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Authentication canceled."
+msgstr "Authentification annulée."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Processing…"
+msgstr "Traitement…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enabled."
+msgstr "Activé."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Disabled."
+msgstr "Désactivé."
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Tools {tools} · Resources {resources} · Prompts {prompts}"
+msgstr "Outils {tools} · Ressources {resources} · Invites {prompts}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Auth: {state}"
+msgstr "Authentification : {state}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Auth: not performed"
+msgstr "Authentification : non effectuée"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Approve"
+msgstr "Approuver"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Approved."
+msgstr "Approuvé."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Reject"
+msgstr "Rejeter"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Rejected."
+msgstr "Rejeté."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Check connection"
+msgstr "Vérifier la connexion"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Checking {name}…"
+msgstr "Vérification de {name}…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Hide capabilities"
+msgstr "Masquer les capacités"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "View capabilities"
+msgstr "Voir les capacités"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Re-authenticate"
+msgstr "Se réauthentifier"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Authenticate"
+msgstr "S’authentifier"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Clear authentication"
+msgstr "Effacer l’authentification"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Authentication state cleared."
+msgstr "État d’authentification effacé."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Edit"
+msgstr "Modifier"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Delete MCP server {name}?"
+msgstr "Supprimer le serveur MCP {name} ?"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Deleted."
+msgstr "Supprimé."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "No MCP servers configured yet. Click Add server to add one."
+msgstr ""
+"Aucun serveur MCP configuré pour l’instant. Cliquez sur Ajouter un "
+"serveur pour en ajouter un."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading MCP servers…"
+msgstr "Chargement des serveurs MCP…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Checking all connections…"
+msgstr "Vérification de toutes les connexions…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "All chats"
+msgstr "Toutes les discussions"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Updated"
+msgstr "Mis à jour le"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Created"
+msgstr "Créé le"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Alphabetical"
+msgstr "Ordre alphabétique"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "{year}-{month}-{day} {hh}:{mm}"
+msgstr "{day}/{month}/{year} {hh}:{mm}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Delete all"
+msgstr "Tout supprimer"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Search archived chats"
+msgstr "Rechercher dans les discussions archivées"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading archived conversations…"
+msgstr "Chargement des conversations archivées…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Delete conversation"
+msgstr "Supprimer la conversation"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Deleting…"
+msgstr "Suppression…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Unarchive"
+msgstr "Désarchiver"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Unarchiving…"
+msgstr "Désarchivage…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "{count} chats"
+msgstr "{count} discussions"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Project actions"
+msgstr "Actions du projet"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Delete all content in project"
+msgstr "Supprimer tout le contenu du projet"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Deleting project content…"
+msgstr "Suppression du contenu du projet…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "No matching archived conversations."
+msgstr "Aucune conversation archivée correspondante."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "No archived conversations yet."
+msgstr "Aucune conversation archivée pour l’instant."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Confirm delete all?"
+msgstr "Confirmer la suppression de tout ?"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Deleting all…"
+msgstr "Suppression de tout…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Sort by"
+msgstr "Trier par"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Approve for me"
+msgstr "Approuver à ma place"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Full access"
+msgstr "Accès complet"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Don't ask"
+msgstr "Ne pas demander"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Graphite"
+msgstr "Graphite"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Midnight blue"
+msgstr "Bleu nuit"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Evergreen"
+msgstr "Vert persistant"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Sepia"
+msgstr "Sépia"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Ivory"
+msgstr "Ivoire"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Foreign session visibility"
+msgstr "Visibilité des sessions externes"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Sessions created outside the web entry point (CLI / A2A / ACP, etc.) are "
+"hidden by default; reveal them here as needed."
+msgstr ""
+"Les sessions créées en dehors du point d’entrée web (CLI / A2A / ACP, "
+"etc.) sont masquées par défaut ; affichez-les ici selon vos besoins."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Show foreign pipeline sessions (read-only)"
+msgstr "Afficher les sessions de pipeline externes (lecture seule)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, pipeline sessions created outside the web entry point "
+"appear in the list for read-only viewing."
+msgstr ""
+"Une fois activé, les sessions de pipeline créées en dehors du point "
+"d’entrée web apparaissent dans la liste pour une consultation en lecture "
+"seule."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Show foreign normal sessions (resumable)"
+msgstr "Afficher les sessions normales externes (reprises possibles)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, normal sessions created outside the web entry point appear "
+"in the list and can be resumed and taken over in the web."
+msgstr ""
+"Une fois activé, les sessions normales créées en dehors du point d’entrée"
+" web apparaissent dans la liste et peuvent être reprises et récupérées "
+"dans le web."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Control optional steps of the sales pipeline; affects only newly started "
+"pipeline runs. Running pipelines keep their original configuration."
+msgstr ""
+"Contrôlez les étapes facultatives du pipeline de vente ; cela n’affecte "
+"que les nouvelles exécutions de pipeline. Les pipelines en cours "
+"conservent leur configuration d’origine."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enable review step"
+msgstr "Activer l’étape de révision"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, the sales pipeline appends a review round after generating "
+"the template (requires the infraguard tool); the backend skips it "
+"automatically when the tool is not installed."
+msgstr ""
+"Une fois activé, le pipeline de vente ajoute une phase de révision après "
+"la génération du modèle (nécessite l’outil infraguard) ; le backend "
+"l’ignore automatiquement lorsque l’outil n’est pas installé."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"The review step depends on the infraguard tool, which was not detected. "
+"Install it here with one click."
+msgstr ""
+"L’étape de révision dépend de l’outil infraguard, qui n’a pas été "
+"détecté. Installez-le ici en un clic."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Install infraguard"
+msgstr "Installer infraguard"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "New session defaults"
+msgstr "Valeurs par défaut des nouvelles sessions"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Set the default permission and mode for new sessions; applies only to new"
+" sessions. Existing sessions keep their own choices."
+msgstr ""
+"Définissez l’autorisation et le mode par défaut des nouvelles sessions ; "
+"cela ne s’applique qu’aux nouvelles sessions. Les sessions existantes "
+"conservent leurs propres choix."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Default mode"
+msgstr "Mode par défaut"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"The normal mode or specific pipeline preset for new sessions, consistent "
+"with the session selector."
+msgstr ""
+"Le mode normal ou le pipeline spécifique prédéfini pour les nouvelles "
+"sessions, cohérent avec le sélecteur de session."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Default permission"
+msgstr "Autorisation par défaut"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The permission mode preset for new sessions."
+msgstr "Le mode d’autorisation prédéfini pour les nouvelles sessions."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Color scheme"
+msgstr "Palette de couleurs"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Switch the color scheme of the entire interface; consistent across all "
+"devices after saving."
+msgstr ""
+"Changez la palette de couleurs de toute l’interface ; identique sur tous "
+"les appareils après l’enregistrement."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Language"
+msgstr "Langue"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Choose the interface language; the page reloads after saving."
+msgstr ""
+"Choisissez la langue de l’interface ; la page se recharge après "
+"l’enregistrement."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Downloading…"
+msgstr "Téléchargement…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Installing…"
+msgstr "Installation…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Verifying version…"
+msgstr "Vérification de la version…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Finishing post-install configuration…"
+msgstr "Finalisation de la configuration post-installation…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Configuring path…"
+msgstr "Configuration du chemin…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Preparing…"
+msgstr "Préparation…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "infraguard is installed; the review step is available."
+msgstr "infraguard est installé ; l’étape de révision est disponible."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"The infraguard tool was not detected and cannot be installed "
+"automatically in the current environment; please install it manually "
+"first."
+msgstr ""
+"L’outil infraguard n’a pas été détecté et ne peut pas être installé "
+"automatiquement dans l’environnement actuel ; veuillez d’abord "
+"l’installer manuellement."
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Install failed: {error}"
+msgstr "Échec de l’installation : {error}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Unknown error"
+msgstr "Erreur inconnue"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Restart service"
+msgstr "Redémarrer le service"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Restart the local web service process (interrupts ongoing conversations);"
+" the page refreshes automatically once complete."
+msgstr ""
+"Redémarrez le processus du service Web local (interrompt les "
+"conversations en cours) ; la page s’actualise automatiquement une fois "
+"l’opération terminée."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Restart the current service?"
+msgstr "Redémarrer le service actuel ?"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Confirm restart"
+msgstr "Confirmer le redémarrage"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The restart is taking a while. Please refresh manually."
+msgstr "Le redémarrage prend du temps. Veuillez actualiser manuellement."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Retry refresh"
+msgstr "Réessayer l’actualisation"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Restarting; the page refreshes automatically once the service recovers…"
+msgstr ""
+"Redémarrage ; la page s’actualise automatiquement dès que le service est "
+"rétabli…"
+
+#~ msgid "Completing step: {step}"
+#~ msgstr "Réalisation de l’étape : {step}"
+
+#~ msgid "Step failed: {step}"
+#~ msgstr "Échec de l’étape : {step}"
+
+#~ msgid "Completed step: {step}"
+#~ msgstr "Étape terminée : {step}"
+
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Resource stacks"
+msgstr "Piles de ressources"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Template files"
+msgstr "Fichiers de modèle"
+
+#: src/iac_code/web/static/js/components/composer.js
+#, python-brace-format
+msgid "{command} is not available in pipeline mode"
+msgstr "{command} n'est pas disponible en mode pipeline"
+
+#: src/iac_code/web/static/js/components/composer.js
+#, python-brace-format
+msgid "{command} is only available in an active conversation"
+msgstr "{command} n'est disponible que dans une conversation active"

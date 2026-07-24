@@ -465,6 +465,49 @@ def normalize_effort(effort: str | None) -> str | None:
     return value or None
 
 
+# Effort tokens that explicitly disable DashScope thinking; mirrors
+# ``dashscope_provider._DISABLE_THINKING_EFFORTS``.
+_THINKING_DISABLE_EFFORTS: frozenset[str] = frozenset({"none", "off", "disable", "disabled", "false", "0"})
+
+# Families whose providers emit an explicit "thinking on" directive by default
+# when the user has NOT configured ``thinkingEnabled`` (DashScope
+# ``enable_thinking=True``, Kimi/Zhipu ``thinking.type=enabled``). For these an
+# unset config still means the next turn thinks. Reasoning-effort families
+# (OpenAI/Anthropic/Gemini) instead emit nothing when unset and let the server
+# decide — unobservable here, so they resolve to off.
+_DEFAULT_ON_FAMILIES: frozenset[ThinkingFamily] = frozenset(
+    {ThinkingFamily.DASHSCOPE, ThinkingFamily.KIMI, ThinkingFamily.ZHIPU}
+)
+
+
+def resolve_thinking_active(
+    provider_key: str | None,
+    model: str | None,
+    thinking_enabled: bool | None,
+    effort: str | None = None,
+) -> bool:
+    """Whether the next turn would run with thinking, mirroring the provider
+    ``_build_thinking_kwargs`` decisions at the family level.
+
+    ``thinking_enabled`` is the already-resolved config/override (``None`` = not
+    set). This powers the web composer's thinking toggle so its initial state
+    matches what the turn actually does — e.g. a DashScope/Kimi/Zhipu session
+    with no override still thinks, so the toggle shows on.
+    """
+    spec = get_thinking_spec(provider_key or "", model or "")
+    if spec.family is ThinkingFamily.NONE:
+        return False
+    if thinking_enabled is False:
+        return False
+    # DashScope disable-effort tokens force thinking off even when configured on.
+    if spec.family is ThinkingFamily.DASHSCOPE and normalize_effort(effort) in _THINKING_DISABLE_EFFORTS:
+        return False
+    if thinking_enabled is True:
+        return True
+    # thinking_enabled is None (not configured): use the family default.
+    return spec.family in _DEFAULT_ON_FAMILIES
+
+
 # Anthropic extended-thinking budget tokens per effort level.
 # Used by ``AnthropicProvider._build_thinking_kwargs``.
 ANTHROPIC_BUDGET: dict[str, int] = {

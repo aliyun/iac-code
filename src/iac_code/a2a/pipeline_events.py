@@ -16,13 +16,19 @@ from iac_code.services.permissions.audit import build_input_summary, build_redac
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     CandidateDetailEvent,
+    CompactionEvent,
+    ContextUsageEvent,
     DiagramEvent,
     MCPProgressEvent,
+    MessageStartEvent,
     PermissionRequestEvent,
     ResourceObservedEvent,
+    StackInstancesProgressEvent,
+    StackProgressEvent,
     SubPipelineStreamEvent,
     TextDeltaEvent,
     ThinkingDeltaEvent,
+    TombstoneEvent,
     ToolResultEvent,
     ToolUseEndEvent,
 )
@@ -285,6 +291,8 @@ class PipelineEventTranslator:
     def translate(self, event: Any) -> list[dict[str, Any]]:
         if isinstance(event, PipelineEvent):
             return self._translate_pipeline_event(event)
+        if isinstance(event, MessageStartEvent):
+            return [self._translate_parent_scoped_display_event("message_started", {"messageId": event.message_id})]
         if isinstance(event, TextDeltaEvent):
             return [self._translate_text_delta_event(event)]
         if isinstance(event, ThinkingDeltaEvent):
@@ -297,7 +305,9 @@ class PipelineEventTranslator:
             return [self._translate_permission_request_event(event)]
         if isinstance(event, ToolUseEndEvent):
             self._remember_tool_input(event)
-            return []
+            return [self._translate_tool_started_event(event)]
+        if isinstance(event, TombstoneEvent):
+            return [self._translate_parent_scoped_display_event("message_tombstone", _tombstone_data(event))]
         if isinstance(event, CandidateDetailEvent):
             envelope = self._translate_candidate_detail_event(event)
             return [] if envelope is None else [envelope]
@@ -310,8 +320,20 @@ class PipelineEventTranslator:
             return [] if envelope is None else [envelope]
         if isinstance(event, MCPProgressEvent):
             return [self._translate_parent_scoped_display_event("tool_progress", _mcp_progress_data(event))]
+        if isinstance(event, StackProgressEvent):
+            return [self._translate_parent_scoped_display_event("stack_progress", _stack_progress_data(event))]
+        if isinstance(event, StackInstancesProgressEvent):
+            return [
+                self._translate_parent_scoped_display_event(
+                    "stack_instances_progress", _stack_instances_progress_data(event)
+                )
+            ]
         if isinstance(event, SubPipelineStreamEvent):
             return self._translate_sub_pipeline_stream_event(event)
+        if isinstance(event, CompactionEvent):
+            return self._translate_compaction_event(event)
+        if isinstance(event, ContextUsageEvent):
+            return [self._translate_parent_scoped_display_event("context_usage", _usage_data(event.usage))]
         return []
 
     def manual_event(
@@ -562,7 +584,12 @@ class PipelineEventTranslator:
             if state.current_step_id is not None:
                 stack_envelope["candidateStep"] = self._candidate_step_coordinate(state, state.current_step_id)
             return [stack_envelope]
-        if isinstance(inner, TextDeltaEvent):
+        if isinstance(inner, MessageStartEvent):
+            event_type = "message_started"
+            data = {"messageId": inner.message_id}
+            input_data = None
+            permission = None
+        elif isinstance(inner, TextDeltaEvent):
             event_type = "text_delta"
             data = {"text": inner.text}
             input_data = None
@@ -604,15 +631,52 @@ class PipelineEventTranslator:
             permission = _permission_request_metadata(inner)
         elif isinstance(inner, ToolUseEndEvent):
             self._remember_tool_input(inner)
-            return []
+            event_type = "tool_started"
+            data = {
+                "toolName": inner.name,
+                "toolUseId": inner.tool_use_id,
+                "input": _sanitize_tool_input(inner.input),
+            }
+            input_data = None
+            permission = None
+        elif isinstance(inner, TombstoneEvent):
+            event_type = "message_tombstone"
+            data = _tombstone_data(inner)
+            input_data = None
+            permission = None
         elif isinstance(inner, ToolResultEvent):
             event_type = "tool_result"
             data = _tool_result_data(inner)
+            recorded_input = self._recorded_tool_input(inner.tool_use_id)
+            if recorded_input is not None:
+                data["input"] = recorded_input
+            input_data = None
+            permission = None
+        elif isinstance(inner, CompactionEvent):
+            event_type = _COMPACTION_PHASE_EVENT_TYPES.get(inner.phase)
+            if event_type is None:
+                return []
+            data = _compaction_data(inner)
             input_data = None
             permission = None
         elif isinstance(inner, MCPProgressEvent):
             event_type = "tool_progress"
             data = _mcp_progress_data(inner)
+            input_data = None
+            permission = None
+        elif isinstance(inner, StackProgressEvent):
+            event_type = "stack_progress"
+            data = _stack_progress_data(inner)
+            input_data = None
+            permission = None
+        elif isinstance(inner, StackInstancesProgressEvent):
+            event_type = "stack_instances_progress"
+            data = _stack_instances_progress_data(inner)
+            input_data = None
+            permission = None
+        elif isinstance(inner, ContextUsageEvent):
+            event_type = "context_usage"
+            data = _usage_data(inner.usage)
             input_data = None
             permission = None
         else:
@@ -674,12 +738,29 @@ class PipelineEventTranslator:
     def _translate_diagram_event(self, event: DiagramEvent) -> dict[str, Any]:
         return self._translate_parent_scoped_display_event("diagram_shown", _diagram_data(event))
 
+    def _translate_compaction_event(self, event: CompactionEvent) -> list[dict[str, Any]]:
+        event_type = _COMPACTION_PHASE_EVENT_TYPES.get(event.phase)
+        if event_type is None:
+            return []
+        return [self._translate_parent_scoped_display_event(event_type, _compaction_data(event))]
+
     def _translate_parent_scoped_display_event(self, event_type: str, data: dict[str, Any]) -> dict[str, Any]:
         scope = "step" if self._current_parent_step_id is not None else "pipeline"
         envelope = self._envelope(event_type, scope, "working", data)
         if self._current_parent_step_id is not None:
             envelope["step"] = self._parent_step_coordinate(self._current_parent_step_id)
         return envelope
+
+    def _translate_tool_started_event(self, event: ToolUseEndEvent) -> dict[str, Any]:
+        """Emit a ``tool_started`` envelope the moment the model finishes a tool
+        call (its input is complete but the result has not arrived), so the web
+        transcript can show the tool as *running* before completing it in place."""
+        data = {
+            "toolName": event.name,
+            "toolUseId": event.tool_use_id,
+            "input": _sanitize_tool_input(event.input),
+        }
+        return self._translate_parent_scoped_display_event("tool_started", data)
 
     def _translate_tool_result_event(self, event: ToolResultEvent) -> list[dict[str, Any]]:
         envelopes: list[dict[str, Any]] = []
@@ -689,8 +770,22 @@ class PipelineEventTranslator:
         stack_envelope = self._translate_stack_current_changed_event(event)
         if stack_envelope is not None:
             envelopes.append(stack_envelope)
-        envelopes.append(self._translate_parent_scoped_display_event("tool_result", _tool_result_data(event)))
+        data = _tool_result_data(event)
+        tool_input = self._recorded_tool_input(event.tool_use_id)
+        if tool_input is not None:
+            data["input"] = tool_input
+        envelopes.append(self._translate_parent_scoped_display_event("tool_result", data))
         return envelopes
+
+    def _recorded_tool_input(self, tool_use_id: str) -> dict[str, Any] | None:
+        """Return the input recorded for a completed tool call, so the web
+        transcript can show *what* each tool was invoked with (and render the
+        ``complete_step`` conclusion, which lives in that tool's input)."""
+        record = self._tool_inputs.get(tool_use_id)
+        if not isinstance(record, dict):
+            return None
+        tool_input = record.get("input")
+        return _sanitize_tool_input(tool_input) if isinstance(tool_input, dict) else None
 
     def _remember_tool_input(self, event: ToolUseEndEvent) -> None:
         self._tool_inputs[event.tool_use_id] = {"toolName": event.name, "input": dict(event.input)}
@@ -1399,8 +1494,36 @@ def _tool_result_data(event: ToolResultEvent) -> dict[str, Any]:
     }
 
 
+def _sanitize_tool_input(tool_input: dict[str, Any]) -> dict[str, Any]:
+    # journal 是本地用户数据；真正远程出口由 pipeline_stream._sanitize_remote_envelope 兜底脱敏，
+    # 故写入时不再脱敏，避免把 [REDACTED]/*** 注入模板 YAML 与 complete_step conclusion。
+    return dict(tool_input) if isinstance(tool_input, dict) else {}
+
+
+def _usage_data(usage: dict[str, Any]) -> dict[str, Any]:
+    usage = usage or {}
+    return {
+        "totalTokens": usage.get("total_tokens"),
+        "contextWindow": usage.get("context_window"),
+        "usagePercent": usage.get("usage_percent"),
+        "messageCount": usage.get("message_count"),
+        "systemPromptTokens": usage.get("system_prompt_tokens"),
+        "toolDefinitionTokens": usage.get("tool_definition_tokens"),
+        "userMessageTokens": usage.get("user_message_tokens"),
+        "assistantMessageTokens": usage.get("assistant_message_tokens"),
+        "toolResultTokens": usage.get("tool_result_tokens"),
+    }
+
+
 def _thinking_delta_data(event: ThinkingDeltaEvent) -> dict[str, Any]:
     return {"type": "raw_thinking", "text": _truncate(event.text)}
+
+
+def _tombstone_data(event: TombstoneEvent) -> dict[str, Any]:
+    return {
+        "messageId": event.message_id,
+        "affectedToolUseIds": list(event.affected_tool_use_ids),
+    }
 
 
 def _mcp_progress_data(event: MCPProgressEvent) -> dict[str, Any]:
@@ -1419,6 +1542,37 @@ def _mcp_progress_data(event: MCPProgressEvent) -> dict[str, Any]:
     if "message" in canonical_progress:
         data["message"] = canonical_progress["message"]
     return data
+
+
+def _stack_progress_data(event: StackProgressEvent) -> dict[str, Any]:
+    """Public envelope data for a stack lifecycle progress frame.
+
+    Field names mirror the web consumers (``pipeline.js`` workspace panel and
+    the inline tool card via ``pipeline_transcript`` → ``events.js``): stackName,
+    stackId, status, progressPercentage, resources, elapsedSeconds, toolUseId.
+    """
+    return {
+        "toolUseId": event.tool_use_id,
+        "stackId": event.stack_id,
+        "stackName": event.stack_name,
+        "status": event.status,
+        "progressPercentage": event.progress_percentage,
+        "resources": event.resources,
+        "elapsedSeconds": event.elapsed_seconds,
+    }
+
+
+def _stack_instances_progress_data(event: StackInstancesProgressEvent) -> dict[str, Any]:
+    """Public envelope data for a StackGroup instances progress frame."""
+    return {
+        "toolUseId": event.tool_use_id,
+        "stackGroupName": event.stack_group_name,
+        "operationId": event.operation_id,
+        "status": event.status,
+        "progressPercentage": event.progress_percentage,
+        "instances": event.instances,
+        "elapsedSeconds": event.elapsed_seconds,
+    }
 
 
 def _completion_step_id(envelope: dict[str, Any]) -> str | None:
@@ -1556,6 +1710,25 @@ def _candidate_detail_data_from_tool_input(tool_use_id: str, tool_input: dict[st
         total_monthly_cost=total_monthly_cost,
         candidate_index=candidate_index,
     )
+
+
+# 压缩事件三相位 → 转录事件类型。旧实现只放行 finished,丢弃 started/failed,导致流水线子代理里
+# 自动压缩时前端收不到「压缩开始/结束」信号:只见步骤计时(syncPipelineThinking),看不到底部
+# 「正在自动压缩上下文」流光条。全部转发后由 pipeline_transcript 折成 compaction.started/finished
+# SSE(started 起条、finished/failed 撤条),与普通模式 WebEventTranslator 的相位映射一致。
+_COMPACTION_PHASE_EVENT_TYPES = {
+    "started": "context_compaction_started",
+    "finished": "context_compacted",
+    "failed": "context_compaction_failed",
+}
+
+
+def _compaction_data(event: CompactionEvent) -> dict[str, Any]:
+    return {
+        "summary": event.summary,
+        "originalTokens": event.original_tokens,
+        "compactedTokens": event.compacted_tokens,
+    }
 
 
 def _diagram_data(event: DiagramEvent) -> dict[str, Any]:

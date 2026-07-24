@@ -279,6 +279,72 @@ class TestOpenAIBuildThinkingKwargs:
         assert p._effort_request_kwargs() == p._build_thinking_kwargs()
 
 
+class TestOpenAIMaxOutputTokens:
+    def test_configured_cap_overrides_default_thinking_disabled(self):
+        from iac_code.providers.openai_provider import OpenAIProvider
+
+        p = OpenAIProvider(
+            model="gpt-5.5",
+            api_key="k",
+            thinking_enabled=False,
+            max_completion_tokens=40000,
+        )
+        assert p._token_limit_kwargs(8192) == {"max_tokens": 40000}
+
+    def test_configured_cap_overrides_default_for_non_max_completion_model(self):
+        from iac_code.providers.openai_provider import OpenAIProvider
+
+        # gpt-5.5 uses the OpenAI family spec (use_max_completion_tokens=False).
+        p = OpenAIProvider(model="gpt-5.5", api_key="k", effort="high", max_completion_tokens=40000)
+        assert p._token_limit_kwargs(8192) == {"max_tokens": 40000}
+
+    def test_blank_config_falls_back_to_request_default(self):
+        from iac_code.providers.openai_provider import OpenAIProvider
+
+        p = OpenAIProvider(model="gpt-5.5", api_key="k", thinking_enabled=False)
+        assert p._token_limit_kwargs(8192) == {"max_tokens": 8192}
+
+    def test_configured_cap_adds_thinking_budget_for_max_completion_model(self):
+        from iac_code.providers.openai_provider import OpenAIProvider
+
+        # glm-5.2 under dashscope: max_completion_tokens 限制含推理的总量,思考预算另发 extra_body。
+        # 配置的可见输出上限须叠加(默认)思考预算,否则推理挤占输出 → 50000 + 8192。
+        p = OpenAIProvider(
+            model="glm-5.2",
+            api_key="k",
+            provider_key="dashscope",
+            thinking_enabled=True,
+            max_completion_tokens=50000,
+        )
+        assert p._token_limit_kwargs(8192) == {"max_completion_tokens": 50000 + 8192}
+
+    def test_configured_cap_adds_explicit_thinking_budget(self):
+        from iac_code.providers.openai_provider import OpenAIProvider
+
+        # 用户同时配置了思考预算时,叠加的是该显式预算,而非默认。
+        p = OpenAIProvider(
+            model="glm-5.2",
+            api_key="k",
+            provider_key="dashscope",
+            thinking_enabled=True,
+            thinking_budget=2000,
+            max_completion_tokens=50000,
+        )
+        assert p._token_limit_kwargs(8192) == {"max_completion_tokens": 52000}
+
+    def test_blank_cap_adds_thinking_budget_to_request_default(self):
+        from iac_code.providers.openai_provider import OpenAIProvider
+
+        # 留空时:请求层默认输出 + 思考预算(与配置分支同一语义)。
+        p = OpenAIProvider(
+            model="glm-5.2",
+            api_key="k",
+            provider_key="dashscope",
+            thinking_enabled=True,
+        )
+        assert p._token_limit_kwargs(8192) == {"max_completion_tokens": 8192 + 8192}
+
+
 @pytest.mark.asyncio
 class TestOpenAIStream:
     async def test_text_chunks_and_usage(self):

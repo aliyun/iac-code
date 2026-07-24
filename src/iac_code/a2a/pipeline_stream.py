@@ -20,6 +20,7 @@ from iac_code.a2a.events import (
     _extract_artifact_metadata,
 )
 from iac_code.a2a.exposure import A2AExposureType, normalize_a2a_exposure_types
+from iac_code.a2a.metadata_redaction import A2AMetadataEchoRedactor
 from iac_code.a2a.pipeline_events import (
     PIPELINE_EVENTS_EXTENSION_URI,
     PIPELINE_METADATA_SCHEMA_VERSION,
@@ -92,12 +93,16 @@ _DISPLAY_ONLY_EVENT_TYPES = {
     "permission_requested",
     "thinking_delta",
     "text_delta",
+    "message_tombstone",
+    "tool_started",
     "tool_result",
 }
 _EXTREME_DEFERRED_EVENT_TYPES = {"text_delta", "thinking_delta"}
 _EXTREME_JOURNAL_FLUSH_EVENTS = 512
 _RECOVERY_STATE_SCOPES = {"step", "candidate", "candidateStep", "candidate_step"}
 _RECOVERY_STATE_STATUSES = {"working"}
+_REMOTE_PAYLOAD_FIELDS = ("data", "input", "permission", "artifact", "error")
+_REMOTE_PAYLOAD_REDACTOR = A2AMetadataEchoRedactor()
 
 
 def backup_committed_delivery_envelope(
@@ -195,7 +200,7 @@ class PipelineA2AEventPublisher:
             if envelope.get("eventType") == "artifact_created" and artifact_metadata is None:
                 continue
             if (
-                envelope.get("eventType") == "tool_result"
+                envelope.get("eventType") in ("tool_started", "tool_result")
                 and artifact_metadata is None
                 and A2AExposureType.TOOL_TRACE not in self.exposure_types
             ):
@@ -554,7 +559,7 @@ class PipelineA2AEventPublisher:
             except _SequenceHighWaterUnavailableError:
                 logger.warning("Skipping A2A pipeline event until journal high-water sequence is readable")
                 return None
-            safe_envelope = to_json_safe(envelope)
+            safe_envelope = to_json_safe(_sanitize_remote_envelope(envelope))
             if not isinstance(safe_envelope, dict):
                 logger.warning("Skipping invalid A2A pipeline envelope: %r", envelope)
                 return None
@@ -700,6 +705,7 @@ class PipelineA2AEventPublisher:
         artifact_metadata: dict[str, Any] | None = None,
         run_before_enqueue: bool = True,
         wait_for_transport: bool = False,
+        local_envelope: dict[str, Any] | None = None,
     ) -> bool:
         async with self._delivery_guard():
             if run_before_enqueue:
@@ -707,6 +713,10 @@ class PipelineA2AEventPublisher:
                     return False
             if artifact_metadata is not None:
                 await self._enqueue_artifact_update(envelope, artifact_metadata)
+            if local_envelope is not None:
+                local_enqueue = getattr(self.event_queue, "enqueue_local_pipeline_envelope", None)
+                if local_enqueue is not None:
+                    await local_enqueue(dict(to_json_safe(local_envelope) or {}))
             await self._enqueue_status(envelope, wait_for_transport=wait_for_transport)
             self.last_envelope = envelope
         return True
@@ -798,7 +808,11 @@ class PipelineA2AEventPublisher:
         )
         if safe_envelope is None:
             return None
-        if not await self.enqueue_persisted(safe_envelope, artifact_metadata=artifact_metadata):
+        if not await self.enqueue_persisted(
+            safe_envelope,
+            artifact_metadata=artifact_metadata,
+            local_envelope=envelope,
+        ):
             return None
         return safe_envelope
 
@@ -822,7 +836,7 @@ class PipelineA2AEventPublisher:
         async with self.delivery_transaction():
             committed_envelope = committed_backup_publication_envelope(
                 self.translator,
-                pending_safe_envelope,
+                pending_envelope,
             )
             committed_safe_envelope = await self.persist_envelope(
                 committed_envelope,
@@ -841,6 +855,7 @@ class PipelineA2AEventPublisher:
                 committed_safe_envelope,
                 artifact_metadata=artifact_metadata,
                 run_before_enqueue=False,
+                local_envelope=committed_envelope,
             ):
                 return None
             if not await self.enqueue_persisted(
@@ -1114,6 +1129,26 @@ class PipelineA2AEventPublisher:
 def _permission_request_from(event: Any) -> PermissionRequestEvent | None:
     inner = _unwrap_stream_event(event)
     return inner if isinstance(inner, PermissionRequestEvent) else None
+
+
+def _sanitize_remote_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
+    sanitized = dict(envelope)
+    data = sanitized.get("data")
+    conclusion_exempt = isinstance(data, dict) and data.get("toolName") == "complete_step"
+    for field in _REMOTE_PAYLOAD_FIELDS:
+        if field not in sanitized:
+            continue
+        if field == "data" and conclusion_exempt:
+            # complete_step 的 conclusion(在 data.input)是下游必需的关键结构化数据，
+            # 所有场景(含真正远程)均不脱敏(已与用户确认，问题1=B，含 RdsMasterPassword)。
+            continue
+        # 在环境上下文里执行，使 redactor 遵守 ``all_redaction_suppressed()``。
+        # 该抑制标志只由环回 web 服务(create_app(expose_local_paths=True),protect_loopback_app
+        # 环回保护)的中间件设置；真正远程的 A2A 服务从不设置它，故其上下文里始终为 False → 路径 + 密钥
+        # 照常脱敏，远程边界不受影响。而本地 web sink 写入的 journal 会被读回展示，理应保留真实的路径与
+        # 结构化内容(含模板 YAML、结论)，故 web 上下文里 redact 整体原样。
+        sanitized[field] = _REMOTE_PAYLOAD_REDACTOR.redact(sanitized[field])
+    return sanitized
 
 
 def _tool_result_from(event: Any) -> ToolResultEvent | None:

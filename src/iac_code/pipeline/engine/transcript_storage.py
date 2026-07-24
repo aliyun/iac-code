@@ -12,7 +12,7 @@ from iac_code import __version__
 from iac_code.agent.message import Message
 from iac_code.services.session_layout import ensure_session_owned_parent, require_supported_session_layout
 from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, session_metadata_entry_exists
-from iac_code.services.session_storage import SessionStorage
+from iac_code.services.session_storage import SessionStorage, merge_preserved_cleanup_prompts
 from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
 from iac_code.utils.state_io import append_jsonl_locked, open_text_no_follow, write_text_no_follow
 
@@ -83,7 +83,10 @@ class PipelineTranscriptStorage:
         messages: list[Message],
         *,
         git_branch: str | None = None,
+        preserve_cleanup_prompts: bool = False,
     ) -> None:
+        if preserve_cleanup_prompts and self.exists(cwd, session_id):
+            messages = merge_preserved_cleanup_prompts(self.load(cwd, session_id), messages)
         path = self.session_path(cwd, session_id)
         self._ensure_transcript_parent(path)
         content = "".join(

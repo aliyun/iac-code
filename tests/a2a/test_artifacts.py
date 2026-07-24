@@ -544,3 +544,24 @@ def test_sanitize_public_tool_output_preserves_non_artifact_content_urls() -> No
         "url": "https://example.test/doc",
         "source_url": "https://example.test/source",
     }
+
+
+def test_sanitize_public_artifact_text_keeps_file_uri_when_all_redaction_suppressed() -> None:
+    from iac_code.utils.public_errors import suppress_all_redaction
+
+    value = "see file:///Users/alice/.iac-code/demo/t.yaml, next"
+    assert sanitize_public_artifact_text(value) == "see [PATH], next"
+    with suppress_all_redaction():
+        assert sanitize_public_artifact_text(value) == value
+
+
+def test_sanitize_public_artifact_data_keeps_everything_raw_when_suppressed() -> None:
+    from iac_code.utils.public_errors import suppress_all_redaction
+
+    payload = {"note": "file:///Users/alice/.iac-code/demo/t.yaml", "password": "p@ss"}
+    assert sanitize_public_artifact_data(payload) == {"note": "[PATH]", "password": "[REDACTED]"}
+    with suppress_all_redaction():
+        assert sanitize_public_artifact_data(payload) == {
+            "note": "file:///Users/alice/.iac-code/demo/t.yaml",
+            "password": "p@ss",
+        }

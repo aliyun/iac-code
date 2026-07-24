@@ -41,6 +41,7 @@ class SkillProvider(SuggestionProvider):
                     icon="$",
                     source="skill",
                     score=float(-match.priority * 1000 - match.score),
+                    origin=str(cmd.source.value),
                 )
             )
 

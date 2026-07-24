@@ -35,6 +35,7 @@ OFFICIAL_PYPI_SOURCE = "official_pypi"
 CONFIGURED_PIP_SOURCE = "configured_pip"
 DEFAULT_RELEASE_NOTES_URL = "https://github.com/aliyun/iac-code/releases/latest"
 CHECK_THROTTLE_SECONDS = 2 * 60 * 60
+WEB_UPDATE_CHECK_INTERVAL_SECONDS = 6 * 60 * 60
 _PYPI_JSON_URL = "https://pypi.org/pypi/iac-code/json"
 _PYPI_SIMPLE_INDEX_URL = "https://pypi.org/simple"
 _GITHUB_LATEST_RELEASE_URL = "https://api.github.com/repos/aliyun/iac-code/releases/latest"
@@ -212,17 +213,26 @@ def start_background_update_check(
     release_date: str | None = None,
     python_executable: str | None = None,
     check_func: Callable[..., UpdateState] = check_for_updates_once,
+    interval_seconds: float | None = None,
+    stop_event: threading.Event | None = None,
 ) -> threading.Thread:
+    stop = stop_event or threading.Event()
+
     def run_check() -> None:
-        try:
-            check_func(
-                path=path,
-                current_version=current_version,
-                release_date=release_date,
-                python_executable=python_executable,
-            )
-        except Exception:
-            _LOGGER.debug("Background update check failed", exc_info=True)
+        while True:
+            try:
+                check_func(
+                    path=path,
+                    current_version=current_version,
+                    release_date=release_date,
+                    python_executable=python_executable,
+                )
+            except Exception:
+                _LOGGER.debug("Background update check failed", exc_info=True)
+            if not interval_seconds or interval_seconds <= 0:
+                return
+            if stop.wait(interval_seconds):
+                return
 
     thread = threading.Thread(target=run_check, name="iac-code-update-checker", daemon=True)
     thread.start()

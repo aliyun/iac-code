@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -173,6 +174,75 @@ class TestLiteMetadata:
 
         assert meta.first_prompt == "real prompt"
 
+    def test_skips_internal_skill_context_user_messages(self, storage):
+        cwd = "/proj/skill-context"
+        storage.append(
+            cwd,
+            "skill-context",
+            Message(
+                role="user",
+                content="<skill-name>iac-aliyun</skill-name>\n\nBase directory for this skill: /tmp/skill\n\n# Body",
+            ),
+            git_branch=None,
+        )
+        storage.append(cwd, "skill-context", Message(role="user", content="create a VPC"), git_branch=None)
+
+        meta = read_lite_metadata(storage.session_path(cwd, "skill-context"))
+
+        assert meta.first_prompt == "create a VPC"
+
+    def test_keeps_current_user_text_with_conversation_summary_prefix(self, storage):
+        cwd = "/proj/summary"
+        storage.append(
+            cwd,
+            "summary",
+            Message(role="user", content="[Conversation Summary]\n这是用户输入的普通文本"),
+            git_branch=None,
+        )
+        storage.append(cwd, "summary", Message(role="assistant", content=[TextBlock(text="ok")]), git_branch=None)
+        storage.append(cwd, "summary", Message(role="user", content="real prompt"), git_branch=None)
+
+        meta = read_lite_metadata(storage.session_path(cwd, "summary"))
+
+        assert meta.first_prompt == "[Conversation Summary]\n这是用户输入的普通文本"
+
+    def test_skips_migrated_legacy_conversation_summary_user_messages(self, storage):
+        cwd = "/proj/legacy-summary"
+        storage.append(
+            cwd,
+            "legacy-summary",
+            Message.from_dict(
+                {
+                    "role": "user",
+                    "content": "[Conversation Summary]\n这里是旧对话的压缩摘要正文",
+                    "version": "0.7.0",
+                }
+            ),
+            git_branch=None,
+        )
+        storage.append(cwd, "legacy-summary", Message(role="user", content="real prompt"), git_branch=None)
+
+        meta = read_lite_metadata(storage.session_path(cwd, "legacy-summary"))
+
+        assert meta.first_prompt == "real prompt"
+
+    def test_skips_pipeline_handoff_context_user_messages(self, storage):
+        cwd = "/proj/handoff-context"
+        storage.append(
+            cwd,
+            "handoff-context",
+            Message(
+                role="user",
+                content="[Pipeline Handoff Context]\nPipeline: selling\nOutcome: completed",
+            ),
+            git_branch=None,
+        )
+        storage.append(cwd, "handoff-context", Message(role="user", content="follow-up question"), git_branch=None)
+
+        meta = read_lite_metadata(storage.session_path(cwd, "handoff-context"))
+
+        assert meta.first_prompt == "follow-up question"
+
 
 # ---------------------------------------------------------------------------
 # SessionIndex
@@ -222,6 +292,69 @@ print(json.dumps(sorted(name for name in sys.modules if name.startswith("iac_cod
             ("same-id", "/a", "from a"),
             ("same-id", "/b", "from b"),
         ]
+
+    def test_snapshot_reuses_single_scan(self, tmp_path, monkeypatch):
+        storage = SessionStorage(projects_dir=tmp_path)
+        storage.append("/a", "id-a", Message(role="user", content="one"), git_branch=None)
+        storage.append("/b", "id-b", Message(role="user", content="two"), git_branch=None)
+        index = SessionIndex(projects_dir=tmp_path)
+
+        import iac_code.services.session_index as session_index_module
+
+        calls = {"count": 0}
+        original = session_index_module._build_entry
+
+        def counting_build_entry(*args, **kwargs):
+            calls["count"] += 1
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(session_index_module, "_build_entry", counting_build_entry)
+
+        # Without a snapshot, every full scan rebuilds every entry from disk.
+        index.list_all_projects_page(limit=None)
+        index.list_all_projects_page(limit=None)
+        assert calls["count"] == 4  # 2 sessions * 2 scans
+
+        # Inside a snapshot, the first scan is cached and reused by later calls.
+        calls["count"] = 0
+        with index.snapshot():
+            first, first_total = index.list_all_projects_page(limit=None)
+            second, second_total = index.list_all_projects_page(limit=None)
+            limited, limited_total = index.list_all_projects_page(limit=1)
+        assert calls["count"] == 2  # one scan of 2 sessions, shared by all three calls
+        assert first is second  # same cached list object
+        assert {e.session_id for e in first} == {"id-a", "id-b"}
+        assert [e.session_id for e in limited] == [first[0].session_id]
+        assert first_total == second_total == limited_total == 2
+
+        # The cache is cleared on block exit, so a later scan rebuilds.
+        calls["count"] = 0
+        index.list_all_projects_page(limit=None)
+        assert calls["count"] == 2
+
+    def test_snapshot_is_reentrant(self, tmp_path, monkeypatch):
+        storage = SessionStorage(projects_dir=tmp_path)
+        storage.append("/a", "id-a", Message(role="user", content="one"), git_branch=None)
+        index = SessionIndex(projects_dir=tmp_path)
+
+        import iac_code.services.session_index as session_index_module
+
+        calls = {"count": 0}
+        original = session_index_module._build_entry
+
+        def counting_build_entry(*args, **kwargs):
+            calls["count"] += 1
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(session_index_module, "_build_entry", counting_build_entry)
+
+        with index.snapshot():
+            index.list_all_projects_page(limit=None)
+            with index.snapshot():
+                index.list_all_projects_page(limit=None)
+            # Inner block exit must NOT drop the cache while the outer block is active.
+            index.list_all_projects_page(limit=None)
+        assert calls["count"] == 1  # single session, scanned once across nested blocks
 
     def test_list_all_projects_includes_legacy_sessions(self, tmp_path):
         storage = SessionStorage(projects_dir=tmp_path)
@@ -420,6 +553,31 @@ print(json.dumps(sorted(name for name in sys.modules if name.startswith("iac_cod
             ("same", "/p", "legacy", True)
         ]
 
+    def test_same_session_id_in_unrelated_projects_does_not_shadow_metadata_only_session(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        write_session_metadata(
+            storage.session_dir("/project-a", "shared-id"),
+            SessionMetadata(
+                session_id="shared-id",
+                cwd="/project-a",
+                name="metadata-only",
+                layout_version=SESSION_LAYOUT_VERSION_V2,
+            ),
+        )
+        legacy_path = storage.legacy_session_path("/project-b", "shared-id")
+        legacy_path.parent.mkdir(parents=True, exist_ok=True)
+        legacy_path.write_text(
+            '{"role":"user","content":"legacy","cwd":"/project-b"}\n',
+            encoding="utf-8",
+        )
+
+        entries = SessionIndex(projects_dir=tmp_path).list_all_projects()
+
+        assert {(entry.cwd, entry.title, entry.is_legacy) for entry in entries} == {
+            ("/project-a", "metadata-only", False),
+            ("/project-b", "legacy", True),
+        }
+
     def test_metadata_only_mismatched_session_id_is_ignored(self, tmp_path):
         storage = SessionStorage(projects_dir=tmp_path)
         write_session_metadata(
@@ -480,6 +638,51 @@ print(json.dumps(sorted(name for name in sys.modules if name.startswith("iac_cod
             "legacy-long": "old",
             "new-long": "new",
         }
+
+    def test_limited_page_reports_deduplicated_total_for_long_project_aliases(self, tmp_path):
+        cwd = "/" + "long-project/" * 24
+        storage = SessionStorage(projects_dir=tmp_path)
+        storage.append(cwd, "same-session", Message(role="user", content="prompt"), git_branch=None)
+        current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+        shutil.copytree(current_project_dir, legacy_project_dir)
+
+        entries, total = SessionIndex(projects_dir=tmp_path).list_all_projects_page(limit=1)
+
+        assert [(entry.session_id, entry.cwd) for entry in entries] == [("same-session", cwd)]
+        assert total == 1
+
+    def test_limited_page_does_not_merge_unrelated_projects_with_hash_like_suffixes(self, tmp_path):
+        suffix = "123456789abc"
+        storage = SessionStorage(projects_dir=tmp_path)
+        storage.append(f"/alpha-{suffix}", "same-session", Message(role="user", content="alpha"), git_branch=None)
+        storage.append(f"/beta-{suffix}", "same-session", Message(role="user", content="beta"), git_branch=None)
+
+        entries, total = SessionIndex(projects_dir=tmp_path).list_all_projects_page(limit=10)
+
+        assert {(entry.cwd, entry.title) for entry in entries} == {
+            (f"/alpha-{suffix}", "alpha"),
+            (f"/beta-{suffix}", "beta"),
+        }
+        assert total == 2
+
+    @pytest.mark.parametrize("limit", [None, 1])
+    def test_all_projects_prefers_current_long_project_alias_over_stale_legacy(self, tmp_path, limit):
+        cwd = "/" + "long-project/" * 24
+        current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+        legacy_storage = SessionStorage(projects_dir=tmp_path)
+        legacy_storage.append(cwd, "same-session", Message(role="user", content="stale"), git_branch=None)
+        shutil.move(legacy_storage.project_dir(cwd), legacy_project_dir)
+
+        current_root = tmp_path / "current-source"
+        current_storage = SessionStorage(projects_dir=current_root)
+        current_storage.append(cwd, "same-session", Message(role="user", content="current"), git_branch=None)
+        shutil.copytree(current_storage.project_dir(cwd), current_project_dir)
+
+        entries, total = SessionIndex(projects_dir=tmp_path).list_all_projects_page(limit=limit)
+
+        assert current_project_dir.exists()
+        assert [(entry.session_id, entry.title) for entry in entries] == [("same-session", "current")]
+        assert total == 1
 
     def test_list_all_projects_ignores_metadata_only_shadow_with_stale_metadata_cwd(self, tmp_path):
         cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)

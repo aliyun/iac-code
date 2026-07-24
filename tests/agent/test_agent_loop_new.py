@@ -1384,11 +1384,22 @@ class TestAgentLoopStreaming:
         loop._result_storage = MagicMock()
         loop._result_storage.process.return_value = SimpleNamespace(content="file contents")
         loop._tool_executor.execute_batch = AsyncMock(return_value=[ToolResult(content="raw result", is_error=False)])
+        storage = MagicMock()
+        loop._session_storage = storage
+        loop._cwd = "/tmp/queued-project"
+        loop._session_id = "queued-session"
 
         events = [e async for e in loop.run_streaming("Hi", queued_input_provider=queued_input_provider)]
 
         assert call_count == 2
-        assert any(isinstance(e, QueuedInputSubmittedEvent) and e.text == "你好" for e in events)
+        submitted = next(e for e in events if isinstance(e, QueuedInputSubmittedEvent) and e.text == "你好")
+        assert submitted.message_id
+        queued_message = next(
+            call.args[2]
+            for call in storage.append.call_args_list
+            if call.args[2].role == "user" and call.args[2].content == "你好"
+        )
+        assert queued_message.metadata["messageId"] == submitted.message_id
         second_call = call_messages[1]
         assert [message.role for message in second_call] == ["user", "assistant", "user", "user"]
         assert second_call[0].content == "Hi"
@@ -1942,12 +1953,20 @@ class TestAgentLoopStreaming:
 
         assert recall_service.surfaced == {"old.md"}
         assert loop._inject_recalled_memory_result(second_result) is False
-        recalled_messages = [
+        # 压缩保留完整历史:被压缩的召回记忆消息仍留在完整历史里(展示不变),
+        # 但已移出喂给 LLM 的有效上下文;二次召回靠 recall service 累积的抑制集拦截。
+        full_history_recalled = [
             message
             for message in loop.context_manager.get_messages()
             if get_recalled_memory_files(message) == ["old.md"]
         ]
-        assert recalled_messages == []
+        assert len(full_history_recalled) == 1
+        effective_recalled = [
+            message
+            for message in loop.context_manager.get_context_messages()
+            if get_recalled_memory_files(message) == ["old.md"]
+        ]
+        assert effective_recalled == []
 
     async def test_run_streaming_executes_tools_and_applies_extensions(self, mock_provider, mock_registry):
         call_count = 0
@@ -2524,6 +2543,43 @@ class TestAgentLoopCompaction:
         assert isinstance(event, CompactionEvent)
         assert event.original_tokens == 1200
         assert event.compacted_tokens == 400
+        assert event.summary == "summary"
+
+    async def test_run_streaming_emits_started_then_finished_when_compacting(self, mock_provider, mock_registry):
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield MessageStartEvent(message_id="m1")
+            yield TextDeltaEvent(text="done")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        loop.context_manager.needs_compaction = MagicMock(side_effect=[True, False, False])
+        loop._auto_compact = AsyncMock(return_value=CompactionEvent(original_tokens=1200, compacted_tokens=400))
+
+        events = [e async for e in loop.run_streaming("Hi")]
+        compactions = [e for e in events if isinstance(e, CompactionEvent)]
+
+        assert [c.phase for c in compactions] == ["started", "finished"]
+        assert (compactions[1].original_tokens, compactions[1].compacted_tokens) == (1200, 400)
+
+    async def test_run_streaming_emits_terminal_failed_when_auto_compact_noops(self, mock_provider, mock_registry):
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield MessageStartEvent(message_id="m1")
+            yield TextDeltaEvent(text="done")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        loop.context_manager.needs_compaction = MagicMock(side_effect=[True, False, False])
+        loop._auto_compact = AsyncMock(return_value=None)
+
+        events = [e async for e in loop.run_streaming("Hi")]
+        compactions = [e for e in events if isinstance(e, CompactionEvent)]
+
+        # A terminal event must stop the running indicator, but a no-op/failure
+        # must not masquerade as a successful 0 -> 0 compaction.
+        assert [c.phase for c in compactions] == ["started", "failed"]
+        assert compactions[1].reason == "no_result"
 
     async def test_auto_compact_persists_compacted_session(self, mock_provider, mock_registry):
         from iac_code.agent.message import Message

@@ -476,6 +476,79 @@ def test_create_agent_runtime_exposes_legacy_memory_manager_for_hidden_command(t
     assert runtime.legacy_memory_manager._memory_dir == get_config_dir() / "memory"
 
 
+def test_session_provider_override_wins_over_global_qwenpaw(tmp_path, monkeypatch) -> None:
+    """A session-level provider override must beat a globally-active QwenPaw partner source.
+
+    Repro of the web bug: the user activates QwenPaw (global ``llm_source=qwenpaw``), it fails,
+    then switches the session to a regular provider (``session.provider=dashscope``). The session's
+    explicit choice must take effect instead of being force-routed back through the broken QwenPaw
+    endpoint. QwenPaw resolves to the *same* provider_key but with its own model/base_url, so the
+    tell is that model/base_url stay the session's, not QwenPaw's.
+    """
+    from iac_code.services.qwenpaw_source import QwenPawConfig
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+
+    monkeypatch.setattr("iac_code.config.get_llm_source", lambda: "qwenpaw")
+
+    def _fake_load_from_qwenpaw() -> QwenPawConfig:
+        return QwenPawConfig(
+            model="qwenpaw-model",
+            provider_key="dashscope",
+            api_key="fake-qwenpaw-key",
+            base_url="https://qwenpaw.invalid/v1",
+        )
+
+    monkeypatch.setattr("iac_code.services.qwenpaw_source.load_from_qwenpaw", _fake_load_from_qwenpaw)
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(
+            model="qwen3.7-max",
+            session_id="override-wins",
+            cwd=str(tmp_path),
+            provider_key_override="dashscope",
+        )
+    )
+
+    pm = runtime.provider_manager
+    assert pm._provider_key_override == "dashscope"
+    assert pm._model == "qwen3.7-max"
+    assert pm._base_url_override is None
+    # The per-request QwenPaw hot-reload must be disabled so stream() cannot revert
+    # the session's provider back to the (broken) partner endpoint.
+    assert pm._ignore_llm_source is True
+
+
+def test_frozen_partner_provider_config_reaches_runtime_without_rereading_source(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr("iac_code.config.get_llm_source", lambda: "qwenpaw")
+    monkeypatch.setattr(
+        "iac_code.services.qwenpaw_source.load_from_qwenpaw",
+        lambda: (_ for _ in ()).throw(AssertionError("partner source must not be reread")),
+    )
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(
+            model="partner-model-snapshot",
+            session_id="frozen-partner",
+            cwd=str(tmp_path),
+            provider_key_override="dashscope",
+            provider_api_key_override="fake-partner-key",
+            provider_base_url_override="https://partner.invalid/v1",
+            provider_config_frozen=True,
+        )
+    )
+
+    pm = runtime.provider_manager
+    assert pm._provider_key_override == "dashscope"
+    assert pm._model == "partner-model-snapshot"
+    assert pm._credentials == {"dashscope": "fake-partner-key"}
+    assert pm._base_url_override == "https://partner.invalid/v1"
+    assert pm._ignore_llm_source is True
+
+
 def test_system_prompt_refresher_reuses_runtime_current_time(tmp_path, monkeypatch) -> None:
     from datetime import datetime as real_datetime
 

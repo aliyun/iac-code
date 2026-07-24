@@ -1342,6 +1342,197 @@ async def test_pipeline_executor_reconfigures_cached_runtime_model_and_api_key_p
     assert provider_manager.calls[1] == ("qwen3.6-plus", {"dashscope": "fallback-key"}, None)
 
 
+def test_pipeline_executor_clears_cached_runtime_session_provider_model_and_effort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+
+    class FakeProviderManager:
+        def __init__(self) -> None:
+            self._model = "global-model"
+            self._credentials: dict[str, str] = {}
+            self._provider_key_override: str | None = None
+            self._base_url_override: str | None = None
+            self._ignore_llm_source = False
+            self.calls: list[tuple[str, str | None, str | None]] = []
+
+        def reconfigure(
+            self,
+            model,
+            credentials,
+            provider_key_override=None,
+            base_url_override=None,
+            request_policy_override=None,
+            effort_override=None,
+        ):
+            self._model = model
+            self._credentials = dict(credentials)
+            self._provider_key_override = provider_key_override
+            self._base_url_override = base_url_override
+            self.calls.append((model, provider_key_override, effort_override))
+
+    monkeypatch.setattr("iac_code.config.load_credentials", lambda model=None: {"model": model or ""})
+    provider_manager = FakeProviderManager()
+    runtime = SimpleNamespace(provider_manager=provider_manager, tool_registry=object())
+
+    session_executor = IacCodeA2APipelineExecutor(
+        task_store=object(),
+        model="session-model",
+        provider_key_override="openai",
+        effort_override="high",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+    session_executor._configure_agent_runtime_for_request(runtime)
+    assert provider_manager.calls[-1] == ("session-model", "openai", "high")
+    assert provider_manager._ignore_llm_source is True
+
+    default_executor = IacCodeA2APipelineExecutor(
+        task_store=object(),
+        model="global-model",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+    default_executor._configure_agent_runtime_for_request(runtime)
+
+    assert provider_manager.calls[-1] == ("global-model", None, None)
+    assert provider_manager._provider_key_override is None
+    assert provider_manager._ignore_llm_source is False
+
+
+@pytest.mark.parametrize("provider_key", ["dashscope", "openai"])
+def test_pipeline_executor_explicit_provider_drops_cached_source_state_and_reloads_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_key: str,
+) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+
+    credential_loads: list[str | None] = []
+
+    def load_credentials(model=None):
+        credential_loads.append(model)
+        return {"dashscope": "fresh-dashscope", "openai": "fresh-openai"}
+
+    class FakeProviderManager:
+        def __init__(self) -> None:
+            self._provider_key_override = "dashscope"
+            self._base_url_override = "https://partner.invalid/v1"
+            self._credentials = {"dashscope": "partner-credential"}
+            self.calls: list[tuple[dict[str, str], str | None, str | None]] = []
+
+        def reconfigure(
+            self,
+            model,
+            credentials,
+            provider_key_override=None,
+            base_url_override=None,
+            request_policy_override=None,
+            effort_override=None,
+        ):
+            self._provider_key_override = provider_key_override
+            self._base_url_override = base_url_override
+            self._credentials = dict(credentials)
+            self.calls.append((dict(credentials), provider_key_override, base_url_override))
+
+    monkeypatch.setattr("iac_code.config.load_credentials", load_credentials)
+    provider_manager = FakeProviderManager()
+    runtime = SimpleNamespace(provider_manager=provider_manager, tool_registry=object())
+    executor = IacCodeA2APipelineExecutor(
+        task_store=object(),
+        model="gpt-5.5" if provider_key == "openai" else "qwen3.7-max",
+        provider_key_override=provider_key,
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    executor._configure_agent_runtime_for_request(runtime)
+
+    assert credential_loads == [executor._model]
+    assert provider_manager.calls == [
+        (
+            {"dashscope": "fresh-dashscope", "openai": "fresh-openai"},
+            provider_key,
+            None,
+        )
+    ]
+
+
+def test_pipeline_executor_preserves_frozen_partner_provider_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+
+    class FakeProviderManager:
+        def __init__(self) -> None:
+            self._provider_key_override = "dashscope"
+            self._base_url_override = "https://stale.invalid/v1"
+            self._credentials = {"dashscope": "stale-key"}
+            self._ignore_llm_source = False
+            self.calls: list[tuple[str, dict[str, str], str | None, str | None, dict | None]] = []
+
+        def reconfigure(
+            self,
+            model,
+            credentials,
+            provider_key_override=None,
+            base_url_override=None,
+            request_policy_override=None,
+            effort_override=None,
+            provider_config_override=None,
+        ):
+            self._provider_key_override = provider_key_override
+            self._base_url_override = base_url_override
+            self._credentials = dict(credentials)
+            self.calls.append(
+                (model, dict(credentials), provider_key_override, base_url_override, provider_config_override)
+            )
+
+    monkeypatch.setattr(
+        "iac_code.config.load_credentials",
+        lambda model=None: (_ for _ in ()).throw(AssertionError("frozen snapshot must not reload credentials")),
+    )
+    provider_manager = FakeProviderManager()
+    runtime = SimpleNamespace(provider_manager=provider_manager, tool_registry=object())
+    executor = IacCodeA2APipelineExecutor(
+        task_store=object(),
+        model="partner-model-snapshot",
+        provider_key_override="dashscope",
+        provider_api_key_override="partner-key-snapshot",
+        provider_base_url_override="https://partner.invalid/v1",
+        provider_config_frozen=True,
+        provider_config_override={"thinkingEnabled": True, "thinkingBudget": 2048},
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    executor._configure_agent_runtime_for_request(runtime)
+
+    assert provider_manager.calls == [
+        (
+            "partner-model-snapshot",
+            {"dashscope": "partner-key-snapshot"},
+            "dashscope",
+            "https://partner.invalid/v1",
+            {"thinkingEnabled": True, "thinkingBudget": 2048},
+        )
+    ]
+    assert provider_manager._ignore_llm_source is True
+
+
 async def _wait_for_output_text(task, expected: str) -> None:
     for _ in range(_A2A_ASYNC_TEST_TIMEOUT * 100):
         if "".join(task.output_text) == expected:
@@ -2388,6 +2579,65 @@ async def test_pipeline_executor_passes_mcp_status_metadata_to_pipeline_factory(
 
     assert captured_kwargs["mcp_manager"] is runtime.mcp_manager
     assert captured_kwargs["mcp_config_warnings"] == runtime.mcp_config_warnings
+
+
+@pytest.mark.asyncio
+async def test_executor_forwards_normal_handoff_ready_to_local_loopback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # 「↪ 普通对话」分隔条与「流水线结局」彩条由 web 主转录 translator 从 loopback
+    # (``enqueue_local_pipeline_envelope``)收到的 ``pipeline_handoff_ready`` 信封生成。
+    # 终态+交接事务 ``_publish_terminal_handoff_transaction`` 此前只把 committed 信封
+    # enqueue 到远程/journal,从不 local 直通,导致实时跑时 loopback 收不到 handoff,
+    # 主转录看不到交接标记——只有 reload 从 journal 重建才出现(问题:恢复能看到、正常跑看不到)。
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    session_dir = tmp_path / "sidecar"
+    fake_pipeline = FakePipeline(
+        [
+            PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=1717821601.0,
+                data={"total_steps": 1},
+            ),
+        ],
+        session_dir=session_dir,
+    )
+    fake_pipeline.handoff_enabled = True
+    fake_pipeline.handoff_summary = "[Pipeline Handoff Context]\nPipeline: selling"
+
+    def fake_create_pipeline(*args, **kwargs):
+        fake_pipeline._session_storage = kwargs["session_storage"]
+        fake_pipeline._session_id = kwargs["session_id"]
+        fake_pipeline._cwd = kwargs["cwd"]
+        return fake_pipeline
+
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", fake_create_pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+
+    class LocalAwareQueue(FakeEventQueue):
+        def __init__(self) -> None:
+            super().__init__()
+            self.local_envelopes: list[dict] = []
+
+        async def enqueue_local_pipeline_envelope(self, envelope: dict) -> None:
+            self.local_envelopes.append(envelope)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = LocalAwareQueue()
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    handoff_locals = [env for env in queue.local_envelopes if env.get("eventType") == "pipeline_handoff_ready"]
+    assert len(handoff_locals) == 1
+    handoff = handoff_locals[0]
+    # loopback 必须拿到 committed(非 pending_backup)的 switch_to_normal 信封,translator 才会
+    # 触发 _on_pipeline_handoff_ready 并发出 normal_chat_boundary/pipeline_outcome 标记。
+    assert handoff.get("visibility") != "pending_backup"
+    assert handoff["data"]["action"] == "switch_to_normal"
+    assert handoff["data"]["outcome"] == "completed"
 
 
 @pytest.mark.asyncio
@@ -5039,6 +5289,78 @@ async def test_executor_repairs_terminal_sidecar_after_partial_nonterminal_strea
     assert snapshot is not None
     assert snapshot["status"] == "failed"
     assert _status_events(queue)[-1]["status"]["state"] == "TASK_STATE_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_executor_publishes_normal_handoff_after_terminal_sidecar_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """重启恢复补发 terminal 后须同样补发 normal handoff,驱动「↪ 普通对话」边界标记(Issue 4)。
+
+    正常完成路径原子地补发 pipeline_completed + pipeline_handoff_ready;而重启恢复路径此前只
+    补 terminal,导致刷新恢复会话结束后看不到进入普通对话的边界。此用例让流水线流只吐一个非终态
+    delta 便断流(不带 PIPELINE_COMPLETED),再置 sidecar_status=completed,迫使执行器走
+    终态恢复分支,断言恢复分支同样补发交接事件、且幂等(committed 交接恰一枚)。
+    """
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    session_dir = tmp_path / "sidecar"
+
+    class RecoveringPipeline(FakePipeline):
+        async def run(self, prompt: str):
+            self.run_prompts.append(_display_text(prompt))
+            yield TextDeltaEvent(text="partial output")
+            self.sidecar_status = "completed"
+
+    fake_pipeline = RecoveringPipeline([], session_dir=session_dir)
+    fake_pipeline.handoff_enabled = True
+    fake_pipeline.handoff_summary = "[Pipeline Handoff Context]\nPipeline: selling"
+
+    def fake_create_pipeline(*args, **kwargs):
+        fake_pipeline._session_storage = kwargs["session_storage"]
+        fake_pipeline._session_id = kwargs["session_id"]
+        fake_pipeline._cwd = kwargs["cwd"]
+        return fake_pipeline
+
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", fake_create_pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    events = A2APipelineJournal(session_dir).read_all()
+    event_types = [event["eventType"] for event in events]
+    # 恢复分支补发了终态。
+    assert "pipeline_completed" in event_types
+    # 关键:恢复分支同样补发交接事件(此前缺失即 Issue 4)。
+    assert "pipeline_handoff_ready" in event_types
+    # 备份流会写 pending_backup + committed 两条,committed 交接恰一枚 → 幂等不重复交接。
+    committed_handoffs = [
+        event
+        for event in events
+        if event["eventType"] == "pipeline_handoff_ready" and event.get("visibility") == "committed"
+    ]
+    assert len(committed_handoffs) == 1
+    handoff = committed_handoffs[0]
+    assert handoff["data"]["action"] == "switch_to_normal"
+    assert handoff["data"]["targetMode"] == "normal"
+    assert handoff["data"]["outcome"] == "completed"
+    assert handoff["data"]["summary"] == "[Pipeline Handoff Context]\nPipeline: selling"
+
+    snapshot = A2APipelineSnapshotStore(session_dir).load()
+    assert snapshot is not None
+    assert snapshot["normalHandoff"]["summary"] == "[Pipeline Handoff Context]\nPipeline: selling"
+
+    # 交接摘要注入 web JSONL,普通对话继承流水线记忆(与正常完成路径一致)。
+    from iac_code.services.session_storage import SessionStorage
+
+    session_id = store._contexts["ctx-1"].session_id
+    messages = SessionStorage().load(str(tmp_path), session_id)
+    assert messages[-1].role == "user"
+    assert messages[-1].content == "[Pipeline Handoff Context]\nPipeline: selling"
 
 
 @pytest.mark.asyncio
@@ -9759,6 +10081,63 @@ async def test_active_pending_question_answer_preserves_image_input(tmp_path: Pa
     answer = future.result()
     assert answer == {"selected_id": "", "selected_label": "", "free_text": "[Image input]"}
     assert injected == [(pipeline_input.content, {"scope": "pipeline", "inputId": "ask-toolu_1"})]
+
+
+@pytest.mark.asyncio
+async def test_active_pending_question_answer_echoes_question_into_input_received(tmp_path: Path) -> None:
+    # Regression (session 54411…): the input_received envelope must echo the
+    # question/options/allowFreeText from the input_required it answers so the
+    # web transcript's fresh resume-run translator (which never saw the paused
+    # run's input_required) can rebuild the answered ask card instead of
+    # collapsing it to {"question": ""} with no options.
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor, _PendingAskUserQuestion
+
+    future = asyncio.get_running_loop().create_future()
+    publish_manual = AsyncMock(return_value=object())
+    options = [{"id": "cn-hangzhou", "label": "华东1(杭州)"}]
+    runtime = SimpleNamespace(
+        pending_question=_PendingAskUserQuestion(
+            event=AskUserQuestionEvent(
+                tool_use_id="toolu_1",
+                question="选择部署地域",
+                options=options,
+                allow_free_text=True,
+                response_future=future,
+            ),
+            envelope={
+                "scope": "step",
+                "inputId": "ask-toolu_1",
+                "data": {
+                    "kind": "ask_user_question",
+                    "question": "选择部署地域",
+                    "options": options,
+                    "allowFreeText": True,
+                },
+            },
+        ),
+        pipeline=SimpleNamespace(),
+        publisher=SimpleNamespace(publish_manual=publish_manual),
+    )
+    executor = IacCodeA2APipelineExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    result = await executor._route_pending_question_answer(runtime, "华东1(杭州)")
+
+    assert result == "answered"
+    data = publish_manual.await_args.kwargs["data"]
+    assert data["question"] == "选择部署地域"
+    assert data["options"] == options
+    assert data["allowFreeText"] is True
+    # The chosen option's label still drives the card's result body.
+    assert data["selectedLabel"] == "华东1(杭州)"
 
 
 @pytest.mark.asyncio

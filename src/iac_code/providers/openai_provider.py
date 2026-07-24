@@ -153,15 +153,20 @@ class OpenAIProvider(Provider):
         return self._thinking_budget if self._thinking_budget is not None else spec.default_thinking_budget
 
     def _token_limit_kwargs(self, max_tokens: int) -> dict[str, int]:
+        # 用户配置的「最大输出 tokens」是硬上限,覆盖调用方传入的默认值;留空时沿用默认。
+        configured = self._max_completion_tokens
         if self._thinking_disabled():
-            return {"max_tokens": max_tokens}
+            return {"max_tokens": configured or max_tokens}
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
         if not spec.use_max_completion_tokens:
-            return {"max_tokens": max_tokens}
-        if self._max_completion_tokens is not None:
-            return {"max_completion_tokens": self._max_completion_tokens}
+            return {"max_tokens": configured or max_tokens}
+        # use_max_completion_tokens 家族:该参数限制「含推理」的总生成量,思考预算另经
+        # extra_body 单独下发。故最终额度 = 可见输出上限 + 思考预算,否则推理会挤占用户要的输出。
+        # configured 与 budget 均可覆盖默认,configured 分支同样要叠加预算(与留空分支一致)。
         thinking_budget = self._effective_thinking_budget()
-        return {"max_completion_tokens": max_tokens + (thinking_budget or 0)}
+        if thinking_budget is None:
+            return {"max_completion_tokens": configured} if configured is not None else {"max_tokens": max_tokens}
+        return {"max_completion_tokens": (configured or max_tokens) + thinking_budget}
 
     def _thinking_disabled(self) -> bool:
         return bool_or_none(getattr(self, "_thinking_enabled", None)) is False

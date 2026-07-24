@@ -2,13 +2,26 @@ from types import SimpleNamespace
 
 import pytest
 
-from iac_code.agent.message import TextBlock, ToolResultBlock, ToolUseBlock
+from iac_code.agent.message import (
+    COMPACTION_SUMMARY_TAIL_METADATA_KEY,
+    Message,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    compaction_summary_tail_count,
+    create_compaction_summary_message,
+    is_compaction_summary_message,
+)
 from iac_code.pipeline.engine.cleanup import (
     CLEANUP_PROMPT_METADATA_TYPE,
     create_cleanup_prompt_message,
     is_cleanup_prompt_message,
 )
-from iac_code.services.context_manager import ContextManager, get_context_window_config
+from iac_code.services.context_manager import (
+    _SUMMARY_BLOCK_TEXT_LIMIT,
+    ContextManager,
+    get_context_window_config,
+)
 
 
 class TestContextWindowConfig:
@@ -155,6 +168,38 @@ class TestContextManager:
         monkeypatch.setattr(cm, "get_total_tokens", lambda: 940_000)
         assert cm.needs_compaction() is True
 
+    def _tiny_window(self, cm: ContextManager) -> None:
+        cm._config = cm._config.__class__(
+            context_window=50,
+            max_output_tokens=8192,
+            compact_buffer=10,
+            compact_threshold=0.5,
+            preserve_recent_turns=3,
+        )
+
+    def test_needs_compaction_false_when_only_recent_tail_over_threshold(self):
+        # 单条超大工具结果使 token 全落在保留尾部：超阈值但没有可压缩的旧消息，压缩是空操作。
+        # 若此时仍判定需要压缩，会每回合空转触发、不留会话记录（见问题 #2 无记录 / #3 反复触发）。
+        cm = ContextManager(system_prompt="", model="qwen")
+        self._tiny_window(cm)
+        cm.add_user_message("read the giant file")
+        cm.add_assistant_message("ok")
+        cm.add_tool_results([ToolResultBlock(tool_use_id="t1", content="lorem ipsum " * 200)])
+        old, _recent = cm._split_messages_for_compaction()
+        assert cm.get_total_tokens() > 25  # 超过阈值（window * 0.5）
+        assert old == []  # 没有可压缩的旧消息——权重全在保留尾部
+        assert cm.needs_compaction() is False
+
+    def test_needs_compaction_true_when_old_messages_exist(self):
+        # 存在可压缩的旧消息时仍应正常触发压缩。
+        cm = ContextManager(system_prompt="", model="qwen")
+        self._tiny_window(cm)
+        for i in range(20):
+            cm.add_user_message(f"message {i} with enough content to use tokens")
+        old, _recent = cm._split_messages_for_compaction()
+        assert old  # 存在可压缩的旧消息
+        assert cm.needs_compaction() is True
+
     def test_get_usage_returns_breakdown(self):
         cm = ContextManager(system_prompt="You are helpful.", model="qwen")
         cm.add_user_message("Hello")
@@ -219,6 +264,39 @@ class TestSegmentedCompaction:
         assert "User message 0" in prompt
         assert "User message 5" not in prompt
 
+    def test_build_compaction_prompt_includes_tool_activity(self):
+        # 问题 #2：流水线步骤的真实内容全在 tool_use/tool_result 里；若只取 TextBlock
+        # 文本，摘要模型只能看到启动指令 → 退化摘要「无历史可总结」。摘要 prompt 必须纳入
+        # 工具名与（截断后的）工具结果，反映实际做了什么。
+        cm = ContextManager(system_prompt="", model="qwen")
+        cm.add_user_message("请完成当前步骤：template_generating。")
+        cm.add_assistant_message([ToolUseBlock(id="t1", name="read_file", input={"path": "main.tf"})])
+        cm.add_tool_results([ToolResultBlock(tool_use_id="t1", content="RESOURCE_MARKER resource ecs {}")])
+        cm.add_assistant_message([ToolUseBlock(id="t2", name="write_file", input={"content": "TEMPLATE_MARKER"})])
+        cm.add_tool_results([ToolResultBlock(tool_use_id="t2", content="ok")])
+        for i in range(3):
+            cm.add_user_message(f"recent-user-{i}")
+            cm.add_assistant_message([TextBlock(text=f"recent-assistant-{i}")])
+
+        prompt = cm.build_compaction_prompt()
+
+        assert prompt  # 不再退化为空
+        assert "请完成当前步骤：template_generating。" in prompt
+        assert "read_file" in prompt
+        assert "RESOURCE_MARKER" in prompt
+        assert "write_file" in prompt
+        assert "TEMPLATE_MARKER" in prompt
+        # 保留尾部（recent）不进摘要 prompt。
+        assert "recent-user-0" not in prompt
+
+    def test_render_message_for_summary_truncates_large_tool_result(self):
+        cm = ContextManager(system_prompt="", model="qwen")
+        big = "X" * (_SUMMARY_BLOCK_TEXT_LIMIT + 500)
+        msg = Message(role="user", content=[ToolResultBlock(tool_use_id="t1", content=big)])
+        rendered = cm._render_message_for_summary(msg)
+        assert rendered.endswith("…")
+        assert len(rendered) <= _SUMMARY_BLOCK_TEXT_LIMIT + len("[工具结果] ") + 1
+
     def test_build_compaction_prompt_excludes_recalled_memory_messages(self):
         cm = ContextManager(system_prompt="sys", model="qwen")
         cm.add_recalled_memory_message("# Recalled Memory\nhidden memory body", ["hidden-topic.md"])
@@ -264,7 +342,8 @@ class TestSegmentedCompaction:
         assert any(
             is_cleanup_prompt_message(message) and message.content == "cleanup hidden prompt" for message in messages
         )
-        assert messages[0].content == "[Conversation Summary]\nsummary"
+        # 新语义：完整历史保留，压缩标记进入有效切片而非 get_messages()[0]。
+        assert cm.get_context_messages()[0].content == "[Conversation Summary]\nsummary"
 
     def test_remove_cleanup_prompt_messages_removes_hidden_prompts(self):
         cm = ContextManager(system_prompt="sys", model="qwen")
@@ -286,7 +365,8 @@ class TestSegmentedCompaction:
         assert original_count == 12
 
         cm.apply_compaction("Summary of old conversation")
-        messages = cm.get_messages()
+        # 新语义：完整历史保留（get_messages 不再收缩），有效切片=标记+尾部。
+        messages = cm.get_context_messages()
         assert len(messages) == 7
         assert "Summary" in messages[0].get_text()
         assert "User message 3" in messages[1].get_text()
@@ -315,13 +395,44 @@ class TestSegmentedCompaction:
 
         cm.apply_compaction("Summary of old conversation")
 
-        messages = cm.get_messages()
+        # 新语义：完整历史保留；断言有效切片(标记+尾部)。
+        messages = cm.get_context_messages()
         assert "Summary" in messages[0].get_text()
-        assert messages[1].role == "assistant"
-        assert messages[1].get_tool_use_blocks()[0].id == "toolu_read"
-        assert messages[2].role == "user"
-        assert isinstance(messages[2].content, list)
-        assert messages[2].content[0].tool_use_id == "toolu_read"
+        # 保留尾部从引导该工具往返的 user 提问开头开始,工具往返随后完整保留。
+        assert messages[1].role == "user"
+        assert messages[1].get_text() == "Please read a file"
+        assert messages[2].role == "assistant"
+        assert messages[2].get_tool_use_blocks()[0].id == "toolu_read"
+        assert messages[3].role == "user"
+        assert isinstance(messages[3].content, list)
+        assert messages[3].content[0].tool_use_id == "toolu_read"
+
+    def test_compaction_tail_starts_at_user_turn_not_assistant(self):
+        # 朴素切分点(len-preserve_count)落在一次工具往返中间时,旧的切分只保证
+        # 工具配对、会让保留尾部从 assistant 中途开始——引导它的 user 提问被并入摘要,
+        # 弱模型在缺少提问上下文时易空转循环。修复后尾部必须从一条真正的 user 回合开头开始。
+        cm = ContextManager(system_prompt="sys", model="qwen")
+        cm.add_user_message("u0")  # 0
+        cm.add_assistant_message([TextBlock(text="a0")])  # 1
+        cm.add_user_message("leading prompt")  # 2  <- 期望尾部从这里开始
+        cm.add_assistant_message([ToolUseBlock(id="t", name="bash", input={"command": "echo x"})])  # 3
+        cm.add_tool_results([ToolResultBlock(tool_use_id="t", content="x")])  # 4  <- 朴素切分点(10-6)
+        cm.add_assistant_message([TextBlock(text="a-mid")])  # 5
+        cm.add_user_message("u2")  # 6
+        cm.add_assistant_message([TextBlock(text="a2")])  # 7
+        cm.add_user_message("u3")  # 8
+        cm.add_assistant_message([TextBlock(text="a3")])  # 9
+
+        cm.apply_compaction("Summary of old conversation")
+
+        # 新语义：完整历史保留；断言有效切片(标记+尾部)。
+        messages = cm.get_context_messages()
+        assert "Summary" in messages[0].get_text()
+        # 保留尾部第一条(摘要之后)必须是携带引导提问的 user 消息,而非 assistant 回复。
+        assert messages[1].role == "user"
+        assert "leading prompt" in messages[1].get_text()
+        # 尾部不得以未配对的 tool_result 开头。
+        assert not any(isinstance(block, ToolResultBlock) for block in messages[1].content)
 
     def test_compaction_keeps_unfinished_tool_use_in_recent_messages(self):
         cm = ContextManager(system_prompt="sys", model="qwen")
@@ -336,11 +447,89 @@ class TestSegmentedCompaction:
 
         cm.apply_compaction("Summary of old conversation")
 
-        messages = cm.get_messages()
+        # 新语义：完整历史保留；断言有效切片(标记+尾部)。
+        messages = cm.get_context_messages()
         assert "Summary" in messages[0].get_text()
         assert any(
             msg.get_tool_use_blocks() and msg.get_tool_use_blocks()[0].id == "toolu_pending" for msg in messages[1:]
         )
+
+    def test_single_user_turn_pipeline_step_still_compacts(self):
+        # 流水线步骤形状:整段只有一个 user 回合开头(初始指令),其余全是 assistant/tool_result
+        # 工具往返。严格切分会一路回退到 index 0 → old 为空 → needs_compaction 永远 False、
+        # 压缩空转(见问题 #2:进度过半仍不触发)。两级策略:严格切分塌缩到 0 时放宽为从一条
+        # 非 tool_result 载体(assistant)的消息开头,由压缩标记(user 摘要)在其前提供引导上下文。
+        cm = ContextManager(system_prompt="", model="qwen")
+        cm._config = cm._config.__class__(
+            context_window=50,
+            max_output_tokens=8192,
+            compact_buffer=10,
+            compact_threshold=0.5,
+            preserve_recent_turns=3,
+        )
+        cm.add_user_message("步骤指令:生成模板")  # 0 —— 唯一的 user 回合开头
+        for i in range(6):
+            cm.add_assistant_message([ToolUseBlock(id=f"t{i}", name="bash", input={"command": f"echo {i}"})])
+            cm.add_tool_results([ToolResultBlock(tool_use_id=f"t{i}", content="lorem ipsum " * 20)])
+
+        old, _recent = cm._split_messages_for_compaction()
+        assert old, "single-user-turn 形状下仍应切出可压缩的旧消息"
+        assert cm.get_total_tokens() > 25  # 超过阈值 window * 0.5
+        assert cm.needs_compaction() is True
+
+        before = cm.get_total_tokens()
+        _original, new = cm.apply_compaction("summary of tool rounds")
+        assert new < before  # 压缩真正推进,不是空操作
+
+        messages = cm.get_context_messages()
+        assert "summary" in messages[0].get_text().lower()  # 压缩标记(user 摘要)
+        # 尾部第一条(标记之后)不得是 tool_result 载体——避免孤立 tool_result;
+        # 由标记提供引导上下文,允许从 assistant 开头。
+        first_tail = messages[1]
+        tail_blocks = first_tail.content if isinstance(first_tail.content, list) else []
+        assert not any(isinstance(block, ToolResultBlock) for block in tail_blocks)
+
+    def test_prior_summary_plus_single_huge_tool_turn_still_reduces(self):
+        # 极端形态(线上会话 dec3dcd9):有效切片开头是上一次压缩留下的摘要标记,其后只有
+        # 一个 user 回合(初始指令)+ 一长串超大 tool_result。严格切分为对齐 user 回合开头会一路
+        # 回退,把整条工具链塞进 recent、old 只剩那条摘要标记 → 重压只是把摘要再总结一遍,大块
+        # 工具结果原样保留 → 毫无缩减。修复:严格切出的 old 无可压缩内容时放宽切分,把较早的
+        # 大块工具往返折进摘要。
+        cm = ContextManager(system_prompt="", model="qwen")
+        cm._config = cm._config.__class__(
+            context_window=50,
+            max_output_tokens=8192,
+            compact_buffer=10,
+            compact_threshold=0.5,
+            preserve_recent_turns=3,
+        )
+        marker = create_compaction_summary_message("上一次压缩的摘要")  # 有效切片 index 0
+        marker.token_count = 3
+        cm._conversation.messages.append(marker)
+        cm.add_user_message("步骤指令:研究更省钱的方案")  # 唯一的 user 回合开头
+        for i in range(6):
+            cm.add_assistant_message([ToolUseBlock(id=f"t{i}", name="bash", input={"command": f"echo {i}"})])
+            cm.add_tool_results([ToolResultBlock(tool_use_id=f"t{i}", content="lorem ipsum " * 20)])
+
+        # 严格切分:old 只剩摘要标记,无任何可压缩内容(病态形态)。
+        naive = len(cm.get_context_messages()) - cm._config.preserve_recent_turns * 2
+        strict = cm._find_safe_compaction_split(cm.get_context_messages(), naive)
+        assert not cm._has_compactible_content(cm.get_context_messages()[:strict])
+
+        # 修复后:两级切分兜住,old 含可压缩的工具往返,压缩真正推进。
+        old, _recent = cm._split_messages_for_compaction()
+        assert cm._has_compactible_content(old)
+        assert cm.needs_compaction() is True
+
+        before = cm.get_total_tokens()
+        _original, new = cm.apply_compaction("折叠早期工具往返")
+        assert new < before  # 不再是空操作
+
+        messages = cm.get_context_messages()
+        assert "折叠早期工具往返" in messages[0].get_text()  # 新摘要标记
+        first_tail = messages[1]
+        tail_blocks = first_tail.content if isinstance(first_tail.content, list) else []
+        assert not any(isinstance(block, ToolResultBlock) for block in tail_blocks)
 
 
 class TestSetModel:
@@ -440,6 +629,9 @@ def test_compaction_surfaced_files_come_from_retained_metadata_only():
 
     cm.apply_compaction("Summary mentions old.md and recent.md")
 
+    # 语义：get_surfaced_memory_files 反映"有效上下文已包含哪些浮出记忆",
+    # 遍历有效切片而非完整历史。压缩后 old.md 的 recalled_memory 消息落在
+    # 标记之前(被压缩出有效上下文),故不再被视为已浮出,可再次被召回。
     assert cm.get_surfaced_memory_files() == {"recent.md"}
 
 
@@ -456,3 +648,133 @@ def test_add_raw_message_preserves_metadata():
 
     assert msg.metadata == {"type": CLEANUP_PROMPT_METADATA_TYPE, "source": "pipeline_cleanup"}
     assert cm.get_messages()[0].metadata["type"] == CLEANUP_PROMPT_METADATA_TYPE
+
+
+def _mgr_with_turns(n_turns: int) -> ContextManager:
+    mgr = ContextManager(system_prompt="sys", model="claude")
+    for i in range(n_turns):
+        mgr.add_user_message(f"u{i}")
+        mgr.add_assistant_message(f"a{i}")
+    return mgr
+
+
+def test_get_context_messages_no_marker_is_full_history():
+    mgr = _mgr_with_turns(2)
+    assert mgr.get_context_messages() == mgr.get_messages()
+
+
+def test_get_context_messages_slices_from_last_marker():
+    mgr = _mgr_with_turns(2)
+    marker = create_compaction_summary_message("S")
+    mgr._conversation.messages.insert(2, marker)  # [u0,a0,marker,u1,a1]
+    ctx = mgr.get_context_messages()
+    assert ctx[0] is marker
+    assert len(ctx) == 3  # marker + u1 + a1
+
+
+def test_get_context_messages_picks_latest_of_multiple_markers():
+    mgr = _mgr_with_turns(3)
+    m1 = create_compaction_summary_message("S1")
+    m2 = create_compaction_summary_message("S2")
+    mgr._conversation.messages.insert(1, m1)
+    mgr._conversation.messages.insert(4, m2)
+    ctx = mgr.get_context_messages()
+    assert ctx[0] is m2
+
+
+def test_get_api_messages_uses_effective_context():
+    mgr = _mgr_with_turns(2)
+    marker = create_compaction_summary_message("SUMMARY")
+    mgr._conversation.messages.insert(2, marker)
+    api = mgr.get_api_messages()
+    assert len(api) == 3
+    assert "[Conversation Summary]" in str(api[0]["content"])
+
+
+def test_get_total_tokens_counts_only_effective_slice():
+    mgr = _mgr_with_turns(4)
+    full_tokens = mgr.get_total_tokens()
+    marker = create_compaction_summary_message("S")
+    # 在靠后位置插标记 → 有效切片显著变短 → token 下降
+    mgr._conversation.messages.insert(6, marker)
+    assert mgr.get_total_tokens() < full_tokens
+
+
+def test_current_user_text_with_summary_prefix_is_not_a_compaction_boundary():
+    mgr = _mgr_with_turns(4)
+    ordinary = Message(role="user", content="[Conversation Summary]\nplease inspect this literal text")
+    mgr._conversation.messages.insert(4, ordinary)
+
+    assert is_compaction_summary_message(ordinary) is False
+    assert mgr.get_context_messages() == mgr.get_messages()
+
+
+def test_apply_compaction_preserves_full_history():
+    mgr = _mgr_with_turns(4)  # 8 msgs, preserve 6 → old=2
+    original_objs = list(mgr.get_messages())
+    mgr.apply_compaction("SUM")
+    full = mgr.get_messages()
+    assert len(full) == len(original_objs) + 1  # 仅多一个标记
+    for obj in original_objs:
+        assert obj in full  # 旧对象仍在（未丢）
+
+
+def test_apply_compaction_effective_slice_is_marker_plus_recent():
+    mgr = _mgr_with_turns(4)
+    mgr.apply_compaction("SUM")
+    ctx = mgr.get_context_messages()
+    assert is_compaction_summary_message(ctx[0])
+    assert ctx[0].get_text() == "[Conversation Summary]\nSUM"
+    assert len(ctx) == 1 + 6  # marker + 最近 3 轮
+
+
+def test_apply_compaction_records_tail_count():
+    mgr = _mgr_with_turns(4)  # 8 msgs, preserve 6 → old=2, recent=6
+    mgr.apply_compaction("SUM")
+    marker = mgr.get_context_messages()[0]
+    assert is_compaction_summary_message(marker)
+    # 标记之后、时间上早于它的保留尾部 = recent 6 条（无隐藏 cleanup）。
+    assert marker.metadata[COMPACTION_SUMMARY_TAIL_METADATA_KEY] == 6
+    assert compaction_summary_tail_count(marker) == 6
+
+
+def test_apply_compaction_tail_count_includes_preserved_cleanup():
+    mgr = _mgr_with_turns(4)
+    cleanup = Message(role="user", content="CLEANUP", metadata={"type": CLEANUP_PROMPT_METADATA_TYPE})
+    cleanup.token_count = 1
+    mgr._conversation.messages.insert(0, cleanup)  # 落在会被压缩的旧段
+    mgr.apply_compaction("SUM")
+    marker = mgr.get_context_messages()[0]
+    # 上浮的隐藏 cleanup(1) + recent(6) 都排在标记之后,均计入尾部。
+    assert compaction_summary_tail_count(marker) == 7
+
+
+def test_apply_compaction_noop_when_nothing_old():
+    mgr = _mgr_with_turns(2)  # 4 msgs <= preserve 6 → old 空
+    before = list(mgr.get_messages())
+    orig, new = mgr.apply_compaction("SUM")
+    assert mgr.get_messages() == before
+    assert orig == new
+
+
+def test_apply_compaction_floats_cleanup_prompt_once():
+    mgr = _mgr_with_turns(4)
+    cleanup = Message(role="user", content="CLEANUP", metadata={"type": CLEANUP_PROMPT_METADATA_TYPE})
+    cleanup.token_count = 1
+    mgr._conversation.messages.insert(0, cleanup)  # 落在会被压缩的旧段
+    mgr.apply_compaction("SUM")
+    full = mgr.get_messages()
+    assert sum(1 for m in full if m.metadata.get("type") == CLEANUP_PROMPT_METADATA_TYPE) == 1
+    assert cleanup in mgr.get_context_messages()  # 上浮进有效切片
+
+
+def test_second_compaction_keeps_both_markers_and_summarizes_first():
+    mgr = _mgr_with_turns(4)
+    mgr.apply_compaction("S1")
+    prompt = mgr.build_compaction_prompt()  # 基于有效切片；旧段含 marker1
+    assert "S1" in prompt
+    mgr.apply_compaction("S2")
+    full = mgr.get_messages()
+    markers = [m for m in full if is_compaction_summary_message(m)]
+    assert len(markers) == 2
+    assert mgr.get_context_messages()[0].get_text() == "[Conversation Summary]\nS2"

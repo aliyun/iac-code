@@ -1218,11 +1218,15 @@ def _install_headless_fakes(monkeypatch, *, creds=None, skills=None, existing_co
             provider_key_override=None,
             base_url_override=None,
             request_policy_override=None,
+            effort_override=None,
+            ignore_llm_source=False,
         ):
             captured["provider_manager"] = {
                 "model": model,
                 "credentials": credentials,
                 "request_policy_override": request_policy_override,
+                "effort_override": effort_override,
+                "ignore_llm_source": ignore_llm_source,
             }
 
     class FakeSessionStorage:

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import types
 from pathlib import Path
 from textwrap import dedent
 from types import SimpleNamespace
@@ -9,7 +10,7 @@ from unittest.mock import ANY, MagicMock, call, patch
 import pytest
 import yaml
 
-from iac_code.agent.message import Message, ToolResultBlock
+from iac_code.agent.message import Message, ToolResultBlock, create_compaction_summary_message
 from iac_code.mcp.types import (
     MCPConfigScope,
     MCPConnectionMetadata,
@@ -25,6 +26,7 @@ from iac_code.pipeline.engine.session import PipelineSession
 from iac_code.pipeline.engine.state_machine import StateMachine
 from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorage
 from iac_code.pipeline.engine.types import StepResult, StepStatus
+from iac_code.services.context_manager import ContextManager
 from iac_code.services.session_backup import BackupReason, BackupResult, SessionBackupBlocked
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import ResourceObservedEvent
@@ -1981,6 +1983,24 @@ def test_prompt_context_for_restored_parent_step_comes_from_agent_loop_context(t
     assert context.agent_loop_session_id == attempt["transcript_id"]
     assert "A" in context.system_prompt
     assert [message.get_text() for message in context.messages] == ["original user prompt", "partial answer"]
+
+
+def test_prompt_context_uses_effective_context_after_compaction():
+    cm = ContextManager(system_prompt="sys", model="claude")
+    cm.load_messages(
+        [
+            Message(role="user", content="OLD_BEFORE_MARKER"),
+            Message(role="assistant", content="old answer"),
+            create_compaction_summary_message("SUMMARY"),
+            Message(role="user", content="recent question"),
+            Message(role="assistant", content="recent answer"),
+        ]
+    )
+    agent_loop = types.SimpleNamespace(system_prompt="sys", context_manager=cm, _session_id="sid")
+    ctx = PipelineRunner._prompt_context_from_agent_loop(agent_loop, scope="parent", step_id="a")
+    ctx_texts = [m.get_text() for m in ctx.messages]
+    assert ctx_texts == [m.get_text() for m in cm.get_context_messages()]
+    assert "OLD_BEFORE_MARKER" not in ctx_texts
 
 
 def test_prompt_context_for_restored_parallel_candidates_comes_from_each_agent_loop_context(tmp_path):

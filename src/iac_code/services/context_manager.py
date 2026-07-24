@@ -11,10 +11,12 @@ from iac_code.agent.message import (
     ContentBlock,
     Conversation,
     Message,
+    TextBlock,
     ToolResultBlock,
     ToolUseBlock,
     create_recalled_memory_message,
     get_recalled_memory_files,
+    is_compaction_summary_message,
     is_recalled_memory_message,
 )
 from iac_code.services.token_counter import TokenCounter
@@ -112,6 +114,11 @@ _MODEL_CONFIGS: dict[str, ContextWindowConfig] = {
     "o4": ContextWindowConfig(200_000, 8_192, 20_000, 0.93, 3),
 }
 _DEFAULT_CONFIG = ContextWindowConfig(128_000, 8_192, 15_000, 0.93, 3)
+
+# 摘要 prompt 里单个 tool_use.input / tool_result 正文的截断上限（字符）。
+# 流水线步骤的真实内容几乎全在工具块里（读文件、API schema、生成的模板、校验输出），
+# 必须纳入摘要才能避免退化摘要（见问题 #2），但需截断以免摘要 prompt 反而爆量。
+_SUMMARY_BLOCK_TEXT_LIMIT = 2_000
 
 
 def get_context_window_config(model: str) -> ContextWindowConfig:
@@ -222,6 +229,20 @@ class ContextManager:
     def get_messages(self) -> list[Message]:
         return self._conversation.messages
 
+    def _last_compaction_index(self) -> int | None:
+        messages = self._conversation.messages
+        for i in range(len(messages) - 1, -1, -1):
+            if is_compaction_summary_message(messages[i]):
+                return i
+        return None
+
+    def get_context_messages(self) -> list[Message]:
+        """有效上下文：最后一个压缩标记起到末尾；无标记则完整历史。"""
+        idx = self._last_compaction_index()
+        if idx is None:
+            return self._conversation.messages
+        return self._conversation.messages[idx:]
+
     def remove_cleanup_prompt_messages(self) -> int:
         from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
 
@@ -232,16 +253,20 @@ class ContextManager:
         return removed
 
     def get_api_messages(self) -> list[dict[str, Any]]:
-        return self._conversation.to_api_messages()
+        return [m.to_api_format() for m in self.get_context_messages()]
 
     def get_surfaced_memory_files(self) -> set[str]:
         files: set[str] = set()
-        for msg in self._conversation.messages:
+        for msg in self.get_context_messages():
             files.update(get_recalled_memory_files(msg))
         return files
 
     def get_total_tokens(self) -> int:
-        return self._system_prompt_tokens + self._tool_definition_tokens + self._conversation.get_total_tokens()
+        return (
+            self._system_prompt_tokens
+            + self._tool_definition_tokens
+            + sum(m.token_count for m in self.get_context_messages())
+        )
 
     def get_usage(self) -> dict[str, Any]:
         """Return detailed token usage breakdown by category."""
@@ -249,7 +274,7 @@ class ContextManager:
         assistant_tokens = 0
         tool_result_tokens = 0
 
-        for msg in self._conversation.messages:
+        for msg in self.get_context_messages():
             if msg.role == "user":
                 if isinstance(msg.content, list) and any(isinstance(b, ToolResultBlock) for b in msg.content):
                     tool_result_tokens += msg.token_count
@@ -274,13 +299,20 @@ class ContextManager:
             "total_tokens": total,
             "context_window": self._config.context_window,
             "usage_percent": (total / self._config.context_window * 100) if self._config.context_window > 0 else 0,
-            "message_count": len(self._conversation.messages),
+            "message_count": len(self.get_context_messages()),
         }
 
     def needs_compaction(self) -> bool:
         total = self.get_total_tokens()
         threshold = self._config.context_window * self._config.compact_threshold
-        return total > threshold
+        if total <= threshold:
+            return False
+        # 超阈值但没有可压缩的旧消息（token 权重全落在保留尾部，例如单条超大工具结果）时，
+        # 压缩是空操作：build_compaction_prompt 为空 → 不留会话记录，且因为上下文没变，下一回合
+        # 仍判定需要压缩，于是每回合反复空转（见问题 #2 无记录 / #3 反复触发）。仅当存在可压缩的
+        # 旧消息、压缩能真正推进时才触发；这与 apply_compaction 自身的 `if not old` 空操作守卫一致。
+        old, _recent = self._split_messages_for_compaction()
+        return bool(old)
 
     @staticmethod
     def _tool_use_ids(message: Message) -> set[str]:
@@ -295,9 +327,55 @@ class ContextManager:
         return {block.tool_use_id for block in message.content if isinstance(block, ToolResultBlock)}
 
     @classmethod
-    def _find_safe_compaction_split(cls, messages: list[Message], split_point: int) -> int:
+    def _is_user_turn_start(cls, message: Message) -> bool:
+        """Whether ``message`` opens a fresh user turn.
+
+        A user turn starts with a user-authored message that is *not* a
+        ``tool_result`` carrier. The preserved compaction tail must begin
+        here so the model never sees an assistant reply (or a bare
+        ``tool_result``) whose originating user prompt was folded into the
+        summary — a shape that leaves weaker models spinning without the
+        prompt that drove the work.
+        """
+        return message.role == "user" and not cls._tool_result_ids(message)
+
+    @classmethod
+    def _is_safe_tail_start(cls, message: Message, *, allow_assistant_start: bool) -> bool:
+        """Whether the preserved tail may begin at ``message``.
+
+        Strict mode (default) requires a real user-turn start. Relaxed mode
+        only forbids starting on a ``tool_result`` carrier — an assistant
+        message qualifies. Relaxed mode is a fallback for conversations whose
+        only user-turn start is the very first message (e.g. a pipeline step:
+        one initial instruction followed by a long run of tool round-trips),
+        where strict mode collapses the split to index 0 and compaction can
+        never make progress. The compaction marker (a ``user`` message) is
+        inserted immediately before the tail, so an assistant start still has
+        a driving prompt in front of it.
+        """
+        if allow_assistant_start:
+            return not cls._tool_result_ids(message)
+        return cls._is_user_turn_start(message)
+
+    @classmethod
+    def _find_safe_compaction_split(
+        cls, messages: list[Message], split_point: int, *, allow_assistant_start: bool = False
+    ) -> int:
         split_point = max(0, min(split_point, len(messages)))
+        if split_point >= len(messages):
+            return split_point
         while split_point > 0:
+            # 1) 保留尾部必须从一个安全边界开始:向前回退跳过 tool_result 载体(严格模式
+            #    还会跳过 assistant 回复),避免尾部丢失引导它的 user 提问、或以未配对
+            #    tool_result 开头。
+            while split_point > 0 and not cls._is_safe_tail_start(
+                messages[split_point], allow_assistant_start=allow_assistant_start
+            ):
+                split_point -= 1
+            if split_point == 0:
+                break
+
+            # 2) 旧消息内不得残留未配对的 tool_use(否则摘要段丢掉其 tool_result)。
             old_tool_uses: dict[str, int] = {}
             old_tool_results: set[str] = set()
 
@@ -310,9 +388,27 @@ class ContextManager:
             if not unpaired_tool_uses:
                 return split_point
 
+            # 回退到最早未配对 tool_use 处;下一轮再对齐到 user 回合开头。
             split_point = min(old_tool_uses[tool_use_id] for tool_use_id in unpaired_tool_uses)
 
         return split_point
+
+    @staticmethod
+    def _has_compactible_content(messages: list[Message]) -> bool:
+        """``old`` 里是否存在重压能真正带来缩减的消息。
+
+        旧摘要标记、召回记忆、清理提示这三类要么会被 ``build_compaction_prompt``
+        跳过、要么只是把摘要再总结一遍——都不产生实质缩减。若 ``old`` 全由它们
+        组成(极端形态:多层旧摘要 + 单个超大工具往返回合,尾部整条工具链回退进
+        recent、old 仅剩上一个摘要标记),压缩就是空操作。此时应让位给放宽切分,
+        把较早的大块工具往返折进摘要。
+        """
+        from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
+
+        return any(
+            not (is_compaction_summary_message(m) or is_recalled_memory_message(m) or is_cleanup_prompt_message(m))
+            for m in messages
+        )
 
     def _split_messages_for_compaction(self) -> tuple[list[Message], list[Message]]:
         """Split messages into [old_messages, recent_messages].
@@ -320,15 +416,71 @@ class ContextManager:
         A "turn" is a user+assistant message pair. We preserve the last
         `preserve_recent_turns` turns (counting from the end).
         """
-        messages = self._conversation.messages
+        messages = self.get_context_messages()
         preserve_count = self._config.preserve_recent_turns * 2
 
         if len(messages) <= preserve_count:
             return [], messages
 
-        split_point = len(messages) - preserve_count
-        split_point = self._find_safe_compaction_split(messages, split_point)
-        return messages[:split_point], messages[split_point:]
+        naive_split = len(messages) - preserve_count
+        # 第一级(严格):优先把尾部对齐到真正的 user 回合开头,普通聊天沿用既有行为。
+        strict_split = self._find_safe_compaction_split(messages, naive_split)
+        strict_old = messages[:strict_split]
+        if strict_split > 0 and self._has_compactible_content(strict_old):
+            return strict_old, messages[strict_split:]
+
+        # 第二级(放宽):严格切出的 old 里没有任何可压缩内容(为空,或只剩旧摘要标记/召回记忆/
+        # 清理提示)。两种形态:
+        #   a) 整段只有一个 user 回合开头(流水线步骤:初始指令 + 成串工具往返),严格切分塌缩到
+        #      0、old 为空、压缩永远空转;
+        #   b) 「多层旧摘要 + 单个超大工具往返回合」:尾部整条工具链回退进 recent,old 仅剩上一个
+        #      摘要标记,重压只是把摘要再总结一遍、大块工具结果原样保留 → 毫无缩减。
+        # 放宽为从一条非 tool_result 载体(assistant)的消息开头,把较早的大块工具往返折进摘要;
+        # 压缩标记(user 摘要)插在其前提供引导上下文。放宽模式内部仍守「old 不得残留未配对
+        # tool_use」,不会拆散 tool_use/tool_result 配对。
+        relaxed_split = self._find_safe_compaction_split(messages, naive_split, allow_assistant_start=True)
+        if relaxed_split > strict_split:
+            # 放宽确实能多折进内容(而非仅退回同一批标记)时才改用它;否则保持严格结果:
+            # 严格 old 若是多条旧摘要标记则照旧合并(有缩减),单条标记则维持既有空操作语义。
+            return messages[:relaxed_split], messages[relaxed_split:]
+        return strict_old, messages[strict_split:]
+
+    @staticmethod
+    def _truncate_for_summary(text: str) -> str:
+        text = text.strip()
+        if len(text) <= _SUMMARY_BLOCK_TEXT_LIMIT:
+            return text
+        return text[:_SUMMARY_BLOCK_TEXT_LIMIT] + "…"
+
+    @classmethod
+    def _render_message_for_summary(cls, msg: Message) -> str:
+        """Render a message for the summary prompt, including tool activity.
+
+        ``Message.get_text()`` only surfaces ``TextBlock`` text, so a pipeline
+        step — whose real work lives almost entirely in ``tool_use`` /
+        ``tool_result`` blocks — would feed the summarizer next to nothing,
+        yielding a degenerate "no prior conversation history" summary (见问题
+        #2). Include a compact rendering of tool calls and (truncated) tool
+        results so the summary reflects what actually happened. ``thinking``
+        and image blocks stay excluded (noisy / non-textual).
+        """
+        if isinstance(msg.content, str):
+            return msg.content.strip()
+        parts: list[str] = []
+        for block in msg.content:
+            if isinstance(block, TextBlock):
+                text = block.text.strip()
+                if text:
+                    parts.append(text)
+            elif isinstance(block, ToolUseBlock):
+                preview = cls._truncate_for_summary(str(block.input)) if block.input else ""
+                parts.append("[调用工具 {}] {}".format(block.name, preview).rstrip())
+            elif isinstance(block, ToolResultBlock):
+                result_text = cls._truncate_for_summary(block.content) if isinstance(block.content, str) else ""
+                if result_text:
+                    label = "工具报错" if block.is_error else "工具结果"
+                    parts.append("[{}] {}".format(label, result_text))
+        return "\n".join(parts)
 
     def build_compaction_prompt(self) -> str:
         """Build compaction prompt from old messages only (recent are preserved)."""
@@ -343,7 +495,7 @@ class ContextManager:
             if is_recalled_memory_message(msg) or is_cleanup_prompt_message(msg):
                 continue
             role = msg.role.upper()
-            text = msg.get_text()
+            text = self._render_message_for_summary(msg)
             if text:
                 conversation_text.append(f"{role}: {text}")
         if not conversation_text:
@@ -363,20 +515,37 @@ class ContextManager:
         )
 
     def apply_compaction(self, summary: str) -> tuple[int, int]:
-        """Replace old messages with summary, keep recent messages intact."""
+        """插入压缩标记，保留完整历史；有效上下文收缩为 [marker]+cleanup+尾部。"""
+        from iac_code.agent.message import (
+            COMPACTION_SUMMARY_TAIL_METADATA_KEY,
+            create_compaction_summary_message,
+        )
         from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
 
-        original_tokens = self._conversation.get_total_tokens()
+        original_tokens = self.get_total_tokens()  # 有效切片(压缩前)
 
-        old, recent = self._split_messages_for_compaction()
-        preserved_hidden = [msg for msg in old if is_cleanup_prompt_message(msg)]
+        old, recent = self._split_messages_for_compaction()  # 有效切片内切分
+        if not old:
+            return (original_tokens, original_tokens)  # 无可压缩，空操作
 
-        summary_msg = Message(role="user", content=f"[Conversation Summary]\n{summary}")
-        summary_msg.token_count = self._token_counter.count_message(summary_msg.to_api_format())
+        marker = create_compaction_summary_message(summary)
+        marker.token_count = self._token_counter.count_message(marker.to_api_format())
 
-        self._conversation.replace_messages([summary_msg] + preserved_hidden + recent)
-        new_tokens = self._conversation.get_total_tokens()
-        logger.info(f"Compaction: {original_tokens} -> {new_tokens} tokens")
+        preserved_hidden = [m for m in old if is_cleanup_prompt_message(m)]
+        preserved_ids = {id(m) for m in preserved_hidden}
+
+        messages = self._conversation.messages
+        insert_index = len(messages) - len(recent)  # recent 是完整历史后缀
+        head = [m for m in messages[:insert_index] if id(m) not in preserved_ids]
+
+        # 压缩这一刻，标记之后的所有消息（preserved_hidden + recent）都是时间上早于它的保留尾部；
+        # 记录条数，供可见转录把边界下沉到尾部之后。之后新追加的回合不计入，自然排在标记之后。
+        marker.metadata[COMPACTION_SUMMARY_TAIL_METADATA_KEY] = len(preserved_hidden) + len(recent)
+
+        self._conversation.replace_messages(head + [marker] + preserved_hidden + recent)
+
+        new_tokens = self.get_total_tokens()  # 有效切片(压缩后)
+        logger.info(f"Compaction: {original_tokens} -> {new_tokens} tokens (history preserved)")
         return (original_tokens, new_tokens)
 
     def reset(self) -> None:

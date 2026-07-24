@@ -1686,6 +1686,7 @@ def test_mcp_get_check_prints_redacted_config_and_connection_diagnostics(monkeyp
     assert payload["connection_state"] == "connected"
     assert payload["protocol_version"] == "2025-06-18"
     assert payload["oauth_client_state"] == {
+        "oauth_configured": True,
         "configured_client_id": True,
         "stored_client_auth_method": "client_secret_post",
         "stored_client_id": True,

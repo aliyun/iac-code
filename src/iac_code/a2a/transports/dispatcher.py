@@ -80,6 +80,7 @@ from iac_code.a2a.push import (
 from iac_code.a2a.push_queue import LocalFileA2APushQueue, RedisStreamsA2APushQueue, require_redis_asyncio
 from iac_code.a2a.push_secrets import A2APushSecretKeyring
 from iac_code.a2a.push_worker import A2APushDeliveryWorker
+from iac_code.a2a.runtime_registry import A2ARuntimeOwner, A2ARuntimeRegistration, register_runtime_owner
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.i18n import _
 from iac_code.pipeline.config import RunMode, get_run_mode
@@ -263,8 +264,12 @@ class A2ARuntimeComponents:
     _exit_stack: AsyncExitStack
     push_worker: Any | None = None
     push_queue: Any | None = None
+    runtime_registration: A2ARuntimeRegistration | None = None
 
     async def aclose(self) -> None:
+        if self.runtime_registration is not None:
+            self.runtime_registration.unregister()
+            self.runtime_registration = None
         await self.task_store.stop_cleanup_loop()
         executor = getattr(self.handler, "agent_executor", None)
         if executor is not None:
@@ -400,14 +405,27 @@ def create_runtime_components(
         backup_service=backup_service,
         metrics=metrics,
     )
+    app = _create_dispatch_app(handler)
+    runtime_registration = register_runtime_owner(
+        A2ARuntimeOwner(
+            task_store=task_store,
+            model=model,
+            metrics=metrics,
+            persistence_root=persistence.root if persistence is not None else None,
+            artifact_store=artifact_store,
+            auto_approve_permissions=auto_approve_permissions,
+            thinking_exposure_types=thinking_exposure_types,
+        )
+    )
     return A2ARuntimeComponents(
         handler=handler,
         task_store=task_store,
         card=card,
-        app=_create_dispatch_app(handler),
+        app=app,
         _exit_stack=AsyncExitStack(),
         push_worker=push_worker,
         push_queue=push_queue_instance,
+        runtime_registration=runtime_registration,
     )
 
 

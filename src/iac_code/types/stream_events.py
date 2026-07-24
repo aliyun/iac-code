@@ -144,10 +144,22 @@ class MessageEndEvent:
 
 
 @dataclass
+class ContextUsageEvent:
+    """Cumulative context-window usage snapshot for the loop that just finished a
+    model round-trip. Emitted after ``MessageEndEvent`` so the web UI can show a
+    live per-(pipeline-step) context-usage ring. ``usage`` is the dict returned by
+    ``ContextManager.get_usage()`` (snake_case keys)."""
+
+    usage: dict[str, Any]
+    type: Literal["context_usage"] = "context_usage"
+
+
+@dataclass
 class TombstoneEvent:
     """Mark a previously-yielded message as orphaned (should be removed from UI/transcript)."""
 
     message_id: str
+    affected_tool_use_ids: list[str] = field(default_factory=list)
     type: Literal["tombstone"] = "tombstone"
 
 
@@ -192,10 +204,19 @@ class PermissionRequestEvent:
 
 @dataclass
 class CompactionEvent:
-    """Context auto-compaction occurred."""
+    """Context auto-compaction lifecycle signal.
+
+    ``phase`` distinguishes the pre-compaction "started" marker (shown as the
+    running indicator in the UI), the successful "finished" result that carries
+    token counts, and a terminal "failed" result that stops the indicator
+    without claiming a compaction occurred.
+    """
 
     original_tokens: int = 0
     compacted_tokens: int = 0
+    summary: str = ""
+    phase: Literal["started", "finished", "failed"] = "finished"
+    reason: str = ""
     type: Literal["compaction"] = "compaction"
 
 
@@ -216,6 +237,7 @@ class QueuedInputSubmittedEvent:
     """A user prompt queued during streaming was submitted mid-turn."""
 
     text: str
+    message_id: str | None = None
     type: Literal["queued_input_submitted"] = "queued_input_submitted"
 
 
@@ -271,6 +293,8 @@ class StackProgressEvent(ToolEmittedEvent):
     progress_percentage: float
     resources: list[dict[str, Any]]
     elapsed_seconds: int
+    # 让 web 前端把进度关联到发起该栈操作的工具卡(与 ResourceObservedEvent/MCPProgressEvent 一致)。
+    tool_use_id: str | None = None
     type: Literal["stack_progress"] = "stack_progress"
 
 
@@ -284,6 +308,8 @@ class StackInstancesProgressEvent(ToolEmittedEvent):
     progress_percentage: int
     instances: list[dict[str, Any]]
     elapsed_seconds: int
+    # 让 web 前端把进度关联到发起该栈组操作的工具卡(与 ResourceObservedEvent/MCPProgressEvent 一致)。
+    tool_use_id: str | None = None
     type: Literal["stack_instances_progress"] = "stack_instances_progress"
 
 
@@ -376,6 +402,7 @@ StreamEvent = Union[
     ToolInputDeltaEvent,
     ToolUseEndEvent,
     MessageEndEvent,
+    ContextUsageEvent,
     TombstoneEvent,
     ErrorEvent,
     ToolResultEvent,

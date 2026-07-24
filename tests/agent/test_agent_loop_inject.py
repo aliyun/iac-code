@@ -50,6 +50,20 @@ class TestInjectUserMessage:
         agent_loop.inject_user_message("second")
         assert agent_loop._pending_injections == deque(["first", "second"])
 
+    def test_injected_message_metadata_is_shared_by_context_and_persistence(self, agent_loop):
+        storage = MagicMock()
+        agent_loop._session_storage = storage
+        metadata = {"messageId": "user-turn-steer-1", "turnId": "turn-1", "source": "steer"}
+
+        agent_loop.inject_user_message("补充信息", metadata=metadata)
+        agent_loop._drain_pending_injections()
+
+        context_message = agent_loop.context_manager.get_messages()[-1]
+        persisted_message = storage.append.call_args.args[2]
+        assert context_message.metadata == metadata
+        assert persisted_message.metadata == metadata
+        assert persisted_message.content == "补充信息"
+
 
 class TestCurrentTurnText:
     def test_initial_value_empty(self, agent_loop):

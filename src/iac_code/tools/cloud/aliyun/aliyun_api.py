@@ -2587,11 +2587,13 @@ class AliyunApi(BaseCloudApi):
             except AliyunOAuthError as exc:
                 return ToolResult.error(str(exc))
 
-        endpoint = (
-            self._get_endpoint(product, region)
-            or self._discover_endpoint(product, region, credential)
-            or self._get_endpoint_fallback(product, region)
-        )
+        endpoint = self._get_endpoint(product, region)
+        if not endpoint:
+            # Location-service discovery makes a blocking OpenAPI call; keep it off
+            # the shared event loop (web agent turns, SSE, and HTTP handlers run on it).
+            endpoint = await asyncio.to_thread(self._discover_endpoint, product, region, credential)
+        if not endpoint:
+            endpoint = self._get_endpoint_fallback(product, region)
         config = self._build_config(credential, endpoint, region)
         client = OpenApiClient(config)
 
@@ -2633,7 +2635,9 @@ class AliyunApi(BaseCloudApi):
         outcome = "success"
 
         try:
-            result = client.call_api(api_params, request, runtime)
+            # The OpenAPI call is blocking network I/O; offload it so it never
+            # starves the shared event loop. Telemetry/event emission stay on-loop.
+            result = await asyncio.to_thread(client.call_api, api_params, request, runtime)
             body = result.get("body", result)
 
             self._last_action = action

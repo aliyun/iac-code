@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from iac_code.commands.registry import CommandRegistry, LocalCommand
+from iac_code.commands.registry import CommandRegistry, LocalCommand, PromptCommand
 from iac_code.i18n import _
 from iac_code.ui.suggestions.types import CompletionToken, SuggestionItem, SuggestionProvider
 
@@ -38,6 +38,7 @@ class CommandProvider(SuggestionProvider):
             name = match.name
             completion = f"/{name} "
             arg_hint = cmd.arg_hint if isinstance(cmd, LocalCommand) else None
+            origin = str(cmd.source.value) if isinstance(cmd, PromptCommand) else None
             items.append(
                 SuggestionItem(
                     id=f"cmd:{cmd.name}",
@@ -48,6 +49,7 @@ class CommandProvider(SuggestionProvider):
                     source="command",
                     score=float(-match.priority * 1000 - match.score),
                     arg_hint=arg_hint,
+                    origin=origin,
                 )
             )
 

@@ -45,9 +45,12 @@ class BashTool(Tool):
             "required": ["command"],
         }
 
+    def execution_timeout(self, tool_input: dict[str, Any]) -> float | None:
+        return _requested_timeout(tool_input) + 10.0
+
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
         command = tool_input["command"]
-        timeout = tool_input.get("timeout", 120)
+        timeout = _requested_timeout(tool_input)
 
         try:
             if sys.platform == "win32":
@@ -77,12 +80,22 @@ class BashTool(Tool):
                     await asyncio.wait_for(process.communicate(), timeout=5)
                 except (asyncio.TimeoutError, OSError):
                     pass
-                return ToolResult.error(
-                    _("Command timed out after {timeout} seconds: {command}").format(timeout=timeout, command=command)
+                timeout_message = _("Command timed out after {timeout} seconds: {command}").format(
+                    timeout=timeout, command=command
                 )
+                return ToolResult(
+                    content=timeout_message,
+                    is_error=True,
+                    metadata={"exitCode": 124, "stdout": "", "stderr": timeout_message},
+                )
+            except asyncio.CancelledError:
+                await kill_process_tree(process)
+                raise
 
             stdout_str = stdout.decode("utf-8", errors="replace") if stdout else ""
             stderr_str = stderr.decode("utf-8", errors="replace") if stderr else ""
+            exit_code = process.returncode if process.returncode is not None else 0
+            metadata = {"exitCode": exit_code, "stdout": stdout_str, "stderr": stderr_str}
 
             # Build result
             parts = []
@@ -90,14 +103,14 @@ class BashTool(Tool):
                 parts.append(f"STDOUT:\n{stdout_str}")
             if stderr_str:
                 parts.append(f"STDERR:\n{stderr_str}")
-            parts.append(f"Exit code: {process.returncode}")
+            parts.append(f"Exit code: {exit_code}")
 
             output = "\n".join(parts)
 
-            if process.returncode != 0:
-                return ToolResult.error(output)
+            if exit_code != 0:
+                return ToolResult(content=output, is_error=True, metadata=metadata)
 
-            return ToolResult.success(output)
+            return ToolResult(content=output, metadata=metadata)
 
         except Exception as e:
             return ToolResult.error(_("Error executing command: {}").format(e))
@@ -173,3 +186,12 @@ class BashTool(Tool):
         if self.is_read_only(input):
             return PermissionResult(behavior="allow")
         return PermissionResult(behavior="ask", message=_("Allow {}?").format(self.user_facing_name(input)))
+
+
+def _requested_timeout(tool_input: dict[str, Any]) -> float:
+    value = tool_input.get("timeout", 120)
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        return 120.0
+    return timeout if timeout > 0 else 120.0

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import sys
 import time
 from collections.abc import AsyncGenerator, Iterator
@@ -278,6 +279,7 @@ def create_provider(
     *,
     base_url: str | None = None,
     provider_key_override: str | None = None,
+    provider_config_override: dict[str, Any] | None = None,
     request_policy_override: ProviderRequestPolicy | None = None,
     effort_override: str | None = None,
 ) -> Provider:
@@ -290,9 +292,12 @@ def create_provider(
         raise ProviderNotConfiguredError(
             _("Unknown provider key: '{key}'. Run /auth to configure.").format(key=provider_key)
         )
-    from iac_code.config import get_provider_config
+    if provider_config_override is None:
+        from iac_code.config import get_provider_config
 
-    provider_cfg = get_provider_config(provider_key)
+        provider_cfg = get_provider_config(provider_key)
+    else:
+        provider_cfg = copy.deepcopy(provider_config_override)
     effective_base_url = base_url or desc.base_url
     if not effective_base_url:
         saved_base = provider_cfg.get("apiBase")
@@ -355,6 +360,8 @@ def create_provider(
 
         if thinking_budget is not None and issubclass(provider_cls, AnthropicProvider):
             request_policy_kwargs["thinking_budget"] = thinking_budget
+        if max_completion_tokens is not None and issubclass(provider_cls, AnthropicProvider):
+            request_policy_kwargs["max_completion_tokens"] = max_completion_tokens
     provider = provider_cls(
         model=model,
         api_key=api_key or None,
@@ -486,6 +493,8 @@ class ProviderManager:
         base_url_override: str | None = None,
         request_policy_override: ProviderRequestPolicy | None = None,
         effort_override: str | None = None,
+        ignore_llm_source: bool = False,
+        provider_config_override: dict[str, Any] | None = None,
     ):
         self._model = model
         self._credentials = credentials
@@ -494,7 +503,12 @@ class ProviderManager:
         self._provider_key_override = provider_key_override
         self._base_url_override = base_url_override
         self._effort_override = effort_override
+        self._provider_config_override = copy.deepcopy(provider_config_override)
         self._request_policy_override = _request_policy_with_effort_override(request_policy_override, effort_override)
+        # 会话级显式 provider 覆盖时,忽略全局合作方源 llm_source(当前唯一实现为 QwenPaw)的每轮热切换:
+        # 否则每次请求开头的 _check_qwenpaw_config_change 都会因全局 llm_source 仍指向合作方而把本会话
+        # 选定的 provider/模型/base_url 改回(失效的)合作方端点,导致换 provider 后仍报同样的错。
+        self._ignore_llm_source = ignore_llm_source
         # Lazy: first startup may have no active provider yet. Defer errors
         # until the user actually tries to send a message, so /auth is reachable.
         self._provider: Provider | None = None
@@ -511,6 +525,9 @@ class ProviderManager:
 
     def _check_qwenpaw_config_change(self) -> None:
         """Detect QwenPaw active_model.json changes and reconfigure if needed."""
+        if self._ignore_llm_source:
+            # 本会话已用会话级 provider 覆盖,忽略全局 llm_source 合作方源的热切换(见构造函数注释)。
+            return
         from iac_code.config import _get_env_overrides, get_llm_source
 
         env = _get_env_overrides()
@@ -549,6 +566,8 @@ class ProviderManager:
             "base_url": self._base_url_override,
             "provider_key_override": self._provider_key_override,
         }
+        if self._provider_config_override is not None:
+            kwargs["provider_config_override"] = self._provider_config_override
         if self._request_policy_override is not None:
             kwargs["request_policy_override"] = self._request_policy_override
         if self._effort_override is not None:
@@ -563,6 +582,7 @@ class ProviderManager:
         base_url_override: str | None = None,
         request_policy_override: ProviderRequestPolicy | None = None,
         effort_override: str | None = None,
+        provider_config_override: dict[str, Any] | None = None,
     ) -> None:
         """Switch model and credentials in place.
 
@@ -576,6 +596,7 @@ class ProviderManager:
         self._provider_key_override = provider_key_override
         self._base_url_override = base_url_override
         self._effort_override = effort_override
+        self._provider_config_override = copy.deepcopy(provider_config_override)
         self._request_policy_override = _request_policy_with_effort_override(request_policy_override, effort_override)
         self.reset_conversation_state()
         self._provider = None
@@ -687,6 +708,8 @@ class ProviderManager:
         _capture_request_content(span_attrs, messages, system, tools)
 
         orphaned_message_ids: list[str] = []
+        orphaned_tool_use_ids: dict[str, list[str]] = {}
+        current_message_id: str | None = None
         buffer_until_accepted = model in _MODEL_REFUSAL_FALLBACK_MAP
         buffered_events: list[StreamEvent] = []
         streaming_failed = False
@@ -706,7 +729,13 @@ class ProviderManager:
                     watchdog.ping()
                     if isinstance(event, MessageStartEvent):
                         orphaned_message_ids.append(event.message_id)
+                        current_message_id = event.message_id
+                        orphaned_tool_use_ids.setdefault(event.message_id, [])
                         span.set_attribute(GenAiAttr.RESPONSE_ID, event.message_id)
+                    elif isinstance(event, (ToolUseStartEvent, ToolUseEndEvent)) and current_message_id is not None:
+                        tool_ids = orphaned_tool_use_ids.setdefault(current_message_id, [])
+                        if event.tool_use_id not in tool_ids:
+                            tool_ids.append(event.tool_use_id)
                     elif (
                         isinstance(event, (TextDeltaEvent, ThinkingDeltaEvent))
                         and event.text
@@ -782,7 +811,10 @@ class ProviderManager:
         if streaming_failed:
             if not buffer_until_accepted:
                 for msg_id in orphaned_message_ids:
-                    yield TombstoneEvent(message_id=msg_id)
+                    yield TombstoneEvent(
+                        message_id=msg_id,
+                        affected_tool_use_ids=orphaned_tool_use_ids.get(msg_id, []),
+                    )
             try:
                 completion = await self._complete_with_retry_result(
                     messages,

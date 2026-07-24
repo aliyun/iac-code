@@ -131,7 +131,9 @@ class ShowArchitectureDiagramTool(Tool):
         if not isinstance(semantic_plan, dict):
             semantic_plan = None
 
-        base_render_result = render_ros_template_architecture_views(template_content)
+        # Rendering walks the whole template graph (pure CPU); keep it off the
+        # shared event loop so web agent turns, SSE, and HTTP handlers stay responsive.
+        base_render_result = await asyncio.to_thread(render_ros_template_architecture_views, template_content)
         if mode == "facts":
             if context.event_queue is not None:
                 await context.event_queue.put(
@@ -166,7 +168,8 @@ class ShowArchitectureDiagramTool(Tool):
                 logger.exception("Failed to optimize architecture diagram with the LLM; keeping draft diagram")
             else:
                 if generated_semantic_plan:
-                    render_result = render_ros_template_architecture_views(
+                    render_result = await asyncio.to_thread(
+                        render_ros_template_architecture_views,
                         template_content,
                         semantic_plan=generated_semantic_plan,
                     )
@@ -188,8 +191,12 @@ class ShowArchitectureDiagramTool(Tool):
             )
 
         if semantic_plan is not None:
-            semantic_plan = repair_semantic_plan_locally(base_render_result.architecture_context, semantic_plan)
-            render_result = render_ros_template_architecture_views(template_content, semantic_plan=semantic_plan)
+            semantic_plan = await asyncio.to_thread(
+                repair_semantic_plan_locally, base_render_result.architecture_context, semantic_plan
+            )
+            render_result = await asyncio.to_thread(
+                render_ros_template_architecture_views, template_content, semantic_plan=semantic_plan
+            )
         else:
             render_result = base_render_result
 

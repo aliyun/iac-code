@@ -903,3 +903,48 @@ Outputs:
         # Either "Error[YAML parse error]" fallback or `"graph TD"` (empty) is acceptable
         # as long as it doesn't raise.
         assert "graph TD" in result
+
+
+class TestShowArchitectureDiagramToolDoesNotBlockEventLoop:
+    """Rendering walks the whole template graph (pure CPU); it must run off the
+    event loop (asyncio.to_thread) so it never starves web turns / SSE / handlers.
+    """
+
+    @pytest.mark.asyncio
+    async def test_render_does_not_starve_loop(self, tmp_path, monkeypatch):
+        import threading
+
+        (tmp_path / "template.yml").write_text(SIMPLE_TEMPLATE, encoding="utf-8")
+
+        entered = threading.Event()
+        release = threading.Event()
+        sentinel = show_diagram_tool.render_ros_template_architecture_views(SIMPLE_TEMPLATE)
+
+        def blocking_render(*args, **kwargs):
+            entered.set()
+            release.wait(5)
+            return sentinel
+
+        monkeypatch.setattr(show_diagram_tool, "render_ros_template_architecture_views", blocking_render)
+
+        queue: asyncio.Queue = asyncio.Queue()
+        context = ToolContext(cwd=str(tmp_path), event_queue=queue)
+        tool = ShowArchitectureDiagramTool()
+        task = asyncio.create_task(
+            tool.execute(
+                tool_input={"file_path": "template.yml", "candidate_name": "方案"},
+                context=context,
+            )
+        )
+
+        # Worker thread entered the blocking render while the loop stayed free.
+        await asyncio.wait_for(asyncio.to_thread(entered.wait, 1), timeout=2)
+        assert not task.done()
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert not task.done()
+
+        release.set()
+        result = await asyncio.wait_for(task, timeout=2)
+        assert not result.is_error
+        assert not queue.empty()

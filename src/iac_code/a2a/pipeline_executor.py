@@ -5,6 +5,7 @@ import contextlib
 import copy
 import inspect
 import logging
+import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -54,7 +55,7 @@ from iac_code.a2a.types import (
 from iac_code.agent.message import Message as AgentMessage
 from iac_code.i18n import _
 from iac_code.pipeline import create_pipeline, discover_pipelines
-from iac_code.pipeline.config import get_pipeline_name
+from iac_code.pipeline.config import get_pipeline_name, is_selling_review_step_enabled
 from iac_code.pipeline.engine.cleanup import CleanupLedger
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.handoff import build_handoff_summary, terminal_outcome_from_completed_event
@@ -262,6 +263,12 @@ class IacCodeA2APipelineExecutor:
         model_from_metadata: bool = False,
         metadata_api_key: str | None = None,
         request_policy_override: ProviderRequestPolicy | None = None,
+        provider_key_override: str | None = None,
+        provider_api_key_override: str | None = None,
+        provider_base_url_override: str | None = None,
+        provider_config_frozen: bool = False,
+        provider_config_override: dict[str, Any] | None = None,
+        effort_override: str | None = None,
         backup_service: Any | None = None,
         aliyun_delegated_executor_factory: Any | None = None,
     ) -> None:
@@ -278,6 +285,12 @@ class IacCodeA2APipelineExecutor:
         self._model_from_metadata = model_from_metadata
         self._metadata_api_key = metadata_api_key
         self._request_policy_override = request_policy_override
+        self._provider_key_override = provider_key_override
+        self._provider_api_key_override = provider_api_key_override
+        self._provider_base_url_override = provider_base_url_override
+        self._provider_config_frozen = provider_config_frozen
+        self._provider_config_override = provider_config_override
+        self._effort_override = effort_override
         self._backup_service = backup_service or SessionBackupService()
         self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
 
@@ -301,7 +314,20 @@ class IacCodeA2APipelineExecutor:
         session_storage = SessionStorage()
 
         def runtime_factory(session_id: str) -> Any:
-            return create_agent_runtime(AgentFactoryOptions(model=self._model, session_id=session_id, cwd=cwd))
+            SessionBackupService(session_storage=session_storage).restore_session(cwd, session_id)
+            return create_agent_runtime(
+                AgentFactoryOptions(
+                    model=self._model,
+                    session_id=session_id,
+                    cwd=cwd,
+                    provider_key_override=self._provider_key_override,
+                    provider_api_key_override=self._provider_api_key_override,
+                    provider_base_url_override=self._provider_base_url_override,
+                    provider_config_frozen=self._provider_config_frozen,
+                    provider_config_override=self._provider_config_override,
+                    effort_override=self._effort_override,
+                )
+            )
 
         try:
             with self._request_context():
@@ -675,6 +701,12 @@ class IacCodeA2APipelineExecutor:
             from_metadata=self._model_from_metadata,
             metadata_api_key=self._metadata_api_key,
             request_policy_override=self._request_policy_override,
+            provider_key_override=self._provider_key_override,
+            provider_api_key_override=self._provider_api_key_override,
+            provider_base_url_override=self._provider_base_url_override,
+            provider_config_frozen=self._provider_config_frozen,
+            provider_config_override=self._provider_config_override,
+            effort_override=self._effort_override,
         )
         if self._aliyun_credential is not None:
             refresh_runtime_cloud_tools(agent_runtime)
@@ -685,7 +717,19 @@ class IacCodeA2APipelineExecutor:
         if runtime is not None:
             return A2APipelineRuntime(agent_runtime=runtime)
         return A2APipelineRuntime(
-            agent_runtime=create_agent_runtime(AgentFactoryOptions(model=self._model, session_id=session_id, cwd=cwd)),
+            agent_runtime=create_agent_runtime(
+                AgentFactoryOptions(
+                    model=self._model,
+                    session_id=session_id,
+                    cwd=cwd,
+                    provider_key_override=self._provider_key_override,
+                    provider_api_key_override=self._provider_api_key_override,
+                    provider_base_url_override=self._provider_base_url_override,
+                    provider_config_frozen=self._provider_config_frozen,
+                    provider_config_override=self._provider_config_override,
+                    effort_override=self._effort_override,
+                )
+            ),
         )
 
     def _clear_stale_recoverable_active_task(
@@ -1172,8 +1216,30 @@ class IacCodeA2APipelineExecutor:
             raw_prerequisites = {}
         raw_feature_flags = raw.get("feature_flags")
         feature_flags = _resolve_feature_flags(raw_feature_flags if isinstance(raw_feature_flags, dict) else None)
+        self._apply_persisted_feature_flag_overrides(feature_flags, raw_feature_flags)
         resolution = inspect_prerequisites(raw_prerequisites, feature_flags=feature_flags)
         return resolution.to_metadata()
+
+    @staticmethod
+    def _apply_persisted_feature_flag_overrides(
+        feature_flags: dict[str, bool],
+        raw_feature_flags: Any,
+    ) -> None:
+        """Layer the persisted「设置/常规」review-step choice into fresh feature flags.
+
+        Precedence: pipeline.yaml default < settings.yml toggle < explicit env var.
+        Only touches ``enable_reviewing`` and only when its env var is not explicitly
+        set, so an env override (e.g. in tests/CI) keeps priority. Runs on fresh runs
+        only — resumes reuse the frozen sidecar metadata and never reach here.
+        """
+        flag_name = "enable_reviewing"
+        if flag_name not in feature_flags:
+            return
+        spec = raw_feature_flags.get(flag_name) if isinstance(raw_feature_flags, dict) else None
+        env_var = spec.get("env") if isinstance(spec, dict) else None
+        if env_var and os.environ.get(env_var, "").strip().lower() in ("true", "1", "yes", "false", "0", "no"):
+            return
+        feature_flags[flag_name] = is_selling_review_step_enabled()
 
     def _sidecar_prerequisite_metadata(
         self,
@@ -2065,6 +2131,16 @@ class IacCodeA2APipelineExecutor:
                 reason="terminal_recovery_publication_failed",
             )
             return _TerminalSidecarRecoveryResult(published=False, available=False)
+        # 正常完成路径会在补发 terminal 的同时补发 normal handoff(驱动「↪ 普通对话」边界标记);
+        # 重启恢复路径此前只补 terminal,导致交接标记缺失(Issue 4)。这里同样补发,幂等:仅当
+        # 作用域内尚无 pipeline_handoff_ready 时才发,是否真正切普通对话仍由 pipeline 的
+        # on_complete_policy 决定(cancel 等不在 apply_on 的终态自然不发)。
+        if not _handoff_ready_present(scoped_journal_events):
+            await self._publish_normal_handoff_ready(
+                pipeline,
+                publisher,
+                _completed_event_data_from_sidecar_status(sidecar_status),
+            )
         return _TerminalSidecarRecoveryResult(published=True, available=True)
 
     def _rebuild_terminal_recovery_snapshot(
@@ -2287,7 +2363,15 @@ class IacCodeA2APipelineExecutor:
                     reason="committed_handoff_backup_ack_failed",
                 )
                 return True
-            if await publisher.enqueue_persisted(handoff_safe_envelope, run_before_enqueue=False):
+            if await publisher.enqueue_persisted(
+                handoff_safe_envelope,
+                run_before_enqueue=False,
+                # loopback web 主转录 translator 只从 enqueue_local_pipeline_envelope 收信封;
+                # 缺了这行 handoff 就只落远程/journal,实时跑看不到「↪ 普通对话」/结局彩条,
+                # 只有 reload 从 journal 重建才出现。传 committed(非 safe/脱敏)信封,与
+                # ``_persist_backup_gated_publication`` 的直通语义一致(未脱敏本地路径供 web 用)。
+                local_envelope=committed_handoff_envelope,
+            ):
                 if not await publisher.enqueue_persisted(
                     backup_committed_delivery_envelope(handoff_ack_envelope, handoff_safe_envelope),
                     run_before_enqueue=False,
@@ -2511,6 +2595,7 @@ class IacCodeA2APipelineExecutor:
                 "selectedId": answer["selected_id"],
                 "selectedLabel": answer["selected_label"],
                 "freeTextLength": len(answer["free_text"]),
+                **_ask_user_question_echo(pending.envelope.get("data")),
             },
             coordinates=_coordinates_from_envelope(pending.envelope),
         )
@@ -2925,6 +3010,7 @@ async def _resume_pending_ask_user_question_stream(
             "selectedId": answer["selected_id"],
             "selectedLabel": answer["selected_label"],
             "freeTextLength": len(answer["free_text"]),
+            **_ask_user_question_echo(pending_input),
         },
         coordinates=_coordinates_from_pending_input(pending_input),
     )
@@ -2967,6 +3053,35 @@ def _ask_user_question_answer_from_pending_input(pending_input: dict[str, Any], 
         prompt,
         allow_free_text=True if not isinstance(allow_free_text, bool) else allow_free_text,
     )
+
+
+def _ask_user_question_echo(source: Any) -> dict[str, Any]:
+    """Non-private fields echoed from an ask_user_question ``input_required``
+    onto its ``input_received`` so the answered envelope is self-contained.
+
+    The web transcript rebuilds an answered ask card at ``input_received`` from
+    the question + options. On a live *resume* run that is served by a fresh
+    translator which never saw the paused run's ``input_required``, those fields
+    are otherwise unavailable and the card collapses to ``{"question": ""}``.
+    Echoing them here (the assistant's question and predefined options — already
+    emitted verbatim one envelope earlier, never the user's free text) makes the
+    envelope self-describing for both the resume and reload paths.
+    """
+    echo: dict[str, Any] = {}
+    if not isinstance(source, dict):
+        return echo
+    question = source.get("question")
+    if isinstance(question, str) and question:
+        echo["question"] = question
+    options = source.get("options")
+    if isinstance(options, list):
+        echo["options"] = options
+    allow_free_text = source.get("allowFreeText")
+    if not isinstance(allow_free_text, bool):
+        allow_free_text = source.get("allow_free_text")
+    if isinstance(allow_free_text, bool):
+        echo["allowFreeText"] = allow_free_text
+    return echo
 
 
 def _ask_user_question_answer_from_options(
@@ -4165,6 +4280,25 @@ def _terminal_status_from_sidecar(status: Any) -> str | None:
     if terminal_event is None:
         return None
     return terminal_event[1]
+
+
+def _completed_event_data_from_sidecar_status(status: Any) -> dict[str, Any]:
+    """把 sidecar 终态映射成最小的 completed-event 载荷,只承载 outcome 标志。
+
+    恢复路径没有真正的 PIPELINE_COMPLETED 事件,但 ``terminal_outcome_from_completed_event``
+    只看 ``failed`` / ``canceled`` / ``early_exit`` 标志(缺省即 ``completed``),实际交接上下文
+    由重建的 ``pipeline.context`` 提供。故此处仅需据 sidecar 终态还原 outcome。
+    """
+    if status == "failed":
+        return {"failed": True}
+    if status in {"user_aborted", "discarded", "canceled"}:
+        return {"canceled": True}
+    return {}
+
+
+def _handoff_ready_present(events: list[dict[str, Any]]) -> bool:
+    """判断作用域内是否已存在 ``pipeline_handoff_ready``,避免恢复补发时重复交接。"""
+    return any(event.get("eventType") == "pipeline_handoff_ready" for event in events)
 
 
 def _task_state_from_pipeline(

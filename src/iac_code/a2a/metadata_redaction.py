@@ -7,6 +7,7 @@ from a2a.types import Message
 from google.protobuf.json_format import MessageToDict, ParseDict
 
 from iac_code.a2a.artifacts import sanitize_public_artifact_text
+from iac_code.utils.public_errors import all_redaction_suppressed
 
 
 class A2AMetadataEchoRedactor:
@@ -62,6 +63,9 @@ class A2AMetadataEchoRedactor:
         *,
         public_path_roots: Iterable[Mapping[str, str]] | None = None,
     ) -> Any:
+        if all_redaction_suppressed():
+            # 环回 web 上下文：敏感键也不打 *** —— 整体原样返回。
+            return value
         if isinstance(value, Mapping):
             return {
                 key: self.REDACTED_VALUE

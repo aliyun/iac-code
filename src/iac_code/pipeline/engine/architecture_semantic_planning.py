@@ -2134,6 +2134,11 @@ async def create_semantic_plan_with_llm(
     attempt: int | None = None,
     previous_plan: dict[str, Any] | None = None,
     validation_issues: list[str] | tuple[str, ...] = (),
+    credentials_override: dict[str, str] | None = None,
+    provider_key_override: str | None = None,
+    base_url_override: str | None = None,
+    provider_config_override: dict[str, Any] | None = None,
+    ignore_llm_source: bool = False,
 ) -> tuple[str, dict[str, Any] | None, Any, str | None]:
     if messages is None and user_prompt is None:
         user_prompt = build_semantic_plan_user_prompt(
@@ -2144,7 +2149,15 @@ async def create_semantic_plan_with_llm(
         )
     if messages is None:
         messages = [Message.user(user_prompt or "")]
-    manager = ProviderManager(model=model, credentials=load_credentials(model=model), effort_override=effort_override)
+    manager = ProviderManager(
+        model=model,
+        credentials=credentials_override if credentials_override is not None else load_credentials(model=model),
+        effort_override=effort_override,
+        provider_key_override=provider_key_override,
+        base_url_override=base_url_override,
+        provider_config_override=provider_config_override,
+        ignore_llm_source=ignore_llm_source,
+    )
     response = await manager.complete(
         messages,
         SYSTEM_PROMPT,
@@ -2174,6 +2187,11 @@ async def create_semantic_plan_for_architecture_with_llm(
     max_tokens: int = 3000,
     max_attempts: int = MAX_SEMANTIC_PLAN_ATTEMPTS,
     effort_override: str | None = "none",
+    credentials_override: dict[str, str] | None = None,
+    provider_key_override: str | None = None,
+    base_url_override: str | None = None,
+    provider_config_override: dict[str, Any] | None = None,
+    ignore_llm_source: bool = False,
 ) -> dict[str, Any]:
     """Create a repaired semantic plan using the same LLM loop as the preview script."""
     llm_architecture_context = build_llm_architecture_context(architecture_context)
@@ -2207,6 +2225,11 @@ async def create_semantic_plan_for_architecture_with_llm(
             attempt=attempt,
             previous_plan=None,
             validation_issues=sent_validation_issues,
+            credentials_override=credentials_override,
+            provider_key_override=provider_key_override,
+            base_url_override=base_url_override,
+            provider_config_override=provider_config_override,
+            ignore_llm_source=ignore_llm_source,
         )
         conversation_messages = [*request_messages, Message.assistant_text(raw_output)]
 

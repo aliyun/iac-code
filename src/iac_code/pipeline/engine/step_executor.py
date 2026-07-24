@@ -38,7 +38,14 @@ from iac_code.services.session_usage import SessionUsageStore
 from iac_code.services.telemetry.names import PipelineAttr
 from iac_code.tools.base import ToolRegistry
 from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY
-from iac_code.types.stream_events import StreamEvent, ToolResultEvent, ToolUseEndEvent, ToolUseStartEvent
+from iac_code.types.stream_events import (
+    ContextUsageEvent,
+    MessageEndEvent,
+    StreamEvent,
+    ToolResultEvent,
+    ToolUseEndEvent,
+    ToolUseStartEvent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -229,6 +236,13 @@ class StepExecutor:
         agent_loop = agent_context.agent_loop
         assert agent_loop is not None
         self._current_agent_loop = agent_loop
+        # 步骤/候选刚启动时，首个 MessageEndEvent 往往要 7-8s 后才到（思考 + 工具往返），
+        # 在此之前没有任何 ContextUsageEvent，前端只能回退到单一「普通会话」圆环（见问题 #3）。
+        # 先按当前上下文用量抢发一次，让用量圆环立即带上正确的 step/候选名称。尽力而为：
+        # 若该 loop 此刻还报不出用量，就退回原来的「首个 MessageEndEvent 后再发」行为。
+        prime_context_usage = getattr(agent_loop, "get_context_usage", None)
+        if callable(prime_context_usage):
+            yield ContextUsageEvent(usage=prime_context_usage())
         completion_guard_state = agent_context.completion_guard_state
 
         complete_step_ids: set[str] = set()
@@ -283,6 +297,8 @@ class StepExecutor:
                                 last_complete_step_error = event.result
                                 last_complete_step_input = pending_complete_input.get(event.tool_use_id)
                     yield event
+                    if isinstance(event, MessageEndEvent) and self._current_agent_loop is not None:
+                        yield ContextUsageEvent(usage=self._current_agent_loop.get_context_usage())
             finally:
                 aclose = getattr(stream, "aclose", None)
                 if callable(aclose):

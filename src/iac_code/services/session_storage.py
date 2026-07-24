@@ -23,6 +23,7 @@ Each ``session.jsonl`` file is a stream of two kinds of JSONL lines:
 from __future__ import annotations
 
 import json
+import shutil
 import stat
 from datetime import datetime, timezone
 from pathlib import Path
@@ -89,6 +90,20 @@ def _cleanup_prompt_identity(message: Message) -> str:
         ensure_ascii=False,
         sort_keys=True,
     )
+
+
+def merge_preserved_cleanup_prompts(existing: list[Message], messages: list[Message]) -> list[Message]:
+    """把 existing 中的 cleanup 提示按 identity 去重合并进 messages(保留缺失者)。"""
+    try:
+        from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
+    except Exception:
+        return messages
+    preserved = [message for message in existing if is_cleanup_prompt_message(message)]
+    if not preserved:
+        return messages
+    existing_keys = {_cleanup_prompt_identity(message) for message in messages if is_cleanup_prompt_message(message)}
+    missing = [message for message in preserved if _cleanup_prompt_identity(message) not in existing_keys]
+    return [*messages, *missing] if missing else messages
 
 
 class SessionStorage:
@@ -261,6 +276,65 @@ class SessionStorage:
     def session_dir(self, cwd: str, session_id: str) -> Path:
         return self._session_dir(cwd, session_id)
 
+    def project_dir(self, cwd: str) -> Path:
+        """Public accessor for the on-disk directory holding a project's sessions."""
+        return self._project_dir_for(cwd)
+
+    def project_read_dirs(self, cwd: str) -> tuple[Path, ...]:
+        """Return existing project-directory aliases in canonical-first order."""
+        return self._project_read_dirs_for(cwd)
+
+    def delete_session(self, cwd: str, session_id: str) -> bool:
+        """Permanently remove a session's on-disk storage.
+
+        Deletes both the directory-format session folder (``<session_id>/``,
+        which also carries ``metadata.json`` and the ``web-session.json``
+        sidecar) and any legacy flat ``<session_id>.jsonl`` file. Returns
+        ``True`` if anything was removed.
+        """
+        removed = False
+        for project_dir in self._project_read_dirs_for(cwd):
+            if project_dir.is_symlink() or self._is_reparse_point(project_dir):
+                continue
+            session_dir = project_dir / session_id
+            if self._is_deletable_session_dir(session_dir, session_id):
+                shutil.rmtree(session_dir)
+                removed = True
+
+            legacy_path = project_dir / f"{session_id}.jsonl"
+            if self._is_regular_file_entry(legacy_path):
+                legacy_path.unlink()
+                removed = True
+
+            primary_legacy_sidecar = self._legacy_sidecar_placeholder_dir(legacy_path)
+            sidecar_dirs = dict.fromkeys(
+                (
+                    primary_legacy_sidecar,
+                    self._conflicting_sidecar_placeholder_dir(primary_legacy_sidecar),
+                    self._conflicting_sidecar_placeholder_dir(session_dir),
+                )
+            )
+            for sidecar_dir in sidecar_dirs:
+                if not self._is_sidecar_only_session_dir(sidecar_dir):
+                    continue
+                shutil.rmtree(sidecar_dir)
+                removed = True
+        return removed
+
+    def _is_deletable_session_dir(self, session_dir: Path, session_id: str) -> bool:
+        if not self._is_directory_entry(session_dir) or not self._is_safe_sidecar_directory_tree(session_dir):
+            return False
+        try:
+            if not is_supported_session_dir_for_id(session_dir, session_id):
+                return False
+        except UnsupportedSessionLayoutError:
+            return False
+        return (
+            self._is_regular_file_entry(session_dir / SESSION_JSONL_FILENAME)
+            or self._is_regular_file_entry(session_dir / SESSION_METADATA_FILENAME)
+            or self._is_sidecar_only_session_dir(session_dir)
+        )
+
     def read_metadata(self, cwd: str, session_id: str) -> SessionMetadata | None:
         if self._legacy_file_wins_over_metadata_only_dir(cwd, session_id):
             return None
@@ -410,9 +484,17 @@ class SessionStorage:
             "permission-audit.jsonl",
             ".usage.jsonl.lock",
             "usage.jsonl",
+            "web-session.json",
+            "web-session.json.tmp",
         }
         if name in allowed_files:
             return True
+        web_metadata_temp_prefix = ".web-session.json."
+        if name.startswith(web_metadata_temp_prefix) and name.endswith(".tmp"):
+            token = name[len(web_metadata_temp_prefix) : -len(".tmp")]
+            return (
+                bool(token) and token.isascii() and all(character.isalnum() or character == "_" for character in token)
+            )
         prefix = "permission-audit.jsonl."
         suffix = name[len(prefix) :] if name.startswith(prefix) else ""
         return suffix.isdecimal()
@@ -630,23 +712,10 @@ class SessionStorage:
         session_id: str,
         messages: list[Message],
     ) -> list[Message]:
-        try:
-            from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
-        except Exception:
-            return messages
-
         path = self._session_path(cwd, session_id)
         if not path.exists():
             return messages
-        existing = self.load(cwd, session_id)
-        preserved = [message for message in existing if is_cleanup_prompt_message(message)]
-        if not preserved:
-            return messages
-        existing_keys = {
-            _cleanup_prompt_identity(message) for message in messages if is_cleanup_prompt_message(message)
-        }
-        missing = [message for message in preserved if _cleanup_prompt_identity(message) not in existing_keys]
-        return [*messages, *missing] if missing else messages
+        return merge_preserved_cleanup_prompts(self.load(cwd, session_id), messages)
 
     # ------------------------------------------------------------------
     # Read

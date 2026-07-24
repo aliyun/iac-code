@@ -2392,7 +2392,7 @@ class PipelineRunner:
             scope=scope,
             step_id=step_id,
             system_prompt=agent_loop.system_prompt,
-            messages=list(agent_loop.context_manager.get_messages()),
+            messages=list(agent_loop.context_manager.get_context_messages()),
             agent_loop_session_id=str(getattr(agent_loop, "_session_id", "")),
             initial_prompt=_initial_prompt_text(initial_prompt),
             candidate_index=candidate_index,

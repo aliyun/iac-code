@@ -3321,3 +3321,50 @@ async def test_production_runtime_transport_unknown_outcome_keeps_approved_contr
     assert services.contract_store.size == 0
     assert transport.calls[-1]["budget"] is services.budgets[-1]
     assert len(services.budgets) == 1
+class TestAliyunApiDoesNotBlockEventLoop:
+    """The blocking OpenAPI network call must run off the event loop (asyncio.to_thread)
+    so it never starves web agent turns, SSE streams, and HTTP handlers.
+    """
+
+    @pytest.mark.asyncio
+    async def test_call_api_does_not_starve_loop(
+        self, api: AliyunApi, context: ToolContext, mock_credentials
+    ) -> None:
+        import threading
+
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocking_call_api(*args, **kwargs):
+            entered.set()
+            release.wait(5)
+            return {"body": {"Instances": []}}
+
+        mock_client = MagicMock()
+        mock_client.call_api.side_effect = blocking_call_api
+
+        with patch("iac_code.tools.cloud.aliyun.aliyun_api.OpenApiClient", return_value=mock_client):
+            task = asyncio.create_task(
+                api.execute(
+                    tool_input={
+                        "product": "ecs",
+                        "action": "DescribeInstances",
+                        "region_id": "cn-hangzhou",
+                    },
+                    context=context,
+                )
+            )
+
+            # Worker thread entered the blocking call while the loop stayed free.
+            await asyncio.wait_for(asyncio.to_thread(entered.wait, 1), timeout=2)
+            assert not task.done()
+            for _ in range(5):
+                await asyncio.sleep(0)
+            assert not task.done()
+
+            release.set()
+            result = await asyncio.wait_for(task, timeout=2)
+
+        assert result.is_error is False
+        data = json.loads(result.content)
+        assert data == {"Instances": []}

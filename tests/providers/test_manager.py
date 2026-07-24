@@ -26,6 +26,7 @@ from iac_code.types.stream_events import (
     MessageStartEvent,
     TextDeltaEvent,
     ThinkingDeltaEvent,
+    ToolUseStartEvent,
     Usage,
 )
 
@@ -86,6 +87,34 @@ class TestCreateProvider:
         assert getattr(p, "_thinking_enabled", None) is True
         assert getattr(p, "_thinking_budget", None) == 2048
         assert getattr(p, "_max_completion_tokens", None) == 10000
+
+    def test_provider_config_override_prevents_runtime_settings_reread(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
+        monkeypatch.setattr(
+            "iac_code.config.get_provider_config",
+            lambda name: {
+                "effort": "low",
+                "thinkingEnabled": False,
+                "thinkingBudget": 1024,
+                "maxCompletionTokens": 2048,
+            },
+        )
+
+        p = create_provider(
+            "glm-5.2",
+            credentials={"dashscope": "snapshot-key"},
+            provider_config_override={
+                "effort": "high",
+                "thinkingEnabled": True,
+                "thinkingBudget": 4096,
+                "maxCompletionTokens": 12000,
+            },
+        )
+
+        assert getattr(p, "_effort", None) == "high"
+        assert getattr(p, "_thinking_enabled", None) is True
+        assert getattr(p, "_thinking_budget", None) == 4096
+        assert getattr(p, "_max_completion_tokens", None) == 12000
 
     def test_request_policy_override_wins_over_settings(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
@@ -184,7 +213,7 @@ class TestCreateProvider:
         assert getattr(p, "_thinking_budget", None) is None
         assert getattr(p, "_max_completion_tokens", None) is None
 
-    def test_anthropic_loads_model_thinking_budget_but_ignores_max_completion_tokens(self, monkeypatch):
+    def test_anthropic_honors_model_thinking_budget_and_max_completion_tokens(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic")
         monkeypatch.setattr(
             "iac_code.config.get_provider_config",
@@ -199,7 +228,7 @@ class TestCreateProvider:
 
         assert p.get_model_name() == "claude-sonnet-4-6"
         assert p._build_thinking_kwargs() == {"thinking": {"type": "enabled", "budget_tokens": 3072}}
-        assert not hasattr(p, "_max_completion_tokens")
+        assert getattr(p, "_max_output_tokens", None) == 10000
 
     def test_effort_override_takes_precedence_over_settings(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
@@ -445,6 +474,76 @@ class TestProviderManager:
         m.reconfigure("some-model", {})
         assert m._provider is None
         assert m.get_model_name() == "some-model"
+
+    def test_check_qwenpaw_config_change_reconfigures_by_default(self, monkeypatch):
+        """CLI/REPL hot-reload: a QwenPaw active_model change is picked up mid-session."""
+        from iac_code.services.qwenpaw_source import QwenPawConfig
+
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
+        monkeypatch.setattr(
+            "iac_code.config._get_env_overrides",
+            lambda: {"provider_key": None, "model": None, "api_base": None, "api_key": None},
+        )
+        monkeypatch.setattr("iac_code.config.get_llm_source", lambda: "qwenpaw")
+        monkeypatch.setattr(
+            "iac_code.services.qwenpaw_source.load_from_qwenpaw",
+            lambda: QwenPawConfig(
+                model="qwen-max",
+                provider_key="dashscope",
+                api_key="fake-qwenpaw-key",
+                base_url="https://qwenpaw.invalid/v1",
+            ),
+        )
+
+        m = ProviderManager(
+            model="qwen3.7-plus",
+            credentials={"dashscope": "k"},
+            provider_key_override="dashscope",
+        )
+        m._check_qwenpaw_config_change()
+
+        # Default behaviour: QwenPaw's active model wins (hot-reload).
+        assert m.get_model_name() == "qwen-max"
+        assert m._base_url_override == "https://qwenpaw.invalid/v1"
+
+    def test_ignore_llm_source_keeps_session_provider(self, monkeypatch):
+        """A session-level provider override must survive the per-request QwenPaw check.
+
+        Web bug: the user activates QwenPaw (global ``llm_source=qwenpaw``), it fails, then
+        switches the session to a regular provider. ``agent_factory`` builds the manager with the
+        session's provider/model, but ``stream()`` calls ``_check_qwenpaw_config_change`` on every
+        request, which reconfigured back to QwenPaw's (broken) endpoint — so switching provider
+        appeared to do nothing. With ``ignore_llm_source`` set the session's choice stays put.
+        """
+        from iac_code.services.qwenpaw_source import QwenPawConfig
+
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
+        monkeypatch.setattr(
+            "iac_code.config._get_env_overrides",
+            lambda: {"provider_key": None, "model": None, "api_base": None, "api_key": None},
+        )
+        monkeypatch.setattr("iac_code.config.get_llm_source", lambda: "qwenpaw")
+        monkeypatch.setattr(
+            "iac_code.services.qwenpaw_source.load_from_qwenpaw",
+            lambda: QwenPawConfig(
+                model="qwen-max",
+                provider_key="dashscope",
+                api_key="fake-qwenpaw-key",
+                base_url="https://qwenpaw.invalid/v1",
+            ),
+        )
+
+        m = ProviderManager(
+            model="qwen3.7-plus",
+            credentials={"dashscope": "k"},
+            provider_key_override="dashscope",
+            ignore_llm_source=True,
+        )
+        m._check_qwenpaw_config_change()
+
+        # Session choice is immune to the global QwenPaw hot-reload.
+        assert m.get_model_name() == "qwen3.7-plus"
+        assert m._base_url_override is None
 
     def test_failure_telemetry_uses_public_error_summary(self, monkeypatch):
         telemetry_events = []
@@ -855,6 +954,34 @@ class TestProviderManagerStreaming:
         request_statuses = [attrs["status"] for name, _value, attrs in metrics if name == Metrics.API_REQUEST_COUNT]
         assert request_statuses == ["error", "ok"]
 
+    async def test_stream_fallback_tombstone_identifies_orphaned_tools(self):
+        mock_provider = AsyncMock()
+
+        async def failing_stream(*a, **kw):
+            yield MessageStartEvent(message_id="m1")
+            yield ToolUseStartEvent(tool_use_id="tool-1", name="bash")
+            raise ConnectionError("stream died")
+
+        mock_provider.stream = failing_stream
+        mock_provider.get_model_name.return_value = "test"
+        mock_provider.complete = AsyncMock(
+            return_value=NonStreamingResponse(
+                message_id="m2",
+                text="complete",
+                tool_uses=[],
+                stop_reason="end_turn",
+                usage=Usage(),
+            )
+        )
+        mgr = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
+        mgr._provider = mock_provider
+
+        events = [event async for event in mgr.stream(messages=[Message.user("hi")], system="sys")]
+
+        tombstone = next(event for event in events if event.type == "tombstone")
+        assert tombstone.message_id == "m1"
+        assert tombstone.affected_tool_use_ids == ["tool-1"]
+
     async def test_fallback_complete_also_fails_yields_error_event(self):
         mock_provider = AsyncMock()
 
@@ -1104,7 +1231,7 @@ class TestProviderManagerStreaming:
 
         monkeypatch.setattr(
             "iac_code.providers.manager.create_provider",
-            lambda model, credentials, *, base_url=None, provider_key_override=None: (
+            lambda model, credentials, *, base_url=None, provider_key_override=None, effort_override=None: (
                 FallbackProvider() if model == "claude-haiku-4-5-20251001" else PrimaryProvider()
             ),
         )
@@ -1743,7 +1870,9 @@ class TestProviderManagerCompleteRetry:
 
         created_models: list[str] = []
 
-        def fake_create_provider(model, credentials, *, base_url=None, provider_key_override=None):
+        def fake_create_provider(
+            model, credentials, *, base_url=None, provider_key_override=None, effort_override=None
+        ):
             created_models.append(model)
             return FakeProvider(model, fail=model == "claude-sonnet-4-6")
 
@@ -1915,7 +2044,9 @@ class TestProviderManagerCompleteRetry:
             async def complete(self, messages, system, tools=None, max_tokens=8192):
                 raise Status503Error("primary temporary outage")
 
-        def fake_create_provider(model, credentials, *, base_url=None, provider_key_override=None):
+        def fake_create_provider(
+            model, credentials, *, base_url=None, provider_key_override=None, effort_override=None
+        ):
             if model == "claude-sonnet-4-6":
                 return PrimaryProvider()
             raise RuntimeError("fallback provider unavailable")
@@ -1952,7 +2083,9 @@ class TestProviderManagerCompleteRetry:
 
         created_models: list[str] = []
 
-        def fake_create_provider(model, credentials, *, base_url=None, provider_key_override=None):
+        def fake_create_provider(
+            model, credentials, *, base_url=None, provider_key_override=None, effort_override=None
+        ):
             created_models.append(model)
             if model == "claude-sonnet-4-6":
                 return PrimaryProvider()

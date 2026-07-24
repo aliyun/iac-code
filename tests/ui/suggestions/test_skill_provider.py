@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from iac_code.commands.registry import CommandRegistry, LocalCommand, PromptCommand
+from iac_code.types.skill_source import SkillSource
 from iac_code.ui.suggestions.skill_provider import SkillProvider
 from iac_code.ui.suggestions.types import CompletionToken
 
@@ -79,6 +80,20 @@ class TestSkillProvider:
         for item in items:
             assert item.source == "skill"
             assert item.icon == "$"
+
+    def test_origin_tracks_prompt_command_source(self):
+        """Skill suggestions expose whether a skill is bundled, project, or user owned."""
+        reg = CommandRegistry()
+        reg.register(PromptCommand(name="system-skill", description="Bundled", source=SkillSource.BUNDLED))
+        reg.register(PromptCommand(name="project-skill", description="Project", source=SkillSource.PROJECT))
+        reg.register(PromptCommand(name="user-skill", description="User", source=SkillSource.USER))
+        provider = SkillProvider(reg)
+
+        items = {item.display_text: item for item in provider.provide(make_token("$skill"))}
+
+        assert items["system-skill"].origin == "bundled"
+        assert items["project-skill"].origin == "project"
+        assert items["user-skill"].origin == "user"
 
     def test_id_format(self, provider):
         """Item ids should be prefixed with 'skill:'."""

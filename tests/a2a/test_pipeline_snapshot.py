@@ -335,6 +335,65 @@ def test_reduce_input_received_records_candidate_selection_details_on_step() -> 
     }
 
 
+def test_reduce_input_received_records_selected_candidate_in_control() -> None:
+    # Issue 1/3: persist the picked plan in control.selectedCandidate so a reload
+    # renders the ✓ and keeps the selection buttons suppressed.
+    step = _base("evt-1", 1, "step_started", scope="step")
+    step["step"] = {"runId": "step-confirm_and_select-1", "id": "confirm_and_select", "index": 4, "total": 5}
+    waiting = _base("evt-2", 2, "input_required", scope="step", status="waiting_input")
+    waiting["step"] = step["step"]
+    waiting["data"] = {"prompt": "choose"}
+    received = _base("evt-3", 3, "input_received", scope="step")
+    received["step"] = step["step"]
+    received["data"] = {
+        "kind": "candidate_selection",
+        "selectedIndex": 0,
+        "selectedValue": "最低成本测试方案",
+        "selectedOption": {"name": "最低成本测试方案", "candidate_index": 0},
+    }
+
+    snapshot = reduce_pipeline_events([step, waiting, received])
+
+    assert snapshot["control"]["selectedCandidate"] == {
+        "candidateName": "最低成本测试方案",
+        "candidateIndex": 0,
+    }
+
+
+def test_reduce_input_received_recovers_selection_from_selected_value_json() -> None:
+    # Fallback: name/index missing at top level, recover from selectedValue JSON.
+    step = _base("evt-1", 1, "step_started", scope="step")
+    step["step"] = {"runId": "step-confirm_and_select-1", "id": "confirm_and_select", "index": 4, "total": 5}
+    received = _base("evt-2", 2, "input_received", scope="step")
+    received["step"] = step["step"]
+    received["data"] = {
+        "kind": "candidate_selection",
+        "selectedValue": json.dumps(
+            {"selected_candidate_name": "高可用方案", "selected_candidate_index": 2},
+            ensure_ascii=False,
+        ),
+    }
+
+    snapshot = reduce_pipeline_events([step, received])
+
+    assert snapshot["control"]["selectedCandidate"] == {
+        "candidateName": "高可用方案",
+        "candidateIndex": 2,
+    }
+
+
+def test_reduce_input_received_non_candidate_kind_leaves_selection_absent() -> None:
+    step = _base("evt-1", 1, "step_started", scope="step")
+    step["step"] = {"runId": "step-intent_parsing-1", "id": "intent_parsing", "index": 1, "total": 5}
+    received = _base("evt-2", 2, "input_received", scope="step")
+    received["step"] = step["step"]
+    received["data"] = {"kind": "ask_user_question", "selectedValue": "补充说明"}
+
+    snapshot = reduce_pipeline_events([step, received])
+
+    assert "selectedCandidate" not in snapshot["control"]
+
+
 def test_reduce_ask_user_question_input_received_reopens_waiting_step() -> None:
     step = _base("evt-1", 1, "step_started", scope="step")
     step["step"] = {

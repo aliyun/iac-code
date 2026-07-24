@@ -1,6 +1,8 @@
 """Tests for the message module."""
 
 from iac_code.agent.message import (
+    COMPACTION_SUMMARY_METADATA_TYPE,
+    COMPACTION_SUMMARY_TAIL_METADATA_KEY,
     Conversation,
     Message,
     RedactedThinkingBlock,
@@ -8,6 +10,9 @@ from iac_code.agent.message import (
     ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
+    compaction_summary_tail_count,
+    create_compaction_summary_message,
+    is_compaction_summary_message,
 )
 
 
@@ -306,3 +311,53 @@ class TestConversation:
         """Test to_api_format() with empty conversation."""
         conv = Conversation()
         assert conv.to_api_format() == []
+
+
+def test_create_compaction_summary_message_shape():
+    msg = create_compaction_summary_message("hello world")
+    assert msg.role == "user"
+    assert msg.metadata.get("type") == COMPACTION_SUMMARY_METADATA_TYPE
+    assert msg.get_text() == "[Conversation Summary]\nhello world"
+
+
+def test_is_compaction_summary_message_by_metadata():
+    msg = create_compaction_summary_message("x")
+    assert is_compaction_summary_message(msg) is True
+
+
+def test_is_compaction_summary_message_migrates_legacy_storage_row():
+    legacy = Message.from_dict({"role": "user", "content": "[Conversation Summary]\nold summary", "version": "0.7.0"})
+    assert is_compaction_summary_message(legacy) is True
+
+
+def test_is_compaction_summary_message_does_not_claim_current_user_text_prefix():
+    current = Message.from_dict(
+        {"role": "user", "content": "[Conversation Summary]\nordinary request", "version": "0.9.1"}
+    )
+    assert is_compaction_summary_message(current) is False
+
+
+def test_is_compaction_summary_message_negatives():
+    assert is_compaction_summary_message(Message(role="user", content="just a question")) is False
+    assert is_compaction_summary_message(Message(role="assistant", content="[Conversation Summary]\nx")) is False
+
+
+def test_compaction_marker_dict_roundtrip_preserves_metadata_type():
+    msg = create_compaction_summary_message("keep me")
+    restored = Message.from_dict(msg.to_dict())
+    assert restored.metadata.get("type") == COMPACTION_SUMMARY_METADATA_TYPE
+    assert is_compaction_summary_message(restored) is True
+
+
+def test_compaction_summary_tail_count_reads_metadata():
+    msg = create_compaction_summary_message("x")
+    assert compaction_summary_tail_count(msg) == 0  # 新建标记默认无尾部字段
+    msg.metadata[COMPACTION_SUMMARY_TAIL_METADATA_KEY] = 4
+    assert compaction_summary_tail_count(msg) == 4
+
+
+def test_compaction_summary_tail_count_ignores_invalid_values():
+    msg = create_compaction_summary_message("x")
+    for bad in (0, -3, "5", None, 2.5):
+        msg.metadata[COMPACTION_SUMMARY_TAIL_METADATA_KEY] = bad
+        assert compaction_summary_tail_count(msg) == 0

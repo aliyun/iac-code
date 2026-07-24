@@ -5,6 +5,11 @@ from pathlib import Path
 
 import setuptools
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+    import tomli as tomllib
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -120,3 +125,35 @@ def test_legacy_setup_declares_package_metadata(monkeypatch):
     assert kwargs["entry_points"] == {"console_scripts": ["iac-code=iac_code.cli.main:app"]}
     assert kwargs["install_requires"]
     assert "a2a" in kwargs["extras_require"]
+
+
+def test_web_static_assets_are_included_in_package_data():
+    data = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    package_data = data["tool"]["setuptools"]["package-data"]["iac_code"]
+
+    assert "**/*.html" in package_data
+    assert "**/*.css" in package_data
+    assert "**/*.js" in package_data
+    assert "**/*.svg" in package_data
+    assert "**/*.LICENSE" in package_data
+
+
+def test_web_static_assets_are_included_in_legacy_setup_package_data(monkeypatch):
+    setup_module = _load_setup_module(monkeypatch)
+    kwargs = setup_module._TEST_SETUP_KWARGS
+
+    for package_data in (setup_module.PACKAGE_DATA["iac_code"], kwargs["package_data"]["iac_code"]):
+        assert "**/*.html" in package_data
+        assert "**/*.css" in package_data
+        assert "**/*.js" in package_data
+        assert "**/*.svg" in package_data
+        assert "**/*.LICENSE" in package_data
+
+
+def test_http_extra_includes_pipeline_runtime_dependencies(monkeypatch):
+    data = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    setup_module = _load_setup_module(monkeypatch)
+
+    for dependencies in (data["project"]["optional-dependencies"]["http"], setup_module.EXTRAS_REQUIRE["http"]):
+        assert any(dependency.startswith("a2a-sdk[") for dependency in dependencies)

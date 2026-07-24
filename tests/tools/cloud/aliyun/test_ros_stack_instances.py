@@ -160,7 +160,7 @@ class TestRosStackInstancesExecute:
         mock_client.list_stack_instances.return_value = list_instances_response
 
         queue: asyncio.Queue = asyncio.Queue()
-        ctx = ToolContext(event_queue=queue)
+        ctx = ToolContext(event_queue=queue, tool_use_id="toolu-instances")
 
         with patch("iac_code.tools.cloud.aliyun.ros_stack_instances.RosClientFactory") as mock_factory:
             mock_factory.create.return_value = mock_client
@@ -191,6 +191,7 @@ class TestRosStackInstancesExecute:
         assert len(progress_events) >= 1
         first = progress_events[0]
         assert first.operation_id == "op-123"
+        assert first.tool_use_id == "toolu-instances"
         assert first.status == "SUCCEEDED"
         assert len(first.instances) == 1
         assert first.instances[0]["account_id"] == "123456789"

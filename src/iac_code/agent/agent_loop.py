@@ -91,6 +91,12 @@ class CompactResult:
     preserve_recent_turns: int = 0
 
 
+@dataclass
+class _PendingInjection:
+    content: str | list[ContentBlock]
+    metadata: dict[str, Any]
+
+
 def _user_input_to_text(user_input: str | list[ContentBlock]) -> str:
     if isinstance(user_input, str):
         return user_input
@@ -372,7 +378,7 @@ class AgentLoop:
             else os.path.join(str(get_config_dir()), "tool-results", self._session_id)
         )
         self._result_storage = ResultStorage(storage_dir=storage_dir)
-        self._pending_injections: deque[str | list[ContentBlock]] = deque()
+        self._pending_injections: deque[str | list[ContentBlock] | _PendingInjection] = deque()
         self._current_turn_text: str = ""
         self._accepting_injected_user_messages = False
         self._pause_event = pause_event
@@ -395,33 +401,49 @@ class AgentLoop:
             PROCESS_RESOLVED_CONTRACT_STORE.reject(snapshot_id)
         self._owned_contract_snapshot_ids.discard(snapshot_id)
 
-    def inject_user_message(self, msg: str | list[ContentBlock]) -> None:
+    def inject_user_message(
+        self,
+        msg: str | list[ContentBlock],
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         """Schedule a user message to be injected before the next LLM turn."""
-        self._pending_injections.append(msg)
+        pending: str | list[ContentBlock] | _PendingInjection = msg
+        if metadata is not None:
+            pending = _PendingInjection(content=msg, metadata=dict(metadata))
+        self._pending_injections.append(pending)
 
     @property
     def can_accept_injected_user_message(self) -> bool:
         """Whether a queued supplement can still be consumed by this run."""
         return self._accepting_injected_user_messages
 
-    def try_inject_user_message(self, msg: str | list[ContentBlock]) -> bool:
+    def try_inject_user_message(
+        self,
+        msg: str | list[ContentBlock],
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
         """Queue a supplement only when this loop still has a consumable turn."""
         if not self.can_accept_injected_user_message:
             return False
-        self.inject_user_message(msg)
+        self.inject_user_message(msg, metadata=metadata)
         return True
 
     def _drain_pending_injections(self) -> None:
         while self._pending_injections:
             injected = self._pending_injections.popleft()
-            self.context_manager.add_user_message(injected)
+            metadata: dict[str, Any] = {}
+            if isinstance(injected, _PendingInjection):
+                metadata = injected.metadata
+                injected = injected.content
+            message = self.context_manager.add_user_message(injected)
+            message.metadata.update(metadata)
             if self._session_storage:
-                from iac_code.agent.message import Message
-
                 self._session_storage.append(
                     self._cwd,
                     self._session_id,
-                    Message(role="user", content=injected),
+                    message,
                     git_branch=self._current_git_branch,
                 )
 
@@ -1041,9 +1063,15 @@ class AgentLoop:
 
             # Auto-compact if needed
             if self.context_manager.needs_compaction():
+                # Emit a "started" marker first so the web UI can render the
+                # "正在自动压缩上下文" running indicator while the (blocking)
+                # summarization LLM call is in flight, then always emit a
+                # terminal event so the indicator never sticks. A no-op or
+                # failure is explicit instead of looking like a successful
+                # 0 -> 0 compaction.
+                yield CompactionEvent(phase="started")
                 compact_event = await self._auto_compact()
-                if compact_event:
-                    yield compact_event
+                yield compact_event if compact_event else CompactionEvent(phase="failed", reason="no_result")
 
             step_attrs = {
                 GenAiAttr.SPAN_KIND: GenAiSpanKind.STEP,
@@ -1568,6 +1596,8 @@ class AgentLoop:
                 continue
             await self._apply_auto_triggers(text)
             message = self.context_manager.add_user_message(text)
+            message_id = "queued-{}".format(uuid.uuid4().hex)
+            message.metadata["messageId"] = message_id
             if self._session_storage:
                 self._session_storage.append(
                     self._cwd,
@@ -1575,7 +1605,7 @@ class AgentLoop:
                     message,
                     git_branch=self._current_git_branch,
                 )
-            yield QueuedInputSubmittedEvent(text=text)
+            yield QueuedInputSubmittedEvent(text=text, message_id=message_id)
 
     @staticmethod
     def _tool_result_event_metadata(metadata: dict[str, Any] | None, processed: Any) -> dict[str, Any] | None:
@@ -1795,7 +1825,7 @@ class AgentLoop:
                         "duration_ms": duration_ms,
                     },
                 )
-                return CompactionEvent(original_tokens=original, compacted_tokens=new)
+                return CompactionEvent(original_tokens=original, compacted_tokens=new, summary=response.text)
         except Exception as e:
             log_event(
                 Events.MEMORY_COMPACT_FAILED,

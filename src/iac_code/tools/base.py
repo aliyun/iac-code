@@ -296,6 +296,10 @@ class Tool(ABC):
         """Per-tool timeout in seconds. None means use the global default."""
         return None
 
+    def execution_timeout(self, tool_input: dict[str, Any]) -> float | None:
+        """Per-call timeout in seconds. Defaults to the tool-level timeout."""
+        return self.timeout
+
     def is_read_only(self, input: dict | None = None) -> bool:
         """Whether the tool only reads and never modifies state."""
         return False

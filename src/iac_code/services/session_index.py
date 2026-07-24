@@ -11,10 +11,17 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from iac_code.agent.message import RECALLED_MEMORY_MARKER, RECALLED_MEMORY_METADATA_TYPE
+from iac_code.agent.message import (
+    COMPACTION_SUMMARY_METADATA_TYPE,
+    RECALLED_MEMORY_MARKER,
+    RECALLED_MEMORY_METADATA_TYPE,
+    is_legacy_compaction_summary_storage_row,
+)
 from iac_code.pipeline.constants import CLEANUP_PROMPT_METADATA_TYPE
 from iac_code.services.session_layout import (
     UnsupportedSessionLayoutError,
@@ -22,6 +29,7 @@ from iac_code.services.session_layout import (
 )
 from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, SESSION_METADATA_FILENAME, read_session_metadata
 from iac_code.utils.project_paths import (
+    MAX_SANITIZED_LENGTH,
     get_projects_dir,
     is_conversation_session_file,
     project_dir_candidates,
@@ -38,6 +46,7 @@ _LEGACY_CLEANUP_RESOURCE_PHRASES = (
     "待清理资源",
     "回滚残留资源",
 )
+_INTERNAL_SKILL_CONTEXT_RE = re.compile(r"^\s*<skill-name>[^<]+</skill-name>(?:\s|\Z)")
 
 
 @dataclass
@@ -186,14 +195,33 @@ def _is_cleanup_prompt_text(text: str | None) -> bool:
     return has_rollback_context and has_cleanup_resource_context
 
 
+def _is_internal_skill_context_text(text: str | None) -> bool:
+    return bool(text and _INTERNAL_SKILL_CONTEXT_RE.match(text))
+
+
+def _is_pipeline_handoff_context_text(text: str | None) -> bool:
+    return bool(text and text.startswith("[Pipeline Handoff Context]"))
+
+
 def _is_hidden_prompt_row(obj: dict) -> bool:
     metadata = obj.get("metadata")
     if isinstance(metadata, dict) and metadata.get("type") == RECALLED_MEMORY_METADATA_TYPE:
         return True
     if isinstance(metadata, dict) and metadata.get("type") == CLEANUP_PROMPT_METADATA_TYPE:
         return True
+    if isinstance(metadata, dict) and metadata.get("type") == "internal-skill-context":
+        return True
+    if isinstance(metadata, dict) and metadata.get("type") == COMPACTION_SUMMARY_METADATA_TYPE:
+        return True
+    if is_legacy_compaction_summary_storage_row(obj):
+        return True
     content = obj.get("content")
-    return isinstance(content, str) and (_is_recalled_memory_text(content) or _is_cleanup_prompt_text(content))
+    return isinstance(content, str) and (
+        _is_recalled_memory_text(content)
+        or _is_cleanup_prompt_text(content)
+        or _is_internal_skill_context_text(content)
+        or _is_pipeline_handoff_context_text(content)
+    )
 
 
 def _extract_first_user_text(head: str) -> str | None:
@@ -254,7 +282,12 @@ def read_lite_metadata(path: Path) -> LiteMetadata:
         head, "git_branch"
     )
     last_prompt = extract_last_json_string_field(tail, "last_prompt")
-    if _is_recalled_memory_text(last_prompt) or _is_cleanup_prompt_text(last_prompt):
+    if (
+        _is_recalled_memory_text(last_prompt)
+        or _is_cleanup_prompt_text(last_prompt)
+        or _is_internal_skill_context_text(last_prompt)
+        or _is_pipeline_handoff_context_text(last_prompt)
+    ):
         last_prompt = None
     first_prompt = _extract_first_user_text(head)
     return LiteMetadata(
@@ -344,11 +377,14 @@ def _metadata_shadow_project_dirs(project_dir: Path, projects_dir: Path, metadat
         for candidate in project_dir_candidates(cwd, projects_dir):
             add(candidate)
     add(project_dir)
-    suffix = _long_project_dir_hash_suffix(project_dir)
-    if suffix is not None and projects_dir.exists():
-        for candidate in projects_dir.iterdir():
-            if candidate.is_dir() and _long_project_dir_hash_suffix(candidate) == suffix:
-                add(candidate)
+    if projects_dir.exists():
+        all_project_dirs = [candidate for candidate in projects_dir.iterdir() if candidate.is_dir()]
+        aliases = _long_project_alias_identities(all_project_dirs)
+        identity = aliases.get(project_dir.name)
+        if identity is not None:
+            for candidate in all_project_dirs:
+                if aliases.get(candidate.name) == identity:
+                    add(candidate)
     return tuple(project_dirs)
 
 
@@ -362,6 +398,47 @@ def _long_project_dir_hash_suffix(project_dir: Path) -> str | None:
     except ValueError:
         return None
     return suffix
+
+
+def _long_project_alias_identities(project_dirs: list[Path]) -> dict[str, tuple[str, str]]:
+    """Identify only real bounded/legacy long-path directory pairs.
+
+    A normal project name may legitimately end in ``-<12 hex>``.  The suffix
+    alone therefore cannot prove that it is a generated long-path alias.
+    """
+    by_suffix: dict[str, list[Path]] = {}
+    for project_dir in project_dirs:
+        suffix = _long_project_dir_hash_suffix(project_dir)
+        if suffix is not None:
+            by_suffix.setdefault(suffix, []).append(project_dir)
+
+    identities: dict[str, tuple[str, str]] = {}
+    legacy_length = MAX_SANITIZED_LENGTH + 13
+    for suffix, candidates in by_suffix.items():
+        bounded = [candidate for candidate in candidates if len(candidate.name) == MAX_SANITIZED_LENGTH]
+        legacy = [candidate for candidate in candidates if len(candidate.name) == legacy_length]
+        for current in bounded:
+            current_prefix = current.name[:-13]
+            for old in legacy:
+                if not old.name[:-13].startswith(current_prefix):
+                    continue
+                identity = ("long-path-alias", current.name)
+                identities[current.name] = identity
+                identities[old.name] = identity
+    return identities
+
+
+def _project_storage_identity(
+    project_dir: Path,
+    aliases: dict[str, tuple[str, str]],
+) -> tuple[str, str]:
+    """Return a stable identity shared by bounded and legacy long-path aliases."""
+    return aliases.get(project_dir.name, ("directory", project_dir.name))
+
+
+def _project_alias_priority(project_dir: Path) -> int:
+    """Prefer the bounded current alias over the pre-fix overlong alias."""
+    return int(len(project_dir.name) <= MAX_SANITIZED_LENGTH)
 
 
 def _session_file_priority(path: Path) -> int:
@@ -414,10 +491,55 @@ class SessionIndex:
 
     def __init__(self, projects_dir: Path | None = None) -> None:
         self._projects_dir = projects_dir if projects_dir is not None else get_projects_dir()
+        # 请求级快照:>0 时 list_all_projects_page 复用同一份全量扫描结果(见 snapshot())。
+        self._snapshot_depth = 0
+        self._snapshot_entries: tuple[list[SessionEntry], int] | None = None
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    @contextmanager
+    def snapshot(self) -> Iterator[None]:
+        """在此代码块内让 :meth:`list_all_projects_page` 只做一次全量扫描并复用。
+
+        首页 ``/api/sessions`` 一次请求里会经由 list_sessions_page /
+        list_pinned_sessions / list_session_projects / list_pinned_projects
+        触发 3~4 次 ``list_all_projects_page(limit=None)``,每次都 stat + 解析
+        磁盘上的每个会话文件。进入本块时把首次扫描结果缓存,块内后续调用(全量或
+        限量)都从这份按 mtime 降序排好的列表返回;退出最外层块时清空缓存,
+        块外的读写仍取磁盘最新状态。可重入(按深度计数)。
+        """
+        self._snapshot_depth += 1
+        try:
+            yield
+        finally:
+            self._snapshot_depth -= 1
+            if self._snapshot_depth == 0:
+                self._snapshot_entries = None
+
+    def _scan_all_entries(self) -> tuple[list[SessionEntry], int]:
+        """Build a SessionEntry for every session file across all projects, mtime-desc."""
+        if not self._projects_dir.exists():
+            return [], 0
+        entries_by_project_session: dict[tuple[str, str], SessionEntry] = {}
+        priorities: dict[tuple[str, str], tuple[int, int, float]] = {}
+        for proj_dir in self._projects_dir.iterdir():
+            if not proj_dir.is_dir():
+                continue
+            for jsonl, session_id in _iter_session_files(proj_dir, projects_dir=self._projects_dir):
+                entry = _build_entry(jsonl, fallback_cwd="", session_id=session_id)
+                if entry is None:
+                    continue
+                key = (entry.cwd, session_id)
+                priority = (_session_file_priority(jsonl), _project_alias_priority(proj_dir), entry.mtime)
+                if priority <= priorities.get(key, (-1, -1, -1.0)):
+                    continue
+                entries_by_project_session[key] = entry
+                priorities[key] = priority
+        entries = list(entries_by_project_session.values())
+        entries.sort(key=lambda e: e.mtime, reverse=True)
+        return entries, len(entries)
 
     def list_for_cwd(self, cwd: str) -> list[SessionEntry]:
         """List entries that belong to ``cwd``, mtime-descending."""
@@ -440,28 +562,74 @@ class SessionIndex:
         entries.sort(key=lambda e: e.mtime, reverse=True)
         return entries
 
-    def list_all_projects(self) -> list[SessionEntry]:
-        """List entries across every known project, mtime-descending."""
+    def list_all_projects_page(self, *, limit: int | None = None) -> tuple[list[SessionEntry], int]:
+        """List entries across every known project with optional metadata-read limit."""
+        if self._snapshot_depth > 0:
+            # 请求级快照生效:全量扫描一次后,全量/限量调用都从这份缓存返回。
+            if self._snapshot_entries is None:
+                self._snapshot_entries = self._scan_all_entries()
+            entries, total = self._snapshot_entries
+            if limit is None:
+                return entries, total
+            if limit <= 0:
+                return [], total
+            return entries[:limit], total
         if not self._projects_dir.exists():
-            return []
+            return [], 0
+        if limit is None:
+            return self._scan_all_entries()
+
+        project_dirs = [proj_dir for proj_dir in self._projects_dir.iterdir() if proj_dir.is_dir()]
+        aliases = _long_project_alias_identities(project_dirs)
+        candidates_by_storage: dict[tuple[tuple[str, str], str], tuple[float, Path, str, int, int]] = {}
+        for proj_dir in project_dirs:
+            project_identity = _project_storage_identity(proj_dir, aliases)
+            alias_priority = _project_alias_priority(proj_dir)
+            for jsonl, session_id in _iter_session_files(proj_dir, projects_dir=self._projects_dir):
+                try:
+                    mtime = jsonl.stat().st_mtime
+                except OSError:
+                    continue
+                key = (project_identity, session_id)
+                priority = _session_file_priority(jsonl)
+                current = candidates_by_storage.get(key)
+                candidate_rank = (priority, alias_priority, mtime)
+                current_rank = (current[3], current[4], current[0]) if current is not None else (-1, -1, -1.0)
+                if candidate_rank > current_rank:
+                    candidates_by_storage[key] = (mtime, jsonl, session_id, priority, alias_priority)
+        candidates = list(candidates_by_storage.values())
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        if limit <= 0:
+            return [], len(candidates)
+
         entries_by_project_session: dict[tuple[str, str], SessionEntry] = {}
         priorities: dict[tuple[str, str], int] = {}
-        for proj_dir in self._projects_dir.iterdir():
-            if not proj_dir.is_dir():
+        for _mtime, jsonl, session_id, _priority, _alias_priority in candidates:
+            entry = _build_entry(jsonl, fallback_cwd="", session_id=session_id)
+            if entry is None:
                 continue
-            for jsonl, session_id in _iter_session_files(proj_dir, projects_dir=self._projects_dir):
-                entry = _build_entry(jsonl, fallback_cwd="", session_id=session_id)
-                if entry is None:
-                    continue
-                priority = _session_file_priority(jsonl)
-                key = (entry.cwd, session_id)
-                if priority <= priorities.get(key, -1):
-                    continue
-                entries_by_project_session[key] = entry
-                priorities[key] = priority
+            key = (entry.cwd, session_id)
+            priority = _session_file_priority(jsonl)
+            if priority <= priorities.get(key, -1):
+                continue
+            entries_by_project_session[key] = entry
+            priorities[key] = priority
+            if len(entries_by_project_session) >= limit:
+                break
         entries = list(entries_by_project_session.values())
-        entries.sort(key=lambda e: e.mtime, reverse=True)
+        entries.sort(key=lambda entry: entry.mtime, reverse=True)
+        return entries, len(candidates)
+
+    def list_all_projects(self) -> list[SessionEntry]:
+        """List entries across every known project, mtime-descending."""
+        entries, _total = self.list_all_projects_page()
         return entries
+
+    def list_project_directories(self) -> list[Path]:
+        """List known project storage directories by directory name."""
+        if not self._projects_dir.exists():
+            return []
+        return sorted((path for path in self._projects_dir.iterdir() if path.is_dir()), key=lambda path: path.name)
 
     def find_by_id_or_prefix(self, arg: str) -> SessionEntry | None:
         """Locate a single entry by exact session id or unique id prefix."""

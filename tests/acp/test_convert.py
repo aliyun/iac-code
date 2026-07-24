@@ -116,6 +116,12 @@ def test_compaction_event_to_message_chunk() -> None:
     assert "compacted" in updates[0].content.text.lower()
 
 
+def test_compaction_started_does_not_emit_completed_message() -> None:
+    converter = ACPEventConverter(turn_id="turn-1")
+
+    assert converter.event_to_updates(CompactionEvent(phase="started")) == []
+
+
 # ---------------------------------------------------------------------------
 # ErrorEvent → AgentMessageChunk
 # ---------------------------------------------------------------------------

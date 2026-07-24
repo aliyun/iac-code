@@ -692,12 +692,65 @@ async def test_subscribe_to_task_stops_after_input_required_status(monkeypatch) 
     ]
 
 
-def test_create_runtime_components_returns_shared_objects() -> None:
+@pytest.mark.asyncio
+async def test_create_runtime_components_returns_shared_objects() -> None:
     components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
 
-    assert isinstance(components, A2ARuntimeComponents)
-    assert components.handler is not None
-    assert components.task_store is not None
+    try:
+        assert isinstance(components, A2ARuntimeComponents)
+        assert components.handler is not None
+        assert components.task_store is not None
+    finally:
+        await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_create_runtime_components_registers_shared_runtime_owner(tmp_path) -> None:
+    from iac_code.a2a.runtime_registry import get_runtime_owner
+
+    persistence_dir = tmp_path / "a2a"
+    components = create_runtime_components(
+        model="qwen3.6-plus",
+        host="127.0.0.1",
+        port=41242,
+        persistence_dir=persistence_dir,
+    )
+
+    owner = get_runtime_owner(persistence_root=persistence_dir)
+    assert owner is not None
+    assert owner.task_store is components.task_store
+    assert owner.model == "qwen3.6-plus"
+
+    await components.aclose()
+
+    assert get_runtime_owner(persistence_root=persistence_dir) is None
+
+
+@pytest.mark.parametrize("failing_stage", ["agent_card", "handler"])
+def test_create_runtime_components_does_not_register_owner_before_initialization_completes(
+    monkeypatch,
+    tmp_path,
+    failing_stage: str,
+) -> None:
+    from iac_code.a2a.runtime_registry import get_runtime_owner
+
+    persistence_dir = tmp_path / failing_stage
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("initialization failed")
+
+    target = "build_agent_card" if failing_stage == "agent_card" else "IacCodeRequestHandler"
+    monkeypatch.setattr("iac_code.a2a.transports.dispatcher.{}".format(target), fail)
+
+    with pytest.raises(RuntimeError, match="initialization failed"):
+        create_runtime_components(
+            model="qwen3.6-plus",
+            host="127.0.0.1",
+            port=41242,
+            persistence_dir=persistence_dir,
+        )
+
+    assert get_runtime_owner(persistence_root=persistence_dir) is None
 
 
 @pytest.mark.asyncio
@@ -723,11 +776,15 @@ async def test_dispatcher_reuses_http_client(monkeypatch) -> None:
             return None
 
     monkeypatch.setattr("iac_code.a2a.transports.dispatcher.httpx.AsyncClient", FakeHTTPClient)
-    dispatcher = A2AJsonRpcDispatcher(create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242))
+    components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
+    dispatcher = A2AJsonRpcDispatcher(components)
 
-    await dispatcher.dispatch({"jsonrpc": "2.0", "id": "1", "method": "message/send"})
-    await dispatcher.dispatch({"jsonrpc": "2.0", "id": "2", "method": "message/send"})
-    await dispatcher.aclose()
+    try:
+        await dispatcher.dispatch({"jsonrpc": "2.0", "id": "1", "method": "message/send"})
+        await dispatcher.dispatch({"jsonrpc": "2.0", "id": "2", "method": "message/send"})
+        await dispatcher.aclose()
+    finally:
+        await components.aclose()
 
     assert created == 1
 
