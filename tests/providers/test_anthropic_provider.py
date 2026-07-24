@@ -6,7 +6,7 @@ from tests.providers._fakes import FakeAnthropicClient, ns
 
 
 class TestAnthropicProvider:
-    def test_created_client_disables_sdk_retries(self, monkeypatch):
+    def test_created_client_preserves_sdk_retry_default(self, monkeypatch):
         calls = []
 
         class FakeAsyncAnthropic:
@@ -18,7 +18,7 @@ class TestAnthropicProvider:
 
         AnthropicProvider(model="claude-sonnet-4-6", api_key="test")
 
-        assert calls[0]["max_retries"] == 0
+        assert "max_retries" not in calls[0]
 
     def test_get_model_name(self):
         p = AnthropicProvider(model="claude-sonnet-4-6", api_key="test")

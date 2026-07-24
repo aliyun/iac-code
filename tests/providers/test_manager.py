@@ -1230,6 +1230,61 @@ class TestProviderManagerCompleteRetry:
             (120, {"provider": "asyncmock", "model": "claude-sonnet-4-6", "iac_code.mode": "normal"})
         ]
 
+    async def test_complete_succeeds_when_telemetry_start_event_and_metrics_fail(self):
+        mock_provider = AsyncMock()
+        mock_provider.complete = AsyncMock(
+            return_value=NonStreamingResponse(
+                message_id="complete-response",
+                text="ok",
+                tool_uses=[],
+                stop_reason="end_turn",
+                usage=Usage(input_tokens=2, output_tokens=1, reported=True),
+            )
+        )
+        manager = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
+        manager._provider = mock_provider
+
+        with (
+            patch("iac_code.providers.manager.start_span", side_effect=RuntimeError("span unavailable")),
+            patch("iac_code.providers.manager.log_event", side_effect=RuntimeError("events unavailable")),
+            patch("iac_code.providers.manager.add_metric", side_effect=RuntimeError("metrics unavailable")),
+        ):
+            response = await manager.complete(messages=[Message.user("hi")], system="sys")
+
+        assert response.message_id == "complete-response"
+        mock_provider.complete.assert_awaited_once()
+
+    async def test_complete_succeeds_when_span_attribute_and_close_fail(self):
+        mock_provider = AsyncMock()
+        mock_provider.complete = AsyncMock(
+            return_value=NonStreamingResponse(
+                message_id="complete-response",
+                text="ok",
+                tool_uses=[],
+                stop_reason="end_turn",
+                usage=Usage(input_tokens=2, output_tokens=1, reported=True),
+            )
+        )
+        manager = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
+        manager._provider = mock_provider
+
+        class FailingSpan:
+            def set_attribute(self, _key, _value):
+                raise RuntimeError("span attribute unavailable")
+
+        class FailingSpanContext:
+            def __enter__(self):
+                return FailingSpan()
+
+            def __exit__(self, *_args):
+                raise RuntimeError("span close unavailable")
+
+        with patch("iac_code.providers.manager.start_span", return_value=FailingSpanContext()):
+            response = await manager.complete(messages=[Message.user("hi")], system="sys")
+
+        assert response.message_id == "complete-response"
+        mock_provider.complete.assert_awaited_once()
+
     async def test_complete_cancelled_error_records_terminal_telemetry_without_fallback(self, monkeypatch):
         mock_provider = AsyncMock()
         mock_provider.complete = AsyncMock(side_effect=asyncio.CancelledError())
@@ -1301,6 +1356,41 @@ class TestProviderManagerCompleteRetry:
         assert request_statuses == ["error", "ok"]
         started_events = [attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_STARTED]
         assert [attrs["model"] for attrs in started_events] == ["claude-sonnet-4-6", "claude-sonnet-4-6"]
+
+    async def test_retryable_failure_still_retries_when_failure_telemetry_fails(self):
+        from iac_code.providers.retry import RetryConfig
+
+        class RateLimitError(Exception):
+            status_code = 429
+
+        mock_provider = AsyncMock()
+        mock_provider.complete = AsyncMock(
+            side_effect=[
+                RateLimitError("slow down"),
+                NonStreamingResponse(
+                    message_id="m",
+                    text="ok",
+                    tool_uses=[],
+                    stop_reason="end_turn",
+                    usage=Usage(input_tokens=1, output_tokens=1, reported=True),
+                ),
+            ]
+        )
+        manager = ProviderManager(
+            model="claude-sonnet-4-6",
+            credentials={"anthropic": "k"},
+            retry_config=RetryConfig(max_retries=1, base_delay=0, jitter_factor=0),
+        )
+        manager._provider = mock_provider
+
+        with (
+            patch("iac_code.providers.manager.log_event", side_effect=RuntimeError("events unavailable")),
+            patch("iac_code.providers.manager.add_metric", side_effect=RuntimeError("metrics unavailable")),
+        ):
+            response = await manager.complete(messages=[Message.user("hi")], system="sys")
+
+        assert response.text == "ok"
+        assert mock_provider.complete.await_count == 2
 
     async def test_any_5xx_status_retries_then_succeeds(self):
         from iac_code.providers.base import NonStreamingResponse

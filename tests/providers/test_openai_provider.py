@@ -8,7 +8,7 @@ from tests.providers._fakes import FakeOpenAIClient, ns
 
 
 class TestOpenAIProvider:
-    def test_created_client_disables_sdk_retries(self, monkeypatch):
+    def test_created_client_preserves_sdk_retry_default(self, monkeypatch):
         calls = []
 
         class FakeAsyncOpenAI:
@@ -20,7 +20,7 @@ class TestOpenAIProvider:
 
         OpenAIProvider(model="gpt-4.1", api_key="test")
 
-        assert calls[0]["max_retries"] == 0
+        assert "max_retries" not in calls[0]
 
     def test_get_model_name(self):
         p = OpenAIProvider(model="gpt-4.1", api_key="test")

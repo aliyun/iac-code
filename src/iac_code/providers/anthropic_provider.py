@@ -90,7 +90,6 @@ class AnthropicProvider(Provider):
             if base_url is not None:
                 client_kwargs["base_url"] = base_url
             client_kwargs.update(kwargs)
-            client_kwargs["max_retries"] = 0
             self._client = anthropic.AsyncAnthropic(**client_kwargs)
         actual_base_url = getattr(self._client, "base_url", None) or base_url
         self._metadata_endpoint_id = self._endpoint_id(actual_base_url)

@@ -46,6 +46,7 @@ CLI 参数 > 环境变量 > 配置文件
 | `IAC_CODE_TELEMETRY_METRICS_ENDPOINT` | 覆盖 metrics 端点 |
 | `IAC_CODE_TELEMETRY_LOGS_ENDPOINT` | 覆盖 logs 端点 |
 | `IAC_CODE_TELEMETRY_HEADERS` | 自定义 OTLP 请求头（JSON 或 key=value 格式） |
+| `IAC_CODE_CHANNEL` | 稳定、低基数的遥测来源渠道（默认：`unknown`），例如 `ros_official` 或 `partner_acme` |
 
 ## 其他
 

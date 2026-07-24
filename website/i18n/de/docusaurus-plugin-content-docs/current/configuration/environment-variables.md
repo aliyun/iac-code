@@ -46,6 +46,7 @@ Siehe [Alibaba Cloud-Anmeldedaten](./alibaba-cloud-credentials.md) fuer weitere 
 | `IAC_CODE_TELEMETRY_METRICS_ENDPOINT` | Ueberschreibungsendpunkt fuer Metriken |
 | `IAC_CODE_TELEMETRY_LOGS_ENDPOINT` | Ueberschreibungsendpunkt fuer Protokolle |
 | `IAC_CODE_TELEMETRY_HEADERS` | Benutzerdefinierte OTLP-Header (JSON- oder key=value-Format) |
+| `IAC_CODE_CHANNEL` | Stabiler Telemetrie-Quellkanal mit niedriger Kardinalitaet (Standard: `unknown`), zum Beispiel `ros_official` oder `partner_acme` |
 
 ## Sonstiges
 

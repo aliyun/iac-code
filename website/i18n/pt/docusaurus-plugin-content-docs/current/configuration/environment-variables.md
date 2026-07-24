@@ -46,6 +46,7 @@ Consulte [Credenciais da Alibaba Cloud](./alibaba-cloud-credentials.md) para mai
 | `IAC_CODE_TELEMETRY_METRICS_ENDPOINT` | Endpoint personalizado para metricas |
 | `IAC_CODE_TELEMETRY_LOGS_ENDPOINT` | Endpoint personalizado para logs |
 | `IAC_CODE_TELEMETRY_HEADERS` | Cabecalhos OTLP personalizados (formato JSON ou chave=valor) |
+| `IAC_CODE_CHANNEL` | Canal de origem de telemetria estavel e de baixa cardinalidade (padrao: `unknown`), por exemplo `ros_official` ou `partner_acme` |
 
 ## Outros
 

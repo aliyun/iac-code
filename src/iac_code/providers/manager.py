@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -86,6 +88,92 @@ _TOKEN_METRIC_SCOPE_KEYS = frozenset(
         PipelineAttr.CANDIDATE_INDEX,
     }
 )
+
+
+class _BestEffortSpan:
+    def __init__(self, span: Any | None = None) -> None:
+        self._span = span
+
+    def set_attribute(self, key: str, value: Any) -> None:
+        if self._span is None:
+            return
+        try:
+            self._span.set_attribute(key, value)
+        except Exception:
+            logger.opt(exception=True).warning("Provider telemetry span attribute failed: key={}", key)
+
+
+def _safe_log_event(event_name: str, attrs: dict[str, Any]) -> None:
+    try:
+        log_event(event_name, attrs)
+    except Exception:
+        logger.opt(exception=True).warning("Provider telemetry event failed: event={}", event_name)
+
+
+def _safe_add_metric(name: str, value: int | float, attrs: dict[str, Any]) -> None:
+    try:
+        add_metric(name, value, attrs)
+    except Exception:
+        logger.opt(exception=True).warning("Provider telemetry metric failed: metric={}", name)
+
+
+@contextmanager
+def _safe_start_span(name: str, attrs: dict[str, Any]) -> Iterator[_BestEffortSpan]:
+    try:
+        span_context = start_span(name, attrs)
+        span = span_context.__enter__()
+    except Exception:
+        logger.opt(exception=True).warning("Provider telemetry span failed to start: span={}", name)
+        yield _BestEffortSpan()
+        return
+
+    try:
+        yield _BestEffortSpan(span)
+    except BaseException:
+        exc_info = sys.exc_info()
+        try:
+            span_context.__exit__(*exc_info)
+        except Exception:
+            logger.opt(exception=True).warning("Provider telemetry span failed to close: span={}", name)
+        raise
+    else:
+        try:
+            span_context.__exit__(None, None, None)
+        except Exception:
+            logger.opt(exception=True).warning("Provider telemetry span failed to close: span={}", name)
+
+
+def _safe_session_id() -> str:
+    try:
+        return get_session_id()
+    except Exception:
+        logger.opt(exception=True).warning("Provider telemetry session id lookup failed")
+        return ""
+
+
+def _safe_span_scope_attributes() -> dict[str, str | int]:
+    try:
+        return get_span_attributes()
+    except Exception:
+        logger.opt(exception=True).warning("Provider telemetry scope lookup failed")
+        return {}
+
+
+def _capture_request_content(
+    attrs: dict[str, Any],
+    messages: list[Message],
+    system: str,
+    tools: list[ToolDefinition] | None,
+) -> None:
+    try:
+        if not should_capture_content_on_span():
+            return
+        attrs[GenAiAttr.INPUT_MESSAGES] = serialize_input_messages(messages)
+        attrs[GenAiAttr.SYSTEM_INSTRUCTIONS] = serialize_system_instructions(system)
+        if tools:
+            attrs[GenAiAttr.TOOL_DEFINITIONS] = serialize_tool_definitions(tools)
+    except Exception:
+        logger.opt(exception=True).warning("Provider telemetry request content capture failed")
 
 
 @dataclass(frozen=True)
@@ -573,7 +661,7 @@ class ProviderManager:
         provider_name = type(provider).__name__.replace("Provider", "").lower()
         sanitized_model = sanitize_model_name(model)
 
-        log_event(
+        _safe_log_event(
             Events.API_REQUEST_STARTED,
             {
                 "provider": provider_name,
@@ -584,7 +672,7 @@ class ProviderManager:
         started = time.monotonic()
 
         span_name = f"{Spans.LLM_CHAT} {model}"
-        session_id = get_session_id()
+        session_id = _safe_session_id()
         span_attrs = {
             GenAiAttr.SPAN_KIND: GenAiSpanKind.LLM,
             GenAiAttr.OPERATION_NAME: GenAiOperationName.CHAT,
@@ -595,12 +683,8 @@ class ProviderManager:
             GenAiAttr.CONVERSATION_ID: session_id,
             GenAiAttr.OUTPUT_TYPE: "text",
         }
-        span_attrs.update(get_span_attributes())
-        if should_capture_content_on_span():
-            span_attrs[GenAiAttr.INPUT_MESSAGES] = serialize_input_messages(messages)
-            span_attrs[GenAiAttr.SYSTEM_INSTRUCTIONS] = serialize_system_instructions(system)
-            if tools:
-                span_attrs[GenAiAttr.TOOL_DEFINITIONS] = serialize_tool_definitions(tools)
+        span_attrs.update(_safe_span_scope_attributes())
+        _capture_request_content(span_attrs, messages, system, tools)
 
         orphaned_message_ids: list[str] = []
         buffer_until_accepted = model in _MODEL_REFUSAL_FALLBACK_MAP
@@ -609,7 +693,7 @@ class ProviderManager:
         refusal_detected = False
         first_token_received = False
         watchdog: StreamWatchdog | None = None
-        with start_span(span_name, span_attrs) as span:
+        with _safe_start_span(span_name, span_attrs) as span:
             try:
                 watchdog = StreamWatchdog(idle_timeout=self._stream_idle_timeout)
                 watchdog.start()
@@ -631,14 +715,14 @@ class ProviderManager:
                         first_token_received = True
                         ttft_ns = int((time.monotonic() - started) * 1_000_000_000)
                         span.set_attribute(GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN, ttft_ns)
-                        log_event(
+                        _safe_log_event(
                             Events.API_RESPONSE_FIRST_TOKEN,
                             {
                                 "provider": provider_name,
                                 "model": sanitized_model,
                                 GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN: ttft_ns,
                                 "first_token_source": event.type,
-                                **get_span_attributes(),
+                                **_safe_span_scope_attributes(),
                             },
                         )
                     if isinstance(event, MessageEndEvent):
@@ -781,7 +865,7 @@ class ProviderManager:
         status: str = "ok",
     ) -> None:
         duration_ms = int((time.monotonic() - started) * 1000)
-        scope_attrs = get_span_attributes()
+        scope_attrs = _safe_span_scope_attributes()
         usage_attrs: dict[str, Any] = {"usage_reported": usage.usage_reported}
         if usage.usage_reported:
             usage_attrs.update(
@@ -796,7 +880,7 @@ class ProviderManager:
                     "cache_hit_rate": usage.cache_hit_rate,
                 }
             )
-        log_event(
+        _safe_log_event(
             Events.API_REQUEST_SUCCEEDED,
             {
                 "provider": provider_name,
@@ -808,17 +892,17 @@ class ProviderManager:
             },
         )
         request_metric_attrs = {"provider": provider_name, "model": model}
-        add_metric(
+        _safe_add_metric(
             Metrics.API_REQUEST_COUNT,
             1,
             {**request_metric_attrs, "status": status},
         )
-        add_metric(Metrics.API_REQUEST_DURATION, duration_ms, request_metric_attrs)
+        _safe_add_metric(Metrics.API_REQUEST_DURATION, duration_ms, request_metric_attrs)
         token_metric_attrs = {
             **request_metric_attrs,
             **{key: value for key, value in scope_attrs.items() if key in _TOKEN_METRIC_SCOPE_KEYS},
         }
-        add_metric(
+        _safe_add_metric(
             Metrics.TOKEN_USAGE_REPORT_COUNT,
             1,
             {**token_metric_attrs, "reported": usage.usage_reported},
@@ -826,7 +910,7 @@ class ProviderManager:
         if not usage.usage_reported:
             return
         if usage.normalized_total_tokens:
-            add_metric(Metrics.TOKEN_TOTAL, usage.normalized_total_tokens, token_metric_attrs)
+            _safe_add_metric(Metrics.TOKEN_TOTAL, usage.normalized_total_tokens, token_metric_attrs)
         for token_type, count in (
             ("input", usage.input_tokens),
             ("output", usage.output_tokens),
@@ -834,7 +918,7 @@ class ProviderManager:
             ("cache_create", usage.cache_creation_input_tokens or 0),
         ):
             if count:
-                add_metric(Metrics.TOKEN_USAGE, count, {**token_metric_attrs, "type": token_type})
+                _safe_add_metric(Metrics.TOKEN_USAGE, count, {**token_metric_attrs, "type": token_type})
 
     @staticmethod
     def _emit_failure_telemetry(
@@ -859,18 +943,18 @@ class ProviderManager:
         }
         if status != "error":
             event_attrs["status"] = status
-        log_event(
+        _safe_log_event(
             Events.API_REQUEST_FAILED,
             event_attrs,
         )
         request_metric_attrs = {"provider": provider_name, "model": model}
-        add_metric(
+        _safe_add_metric(
             Metrics.API_REQUEST_COUNT,
             1,
             {**request_metric_attrs, "status": status, "error_type": type(exc).__name__},
         )
         if record_duration:
-            add_metric(Metrics.API_REQUEST_DURATION, duration_ms, request_metric_attrs)
+            _safe_add_metric(Metrics.API_REQUEST_DURATION, duration_ms, request_metric_attrs)
 
     async def complete(
         self,
@@ -933,7 +1017,7 @@ class ProviderManager:
         sanitized_model = sanitize_model_name(model)
 
         async def _on_retry(attempt, exc, delay):
-            log_event(
+            _safe_log_event(
                 Events.API_REQUEST_RETRIED,
                 {
                     "provider": provider_name,
@@ -947,7 +1031,7 @@ class ProviderManager:
             if refusal_detected:
                 raise _ModelRefusalError(model)
 
-            session_id = get_session_id()
+            session_id = _safe_session_id()
             span_attrs = {
                 GenAiAttr.SPAN_KIND: GenAiSpanKind.LLM,
                 GenAiAttr.OPERATION_NAME: GenAiOperationName.CHAT,
@@ -957,19 +1041,16 @@ class ProviderManager:
                 GenAiAttr.SESSION_ID: session_id,
                 GenAiAttr.CONVERSATION_ID: session_id,
                 GenAiAttr.OUTPUT_TYPE: "text",
-                **get_span_attributes(),
+                **_safe_span_scope_attributes(),
             }
-            if should_capture_content_on_span():
-                span_attrs[GenAiAttr.INPUT_MESSAGES] = serialize_input_messages(messages)
-                span_attrs[GenAiAttr.SYSTEM_INSTRUCTIONS] = serialize_system_instructions(system)
-                if tools:
-                    span_attrs[GenAiAttr.TOOL_DEFINITIONS] = serialize_tool_definitions(tools)
+            _capture_request_content(span_attrs, messages, system, tools)
 
             try:
-                with start_span(f"{Spans.LLM_CHAT} {model}", span_attrs) as span:
+                with _safe_start_span(f"{Spans.LLM_CHAT} {model}", span_attrs) as span:
                     try:
                         kwargs = {"cache_policy": cache_policy} if cache_policy != "default" else {}
-                        log_event(
+                        request_started = time.monotonic()
+                        _safe_log_event(
                             Events.API_REQUEST_STARTED,
                             {
                                 "provider": provider_name,
@@ -1050,7 +1131,7 @@ class ProviderManager:
                 fallback = self._get_fallback_model(model, wire_provider_key)
                 fallback_reason = "model_degradation"
             if fallback is not None and fallback not in visited:
-                log_event(
+                _safe_log_event(
                     Events.MODEL_FALLBACK_TRIGGERED,
                     {
                         "from_model": sanitized_model,

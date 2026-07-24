@@ -83,7 +83,7 @@ class OpenAIProvider(Provider):
         if client is not None:
             self._client = client
         else:
-            self._client = AsyncOpenAI(api_key=api_key, base_url=base_url, max_retries=0)
+            self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         actual_base_url = getattr(self._client, "base_url", None) or base_url
         self._metadata_endpoint_id = self._endpoint_id(actual_base_url)
         self._PROVIDER_KEY = provider_key
