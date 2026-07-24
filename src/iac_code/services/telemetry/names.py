@@ -192,11 +192,12 @@ class Events:
     SESSION_CANCELLED = "iac.session.cancelled"
     AUTH_CONFIGURED = "iac.auth.configured"
 
-    # --- API / LLM (5) ---
+    # --- API / LLM (6) ---
     API_REQUEST_STARTED = "iac.api.request.started"
     API_REQUEST_SUCCEEDED = "iac.api.request.succeeded"
     API_REQUEST_FAILED = "iac.api.request.failed"
     API_REQUEST_RETRIED = "iac.api.request.retried"
+    API_RESPONSE_FIRST_TOKEN = "iac.api.response.first_token"
     MODEL_FALLBACK_TRIGGERED = "iac.model.fallback.triggered"
 
     # --- Tool (6) ---

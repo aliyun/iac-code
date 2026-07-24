@@ -34,6 +34,7 @@ _METRIC_ATTR_KEYS = frozenset(
         "critical",
         "error_type",
         "from_step",
+        "input_kind",
         "input_length_bucket",
         "parent_step_id",
         "persisted",
@@ -689,6 +690,7 @@ class PipelineObservability:
         total_steps: int,
         step_type: str | None = None,
         ui_mode: str | None = None,
+        input_kind: str | None = None,
         option_count: int | None = None,
         prompt: str | None = None,
     ) -> None:
@@ -701,6 +703,7 @@ class PipelineObservability:
                 total_steps=total_steps,
                 step_type=step_type,
                 ui_mode=ui_mode,
+                input_kind=input_kind,
                 option_count=option_count,
                 prompt=prompt,
             ),
@@ -714,6 +717,7 @@ class PipelineObservability:
         step_attempt: int | None = None,
         total_steps: int,
         ui_mode: str | None = None,
+        input_kind: str | None = None,
         user_input: str | None = None,
         wait_duration_ms: float | None = None,
     ) -> None:
@@ -724,6 +728,7 @@ class PipelineObservability:
             step_attempt=step_attempt,
             total_steps=total_steps,
             ui_mode=ui_mode,
+            input_kind=input_kind,
             input_length_bucket=input_length_bucket,
             wait_duration_ms=wait_duration_ms,
         )
@@ -738,6 +743,7 @@ class PipelineObservability:
                     step_attempt=step_attempt,
                     total_steps=total_steps,
                     ui_mode=ui_mode,
+                    input_kind=input_kind,
                     input_length_bucket=input_length_bucket,
                 ),
             )

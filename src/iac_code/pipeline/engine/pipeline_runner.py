@@ -2525,6 +2525,7 @@ class PipelineRunner:
                 selected_index=selected_index,
                 selected_value=user_text,
             )
+        selection_observed = selected_index is not None
 
         yield PipelineEvent(
             type=PipelineEventType.USER_INPUT_RECEIVED,
@@ -2542,6 +2543,41 @@ class PipelineRunner:
             **self._continue_input_kwargs(pipeline_input),
             resume_waiting_step=True,
         ):
+            if (
+                not selection_observed
+                and step.ui_mode == "candidate_selection"
+                and isinstance(event, PipelineEvent)
+                and event.type == PipelineEventType.STEP_COMPLETED
+                and event.step_id == step.step_id
+                and isinstance(event.data, dict)
+            ):
+                conclusion = event.data.get("conclusion")
+                if isinstance(conclusion, dict):
+                    resolved_index = conclusion.get("selected_candidate_index")
+                    resolved_name = conclusion.get("selected_candidate_name")
+                    if (
+                        isinstance(resolved_index, int)
+                        and not isinstance(resolved_index, bool)
+                        and 0 <= resolved_index < len(waiting_options)
+                    ):
+                        selected_index = resolved_index
+                    elif resolved_index is None and isinstance(resolved_name, str):
+                        selected_index = self._infer_selected_index(resolved_name, waiting_options)
+                    elif resolved_index is None and len(waiting_options) == 1:
+                        selected_index = 0
+                        resolved_name = self._option_display_value(waiting_options[0])
+                    if selected_index is not None:
+                        selected_value = self._option_display_value(waiting_options[selected_index])
+                        self._observability.selection_made(
+                            step_id=step.step_id,
+                            step_attempt=step_attempt,
+                            ui_mode=step.ui_mode,
+                            option_count=len(waiting_options),
+                            selected_index=selected_index,
+                            selected_value=selected_value
+                            or (resolved_name if isinstance(resolved_name, str) else user_text),
+                        )
+                        selection_observed = True
             yield event
 
     async def resume_ask_user_question(
@@ -2565,6 +2601,34 @@ class PipelineRunner:
             raise ValueError(
                 f"ask_user_question tool_use_id mismatch: expected {expected_tool_use_id!r}, got {tool_use_id!r}"
             )
+        answer_text = payload["free_text"] or payload["selected_label"] or payload["selected_id"]
+        if payload["selected_id"] and payload["free_text"]:
+            answer_type = "option_and_free_text"
+        elif payload["selected_id"]:
+            answer_type = "option"
+        elif payload["free_text"]:
+            answer_type = "free_text"
+        else:
+            answer_type = "empty"
+        options = pending_input.get("options") if isinstance(pending_input, dict) else None
+        option_count = len(options) if isinstance(options, list) else 0
+        step_index = self.state_machine.current_step_index + 1
+        step_attempt = self._current_step_attempt(step.step_id)
+        self._observability.user_input_received(
+            step_id=step.step_id,
+            step_index=step_index,
+            step_attempt=step_attempt,
+            total_steps=self.state_machine.total_steps,
+            ui_mode=step.ui_mode,
+            input_kind="ask_user_question",
+            user_input=answer_text,
+        )
+        self._observability.question_answered(
+            step_id=step.step_id,
+            tool_call_id=tool_use_id,
+            option_count=option_count,
+            answer_type=answer_type,
+        )
         await self._start_mcp_reconnect_tasks()
         mcp_status_event = self._mcp_status_event(force=True)
         if mcp_status_event is not None:
@@ -3818,6 +3882,18 @@ class PipelineRunner:
                     if isinstance(event, StepResult):
                         step_result = event
                     else:
+                        if isinstance(event, AskUserQuestionEvent):
+                            self._observability.user_input_required(
+                                step_id=step.step_id,
+                                step_index=step_index,
+                                step_attempt=step_attempt,
+                                total_steps=self.state_machine.total_steps,
+                                step_type=step.step_type,
+                                ui_mode=step.ui_mode,
+                                input_kind="ask_user_question",
+                                option_count=len(event.options),
+                                prompt=event.question,
+                            )
                         if isinstance(event, ResourceObservedEvent):
                             try:
                                 for warning_event in self._handle_resource_observed(

@@ -631,6 +631,16 @@ class ProviderManager:
                         first_token_received = True
                         ttft_ns = int((time.monotonic() - started) * 1_000_000_000)
                         span.set_attribute(GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN, ttft_ns)
+                        log_event(
+                            Events.API_RESPONSE_FIRST_TOKEN,
+                            {
+                                "provider": provider_name,
+                                "model": sanitized_model,
+                                GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN: ttft_ns,
+                                "first_token_source": event.type,
+                                **get_span_attributes(),
+                            },
+                        )
                     if isinstance(event, MessageEndEvent):
                         watchdog.stop()
                         if event.stop_reason == "refusal":

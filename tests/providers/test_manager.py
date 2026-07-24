@@ -695,6 +695,7 @@ class TestProviderManagerStreaming:
             use_span_attributes(scope),
             patch("iac_code.providers.manager.start_span", return_value=nullcontext(span)) as start_span,
             patch("iac_code.providers.manager.get_session_id", return_value="iac_sess_1"),
+            patch("iac_code.providers.manager.log_event") as log_event,
         ):
             events = [event async for event in manager.stream(messages=[Message.user("hi")], system="sys")]
 
@@ -717,6 +718,17 @@ class TestProviderManagerStreaming:
         ]
         assert len(ttft_calls) == 1
         assert ttft_calls[0].args[1] >= 0
+        first_token_calls = [
+            call for call in log_event.call_args_list if call.args[0] == Events.API_RESPONSE_FIRST_TOKEN
+        ]
+        assert len(first_token_calls) == 1
+        assert first_token_calls[0].args[1] == {
+            "provider": "asyncmock",
+            "model": "claude-sonnet-4-6",
+            GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN: ttft_calls[0].args[1],
+            "first_token_source": "thinking_delta",
+            **scope,
+        }
 
     async def test_fable_accepted_stream_preserves_event_order(self, monkeypatch):
         expected = [
