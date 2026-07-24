@@ -1,218 +1,174 @@
-"""Pre-call hook: validate ROS template syntax and structure before API calls."""
+"""Pre-call hook for the shared, action-aware ROS local validator."""
 
 from __future__ import annotations
 
 import json
+import re
+from collections.abc import Mapping
 from typing import Any
 
 import yaml
 
 from iac_code.i18n import _
-from iac_code.tools.base import ToolResult
+from iac_code.tools.base import ToolContext
 from iac_code.tools.cloud.aliyun.api_hooks import before_call
-from iac_code.tools.cloud.aliyun.ros_yaml import ros_yaml_load
+from iac_code.tools.cloud.aliyun.ros_validation.action_policy import (
+    TEMPLATE_BODY_ACTIONS,
+    validate_action_request,
+)
+from iac_code.tools.cloud.aliyun.ros_validation.model import (
+    Category,
+    MaterializedTemplateSource,
+    Severity,
+    ValidationPolicy,
+    ValidationReport,
+    make_diagnostic,
+)
+from iac_code.tools.cloud.aliyun.ros_validation.outcome import (
+    RosPreflightOutcome,
+    outcome_from_report,
+)
+from iac_code.tools.cloud.aliyun.ros_validation.parser import parse_template_source
+from iac_code.tools.cloud.aliyun.ros_validation.validator import validate_ros_template
 
-_RESOURCE_TYPE_CORRECTIONS: dict[str, str] = {
-    "ALIYUN::VPC::VPC": "ALIYUN::ECS::VPC",
-    "ALIYUN::VPC::VSwitch": "ALIYUN::ECS::VSwitch",
-}
+_FLAT_PARAMETER = re.compile(r"^Parameters\.(\d+)\.(ParameterKey|ParameterValue)$")
 
-_TERRAFORM_TRANSFORM_PREFIXES = ("Aliyun::Terraform-", "Aliyun::OpenTofu-")
-_EXISTING_VPC_ASSOCIATION_PROPERTIES = {
-    "ALIYUN::ECS::VPC::VPCId",
-    "ALIYUN::VPC::VPCId",
-}
 
-_TEMPLATE_BODY_ACTIONS = [
-    "ValidateTemplate",
-    "CreateStack",
-    "UpdateStack",
-    "PreviewStack",
-    "CreateChangeSet",
-    "GetTemplateEstimateCost",
-    "GetTemplateSummary",
-    "GenerateTemplatePolicy",
-    "GetTemplateParameterConstraints",
-    "CreateStackGroup",
-    "UpdateStackGroup",
-    "CreateTemplate",
-    "UpdateTemplate",
-]
+def local_template_source_error(error: BaseException) -> RosPreflightOutcome:
+    """Convert an allowed local-file read/decode failure into a normal ROS report."""
+
+    kind = "UTF-8" if isinstance(error, UnicodeError) else "READ"
+    diagnostic = make_diagnostic(
+        code="ROS1202",
+        severity=Severity.ERROR,
+        category=Category.COMPATIBILITY,
+        summary=_("The local ROS template file cannot be read.")
+        if kind == "READ"
+        else _("The local ROS template file is not valid UTF-8."),
+        detail=_("TemplateURL/local TemplateBody failed before entering the Parser; the ROS API was not called."),
+        subject="local-template-source",
+        stable_args=(kind, type(error).__name__),
+        suggestion=_("Confirm that the file exists, is readable, and is saved as UTF-8."),
+    )
+    return outcome_from_report(ValidationReport.build([diagnostic], analysis_incomplete=False))
 
 
 def _is_json(text: str) -> bool:
-    return text.lstrip().startswith("{")
+    try:
+        json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    return True
 
 
 def _format_yaml_error(exc: yaml.YAMLError, text: str) -> str:
-    lines = text.splitlines()
+    del text
     mark = getattr(exc, "problem_mark", None)
     problem = getattr(exc, "problem", str(exc))
     if mark is None:
         return _("Template YAML syntax error: {}").format(problem)
-    line_num = mark.line + 1
-    col_num = mark.column + 1
-    context_lines: list[str] = []
-    start = max(0, mark.line - 2)
-    end = min(len(lines), mark.line + 2)
-    for i in range(start, end):
-        prefix = "> " if i == mark.line else "  "
-        context_lines.append("{}{:>4} | {}".format(prefix, i + 1, lines[i]))
-        if i == mark.line:
-            context_lines.append("  " + " " * (4 + 3 + mark.column) + "^")
-    context_str = "\n".join(context_lines)
-    return _("Template YAML syntax error (line {line}, column {col}): {problem}\nContext:\n{context}").format(
-        line=line_num, col=col_num, problem=problem, context=context_str
+    return _("Template YAML syntax error (line {line}, column {col}): {problem}").format(
+        line=mark.line + 1,
+        col=mark.column + 1,
+        problem=problem,
     )
 
 
 def _format_json_error(exc: json.JSONDecodeError, text: str) -> str:
+    del text
     return _("Template JSON syntax error (line {line}, column {col}): {msg}").format(
-        line=exc.lineno, col=exc.colno, msg=exc.msg
+        line=exc.lineno,
+        col=exc.colno,
+        msg=exc.msg,
     )
 
 
 def _parse_template(template_body: str) -> tuple[dict | None, str | None]:
-    """Parse template body, return (data, error_message). One of them is None."""
-    if _is_json(template_body):
-        try:
-            data = json.loads(template_body)
-        except json.JSONDecodeError as e:
-            return None, _format_json_error(e, template_body)
-    else:
-        try:
-            data = ros_yaml_load(template_body)
-        except yaml.YAMLError as e:
-            return None, _format_yaml_error(e, template_body)
-    if not isinstance(data, dict):
-        fmt = "JSON" if _is_json(template_body) else "YAML"
-        return None, _("Template {fmt} parse result is not an object (dict), please check the template format").format(
-            fmt=fmt
-        )
-    return data, None
-
-
-def _is_terraform(data: dict) -> bool:
-    transform = data.get("Transform", "")
-    values = transform if isinstance(transform, list) else [transform]
-    return any(isinstance(v, str) and v.startswith(_TERRAFORM_TRANSFORM_PREFIXES) for v in values)
-
-
-def _ref_name(value: Any) -> str | None:
-    if not isinstance(value, dict):
-        return None
-    ref = value.get("Ref")
-    return ref if isinstance(ref, str) and ref else None
-
-
-def _parameter_definition(parameters: dict[str, Any], name: str | None) -> dict[str, Any] | None:
-    if not name:
-        return None
-    parameter = parameters.get(name)
-    return parameter if isinstance(parameter, dict) else None
-
-
-def _is_existing_vpc_parameter(parameters: dict[str, Any], name: str | None) -> bool:
-    parameter = _parameter_definition(parameters, name)
-    if parameter is None:
-        return False
-    return parameter.get("AssociationProperty") in _EXISTING_VPC_ASSOCIATION_PROPERTIES
-
-
-def _validate_existing_vpc_vswitch_cidr(name: str, resource: dict, parameters: dict[str, Any]) -> list[str]:
-    properties = resource.get("Properties")
-    if not isinstance(properties, dict):
-        return []
-    vpc_param = _ref_name(properties.get("VpcId"))
-    if not _is_existing_vpc_parameter(parameters, vpc_param):
-        return []
-
-    cidr_block = properties.get("CidrBlock")
-    cidr_param = _ref_name(cidr_block)
-    cidr_parameter = _parameter_definition(parameters, cidr_param)
-    if cidr_parameter is not None and cidr_parameter.get("Default") is not None:
-        return [
-            _(
-                "Resource '{name}' creates a VSwitch in existing VPC parameter '{vpc_param}', "
-                "but CidrBlock references parameter '{cidr_param}' with a Default. "
-                "Remove Parameters.{cidr_param}.Default and let deployment parameters choose a non-overlapping CIDR "
-                "after VpcId is selected."
-            ).format(name=name, vpc_param=vpc_param, cidr_param=cidr_param)
-        ]
-    if isinstance(cidr_block, str) and cidr_block.strip():
-        return [
-            _(
-                "Resource '{name}' creates a VSwitch in existing VPC parameter '{vpc_param}', "
-                "so CidrBlock must not be a static value. Remove the fixed CidrBlock and let deployment parameters "
-                "choose a non-overlapping CIDR after VpcId is selected."
-            ).format(name=name, vpc_param=vpc_param)
-        ]
-    return []
+    result = parse_template_source(template_body)
+    if result.template is None:
+        detail = result.diagnostics[0].detail if result.diagnostics else _("Template parse failed")
+        return None, _("Template YAML syntax error: {}").format(detail)
+    if not isinstance(result.template.data, dict):
+        return None, _("Template parse result is not an object (dict), please check the template format")
+    return result.template.data, None
 
 
 def _validate_structure(data: dict) -> list[str]:
-    """Validate ROS template structure. Return list of error messages."""
-    errors: list[str] = []
-    is_tf = _is_terraform(data)
-    parameters = data.get("Parameters")
-    if not isinstance(parameters, dict):
-        parameters = {}
+    """Compatibility helper retained for callers of the previous hook module."""
 
-    if "ROSTemplateFormatVersion" not in data:
-        errors.append(
-            _("Template is missing ROSTemplateFormatVersion (ROS templates must include this field, e.g. '2015-09-01')")
-        )
+    body = json.dumps(data, ensure_ascii=False)
+    from iac_code.tools.cloud.aliyun.ros_validation.model import EvaluationMode, RequestValidationContext
 
-    if not is_tf:
-        resources = data.get("Resources")
-        if resources is None:
-            errors.append(_("Template is missing Resources (ROS templates must include Resources)"))
-        elif not isinstance(resources, dict):
-            errors.append(_("Resources must be an object (dict), current type is {}").format(type(resources).__name__))
-        else:
-            for name, resource in resources.items():
-                if not isinstance(resource, dict):
-                    errors.append(
-                        _("Resource '{name}' definition must be an object (dict), current type is {type}").format(
-                            name=name, type=type(resource).__name__
-                        )
-                    )
-                    continue
-                if "Type" not in resource:
-                    errors.append(_("Resource '{name}' is missing the Type field").format(name=name))
-                    continue
-                rtype = resource["Type"]
-                if rtype in _RESOURCE_TYPE_CORRECTIONS:
-                    correct = _RESOURCE_TYPE_CORRECTIONS[rtype]
-                    errors.append(
-                        _("Resource '{name}' has incorrect type '{wrong}', should be '{correct}'").format(
-                            name=name, wrong=rtype, correct=correct
-                        )
-                    )
-                if rtype == "ALIYUN::ECS::VSwitch":
-                    errors.extend(_validate_existing_vpc_vswitch_cidr(name, resource, parameters))
-
-    return errors
+    report = validate_ros_template(
+        MaterializedTemplateSource(body, origin_kind="SYNTHETIC_ADAPTER"),
+        RequestValidationContext(action="ValidateTemplate", evaluation_mode=EvaluationMode.DEPLOYMENT),
+    )
+    return [
+        " ".join(part for part in (item.summary, item.detail, item.suggestion) if part)
+        for item in report.diagnostics
+        if item.severity.value == "ERROR"
+    ]
 
 
-@before_call("ros", _TEMPLATE_BODY_ACTIONS)
-def check_template(product: str, action: str, params: dict[str, Any]) -> ToolResult | None:
-    template_body = params.get("TemplateBody", "")
-    if not template_body:
+def _parameter_bindings(params: Mapping[str, Any]) -> dict[Any, Any]:
+    result: dict[Any, Any] = {}
+    raw = params.get("Parameters")
+    if isinstance(raw, Mapping):
+        result.update(raw)
+    elif isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, Mapping) or "ParameterKey" not in item:
+                continue
+            result[item["ParameterKey"]] = item.get("ParameterValue")
+    flat: dict[int, dict[str, Any]] = {}
+    for key, value in params.items():
+        match = _FLAT_PARAMETER.match(key)
+        if match:
+            flat.setdefault(int(match.group(1)), {})[match.group(2)] = value
+    for item in flat.values():
+        if "ParameterKey" in item:
+            result[item["ParameterKey"]] = item.get("ParameterValue")
+    return result
+
+
+@before_call("ros", list(TEMPLATE_BODY_ACTIONS))
+def check_template(
+    product: str,
+    action: str,
+    params: dict[str, Any],
+    *,
+    context: ToolContext | None = None,
+) -> RosPreflightOutcome | None:
+    del product
+    trusted_context = context.trusted_ros_account_context if context is not None else None
+    action_policy, request_diagnostics, active_body = validate_action_request(
+        action,
+        params,
+        trusted_ros_account_context=trusted_context,
+    )
+    if action_policy is None:
         return None
-
-    data, syntax_error = _parse_template(template_body)
-    if syntax_error:
-        return ToolResult.error(syntax_error)
-
-    assert data is not None
-    structure_errors = _validate_structure(data)
-    if structure_errors:
-        msg = (
-            _("Template structure validation found the following issues, please fix and retry:")
-            + "\n"
-            + "\n".join("  - {}".format(e) for e in structure_errors)
+    diagnostics = list(request_diagnostics)
+    analysis_incomplete = False
+    if active_body:
+        template_body = params.get("TemplateBody")
+        origin_kind = "SOURCE_TEXT"
+        if isinstance(template_body, Mapping):
+            template_body = json.dumps(template_body, ensure_ascii=False)
+            origin_kind = "SYNTHETIC_ADAPTER"
+        request = action_policy.request_context(params, trusted_ros_account_context=trusted_context)
+        report = validate_ros_template(
+            MaterializedTemplateSource(
+                template_body,
+                kind="INLINE",
+                origin="TemplateBody",
+                origin_kind=origin_kind,
+            ),
+            request,
+            policy=ValidationPolicy.STRICT,
+            parameter_bindings=_parameter_bindings(params),
         )
-        return ToolResult.error(msg)
-
-    return None
+        diagnostics.extend(report.diagnostics)
+        analysis_incomplete = report.analysis_incomplete
+    final_report = ValidationReport.build(diagnostics, analysis_incomplete=analysis_incomplete)
+    return outcome_from_report(final_report, template_analyzed=active_body)

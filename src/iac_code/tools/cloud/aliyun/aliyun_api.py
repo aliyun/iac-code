@@ -607,6 +607,10 @@ def _normalize_runtime_input(
     if not _runtime_json_shape_is_valid(normalized["params"], allow_sentinel=allow_internal_shape):
         raise ApiContractError("invalid_params")
     canonical_product = _PRODUCT_CANONICAL.get(product.lower(), product)
+    if canonical_product == "ros":
+        from iac_code.tools.cloud.aliyun.hooks.ros_parameters import normalize_ros_parameters
+
+        normalize_ros_parameters(str(normalized.get("action") or ""), normalized["params"])
     template_url = normalized["params"].get("TemplateURL")
     if canonical_product == "ros" and isinstance(template_url, str) and is_local_template_url(template_url):
         if "TemplateBody" in normalized["params"]:
@@ -680,12 +684,16 @@ def _with_canonical_runtime_product(input: Mapping[str, Any], product: str) -> d
     params = normalized.get("params")
     if product.casefold() != "ros" or not isinstance(params, Mapping):
         return normalized
-    template_url = params.get("TemplateURL")
+    canonical_params = dict(params)
+    from iac_code.tools.cloud.aliyun.hooks.ros_parameters import normalize_ros_parameters
+
+    normalize_ros_parameters(str(normalized.get("action") or ""), canonical_params)
+    normalized["params"] = canonical_params
+    template_url = canonical_params.get("TemplateURL")
     if not isinstance(template_url, str) or not is_local_template_url(template_url):
         return normalized
-    if "TemplateBody" in params:
+    if "TemplateBody" in canonical_params:
         raise ApiContractError("conflicting_template_sources")
-    canonical_params = dict(params)
     canonical_params.pop("TemplateURL")
     canonical_params["TemplateBody"] = LOCAL_TEMPLATE_BODY_SENTINEL
     normalized["params"] = canonical_params
@@ -1909,17 +1917,67 @@ class AliyunApi(BaseCloudApi):
         return _("Call succeeded")
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
+        context.ros_preflight_outcome = None
+        runtime_input = tool_input
         if self._runtime_services is not None:
-            prepared_input = self.prepare_invocation_input(tool_input)
+            runtime_input = self.prepare_invocation_input(tool_input)
+            if error := self._public_preflight_handoff_error(runtime_input, context):
+                self._reject_runtime_handoff(context)
+                return ToolResult.error(
+                    public_aliyun_error(
+                        error,
+                        product=runtime_input.get("product"),
+                        version=runtime_input.get("version"),
+                        action=runtime_input.get("action"),
+                        region_id=runtime_input.get("region_id"),
+                    )
+                )
+        product = str(runtime_input.get("product") or "").casefold()
+        params = runtime_input.get("params")
+        ros_preflight_completed = False
+        if (
+            not context.pipeline_mode
+            and product in {"ros", "resourceorchestrationservice"}
+            and isinstance(params, dict)
+        ):
+            # Source cardinality and already-materialized TemplateBody are
+            # stage-zero checks: validate them before region/credential setup.
+            from iac_code.tools.cloud.aliyun.api_hooks import run_hooks
+
+            hook_result = run_hooks(
+                "ros",
+                str(tool_input.get("action") or ""),
+                params,
+                context=context,
+                read_only=True,
+            )
+            if hook_result is not None:
+                if self._runtime_services is not None:
+                    self._reject_runtime_handoff(context)
+                return hook_result
+            template_url = params.get("TemplateURL")
+            local_template_materialization_pending = (
+                isinstance(template_url, str) and bool(template_url) and is_local_template_url(template_url)
+            )
+            ros_preflight_completed = bool(
+                context.ros_preflight_outcome is not None and not local_template_materialization_pending
+            )
+        if self._runtime_services is not None:
             return await self._execute_runtime(
-                api_input=prepared_input,
-                binding_input=prepared_input,
+                api_input=runtime_input,
+                binding_input=runtime_input,
                 context=context,
                 trust_path="public",
+                ros_preflight_completed=ros_preflight_completed,
             )
         if self._isolated_legacy_test:
-            return await self._execute_legacy(tool_input=tool_input, context=context)
-        return ToolResult.error(
+            result = await self._execute_legacy(
+                tool_input=tool_input,
+                context=context,
+                ros_preflight_completed=ros_preflight_completed,
+            )
+            return self._attach_ros_preflight(result, context)
+        result = ToolResult.error(
             public_aliyun_error(
                 "aliyun_runtime_services_required",
                 product=tool_input.get("product"),
@@ -1928,6 +1986,25 @@ class AliyunApi(BaseCloudApi):
                 region_id=tool_input.get("region_id"),
             )
         )
+        return self._attach_ros_preflight(result, context)
+
+    def _public_preflight_handoff_error(
+        self,
+        binding_input: Mapping[str, Any],
+        context: ToolContext,
+    ) -> ApiContractError | None:
+        """Validate a public handoff before a stage-zero early return can bypass it."""
+
+        binding = context.invocation_binding
+        if binding is None or context.snapshot_id is None or context.security_digest is None:
+            return ApiContractError("aliyun_runtime_handoff_required")
+        if binding.canonical_input_sha256 != canonical_input_sha256(binding_input):
+            return ApiContractError("aliyun_invocation_binding_mismatch")
+        if context.tool_use_id is not None and binding.tool_use_id != context.tool_use_id:
+            return ApiContractError("aliyun_invocation_binding_mismatch")
+        if binding.tool_name != self.name:
+            return ApiContractError("aliyun_public_binding_required")
+        return None
 
     async def execute_delegated(
         self,
@@ -1935,6 +2012,7 @@ class AliyunApi(BaseCloudApi):
         tool_input: Mapping[str, Any],
         context: ToolContext,
     ) -> ToolResult:
+        context.ros_preflight_outcome = None
         if self._runtime_services is None:
             return ToolResult.error(
                 public_aliyun_error(
@@ -2004,6 +2082,7 @@ class AliyunApi(BaseCloudApi):
         tool_input: Mapping[str, Any],
         context: ToolContext,
     ) -> ToolResult:
+        context.ros_preflight_outcome = None
         if self._runtime_services is None:
             return ToolResult.error("aliyun_runtime_services_required")
         return await self._execute_runtime(
@@ -2013,6 +2092,12 @@ class AliyunApi(BaseCloudApi):
             trust_path="internal",
         )
 
+    @staticmethod
+    def _attach_ros_preflight(result: ToolResult, context: ToolContext) -> ToolResult:
+        from iac_code.tools.cloud.aliyun.ros_validation.outcome import attach_ros_validation
+
+        return attach_ros_validation(result, context.ros_preflight_outcome)
+
     async def _execute_runtime(
         self,
         *,
@@ -2020,6 +2105,25 @@ class AliyunApi(BaseCloudApi):
         binding_input: Mapping[str, Any] | None,
         context: ToolContext,
         trust_path: str,
+        ros_preflight_completed: bool = False,
+    ) -> ToolResult:
+        result = await self._execute_runtime_unattached(
+            api_input=api_input,
+            binding_input=binding_input,
+            context=context,
+            trust_path=trust_path,
+            ros_preflight_completed=ros_preflight_completed,
+        )
+        return self._attach_ros_preflight(result, context)
+
+    async def _execute_runtime_unattached(
+        self,
+        *,
+        api_input: Mapping[str, Any],
+        binding_input: Mapping[str, Any] | None,
+        context: ToolContext,
+        trust_path: str,
+        ros_preflight_completed: bool = False,
     ) -> ToolResult:
         runtime = self._runtime_services
         if runtime is None:
@@ -2171,11 +2275,16 @@ class AliyunApi(BaseCloudApi):
                     if trust_path == "internal"
                     else _authorized_materialization_path("template", authorized_read_paths)
                 )
-                template_bytes = await asyncio.to_thread(_read_body_file, resolved_template)
                 try:
+                    template_bytes = await asyncio.to_thread(_read_body_file, resolved_template)
                     params["TemplateBody"] = template_bytes.decode("utf-8")
-                except UnicodeDecodeError as error:
-                    raise ApiContractError("invalid_template_file") from error
+                except (OSError, UnicodeError) as error:
+                    from iac_code.tools.cloud.aliyun.hooks.ros_validate import local_template_source_error
+
+                    outcome = local_template_source_error(error)
+                    context.ros_preflight_outcome = outcome
+                    assert outcome.blocking_result is not None
+                    return outcome.blocking_result
             body_file = materialized.get("body_file")
             if isinstance(body_file, str):
                 resolved_body_file = (
@@ -2195,12 +2304,13 @@ class AliyunApi(BaseCloudApi):
                         params[parameter.name] = region_id
                         break
 
-            observe("hooks")
-            from iac_code.tools.cloud.aliyun.api_hooks import run_hooks
+            if not ros_preflight_completed:
+                observe("hooks")
+                from iac_code.tools.cloud.aliyun.api_hooks import run_hooks
 
-            hook_result = run_hooks(contract.product.casefold(), contract.action, params)
-            if hook_result is not None:
-                return hook_result
+                hook_result = run_hooks(contract.product.casefold(), contract.action, params, context=context)
+                if hook_result is not None:
+                    return hook_result
             post_hook_shape = _runtime_call_shape(materialized, contract=contract)
             if post_hook_shape.security_view() != final_shape.security_view():
                 raise ApiContractError("hook_call_shape_changed")
@@ -2409,7 +2519,13 @@ class AliyunApi(BaseCloudApi):
                 )
             )
 
-    async def _execute_legacy(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
+    async def _execute_legacy(
+        self,
+        *,
+        tool_input: dict[str, Any],
+        context: ToolContext,
+        ros_preflight_completed: bool = False,
+    ) -> ToolResult:
         product = tool_input.get("product", "")
         product = _PRODUCT_CANONICAL.get(product.lower(), product)
         action = tool_input.get("action", "")
@@ -2429,14 +2545,28 @@ class AliyunApi(BaseCloudApi):
                 if path_result := check_local_template_url_read_permission(template_url, context):
                     if path_result.behavior == "deny":
                         return ToolResult.error(path_result.message)
-                params["TemplateBody"] = read_local_template_url(template_url, context)
+                try:
+                    params["TemplateBody"] = read_local_template_url(template_url, context)
+                except (OSError, UnicodeError) as error:
+                    from iac_code.tools.cloud.aliyun.hooks.ros_validate import local_template_source_error
+
+                    outcome = local_template_source_error(error)
+                    context.ros_preflight_outcome = outcome
+                    assert outcome.blocking_result is not None
+                    return outcome.blocking_result
                 del params["TemplateURL"]
 
         # Pre-call hooks (e.g. resource type validation)
-        from iac_code.tools.cloud.aliyun.api_hooks import run_hooks
+        if not ros_preflight_completed:
+            from iac_code.tools.cloud.aliyun.api_hooks import run_hooks
 
-        if hook_result := run_hooks(product, action, params):
-            return hook_result
+            if hook_result := run_hooks(product, action, params, context=context):
+                return hook_result
+
+        if product == "ros":
+            from iac_code.tools.cloud.aliyun.hooks.ros_parameters import normalize_ros_parameters
+
+            normalize_ros_parameters(action, params)
 
         try:
             version = self._resolve_version(tool_input)

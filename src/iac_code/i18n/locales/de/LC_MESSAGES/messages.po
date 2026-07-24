@@ -4486,6 +4486,7 @@ msgid "Policies:"
 msgstr "Richtlinien:"
 
 #: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
 msgid "Summary:"
 msgstr "Zusammenfassung:"
 
@@ -6370,20 +6371,36 @@ msgstr ""
 "/HTTP-URL."
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "The local ROS template file cannot be read."
+msgstr "Die lokale ROS Template-Datei kann nicht gelesen werden."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "The local ROS template file is not valid UTF-8."
+msgstr "Die lokale ROS Vorlagendatei ist nicht gültig UTF-8."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid ""
+"TemplateURL/local TemplateBody failed before entering the Parser; the ROS"
+" API was not called."
+msgstr ""
+"TemplateURL/local TemplateBody scheiterte vor dem Betreten des Parsers; "
+"der ROS API wurde nicht aufgerufen."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "Confirm that the file exists, is readable, and is saved as UTF-8."
+msgstr ""
+"Bestätigen Sie, dass die Datei vorhanden ist, lesbar ist und als UTF-8 "
+"gespeichert ist."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 #, python-brace-format
 msgid "Template YAML syntax error: {}"
 msgstr "YAML-Syntaxfehler in der Vorlage: {}"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 #, python-brace-format
-msgid ""
-"Template YAML syntax error (line {line}, column {col}): {problem}\n"
-"Context:\n"
-"{context}"
-msgstr ""
-"YAML-Syntaxfehler in der Vorlage (Zeile {line}, Spalte {col}): {problem}\n"
-"Kontext:\n"
-"{context}"
+msgid "Template YAML syntax error (line {line}, column {col}): {problem}"
+msgstr "Meldebogen YAML Syntaxfehler (Zeile {line}, Spalte {col}): {problem}"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 #, python-brace-format
@@ -6391,86 +6408,2244 @@ msgid "Template JSON syntax error (line {line}, column {col}): {msg}"
 msgstr "JSON-Syntaxfehler in der Vorlage (Zeile {line}, Spalte {col}): {msg}"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
-#, python-brace-format
-msgid ""
-"Template {fmt} parse result is not an object (dict), please check the "
-"template format"
-msgstr ""
-"Das {fmt}-Parseergebnis der Vorlage ist kein Objekt (dict), bitte "
-"überprüfen Sie das Vorlagenformat"
-
-#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
-#, python-brace-format
-msgid ""
-"Resource '{name}' creates a VSwitch in existing VPC parameter "
-"'{vpc_param}', but CidrBlock references parameter '{cidr_param}' with a "
-"Default. Remove Parameters.{cidr_param}.Default and let deployment "
-"parameters choose a non-overlapping CIDR after VpcId is selected."
-msgstr ""
-"Die Ressource '{name}' erstellt einen VSwitch im Parameter für eine "
-"vorhandene VPC '{vpc_param}', aber CidrBlock verweist auf den Parameter "
-"'{cidr_param}' mit einem Default. Entfernen Sie "
-"Parameters.{cidr_param}.Default und lassen Sie die "
-"Bereitstellungsparameter nach Auswahl von VpcId einen nicht überlappenden"
-" CIDR-Bereich wählen."
-
-#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
-#, python-brace-format
-msgid ""
-"Resource '{name}' creates a VSwitch in existing VPC parameter "
-"'{vpc_param}', so CidrBlock must not be a static value. Remove the fixed "
-"CidrBlock and let deployment parameters choose a non-overlapping CIDR "
-"after VpcId is selected."
-msgstr ""
-"Die Ressource '{name}' erstellt einen VSwitch im Parameter für eine "
-"vorhandene VPC '{vpc_param}', daher darf CidrBlock kein statischer Wert "
-"sein. Entfernen Sie den festen CidrBlock und lassen Sie die "
-"Bereitstellungsparameter nach Auswahl von VpcId einen nicht überlappenden"
-" CIDR-Bereich wählen."
+msgid "Template parse failed"
+msgstr "Meldebogen Parse gescheitert"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid ""
-"Template is missing ROSTemplateFormatVersion (ROS templates must include "
-"this field, e.g. '2015-09-01')"
+"Template parse result is not an object (dict), please check the template "
+"format"
 msgstr ""
-"In der Vorlage fehlt ROSTemplateFormatVersion (ROS-Vorlagen müssen dieses"
-" Feld enthalten, z.B. '2015-09-01')"
+"Template Parse Ergebnis ist kein Objekt (Dict), bitte überprüfen Sie das "
+"Template Format"
 
-#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
-msgid "Template is missing Resources (ROS templates must include Resources)"
-msgstr "In der Vorlage fehlt Resources (ROS-Vorlagen müssen Resources enthalten)"
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid ""
+"Trusted ROS account context is missing, so the Module registration "
+"account boundary cannot be verified."
+msgstr ""
+"Der vertrauenswürdige ROS-Kontokontext fehlt, so dass die Module-"
+"Registrierungskontogrenze nicht überprüft werden kann."
 
-#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid ""
+"Local structure and function semantics were validated; account "
+"consistency requires trusted host context."
+msgstr ""
+"Die Struktur- und Funktionssemantik von Local wurde validiert; die "
+"Kontokonsistenz erfordert einen vertrauenswürdigen Host-Kontext."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "PreviewStack has an invalid number of template sources."
+msgstr "PreviewStack hat eine ungültige Anzahl von Vorlagenquellen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid ""
+"Creating a preview requires one source; updating a preview accepts zero "
+"or one source."
+msgstr ""
+"Das Erstellen einer Vorschau erfordert eine Quelle; das Aktualisieren "
+"einer Vorschau akzeptiert Null oder eine Quelle."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "PreviewStack must provide Parameters when reusing the existing template."
+msgstr ""
+"PreviewStack muss Parameters bereitstellen, wenn Sie das vorhandene "
+"Template wiederverwenden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid ""
+"A source-less update preview reuses the template only when Parameters is "
+"provided."
+msgstr ""
+"Eine quellenlose Updatevorschau verwendet die Vorlage nur wieder, wenn "
+"Parameters bereitgestellt wird."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "ContinueCreateStack.Mode is invalid."
+msgstr "ContinueCreateStack.Mode ist ungültig."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "Mode must be Recreate or Ignore."
+msgstr "Mode muss Recreate oder Ignore sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "ContinueCreateStack provides multiple template sources."
+msgstr "ContinueCreateStack bietet mehrere Vorlagenquellen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "Recreate accepts at most one source."
+msgstr "Recreate akzeptiert höchstens eine Quelle."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "The CreateChangeSet template source does not match ChangeSetType."
+msgstr "Die Vorlagenquelle CreateChangeSet stimmt nicht mit ChangeSetType überein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid ""
+"Select one of Body, URL, or TemplateId; ScratchId is valid only for "
+"IMPORT of a new stack."
+msgstr ""
+"Wählen Sie Body, URL oder TemplateId aus; ScratchId ist nur für IMPORT "
+"eines neuen Stacks gültig."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "GetTemplateRecommendParameters has an invalid template source."
+msgstr "GetTemplateRecommendParameters hat eine ungültige Vorlagenquelle."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid ""
+"Provide at least one source, and do not provide TemplateBody and "
+"TemplateURL together."
+msgstr ""
+"Geben Sie mindestens eine Quelle an und stellen Sie TemplateBody und "
+"TemplateURL nicht zusammen bereit."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid ""
+"GetTemplateRecommendParameters provides TemplateId together with a "
+"higher-priority source."
+msgstr ""
+"GetTemplateRecommendParameters stellt TemplateId zusammen mit einer "
+"Quelle mit höherer Priorität bereit."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid ""
+"ROS prefers TemplateBody/TemplateURL, so TemplateId is ignored in this "
+"call."
+msgstr ""
+"ROS bevorzugt TemplateBody/TemplateURL, daher wird TemplateId in diesem "
+"Aufruf ignoriert."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "ListStackOperationRisks.OperationType is invalid."
+msgstr "ListStackOperationRisks.OperationType ist ungültig."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "The locked SDK declares only CreateStack and DeleteStack."
+msgstr "Das gesperrte SDK deklariert nur CreateStack und DeleteStack."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "The ListStackOperationRisks source does not match OperationType."
+msgstr "Die ListStackOperationRisks Quelle stimmt nicht mit OperationType überein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid ""
+"CreateStack requires one template source; DeleteStack accepts only "
+"StackId."
+msgstr ""
+"CreateStack erfordert eine Vorlagenquelle; DeleteStack akzeptiert nur "
+"StackId."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "CreateStackGroup cannot provide Parameters when StackArn is used."
+msgstr ""
+"CreateStackGroup kann Parameters nicht bereitstellen, wenn StackArn "
+"verwendet wird."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid ""
+"StackArn references an existing stack template, so Parameters is "
+"ineffective in this branch."
+msgstr ""
+"StackArn verweist auf eine vorhandene Stapelvorlage, so dass Parameters "
+"in diesem Branch ineffektiv ist."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "CreateStackGroup must use SELF_MANAGED when StackArn is used."
+msgstr ""
+"CreateStackGroup muss SELF_MANAGED verwenden, wenn StackArn verwendet "
+"wird."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "The SERVICE_MANAGED branch does not accept StackArn as a template source."
+msgstr "Der SERVICE_MANAGED-Zweig akzeptiert StackArn nicht als Vorlagenquelle."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid ""
+"Local template analysis for RegisterResourceType supports only "
+"EntityType=Module."
+msgstr ""
+"Local Template Analyse für RegisterResourceType unterstützt nur "
+"EntityType=Module."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "EntityType is not Module."
+msgstr "EntityType ist nicht Module."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "RegisterResourceType.ResourceType has an invalid format."
+msgstr "RegisterResourceType.ResourceType hat ein ungültiges Format."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid ""
+"It must contain 18 to 100 characters and match "
+"MODULE::Organization::Service::Type."
+msgstr ""
+"Es muss 18 bis 100 Zeichen enthalten und mit "
+"MODULE::Organization::Service::Type übereinstimmen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "The service segment of MODULE::SHARE does not match the current tenant."
+msgstr "Das Servicesegment von MODULE::SHARE passt nicht zum aktuellen Mieter."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid ""
+"The third segment of a SHARE Module must equal tenant_id in the trusted "
+"account context."
+msgstr ""
+"Das dritte Segment eines SHARE Module muss im vertrauenswürdigen "
+"Kontokontext mit tenant_id übereinstimmen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
 #, python-brace-format
-msgid "Resources must be an object (dict), current type is {}"
-msgstr "Resources muss ein Objekt (dict) sein, aktueller Typ ist {}"
+msgid "contains {}"
+msgstr "enthält {}"
 
-#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "starts with acs"
+msgstr "beginnt mit acs"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+#, python-brace-format
+msgid "equals reserved name {}"
+msgstr "entspricht dem reservierten Namen {}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "The Module organization uses a name reserved for non-production accounts."
+msgstr ""
+"Die Module-Organisation verwendet einen Namen, der für Nicht-"
+"Produktionskonten reserviert ist."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+#, python-brace-format
+msgid "organization {} in the current trusted account context."
+msgstr "Organisation {} im aktuellen vertrauenswürdigen Kontokontext."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+#, python-brace-format
+msgid "{} is missing required field {}."
+msgstr "{} fehlt das erforderliche Feld {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid ""
+"This operation-target field is not part of the mutually exclusive "
+"template-source group."
+msgstr ""
+"Dieses Operations-Ziel-Feld ist nicht Teil der sich gegenseitig "
+"ausschließenden Template-Source-Gruppe."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+#, python-brace-format
+msgid "{} has an invalid number of template sources."
+msgstr "{} hat eine ungültige Anzahl von Vorlagenquellen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+#, python-brace-format
+msgid "Provide exactly one of these sources: {}; {} were provided."
+msgstr "Geben Sie genau eine dieser Quellen an: {}; {} wurden bereitgestellt."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+#, python-brace-format
+msgid "{} provides multiple template sources."
+msgstr "{} bietet mehrere Vorlagenquellen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid "This operation accepts at most one new template source."
+msgstr "Diese Operation akzeptiert höchstens eine neue Vorlagenquelle."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Local reference location"
+msgstr "Local Referenzort"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The ROS value type of this expression cannot be determined locally."
+msgstr "Der ROS-Werttyp dieses Ausdrucks kann nicht lokal bestimmt werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The value is outside the modelled String, Number, Boolean, List, Map, and"
+" Null boundary; deterministic type-error derivation has stopped."
+msgstr ""
+"Der Wert befindet sich außerhalb der modellierten String, Number, "
+"Boolean, List, Map und Null Grenze; die deterministische "
+"Typfehlerableitung wurde gestoppt."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#: src/iac_code/tools/cloud/aliyun/ros_validation/validator.py
+msgid "The top level of a ROS template must be a Mapping."
+msgstr "Die oberste Ebene einer ROS-Vorlage muss eine Mapping sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The parsed result is not an object, so the template structure cannot be "
+"analyzed."
+msgstr ""
+"Das analysierte Ergebnis ist kein Objekt, daher kann die Template-"
+"Struktur nicht analysiert werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Function {} cannot be used as a Condition root expression."
+msgstr "Funktion {} kann nicht als Condition Root-Ausdruck verwendet werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"Condition roots register only Equals, Ref, FindInMap, Not, And, and Or; "
+"child expressions may use the extended function table."
+msgstr ""
+"Condition-Roots registrieren nur Equals, Ref, FindInMap, Not, And und Or;"
+" Child-Ausdrücke können die erweiterte Funktionstabelle verwenden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Resource {} {} must be a Mapping or ROS Function."
+msgstr "Resource {} {} muss eine Mapping- oder ROS-Funktion sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "ROS does not accept root nodes such as String, List, or Null."
+msgstr "ROS akzeptiert keine Root-Knoten wie String, List oder Null."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "DependsOn members must be String, Null, or an empty string."
+msgstr ""
+"DependsOn-Mitglieder müssen String, Null oder eine leere Zeichenfolge "
+"sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The Count precompiler can sanitize or bind only String resource logical "
+"names."
+msgstr ""
+"Der Count-Vorkompiler kann nur logische String-Ressourcennamen "
+"desinfizieren oder binden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "DependsOn references nonexistent resource {}."
+msgstr "DependsOn verweist auf nicht vorhandene Ressource {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The resource logical name or expanded Count instance name is invalid."
+msgstr ""
+"Der logische Ressourcenname oder der erweiterte Count-Instanzname ist "
+"ungültig."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "DeletionPolicy value {} is invalid."
+msgstr "DeletionPolicy Wert {} ist ungültig."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The local contract allows only Delete, Retain, or a Ref to one Parameter;"
+" Snapshot is unsupported."
+msgstr ""
+"Der lokale Vertrag erlaubt nur Löschen, Zurückhalten oder ein Ref zu "
+"einem Parameter; Snapshot wird nicht unterstützt."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The DeletionPolicy Ref is missing a Parameter name."
+msgstr "Dem DeletionPolicy Ref fehlt ein Parameter-Name."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"Ref: Null is not a valid parameter name; Null is treated as Delete only "
+"when a declared Parameter resolves to Null."
+msgstr ""
+"Ref: Null ist kein gültiger Parametername; Null wird nur dann als Löschen"
+" behandelt, wenn ein deklariertes Parameter in Null aufgelöst wird."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "DeletionPolicy cannot Ref resource {}."
+msgstr "DeletionPolicy kann nicht Ref Ressource {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "This position accepts only a Parameter Ref, not a Resource/DataSource Ref."
+msgstr ""
+"Diese Position akzeptiert nur ein Parameter Ref, nicht ein "
+"Resource/DataSource Ref."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "DeletionPolicy cannot Ref pseudo parameter {}."
+msgstr "DeletionPolicy kann nicht Ref Pseudoparameter {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The value domain of this pseudo parameter does not contain Delete, "
+"Retain, or Null."
+msgstr ""
+"Die Wertedomäne dieses Pseudoparameters enthält nicht Delete, Retain oder"
+" Null."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "DeletionPolicy Parameter {} permits unsupported Snapshot."
+msgstr "DeletionPolicy Parameter {} ermöglicht nicht unterstützte Snapshot."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"Because AllowedValues contains Snapshot, this Parameter could place the "
+"template into a deletion policy unsupported by ROS."
+msgstr ""
+"Da AllowedValues Snapshot enthält, könnte dieses Parameter die Vorlage in"
+" eine Löschrichtlinie einfügen, die nicht von ROS unterstützt wird."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "The DeletionPolicy Parameter Ref resolves to invalid value {}."
+msgstr "Der DeletionPolicy Parameter Ref löst sich auf den ungültigen Wert {} auf."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The resolved value must be Delete, Retain, or Null; Snapshot is "
+"unsupported, and Null is treated as Delete."
+msgstr ""
+"Der aufgelöste Wert muss Delete, Retain oder Null sein; Snapshot wird "
+"nicht unterstützt und Null wird als Delete behandelt."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "DeletionPolicy Parameter Ref type {} is invalid."
+msgstr "DeletionPolicy Parameter Ref Typ {} ist ungültig."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The resolved value must be Delete, Retain, or Null."
+msgstr "Der aufgelöste Wert muss Delete, Retain oder Null sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "DeletionPolicy has an invalid structure."
+msgstr "DeletionPolicy hat eine ungültige Struktur."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"Only Delete, Retain, or a Ref to one Parameter is allowed; Snapshot, "
+"other functions, and explicit Null are rejected."
+msgstr ""
+"Nur Löschen, Behalten oder ein Ref in ein Parameter ist erlaubt; "
+"Snapshot, andere Funktionen und explizites Null werden abgelehnt."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The template contains a non-finite Number."
+msgstr "Die Vorlage enthält ein nicht endliches Number."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The locked ROS runtime accepts this value, but it violates standard JSON "
+"and official template numeric constraints."
+msgstr ""
+"Der gesperrte ROS runtime akzeptiert diesen Wert, verstößt jedoch gegen "
+"Standard-JSON und offizielle numerische Vorgaben."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "ROSTemplateFormatVersion must be exactly 2015-09-01."
+msgstr "ROSTemplateFormatVersion muss genau 2015-09-01 sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The local function contracts apply only to the ROS 2015-09-01 runtime."
+msgstr "Die lokalen Funktionsverträge gelten nur für das ROS 2015-09-01 runtime."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "A Module registration template cannot contain {}."
+msgstr "Eine Module-Registrierungsvorlage kann {} nicht enthalten."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "This top-level section is not part of the ROS Module schema."
+msgstr "Dieser Abschnitt der obersten Ebene ist nicht Teil des ROS Module-Schemas."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "A Module registration template cannot contain non-empty Rules."
+msgstr "Eine Module-Registrierungsvorlage kann kein nicht leeres Rules enthalten."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Rules are not part of the Module registration template consumer contract."
+msgstr ""
+"Rules sind nicht Teil des Module Registrierungsvorlagen "
+"Verbrauchervertrag."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Module {} name {} contains a reserved character."
+msgstr "Module {} Name {} enthält ein reserviertes Zeichen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Forbidden character: {}."
+msgstr "Verbotenes Zeichen: {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "A MODULE resource cannot contain {}."
+msgstr "Eine MODULE-Ressource kann {} nicht enthalten."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Module consumer expansion protocol does not support this field."
+msgstr "Das Module-Verbrauchererweiterungsprotokoll unterstützt dieses Feld nicht."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The Module registration template contains Stack resources constrained by "
+"the account environment."
+msgstr ""
+"Die Module-Registrierungsvorlage enthält Stack-Ressourcen, die durch die "
+"Kontoumgebung eingeschränkt sind."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
 #, python-brace-format
 msgid ""
-"Resource '{name}' definition must be an object (dict), current type is "
-"{type}"
+"Whether {} is allowed depends on the production/test account environment "
+"and cannot be determined from local template semantics alone."
 msgstr ""
-"Die Definition der Ressource '{name}' muss ein Objekt (dict) sein, "
-"aktueller Typ ist {type}"
+"Ob {} erlaubt ist, hängt von der Produktions- / Testkontoumgebung ab und "
+"kann nicht allein aus der lokalen Template-Semantik bestimmt werden."
 
-#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The template is missing ROSTemplateFormatVersion."
+msgstr "Die Vorlage fehlt ROSTemplateFormatVersion."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "A ROS template must declare a version, such as 2015-09-01."
+msgstr "Eine ROS-Vorlage muss eine Version wie 2015-09-01 deklarieren."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Add ROSTemplateFormatVersion: '2015-09-01'."
+msgstr "ROSTemplateFormatVersion hinzufügen: '2015-09-01'."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
 #, python-brace-format
-msgid "Resource '{name}' is missing the Type field"
-msgstr "Bei Ressource '{name}' fehlt das Feld Type"
+msgid "{} must be a Mapping."
+msgstr "{} muss ein Mapping sein."
 
-#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The current section cannot produce symbols and expression occurrences."
+msgstr ""
+"Der aktuelle Abschnitt kann keine Symbole und Ausdrucksereignisse "
+"erzeugen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Resources must be a Mapping."
+msgstr "Resources muss ein Mapping sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The current Resources value cannot be enumerated as resource declarations."
+msgstr ""
+"Der aktuelle Resources-Wert kann nicht als Ressourcendeklarationen "
+"aufgezählt werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
 #, python-brace-format
-msgid "Resource '{name}' has incorrect type '{wrong}', should be '{correct}'"
-msgstr "Ressource '{name}' hat den falschen Typ '{wrong}', sollte '{correct}' sein"
+msgid "The definition of resource {} must be a Mapping."
+msgstr "Die Definition der Ressource {} muss ein Mapping sein."
 
-#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Type and Properties cannot be read from the resource node."
+msgstr "Type und Properties können nicht vom Ressourcenknoten gelesen werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Resource {} is missing Type."
+msgstr "Resource {} fehlt Type."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Every ROS resource declaration must contain Type."
+msgstr "Jede ROS-Ressourcendeklaration muss Type enthalten."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Add Type to the resource."
+msgstr "Hinzufügen von Type zur Ressource."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Resource {} uses incorrect type {}."
+msgstr "Resource {} verwendet den falschen Typ {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "The corresponding ROS resource type is {}."
+msgstr "Der entsprechende ROS-Ressourcentyp ist {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Change it to {}."
+msgstr "Ändern Sie es in {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Condition {} references nonexistent Condition {}."
+msgstr "Condition {} verweist auf nicht vorhandene Condition {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
 msgid ""
-"Template structure validation found the following issues, please fix and "
-"retry:"
+"Condition names in And, Or, Not, and Fn::If must be declared in "
+"Conditions first."
 msgstr ""
-"Die Strukturvalidierung der Vorlage hat folgende Probleme gefunden, bitte"
-" beheben und erneut versuchen:"
+"Condition-Namen in And, Or, Not und Fn::If müssen zuerst in Conditions "
+"deklariert werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Conditions contain a cycle: {}."
+msgstr "Conditions enthält einen Zyklus: {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Condition dependency graph must be acyclic."
+msgstr "Der Condition Abhängigkeitsgraph muss azyklisch sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "VSwitch {} in an existing VPC uses a static CidrBlock."
+msgstr "VSwitch {} in einem vorhandenen VPC verwendet ein statisches CidrBlock."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The CidrBlock Parameter has a Default; after selecting an existing VPC, "
+"deployment parameters should choose a non-conflicting CIDR block."
+msgstr ""
+"Der CidrBlock-Parameter hat ein Default; nach Auswahl einer vorhandenen "
+"VPC sollten die Bereitstellungsparameter einen konfliktfreien CIDR-Block "
+"wählen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"After selecting an existing VPC, deployment parameters should choose a "
+"non-conflicting CidrBlock."
+msgstr ""
+"Nach der Auswahl einer vorhandenen VPC sollten die "
+"Bereitstellungsparameter eine nicht widersprüchliche CidrBlock auswählen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Remove the fixed value or the referenced Parameter Default."
+msgstr ""
+"Entfernen Sie den festen Wert oder das Default des referenzierten "
+"Parameters."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Locals must be a Mapping."
+msgstr "Locals muss ein Mapping sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Local dependency graph cannot be built."
+msgstr "Der Local Abhängigkeitsgraph kann nicht erstellt werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Local declaration has an invalid structure."
+msgstr "Die Local-Deklaration hat eine ungültige Struktur."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "A Local must use a String name and a Mapping definition."
+msgstr "Ein Local muss einen String-Namen und eine Mapping-Definition verwenden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Local {} contains unsupported fields."
+msgstr "Local {} enthält nicht unterstützte Felder."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Only Type, Value, and Properties are allowed."
+msgstr "Nur Type, Value und Properties sind erlaubt."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Local {} has an invalid Value/Properties combination."
+msgstr "Local {} hat eine ungültige Value/Properties Kombination."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Macro/Eval must have Value and cannot have Properties."
+msgstr "Macro/Eval muss Value haben und kann nicht Properties haben."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "DataSource Local {} has an invalid Value/Properties combination."
+msgstr "DataSource Local {} hat eine ungültige Value/Properties Kombination."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "A DATASOURCE::* Local cannot have Value, and Properties must be a Mapping."
+msgstr ""
+"Ein DATASOURCE::* Local kann nicht Value haben, und Properties muss ein "
+"Mapping sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Local {} Type {} is unsupported."
+msgstr "Local {} Type {} wird nicht unterstützt."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Macro, Eval, and DATASOURCE::* Resource Type are supported."
+msgstr "Macro, Eval und DATASOURCE::* Resource Type werden unterstützt."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Eval Local {} uses ALIYUN::StackId in a restricted position."
+msgstr "Eval Local {} verwendet ALIYUN::StackId in einer eingeschränkten Position."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The locked Locals precompiler rejects this Ref when it appears as a "
+"Mapping value; use Macro instead."
+msgstr ""
+"Der gesperrte Locals-Vorkompiler lehnt diesen Ref ab, wenn er als "
+"Mapping-Wert erscheint; verwenden Sie stattdessen Macro."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Local name {} does not match the official alphanumeric format."
+msgstr "Local Name {} entspricht nicht dem offiziellen alphanumerischen Format."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The locked runtime accepts this name, but the official contract allows "
+"only ASCII letters and digits."
+msgstr ""
+"Das gesperrte runtime akzeptiert diesen Namen, aber der offizielle "
+"Vertrag erlaubt nur ASCII-Buchstaben und Ziffern."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"When the outer template uses Locals, an inline nested stack cannot also "
+"declare Locals."
+msgstr ""
+"Wenn die äußere Vorlage Locals verwendet, kann ein inline verschachtelter"
+" Stapel nicht auch Locals deklarieren."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The locked PreCompilerLocals scans ALIYUN::ROS::Stack.TemplateBody and "
+"rejects this structure."
+msgstr ""
+"Der gesperrte PreCompilerLocals scannt ALIYUN::ROS::Stack.TemplateBody "
+"und lehnt diese Struktur ab."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"An inline nested stack declares Locals, which are not officially "
+"supported."
+msgstr ""
+"Ein Inline-Stack deklariert Locals, die nicht offiziell unterstützt "
+"werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The locked precompiler returns early when the outer template has no "
+"Locals, but the official nested-stack contract still does not support "
+"Locals."
+msgstr ""
+"Der gesperrte Vorkompiler kehrt vorzeitig zurück, wenn die äußere Vorlage"
+" kein Locals hat, aber der offizielle Nested-Stack-Vertrag Locals immer "
+"noch nicht unterstützt."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"Whether the remote nested stack contains Locals cannot be verified "
+"locally."
+msgstr ""
+"Ob der entfernte verschachtelte Stapel Locals enthält, kann nicht lokal "
+"überprüft werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The TemplateURL content is not in the current TemplateBody; local "
+"validation does not access the network to retrieve it."
+msgstr ""
+"Der TemplateURL-Inhalt befindet sich nicht im aktuellen TemplateBody; die"
+" lokale Validierung greift nicht auf das Netzwerk zu, um ihn abzurufen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Locals contain a cycle: {}."
+msgstr "Locals enthält einen Zyklus: {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"Local dependencies must be acyclic, with a reference depth no greater "
+"than 5."
+msgstr ""
+"Local-Abhängigkeiten müssen azyklisch sein, mit einer Referenztiefe von "
+"nicht mehr als 5."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Local {} has a reference depth greater than 5."
+msgstr "Local {} hat eine Referenztiefe größer als 5."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The ROS Local precompiler supports at most five reference levels."
+msgstr "Der ROS Local Precompiler unterstützt maximal fünf Referenzebenen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "conflicting declaration"
+msgstr "widersprüchliche Erklärung"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Symbol {} is declared in multiple sections."
+msgstr "Das Symbol {} wird in mehreren Abschnitten deklariert."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
+"Logical names in Parameters, Resources, and Locals must be mutually "
+"unique: {}."
+msgstr ""
+"Logische Namen in Parameters, Resources und Locals müssen gegenseitig "
+"eindeutig sein: {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Rename one declaration and update its references."
+msgstr "Benennen Sie eine Erklärung um und aktualisieren Sie ihre Referenzen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Resource {} Count is not a non-negative integer."
+msgstr "Resource {} Count ist keine nicht negative ganze Zahl."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"Count accepts an Integer, a String accepted by int(), or a dynamic "
+"expression returning either value; the current type is deterministically "
+"incompatible."
+msgstr ""
+"Count akzeptiert einen Integer, einen String, der von int() akzeptiert "
+"wird, oder einen dynamischen Ausdruck, der entweder einen Wert "
+"zurückgibt; der aktuelle Typ ist deterministisch inkompatibel."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Resource {} Count uses a String value."
+msgstr "Resource {} Count verwendet einen String-Wert."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The locked runtime accepts a convertible String through int(); STRICT "
+"mode recommends using Number/Integer directly."
+msgstr ""
+"Der gesperrte runtime akzeptiert ein konvertierbares String durch int(); "
+"der STRICT-Modus empfiehlt die direkte Verwendung von Number/Integer."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Change Count to an unquoted non-negative integer."
+msgstr "Ändern Sie Count in eine nicht zitierte nicht negative Ganzzahl."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Dynamic Count may conflict with explicit resource {}."
+msgstr "Dynamisches Count kann mit der expliziten Ressource {} in Konflikt stehen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"Count length is unknown locally; instance-name collisions can be "
+"determined only after deployment parameters are known."
+msgstr ""
+"Count Länge ist lokal unbekannt; Instanz-Name-Kollisionen können nur "
+"bestimmt werden, nachdem Bereitstellungsparameter bekannt sind."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Expanded Count name {} conflicts with an explicit resource."
+msgstr ""
+"Der erweiterte Count-Name {} steht in Konflikt mit einer expliziten "
+"Ressource."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Full precompilation would generate a resource instance with the same name."
+msgstr ""
+"Die vollständige Vorkompilierung würde eine Ressourceninstanz mit "
+"demselben Namen erzeugen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Rule Assert is known to be false."
+msgstr "Der Rule Assert ist bekanntlich falsch."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "This assertion will cause template validation to fail{}."
+msgstr "Diese Behauptung führt dazu, dass die Vorlagenvalidierung fehlschlägt{}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Correct the Parameter default, RuleCondition, or Assert expression."
+msgstr ""
+"Korrigieren Sie den Parameter-Standard, RuleCondition oder Assert-"
+"Ausdruck."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Rules.{} returns {}; explicitly returning Boolean is recommended."
+msgstr "Rules.{} gibt {} zurück; es wird ausdrücklich Boolean zurückgegeben."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The runtime uses truthiness for RuleCondition and fails Assert only when "
+"its result is exactly False; this is retained as a compatibility "
+"extension."
+msgstr ""
+"Der runtime verwendet Wahrhaftigkeit für RuleCondition und schlägt Assert"
+" nur dann fehl, wenn sein Ergebnis genau falsch ist; dies wird als "
+"Kompatibilitätserweiterung beibehalten."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "A nonexistent Condition {} is referenced."
+msgstr "Es wird auf ein nicht vorhandenes Condition {} verwiesen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Condition name must be declared in the Conditions section."
+msgstr "Der Condition-Name muss im Abschnitt Conditions deklariert werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The ROS template exceeds the local semantic-analysis budget."
+msgstr "Die ROS-Vorlage übersteigt das lokale Budget für semantische Analysen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Incomplete analysis has stopped and the API call has been blocked."
+msgstr ""
+"Die unvollständige Analyse wurde gestoppt und der API-Aufruf wurde "
+"blockiert."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "ROS function nesting exceeds 20 levels."
+msgstr "ROS Funktion Nesting überschreitet 20 Ebenen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "ROS does not accept a function at level 21."
+msgstr "ROS akzeptiert keine Funktion auf Level 21."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Expression type {} is incompatible with its consumer position."
+msgstr "Der Ausdruckstyp {} ist mit seiner Verbraucherposition nicht kompatibel."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "This position requires {}."
+msgstr "Diese Position erfordert {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Unknown ROS function {}."
+msgstr "Unbekannte ROS Funktion {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "This name is not in the registry of 43 ROS 2015-09-01 runtime functions."
+msgstr ""
+"Dieser Name ist nicht in der Registrierung von 43 ROS 2015-09-01 runtime "
+"Funktionen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Check the function name."
+msgstr "Überprüfen Sie den Funktionsnamen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Function {} cannot be used in {} context."
+msgstr "Die Funktion {} kann nicht im {}-Kontext verwendet werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"ROS registers different function tables for normal expressions, "
+"Conditions/Rules, and Count."
+msgstr ""
+"ROS registriert verschiedene Funktionstabellen für normale Ausdrücke, "
+"Conditions/Rules und Count."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "A Module registration template cannot use Fn::GetStackOutput."
+msgstr "Eine Module-Registrierungsvorlage kann Fn::GetStackOutput nicht verwenden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Module registration cannot depend on the runtime output of another Stack."
+msgstr ""
+"Die Module-Registrierung kann nicht vom runtime-Ausgang eines anderen "
+"Stack abhängen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Fn::Select cannot select an element during Count precompilation."
+msgstr "Fn::Select kann während der Count-Vorkompilierung kein Element auswählen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
+"The known arguments of {} cannot be evaluated under the ROS runtime "
+"contract."
+msgstr ""
+"Die bekannten Argumente von {} können nicht unter dem ROS runtime Vertrag"
+" bewertet werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
+"Local precomputation failed at the {} boundary; the remaining independent"
+" expressions will still be validated."
+msgstr ""
+"Die Local-Vorberechnung ist an der {}-Grenze fehlgeschlagen; die "
+"verbleibenden unabhängigen Ausdrücke werden weiterhin validiert."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "{} has an invalid argument shape."
+msgstr "{} hat eine ungültige Argumentform."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "The runtime requires {}."
+msgstr "Der runtime erfordert {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "{} argument {} has incompatible type {}."
+msgstr "{} Argument {} hat inkompatible Typ {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "This argument requires {}."
+msgstr "Dieses Argument erfordert {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "{} argument {} uses Boolean as Integer."
+msgstr "{} Argument {} verwendet Boolean als Integer."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The ROS Python runtime accepts this value, but an explicit Integer is "
+"clearer and better matches the official template contract."
+msgstr ""
+"Der ROS Python runtime akzeptiert diesen Wert, aber ein explizites "
+"Integer ist klarer und passt besser zum offiziellen Vorlagenvertrag."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "The known result of {} is a non-finite Number."
+msgstr "Das bekannte Ergebnis von {} ist ein nicht endliches Number."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The locked runtime returns NaN/Infinity, but that value violates standard"
+" JSON and the official template numeric constraints."
+msgstr ""
+"Der gesperrte runtime gibt NaN/Infinity zurück, aber dieser Wert verstößt"
+" gegen Standard JSON und die offiziellen numerischen Einschränkungen der "
+"Vorlage."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "{} List members must be hashable."
+msgstr "{} List Mitglieder müssen hashable sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The runtime checks each item for hashability before comparing collections."
+msgstr ""
+"Der runtime überprüft jedes Element auf Hash-Fähigkeit, bevor er "
+"Sammlungen vergleicht."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "{} uses a runtime-only non-List Iterable outer container."
+msgstr "{} verwendet einen runtime-nur nicht-List Iterable äußeren Container."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The locked constructor unpacks by iteration order; the official template "
+"contract recommends a List."
+msgstr ""
+"Das gesperrte constructor wird per Iterationsreihenfolge entpackt; der "
+"offizielle Vorlagenvertrag empfiehlt ein List."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "{} uses a runtime-only indexable Mapping outer container."
+msgstr "{} verwendet einen runtime-nur indexierbaren Mapping äußeren Container."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
+"The locked implementation indexes this container from 0 through {}; the "
+"official template contract recommends a List."
+msgstr ""
+"Die gesperrte Implementierung indiziert diesen Container von 0 bis {}; "
+"der offizielle Vorlagenvertrag empfiehlt ein List."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Function-form Ref resolves to {}, which is not a visible Parameter."
+msgstr ""
+"Die Funktionsform Ref wird in {} aufgelöst, was kein sichtbares Parameter"
+" ist."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The Ref factory selects ParamRef before function evaluation; it does not "
+"switch to ResourceRef when the result is a resource name."
+msgstr ""
+"Die Ref-Fabrik wählt vor der Funktionsauswertung ParamRef aus; sie "
+"wechselt nicht zu ResourceRef, wenn das Ergebnis ein Ressourcenname ist."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Ref ALIYUN::Index can be used only in a resource that declares Count."
+msgstr ""
+"Ref ALIYUN::Index kann nur in einer Ressource verwendet werden, die Count"
+" deklariert."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"This pseudo parameter is visible only in rewritable content of a Count "
+"resource instance."
+msgstr ""
+"Dieser Pseudoparameter ist nur im wiederbeschreibbaren Inhalt einer "
+"Count-Ressourceninstanz sichtbar."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "{} contains Ref {}, which cannot reference a Local."
+msgstr "{} enthält Ref {}, das nicht auf ein Local verweisen kann."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"ROS Local precompilation replaces only resource Count and Properties; "
+"names in this field are resolved as Parameter Ref."
+msgstr ""
+"ROS Local-Vorkompilierung ersetzt nur die Ressource Count und Properties;"
+" Namen in diesem Feld werden als Parameter Ref aufgelöst."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "A temporary Local Stack cannot reference outer resource {}."
+msgstr ""
+"Ein temporäres Local Stack kann nicht auf die äußere Ressource {} "
+"verweisen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The temporary Eval/DataSource Local template copies only Parameters and "
+"Locals, not outer Resources/DataSources."
+msgstr ""
+"Die temporäre Eval/DataSource Local Vorlage kopiert nur Parameters und "
+"Locals, nicht äußere Resources/DataSources."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
+"Count resource {} expands into multiple instances, but this Ref cannot be"
+" automatically rewritten into an instance list."
+msgstr ""
+"Count-Ressource {} wird in mehrere Instanzen erweitert, aber diese Ref "
+"kann nicht automatisch in eine Instanzliste umgeschrieben werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
+"Place Ref in an expandable expression under resource Properties or "
+"Outputs, or reference an explicit instance such as {}[0]."
+msgstr ""
+"Platzieren Sie Ref in einem erweiterbaren Ausdruck unter Ressource "
+"Properties oder Outputs oder verweisen Sie auf eine explizite Instanz wie"
+" {}[0]."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Ref references nonexistent symbol {}."
+msgstr "Ref verweist auf nicht vorhandenes Symbol {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The name does not appear in Parameters, Resources, Locals, or pseudo "
+"parameters."
+msgstr ""
+"Der Name erscheint nicht in Parameters, Resources, Locals oder "
+"Pseudoparametern."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Correct the logical name or add the missing declaration."
+msgstr ""
+"Korrigieren Sie den logischen Namen oder fügen Sie die fehlende Erklärung"
+" hinzu."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "ParamRef in {} context uses a non-String parameter key."
+msgstr "ParamRef verwendet im {}-Kontext einen nicht-String-Parameterschlüssel."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The locked runtime can look up a HashableScalar, but the official "
+"parameter-name and Ref contracts use String."
+msgstr ""
+"Der gesperrte runtime kann einen HashableScalar nachschlagen, aber der "
+"offizielle Parametername und die Ref-Verträge verwenden String."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "{} context contains Ref {}, which is not a visible Parameter."
+msgstr "Der {}-Kontext enthält Ref {}, was kein sichtbares Parameter ist."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"This context uses ParamRef; normal Resource/DataSource values are not "
+"allowed, and List/Map cannot be used as parameter keys."
+msgstr ""
+"Dieser Kontext verwendet ParamRef; normale Resource/DataSource-Werte sind"
+" nicht erlaubt und List/Map können nicht als Parameterschlüssel verwendet"
+" werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Whether Count instance reference {} exists cannot be determined locally."
+msgstr "Ob Count Instanzreferenz {} existiert, kann nicht lokal bestimmt werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"Count length is determined by a dynamic expression; if an instance exists"
+" at deployment time, this reference returns a single-instance value."
+msgstr ""
+"Count Länge wird durch einen dynamischen Ausdruck bestimmt; wenn eine "
+"Instanz zum Bereitstellungszeitpunkt existiert, gibt diese Referenz einen"
+" Einzelinstanzwert zurück."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "DataSource Local {} cannot remain in the final template scope."
+msgstr "DataSource Local {} kann nicht im endgültigen Vorlagenumfang verbleiben."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "A DataSource Local is visible only inside the Local dependency graph."
+msgstr ""
+"Ein DataSource Local ist nur innerhalb des Local Abhängigkeitsgraphen "
+"sichtbar."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "DataSource Local {} cannot use Fn::GetAtt in final template scope."
+msgstr ""
+"DataSource Local {} kann Fn::GetAtt nicht im endgültigen Vorlagenumfang "
+"verwenden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"A DataSource Local is visible only in the temporary Stack for the Local "
+"dependency graph."
+msgstr ""
+"Ein DataSource Local ist nur im temporären Stack für das Local-"
+"Abhängigkeitsgraph sichtbar."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "A temporary Local Stack cannot read attributes of outer resource {}."
+msgstr ""
+"Ein temporäres Local Stack kann keine Attribute der äußeren Ressource {} "
+"lesen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The temporary Eval/DataSource Local template does not copy outer "
+"Resources/DataSources."
+msgstr ""
+"Die temporäre Eval/DataSource Local Vorlage kopiert keine äußeren "
+"Resources/DataSources."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Fn::GetAtt references nonexistent resource {}."
+msgstr "Fn::GetAtt verweist auf nicht vorhandene Ressource {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The resource logical name or Count instance name is invalid."
+msgstr "Der logische Ressourcenname oder Count-Instanzname ist ungültig."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
+"Count resource {} expands into multiple instances, but this Fn::GetAtt "
+"cannot be automatically rewritten into an attribute list."
+msgstr ""
+"Count-Ressource {} wird in mehrere Instanzen erweitert, aber diese "
+"Fn::GetAtt kann nicht automatisch in eine Attributliste umgeschrieben "
+"werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
+"Use Fn::GetAtt: [{}, attribute-name] in an expandable expression under "
+"resource Properties or Outputs, or reference an explicit instance such as"
+" {}[0]."
+msgstr ""
+"Verwenden Sie Fn::GetAtt: [{}, attribute-name] in einem erweiterbaren "
+"Ausdruck unter Ressource Properties oder Outputs oder verweisen Sie auf "
+"eine explizite Instanz wie {}[0]."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "A List condition cannot be empty."
+msgstr "Eine List-Bedingung kann nicht leer sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "A Map condition must contain a Condition key."
+msgstr "Eine Map-Bedingung muss einen Condition-Schlüssel enthalten."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "condition must resolve to Boolean, String, List, or Map."
+msgstr "Die Bedingung muss in Boolean, String, List oder Map aufgelöst werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The condition key must resolve to String or Boolean."
+msgstr "Der Bedingungsschlüssel muss in String oder Boolean aufgelöst werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The condition key cannot be Null."
+msgstr "Der Bedingungsschlüssel kann nicht Null sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The condition key must be a String or Boolean."
+msgstr "Der Bedingungsschlüssel muss ein String oder Boolean sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The known Fn::If condition cannot be evaluated under the ROS runtime "
+"contract."
+msgstr ""
+"Die bekannte Fn::If Bedingung kann nicht unter dem ROS runtime Vertrag "
+"bewertet werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "{} in a plain string is not expanded by ROS."
+msgstr "{} in einem einfachen String wird nicht durch ROS erweitert."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
+"Only Fn::Sub expands ${...}; the current function treats it as a literal "
+"string."
+msgstr ""
+"Nur Fn::Sub erweitert ${...}; die aktuelle Funktion behandelt es als "
+"Literalstring."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Use Ref/Fn::GetAtt, or place the string inside Fn::Sub."
+msgstr "Verwenden Sie Ref/Fn::GetAtt oder legen Sie den String in Fn::Sub."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Fn::Select uses a runtime-only non-List outer container."
+msgstr "Fn::Select verwendet einen runtime-nur nicht-List äußeren Container."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The locked constructor can unpack exactly two members; the official "
+"template contract recommends a List."
+msgstr ""
+"Das gesperrte constructor kann genau zwei Mitglieder auspacken; der "
+"offizielle Vorlagenvertrag empfiehlt ein List."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The literal Mapping key for Fn::FindInMap does not exist."
+msgstr "Der literale Mapping-Schlüssel für Fn::FindInMap existiert nicht."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "No entry was found in map-name, top-key, second-key order."
+msgstr ""
+"Es wurde kein Eintrag in der Reihenfolge map-name, top-key, second-key "
+"gefunden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Fn::GetAZs is consumed outside the official ECS/VPC scope."
+msgstr "Fn::GetAZs wird außerhalb des offiziellen ECS/VPC-Bereichs konsumiert."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The runtime does not restrict this consumer position, so this is reported"
+" only as a quality difference."
+msgstr ""
+"Das runtime schränkt diese Verbraucherposition nicht ein, so dass dies "
+"nur als Qualitätsunterschied gemeldet wird."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Fn::ResourceFacade has no parent_resource in a top-level template."
+msgstr "Fn::ResourceFacade hat in einer Top-Level-Vorlage keine parent_resource."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "This internal function can be evaluated only in a resource facade context."
+msgstr ""
+"Diese interne Funktion kann nur in einem Ressourcenfassadenkontext "
+"ausgewertet werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Fn::Join collection uses Boolean as Integer text."
+msgstr "Die Fn::Join-Sammlung verwendet Boolean als Integer-Text."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The runtime inherits Python bool/int semantics; convert it explicitly "
+"first."
+msgstr ""
+"Die runtime erbt Python bool/int Semantik; konvertieren Sie es explizit "
+"zuerst."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Fn::Join collection contains an item that cannot be joined."
+msgstr ""
+"Die Fn::Join-Sammlung enthält ein Element, das nicht verbunden werden "
+"kann."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Only String, Integer, Boolean, and Null are accepted."
+msgstr "Es werden nur String, Integer, Boolean und Null akzeptiert."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Fn::Split delimiter cannot be empty."
+msgstr "Der Fn::Split Trennzeichen kann nicht leer sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Python split('') raises an empty separator error."
+msgstr "Python split('') löst einen leeren Separatorfehler aus."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "An Fn::Replace replacement key must be a String."
+msgstr "Ein Fn::Replace-Ersatzschlüssel muss ein String sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "A non-Null template consumes the key with replace()."
+msgstr "Eine Nicht-Null Vorlage verbraucht den Schlüssel mit replace()."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The constant Fn::Base64Decode input does not match the ROS Base64 format."
+msgstr ""
+"Der konstante Fn::Base64Decode-Eingang entspricht nicht dem ROS "
+"Base64-Format."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"Input must be non-empty and match the locked runtime padding regex; only "
+"one trailing newline accepted by regex `$` is allowed."
+msgstr ""
+"Die Eingabe muss nicht leer sein und dem gesperrten runtime-Pading-Regex "
+"entsprechen; nur eine von regex \"$\" akzeptierte Trailing-Newline ist "
+"zulässig."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The constant Fn::Base64Decode input is invalid."
+msgstr "Der konstante Fn::Base64Decode Eingang ist ungültig."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Input must be non-empty Base64 that decodes as UTF-8."
+msgstr "Der Eingang muss nicht leer Base64 sein, der als UTF-8 dekodiert wird."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Fn::Str container cannot be JSON-serialized."
+msgstr "Der Fn::Str Container kann nicht JSON-serialisiert werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The container contains an unsupported key or value."
+msgstr "Der Container enthält einen nicht unterstützten Schlüssel oder Wert."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Fn::Sub variable-map keys must be Strings."
+msgstr "Fn::Sub variable Kartenschlüssel müssen Strings sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The Sub constructor iterates over and validates every variable name "
+"before evaluation."
+msgstr ""
+"Der Sub constructor iteriert und validiert jeden Variablennamen vor der "
+"Auswertung."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Fn::Sub Parameter Ref result cannot be converted to String."
+msgstr ""
+"Das Ergebnis Fn::Sub Parameter Ref kann nicht in String konvertiert "
+"werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The ROS constructor calls to_string on the ParamRef result first."
+msgstr ""
+"Der ROS constructor ruft to_string zuerst auf dem Ergebnis von ParamRef "
+"auf."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Fn::Sub variable name does not match the runtime syntax."
+msgstr "Der Name der Fn::Sub-Variable stimmt nicht mit der runtime-Syntax überein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
+"The ${...} content must contain at least one name matched by "
+"SUB_STRING_PATTERN."
+msgstr ""
+"Der ${...}-Inhalt muss mindestens einen Namen enthalten, der mit "
+"SUB_STRING_PATTERN übereinstimmt."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Fn::Sub variable {} cannot be JSON-serialized."
+msgstr "Fn::Sub Variable {} kann nicht JSON-serialisiert werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "A used List/Map variable enters the runtime to_string JSON branch."
+msgstr ""
+"Eine verwendete List/Map-Variable tritt in den runtime to_string JSON-"
+"Zweig ein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
+"{} in Fn::Sub references a Count resource that expands into multiple "
+"instances; ROS cannot determine which instance attribute to read."
+msgstr ""
+"{} in Fn::Sub verweist auf eine Count-Ressource, die in mehrere Instanzen"
+" erweitert wird; ROS kann nicht bestimmen, welches Instanzattribut "
+"gelesen werden soll."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
+"Use an expandable Fn::GetAtt in the variable map, or reference an "
+"explicit instance such as {}[0]."
+msgstr ""
+"Verwenden Sie ein erweiterbares Fn::GetAtt in der Variablenkarte oder "
+"verweisen Sie auf eine explizite Instanz wie {}[0]."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Fn::Sub references nonexistent resource attribute {}."
+msgstr "Fn::Sub verweist auf nicht vorhandenes Ressourcenattribut {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The implicit GetAtt cannot bind to a resource."
+msgstr "Das implizite GetAtt kann nicht an eine Ressource binden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
+"{} in Fn::Sub references a Count resource that expands into multiple "
+"instances; ROS cannot determine which instance to use."
+msgstr ""
+"{} in Fn::Sub verweist auf eine Count-Ressource, die in mehrere Instanzen"
+" erweitert wird; ROS kann nicht bestimmen, welche Instanz verwendet "
+"werden soll."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
+"Use an expandable Ref in the variable map, or reference an explicit "
+"instance such as {}[0]."
+msgstr ""
+"Verwenden Sie ein erweiterbares Ref in der Variablenkarte oder verweisen "
+"Sie auf eine explizite Instanz wie {}[0]."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Fn::Sub references nonexistent symbol {}."
+msgstr "Fn::Sub verweist auf nicht vorhandenes Symbol {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The name does not exist in either the variable map or the template symbol"
+" table."
+msgstr ""
+"Der Name existiert weder in der Variablenkarte noch in der "
+"Vorlagensymboltabelle."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Fn::Sub variable {} is not used by the template."
+msgstr "Fn::Sub Variable {} wird von der Vorlage nicht verwendet."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Unused variables do not affect the result."
+msgstr "Nicht verwendete Variablen beeinflussen das Ergebnis nicht."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Integer argument {} of Fn::Indent is out of range."
+msgstr "Integer Argument {} von Fn::Indent ist außerhalb des Bereichs."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "The allowed range is 0 to {}."
+msgstr "Der zulässige Bereich ist 0 bis {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The fourth argument of Fn::Indent should be a Boolean."
+msgstr "Das vierte Argument von Fn::Indent sollte ein Boolean sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The runtime uses truthy semantics, but an explicit Boolean is clearer."
+msgstr ""
+"Das runtime verwendet wahrheitsgemäße Semantik, aber ein explizites "
+"Boolean ist klarer."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Fn::FormatTime time zone is invalid."
+msgstr "Die Zeitzone Fn::FormatTime ist ungültig."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The locked runtime requires time_zone to be recognized by the time-zone "
+"database."
+msgstr ""
+"Das gesperrte runtime erfordert, dass time_zone von der "
+"Zeitzonendatenbank erkannt wird."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Fn::MatchPattern regular expression is invalid."
+msgstr "Der reguläre Ausdruck Fn::MatchPattern ist ungültig."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The literal pattern cannot be compiled."
+msgstr "Das wörtliche Muster kann nicht kompiliert werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The fourth Fn::Select argument must be a raw String or Null."
+msgstr "Das vierte Fn::Select-Argument muss ein roher String oder Null sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"error_message is checked during construction, regardless of whether the "
+"key matches."
+msgstr ""
+"error_message wird während des Baus überprüft, unabhängig davon, ob der "
+"Schlüssel übereinstimmt."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The literal Fn::Select key/index did not match."
+msgstr "Der wörtliche Fn::Select-Schlüssel/Index stimmte nicht überein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The fourth error_message is not Null, so the runtime reports an error."
+msgstr ""
+"Das vierte error_message ist nicht Null, daher meldet das runtime einen "
+"Fehler."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The literal Fn::Select key/index is invalid."
+msgstr "Der literale Fn::Select Schlüssel/Index ist ungültig."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The value cannot be converted to an Integer, a valid slice, or the key "
+"required by the collection."
+msgstr ""
+"Der Wert kann nicht in einen Integer, einen gültigen Slice oder den von "
+"der Sammlung benötigten Schlüssel konvertiert werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
+"The second Fn::Select argument is definitively {}, which cannot be used "
+"as a collection."
+msgstr ""
+"Das zweite Fn::Select-Argument ist definitiv {}, das nicht als Sammlung "
+"verwendet werden kann."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"This argument must be List, Map, Null, EmptyString, or a String that "
+"decodes to JSON List/Map/Null."
+msgstr ""
+"Dieses Argument muss List, Map, Null, EmptyString oder ein String sein, "
+"das in JSON List/Map/Null decodiert."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"Make the second argument return an actual collection, or remove "
+"Fn::Select."
+msgstr ""
+"Lassen Sie das zweite Argument eine tatsächliche Sammlung zurückgeben, "
+"oder entfernen Sie Fn::Select."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The first two Fn::MemberListToMap arguments must be raw Strings."
+msgstr "Die ersten beiden Fn::MemberListToMap-Argumente müssen rohe Strings sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The name and value field names are consumed during construction."
+msgstr "Die Namens- und Wertfeldnamen werden während der Konstruktion verbraucht."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Fn::MemberListToMap members must be Strings."
+msgstr "Fn::MemberListToMap-Mitglieder müssen Strings sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The runtime calls split('=', 1) for every item."
+msgstr "Der runtime ruft split('=', 1) für jedes Element auf."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "An Fn::MemberListToMap member is missing an equals sign."
+msgstr "Einem Fn::MemberListToMap-Mitglied fehlt ein Gleichheitszeichen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The member cannot be converted to the key/value pair required by dict()."
+msgstr ""
+"Das Mitglied kann nicht in das von dict() benötigte Schlüssel/Wert-Paar "
+"konvertiert werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Fn::GetJsonValue has an invalid JSON String."
+msgstr "Fn::GetJsonValue hat eine ungültige JSON String."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The second argument cannot be decoded as a JSON object."
+msgstr "Das zweite Argument kann nicht als JSON Objekt dekodiert werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The value selected by Fn::GetJsonValue cannot be JSON-serialized."
+msgstr ""
+"Der von Fn::GetJsonValue ausgewählte Wert kann nicht JSON-serialisiert "
+"werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Only the selected non-String cell enters json.dumps."
+msgstr "Nur die ausgewählte Nicht-String-Zelle tritt in json.dumps ein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "An Fn::MergeMapToList Map contains more than one valid key/value pair."
+msgstr ""
+"Ein Fn::MergeMapToList Map enthält mehr als ein gültiges Schlüssel/Wert-"
+"Paar."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The locked runtime rejects this Map before the second non-empty value."
+msgstr ""
+"Der gesperrte runtime weist diesen Map vor dem zweiten nicht-leeren Wert "
+"zurück."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "An Fn::MergeMapToList Map value must be List or Null."
+msgstr "Ein Fn::MergeMapToList Map-Wert muss List oder Null sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Null is treated as ['']; other types fail deterministically at runtime."
+msgstr ""
+"Null wird als [''] behandelt; andere Typen scheitern deterministisch an "
+"runtime."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Fn::SelectMapList key must be hashable."
+msgstr "Der Fn::SelectMapList-Schlüssel muss hashbar sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The runtime evaluates `key in map_item`; a List/Map key fails "
+"deterministically."
+msgstr ""
+"Der runtime wertet `key in map_item` aus; ein List/Map-Schlüssel schlägt "
+"deterministisch fehl."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Fn::SelectMapList collection members must be Maps or Null."
+msgstr "Fn::SelectMapList-Sammlungsmitglieder müssen Maps oder Null sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Null is skipped; other types cannot participate in key lookup."
+msgstr ""
+"Null wird übersprungen; andere Typen können nicht an der Schlüsselsuche "
+"teilnehmen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Fn::Jq method must be First or All."
+msgstr "Die Fn::Jq-Methode muss First or All sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "method is checked during raw construction."
+msgstr "Das Verfahren wird beim Rohbau überprüft."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Fn::Jq forbids $ENV in a raw script."
+msgstr "Fn::Jq verbietet $ENV in einem Rohskript."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"This regular-expression check occurs before function evaluation; the "
+"result of a dynamic script is not checked here."
+msgstr ""
+"Diese Regular-Expression-Prüfung erfolgt vor der Funktionsauswertung; das"
+" Ergebnis eines dynamischen Skripts wird hier nicht überprüft."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Fn::Jq has a non-empty String value that is not valid JSON."
+msgstr "Fn::Jq hat einen nicht leeren String-Wert, der nicht gültig ist JSON."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The runtime calls json.loads before executing jq."
+msgstr "Der runtime ruft json.loads auf, bevor er jq ausführt."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Fn::Jq value cannot be JSON-serialized."
+msgstr "Der Fn::Jq-Wert kann nicht JSON-serialisiert werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"A value that is not short-circuited crosses the JSON boundary before the "
+"jq backend."
+msgstr ""
+"Ein Wert, der nicht kurzgeschlossen ist, überschreitet die JSON-Grenze "
+"vor dem jq-Backend."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Fn::EachMemberIn List exceeds 10,000 items."
+msgstr "Der Fn::EachMemberIn List übersteigt 10.000 Artikel."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The runtime limits each collection to 10,000 items."
+msgstr "Der runtime begrenzt jede Sammlung auf 10.000 Artikel."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"All Fn::Add arguments must be Numbers, Lists, or Maps of the same "
+"category."
+msgstr ""
+"Alle Fn::Add-Argumente müssen Numbers, Lists oder Maps derselben "
+"Kategorie sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The three operation branches cannot be mixed."
+msgstr "Die drei Operationszweige können nicht gemischt werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Member {} of Fn::Avg cannot be converted to Float."
+msgstr "Member {} von Fn::Avg kann nicht in Float umgewandelt werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "The conversion result is {}."
+msgstr "Das Umwandlungsergebnis ist {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The known Fn::Avg arguments fail during summation or rounding."
+msgstr "Die bekannten Fn::Avg-Argumente scheitern beim Summieren oder Runden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The ROS runtime cannot evaluate this literal numeric combination."
+msgstr ""
+"Die ROS runtime kann diese wörtliche numerische Kombination nicht "
+"auswerten."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The non-finite Fn::Avg result cannot be converted to Integer."
+msgstr ""
+"Das nicht endliche Ergebnis von Fn::Avg kann nicht in Integer konvertiert"
+" werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"When ndigits is at most 0, the runtime eventually calls int(); "
+"NaN/Infinity fails deterministically."
+msgstr ""
+"Wenn ndigits höchstens 0 ist, ruft der runtime schließlich int() auf; "
+"NaN/Infinity scheitert deterministisch."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Fn::Calculate expression is outside the safe allowlist."
+msgstr "Der Ausdruck Fn::Calculate befindet sich außerhalb der Safe Allowlist."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The expression must be a raw String; ** and non-arithmetic characters are"
+" forbidden."
+msgstr ""
+"Der Ausdruck muss ein roher String sein; ** und nicht-arithmetische "
+"Zeichen sind verboten."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Fn::Calculate has an invalid placeholder format."
+msgstr "Fn::Calculate hat ein ungültiges Platzhalterformat."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
+"Only positional placeholders such as {0} and {1}, without conversions or "
+"format specs, are allowed."
+msgstr ""
+"Nur Positionsplatzhalter wie {0} und {1} ohne Konvertierungen oder "
+"Formatspezifikationen sind erlaubt."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Fn::Calculate number {} failed preflight validation."
+msgstr "Fn::Calculate Nummer {} fehlgeschlagen Preflight Validierung."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "float() produced {}; preflight runs before placeholder reachability."
+msgstr "float() produzierte {}; Preflight läuft vor Platzhaltererreichbarkeit."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Fn::Calculate references a number placeholder that does not exist."
+msgstr "Fn::Calculate verweist auf einen Nummernplatzhalter, der nicht existiert."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "The maximum expression index is {}, but only {} numbers were provided."
+msgstr ""
+"Der maximale Expressionsindex ist {}, es wurden jedoch nur {}-Nummern "
+"bereitgestellt."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Fn::Calculate expression cannot be formatted with the raw numbers."
+msgstr "Der Ausdruck Fn::Calculate kann nicht mit den Rohzahlen formatiert werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The runtime calls expression.format(*numbers) before arithmetic "
+"evaluation."
+msgstr ""
+"Der runtime ruft vor der arithmetischen Auswertung "
+"expression.format(*numbers) auf."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The known Fn::Calculate expression cannot be evaluated under the runtime "
+"arithmetic contract."
+msgstr ""
+"Der bekannte Fn::Calculate-Ausdruck kann nicht unter dem runtime-"
+"Arithmetik-Kontrakt ausgewertet werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"The formatted result contains an invalid token, division by zero, "
+"overflow, or a non-finite value that cannot be converted to Integer."
+msgstr ""
+"Das formatierte Ergebnis enthält ein ungültiges Token, eine Division "
+"durch Null, einen Überlauf oder einen nicht endlichen Wert, der nicht in "
+"Integer konvertiert werden kann."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Integer argument {} of Fn::Cidr is out of range."
+msgstr "Integer Argument {} von Fn::Cidr ist außerhalb des Bereichs."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "The allowed range is {} to {}."
+msgstr "Der zulässige Bereich ist {} bis {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The literal Fn::Cidr IPv4 network is invalid."
+msgstr "Das literale Fn::Cidr IPv4 Netzwerk ist ungültig."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "ipBlock must be a valid IPv4 CIDR."
+msgstr "ipBlock muss ein gültiges IPv4 CIDR sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The literal Fn::Cidr network arguments are invalid."
+msgstr "Die literalen Fn::Cidr-Netzwerkargumente sind ungültig."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"IPv4, count from 1 to 256, cidrBits from 1 to 32, and sufficient capacity"
+" are required."
+msgstr ""
+"IPv4, von 1 bis 256, cidrBits von 1 bis 32, und es sind ausreichende "
+"Kapazitäten erforderlich."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Fn::TransformNamespace transform_type is invalid."
+msgstr "Fn::TransformNamespace transform_type ist ungültig."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Only Condition or DependsOn is supported."
+msgstr "Nur Condition oder DependsOn werden unterstützt."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The Fn::TransformNamespace Condition List cannot be empty."
+msgstr "Der Fn::TransformNamespace Condition List kann nicht leer sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The runtime reads the first member, so an empty List raises IndexError."
+msgstr ""
+"Der runtime liest das erste Mitglied, so dass ein leeres List IndexError "
+"erhöht."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Fn::TransformNamespace.DependsOn has an invalid Lookup value."
+msgstr "Fn::TransformNamespace.DependsOn hat einen ungültigen Lookup-Wert."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Every Lookup value must be List[String]."
+msgstr "Jeder Lookup-Wert muss List[String] sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/facts.py
+msgid "An internal ROS local-validator component failed."
+msgstr "Eine interne ROS-Validatorkomponente ist fehlgeschlagen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/facts.py
+#, python-brace-format
+msgid "Component {} raised {}."
+msgstr "Komponente {} erhöhte {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/model.py
+msgid "origin"
+msgstr "Ursprung"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/outcome.py
+msgid ""
+"\n"
+"\n"
+"---\n"
+"ROS local preflight diagnostics:\n"
+msgstr "--- ROS lokale Preflight-Diagnose:"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+#, python-brace-format
+msgid "alias reference budget exceeds {}"
+msgstr "Alias-Referenzbudget übersteigt {}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+#, python-brace-format
+msgid "merge expansion budget exceeds {}"
+msgstr "Merger Expansion Budget übersteigt {}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+#, python-brace-format
+msgid "template nesting exceeds {}"
+msgstr "Template Nesting übersteigt {}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+#, python-brace-format
+msgid "parser event budget exceeds {}"
+msgstr "Parser Event Budget übersteigt {}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "The template contains a duplicate Mapping key."
+msgstr "Die Vorlage enthält einen doppelten Mapping Schlüssel."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "ROS/PyYAML uses the later value; remove the duplicate to avoid ambiguity."
+msgstr ""
+"ROS/PyYAML verwendet den späteren Wert; entfernen Sie das Duplikat, um "
+"Mehrdeutigkeiten zu vermeiden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "Keep only one declaration of this key."
+msgstr "Halten Sie nur eine Deklaration dieses Schlüssels."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "first declaration"
+msgstr "erste Deklaration"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "JSON contains trailing content"
+msgstr "JSON enthält Trailing-Inhalte"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "unexpected end of JSON input"
+msgstr "Unerwartetes Ende des JSON-Eingangs"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "invalid JSON value"
+msgstr "ungültiger JSON-Wert"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "unescaped control character in JSON string"
+msgstr "unescaped Steuerzeichen in JSON String"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "invalid JSON string escape"
+msgstr "ungültige JSON-Zeichenflucht"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "invalid JSON Unicode escape"
+msgstr "ungültige JSON Unicode Flucht"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "unterminated JSON string"
+msgstr "Untermated JSON String"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "invalid JSON string"
+msgstr "ungültiger JSON-String"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "invalid Unicode surrogate"
+msgstr "ungültiger Unicode-Surrogat"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "unterminated JSON array"
+msgstr "nicht abgeschlossenes JSON-Array"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "expected ',' or ']' in JSON array"
+msgstr "im JSON-Array wurde ',' oder ']' erwartet"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "JSON object keys must be strings"
+msgstr "JSON Objektschlüssel müssen Strings sein"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "expected ':' after JSON object key"
+msgstr "erwartet ':' nach JSON Objektschlüssel"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "ROS JSON uses the later value; remove the duplicate to avoid ambiguity."
+msgstr ""
+"ROS JSON verwendet den späteren Wert; entfernen Sie das Duplikat, um "
+"Mehrdeutigkeiten zu vermeiden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "unterminated JSON object"
+msgstr "untermated JSON Objekt"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "expected ',' or '}' in JSON object"
+msgstr "erwartetes ',' oder '} in JSON Objekt"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "The ROS template cannot be parsed."
+msgstr "Das ROS Template kann nicht analysiert werden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "Fix the syntax and validate again."
+msgstr "Beheben Sie die Syntax und validieren Sie erneut."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "TemplateBody must be a String."
+msgstr "TemplateBody muss ein String sein."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid ""
+"The current TemplateBody type is not String, so source locations cannot "
+"be built."
+msgstr ""
+"Der aktuelle TemplateBody-Typ ist nicht String, so dass Quellstandorte "
+"nicht erstellt werden können."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "TemplateBody UTF-8 size is outside the allowed range."
+msgstr "TemplateBody UTF-8 Größe liegt außerhalb des zulässigen Bereichs."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+#, python-brace-format
+msgid "The allowed range is 1 to 524288 bytes; the current size is {} bytes."
+msgstr ""
+"Der erlaubte Bereich ist 1 bis 524288 Bytes; die aktuelle Größe ist {} "
+"Bytes."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "TemplateBody contains a NUL character."
+msgstr "TemplateBody enthält ein Zeichen NUL."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "NUL makes ROS template parsing unsafe, so local validation has stopped."
+msgstr ""
+"NUL macht das ROS-Template-Parsing unsicher, so dass die lokale "
+"Validierung gestoppt wurde."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "The ROS template exceeds the local-analysis safety budget."
+msgstr "Die ROS-Vorlage übersteigt das Sicherheitsbudget der lokalen Analyse."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "The template is empty."
+msgstr "Das Template ist leer."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
+msgid "An internal error occurred during the ROS local-validator parsing stage."
+msgstr ""
+"Ein interner Fehler trat während der lokalen ROS-Validator-Parsing-Phase "
+"auf."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+msgid "ERROR"
+msgstr "FEHLER"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+msgid "WARNING"
+msgstr "WARNUNG"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+msgid "LIMITATION"
+msgstr "EINSCHRÄNKUNG"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+msgid "ROS local validation failed"
+msgstr "ROS lokale Validierung fehlgeschlagen"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+msgid "ROS local validation completed"
+msgstr "ROS lokale Validierung abgeschlossen"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+#, python-brace-format
+msgid "{}: {} errors, {} warnings, {} limitations."
+msgstr "{}: {} Fehler, {} Warnungen, {} Einschränkungen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+msgid "Analysis did not complete; this call was blocked to avoid missed errors."
+msgstr ""
+"Die Analyse wurde nicht abgeschlossen; dieser Aufruf wurde blockiert, um "
+"verpasste Fehler zu vermeiden."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+msgid "generated JSON "
+msgstr "erzeugt JSON"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+#, python-brace-format
+msgid "{}line {}:"
+msgstr "{}Zeile {}:"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+msgid "Details:"
+msgstr "Einzelheiten:"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+#, python-brace-format
+msgid "{}line {}:{}"
+msgstr "{}Zeile {}:{}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+msgid "no source location"
+msgstr "kein Quellort"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+#, python-brace-format
+msgid "   path: {}"
+msgstr "Pfad: {}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+#, python-brace-format
+msgid "   Related location ({}): {}, path: {}"
+msgstr "Verwandter Standort ({}): {}, Pfad: {}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+#, python-brace-format
+msgid "   expected: {}"
+msgstr "erwartet: {}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+#, python-brace-format
+msgid "   actual: {}"
+msgstr "aktuell: {}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+#, python-brace-format
+msgid "   Suggestion: {}"
+msgstr "Vorschlag: {}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/symbols.py
+msgid "Number argument cannot be converted to a number"
+msgstr "Number Argument kann nicht in eine Zahl konvertiert werden"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/symbols.py
+msgid "Boolean argument cannot be converted to a Boolean"
+msgstr "Boolean Argument kann nicht in ein Boolean konvertiert werden"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/types.py
+#, python-brace-format
+msgid "non-finite JSON constant {}"
+msgstr "nicht endliche JSON Konstante {}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/validator.py
+msgid "The current parsed result cannot contain ROS sections."
+msgstr "Das aktuelle analysierte Ergebnis kann keine ROS-Abschnitte enthalten."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/validator.py
+#, python-brace-format
+msgid "The known value of Parameter {} cannot be parsed as its declared type."
+msgstr ""
+"Der bekannte Wert von Parameter {} kann nicht als deklarierter Typ "
+"analysiert werden."
 
 #: src/iac_code/ui/banner.py
 #, python-brace-format
@@ -8910,3 +11085,88 @@ msgstr "Öffnen einer nicht regulären Datei verweigert: {path}"
 #~ "Sie das Speicherkontingent der aktiven "
 #~ "Sitzung und versuchen Sie es erneut."
 
+#~ msgid ""
+#~ "Template YAML syntax error (line {line}, column {col}): {problem}\n"
+#~ "Context:\n"
+#~ "{context}"
+#~ msgstr ""
+#~ "YAML-Syntaxfehler in der Vorlage (Zeile"
+#~ " {line}, Spalte {col}): {problem}\n"
+#~ "Kontext:\n"
+#~ "{context}"
+
+#~ msgid ""
+#~ "Resource '{name}' creates a VSwitch in"
+#~ " existing VPC parameter '{vpc_param}', but"
+#~ " CidrBlock references parameter '{cidr_param}'"
+#~ " with a Default. Remove "
+#~ "Parameters.{cidr_param}.Default and let deployment"
+#~ " parameters choose a non-overlapping "
+#~ "CIDR after VpcId is selected."
+#~ msgstr ""
+#~ "Die Ressource '{name}' erstellt einen "
+#~ "VSwitch im Parameter für eine vorhandene"
+#~ " VPC '{vpc_param}', aber CidrBlock verweist"
+#~ " auf den Parameter '{cidr_param}' mit "
+#~ "einem Default. Entfernen Sie "
+#~ "Parameters.{cidr_param}.Default und lassen Sie "
+#~ "die Bereitstellungsparameter nach Auswahl von"
+#~ " VpcId einen nicht überlappenden CIDR-"
+#~ "Bereich wählen."
+
+#~ msgid ""
+#~ "Resource '{name}' creates a VSwitch in"
+#~ " existing VPC parameter '{vpc_param}', so"
+#~ " CidrBlock must not be a static "
+#~ "value. Remove the fixed CidrBlock and"
+#~ " let deployment parameters choose a "
+#~ "non-overlapping CIDR after VpcId is "
+#~ "selected."
+#~ msgstr ""
+#~ "Die Ressource '{name}' erstellt einen "
+#~ "VSwitch im Parameter für eine vorhandene"
+#~ " VPC '{vpc_param}', daher darf CidrBlock"
+#~ " kein statischer Wert sein. Entfernen "
+#~ "Sie den festen CidrBlock und lassen "
+#~ "Sie die Bereitstellungsparameter nach Auswahl"
+#~ " von VpcId einen nicht überlappenden "
+#~ "CIDR-Bereich wählen."
+
+#~ msgid ""
+#~ "Template is missing ROSTemplateFormatVersion "
+#~ "(ROS templates must include this field,"
+#~ " e.g. '2015-09-01')"
+#~ msgstr ""
+#~ "In der Vorlage fehlt ROSTemplateFormatVersion"
+#~ " (ROS-Vorlagen müssen dieses Feld "
+#~ "enthalten, z.B. '2015-09-01')"
+
+#~ msgid "Template is missing Resources (ROS templates must include Resources)"
+#~ msgstr ""
+#~ "In der Vorlage fehlt Resources (ROS-"
+#~ "Vorlagen müssen Resources enthalten)"
+
+#~ msgid "Resources must be an object (dict), current type is {}"
+#~ msgstr "Resources muss ein Objekt (dict) sein, aktueller Typ ist {}"
+
+#~ msgid ""
+#~ "Resource '{name}' definition must be an"
+#~ " object (dict), current type is "
+#~ "{type}"
+#~ msgstr ""
+#~ "Die Definition der Ressource '{name}' "
+#~ "muss ein Objekt (dict) sein, aktueller"
+#~ " Typ ist {type}"
+
+#~ msgid "Resource '{name}' has incorrect type '{wrong}', should be '{correct}'"
+#~ msgstr ""
+#~ "Ressource '{name}' hat den falschen Typ"
+#~ " '{wrong}', sollte '{correct}' sein"
+
+#~ msgid ""
+#~ "Template structure validation found the "
+#~ "following issues, please fix and retry:"
+#~ msgstr ""
+#~ "Die Strukturvalidierung der Vorlage hat "
+#~ "folgende Probleme gefunden, bitte beheben "
+#~ "und erneut versuchen:"

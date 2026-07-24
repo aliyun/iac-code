@@ -236,11 +236,15 @@ class AliyunDelegatedExecutor:
             if not validate_delegated_tool_input(tool_input, action=self._action):
                 return ToolResult.error(self._public_error("invalid_tool_input", tool_input))
             shape = build_delegated_call_shape(tool_input, action=self._action)
-            return await self._public_tool.execute_delegated(
-                shape,
-                tool_input,
-                _delegated_tool_context(context),
-            )
+            delegated_context = _delegated_tool_context(context)
+            try:
+                return await self._public_tool.execute_delegated(
+                    shape,
+                    tool_input,
+                    delegated_context,
+                )
+            finally:
+                context.ros_preflight_outcome = delegated_context.ros_preflight_outcome
         finally:
             self._public_tool._invalidate_runtime_handoff(context)
 
@@ -316,6 +320,7 @@ def _delegated_tool_context(context: ToolContext) -> ToolContext:
         snapshot_id=context.snapshot_id,
         security_digest=context.security_digest,
         execution_class=context.execution_class,
+        trusted_ros_account_context=context.trusted_ros_account_context,
     )
 
 

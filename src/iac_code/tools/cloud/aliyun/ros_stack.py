@@ -21,7 +21,7 @@ from iac_code.services.telemetry.sanitize import (
     sanitize_resource_type,
     sanitize_terraform_provider,
 )
-from iac_code.tools.base import ToolContext
+from iac_code.tools.base import ToolContext, ToolResult
 from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
 from iac_code.tools.cloud.aliyun.template_source import (
     check_local_template_url_read_permission,
@@ -252,6 +252,55 @@ class RosStack(BaseCloudStack):
 
     def user_facing_name(self, input: dict | None = None) -> str:
         return _("ROS Stack")
+
+    async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
+        context.ros_preflight_outcome = None
+        params = tool_input.get("params")
+        if not context.pipeline_mode and isinstance(params, dict):
+            template_url = params.get("TemplateURL", "")
+            if isinstance(template_url, str) and template_url and is_local_template_url(template_url):
+                if path_result := check_local_template_url_read_permission(
+                    template_url,
+                    None,
+                    cwd=context.cwd,
+                    additional_directories=context.additional_directories,
+                    trusted_read_directories=context.trusted_read_directories,
+                    relative_read_directories=context.relative_read_directories,
+                    strict_read_directories=context.strict_read_directories,
+                    read_path_violation_behavior=context.read_path_violation_behavior,
+                ):
+                    if path_result.behavior == "deny":
+                        return ToolResult.error(path_result.message)
+                try:
+                    params["TemplateBody"] = read_local_template_url(
+                        template_url,
+                        None,
+                        cwd=context.cwd,
+                        relative_read_directories=context.relative_read_directories,
+                    )
+                except (OSError, UnicodeError) as error:
+                    from iac_code.tools.cloud.aliyun.hooks.ros_validate import local_template_source_error
+
+                    outcome = local_template_source_error(error)
+                    context.ros_preflight_outcome = outcome
+                    assert outcome.blocking_result is not None
+                    return outcome.blocking_result
+                del params["TemplateURL"]
+            from iac_code.tools.cloud.aliyun.api_hooks import run_hooks
+
+            hook_result = run_hooks(
+                "ros",
+                str(tool_input.get("action") or ""),
+                params,
+                context=context,
+                read_only=True,
+            )
+            if hook_result is not None:
+                return hook_result
+        result = await super().execute(tool_input=tool_input, context=context)
+        from iac_code.tools.cloud.aliyun.ros_validation.outcome import attach_ros_validation
+
+        return attach_ros_validation(result, context.ros_preflight_outcome)
 
     def is_action_terminal(self, action: str, status: StackStatus) -> bool:
         if action in {"CreateStack", "ContinueCreateStack"}:
@@ -491,6 +540,8 @@ class RosStack(BaseCloudStack):
             "relative_read_directories": context.relative_read_directories,
             "strict_read_directories": context.strict_read_directories,
             "read_path_violation_behavior": context.read_path_violation_behavior,
+            "tool_context": context,
+            "ros_preflight_completed": context.ros_preflight_outcome is not None,
         }
 
     async def check_permissions(self, input: dict, context=None):
@@ -526,7 +577,11 @@ class RosStack(BaseCloudStack):
         relative_read_directories: list[str] | None = None,
         strict_read_directories: list[str] | None = None,
         read_path_violation_behavior: Literal["ask", "deny"] = "ask",
+        tool_context: ToolContext | None = None,
+        ros_preflight_completed: bool = False,
     ) -> str:
+        if tool_context is not None and not ros_preflight_completed:
+            tool_context.ros_preflight_outcome = None
         deployment_guard_pipeline_mode = pipeline_mode and not allow_pipeline_deployment_actions
         if error := reject_pipeline_dedicated_ros_deployment_action(
             action, pipeline_mode=deployment_guard_pipeline_mode
@@ -534,7 +589,6 @@ class RosStack(BaseCloudStack):
             raise ValueError(error)
         if error := reject_pipeline_template_source_params(action, params, pipeline_mode=pipeline_mode):
             raise ValueError(error)
-        client = self._get_client(region)
         # Ensure RegionId is always in params for the API request
         if region:
             params.setdefault("RegionId", region)
@@ -553,23 +607,37 @@ class RosStack(BaseCloudStack):
             ):
                 if path_result.behavior == "deny":
                     raise ValueError(path_result.message)
-            params["TemplateBody"] = read_local_template_url(
-                template_url,
-                None,
-                cwd=cwd,
-                relative_read_directories=relative_read_directories,
-            )
+            try:
+                params["TemplateBody"] = read_local_template_url(
+                    template_url,
+                    None,
+                    cwd=cwd,
+                    relative_read_directories=relative_read_directories,
+                )
+            except (OSError, UnicodeError) as error:
+                from iac_code.tools.cloud.aliyun.hooks.ros_validate import local_template_source_error
+
+                outcome = local_template_source_error(error)
+                if tool_context is not None:
+                    tool_context.ros_preflight_outcome = outcome
+                assert outcome.blocking_result is not None
+                raise ValueError(outcome.blocking_result.content) from error
             del params["TemplateURL"]
-        # TemplateBody must be a JSON string; non-pipeline callers may still pass a dict.
+        if not ros_preflight_completed:
+            from iac_code.tools.cloud.aliyun.api_hooks import run_hooks
+
+            hook_result = run_hooks("ros", action, params, context=tool_context)
+            if hook_result is not None:
+                raise ValueError(hook_result.content)
+
+        # Preserve Mapping provenance through preflight; only the SDK-facing
+        # request needs the deterministic JSON representation.
         if isinstance(params.get("TemplateBody"), dict):
             params["TemplateBody"] = json.dumps(params["TemplateBody"], ensure_ascii=False)
 
-        from iac_code.tools.cloud.aliyun.api_hooks import run_hooks
-
-        hook_result = run_hooks("ros", action, params)
-        if hook_result is not None:
-            raise ValueError(hook_result.content)
-
+        # Constructing the SDK client may resolve credentials.  Local template
+        # validation must therefore complete before this point.
+        client = self._get_client(region)
         if action == "CreateStack":
             return await self._handle_create_stack(client, params, region)
         elif action == "UpdateStack":

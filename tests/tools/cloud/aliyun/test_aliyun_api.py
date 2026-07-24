@@ -923,7 +923,7 @@ class TestAliyunApiHooks:
         mock_client.call_api.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_ros_missing_template_url_is_allowed_outside_pipeline(
+    async def test_ros_template_action_requires_source_outside_pipeline(
         self, api: AliyunApi, context: ToolContext, mock_credentials
     ) -> None:
         mock_client = MagicMock()
@@ -940,8 +940,9 @@ class TestAliyunApiHooks:
                 context=context,
             )
 
-        assert result.is_error is False
-        mock_client.call_api.assert_called_once()
+        assert result.is_error is True
+        assert "ROS1201" in result.content
+        mock_client.call_api.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_ros_remote_template_url_scheme_is_case_insensitive(
@@ -1886,6 +1887,8 @@ async def test_explicit_version_never_reads_remote_product_catalog_when_api_meta
 @pytest.mark.asyncio
 async def test_ros_hook_syntax_error_preserves_original_detail(tmp_path: Path) -> None:
     services, _, _, transport = _production_services()
+    credential_calls: list[None] = []
+    services.credential_provider = lambda: credential_calls.append(None)
     tool = AliyunApi(services=services)
     secret = "CUSTOMER_TOKEN_123"
     template = tmp_path / "invalid-template.yml"
@@ -1906,10 +1909,12 @@ async def test_ros_hook_syntax_error_preserves_original_detail(tmp_path: Path) -
     )
 
     assert result.is_error is True
-    assert result.content.startswith("Template YAML syntax error (line")
-    assert "Context:" in result.content
-    assert secret in result.content
+    assert "ROS1001" in result.content
+    assert "line 4:1" in result.content
+    assert "Context:" not in result.content
+    assert secret not in result.content
     assert str(template) not in result.content
+    assert credential_calls == []
     assert transport.calls == []
 
 
@@ -1946,8 +1951,9 @@ async def test_ros_hook_structure_error_preserves_actionable_detail(tmp_path: Pa
     )
 
     assert result.is_error is True
-    assert "CidrBlock must not be a static value" in result.content
-    assert "choose a non-overlapping CIDR" in result.content
+    assert "ROS5102" in result.content
+    assert "existing VPC" in result.content
+    assert "CidrBlock" in result.content
     assert str(template) not in result.content
     assert transport.calls == []
 
@@ -1968,6 +1974,71 @@ async def test_openmeta_preserves_hook_error_result(monkeypatch) -> None:
 
     assert result == ToolResult.error(hook_detail)
     assert transport.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["success", "service-error", "internal-error"])
+async def test_ros_adapter_preflights_once_and_attaches_outcome(mode: str) -> None:
+    from iac_code.tools.cloud.aliyun.api_hooks import run_hooks
+
+    services, _, endpoint_resolver, transport = _production_services()
+    if mode == "service-error":
+        transport.responses["ValidateTemplate"] = NormalizedApiResponse(
+            status=500,
+            headers=MappingProxyType({}),
+            body={"Code": "InvalidRequest", "Message": "service failed"},
+            content_type="application/json",
+            content_encoding=None,
+            size=64,
+        )
+    elif mode == "internal-error":
+        endpoint_resolver.failure = RuntimeError("endpoint failed after preflight")
+    body = (
+        "ROSTemplateFormatVersion: '2015-09-01'\n"
+        "Resources:\n"
+        "  Wait:\n"
+        "    Type: ALIYUN::ROS::Sleep\n"
+        "    Properties:\n"
+        "      Triggers: {Zones: {Fn::GetAZs: ''}}\n"
+    )
+
+    with patch("iac_code.tools.cloud.aliyun.api_hooks.run_hooks", wraps=run_hooks) as hook:
+        result = await _production_execute(
+            AliyunApi(services=services),
+            {
+                "product": "ros",
+                "action": "ValidateTemplate",
+                "params": {"TemplateBody": body},
+                "region_id": "cn-hangzhou",
+            },
+        )
+
+    hook.assert_called_once()
+    assert hook.call_args.kwargs["read_only"] is True
+    assert result.is_error is (mode != "success")
+    assert result.metadata["ros_validation"]["warning_count"] >= 1
+    assert "ROS local preflight diagnostics" in result.content
+
+
+@pytest.mark.asyncio
+async def test_ros_adapter_preflights_remote_template_url_once() -> None:
+    from iac_code.tools.cloud.aliyun.api_hooks import run_hooks
+
+    services, _, _, _ = _production_services()
+
+    with patch("iac_code.tools.cloud.aliyun.api_hooks.run_hooks", wraps=run_hooks) as hook:
+        await _production_execute(
+            AliyunApi(services=services),
+            {
+                "product": "ros",
+                "action": "ValidateTemplate",
+                "params": {"TemplateURL": "https://example.com/template.yml"},
+                "region_id": "cn-hangzhou",
+            },
+        )
+
+    hook.assert_called_once()
+    assert hook.call_args.kwargs["read_only"] is True
 
 
 @pytest.mark.asyncio
@@ -2739,7 +2810,7 @@ async def test_production_runtime_ros_template_formdata_hooks_and_events(tmp_pat
         {
             "product": "ros",
             "action": "CreateStack",
-            "params": {"StackName": "demo"},
+            "params": {"StackName": "demo", "TemplateURL": str(template)},
             "region_id": "cn-hangzhou",
         },
         event_queue=queue,
@@ -2748,6 +2819,54 @@ async def test_production_runtime_ros_template_formdata_hooks_and_events(tmp_pat
     assert created.is_error is False
     assert isinstance(event, ResourceObservedEvent)
     assert event.resource_id == "stack-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source_kind", ("inline", "local"))
+@pytest.mark.parametrize("product", ("ros", "ResourceOrchestrationService"))
+async def test_ros_parameters_hook_preserves_bound_security_shape(
+    tmp_path: Path,
+    source_kind: str,
+    product: str,
+) -> None:
+    services, _, _, transport = _production_services()
+    transport.responses["CreateStack"] = NormalizedApiResponse(
+        200,
+        MappingProxyType({}),
+        {"StackId": "stack-parameters", "RequestId": "request-parameters"},
+        "application/json",
+        None,
+        48,
+    )
+    template_body = "ROSTemplateFormatVersion: 2015-09-01\nResources: {}\n"
+    params: dict[str, Any] = {
+        "StackName": "demo",
+        "Parameters": {"Environment": "test"},
+    }
+    cwd = ""
+    if source_kind == "inline":
+        params["TemplateBody"] = template_body
+    else:
+        template = tmp_path / "parameters-template.yaml"
+        template.write_text(template_body, encoding="utf-8")
+        params["TemplateURL"] = str(template)
+        cwd = str(tmp_path)
+
+    tool = AliyunApi(services=services)
+    raw_input = {
+        "product": product,
+        "action": "CreateStack",
+        "params": params,
+        "region_id": "cn-hangzhou",
+    }
+    assert tool.prepare_invocation_input(raw_input)["params"] == params
+
+    result = await _production_execute(tool, raw_input, cwd=cwd)
+
+    assert result.is_error is False
+    assert len(transport.calls) == 1
+    assert params["Parameters"] == {"Environment": "test"}
+    assert not any(key.startswith("Parameters.") for key in params)
 
 
 @pytest.mark.parametrize("body", [[1, {"nested": True}], "scalar", 7, True, None])

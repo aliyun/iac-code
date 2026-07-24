@@ -6,42 +6,9 @@ from typing import Any
 
 import yaml
 
-_ROS_FUNCTIONS = [
-    "Base64",
-    "FindInMap",
-    "GetAZs",
-    "If",
-    "Join",
-    "Select",
-    "Sub",
-    "Replace",
-    "Split",
-    "Str",
-    "GetStackOutput",
-    "Indent",
-    "Length",
-    "GetJsonValue",
-    "MergeMapToList",
-    "Avg",
-    "SelectMapList",
-    "Add",
-    "Calculate",
-    "Max",
-    "Min",
-    "Jq",
-    "Index",
-    "ListMerge",
-    "Contains",
-    "EachMemberIn",
-    "ValueOfAll",
-    "ValueOf",
-    "MarketplaceImage",
-    "Any",
-    "Equals",
-    "Not",
-    "Or",
-    "And",
-]
+from iac_code.tools.cloud.aliyun.ros_validation.function_specs import yaml_short_function_names
+
+_ROS_FUNCTIONS = yaml_short_function_names()
 
 
 def _make_fn_constructor(fn_name: str):
@@ -91,9 +58,19 @@ class _RosYamlLoader(yaml.SafeLoader):
     pass
 
 
+def _timestamp_as_string(loader: yaml.SafeLoader, node: yaml.Node) -> str:
+    return loader.construct_scalar(node)
+
+
 _RosYamlLoader.add_constructor("!Ref", _ref_constructor)
 _RosYamlLoader.add_constructor("!GetAtt", _getatt_constructor)
+_RosYamlLoader.add_constructor("tag:yaml.org,2002:timestamp", _timestamp_as_string)
 for _fn in _ROS_FUNCTIONS:
+    if _fn == "GetAtt":
+        # The scalar short form needs the ROS-specific dotted-name split above.
+        # Re-registering it with the generic constructor would silently turn
+        # ``!GetAtt Resource.Attribute`` into a raw String argument.
+        continue
     _RosYamlLoader.add_constructor(f"!{_fn}", _make_fn_constructor(_fn))
 
 
