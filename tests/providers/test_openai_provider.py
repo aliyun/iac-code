@@ -8,6 +8,20 @@ from tests.providers._fakes import FakeOpenAIClient, ns
 
 
 class TestOpenAIProvider:
+    def test_created_client_disables_sdk_retries(self, monkeypatch):
+        calls = []
+
+        class FakeAsyncOpenAI:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.base_url = kwargs.get("base_url") or "https://fake.openai.local"
+
+        monkeypatch.setattr("iac_code.providers.openai_provider.AsyncOpenAI", FakeAsyncOpenAI)
+
+        OpenAIProvider(model="gpt-4.1", api_key="test")
+
+        assert calls[0]["max_retries"] == 0
+
     def test_get_model_name(self):
         p = OpenAIProvider(model="gpt-4.1", api_key="test")
         assert p.get_model_name() == "gpt-4.1"
@@ -294,6 +308,8 @@ class TestOpenAIStream:
         assert out[-1].stop_reason == "end_turn"
         assert out[-1].usage.input_tokens == 3
         assert out[-1].usage.output_tokens == 2
+        assert out[-1].usage.usage_reported is True
+        assert client.chat.completions.calls[0]["stream_options"] == {"include_usage": True}
 
     async def test_tool_call_accumulation(self):
         chunks = [
@@ -879,8 +895,15 @@ class TestOpenAICacheMetrics:
 
         out = [e async for e in provider.stream(messages=[Message.user("hi")], system="sys")]
         end = out[-1]
+        assert end.usage.input_tokens == 500
+        assert end.usage.total_input_tokens == 500
+        assert end.usage.standard_input_tokens == 100
         assert end.usage.cache_read_input_tokens == 300
         assert end.usage.cache_creation_input_tokens == 100
+        assert end.usage.total_tokens == 920
+        assert end.usage.normalized_total_tokens == 520
+        assert end.usage.cache_hit_rate == 0.6
+        assert end.usage.usage_reported is True
 
     async def test_stream_without_details_defaults_to_zero(self):
         chunks = [
@@ -897,6 +920,21 @@ class TestOpenAICacheMetrics:
         assert end.usage.cache_read_input_tokens == 0
         assert end.usage.cache_creation_input_tokens == 0
 
+    async def test_unknown_compatible_endpoint_does_not_receive_stream_options(self):
+        chunks = [
+            ns(
+                usage=None,
+                choices=[ns(finish_reason="stop", delta=ns(content="ok", tool_calls=None))],
+            ),
+        ]
+        client = FakeOpenAIClient(stream_chunks=chunks)
+        provider = OpenAIProvider(model="custom", client=client, provider_key="openai_compatible")
+
+        out = [e async for e in provider.stream(messages=[Message.user("hi")], system="sys")]
+
+        assert out[-1].usage.usage_reported is False
+        assert "stream_options" not in client.chat.completions.calls[0]
+
     async def test_complete_reads_cached_tokens(self):
         response = ns(
             id="cmpl_cache",
@@ -911,5 +949,12 @@ class TestOpenAICacheMetrics:
         provider = OpenAIProvider(model="gpt-4.1", client=client)
 
         result = await provider.complete(messages=[Message.user("hi")], system="sys")
+        assert result.usage.input_tokens == 500
+        assert result.usage.total_input_tokens == 500
+        assert result.usage.standard_input_tokens == 100
         assert result.usage.cache_read_input_tokens == 400
         assert result.usage.cache_creation_input_tokens == 0
+        assert result.usage.total_tokens == 920
+        assert result.usage.normalized_total_tokens == 520
+        assert result.usage.cache_hit_rate == 0.8
+        assert result.usage.usage_reported is True

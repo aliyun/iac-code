@@ -19,16 +19,53 @@ TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY = "render_verbose_result_in_transcr
 
 @dataclass
 class Usage:
-    """Token usage from an API response."""
+    """Provider token usage with enough metadata for normalized reporting."""
 
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_input_tokens: int = 0
     cache_read_input_tokens: int = 0
+    input_tokens_include_cache: bool = True
+    reported: bool = False
+
+    @property
+    def usage_reported(self) -> bool:
+        return self.reported or any(
+            (
+                self.input_tokens,
+                self.output_tokens,
+                self.cache_creation_input_tokens,
+                self.cache_read_input_tokens,
+            )
+        )
+
+    @property
+    def total_input_tokens(self) -> int:
+        if self.input_tokens_include_cache:
+            return self.input_tokens
+        return self.input_tokens + self.cache_creation_input_tokens + self.cache_read_input_tokens
 
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens + self.cache_creation_input_tokens + self.cache_read_input_tokens
+
+    @property
+    def normalized_total_tokens(self) -> int:
+        """Total usage normalized across inclusive and separate cache counters."""
+        return self.total_input_tokens + self.output_tokens
+
+    @property
+    def standard_input_tokens(self) -> int:
+        if not self.input_tokens_include_cache:
+            return self.input_tokens
+        return max(0, self.input_tokens - self.cache_creation_input_tokens - self.cache_read_input_tokens)
+
+    @property
+    def cache_hit_rate(self) -> float:
+        total_input_tokens = self.total_input_tokens
+        if total_input_tokens <= 0:
+            return 0.0
+        return min(1.0, self.cache_read_input_tokens / total_input_tokens)
 
 
 # -- Provider-originated events ------------------------------------------------

@@ -35,6 +35,7 @@ class OpenRouterProvider(OpenAIProvider):
                     "HTTP-Referer": "https://github.com/aliyun/iac-code",
                     "X-Title": "iac-code",
                 },
+                max_retries=0,
             )
         super().__init__(
             model=model,

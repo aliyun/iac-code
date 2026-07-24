@@ -78,6 +78,44 @@ async def test_stream_event_driver_preserves_generator_context_across_yields() -
     await driver
 
 
+@pytest.mark.asyncio
+async def test_stream_event_driver_closes_generator_in_its_own_context() -> None:
+    from iac_code.a2a.pipeline_executor import _drive_stream_events
+
+    marker = contextvars.ContextVar("stream_driver_close_marker", default="outside")
+    lifecycle_tasks: list[asyncio.Task[object] | None] = []
+    reset_errors: list[BaseException] = []
+    closed = asyncio.Event()
+
+    async def events():
+        lifecycle_tasks.append(asyncio.current_task())
+        token = marker.set("inside")
+        try:
+            yield marker.get()
+            await asyncio.Event().wait()
+        finally:
+            lifecycle_tasks.append(asyncio.current_task())
+            try:
+                marker.reset(token)
+            except BaseException as exc:
+                reset_errors.append(exc)
+            closed.set()
+
+    requests: asyncio.Queue[asyncio.Future[object]] = asyncio.Queue()
+    driver = asyncio.create_task(_drive_stream_events(events(), requests))
+    completion = asyncio.get_running_loop().create_future()
+    requests.put_nowait(completion)
+    assert await completion == "inside"
+
+    driver.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await driver
+
+    assert closed.is_set()
+    assert reset_errors == []
+    assert lifecycle_tasks == [driver, driver]
+
+
 def _write_pipeline_yaml(pipeline_dir: Path) -> None:
     pipeline_dir.mkdir(parents=True)
     (pipeline_dir / "pipeline.yaml").write_text(

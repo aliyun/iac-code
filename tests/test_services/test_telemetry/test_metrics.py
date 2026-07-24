@@ -11,6 +11,8 @@ def test_metric_names_covers_spec_core_set():
         M.SESSION_COUNT,
         M.ACTIVE_TIME_TOTAL,
         M.TOKEN_USAGE,
+        M.TOKEN_TOTAL,
+        M.TOKEN_USAGE_REPORT_COUNT,
         M.API_REQUEST_COUNT,
         M.API_REQUEST_DURATION,
         M.TOOL_USE_COUNT,

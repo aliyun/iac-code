@@ -29,7 +29,9 @@ from iac_code.services.telemetry.names import (
     GenAiAttr,
     GenAiOperationName,
     GenAiSpanKind,
+    IacCodeAttr,
     Metrics,
+    PipelineAttr,
     Spans,
 )
 from iac_code.services.telemetry.sanitize import sanitize_error_message, sanitize_model_name
@@ -44,6 +46,7 @@ from iac_code.types.stream_events import (
     TombstoneEvent,
     ToolUseEndEvent,
     ToolUseStartEvent,
+    Usage,
 )
 from iac_code.utils.public_errors import public_error, public_exception_summary
 
@@ -70,6 +73,18 @@ _RETRYABLE_TRANSPORT_ERRORS = (
     OSError,
     OpenAIAPIConnectionError,
     AnthropicAPIConnectionError,
+)
+
+_TOKEN_METRIC_SCOPE_KEYS = frozenset(
+    {
+        IacCodeAttr.MODE,
+        PipelineAttr.NAME,
+        PipelineAttr.STEP_ID,
+        PipelineAttr.PARENT_STEP_ID,
+        PipelineAttr.SUB_PIPELINE_NAME,
+        PipelineAttr.SUB_STEP_ID,
+        PipelineAttr.CANDIDATE_INDEX,
+    }
 )
 
 
@@ -587,13 +602,14 @@ class ProviderManager:
             if tools:
                 span_attrs[GenAiAttr.TOOL_DEFINITIONS] = serialize_tool_definitions(tools)
 
+        orphaned_message_ids: list[str] = []
+        buffer_until_accepted = model in _MODEL_REFUSAL_FALLBACK_MAP
+        buffered_events: list[StreamEvent] = []
+        streaming_failed = False
+        refusal_detected = False
+        first_token_received = False
+        watchdog: StreamWatchdog | None = None
         with start_span(span_name, span_attrs) as span:
-            orphaned_message_ids: list[str] = []
-            buffer_until_accepted = model in _MODEL_REFUSAL_FALLBACK_MAP
-            buffered_events: list[StreamEvent] = []
-            streaming_failed = False
-            refusal_detected = False
-            first_token_received = False
             try:
                 watchdog = StreamWatchdog(idle_timeout=self._stream_idle_timeout)
                 watchdog.start()
@@ -618,6 +634,14 @@ class ProviderManager:
                     if isinstance(event, MessageEndEvent):
                         watchdog.stop()
                         if event.stop_reason == "refusal":
+                            self._set_llm_response_span_attrs(span, event, model)
+                            self._emit_success_telemetry(
+                                provider_name,
+                                sanitized_model,
+                                started,
+                                event.usage,
+                                status="refusal",
+                            )
                             refusal_detected = True
                             streaming_failed = True
                             logger.warning("Streaming response was refused, falling back to an approved model")
@@ -633,110 +657,166 @@ class ProviderManager:
                         buffered_events.append(event)
                     else:
                         yield event
-                streaming_failed = True
-            except asyncio.CancelledError:
+                watchdog.stop()
+                if not refusal_detected:
+                    streaming_failed = True
+                    self._emit_failure_telemetry(
+                        provider_name,
+                        sanitized_model,
+                        started,
+                        RuntimeError("Streaming response ended before message completion"),
+                    )
+            except asyncio.CancelledError as exc:
+                if watchdog is not None:
+                    watchdog.stop()
+                self._emit_failure_telemetry(
+                    provider_name,
+                    sanitized_model,
+                    started,
+                    exc,
+                    status="cancelled",
+                    record_duration=True,
+                )
                 raise
             except Exception as e:
+                if watchdog is not None:
+                    watchdog.stop()
                 streaming_failed = True
+                self._emit_failure_telemetry(provider_name, sanitized_model, started, e)
                 logger.warning(f"Streaming failed, falling back to non-streaming: {e}")
-            if streaming_failed:
-                if not buffer_until_accepted:
-                    for msg_id in orphaned_message_ids:
-                        yield TombstoneEvent(message_id=msg_id)
-                try:
-                    completion = await self._complete_with_retry_result(
-                        messages,
-                        system,
-                        tools,
-                        max_tokens,
-                        refusal_detected=refusal_detected,
+
+        if streaming_failed:
+            if not buffer_until_accepted:
+                for msg_id in orphaned_message_ids:
+                    yield TombstoneEvent(message_id=msg_id)
+            try:
+                completion = await self._complete_with_retry_result(
+                    messages,
+                    system,
+                    tools,
+                    max_tokens,
+                    refusal_detected=refusal_detected,
+                )
+            except Exception as e:
+                yield _error_event_from_exception(e)
+                return
+            response = completion.response
+            yield MessageStartEvent(message_id=response.message_id)
+            if response.thinking_blocks:
+                for block_index, block in enumerate(response.thinking_blocks):
+                    yield ThinkingDeltaEvent(
+                        text=str(block.get("text") or ""),
+                        block_index=block_index,
+                        block_type=block.get("type", "thinking"),
+                        provider_metadata=(
+                            dict(block["provider_metadata"])
+                            if isinstance(block.get("provider_metadata"), dict)
+                            else None
+                        ),
                     )
-                except Exception as e:
-                    self._emit_failure_telemetry(provider_name, sanitized_model, started, e)
-                    yield _error_event_from_exception(e)
-                    return
-                response = completion.response
-                response_model = sanitize_model_name(completion.model)
-                span.set_attribute(GenAiAttr.RESPONSE_ID, response.message_id)
-                self._set_llm_response_span_attrs_from_response(span, response, completion.model)
-                self._emit_success_telemetry(completion.provider_name, response_model, started, response.usage)
-                yield MessageStartEvent(message_id=response.message_id)
-                if response.thinking_blocks:
-                    for block_index, block in enumerate(response.thinking_blocks):
-                        yield ThinkingDeltaEvent(
-                            text=str(block.get("text") or ""),
-                            block_index=block_index,
-                            block_type=block.get("type", "thinking"),
-                            provider_metadata=(
-                                dict(block["provider_metadata"])
-                                if isinstance(block.get("provider_metadata"), dict)
-                                else None
-                            ),
-                        )
-                elif response.thinking:
-                    yield ThinkingDeltaEvent(text=response.thinking)
-                if response.text:
-                    yield TextDeltaEvent(text=response.text)
-                for tu in response.tool_uses:
-                    provider_metadata = tu.get("provider_metadata")
-                    yield ToolUseStartEvent(
-                        tool_use_id=tu["id"],
-                        name=tu["name"],
-                        provider_metadata=provider_metadata,
-                    )
-                    yield ToolUseEndEvent(
-                        tool_use_id=tu["id"],
-                        name=tu["name"],
-                        input=tu["input"],
-                        provider_metadata=provider_metadata,
-                    )
-                yield MessageEndEvent(stop_reason=response.stop_reason, usage=response.usage)
+            elif response.thinking:
+                yield ThinkingDeltaEvent(text=response.thinking)
+            if response.text:
+                yield TextDeltaEvent(text=response.text)
+            for tu in response.tool_uses:
+                provider_metadata = tu.get("provider_metadata")
+                yield ToolUseStartEvent(
+                    tool_use_id=tu["id"],
+                    name=tu["name"],
+                    provider_metadata=provider_metadata,
+                )
+                yield ToolUseEndEvent(
+                    tool_use_id=tu["id"],
+                    name=tu["name"],
+                    input=tu["input"],
+                    provider_metadata=provider_metadata,
+                )
+            yield MessageEndEvent(stop_reason=response.stop_reason, usage=response.usage)
 
     @staticmethod
     def _set_llm_response_span_attrs(span, end_event: MessageEndEvent, model: str) -> None:
         usage = end_event.usage
         span.set_attribute(GenAiAttr.RESPONSE_MODEL, model)
         span.set_attribute(GenAiAttr.RESPONSE_FINISH_REASONS, [end_event.stop_reason])
-        span.set_attribute(GenAiAttr.USAGE_INPUT_TOKENS, usage.input_tokens)
-        span.set_attribute(GenAiAttr.USAGE_OUTPUT_TOKENS, usage.output_tokens)
-        total = usage.input_tokens + usage.output_tokens
-        span.set_attribute(GenAiAttr.USAGE_TOTAL_TOKENS, total)
-        if usage.cache_creation_input_tokens:
-            span.set_attribute(GenAiAttr.USAGE_CACHE_CREATION_INPUT_TOKENS, usage.cache_creation_input_tokens)
-        if usage.cache_read_input_tokens:
-            span.set_attribute(GenAiAttr.USAGE_CACHE_READ_INPUT_TOKENS, usage.cache_read_input_tokens)
+        ProviderManager._set_usage_span_attrs(span, usage)
 
     @staticmethod
     def _set_llm_response_span_attrs_from_response(span, response: NonStreamingResponse, model: str) -> None:
         usage = response.usage
         span.set_attribute(GenAiAttr.RESPONSE_MODEL, model)
         span.set_attribute(GenAiAttr.RESPONSE_FINISH_REASONS, [response.stop_reason])
-        span.set_attribute(GenAiAttr.USAGE_INPUT_TOKENS, usage.input_tokens)
-        span.set_attribute(GenAiAttr.USAGE_OUTPUT_TOKENS, usage.output_tokens)
-        total = usage.input_tokens + usage.output_tokens
-        span.set_attribute(GenAiAttr.USAGE_TOTAL_TOKENS, total)
-        if usage.cache_creation_input_tokens:
-            span.set_attribute(GenAiAttr.USAGE_CACHE_CREATION_INPUT_TOKENS, usage.cache_creation_input_tokens)
-        if usage.cache_read_input_tokens:
-            span.set_attribute(GenAiAttr.USAGE_CACHE_READ_INPUT_TOKENS, usage.cache_read_input_tokens)
+        ProviderManager._set_usage_span_attrs(span, usage)
 
     @staticmethod
-    def _emit_success_telemetry(provider_name: str, model: str, started: float, usage) -> None:
+    def _set_usage_span_attrs(span: Any, usage: Usage) -> None:
+        span.set_attribute(GenAiAttr.USAGE_REPORTED, usage.usage_reported)
+        if not usage.usage_reported:
+            return
+        span.set_attribute(GenAiAttr.USAGE_INPUT_TOKENS, usage.input_tokens)
+        span.set_attribute(GenAiAttr.USAGE_TOTAL_INPUT_TOKENS, usage.total_input_tokens)
+        span.set_attribute(GenAiAttr.USAGE_STANDARD_INPUT_TOKENS, usage.standard_input_tokens)
+        span.set_attribute(GenAiAttr.USAGE_OUTPUT_TOKENS, usage.output_tokens)
+        span.set_attribute(GenAiAttr.USAGE_TOTAL_TOKENS, usage.normalized_total_tokens)
+        span.set_attribute(GenAiAttr.USAGE_CACHE_CREATION_INPUT_TOKENS, usage.cache_creation_input_tokens)
+        span.set_attribute(GenAiAttr.USAGE_CACHE_READ_INPUT_TOKENS, usage.cache_read_input_tokens)
+        span.set_attribute(GenAiAttr.USAGE_CACHE_HIT_RATE, usage.cache_hit_rate)
+
+    @staticmethod
+    def _emit_success_telemetry(
+        provider_name: str,
+        model: str,
+        started: float,
+        usage: Usage,
+        *,
+        status: str = "ok",
+    ) -> None:
         duration_ms = int((time.monotonic() - started) * 1000)
+        scope_attrs = get_span_attributes()
+        usage_attrs: dict[str, Any] = {"usage_reported": usage.usage_reported}
+        if usage.usage_reported:
+            usage_attrs.update(
+                {
+                    "input_tokens": usage.input_tokens,
+                    "total_input_tokens": usage.total_input_tokens,
+                    "standard_input_tokens": usage.standard_input_tokens,
+                    "output_tokens": usage.output_tokens,
+                    "total_tokens": usage.normalized_total_tokens,
+                    "cache_read_tokens": usage.cache_read_input_tokens,
+                    "cache_create_tokens": usage.cache_creation_input_tokens,
+                    "cache_hit_rate": usage.cache_hit_rate,
+                }
+            )
         log_event(
             Events.API_REQUEST_SUCCEEDED,
             {
                 "provider": provider_name,
                 "model": model,
+                "status": status,
                 "duration_ms": duration_ms,
-                "input_tokens": usage.input_tokens,
-                "output_tokens": usage.output_tokens,
-                "cache_read_tokens": usage.cache_read_input_tokens,
-                "cache_create_tokens": usage.cache_creation_input_tokens,
+                **usage_attrs,
+                **scope_attrs,
             },
         )
-        add_metric(Metrics.API_REQUEST_COUNT, 1, {"provider": provider_name, "model": model, "status": "ok"})
-        add_metric(Metrics.API_REQUEST_DURATION, duration_ms, {"provider": provider_name, "model": model})
+        request_metric_attrs = {"provider": provider_name, "model": model}
+        add_metric(
+            Metrics.API_REQUEST_COUNT,
+            1,
+            {**request_metric_attrs, "status": status},
+        )
+        add_metric(Metrics.API_REQUEST_DURATION, duration_ms, request_metric_attrs)
+        token_metric_attrs = {
+            **request_metric_attrs,
+            **{key: value for key, value in scope_attrs.items() if key in _TOKEN_METRIC_SCOPE_KEYS},
+        }
+        add_metric(
+            Metrics.TOKEN_USAGE_REPORT_COUNT,
+            1,
+            {**token_metric_attrs, "reported": usage.usage_reported},
+        )
+        if not usage.usage_reported:
+            return
+        if usage.normalized_total_tokens:
+            add_metric(Metrics.TOKEN_TOTAL, usage.normalized_total_tokens, token_metric_attrs)
         for token_type, count in (
             ("input", usage.input_tokens),
             ("output", usage.output_tokens),
@@ -744,29 +824,43 @@ class ProviderManager:
             ("cache_create", usage.cache_creation_input_tokens or 0),
         ):
             if count:
-                add_metric(Metrics.TOKEN_USAGE, count, {"type": token_type, "provider": provider_name, "model": model})
+                add_metric(Metrics.TOKEN_USAGE, count, {**token_metric_attrs, "type": token_type})
 
     @staticmethod
-    def _emit_failure_telemetry(provider_name: str, model: str, started: float, exc: Exception) -> None:
+    def _emit_failure_telemetry(
+        provider_name: str,
+        model: str,
+        started: float,
+        exc: BaseException,
+        *,
+        status: str = "error",
+        record_duration: bool = False,
+    ) -> None:
         duration_ms = int((time.monotonic() - started) * 1000)
         summary = public_exception_summary(exc, max_chars=1000)
         failure = public_error(message=summary, error_type=type(exc).__name__)
+        event_attrs: dict[str, Any] = {
+            "provider": provider_name,
+            "model": model,
+            "error_type": type(exc).__name__,
+            "duration_ms": duration_ms,
+            "error_message": sanitize_error_message(failure.summary),
+            "error_id": failure.error_id,
+        }
+        if status != "error":
+            event_attrs["status"] = status
         log_event(
             Events.API_REQUEST_FAILED,
-            {
-                "provider": provider_name,
-                "model": model,
-                "error_type": type(exc).__name__,
-                "duration_ms": duration_ms,
-                "error_message": sanitize_error_message(failure.summary),
-                "error_id": failure.error_id,
-            },
+            event_attrs,
         )
+        request_metric_attrs = {"provider": provider_name, "model": model}
         add_metric(
             Metrics.API_REQUEST_COUNT,
             1,
-            {"provider": provider_name, "model": model, "status": "error", "error_type": type(exc).__name__},
+            {**request_metric_attrs, "status": status, "error_type": type(exc).__name__},
         )
+        if record_duration:
+            add_metric(Metrics.API_REQUEST_DURATION, duration_ms, request_metric_attrs)
 
     async def complete(
         self,
@@ -840,11 +934,66 @@ class ProviderManager:
             )
 
         async def operation():
+            if refusal_detected:
+                raise _ModelRefusalError(model)
+
+            session_id = get_session_id()
+            span_attrs = {
+                GenAiAttr.SPAN_KIND: GenAiSpanKind.LLM,
+                GenAiAttr.OPERATION_NAME: GenAiOperationName.CHAT,
+                GenAiAttr.PROVIDER_NAME: provider_name,
+                GenAiAttr.REQUEST_MODEL: model,
+                GenAiAttr.REQUEST_MAX_TOKENS: max_tokens,
+                GenAiAttr.SESSION_ID: session_id,
+                GenAiAttr.CONVERSATION_ID: session_id,
+                GenAiAttr.OUTPUT_TYPE: "text",
+                **get_span_attributes(),
+            }
+            if should_capture_content_on_span():
+                span_attrs[GenAiAttr.INPUT_MESSAGES] = serialize_input_messages(messages)
+                span_attrs[GenAiAttr.SYSTEM_INSTRUCTIONS] = serialize_system_instructions(system)
+                if tools:
+                    span_attrs[GenAiAttr.TOOL_DEFINITIONS] = serialize_tool_definitions(tools)
+
             try:
-                if refusal_detected:
-                    raise _ModelRefusalError(model)
-                kwargs = {"cache_policy": cache_policy} if cache_policy != "default" else {}
-                response = await provider.complete(messages, system, tools, max_tokens, **kwargs)
+                with start_span(f"{Spans.LLM_CHAT} {model}", span_attrs) as span:
+                    try:
+                        kwargs = {"cache_policy": cache_policy} if cache_policy != "default" else {}
+                        log_event(
+                            Events.API_REQUEST_STARTED,
+                            {
+                                "provider": provider_name,
+                                "model": sanitized_model,
+                                "message_count": len(messages),
+                            },
+                        )
+                        request_started = time.monotonic()
+                        response = await provider.complete(messages, system, tools, max_tokens, **kwargs)
+                    except asyncio.CancelledError as exc:
+                        self._emit_failure_telemetry(
+                            provider_name,
+                            sanitized_model,
+                            request_started,
+                            exc,
+                            status="cancelled",
+                            record_duration=True,
+                        )
+                        raise
+                    except Exception as exc:
+                        self._emit_failure_telemetry(provider_name, sanitized_model, request_started, exc)
+                        raise
+
+                    span.set_attribute(GenAiAttr.RESPONSE_ID, response.message_id)
+                    self._set_llm_response_span_attrs_from_response(span, response, model)
+                    response_status = "refusal" if response.stop_reason == "refusal" else "ok"
+                    self._emit_success_telemetry(
+                        provider_name,
+                        sanitized_model,
+                        request_started,
+                        response.usage,
+                        status=response_status,
+                    )
+
                 if response.stop_reason == "refusal":
                     raise _ModelRefusalError(model)
                 return _CompletionResult(

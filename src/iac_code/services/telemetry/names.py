@@ -94,11 +94,15 @@ class GenAiAttr:
     OUTPUT_TYPE = "gen_ai.output.type"
 
     # --- Usage ---
+    USAGE_REPORTED = "gen_ai.usage.reported"
     USAGE_INPUT_TOKENS = "gen_ai.usage.input_tokens"
+    USAGE_TOTAL_INPUT_TOKENS = "gen_ai.usage.total_input_tokens"
+    USAGE_STANDARD_INPUT_TOKENS = "gen_ai.usage.standard_input_tokens"
     USAGE_OUTPUT_TOKENS = "gen_ai.usage.output_tokens"
     USAGE_TOTAL_TOKENS = "gen_ai.usage.total_tokens"
     USAGE_CACHE_CREATION_INPUT_TOKENS = "gen_ai.usage.cache_creation.input_tokens"
     USAGE_CACHE_READ_INPUT_TOKENS = "gen_ai.usage.cache_read.input_tokens"
+    USAGE_CACHE_HIT_RATE = "gen_ai.usage.cache_hit_rate"
 
     # --- Content (debug mode only) ---
     INPUT_MESSAGES = "gen_ai.input.messages"
@@ -266,6 +270,8 @@ class Metrics:
     SESSION_COUNT = "iac.session.count"
     ACTIVE_TIME_TOTAL = "iac.active_time.total"
     TOKEN_USAGE = "iac.token.usage"
+    TOKEN_TOTAL = "iac.token.total"
+    TOKEN_USAGE_REPORT_COUNT = "iac.token.usage_report.count"
     API_REQUEST_COUNT = "iac.api.request.count"
     API_REQUEST_DURATION = "iac.api.request.duration"
     TOOL_USE_COUNT = "iac.tool.use.count"

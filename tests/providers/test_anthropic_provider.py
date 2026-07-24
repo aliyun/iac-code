@@ -6,6 +6,20 @@ from tests.providers._fakes import FakeAnthropicClient, ns
 
 
 class TestAnthropicProvider:
+    def test_created_client_disables_sdk_retries(self, monkeypatch):
+        calls = []
+
+        class FakeAsyncAnthropic:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.base_url = kwargs.get("base_url") or "https://fake.anthropic.local"
+
+        monkeypatch.setattr("iac_code.providers.anthropic_provider.anthropic.AsyncAnthropic", FakeAsyncAnthropic)
+
+        AnthropicProvider(model="claude-sonnet-4-6", api_key="test")
+
+        assert calls[0]["max_retries"] == 0
+
     def test_get_model_name(self):
         p = AnthropicProvider(model="claude-sonnet-4-6", api_key="test")
         assert p.get_model_name() == "claude-sonnet-4-6"
@@ -424,6 +438,35 @@ class TestAnthropicStream:
         assert out[-1].usage.input_tokens == 10
         assert out[-1].usage.output_tokens == 5
 
+    async def test_cache_tokens_are_included_in_normalized_input_total(self):
+        final = ns(
+            usage=ns(
+                input_tokens=10,
+                output_tokens=5,
+                cache_creation_input_tokens=20,
+                cache_read_input_tokens=70,
+            ),
+            stop_reason="end_turn",
+        )
+        provider = AnthropicProvider(
+            model="claude-sonnet-4-6",
+            client=FakeAnthropicClient(stream_events=[], stream_final=final),
+        )
+
+        out = [e async for e in provider.stream(messages=[Message.user("hi")], system="sys")]
+        usage = out[-1].usage
+
+        assert usage.input_tokens == 10
+        assert usage.total_input_tokens == 100
+        assert usage.standard_input_tokens == 10
+        assert usage.output_tokens == 5
+        assert usage.cache_creation_input_tokens == 20
+        assert usage.cache_read_input_tokens == 70
+        assert usage.total_tokens == 105
+        assert usage.normalized_total_tokens == 105
+        assert usage.cache_hit_rate == 0.7
+        assert usage.usage_reported is True
+
     async def test_stream_kwargs_includes_system_and_tools(self):
         events = []
         final = ns(
@@ -571,6 +614,33 @@ class TestAnthropicComplete:
         assert result.stop_reason == "end_turn"
         assert result.usage.input_tokens == 3
         assert result.usage.output_tokens == 2
+
+    async def test_cache_tokens_are_included_in_normalized_input_total(self):
+        response = ns(
+            id="msg_cached",
+            content=[ns(type="text", text="cached")],
+            usage=ns(
+                input_tokens=5,
+                output_tokens=2,
+                cache_creation_input_tokens=0,
+                cache_read_input_tokens=45,
+            ),
+            stop_reason="end_turn",
+        )
+        provider = AnthropicProvider(
+            model="claude-sonnet-4-6",
+            client=FakeAnthropicClient(create_response=response),
+        )
+
+        result = await provider.complete(messages=[Message.user("hi")], system="sys")
+
+        assert result.usage.input_tokens == 5
+        assert result.usage.total_input_tokens == 50
+        assert result.usage.standard_input_tokens == 5
+        assert result.usage.total_tokens == 52
+        assert result.usage.normalized_total_tokens == 52
+        assert result.usage.cache_hit_rate == 0.9
+        assert result.usage.usage_reported is True
 
     async def test_tool_use_response(self):
         response = ns(

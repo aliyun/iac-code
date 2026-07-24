@@ -75,13 +75,15 @@ class OpenAIProvider(Provider):
         self._thinking_enabled = bool_or_none(thinking_enabled)
         self._thinking_budget = positive_int_or_none(thinking_budget)
         self._max_completion_tokens = positive_int_or_none(max_completion_tokens)
+        if provider_key == "openai":
+            self.supports_stream_options = True
         # Subclasses may set this before calling super().stream/complete to
         # inject provider-specific kwargs (e.g. DeepSeek thinking mode).
         self._extra_request_kwargs: dict[str, Any] = {}
         if client is not None:
             self._client = client
         else:
-            self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+            self._client = AsyncOpenAI(api_key=api_key, base_url=base_url, max_retries=0)
         actual_base_url = getattr(self._client, "base_url", None) or base_url
         self._metadata_endpoint_id = self._endpoint_id(actual_base_url)
         self._PROVIDER_KEY = provider_key
@@ -362,6 +364,7 @@ class OpenAIProvider(Provider):
                     output_tokens=chunk.usage.completion_tokens or 0,
                     cache_read_input_tokens=cache_read,
                     cache_creation_input_tokens=cache_create,
+                    reported=True,
                 )
 
             if not chunk.choices:
@@ -595,6 +598,7 @@ class OpenAIProvider(Provider):
             output_tokens=response.usage.completion_tokens if response.usage else 0,
             cache_read_input_tokens=cache_read,
             cache_creation_input_tokens=cache_create,
+            reported=response.usage is not None,
         )
 
         return NonStreamingResponse(

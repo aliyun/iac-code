@@ -19,7 +19,7 @@ from iac_code.providers.manager import (
 )
 from iac_code.providers.registry import PROVIDER_REGISTRY
 from iac_code.providers.request_policy import ProviderRequestPolicy
-from iac_code.services.telemetry.names import GenAiAttr, IacCodeAttr, PipelineAttr, Spans
+from iac_code.services.telemetry.names import Events, GenAiAttr, IacCodeAttr, Metrics, PipelineAttr, Spans
 from iac_code.services.telemetry.scope import use_span_attributes
 from iac_code.types.stream_events import (
     MessageEndEvent,
@@ -447,8 +447,6 @@ class TestProviderManager:
         assert m.get_model_name() == "some-model"
 
     def test_failure_telemetry_uses_public_error_summary(self, monkeypatch):
-        from iac_code.services.telemetry.names import Events
-
         telemetry_events = []
         monkeypatch.setattr(
             "iac_code.providers.manager.log_event",
@@ -491,6 +489,187 @@ class TestProviderManagerStreaming:
         events = [e async for e in mgr.stream(messages=[Message.user("hi")], system="sys")]
         types = [e.type for e in events]
         assert "message_start" in types and "text_delta" in types and "message_end" in types
+
+    async def test_stream_records_normalized_token_usage_on_all_signals(self):
+        mock_provider = AsyncMock()
+
+        async def fake_stream(*args, **kwargs):
+            yield MessageStartEvent(message_id="m1")
+            yield TextDeltaEvent(text="answer")
+            yield MessageEndEvent(
+                stop_reason="end_turn",
+                usage=Usage(
+                    input_tokens=30,
+                    output_tokens=20,
+                    cache_read_input_tokens=60,
+                    cache_creation_input_tokens=10,
+                    input_tokens_include_cache=False,
+                    reported=True,
+                ),
+            )
+
+        mock_provider.stream = fake_stream
+        span = MagicMock()
+        telemetry_events = []
+        metrics = []
+        manager = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
+        manager._provider = mock_provider
+        scope = {
+            IacCodeAttr.MODE: "pipeline",
+            PipelineAttr.NAME: "selling",
+            PipelineAttr.RUN_ID: "run-high-cardinality",
+            PipelineAttr.STEP_ID: "intent_parsing",
+        }
+
+        with (
+            use_span_attributes(scope),
+            patch("iac_code.providers.manager.start_span", return_value=nullcontext(span)),
+            patch("iac_code.providers.manager.get_session_id", return_value="iac_sess_1"),
+            patch(
+                "iac_code.providers.manager.log_event",
+                side_effect=lambda name, attrs: telemetry_events.append((name, attrs)),
+            ),
+            patch(
+                "iac_code.providers.manager.add_metric",
+                side_effect=lambda name, value, attrs: metrics.append((name, value, attrs)),
+            ),
+        ):
+            await _collect_stream_events(manager.stream(messages=[Message.user("hi")], system="sys"))
+
+        span_attrs = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
+        assert span_attrs[GenAiAttr.USAGE_REPORTED] is True
+        assert span_attrs[GenAiAttr.USAGE_INPUT_TOKENS] == 30
+        assert span_attrs[GenAiAttr.USAGE_TOTAL_INPUT_TOKENS] == 100
+        assert span_attrs[GenAiAttr.USAGE_STANDARD_INPUT_TOKENS] == 30
+        assert span_attrs[GenAiAttr.USAGE_OUTPUT_TOKENS] == 20
+        assert span_attrs[GenAiAttr.USAGE_TOTAL_TOKENS] == 120
+        assert span_attrs[GenAiAttr.USAGE_CACHE_READ_INPUT_TOKENS] == 60
+        assert span_attrs[GenAiAttr.USAGE_CACHE_CREATION_INPUT_TOKENS] == 10
+        assert span_attrs[GenAiAttr.USAGE_CACHE_HIT_RATE] == 0.6
+
+        success = next(attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_SUCCEEDED)
+        assert success["usage_reported"] is True
+        assert success["input_tokens"] == 30
+        assert success["total_input_tokens"] == 100
+        assert success["standard_input_tokens"] == 30
+        assert success["output_tokens"] == 20
+        assert success["total_tokens"] == 120
+        assert success["cache_read_tokens"] == 60
+        assert success["cache_create_tokens"] == 10
+        assert success["cache_hit_rate"] == 0.6
+        assert success[PipelineAttr.RUN_ID] == "run-high-cardinality"
+
+        token_metrics = {(attrs["type"], value): attrs for name, value, attrs in metrics if name == Metrics.TOKEN_USAGE}
+        assert set(token_metrics) == {
+            ("input", 30),
+            ("output", 20),
+            ("cache_read", 60),
+            ("cache_create", 10),
+        }
+        assert all(attrs[IacCodeAttr.MODE] == "pipeline" for attrs in token_metrics.values())
+        assert all(attrs[PipelineAttr.STEP_ID] == "intent_parsing" for attrs in token_metrics.values())
+        assert all(PipelineAttr.RUN_ID not in attrs for attrs in token_metrics.values())
+        total_metric = next((value, attrs) for name, value, attrs in metrics if name == Metrics.TOKEN_TOTAL)
+        assert total_metric[0] == 120
+        assert total_metric[1][IacCodeAttr.MODE] == "pipeline"
+
+    async def test_stream_records_zero_cache_breakdown_on_span(self):
+        mock_provider = AsyncMock()
+
+        async def fake_stream(*args, **kwargs):
+            yield MessageStartEvent(message_id="m1")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=10, output_tokens=2))
+
+        mock_provider.stream = fake_stream
+        span = MagicMock()
+        manager = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
+        manager._provider = mock_provider
+
+        with (
+            patch("iac_code.providers.manager.start_span", return_value=nullcontext(span)),
+            patch("iac_code.providers.manager.get_session_id", return_value="iac_sess_1"),
+        ):
+            await _collect_stream_events(manager.stream(messages=[Message.user("hi")], system="sys"))
+
+        span_attrs = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
+        assert span_attrs[GenAiAttr.USAGE_CACHE_READ_INPUT_TOKENS] == 0
+        assert span_attrs[GenAiAttr.USAGE_CACHE_CREATION_INPUT_TOKENS] == 0
+        assert span_attrs[GenAiAttr.USAGE_CACHE_HIT_RATE] == 0.0
+
+    async def test_stream_marks_missing_usage_without_emitting_zero_token_metrics(self):
+        mock_provider = AsyncMock()
+
+        async def fake_stream(*args, **kwargs):
+            yield MessageStartEvent(message_id="m1")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = fake_stream
+        span = MagicMock()
+        telemetry_events = []
+        metrics = []
+        manager = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
+        manager._provider = mock_provider
+
+        with (
+            patch("iac_code.providers.manager.start_span", return_value=nullcontext(span)),
+            patch("iac_code.providers.manager.get_session_id", return_value="iac_sess_1"),
+            patch(
+                "iac_code.providers.manager.log_event",
+                side_effect=lambda name, attrs: telemetry_events.append((name, attrs)),
+            ),
+            patch(
+                "iac_code.providers.manager.add_metric",
+                side_effect=lambda name, value, attrs: metrics.append((name, value, attrs)),
+            ),
+        ):
+            await _collect_stream_events(manager.stream(messages=[Message.user("hi")], system="sys"))
+
+        span_attrs = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
+        assert span_attrs[GenAiAttr.USAGE_REPORTED] is False
+        assert GenAiAttr.USAGE_INPUT_TOKENS not in span_attrs
+        assert GenAiAttr.USAGE_CACHE_HIT_RATE not in span_attrs
+        success = next(attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_SUCCEEDED)
+        assert success["usage_reported"] is False
+        assert "total_tokens" not in success
+        usage_report_metrics = [
+            (value, attrs) for name, value, attrs in metrics if name == Metrics.TOKEN_USAGE_REPORT_COUNT
+        ]
+        assert len(usage_report_metrics) == 1
+        assert usage_report_metrics[0][0] == 1
+        assert usage_report_metrics[0][1]["reported"] is False
+        assert not any(name == Metrics.TOKEN_USAGE for name, _value, _attrs in metrics)
+        assert not any(name == Metrics.TOKEN_TOTAL for name, _value, _attrs in metrics)
+
+    async def test_stream_distinguishes_reported_zero_usage_from_missing_usage(self):
+        mock_provider = AsyncMock()
+
+        async def fake_stream(*args, **kwargs):
+            yield MessageStartEvent(message_id="m1")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage(reported=True))
+
+        mock_provider.stream = fake_stream
+        metrics = []
+        manager = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
+        manager._provider = mock_provider
+
+        with (
+            patch("iac_code.providers.manager.start_span", return_value=nullcontext(MagicMock())),
+            patch("iac_code.providers.manager.get_session_id", return_value="iac_sess_1"),
+            patch(
+                "iac_code.providers.manager.add_metric",
+                side_effect=lambda name, value, attrs: metrics.append((name, value, attrs)),
+            ),
+        ):
+            await _collect_stream_events(manager.stream(messages=[Message.user("hi")], system="sys"))
+
+        usage_report_metrics = [
+            (value, attrs) for name, value, attrs in metrics if name == Metrics.TOKEN_USAGE_REPORT_COUNT
+        ]
+        assert len(usage_report_metrics) == 1
+        assert usage_report_metrics[0][0] == 1
+        assert usage_report_metrics[0][1]["reported"] is True
+        assert not any(name == Metrics.TOKEN_USAGE for name, _value, _attrs in metrics)
+        assert not any(name == Metrics.TOKEN_TOTAL for name, _value, _attrs in metrics)
 
     async def test_stream_records_first_non_empty_thinking_delta_and_pipeline_scope(self):
         mock_provider = AsyncMock()
@@ -603,6 +782,16 @@ class TestProviderManagerStreaming:
             return FableProvider() if model == "claude-fable-5" else OpusProvider()
 
         monkeypatch.setattr("iac_code.providers.manager.create_provider", fake_create_provider)
+        telemetry_events = []
+        metrics = []
+        monkeypatch.setattr(
+            "iac_code.providers.manager.log_event",
+            lambda name, attrs: telemetry_events.append((name, attrs)),
+        )
+        monkeypatch.setattr(
+            "iac_code.providers.manager.add_metric",
+            lambda name, value, attrs: metrics.append((name, value, attrs)),
+        )
         manager = ProviderManager(model="claude-fable-5", credentials={"anthropic": "k"})
 
         events = await _collect_stream_events(manager.stream(messages=[Message.user("hi")], system="sys"))
@@ -618,9 +807,17 @@ class TestProviderManagerStreaming:
         assert follow_up_events[1].text == "continued with opus"
         assert manager.get_model_name() == "claude-opus-4-8"
         assert created_models == ["claude-fable-5", "claude-opus-4-8"]
+        usage_events = [attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_SUCCEEDED]
+        assert [attrs["status"] for attrs in usage_events] == ["refusal", "ok", "ok"]
+        assert [value for name, value, _attrs in metrics if name == Metrics.TOKEN_TOTAL] == [7, 11, 5]
 
-    async def test_stream_fallback_tombstone(self):
+    async def test_stream_fallback_tombstone(self, monkeypatch):
         mock_provider = AsyncMock()
+        metrics = []
+        monkeypatch.setattr(
+            "iac_code.providers.manager.add_metric",
+            lambda name, value, attrs: metrics.append((name, value, attrs)),
+        )
 
         async def failing_stream(*a, **kw):
             yield MessageStartEvent(message_id="m1")
@@ -643,6 +840,8 @@ class TestProviderManagerStreaming:
         events = [e async for e in mgr.stream(messages=[Message.user("hi")], system="sys")]
         types = [e.type for e in events]
         assert "tombstone" in types and "text_delta" in types and "message_end" in types
+        request_statuses = [attrs["status"] for name, _value, attrs in metrics if name == Metrics.API_REQUEST_COUNT]
+        assert request_statuses == ["error", "ok"]
 
     async def test_fallback_complete_also_fails_yields_error_event(self):
         mock_provider = AsyncMock()
@@ -810,9 +1009,30 @@ class TestProviderManagerStreaming:
 
         mgr = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
         mgr._provider = CancellingStreamProvider()
+        telemetry_events = []
+        metrics = []
 
-        with pytest.raises(asyncio.CancelledError):
+        with (
+            patch(
+                "iac_code.providers.manager.log_event",
+                side_effect=lambda name, attrs: telemetry_events.append((name, attrs)),
+            ),
+            patch(
+                "iac_code.providers.manager.add_metric",
+                side_effect=lambda name, value, attrs: metrics.append((name, value, attrs)),
+            ),
+            pytest.raises(asyncio.CancelledError),
+        ):
             await _collect_stream_events(mgr.stream(messages=[Message.user("hi")], system="sys"))
+
+        assert len([attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_STARTED]) == 1
+        failures = [attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_FAILED]
+        assert len(failures) == 1
+        assert failures[0]["status"] == "cancelled"
+        assert failures[0]["error_type"] == "CancelledError"
+        request_statuses = [attrs["status"] for name, _value, attrs in metrics if name == Metrics.API_REQUEST_COUNT]
+        assert request_statuses == ["cancelled"]
+        assert len([value for name, value, _attrs in metrics if name == Metrics.API_REQUEST_DURATION]) == 1
 
     async def test_stream_fallback_records_fallback_response_model_without_mutating_state(self, monkeypatch):
         from iac_code.providers.retry import RetryConfig
@@ -850,8 +1070,9 @@ class TestProviderManagerStreaming:
                 )
 
         class RecordingSpan:
-            def __init__(self):
-                self.attributes = {}
+            def __init__(self, name, attributes):
+                self.name = name
+                self.attributes = dict(attributes or {})
 
             def set_attribute(self, key, value):
                 self.attributes[key] = value
@@ -866,7 +1087,7 @@ class TestProviderManagerStreaming:
             def __exit__(self, exc_type, exc, tb):
                 return None
 
-        span = RecordingSpan()
+        spans = []
         telemetry_events = []
 
         monkeypatch.setattr(
@@ -877,7 +1098,9 @@ class TestProviderManagerStreaming:
         )
         monkeypatch.setattr(
             "iac_code.providers.manager.start_span",
-            lambda name, attrs=None: RecordingSpanContext(span),
+            lambda name, attrs=None: RecordingSpanContext(
+                spans.append(RecordingSpan(name, attrs)) or spans[-1]
+            ),
         )
         monkeypatch.setattr(
             "iac_code.providers.manager.log_event",
@@ -893,6 +1116,7 @@ class TestProviderManagerStreaming:
         events = await _collect_stream_events(mgr.stream(messages=[Message.user("hi")], system="sys"))
 
         success_event = next(attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_SUCCEEDED)
+        failure_events = [attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_FAILED]
         assert [event.type for event in events] == [
             "message_start",
             "tombstone",
@@ -900,7 +1124,21 @@ class TestProviderManagerStreaming:
             "text_delta",
             "message_end",
         ]
-        assert span.attributes[GenAiAttr.RESPONSE_MODEL] == "claude-haiku-4-5-20251001"
+        assert len(spans) == 3
+        assert [span.name for span in spans] == [
+            f"{Spans.LLM_CHAT} claude-sonnet-4-6",
+            f"{Spans.LLM_CHAT} claude-sonnet-4-6",
+            f"{Spans.LLM_CHAT} claude-haiku-4-5-20251001",
+        ]
+        assert spans[2].attributes[GenAiAttr.REQUEST_MODEL] == "claude-haiku-4-5-20251001"
+        assert GenAiAttr.RESPONSE_MODEL not in spans[0].attributes
+        assert GenAiAttr.RESPONSE_MODEL not in spans[1].attributes
+        assert spans[2].attributes[GenAiAttr.RESPONSE_MODEL] == "claude-haiku-4-5-20251001"
+        assert spans[2].attributes[GenAiAttr.USAGE_TOTAL_TOKENS] == 11
+        assert [attrs["model"] for attrs in failure_events] == [
+            sanitize_model_name("claude-sonnet-4-6"),
+            sanitize_model_name("claude-sonnet-4-6"),
+        ]
         assert success_event["provider"] == "fallback"
         assert success_event["model"] == sanitize_model_name("claude-haiku-4-5-20251001")
         assert mgr.get_model_name() == "claude-sonnet-4-6"
@@ -935,7 +1173,84 @@ class TestProviderManagerCompleteRetry:
     def _active_provider(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic")
 
-    async def test_retryable_status_429_retries_then_succeeds(self):
+    async def test_complete_records_chat_span_event_and_total_metric(self):
+        mock_provider = AsyncMock()
+        mock_provider.complete = AsyncMock(
+            return_value=NonStreamingResponse(
+                message_id="complete-response",
+                text="ok",
+                tool_uses=[],
+                stop_reason="end_turn",
+                usage=Usage(input_tokens=100, output_tokens=20, cache_read_input_tokens=60),
+            )
+        )
+        span = MagicMock()
+        telemetry_events = []
+        metrics = []
+        manager = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
+        manager._provider = mock_provider
+
+        with (
+            use_span_attributes({IacCodeAttr.MODE: "normal"}),
+            patch("iac_code.providers.manager.start_span", return_value=nullcontext(span)) as start_span,
+            patch("iac_code.providers.manager.get_session_id", return_value="iac_sess_1"),
+            patch(
+                "iac_code.providers.manager.log_event",
+                side_effect=lambda name, attrs: telemetry_events.append((name, attrs)),
+            ),
+            patch(
+                "iac_code.providers.manager.add_metric",
+                side_effect=lambda name, value, attrs: metrics.append((name, value, attrs)),
+            ),
+        ):
+            response = await manager.complete(messages=[Message.user("hi")], system="sys")
+
+        assert response.message_id == "complete-response"
+        assert start_span.call_args.args[0] == f"{Spans.LLM_CHAT} claude-sonnet-4-6"
+        assert start_span.call_args.args[1][IacCodeAttr.MODE] == "normal"
+        span_attrs = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
+        assert span_attrs[GenAiAttr.USAGE_TOTAL_TOKENS] == 120
+        success = [attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_SUCCEEDED]
+        assert len(success) == 1
+        assert success[0]["status"] == "ok"
+        total_metrics = [(value, attrs) for name, value, attrs in metrics if name == Metrics.TOKEN_TOTAL]
+        assert total_metrics == [
+            (120, {"provider": "asyncmock", "model": "claude-sonnet-4-6", "iac_code.mode": "normal"})
+        ]
+
+    async def test_complete_cancelled_error_records_terminal_telemetry_without_fallback(self, monkeypatch):
+        mock_provider = AsyncMock()
+        mock_provider.complete = AsyncMock(side_effect=asyncio.CancelledError())
+        telemetry_events = []
+        metrics = []
+        manager = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
+        manager._provider = mock_provider
+        fallback_factory = Mock(side_effect=AssertionError("cancellation must not create a fallback provider"))
+        monkeypatch.setattr("iac_code.providers.manager.create_provider", fallback_factory)
+        monkeypatch.setattr(
+            "iac_code.providers.manager.log_event",
+            lambda name, attrs: telemetry_events.append((name, attrs)),
+        )
+        monkeypatch.setattr(
+            "iac_code.providers.manager.add_metric",
+            lambda name, value, attrs: metrics.append((name, value, attrs)),
+        )
+
+        with pytest.raises(asyncio.CancelledError):
+            await manager.complete(messages=[Message.user("hi")], system="sys")
+
+        mock_provider.complete.assert_awaited_once()
+        fallback_factory.assert_not_called()
+        assert len([attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_STARTED]) == 1
+        failures = [attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_FAILED]
+        assert len(failures) == 1
+        assert failures[0]["status"] == "cancelled"
+        assert failures[0]["error_type"] == "CancelledError"
+        request_statuses = [attrs["status"] for name, _value, attrs in metrics if name == Metrics.API_REQUEST_COUNT]
+        assert request_statuses == ["cancelled"]
+        assert len([value for name, value, _attrs in metrics if name == Metrics.API_REQUEST_DURATION]) == 1
+
+    async def test_retryable_status_429_retries_then_succeeds(self, monkeypatch):
         from iac_code.providers.base import NonStreamingResponse
         from iac_code.providers.retry import RetryConfig
         from iac_code.types.stream_events import Usage
@@ -950,6 +1265,16 @@ class TestProviderManagerCompleteRetry:
                 NonStreamingResponse(message_id="m", text="ok", tool_uses=[], stop_reason="end_turn", usage=Usage()),
             ]
         )
+        telemetry_events = []
+        metrics = []
+        monkeypatch.setattr(
+            "iac_code.providers.manager.log_event",
+            lambda name, attrs: telemetry_events.append((name, attrs)),
+        )
+        monkeypatch.setattr(
+            "iac_code.providers.manager.add_metric",
+            lambda name, value, attrs: metrics.append((name, value, attrs)),
+        )
         mgr = ProviderManager(
             model="claude-sonnet-4-6",
             credentials={"anthropic": "k"},
@@ -960,6 +1285,10 @@ class TestProviderManagerCompleteRetry:
         result = await mgr.complete(messages=[Message.user("hi")], system="")
         assert result.text == "ok"
         assert mock_provider.complete.call_count == 2
+        request_statuses = [attrs["status"] for name, _value, attrs in metrics if name == Metrics.API_REQUEST_COUNT]
+        assert request_statuses == ["error", "ok"]
+        started_events = [attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_STARTED]
+        assert [attrs["model"] for attrs in started_events] == ["claude-sonnet-4-6", "claude-sonnet-4-6"]
 
     async def test_any_5xx_status_retries_then_succeeds(self):
         from iac_code.providers.base import NonStreamingResponse
@@ -1023,6 +1352,16 @@ class TestProviderManagerCompleteRetry:
             return provider
 
         monkeypatch.setattr("iac_code.providers.manager.create_provider", fake_create_provider)
+        telemetry_events = []
+        metrics = []
+        monkeypatch.setattr(
+            "iac_code.providers.manager.log_event",
+            lambda name, attrs: telemetry_events.append((name, attrs)),
+        )
+        monkeypatch.setattr(
+            "iac_code.providers.manager.add_metric",
+            lambda name, value, attrs: metrics.append((name, value, attrs)),
+        )
         manager = ProviderManager(model="claude-fable-5", credentials={"anthropic": "k"})
 
         response = await manager.complete(messages=[Message.user("hi")], system="")
@@ -1034,6 +1373,9 @@ class TestProviderManagerCompleteRetry:
         assert providers["claude-fable-5"].complete_calls == 1
         assert providers["claude-opus-4-8"].complete_calls == 2
         assert manager.get_model_name() == "claude-opus-4-8"
+        usage_events = [attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_SUCCEEDED]
+        assert [attrs["status"] for attrs in usage_events] == ["refusal", "ok", "ok"]
+        assert [value for name, value, _attrs in metrics if name == Metrics.TOKEN_TOTAL] == [7, 11, 11]
 
         manager.reset_conversation_state()
 
@@ -1096,6 +1438,16 @@ class TestProviderManagerCompleteRetry:
             return FakeProvider(model)
 
         monkeypatch.setattr("iac_code.providers.manager.create_provider", fake_create_provider)
+        telemetry_events = []
+        metrics = []
+        monkeypatch.setattr(
+            "iac_code.providers.manager.log_event",
+            lambda name, attrs: telemetry_events.append((name, attrs)),
+        )
+        monkeypatch.setattr(
+            "iac_code.providers.manager.add_metric",
+            lambda name, value, attrs: metrics.append((name, value, attrs)),
+        )
         manager = ProviderManager(
             model="claude-fable-5",
             credentials={"anthropic": "k"},
@@ -1107,6 +1459,18 @@ class TestProviderManagerCompleteRetry:
 
         assert created_models == ["claude-fable-5", "claude-opus-4-8"]
         assert manager.get_model_name() == "claude-fable-5"
+        success_events = [attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_SUCCEEDED]
+        failure_events = [attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_FAILED]
+        started_events = [attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_STARTED]
+        assert [attrs["model"] for attrs in started_events] == ["claude-fable-5", "claude-opus-4-8"]
+        assert [(attrs["model"], attrs["status"]) for attrs in success_events] == [
+            ("claude-fable-5", "refusal")
+        ]
+        assert [(attrs["model"], attrs["error_type"]) for attrs in failure_events] == [
+            ("claude-opus-4-8", "Status503Error")
+        ]
+        request_statuses = [attrs["status"] for name, _value, attrs in metrics if name == Metrics.API_REQUEST_COUNT]
+        assert request_statuses == ["refusal", "error"]
 
     async def test_connection_error_is_retryable(self):
         from iac_code.providers.base import NonStreamingResponse
