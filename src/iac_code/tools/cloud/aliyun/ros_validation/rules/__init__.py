@@ -1,0 +1,1 @@
+"""ValidationRule extension namespace."""

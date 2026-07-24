@@ -1,12 +1,9 @@
-"""Pre-call hook: expand ROS Parameters from dict format to flat format."""
+"""ROS Parameters adapters for the generic RPC request path."""
 
 from __future__ import annotations
 
 import json
 from typing import Any
-
-from iac_code.tools.base import ToolResult
-from iac_code.tools.cloud.aliyun.api_hooks import before_call
 
 _PARAMETERS_ACTIONS = [
     "CreateStack",
@@ -55,22 +52,32 @@ def _normalize_parameters(parameters: Any) -> list[tuple[str, str]] | None:
     return None
 
 
-@before_call("ros", _PARAMETERS_ACTIONS)
-def expand_parameters(product: str, action: str, params: dict[str, Any]) -> ToolResult | None:
+def normalize_ros_parameters(action: str, params: dict[str, Any]) -> None:
+    """Materialize ROS ``Parameters`` into the canonical flat RPC shape."""
+
+    if action not in _PARAMETERS_ACTIONS:
+        return
     parameters = params.get("Parameters")
     if parameters is None:
-        return None
-
-    if any(k.startswith("Parameters.") and k.endswith(".ParameterKey") for k in params):
-        return None
-
+        return
+    if any(key.startswith("Parameters.") and key.endswith(".ParameterKey") for key in params):
+        return
     pairs = _normalize_parameters(parameters)
     if pairs is None:
-        return None
+        return
 
     del params["Parameters"]
-    for i, (key, value_str) in enumerate(pairs, start=1):
-        params[f"Parameters.{i}.ParameterKey"] = key
-        params[f"Parameters.{i}.ParameterValue"] = value_str
+    for index, (key, value_str) in enumerate(pairs, start=1):
+        params[f"Parameters.{index}.ParameterKey"] = key
+        params[f"Parameters.{index}.ParameterValue"] = value_str
 
-    return None
+
+def expand_parameters(product: str, action: str, params: dict[str, Any]) -> None:
+    """Compatibility wrapper for callers that explicitly request RPC materialization.
+
+    This function is intentionally not a pre-call hook: stage-zero validation
+    must be read-only so invocation bindings keep describing the approved input.
+    """
+
+    del product
+    normalize_ros_parameters(action, params)

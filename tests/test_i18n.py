@@ -341,6 +341,70 @@ ROS_DEPLOYMENT_REJECTION_MSGID = (
     "Do not call the raw ROS deployment API directly."
 )
 
+ROS_VALIDATION_SOURCE_PREFIXES = (
+    "src/iac_code/tools/cloud/aliyun/ros_validation/",
+    "src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py",
+)
+
+ROS_VALIDATION_REQUIRED_LITERAL_TOKENS = {
+    "Mode must be Recreate or Ignore.": {"Mode", "Recreate", "Ignore"},
+    "Recreate accepts at most one source.": {"Recreate"},
+    "RegisterResourceType.ResourceType has an invalid format.": {"RegisterResourceType.ResourceType"},
+    (
+        "Condition roots register only Equals, Ref, FindInMap, Not, And, and Or; "
+        "child expressions may use the extended function table."
+    ): {"Equals", "Ref", "FindInMap", "Not", "And", "Or"},
+    "Condition names in And, Or, Not, and Fn::If must be declared in Conditions first.": {
+        "And",
+        "Or",
+        "Not",
+        "Fn::If",
+        "Conditions",
+    },
+    "This position accepts only a Parameter Ref, not a Resource/DataSource Ref.": {
+        "Parameter Ref",
+        "Resource/DataSource Ref",
+    },
+    "The CidrBlock Parameter has a Default; after selecting an existing VPC, deployment parameters should "
+    "choose a non-conflicting CIDR block.": {"CidrBlock", "Default", "VPC"},
+    "Remove the fixed value or the referenced Parameter Default.": {"Default"},
+    "Macro/Eval must have Value and cannot have Properties.": {"Macro/Eval", "Value", "Properties"},
+    "Macro, Eval, and DATASOURCE::* Resource Type are supported.": {
+        "Macro",
+        "Eval",
+        "DATASOURCE::*",
+        "Resource Type",
+    },
+    (
+        "ROS Local precompilation replaces only resource Count and Properties; names in this field are resolved "
+        "as Parameter Ref."
+    ): {"Count", "Properties", "Parameter Ref"},
+    (
+        "The temporary Eval/DataSource Local template copies only Parameters and Locals, not outer "
+        "Resources/DataSources."
+    ): {"Eval/DataSource", "Parameters", "Locals", "Resources/DataSources"},
+    "The temporary Eval/DataSource Local template does not copy outer Resources/DataSources.": {
+        "Eval/DataSource",
+        "Resources/DataSources",
+    },
+    "Fn::ResourceFacade has no parent_resource in a top-level template.": {
+        "Fn::ResourceFacade",
+        "parent_resource",
+    },
+    "The runtime calls split('=', 1) for every item.": {"split('=', 1)"},
+    "Python split('') raises an empty separator error.": {"split('')"},
+    "Null is treated as ['']; other types fail deterministically at runtime.": {"['']"},
+    "The runtime evaluates `key in map_item`; a List/Map key fails deterministically.": {
+        "`key in map_item`",
+        "List/Map",
+    },
+    "The Fn::Jq method must be First or All.": {"Fn::Jq", "First", "All"},
+    "Member {} of Fn::Avg cannot be converted to Float.": {"Fn::Avg", "Float"},
+    "Fn::Calculate number {} failed preflight validation.": {"Fn::Calculate"},
+    "The runtime reads the first member, so an empty List raises IndexError.": {"List", "IndexError"},
+    "expected ',' or ']' in JSON array": {"]"},
+}
+
 
 def _get_all_msgids_from_pot(pot_file: Path) -> set[str]:
     """Extract all msgids from a .pot template file.
@@ -357,6 +421,19 @@ def _get_all_msgids_from_pot(pot_file: Path) -> set[str]:
         catalog = read_po(f)
 
     return {message.id for message in catalog if message.id and isinstance(message.id, str)}
+
+
+def _get_msgids_for_source_prefixes(pot_file: Path, prefixes: tuple[str, ...]) -> set[str]:
+    with open(pot_file, "r", encoding="utf-8") as f:
+        catalog = read_po(f)
+
+    return {
+        message.id
+        for message in catalog
+        if message.id
+        and isinstance(message.id, str)
+        and any(location[0].startswith(prefixes) for location in message.locations)
+    }
 
 
 def _get_all_translations_from_po(po_file: Path) -> dict[str, str]:
@@ -618,6 +695,69 @@ def test_translation_completeness():
             error_messages.append(f"Language '{lang}' has incomplete translations:")
             error_messages.extend(errors)
         pytest.fail("\n".join(error_messages))
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
+def test_ros_validation_user_visible_translations_are_complete():
+    msgids = _get_msgids_for_source_prefixes(POT_FILE, ROS_VALIDATION_SOURCE_PREFIXES)
+    assert msgids
+
+    errors = []
+    for lang_dir in _discover_language_dirs():
+        translations = _get_all_translations_from_po(lang_dir / "LC_MESSAGES" / "messages.po")
+        for msgid in sorted(msgids):
+            msgstr = translations.get(msgid, "").strip()
+            if not msgstr:
+                errors.append(f"{lang_dir.name}: missing translation for {msgid!r}")
+            elif msgstr == msgid:
+                errors.append(f"{lang_dir.name}: untranslated placeholder for {msgid!r}")
+            else:
+                try:
+                    expected_fields = _format_fields(msgid)
+                except ValueError:
+                    continue
+                try:
+                    actual_fields = _format_fields(msgstr)
+                except ValueError:
+                    actual_fields = Counter({"<invalid format string>": 1})
+                if actual_fields != expected_fields:
+                    errors.append(
+                        f"{lang_dir.name}: placeholder mismatch for {msgid!r}: "
+                        f"expected {sorted(expected_fields)}, got {sorted(actual_fields)}"
+                    )
+
+    assert not errors, "ROS validation translations are incomplete:\n" + "\n".join(errors)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
+def test_ros_validation_translations_preserve_required_literal_tokens():
+    msgids = _get_msgids_for_source_prefixes(POT_FILE, ROS_VALIDATION_SOURCE_PREFIXES)
+    missing_msgids = set(ROS_VALIDATION_REQUIRED_LITERAL_TOKENS) - msgids
+    assert not missing_msgids
+
+    errors = []
+    for lang_dir in _discover_language_dirs():
+        translations = _get_all_translations_from_po(lang_dir / "LC_MESSAGES" / "messages.po")
+        for msgid, required_tokens in ROS_VALIDATION_REQUIRED_LITERAL_TOKENS.items():
+            msgstr = translations.get(msgid, "")
+            for token in sorted(required_tokens):
+                if token not in msgstr:
+                    errors.append(f"{lang_dir.name}: {msgid!r} must preserve {token!r}")
+
+    assert not errors, "ROS validation translations changed required literal tokens:\n" + "\n".join(errors)
+
+
+def test_ros_validation_uses_runtime_language(monkeypatch: pytest.MonkeyPatch) -> None:
+    from iac_code.i18n import _, setup_i18n
+
+    monkeypatch.setenv("LANGUAGE", "zh")
+    setup_i18n()
+    try:
+        assert _("ROS local validation failed") == "ROS 本地校验失败"
+        assert _("   expected: {}").format("List") == "   期望：List"
+    finally:
+        monkeypatch.setenv("LANGUAGE", DEFAULT_LANGUAGE)
+        setup_i18n()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")

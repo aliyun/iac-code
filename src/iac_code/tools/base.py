@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from iac_code.i18n import _
 
 if TYPE_CHECKING:
+    from iac_code.tools.cloud.aliyun.ros_validation.model import TrustedRosAccountContext
+    from iac_code.tools.cloud.aliyun.ros_validation.outcome import RosPreflightOutcome
     from iac_code.types.permissions import ExecutionClass, InvocationBinding, PermissionResult
 
 
@@ -44,6 +46,8 @@ class ToolContext:
     security_digest: str | None = None
     execution_class: ExecutionClass | None = None
     request_started: bool = False
+    ros_preflight_outcome: RosPreflightOutcome | None = None
+    trusted_ros_account_context: TrustedRosAccountContext | None = None
 
     def __init__(
         self,
@@ -63,6 +67,8 @@ class ToolContext:
         security_digest: str | None = None,
         execution_class: ExecutionClass | None = None,
         telemetry_attributes: dict[str, str | int] | None = None,
+        ros_preflight_outcome: RosPreflightOutcome | None = None,
+        trusted_ros_account_context: TrustedRosAccountContext | None = None,
     ) -> None:
         if isinstance(tool_use_id, list) and isinstance(additional_directories, list):
             old_additional_directories = tool_use_id
@@ -91,6 +97,8 @@ class ToolContext:
         self.security_digest = security_digest
         self.execution_class = execution_class
         self.request_started = False
+        self.ros_preflight_outcome = ros_preflight_outcome
+        self.trusted_ros_account_context = trusted_ros_account_context
         self.permission_context = permission_context
 
     def set_permission_context(self, permission_context: Any) -> None:

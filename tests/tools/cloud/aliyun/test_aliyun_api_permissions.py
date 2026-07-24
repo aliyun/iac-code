@@ -1679,7 +1679,14 @@ async def test_delegated_local_template_is_materialized_only_after_contract_cons
     from iac_code.tools.cloud.aliyun.runtime import AliyunDelegatedExecutor
 
     template = tmp_path / "template.yml"
-    template_body = "ROSTemplateFormatVersion: '2015-09-01'\nResources:\n  Vpc:\n    Type: ALIYUN::ECS::VPC\n"
+    template_body = (
+        "ROSTemplateFormatVersion: '2015-09-01'\n"
+        "Resources:\n"
+        "  Wait:\n"
+        "    Type: ALIYUN::ROS::Sleep\n"
+        "    Properties:\n"
+        "      Triggers: {Zones: {Fn::GetAZs: ''}}\n"
+    )
     template.write_bytes(template_body.encode("utf-8"))
     contract = _canonical_contract(
         product="ROS",
@@ -1703,10 +1710,138 @@ async def test_delegated_local_template_is_materialized_only_after_contract_cons
     result = await delegated.execute(outer_input, context)
 
     assert result.is_error is False
+    assert context.ros_preflight_outcome is not None
+    assert context.ros_preflight_outcome.report.warning_count == 1
     builder_input = runtime.request_builder.inputs[0]
     assert builder_input["params"]["TemplateBody"] == template_body
     assert "TemplateURL" not in builder_input["params"]
     assert stages.index("contract") < stages.index("materialize") < stages.index("request_builder")
+
+
+@pytest.mark.asyncio
+async def test_invalid_inline_ros_template_rejects_approved_handoff_before_credentials() -> None:
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action="ValidateTemplate",
+        operation_type="read",
+    )
+    tool, runtime = _execution_runtime(contract)
+    calls: list[str] = []
+    runtime.default_region_provider = lambda: calls.append("default-region") or "cn-hangzhou"
+    runtime.credential_provider = lambda: calls.append("credential")
+
+    tool_input = {
+        "product": "ros",
+        "version": "2019-09-10",
+        "action": "ValidateTemplate",
+        "params": {"TemplateBody": "ROSTemplateFormatVersion: 2015-09-01\nResources: ["},
+        "region_id": "cn-hangzhou",
+    }
+    _, context = await _approved_execution_context(tool, tool_input)
+    calls.clear()
+
+    result = await tool.execute(tool_input=tool_input, context=context)
+
+    assert result.is_error
+    assert "ROS1001" in result.content
+    assert calls == []
+    assert runtime.contract_store.size == 0
+
+
+@pytest.mark.asyncio
+async def test_non_string_inline_ros_template_rejects_approved_handoff_before_credentials() -> None:
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action="ValidateTemplate",
+        operation_type="read",
+    )
+    tool, runtime = _execution_runtime(contract)
+    calls: list[str] = []
+    runtime.default_region_provider = lambda: calls.append("default-region") or "cn-hangzhou"
+    runtime.credential_provider = lambda: calls.append("credential")
+
+    tool_input = {
+        "product": "ros",
+        "version": "2019-09-10",
+        "action": "ValidateTemplate",
+        "params": {"TemplateBody": 123},
+        "region_id": "cn-hangzhou",
+    }
+    _, context = await _approved_execution_context(tool, tool_input)
+    calls.clear()
+
+    result = await tool.execute(tool_input=tool_input, context=context)
+
+    assert result.is_error
+    assert result.content.count("ROS local validation failed") == 1
+    assert "ROS local preflight diagnostics" not in result.content
+    assert calls == []
+    assert runtime.contract_store.size == 0
+
+
+@pytest.mark.asyncio
+async def test_missing_ros_template_source_rejects_approved_handoff_before_credentials() -> None:
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action="ValidateTemplate",
+        operation_type="read",
+    )
+    tool, runtime = _execution_runtime(contract)
+    calls: list[str] = []
+    runtime.default_region_provider = lambda: calls.append("default-region") or "cn-hangzhou"
+    runtime.credential_provider = lambda: calls.append("credential")
+
+    tool_input = {
+        "product": "ros",
+        "version": "2019-09-10",
+        "action": "ValidateTemplate",
+        "params": {},
+        "region_id": "cn-hangzhou",
+    }
+    _, context = await _approved_execution_context(tool, tool_input)
+    calls.clear()
+
+    result = await tool.execute(tool_input=tool_input, context=context)
+
+    assert result.is_error
+    assert result.content.count("ROS local validation failed") == 1
+    assert "ROS1201" in result.content
+    assert "ROS local preflight diagnostics" not in result.content
+    assert calls == []
+    assert runtime.contract_store.size == 0
+
+
+@pytest.mark.asyncio
+async def test_invalid_inline_ros_template_cannot_bypass_public_binding_validation() -> None:
+    valid_input = {
+        "product": "ros",
+        "version": "2019-09-10",
+        "action": "ValidateTemplate",
+        "params": {"TemplateBody": "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n"},
+        "region_id": "cn-hangzhou",
+    }
+    invalid_input = {
+        **valid_input,
+        "params": {"TemplateBody": "ROSTemplateFormatVersion: 2015-09-01\nResources: ["},
+    }
+    tool, runtime = _execution_runtime(
+        _canonical_contract(
+            product="ROS",
+            version="2019-09-10",
+            action="ValidateTemplate",
+            operation_type="read",
+        )
+    )
+    _, context = await _approved_execution_context(tool, valid_input)
+
+    result = await tool.execute(tool_input=invalid_input, context=context)
+
+    assert result == ToolResult.error(_expected_public_error("aliyun_invocation_binding_mismatch", invalid_input))
+    assert "ROS1001" not in result.content
+    assert runtime.contract_store.size == 0
 
 
 @pytest.mark.asyncio

@@ -445,3 +445,186 @@ class TestToolExecutorValidation:
         calls = [ToolCallRequest(id="v3", name="strict", input={})]
         await executor.execute_batch(calls, ToolContext())
         assert len(executed) == 0
+
+
+def _warning_outcome(label: str):
+    from iac_code.tools.cloud.aliyun.ros_validation.model import (
+        Category,
+        Severity,
+        ValidationReport,
+        make_diagnostic,
+    )
+    from iac_code.tools.cloud.aliyun.ros_validation.outcome import outcome_from_report
+
+    report = ValidationReport.build(
+        [
+            make_diagnostic(
+                code="ROS5999",
+                severity=Severity.WARNING,
+                category=Category.QUALITY,
+                summary="warning-{}".format(label),
+                detail="detail-{}".format(label),
+                stable_args=(label,),
+            )
+        ]
+    )
+    return outcome_from_report(report)
+
+
+def test_attach_ros_validation_merges_by_diagnostic_id_and_preserves_existing_payload():
+    from iac_code.tools.cloud.aliyun.ros_validation.model import (
+        Category,
+        Severity,
+        ValidationReport,
+        make_diagnostic,
+    )
+    from iac_code.tools.cloud.aliyun.ros_validation.outcome import attach_ros_validation, outcome_from_report
+
+    existing_diagnostic = make_diagnostic(
+        code="ROS-EXISTING",
+        severity=Severity.WARNING,
+        category=Category.QUALITY,
+        summary="existing",
+        detail="existing",
+    )
+    new_diagnostic = make_diagnostic(
+        code="ROS-NEW",
+        severity=Severity.LIMITATION,
+        category=Category.LIMITATION,
+        summary="new",
+        detail="new",
+    )
+    existing_report = ValidationReport.build([existing_diagnostic]).to_dict()
+    existing_report["server_field"] = "keep"
+    result = ToolResult(
+        content="api-payload",
+        is_error=False,
+        metadata={"ros_validation": existing_report, "api_metadata": "keep"},
+    )
+    outcome = outcome_from_report(ValidationReport.build([new_diagnostic]))
+
+    merged = attach_ros_validation(result, outcome)
+    merged_twice = attach_ros_validation(merged, outcome)
+
+    diagnostics = merged_twice.metadata["ros_validation"]["diagnostics"]
+    assert [item["diagnostic_id"] for item in diagnostics] == [
+        existing_diagnostic.diagnostic_id,
+        new_diagnostic.diagnostic_id,
+    ]
+    assert merged_twice.metadata["ros_validation"]["server_field"] == "keep"
+    assert merged_twice.metadata["api_metadata"] == "keep"
+    assert merged_twice.content.startswith("api-payload")
+
+
+class FakeRosPreflightTool(FakeReadTool):
+    async def execute(self, *, tool_input, context):
+        outcome = _warning_outcome(tool_input["label"])
+        context.ros_preflight_outcome = outcome
+        mode = tool_input.get("mode", "success")
+        if mode == "server-error":
+            result = ToolResult.error("service failed")
+            from iac_code.tools.cloud.aliyun.ros_validation.outcome import attach_ros_validation
+
+            return attach_ros_validation(result, outcome)
+        if mode == "exception":
+            raise RuntimeError("after preflight")
+        if mode == "timeout":
+            await asyncio.sleep(10)
+        result = ToolResult.success("payload-{}".format(tool_input["label"]))
+        from iac_code.tools.cloud.aliyun.ros_validation.outcome import attach_ros_validation
+
+        return attach_ros_validation(result, outcome)
+
+
+class FakeUnattachedRosPreflightTool(FakeReadTool):
+    async def execute(self, *, tool_input, context):
+        context.ros_preflight_outcome = _warning_outcome(tool_input["label"])
+        return ToolResult.success("payload-{}".format(tool_input["label"]))
+
+
+@pytest.mark.asyncio
+class TestRosPreflightOutcomePropagation:
+    async def test_normal_return_is_the_adapter_attachment_boundary(self):
+        registry = MagicMock()
+        registry.get = lambda name: FakeUnattachedRosPreflightTool()
+
+        results = await ToolExecutor(registry=registry).execute_batch(
+            [ToolCallRequest(id="normal", name="read", input={"label": "normal"})],
+            ToolContext(),
+        )
+
+        assert results[0].content == "payload-normal"
+        assert not results[0].metadata
+
+    async def test_trusted_ros_account_context_survives_per_invocation_context_copy(self):
+        from iac_code.tools.cloud.aliyun.ros_validation.model import TrustedRosAccountContext
+
+        trusted = TrustedRosAccountContext("tenant", "owner", "production", "host-test")
+
+        class ContextProbeTool(FakeReadTool):
+            async def execute(self, *, tool_input, context):
+                del tool_input
+                assert context.trusted_ros_account_context is trusted
+                return ToolResult.success("ok")
+
+        registry = MagicMock()
+        registry.get = lambda name: ContextProbeTool()
+        results = await ToolExecutor(registry=registry).execute_batch(
+            [ToolCallRequest(id="trusted", name="read", input={})],
+            ToolContext(trusted_ros_account_context=trusted),
+        )
+        assert results[0].content == "ok"
+
+    async def test_warning_attaches_to_success_and_server_error_without_overwriting_payload(self):
+        tool = FakeRosPreflightTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        results = await ToolExecutor(registry=registry).execute_batch(
+            [
+                ToolCallRequest(id="success", name="read", input={"label": "success"}),
+                ToolCallRequest(id="server-error", name="read", input={"label": "server", "mode": "server-error"}),
+            ],
+            ToolContext(),
+        )
+
+        assert results[0].content.startswith("payload-success")
+        assert not results[0].is_error
+        assert results[1].content.startswith("service failed")
+        assert results[1].is_error
+        assert results[0].metadata["ros_validation"]["diagnostics"][0]["summary"] == "warning-success"
+        assert results[1].metadata["ros_validation"]["diagnostics"][0]["summary"] == "warning-server"
+
+    async def test_warning_attaches_after_exception_and_timeout(self):
+        tool = FakeRosPreflightTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        exception_result = await ToolExecutor(registry=registry).execute_batch(
+            [ToolCallRequest(id="exception", name="read", input={"label": "exception", "mode": "exception"})],
+            ToolContext(),
+        )
+        timeout_result = await ToolExecutor(registry=registry, tool_timeout=0.01).execute_batch(
+            [ToolCallRequest(id="timeout", name="read", input={"label": "timeout", "mode": "timeout"})],
+            ToolContext(),
+        )
+
+        assert exception_result[0].is_error
+        assert "after preflight" in exception_result[0].content
+        assert exception_result[0].metadata["ros_validation"]["diagnostics"][0]["summary"] == "warning-exception"
+        assert timeout_result[0].is_error
+        assert "timed out" in timeout_result[0].content
+        assert timeout_result[0].metadata["ros_validation"]["diagnostics"][0]["summary"] == "warning-timeout"
+
+    async def test_concurrent_invocations_do_not_share_outcomes(self):
+        tool = FakeRosPreflightTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        results = await ToolExecutor(registry=registry).execute_batch(
+            [
+                ToolCallRequest(id="a", name="read", input={"label": "a"}),
+                ToolCallRequest(id="b", name="read", input={"label": "b"}),
+            ],
+            ToolContext(),
+        )
+
+        summaries = [item.metadata["ros_validation"]["diagnostics"][0]["summary"] for item in results]
+        assert summaries == ["warning-a", "warning-b"]

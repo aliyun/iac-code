@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from iac_code.services.telemetry.names import Events, Metrics
-from iac_code.tools.base import ToolContext
+from iac_code.tools.base import ToolContext, ToolResult
 from iac_code.tools.cloud.aliyun.ros_stack import RosStack
 from iac_code.tools.path_safety import get_iac_code_application_root
 from iac_code.types.permissions import ToolPermissionContext
@@ -96,6 +96,225 @@ class TestRosStackPermissions:
 
 
 class TestRosStackExecute:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("mode", ["success", "caught-error"])
+    async def test_execute_preflights_once_and_attaches_outcome(self, tool: RosStack, mode: str) -> None:
+        from iac_code.tools.cloud.aliyun.api_hooks import run_hooks
+
+        context = ToolContext()
+        tool._get_client = lambda _region: object()  # type: ignore[method-assign]
+        if mode == "caught-error":
+            tool._handle_create_stack = AsyncMock(side_effect=RuntimeError("service failed"))  # type: ignore[method-assign]
+        else:
+            tool._handle_create_stack = AsyncMock(return_value="stack-123")  # type: ignore[method-assign]
+            tool.wait_for_stack_operation = AsyncMock(  # type: ignore[method-assign]
+                return_value=ToolResult(content="api-result", metadata={"api": "kept"})
+            )
+        body = (
+            "ROSTemplateFormatVersion: '2015-09-01'\n"
+            "Resources:\n"
+            "  Wait:\n"
+            "    Type: ALIYUN::ROS::Sleep\n"
+            "    Properties:\n"
+            "      Triggers: {Zones: {Fn::GetAZs: ''}}\n"
+        )
+
+        with patch("iac_code.tools.cloud.aliyun.api_hooks.run_hooks", wraps=run_hooks) as hook:
+            result = await tool.execute(
+                tool_input={
+                    "action": "CreateStack",
+                    "region_id": "cn-hangzhou",
+                    "params": {"StackName": "demo", "TemplateBody": body},
+                },
+                context=context,
+            )
+
+        assert hook.call_count == 1
+        assert result.is_error is (mode == "caught-error")
+        assert result.metadata["ros_validation"]["warning_count"] >= 1
+        assert "ROS local preflight diagnostics" in result.content
+
+    @pytest.mark.asyncio
+    async def test_execute_preflights_remote_template_url_once(self, tool: RosStack) -> None:
+        from iac_code.tools.cloud.aliyun.api_hooks import run_hooks
+
+        context = ToolContext()
+        with (
+            patch.object(tool, "_get_client", return_value=object()),
+            patch.object(tool, "_handle_create_stack", new=AsyncMock(return_value="stack-123")),
+            patch.object(
+                tool,
+                "wait_for_stack_operation",
+                new=AsyncMock(return_value=ToolResult.success("api-result")),
+            ),
+            patch("iac_code.tools.cloud.aliyun.api_hooks.run_hooks", wraps=run_hooks) as hook,
+        ):
+            result = await tool.execute(
+                tool_input={
+                    "action": "CreateStack",
+                    "region_id": "cn-hangzhou",
+                    "params": {
+                        "StackName": "demo",
+                        "TemplateURL": "https://example.com/template.yml",
+                    },
+                },
+                context=context,
+            )
+
+        assert not result.is_error
+        hook.assert_called_once()
+        assert hook.call_args.kwargs["read_only"] is True
+
+    @pytest.mark.asyncio
+    async def test_call_action_preserves_mapping_template_as_synthetic_source(self, tool: RosStack) -> None:
+        context = ToolContext()
+        params = {
+            "StackName": "test",
+            "TemplateBody": {
+                "ROSTemplateFormatVersion": "2015-09-01",
+                "Resources": {
+                    "Vpc": {"Type": "ALIYUN::ECS::VPC"},
+                    "Wait": {
+                        "Type": "ALIYUN::ROS::Sleep",
+                        "Properties": {
+                            "Triggers": {
+                                "Value": {
+                                    "Fn::GetAtt": {
+                                        "Vpc": "VpcId",
+                                        "VpcId": "ignored",
+                                    }
+                                }
+                            }
+                        },
+                    },
+                },
+            },
+        }
+        tool._get_client = lambda _region: MagicMock()  # type: ignore[method-assign]
+
+        with patch.object(tool, "_handle_create_stack", new=AsyncMock(return_value="stack-123")):
+            result = await tool.call_action(
+                "CreateStack",
+                params,
+                "cn-hangzhou",
+                tool_context=context,
+            )
+
+        assert result == "stack-123"
+        assert context.ros_preflight_outcome is not None
+        warning = next(item for item in context.ros_preflight_outcome.report.diagnostics if item.code == "ROS5208")
+        assert warning.source_span is not None
+        assert warning.source_span.synthetic
+
+    @pytest.mark.asyncio
+    async def test_invalid_inline_template_is_blocked_before_default_region_credentials(self, tool: RosStack) -> None:
+        context = ToolContext()
+        with patch(
+            "iac_code.tools.cloud.aliyun.ros_stack.CloudCredentials",
+            side_effect=AssertionError("credentials must not be read"),
+        ):
+            result = await tool.execute(
+                tool_input={
+                    "action": "CreateStack",
+                    "params": {
+                        "StackName": "test",
+                        "TemplateBody": "ROSTemplateFormatVersion: 2015-09-01\nResources: [",
+                    },
+                },
+                context=context,
+            )
+
+        assert result.is_error
+        assert "ROS1001" in result.content
+        assert context.ros_preflight_outcome is not None
+
+    @pytest.mark.asyncio
+    async def test_non_string_inline_template_is_stage_zero_blocked_before_credentials(self, tool: RosStack) -> None:
+        context = ToolContext()
+        with patch(
+            "iac_code.tools.cloud.aliyun.ros_stack.CloudCredentials",
+            side_effect=AssertionError("credentials must not be read"),
+        ):
+            result = await tool.execute(
+                tool_input={
+                    "action": "CreateStack",
+                    "params": {"StackName": "test", "TemplateBody": 123},
+                },
+                context=context,
+            )
+
+        assert result.is_error
+        assert result.content.count("ROS local validation failed") == 1
+        assert "ROS local preflight diagnostics" not in result.content
+        assert context.ros_preflight_outcome is not None
+
+    @pytest.mark.asyncio
+    async def test_missing_template_source_is_stage_zero_blocked_once_before_credentials(self, tool: RosStack) -> None:
+        context = ToolContext()
+        with patch(
+            "iac_code.tools.cloud.aliyun.ros_stack.CloudCredentials",
+            side_effect=AssertionError("credentials must not be read"),
+        ):
+            result = await tool.execute(
+                tool_input={
+                    "action": "CreateStack",
+                    "params": {"StackName": "test"},
+                },
+                context=context,
+            )
+
+        assert result.is_error
+        assert result.content.count("ROS local validation failed") == 1
+        assert "ROS1201" in result.content
+        assert "ROS local preflight diagnostics" not in result.content
+        assert context.ros_preflight_outcome is not None
+
+    @pytest.mark.asyncio
+    async def test_local_invalid_template_returns_one_blocking_report_before_credentials(
+        self, tool: RosStack, tmp_path
+    ) -> None:
+        template = tmp_path / "invalid.yaml"
+        template.write_text("ROSTemplateFormatVersion: 2015-09-01\nResources: [", encoding="utf-8")
+        context = ToolContext(cwd=str(tmp_path), relative_read_directories=[str(tmp_path)])
+        with patch(
+            "iac_code.tools.cloud.aliyun.ros_stack.CloudCredentials",
+            side_effect=AssertionError("credentials must not be read"),
+        ):
+            result = await tool.execute(
+                tool_input={
+                    "action": "CreateStack",
+                    "params": {"StackName": "test", "TemplateURL": str(template)},
+                },
+                context=context,
+            )
+
+        assert result.is_error
+        assert result.content.count("ROS local validation failed") == 1
+        assert "ROS local preflight diagnostics" not in result.content
+
+    @pytest.mark.asyncio
+    async def test_invalid_template_is_blocked_before_ros_client(self, tool: RosStack) -> None:
+        client_calls: list[str] = []
+        tool._get_client = lambda region: client_calls.append(region)  # type: ignore[method-assign]
+        context = ToolContext()
+
+        result = await tool.execute(
+            tool_input={
+                "action": "CreateStack",
+                "params": {
+                    "StackName": "test",
+                    "TemplateBody": "ROSTemplateFormatVersion: 2015-09-01\nResources: [",
+                },
+                "region_id": "cn-hangzhou",
+            },
+            context=context,
+        )
+
+        assert result.is_error
+        assert "ROS1001" in result.content
+        assert client_calls == []
+        assert context.ros_preflight_outcome is not None
+
     @pytest.mark.asyncio
     async def test_execute_unsupported_action(self, tool: RosStack, context: ToolContext) -> None:
         result = await tool.execute(

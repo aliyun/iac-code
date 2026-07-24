@@ -8,6 +8,7 @@ from iac_code.tools.cloud.aliyun.hooks.ros_validate import (
     _parse_template,
     _validate_structure,
     check_template,
+    local_template_source_error,
 )
 
 
@@ -35,9 +36,10 @@ class TestParseTemplate:
     def test_invalid_json(self) -> None:
         text = '{"key": "value",}'
         data, err = _parse_template(text)
-        assert data is None
-        assert err is not None
-        assert "JSON" in err
+        # ROS performs JSON-first detection and then accepts YAML's trailing-comma
+        # Mapping syntax when strict JSON parsing fails.
+        assert data == {"key": "value"}
+        assert err is None
 
     def test_json_detection_by_brace(self) -> None:
         text = '  {"ROSTemplateFormatVersion": "2015-09-01"}'
@@ -94,7 +96,8 @@ class TestValidateStructure:
     def test_missing_resources(self) -> None:
         data = {"ROSTemplateFormatVersion": "2015-09-01"}
         errors = _validate_structure(data)
-        assert any("Resources" in e for e in errors)
+        # Empty templates are accepted by ROS; Resources is not universally required.
+        assert errors == []
 
     def test_terraform_template_skips_resources(self) -> None:
         data = {
@@ -229,12 +232,16 @@ class TestValidateStructure:
 class TestCheckTemplate:
     def test_no_template_body_returns_none(self) -> None:
         result = check_template("ros", "ValidateTemplate", {})
-        assert result is None
+        assert result is not None
+        assert result.blocking_result is not None
+        assert result.blocking_result.is_error
 
-    def test_valid_template_returns_none(self) -> None:
+    def test_valid_template_returns_non_blocking_analyzed_outcome(self) -> None:
         body = '{"ROSTemplateFormatVersion": "2015-09-01", "Resources": {"V": {"Type": "ALIYUN::ECS::VPC"}}}'
         result = check_template("ros", "ValidateTemplate", {"TemplateBody": body})
-        assert result is None
+        assert result is not None
+        assert result.blocking_result is None
+        assert result.template_analyzed
 
     def test_syntax_error_returns_error(self) -> None:
         result = check_template("ros", "ValidateTemplate", {"TemplateBody": "{bad json"})
@@ -246,3 +253,10 @@ class TestCheckTemplate:
         result = check_template("ros", "ValidateTemplate", {"TemplateBody": body})
         assert result is not None
         assert result.is_error
+
+    def test_local_template_read_error_is_a_structured_blocking_report(self) -> None:
+        outcome = local_template_source_error(UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid"))
+        assert outcome.blocking_result is not None
+        assert outcome.report.diagnostics[0].code == "ROS1202"
+        assert outcome.blocking_result.metadata is not None
+        assert outcome.blocking_result.metadata["ros_validation"]["error_count"] == 1

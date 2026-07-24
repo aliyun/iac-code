@@ -101,6 +101,8 @@ class ToolExecutor:
             snapshot_id=call.snapshot_id,
             security_digest=call.security_digest,
             execution_class=call.execution_class,
+            ros_preflight_outcome=None,
+            trusted_ros_account_context=context.trusted_ros_account_context,
         )
 
         timeout = tool.timeout if tool.timeout is not None else self._tool_timeout
@@ -146,9 +148,12 @@ class ToolExecutor:
             add_metric(Metrics.TOOL_USE_COUNT, 1, {"tool_name": tool_name, "outcome": "error"})
             timeout_error = tool.timeout_error_result_with_context(call.input, timeout, context)
             if timeout_error is not None:
-                return timeout_error
-            return ToolResult.error(
-                _("Tool '{tool_name}' timed out after {timeout}s").format(tool_name=call.name, timeout=timeout)
+                return self._attach_ros_preflight(timeout_error, context)
+            return self._attach_ros_preflight(
+                ToolResult.error(
+                    _("Tool '{tool_name}' timed out after {timeout}s").format(tool_name=call.name, timeout=timeout)
+                ),
+                context,
             )
         except Exception as e:
             log_event(
@@ -160,7 +165,19 @@ class ToolExecutor:
                 },
             )
             add_metric(Metrics.TOOL_USE_COUNT, 1, {"tool_name": tool_name, "outcome": "error"})
-            return ToolResult.error(_("Tool '{tool_name}' failed: {error}").format(tool_name=call.name, error=e))
+            return self._attach_ros_preflight(
+                ToolResult.error(_("Tool '{tool_name}' failed: {error}").format(tool_name=call.name, error=e)),
+                context,
+            )
+
+    @staticmethod
+    def _attach_ros_preflight(result: ToolResult, context: ToolContext) -> ToolResult:
+        outcome = context.ros_preflight_outcome
+        if outcome is None:
+            return result
+        from iac_code.tools.cloud.aliyun.ros_validation.outcome import attach_ros_validation
+
+        return attach_ros_validation(result, outcome)
 
     async def _execute_concurrent(
         self, calls: list[ToolCallRequest], context: ToolContext
