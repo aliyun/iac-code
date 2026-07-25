@@ -1031,9 +1031,18 @@ class AgentLoop:
         system: str,
         tools: list[Any] | None,
     ) -> AsyncGenerator[StreamEvent, None]:
-        with use_span_attributes(self._telemetry_attributes):
-            async for event in self._provider_manager.stream(messages=messages, system=system, tools=tools):
+        provider_stream = self._provider_manager.stream(messages=messages, system=system, tools=tools)
+        try:
+            while True:
+                with use_span_attributes(self._telemetry_attributes):
+                    try:
+                        event = await anext(provider_stream)
+                    except StopAsyncIteration:
+                        return
                 yield event
+        finally:
+            with use_span_attributes(self._telemetry_attributes):
+                await provider_stream.aclose()
 
     async def _run_streaming_inner(
         self,

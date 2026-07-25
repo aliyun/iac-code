@@ -8,6 +8,7 @@ import pytest
 
 from iac_code.agent.agent_loop import AgentLoop
 from iac_code.services.telemetry.names import GenAiAttr, IacCodeAttr, PipelineAttr, Spans
+from iac_code.services.telemetry.scope import get_span_attributes
 from iac_code.tools.base import ToolResult
 from iac_code.tools.tool_executor import ToolExecutor
 from iac_code.types.permissions import PermissionResult
@@ -240,6 +241,26 @@ class TestAgentLoopInit:
 
 @pytest.mark.asyncio
 class TestAgentLoopStreaming:
+    async def test_provider_stream_can_close_from_a_different_asyncio_context(self, mock_provider, mock_registry):
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            assert get_span_attributes()[PipelineAttr.NAME] == "selling"
+            yield TextDeltaEvent(text="Hello!")
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            pipeline_mode=True,
+            telemetry_attributes={PipelineAttr.NAME: "selling"},
+        )
+
+        stream = loop._stream_provider(messages=[], system="test", tools=None)
+        assert await anext(stream) == TextDeltaEvent(text="Hello!")
+        await asyncio.create_task(stream.aclose())
+
+        assert get_span_attributes() == {}
+
     async def test_text_only(self, mock_provider, mock_registry):
         async def fake_stream(messages, system, tools=None, max_tokens=8192):
             yield MessageStartEvent(message_id="m1")
