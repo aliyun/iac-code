@@ -389,6 +389,53 @@ def test_observer_clears_previous_error_after_retry_success(tmp_path) -> None:
     assert completed.last_error is None
 
 
+def test_observer_reads_stack_status_from_aliyun_api_response_body(tmp_path) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    resource = CleanupResource(
+        provider="ros",
+        resource_type="stack",
+        resource_id="stack-123",
+        region_id="cn-hangzhou",
+        cleanup_status="in_progress",
+        progress_status="DELETE_REQUESTED",
+    )
+    ledger.mark_cleanup_required([resource], source_step_id="deploying", reason="rollback requested")
+    observer = CleanupObserver(ledger)
+
+    observer.observe(
+        ToolUseEndEvent(
+            tool_use_id="toolu-get",
+            name="aliyun_api",
+            input={
+                "product": "ros",
+                "action": "GetStack",
+                "region_id": "cn-hangzhou",
+                "params": {"StackId": "stack-123"},
+            },
+        )
+    )
+    observer.observe(
+        ToolResultEvent(
+            tool_use_id="toolu-get",
+            tool_name="aliyun_api",
+            result=json.dumps(
+                {
+                    "status": 200,
+                    "body": {
+                        "StackId": "stack-123",
+                        "Status": "DELETE_COMPLETE",
+                    },
+                }
+            ),
+            is_error=False,
+        )
+    )
+
+    [completed] = ledger.cleanup_resources()
+    assert completed.cleanup_status == "completed"
+    assert completed.progress_status == "DELETE_COMPLETE"
+
+
 def test_terminal_cleanup_resource_ignores_late_nonterminal_or_failed_events(tmp_path) -> None:
     ledger = CleanupLedger(tmp_path / "cleanup.yaml")
     resource = CleanupResource(

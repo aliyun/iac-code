@@ -977,10 +977,15 @@ def _safe_history_error(value: str | None) -> str | None:
 
 def _status_from_result(result: dict[str, Any]) -> str | None:
     nested = _dict_value(result.get("Stack") or result.get("stack"))
-    return _first_string(
-        result,
-        ("StackStatus", "stackStatus", "stack_status", "Status", "status"),
-    ) or _first_string(nested, ("StackStatus", "stackStatus", "stack_status", "Status", "status"))
+    body = _dict_value(result.get("body"))
+    body_stack = _dict_value(body.get("Stack") or body.get("stack"))
+    status_keys = ("StackStatus", "stackStatus", "stack_status", "Status", "status")
+    return (
+        _first_string(nested, status_keys)
+        or _first_string(body_stack, status_keys)
+        or _first_string(body, status_keys)
+        or _first_string(result, status_keys)
+    )
 
 
 def _stack_id_from_sources(*sources: dict[str, Any]) -> str | None:
@@ -990,6 +995,13 @@ def _stack_id_from_sources(*sources: dict[str, Any]) -> str | None:
             return stack_id
         nested = _dict_value(source.get("Stack") or source.get("stack"))
         stack_id = _first_string(nested, ("StackId", "stackId", "stack_id"))
+        if stack_id:
+            return stack_id
+        body = _dict_value(source.get("body"))
+        body_stack = _dict_value(body.get("Stack") or body.get("stack"))
+        stack_id = _first_string(body_stack, ("StackId", "stackId", "stack_id")) or _first_string(
+            body, ("StackId", "stackId", "stack_id")
+        )
         if stack_id:
             return stack_id
     return None

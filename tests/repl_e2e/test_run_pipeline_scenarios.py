@@ -722,6 +722,68 @@ def test_find_available_vswitch_cidrs_returns_distinct_subnets() -> None:
     assert cidrs == ["192.168.254.0/24", "192.168.253.0/24"]
 
 
+def test_discover_cleanup_network_target_excludes_prior_scenario_cidrs(monkeypatch) -> None:
+    runner = _load_runner()
+
+    def call_api(_product: str, action: str, _params: dict[str, object]) -> dict[str, object]:
+        if action == "DescribeVpcs":
+            return {
+                "Vpcs": {
+                    "Vpc": [
+                        {
+                            "VpcId": "vpc-test",
+                            "CidrBlock": "192.168.0.0/16",
+                            "Status": "Available",
+                        }
+                    ]
+                }
+            }
+        return {
+            "VSwitches": {
+                "VSwitch": [
+                    {
+                        "VSwitchId": "vsw-existing",
+                        "CidrBlock": "192.168.10.0/24",
+                        "Status": "Available",
+                        "ZoneId": "cn-hangzhou-k",
+                    }
+                ]
+            }
+        }
+
+    monkeypatch.setattr(runner, "_call_aliyun_api", call_api)
+
+    target = runner._discover_cleanup_network_target(
+        excluded_cidrs={"192.168.255.0/24", "192.168.254.0/24"}
+    )
+
+    assert target.vswitch_cidr == "192.168.253.0/24"
+    assert target.rollback_vswitch_cidr == "192.168.252.0/24"
+
+
+def test_wait_for_cleanup_resource_status_drains_pty_while_polling(monkeypatch) -> None:
+    runner = _load_runner()
+
+    class FakePty:
+        def __init__(self) -> None:
+            self.drain_calls = 0
+
+        def drain_output(self) -> None:
+            self.drain_calls += 1
+
+    pty = FakePty()
+
+    def cleanup_resource(_pty, _stack_id: str) -> dict[str, str]:
+        return {"cleanup_status": "completed" if pty.drain_calls >= 2 else "in_progress"}
+
+    monkeypatch.setattr(runner, "_cleanup_resource_for_stack", cleanup_resource)
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+
+    runner._wait_for_cleanup_resource_status(pty, "stack-test", {"completed"}, timeout=1)
+
+    assert pty.drain_calls == 2
+
+
 def test_call_aliyun_api_uses_runtime_services_and_unwraps_body(monkeypatch, tmp_path: Path) -> None:
     runner = _load_runner()
     from iac_code import config
@@ -2522,6 +2584,71 @@ def test_selection_invalid_then_valid_runs_expected_terminal_flow(monkeypatch, t
         ("expect", "pipeline completed"),
         ("sendline", "/exit"),
     ]
+
+
+def test_auto_cleanup_network_target_is_rediscovered_for_each_scenario(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args([])
+    targets = [
+        runner.CleanupNetworkTarget(
+            vpc_id="vpc-first",
+            vpc_cidr="172.16.0.0/12",
+            zone_id="cn-hangzhou-h",
+            vswitch_cidr="172.31.255.0/24",
+            rollback_vswitch_cidr="172.31.254.0/24",
+        ),
+        runner.CleanupNetworkTarget(
+            vpc_id="vpc-second",
+            vpc_cidr="10.0.0.0/8",
+            zone_id="cn-hangzhou-k",
+            vswitch_cidr="10.255.255.0/24",
+            rollback_vswitch_cidr="10.255.254.0/24",
+        ),
+    ]
+    discoveries: list[runner.CleanupNetworkTarget] = []
+    exclusions: list[set[str]] = []
+
+    def discover(*, excluded_cidrs=()) -> runner.CleanupNetworkTarget:
+        exclusions.append(set(excluded_cidrs))
+        target = targets[len(discoveries)]
+        discoveries.append(target)
+        return target
+
+    monkeypatch.setattr(runner, "_discover_cleanup_network_target", discover)
+
+    assert runner._ensure_cleanup_network_target(args, tmp_path / "first") == targets[0]
+    assert runner._ensure_cleanup_network_target(args, tmp_path / "second") == targets[1]
+    assert discoveries == targets
+    assert exclusions == [set(), {"172.31.255.0/24", "172.31.254.0/24"}]
+
+
+def test_explicit_cleanup_network_target_is_reused(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(
+        [
+            "--cleanup-vpc-id",
+            "vpc-explicit",
+            "--cleanup-vpc-cidr",
+            "172.16.0.0/12",
+            "--cleanup-zone-id",
+            "cn-hangzhou-h",
+            "--cleanup-vswitch-cidr",
+            "172.31.255.0/24",
+            "--cleanup-rollback-vswitch-cidr",
+            "172.31.254.0/24",
+        ]
+    )
+    monkeypatch.setattr(
+        runner,
+        "_discover_cleanup_network_target",
+        lambda **_: (_ for _ in ()).throw(AssertionError("explicit target must not be rediscovered")),
+    )
+
+    first = runner._ensure_cleanup_network_target(args, tmp_path / "first")
+    second = runner._ensure_cleanup_network_target(args, tmp_path / "second")
+
+    assert first == second
+    assert first.vpc_id == "vpc-explicit"
 
 
 def test_rollback_step5_cleanup_runs_expected_terminal_flow(monkeypatch, tmp_path: Path) -> None:
