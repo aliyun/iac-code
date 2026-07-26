@@ -51,6 +51,7 @@ from iac_code.tools.cloud.aliyun.api_contract import (
 )
 from iac_code.tools.cloud.aliyun.endpoint_resolver import EndpointResolution
 from iac_code.tools.cloud.aliyun.openmeta import MetadataFetch, ProductMetadata, normalize_api_metadata
+from iac_code.tools.cloud.aliyun.result_contract import serialize_business_result
 from iac_code.tools.cloud.aliyun.retry_policy import RetryBudget, RetryExhausted, RetryReason, TransportFailure
 from iac_code.tools.cloud.aliyun.runtime import create_aliyun_runtime_services
 
@@ -2795,6 +2796,37 @@ async def test_tea_adapter_enforces_success_body_limit() -> None:
             context=ToolContext(),
             budget=budget(),
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw_body", [b"raw-binary", bytearray(b"raw-binary")])
+async def test_tea_adapter_binary_body_projects_to_stable_base64_json(raw_body: bytes | bytearray) -> None:
+    class FakeTeaClient:
+        async def call_api_streaming_async(
+            self, params: Any, request: Any, runtime: Any, **_kwargs: Any
+        ) -> dict[str, Any]:
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/octet-stream"},
+                "body": raw_body,
+                "_iac_response_body_size": len(raw_body),
+            }
+
+    binary_contract = replace(contract(response_body_type="binary"), transport="tea")
+    binary_request = built_request(mode="binary")
+    response = await TeaTransportAdapter(client_factory=lambda _endpoint, _credential: FakeTeaClient()).execute(
+        contract=binary_contract,
+        request=binary_request,
+        endpoint=endpoint(),
+        credential=credential(),
+        context=ToolContext(),
+        budget=budget(),
+    )
+
+    content, body_format = serialize_business_result(response, binary_request, binary_contract)
+
+    assert content == '{\n  "data": "cmF3LWJpbmFyeQ==",\n  "encoding": "base64"\n}'
+    assert body_format == "binary_base64_json"
 
 
 @pytest.mark.asyncio

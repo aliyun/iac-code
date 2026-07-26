@@ -10,6 +10,7 @@ from iac_code.a2a.pipeline_events import PIPELINE_EVENTS_EXTENSION_URI, Pipeline
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.step_spec import A2AArtifactSpec
 from iac_code.services.permissions.audit import fingerprint_text
+from iac_code.tools.cloud.aliyun.result_contract import ALIYUN_HTTP_METADATA_KEY
 from iac_code.tools.result_storage import ResultStorage
 from iac_code.types.stream_events import (
     CandidateDetailEvent,
@@ -72,6 +73,27 @@ def _has_truncated_object(value: object) -> bool:
             return True
         return any(_has_truncated_object(child) for child in value.values())
     return False
+
+
+def _aliyun_threshold_pair(limit: int, diagnostics: str = "") -> tuple[str, str]:
+    marker = "BUSINESS_TAIL_MARKER"
+    empty_body = json.dumps({"payload": "", "tail": marker}, ensure_ascii=False, indent=2)
+    payload_size = limit - len(empty_body) - len(diagnostics)
+    payload = {"payload": "X" * payload_size, "tail": marker}
+    body = json.dumps(payload, ensure_ascii=False, indent=2)
+    envelope = json.dumps(
+        {
+            "status": 200,
+            "headers": {"requestid": "req-1"},
+            "body": payload,
+            "content_type": "application/json",
+            "content_encoding": None,
+            "size": len(body),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    return body + diagnostics, envelope + diagnostics
 
 
 def test_pipeline_started_has_stable_envelope() -> None:
@@ -270,6 +292,60 @@ def test_tool_result_redacts_embedded_infraguard_file_content() -> None:
     assert "ROSTemplateFormatVersion" not in rendered
     assert "file_content" in rendered
     assert "sha256-value" in rendered
+
+
+def test_aliyun_tool_result_translation_exposes_business_content_but_not_internal_http_metadata() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    [envelope] = translator.translate(
+        ToolResultEvent(
+            tool_use_id="toolu-aliyun",
+            tool_name="aliyun_api",
+            result='{"Business":"value"}',
+            metadata={ALIYUN_HTTP_METADATA_KEY: {"contract_version": "aliyun_body_v1", "header_count": 1}},
+        )
+    )
+
+    assert envelope["eventType"] == "tool_result"
+    assert envelope["data"]["result"] == '{"Business":"value"}'
+    rendered = json.dumps(envelope, ensure_ascii=False)
+    assert ALIYUN_HTTP_METADATA_KEY not in rendered
+    assert "aliyun_body_v1" not in rendered
+
+
+@pytest.mark.parametrize("diagnostics", ["", "\nDelegated diagnostics: preflight passed"])
+def test_pipeline_result_storage_precedes_public_4000_projection_for_aliyun_results(tmp_path, diagnostics) -> None:
+    new_content, old_content = _aliyun_threshold_pair(50_000, diagnostics)
+    storage = ResultStorage(
+        storage_dir=str(tmp_path / "tool-results"),
+        max_inline_chars=50_000,
+        preview_chars=2_000,
+    )
+    new_result = storage.process("new", new_content)
+    old_result = storage.process("old", old_content)
+    translator = PipelineEventTranslator(_ctx())
+
+    [new_envelope] = translator.translate(
+        ToolResultEvent(
+            tool_use_id="new",
+            tool_name="aliyun_api" if not diagnostics else "ros_validate_template",
+            result=new_result.content,
+        )
+    )
+    [old_envelope] = translator.translate(
+        ToolResultEvent(
+            tool_use_id="old",
+            tool_name="aliyun_api" if not diagnostics else "ros_validate_template",
+            result=old_result.content,
+        )
+    )
+
+    assert new_result.is_externalized is False
+    assert len(new_envelope["data"]["result"]) == 4_000
+    assert old_result.is_externalized is True
+    assert old_result.file_path not in old_envelope["data"]["result"]
+    assert "saved to [PATH]" in old_envelope["data"]["result"]
+    assert len(old_envelope["data"]["result"]) < 4_000
 
 
 def test_tool_result_redacts_externalized_infraguard_file_content_preview(tmp_path) -> None:

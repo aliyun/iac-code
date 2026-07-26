@@ -863,7 +863,19 @@ async def test_runtime_real_oss_adapter_binds_bucket_exactly_once(
     request = session.requests[0]
     assert urlsplit(request["url"]).hostname == "demo-bucket.oss-cn-hangzhou.aliyuncs.com"
     assert request["headers"]["Host"] == "demo-bucket.oss-cn-hangzhou.aliyuncs.com"
-    assert json.loads(result.content)["headers"]["x-runtime-declared"] == "visible"
+    content = json.loads(result.content)
+    aliyun_http = result.metadata["aliyun_http"]
+    if action == "GetObject":
+        assert content == {"data": "b2JqZWN0", "encoding": "base64"}
+        assert aliyun_http["body_format"] == "binary_base64_json"
+        assert aliyun_http["response_mode"] == "binary"
+    else:
+        assert content["x-runtime-declared"] == "visible"
+        assert aliyun_http["body_format"] == "headers_only_json"
+        assert aliyun_http["response_mode"] == "headers_only"
+    assert aliyun_http["headers_nonempty"] is True
+    assert aliyun_http["header_count"] == 5
+    assert "x-runtime-declared" not in aliyun_http
 
 
 @pytest.mark.asyncio

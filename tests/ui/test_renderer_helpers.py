@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from rich.console import Console
 
+from iac_code.agent.agent_loop import AgentLoop
 from iac_code.agent.message import (
     ImageBlock,
     Message,
@@ -89,6 +90,15 @@ class DemoTool(Tool):
 
     def user_facing_name(self, input: dict | None = None) -> str:
         return "Demo"
+
+
+class AliyunInstanceRendererTool(DemoTool):
+    @property
+    def name(self) -> str:
+        return "aliyun_api"
+
+    def render_tool_result_message(self, output: str, *, is_error: bool = False, verbose: bool = False) -> str | None:
+        return "mutable instance renderer"
 
 
 def make_renderer() -> Renderer:
@@ -350,6 +360,146 @@ class TestRendererHelpers:
         assert "complete_step validation failed." in output
         assert "'conclusion' is a required property" not in output
         assert "schema summary" not in output
+
+    def test_marked_aliyun_result_prefers_atomic_metadata_over_registered_instance_live_and_replay(self):
+        registry = ToolRegistry()
+        registry.register(AliyunInstanceRendererTool())
+        renderer = Renderer(make_console(), registry, status_callback=lambda: "ready")
+        metadata = {
+            "aliyun_http": {
+                "contract_version": "aliyun_body_v1",
+                "status": 200,
+                "status_class": "2xx",
+                "response_mode": "json",
+                "body_format": "json",
+                "content_state": "inline_final",
+            },
+            TOOL_RENDER_METADATA_KEY: {
+                TOOL_RENDER_RESULT_COMPACT_KEY: "atomic compact summary",
+                TOOL_RENDER_RESULT_VERBOSE_KEY: "atomic verbose summary",
+            },
+        }
+        record = _ToolCallRecord(
+            tool_name="aliyun_api",
+            tool_input={"action": "DescribeInstances"},
+            done=True,
+            result='{"RequestId":"req-1"}',
+            metadata=metadata,
+        )
+
+        compact = renderer._render_tool_result(record)
+        assert compact is not None
+        assert "atomic compact summary" in compact.plain
+        assert "mutable instance renderer" not in compact.plain
+
+        renderer._verbose = True
+        verbose = renderer._render_tool_result(record)
+        assert verbose is not None
+        assert "atomic verbose summary" in verbose.plain
+        assert "mutable instance renderer" not in verbose.plain
+
+        renderer._verbose = False
+        renderer.replay_history(
+            [
+                Message(
+                    role="assistant",
+                    content=[
+                        ToolUseBlock(
+                            id="tool-aliyun",
+                            name="aliyun_api",
+                            input={"action": "DescribeInstances"},
+                        )
+                    ],
+                ),
+                Message(
+                    role="user",
+                    content=[
+                        ToolResultBlock(
+                            tool_use_id="tool-aliyun",
+                            content='{"RequestId":"req-1"}',
+                            metadata=metadata,
+                        )
+                    ],
+                ),
+            ]
+        )
+        output = renderer.console.file.getvalue()
+        assert "atomic compact summary" in output
+        assert "mutable instance renderer" not in output
+
+    @pytest.mark.asyncio
+    async def test_concurrent_marked_aliyun_results_keep_atomic_render_metadata_isolated(self):
+        registry = ToolRegistry()
+        registry.register(AliyunInstanceRendererTool())
+        renderer = Renderer(make_console(), registry, status_callback=lambda: "ready")
+
+        def marked_metadata(request_id: str) -> dict:
+            return {
+                "aliyun_http": {
+                    "contract_version": "aliyun_body_v1",
+                    "product": "Ecs",
+                    "version": "2014-05-26",
+                    "action": "DescribeInstances",
+                    "status": 200,
+                    "status_class": "2xx",
+                    "response_mode": "json",
+                    "body_format": "json",
+                    "content_state": "inline_final",
+                },
+                "request_id": request_id,
+            }
+
+        async def build_record(request_id: str) -> _ToolCallRecord:
+            output = json.dumps({"RequestId": request_id})
+            metadata = await asyncio.to_thread(
+                AgentLoop._tool_result_render_metadata,
+                marked_metadata(request_id),
+                registry.get("aliyun_api"),
+                output,
+                is_error=False,
+                tool_name="aliyun_api",
+                tool_input={"action": "DescribeInstances"},
+            )
+            return _ToolCallRecord(
+                tool_name="aliyun_api",
+                tool_input={"action": "DescribeInstances"},
+                done=True,
+                result=output,
+                metadata=metadata,
+            )
+
+        record_a, record_b = await asyncio.gather(build_record("req-a"), build_record("req-b"))
+        rendered_a, rendered_b = await asyncio.gather(
+            asyncio.to_thread(renderer._render_tool_result, record_a),
+            asyncio.to_thread(renderer._render_tool_result, record_b),
+        )
+
+        assert rendered_a is not None
+        assert rendered_b is not None
+        assert "req-a" in rendered_a.plain
+        assert "req-b" not in rendered_a.plain
+        assert "req-b" in rendered_b.plain
+        assert "req-a" not in rendered_b.plain
+        assert "mutable instance renderer" not in rendered_a.plain
+        assert "mutable instance renderer" not in rendered_b.plain
+
+    def test_unmarked_aliyun_result_keeps_registered_instance_renderer_priority(self):
+        registry = ToolRegistry()
+        registry.register(AliyunInstanceRendererTool())
+        renderer = Renderer(make_console(), registry, status_callback=lambda: "ready")
+        record = _ToolCallRecord(
+            tool_name="aliyun_api",
+            tool_input={},
+            done=True,
+            result='{"status":200,"body":{"RequestId":"old"}}',
+            metadata={TOOL_RENDER_METADATA_KEY: {TOOL_RENDER_RESULT_COMPACT_KEY: "metadata fallback"}},
+        )
+
+        rendered = renderer._render_tool_result(record)
+
+        assert rendered is not None
+        assert "mutable instance renderer" in rendered.plain
+        assert "metadata fallback" not in rendered.plain
 
     def test_replay_history_summarizes_legacy_complete_step_error_without_metadata(self):
         renderer = Renderer(make_console(), ToolRegistry(), status_callback=lambda: "ready")

@@ -14,13 +14,24 @@ from typing import Any
 from anthropic import APIConnectionError as AnthropicAPIConnectionError
 from loguru import logger
 from openai import APIConnectionError as OpenAIAPIConnectionError
+from opentelemetry.trace import Status, StatusCode
 
 from iac_code.i18n import _
 from iac_code.providers.base import Message, NonStreamingResponse, Provider, ToolDefinition
 from iac_code.providers.request_policy import ProviderRequestPolicy, bool_or_none
 from iac_code.providers.retry import RetryableError, RetryConfig, with_retry
 from iac_code.providers.stream_watchdog import StreamWatchdog
-from iac_code.services.telemetry import add_metric, get_session_id, log_event, start_span
+from iac_code.services.telemetry import (
+    add_metric,
+    attach_context,
+    detach_context,
+    get_current_context,
+    get_session_id,
+    log_event,
+    start_detached_span,
+    start_span,
+    use_span,
+)
 from iac_code.services.telemetry.config import should_capture_content_on_span
 from iac_code.services.telemetry.content_serializer import (
     serialize_input_messages,
@@ -38,7 +49,7 @@ from iac_code.services.telemetry.names import (
     Spans,
 )
 from iac_code.services.telemetry.sanitize import sanitize_error_message, sanitize_model_name
-from iac_code.services.telemetry.scope import get_span_attributes
+from iac_code.services.telemetry.scope import get_span_attributes, replace_span_attributes
 from iac_code.types.stream_events import (
     ErrorEvent,
     MessageEndEvent,
@@ -94,6 +105,12 @@ _TOKEN_METRIC_SCOPE_KEYS = frozenset(
 class _BestEffortSpan:
     def __init__(self, span: Any | None = None) -> None:
         self._span = span
+        self._exception_recorded = False
+        self._error_status_set = False
+
+    @property
+    def raw(self) -> Any | None:
+        return self._span
 
     def set_attribute(self, key: str, value: Any) -> None:
         if self._span is None:
@@ -102,6 +119,29 @@ class _BestEffortSpan:
             self._span.set_attribute(key, value)
         except Exception:
             logger.opt(exception=True).warning("Provider telemetry span attribute failed: key={}", key)
+
+    def record_exception_once(self, exc: BaseException) -> None:
+        if self._span is None or self._exception_recorded:
+            return
+        self._exception_recorded = True
+        try:
+            self._span.record_exception(exc)
+        except Exception:
+            logger.opt(exception=True).warning("Provider telemetry span exception recording failed")
+
+    def set_error_status_once(self, description: str) -> None:
+        if self._span is None or self._error_status_set:
+            return
+        self._error_status_set = True
+        try:
+            self._span.set_status(Status(StatusCode.ERROR, description=description))
+        except Exception:
+            logger.opt(exception=True).warning("Provider telemetry span status update failed")
+
+    def end(self) -> None:
+        if self._span is None:
+            return
+        self._span.end()
 
 
 def _safe_log_event(event_name: str, attrs: dict[str, Any]) -> None:
@@ -144,6 +184,76 @@ def _safe_start_span(name: str, attrs: dict[str, Any]) -> Iterator[_BestEffortSp
             logger.opt(exception=True).warning("Provider telemetry span failed to close: span={}", name)
 
 
+def _safe_start_detached_span(name: str, attrs: dict[str, Any], parent_context: Any) -> _BestEffortSpan:
+    try:
+        return _BestEffortSpan(start_detached_span(name, attrs, parent_context=parent_context))
+    except Exception:
+        logger.opt(exception=True).warning("Provider detached telemetry span failed to start: span={}", name)
+        return _BestEffortSpan()
+
+
+@contextmanager
+def _safe_use_span(span: _BestEffortSpan) -> Iterator[None]:
+    raw_span = span.raw
+    if raw_span is None:
+        yield
+        return
+    try:
+        span_context = use_span(
+            raw_span,
+            record_exception=False,
+            set_status_on_exception=False,
+            end_on_exit=False,
+        )
+        span_context.__enter__()
+    except Exception:
+        logger.opt(exception=True).warning("Provider telemetry span activation failed")
+        yield
+        return
+    try:
+        yield
+    except BaseException:
+        exc_info = sys.exc_info()
+        try:
+            span_context.__exit__(*exc_info)
+        except Exception:
+            logger.opt(exception=True).warning("Provider telemetry span deactivation failed")
+        raise
+    else:
+        try:
+            span_context.__exit__(None, None, None)
+        except Exception:
+            logger.opt(exception=True).warning("Provider telemetry span deactivation failed")
+
+
+def _safe_current_context() -> Any:
+    try:
+        return get_current_context()
+    except Exception:
+        logger.opt(exception=True).warning("Provider telemetry context capture failed")
+        return None
+
+
+@contextmanager
+def _safe_attach_parent_context(parent_context: Any) -> Iterator[None]:
+    if parent_context is None:
+        yield
+        return
+    try:
+        token = attach_context(parent_context)
+    except Exception:
+        logger.opt(exception=True).warning("Provider telemetry parent context attach failed")
+        yield
+        return
+    try:
+        yield
+    finally:
+        try:
+            detach_context(token)
+        except Exception:
+            logger.opt(exception=True).warning("Provider telemetry parent context detach failed")
+
+
 def _safe_session_id() -> str:
     try:
         return get_session_id()
@@ -165,11 +275,12 @@ def _capture_request_content(
     messages: list[Message],
     system: str,
     tools: list[ToolDefinition] | None,
+    telemetry_messages: list[Any] | None = None,
 ) -> None:
     try:
         if not should_capture_content_on_span():
             return
-        attrs[GenAiAttr.INPUT_MESSAGES] = serialize_input_messages(messages)
+        attrs[GenAiAttr.INPUT_MESSAGES] = serialize_input_messages(telemetry_messages or messages)
         attrs[GenAiAttr.SYSTEM_INSTRUCTIONS] = serialize_system_instructions(system)
         if tools:
             attrs[GenAiAttr.TOOL_DEFINITIONS] = serialize_tool_definitions(tools)
@@ -670,8 +781,36 @@ class ProviderManager:
         model_ids = {entry.id for entry in descriptor.models}
         return fallback if model in model_ids and fallback in model_ids else None
 
-    async def stream(
-        self, messages: list[Message], system: str, tools: list[ToolDefinition] | None = None, max_tokens: int = 8192
+    def stream(
+        self,
+        messages: list[Message],
+        system: str,
+        tools: list[ToolDefinition] | None = None,
+        max_tokens: int = 8192,
+        telemetry_messages: list[Any] | None = None,
+    ) -> AsyncGenerator[StreamEvent, None]:
+        captured_scope = _safe_span_scope_attributes()
+        captured_parent = _safe_current_context()
+        return self._stream_impl(
+            messages,
+            system,
+            tools,
+            max_tokens,
+            telemetry_messages=telemetry_messages,
+            captured_scope=captured_scope,
+            captured_parent=captured_parent,
+        )
+
+    async def _stream_impl(
+        self,
+        messages: list[Message],
+        system: str,
+        tools: list[ToolDefinition] | None,
+        max_tokens: int,
+        *,
+        telemetry_messages: list[Any] | None,
+        captured_scope: dict[str, str | int],
+        captured_parent: Any,
     ) -> AsyncGenerator[StreamEvent, None]:
         try:
             self._check_qwenpaw_config_change()
@@ -682,14 +821,6 @@ class ProviderManager:
         provider_name = type(provider).__name__.replace("Provider", "").lower()
         sanitized_model = sanitize_model_name(model)
 
-        _safe_log_event(
-            Events.API_REQUEST_STARTED,
-            {
-                "provider": provider_name,
-                "model": sanitized_model,
-                "message_count": len(messages),
-            },
-        )
         started = time.monotonic()
 
         span_name = f"{Spans.LLM_CHAT} {model}"
@@ -704,8 +835,8 @@ class ProviderManager:
             GenAiAttr.CONVERSATION_ID: session_id,
             GenAiAttr.OUTPUT_TYPE: "text",
         }
-        span_attrs.update(_safe_span_scope_attributes())
-        _capture_request_content(span_attrs, messages, system, tools)
+        span_attrs.update(captured_scope)
+        _capture_request_content(span_attrs, messages, system, tools, telemetry_messages)
 
         orphaned_message_ids: list[str] = []
         orphaned_tool_use_ids: dict[str, list[str]] = {}
@@ -716,97 +847,256 @@ class ProviderManager:
         refusal_detected = False
         first_token_received = False
         watchdog: StreamWatchdog | None = None
-        with _safe_start_span(span_name, span_attrs) as span:
+        stream_iter: AsyncGenerator[StreamEvent, None] | None = None
+        terminal_status: str | None = None
+        close_attempted = False
+        close_completed = False
+        end_attempted = False
+
+        with replace_span_attributes(captured_scope):
+            span = _safe_start_detached_span(span_name, span_attrs, captured_parent)
+
+        @contextmanager
+        def activate_span() -> Iterator[None]:
+            with replace_span_attributes(captured_scope), _safe_use_span(span):
+                yield
+
+        def end_span_once() -> None:
+            nonlocal end_attempted
+            if end_attempted:
+                return
+            end_attempted = True
             try:
-                watchdog = StreamWatchdog(idle_timeout=self._stream_idle_timeout)
-                watchdog.start()
-                stream_iter = provider.stream(messages, system, tools, max_tokens).__aiter__()
-                while True:
-                    try:
-                        event = await asyncio.wait_for(stream_iter.__anext__(), timeout=self._stream_idle_timeout)
-                    except StopAsyncIteration:
-                        break
-                    watchdog.ping()
-                    if isinstance(event, MessageStartEvent):
-                        orphaned_message_ids.append(event.message_id)
-                        current_message_id = event.message_id
-                        orphaned_tool_use_ids.setdefault(event.message_id, [])
-                        span.set_attribute(GenAiAttr.RESPONSE_ID, event.message_id)
-                    elif isinstance(event, (ToolUseStartEvent, ToolUseEndEvent)) and current_message_id is not None:
-                        tool_ids = orphaned_tool_use_ids.setdefault(current_message_id, [])
-                        if event.tool_use_id not in tool_ids:
-                            tool_ids.append(event.tool_use_id)
-                    elif (
-                        isinstance(event, (TextDeltaEvent, ThinkingDeltaEvent))
-                        and event.text
-                        and not first_token_received
-                    ):
-                        first_token_received = True
-                        ttft_ns = int((time.monotonic() - started) * 1_000_000_000)
-                        span.set_attribute(GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN, ttft_ns)
-                        _safe_log_event(
-                            Events.API_RESPONSE_FIRST_TOKEN,
-                            {
-                                "provider": provider_name,
-                                "model": sanitized_model,
-                                GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN: ttft_ns,
-                                "first_token_source": event.type,
-                                **_safe_span_scope_attributes(),
-                            },
-                        )
-                    if isinstance(event, MessageEndEvent):
-                        watchdog.stop()
-                        if event.stop_reason == "refusal":
-                            self._set_llm_response_span_attrs(span, event, model)
-                            self._emit_success_telemetry(
-                                provider_name,
-                                sanitized_model,
-                                started,
-                                event.usage,
-                                status="refusal",
-                            )
-                            refusal_detected = True
-                            streaming_failed = True
-                            logger.warning("Streaming response was refused, falling back to an approved model")
-                            break
-                        if buffer_until_accepted:
-                            for buffered_event in buffered_events:
-                                yield buffered_event
-                        yield event
-                        self._set_llm_response_span_attrs(span, event, model)
-                        self._emit_success_telemetry(provider_name, sanitized_model, started, event.usage)
-                        return
-                    if buffer_until_accepted:
-                        buffered_events.append(event)
-                    else:
-                        yield event
-                watchdog.stop()
-                if not refusal_detected:
-                    streaming_failed = True
-                    self._emit_failure_telemetry(
-                        provider_name,
-                        sanitized_model,
-                        started,
-                        RuntimeError("Streaming response ended before message completion"),
+                with replace_span_attributes(captured_scope):
+                    span.end()
+            except Exception:
+                logger.opt(exception=True).warning("Provider detached telemetry span failed to end: span={}", span_name)
+
+        def has_propagating_primary(primary: BaseException | None) -> bool:
+            return isinstance(primary, (asyncio.CancelledError, GeneratorExit)) or (
+                primary is not None and not isinstance(primary, Exception)
+            )
+
+        async def close_stream_iter_once(primary: BaseException | None = None) -> None:
+            nonlocal close_attempted, close_completed
+            if stream_iter is None or close_attempted:
+                return
+            close_attempted = True
+            try:
+                with activate_span():
+                    await stream_iter.aclose()
+            except asyncio.CancelledError:
+                task = asyncio.current_task()
+                cancelling = getattr(task, "cancelling", None)
+                if callable(cancelling) and cancelling() > 0:
+                    raise
+                if has_propagating_primary(primary):
+                    logger.opt(exception=True).warning(
+                        "Provider stream close cancellation suppressed behind primary outcome"
                     )
-            except asyncio.CancelledError as exc:
-                if watchdog is not None:
-                    watchdog.stop()
+                    return
+                raise
+            except Exception:
+                logger.opt(exception=True).warning("Provider stream close failed")
+            except BaseException:
+                if has_propagating_primary(primary):
+                    logger.opt(exception=True).warning(
+                        "Provider stream fatal close failure suppressed behind primary outcome"
+                    )
+                    return
+                raise
+            else:
+                close_completed = True
+
+        def commit_success(event: MessageEndEvent, *, status: str = "ok") -> bool:
+            nonlocal terminal_status
+            if terminal_status is not None:
+                return False
+            terminal_status = status
+            with activate_span():
+                self._set_llm_response_span_attrs(span, event, model)
+                self._emit_success_telemetry(
+                    provider_name,
+                    sanitized_model,
+                    started,
+                    event.usage,
+                    status=status,
+                )
+            return True
+
+        def commit_failure(
+            exc: BaseException,
+            *,
+            status: str,
+            mark_span_error: bool,
+            record_exception: bool,
+            error_description: str | None = None,
+        ) -> bool:
+            nonlocal terminal_status
+            if terminal_status is not None:
+                return False
+            terminal_status = status
+            with activate_span():
+                description = error_description or public_exception_summary(exc, max_chars=1000)
+                if record_exception:
+                    span.record_exception_once(exc)
+                if mark_span_error:
+                    span.set_error_status_once(description)
                 self._emit_failure_telemetry(
                     provider_name,
                     sanitized_model,
                     started,
                     exc,
-                    status="cancelled",
+                    status=status,
                     record_duration=True,
+                    scope_attrs=captured_scope,
                 )
-                raise
-            except Exception as e:
-                if watchdog is not None:
+            return True
+
+        try:
+            with activate_span():
+                _safe_log_event(
+                    Events.API_REQUEST_STARTED,
+                    {
+                        "provider": provider_name,
+                        "model": sanitized_model,
+                        "message_count": len(messages),
+                    },
+                )
+            watchdog = StreamWatchdog(idle_timeout=self._stream_idle_timeout)
+            watchdog.start()
+            stream_iter = provider.stream(messages, system, tools, max_tokens)
+            while True:
+                try:
+                    with activate_span():
+                        event = await asyncio.wait_for(stream_iter.__anext__(), timeout=self._stream_idle_timeout)
+                        watchdog.ping()
+                        if isinstance(event, MessageStartEvent):
+                            orphaned_message_ids.append(event.message_id)
+                            current_message_id = event.message_id
+                            orphaned_tool_use_ids.setdefault(event.message_id, [])
+                            span.set_attribute(GenAiAttr.RESPONSE_ID, event.message_id)
+                        elif isinstance(event, (ToolUseStartEvent, ToolUseEndEvent)) and current_message_id is not None:
+                            tool_ids = orphaned_tool_use_ids.setdefault(current_message_id, [])
+                            if event.tool_use_id not in tool_ids:
+                                tool_ids.append(event.tool_use_id)
+                        elif (
+                            isinstance(event, (TextDeltaEvent, ThinkingDeltaEvent))
+                            and event.text
+                            and not first_token_received
+                        ):
+                            first_token_received = True
+                            ttft_ns = int((time.monotonic() - started) * 1_000_000_000)
+                            span.set_attribute(GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN, ttft_ns)
+                            _safe_log_event(
+                                Events.API_RESPONSE_FIRST_TOKEN,
+                                {
+                                    "provider": provider_name,
+                                    "model": sanitized_model,
+                                    GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN: ttft_ns,
+                                    "first_token_source": event.type,
+                                    **captured_scope,
+                                },
+                            )
+                except StopAsyncIteration:
+                    break
+
+                if isinstance(event, MessageEndEvent):
                     watchdog.stop()
+                    if event.stop_reason == "refusal":
+                        commit_success(event, status="refusal")
+                        refusal_detected = True
+                        streaming_failed = True
+                        try:
+                            await close_stream_iter_once()
+                        finally:
+                            end_span_once()
+                        logger.warning("Streaming response was refused, falling back to an approved model")
+                        break
+                    commit_success(event)
+                    try:
+                        await close_stream_iter_once()
+                    finally:
+                        end_span_once()
+                    if buffer_until_accepted:
+                        for buffered_event in buffered_events:
+                            yield buffered_event
+                    yield event
+                    return
+                if buffer_until_accepted:
+                    buffered_events.append(event)
+                else:
+                    yield event
+
+            if not refusal_detected:
+                failure_message = "Streaming response ended before message completion"
                 streaming_failed = True
-                self._emit_failure_telemetry(provider_name, sanitized_model, started, e)
-                logger.warning(f"Streaming failed, falling back to non-streaming: {e}")
+                commit_failure(
+                    RuntimeError(failure_message),
+                    status="error",
+                    mark_span_error=True,
+                    record_exception=False,
+                    error_description=failure_message,
+                )
+                try:
+                    await close_stream_iter_once()
+                finally:
+                    end_span_once()
+        except asyncio.CancelledError as exc:
+            commit_failure(
+                exc,
+                status="cancelled",
+                mark_span_error=False,
+                record_exception=False,
+            )
+            try:
+                await close_stream_iter_once(exc)
+            finally:
+                end_span_once()
+            raise
+        except GeneratorExit as exc:
+            commit_failure(
+                exc,
+                status="cancelled",
+                mark_span_error=False,
+                record_exception=False,
+            )
+            try:
+                await close_stream_iter_once(exc)
+            finally:
+                end_span_once()
+            raise
+        except Exception as exc:
+            already_terminal = terminal_status is not None
+            commit_failure(
+                exc,
+                status="error",
+                mark_span_error=True,
+                record_exception=True,
+            )
+            try:
+                await close_stream_iter_once()
+            finally:
+                end_span_once()
+            if already_terminal:
+                raise
+            streaming_failed = True
+            logger.warning(f"Streaming failed, falling back to non-streaming: {exc}")
+        except BaseException as exc:
+            commit_failure(
+                exc,
+                status="error",
+                mark_span_error=True,
+                record_exception=True,
+            )
+            try:
+                await close_stream_iter_once(exc)
+            finally:
+                end_span_once()
+            raise
+        finally:
+            if watchdog is not None:
+                watchdog.stop()
 
         if streaming_failed:
             if not buffer_until_accepted:
@@ -816,13 +1106,15 @@ class ProviderManager:
                         affected_tool_use_ids=orphaned_tool_use_ids.get(msg_id, []),
                     )
             try:
-                completion = await self._complete_with_retry_result(
-                    messages,
-                    system,
-                    tools,
-                    max_tokens,
-                    refusal_detected=refusal_detected,
-                )
+                with replace_span_attributes(captured_scope), _safe_attach_parent_context(captured_parent):
+                    completion = await self._complete_with_retry_result(
+                        messages,
+                        system,
+                        tools,
+                        max_tokens,
+                        telemetry_messages=telemetry_messages,
+                        refusal_detected=refusal_detected,
+                    )
             except Exception as e:
                 yield _error_event_from_exception(e)
                 return
@@ -961,6 +1253,7 @@ class ProviderManager:
         *,
         status: str = "error",
         record_duration: bool = False,
+        scope_attrs: dict[str, str | int] | None = None,
     ) -> None:
         duration_ms = int((time.monotonic() - started) * 1000)
         summary = public_exception_summary(exc, max_chars=1000)
@@ -972,9 +1265,9 @@ class ProviderManager:
             "duration_ms": duration_ms,
             "error_message": sanitize_error_message(failure.summary),
             "error_id": failure.error_id,
+            "status": status,
+            **(scope_attrs or {}),
         }
-        if status != "error":
-            event_attrs["status"] = status
         _safe_log_event(
             Events.API_REQUEST_FAILED,
             event_attrs,
@@ -995,6 +1288,7 @@ class ProviderManager:
         tools: list[ToolDefinition] | None = None,
         max_tokens: int = 8192,
         cache_policy: str = "default",
+        telemetry_messages: list[Any] | None = None,
     ) -> NonStreamingResponse:
         return await self._complete_with_retry(
             messages,
@@ -1002,6 +1296,7 @@ class ProviderManager:
             tools,
             max_tokens,
             cache_policy=cache_policy,
+            telemetry_messages=telemetry_messages,
         )
 
     async def _complete_with_retry(
@@ -1013,6 +1308,7 @@ class ProviderManager:
         provider_override: Provider | None = None,
         model_override: str | None = None,
         cache_policy: str = "default",
+        telemetry_messages: list[Any] | None = None,
     ) -> NonStreamingResponse:
         result = await self._complete_with_retry_result(
             messages,
@@ -1022,6 +1318,7 @@ class ProviderManager:
             provider_override=provider_override,
             model_override=model_override,
             cache_policy=cache_policy,
+            telemetry_messages=telemetry_messages,
         )
         return result.response
 
@@ -1037,6 +1334,7 @@ class ProviderManager:
         fallback_visited: frozenset[str] | None = None,
         refusal_detected: bool = False,
         allow_model_fallback: bool = True,
+        telemetry_messages: list[Any] | None = None,
     ) -> _CompletionResult:
         if provider_override is None and model_override is None:
             provider, model = self._active_provider_and_model()
@@ -1075,7 +1373,7 @@ class ProviderManager:
                 GenAiAttr.OUTPUT_TYPE: "text",
                 **_safe_span_scope_attributes(),
             }
-            _capture_request_content(span_attrs, messages, system, tools)
+            _capture_request_content(span_attrs, messages, system, tools, telemetry_messages)
 
             try:
                 with _safe_start_span(f"{Spans.LLM_CHAT} {model}", span_attrs) as span:
@@ -1104,6 +1402,17 @@ class ProviderManager:
                         raise
                     except Exception as exc:
                         self._emit_failure_telemetry(provider_name, sanitized_model, request_started, exc)
+                        raise
+                    except BaseException as exc:
+                        self._emit_failure_telemetry(
+                            provider_name,
+                            sanitized_model,
+                            request_started,
+                            exc,
+                            status="error",
+                            record_duration=True,
+                            scope_attrs=_safe_span_scope_attributes(),
+                        )
                         raise
 
                     span.set_attribute(GenAiAttr.RESPONSE_ID, response.message_id)
@@ -1195,6 +1504,7 @@ class ProviderManager:
                         cache_policy=cache_policy,
                         fallback_visited=frozenset(visited),
                         allow_model_fallback=not isinstance(original_exc, _ModelRefusalError),
+                        telemetry_messages=telemetry_messages,
                     )
                     if isinstance(original_exc, _ModelRefusalError):
                         self._pinned_provider = result.provider

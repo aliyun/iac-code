@@ -7,9 +7,21 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 
 from iac_code.agent.agent_loop import AgentLoop
+from iac_code.agent.message import (
+    ImageBlock,
+    RedactedThinkingBlock,
+    TextBlock,
+    ThinkingBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+)
+from iac_code.agent.message import (
+    Message as AgentMessage,
+)
 from iac_code.services.telemetry.names import GenAiAttr, IacCodeAttr, PipelineAttr, Spans
 from iac_code.services.telemetry.scope import get_span_attributes
 from iac_code.tools.base import ToolResult
+from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY
 from iac_code.tools.tool_executor import ToolExecutor
 from iac_code.types.permissions import PermissionResult
 from iac_code.types.stream_events import (
@@ -132,6 +144,68 @@ def test_tool_result_block_metadata_filters_render_metadata_to_json_safe_fields(
     json.dumps(metadata)
 
 
+def _marked_aliyun_http(**changes):
+    value = {
+        "contract_version": "aliyun_body_v1",
+        "product": "Ecs",
+        "version": "2014-05-26",
+        "action": "DescribeInstances",
+        "status": 200,
+        "status_class": "2xx",
+        "response_mode": "json",
+        "body_format": "json",
+        "headers_present": True,
+        "body_present": True,
+        "content_type_present": True,
+        "size_present": True,
+        "content_encoding_present": False,
+        "headers_nonempty": True,
+        "header_count": 1,
+    }
+    value.update(changes)
+    return value
+
+
+def test_tool_result_metadata_marks_content_state_and_persists_only_internal_allowlist(tmp_path):
+    processed = SimpleNamespace(is_externalized=True, file_path=tmp_path / "full-result.json")
+    event_metadata = AgentLoop._tool_result_event_metadata(
+        {
+            "aliyun_http": _marked_aliyun_http(unknown="drop-me"),
+            "ros_validation": {"valid": True},
+            "private_plugin_value": object(),
+        },
+        processed,
+    )
+
+    assert event_metadata is not None
+    assert event_metadata["aliyun_http"]["content_state"] == "externalized_preview"
+    assert "unknown" not in event_metadata["aliyun_http"]
+    assert event_metadata["ros_validation"] == {"valid": True}
+    assert event_metadata["private_plugin_value"] is not None
+
+    block_metadata = AgentLoop._tool_result_block_metadata(processed, event_metadata)
+
+    assert block_metadata["aliyun_http"]["content_state"] == "externalized_preview"
+    assert block_metadata[EXTERNALIZED_RESULT_PATH_METADATA_KEY] == str(processed.file_path)
+    assert "ros_validation" not in block_metadata
+    assert "private_plugin_value" not in block_metadata
+    json.dumps(block_metadata)
+
+
+def test_tool_result_metadata_marks_inline_content_without_externalized_path():
+    processed = SimpleNamespace(is_externalized=False, file_path=None)
+
+    event_metadata = AgentLoop._tool_result_event_metadata(
+        {"aliyun_http": _marked_aliyun_http()},
+        processed,
+    )
+    block_metadata = AgentLoop._tool_result_block_metadata(processed, event_metadata)
+
+    assert event_metadata == block_metadata
+    assert block_metadata["aliyun_http"]["content_state"] == "inline_final"
+    assert EXTERNALIZED_RESULT_PATH_METADATA_KEY not in block_metadata
+
+
 class TestAgentLoopInit:
     def test_init(self, mock_provider, mock_registry):
         loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
@@ -187,30 +261,27 @@ class TestAgentLoopInit:
     def test_get_provider_messages_converts_strings_and_blocks(self, mock_provider, mock_registry):
         loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
         loop.context_manager = MagicMock()
-        loop.context_manager.get_api_messages.return_value = [
-            {"role": "user", "content": "hello"},
-            {
-                "role": "assistant",
-                "content": [
-                    {"type": "text", "text": "hi"},
-                    {
-                        "type": "tool_use",
-                        "id": "toolu_1",
-                        "name": "read_file",
-                        "input": {"path": "a.txt"},
-                        "provider_metadata": {
+        loop.context_manager.get_context_messages.return_value = [
+            AgentMessage(role="user", content="hello"),
+            AgentMessage(
+                role="assistant",
+                content=[
+                    TextBlock(text="hi"),
+                    ToolUseBlock(
+                        id="toolu_1",
+                        name="read_file",
+                        input={"path": "a.txt"},
+                        provider_metadata={
                             "provider": "gemini",
                             "extra_content": {"google": {"thought_signature": "sig"}},
                         },
-                    },
-                    {
-                        "type": "redacted_thinking",
-                        "data": "opaque",
-                        "provider_metadata": {"provider": "anthropic", "data": "opaque"},
-                    },
-                    "ignored",
+                    ),
+                    RedactedThinkingBlock(
+                        data="opaque",
+                        provider_metadata={"provider": "anthropic", "data": "opaque"},
+                    ),
                 ],
-            },
+            ),
         ]
 
         messages = loop._get_provider_messages()
@@ -222,6 +293,122 @@ class TestAgentLoopInit:
         assert messages[1].content[1].provider_metadata["provider"] == "gemini"
         assert messages[1].content[2].type == "redacted_thinking"
         assert messages[1].content[2].data == "opaque"
+
+    def test_provider_message_pair_builder_preserves_wire_and_pairs_duplicate_ids_by_occurrence(
+        self, mock_provider, mock_registry
+    ):
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        aliyun_http = {
+            "contract_version": "aliyun_body_v1",
+            "product": "Ecs",
+            "version": "2014-05-26",
+            "action": "DescribeInstances",
+            "status": 200,
+            "status_class": "2xx",
+            "response_mode": "json",
+            "body_format": "json",
+            "headers_present": True,
+            "body_present": True,
+            "content_type_present": True,
+            "size_present": True,
+            "content_encoding_present": False,
+            "headers_nonempty": True,
+            "header_count": 1,
+            "content_state": "inline_final",
+            "unknown": "drop-me",
+        }
+        messages = [
+            AgentMessage(role="user", content="hello"),
+            AgentMessage(
+                role="assistant",
+                content=[
+                    ThinkingBlock(thinking="reasoning", provider_metadata={"signature": "sig"}),
+                    RedactedThinkingBlock(data="opaque", provider_metadata={"provider": "anthropic"}),
+                    TextBlock(text="first"),
+                    ImageBlock(media_type="image/png", data="base64-image"),
+                    ToolUseBlock(id="reused", name="aliyun_api", input={"action": "DescribeInstances"}),
+                ],
+            ),
+            AgentMessage(
+                role="user",
+                content=[
+                    ToolResultBlock(
+                        tool_use_id="reused",
+                        content='{"Instances":[]}',
+                        metadata={"aliyun_http": aliyun_http},
+                    )
+                ],
+            ),
+            AgentMessage(
+                role="assistant",
+                content=[ToolUseBlock(id="reused", name="bash", input={"command": "pwd"})],
+            ),
+            AgentMessage(
+                role="user",
+                content=[ToolResultBlock(tool_use_id="reused", content="/tmp/project")],
+            ),
+        ]
+        loop.context_manager = MagicMock()
+        loop.context_manager.get_context_messages.return_value = messages
+
+        expected_provider_messages = loop._get_provider_messages()
+        provider_messages, telemetry_messages = loop._get_provider_messages_with_telemetry()
+
+        assert provider_messages == expected_provider_messages
+        assert provider_messages[2].content[0].provider_metadata == {}
+        assert "aliyun_http" not in repr(provider_messages)
+        first_result = telemetry_messages[2].content[0]
+        second_result = telemetry_messages[4].content[0]
+        assert first_result.name == "aliyun_api"
+        assert first_result.metadata["aliyun_http"]["status"] == 200
+        assert "unknown" not in first_result.metadata["aliyun_http"]
+        assert second_result.name == "bash"
+        assert second_result.metadata == {}
+
+    @pytest.mark.asyncio
+    async def test_stream_provider_calls_sync_stream_factory_inside_full_business_scope(self, mock_registry):
+        captured = []
+
+        class ProviderManagerSpy:
+            def stream(self, messages, system, tools=None, telemetry_messages=None):
+                captured.append((get_span_attributes(), telemetry_messages))
+
+                async def events():
+                    yield TextDeltaEvent(text="ok")
+
+                return events()
+
+        sidecar = [SimpleNamespace(role="user", content="hello")]
+        loop = AgentLoop(
+            provider_manager=ProviderManagerSpy(),
+            system_prompt="test",
+            tool_registry=mock_registry,
+            pipeline_mode=True,
+            telemetry_attributes={PipelineAttr.NAME: "selling", PipelineAttr.STEP_ID: "validate"},
+        )
+
+        events = [
+            event
+            async for event in loop._stream_provider(
+                messages=[],
+                system="test",
+                tools=None,
+                telemetry_messages=sidecar,
+            )
+        ]
+
+        assert events == [TextDeltaEvent(text="ok")]
+        assert captured == [
+            (
+                {
+                    "iac_code.mode": "pipeline",
+                    PipelineAttr.NAME: "selling",
+                    PipelineAttr.STEP_ID: "validate",
+                },
+                sidecar,
+            )
+        ]
+        assert get_span_attributes() == {}
 
     def test_apply_context_modifier(self, mock_provider, mock_registry):
         loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
@@ -2565,6 +2752,10 @@ class TestAgentLoopCompaction:
         assert event.original_tokens == 1200
         assert event.compacted_tokens == 400
         assert event.summary == "summary"
+        call_kwargs = mock_provider.complete.await_args.kwargs
+        assert len(call_kwargs["messages"]) == 1
+        assert call_kwargs["messages"][0].content == "compact me"
+        assert "telemetry_messages" not in call_kwargs
 
     async def test_run_streaming_emits_started_then_finished_when_compacting(self, mock_provider, mock_registry):
         async def fake_stream(messages, system, tools=None, max_tokens=8192):
@@ -2705,6 +2896,10 @@ class TestAgentLoopCompaction:
 
         assert result.status == "success"
         assert (result.original_tokens, result.compacted_tokens) == (900, 300)
+        call_kwargs = mock_provider.complete.await_args.kwargs
+        assert len(call_kwargs["messages"]) == 1
+        assert call_kwargs["messages"][0].content == "compact me"
+        assert "telemetry_messages" not in call_kwargs
 
     async def test_compact_persists_compacted_session(self, mock_provider, mock_registry):
         from iac_code.agent.message import Message

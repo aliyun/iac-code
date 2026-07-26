@@ -1043,8 +1043,7 @@ async def _call_aliyun_api_async(product: str, action: str, params: dict[str, An
     payload = json.loads(result.content)
     if not isinstance(payload, dict):
         return {}
-    body = payload.get("body")
-    return body if isinstance(body, dict) else payload
+    return payload
 
 
 def _call_aliyun_api(product: str, action: str, params: dict[str, Any]) -> dict[str, Any]:

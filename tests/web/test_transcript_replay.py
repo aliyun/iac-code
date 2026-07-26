@@ -18,6 +18,27 @@ def _visible_pairs(messages: list[dict]) -> list[dict[str, str]]:
     return [{"role": message.get("role"), "content": message.get("content")} for message in messages]
 
 
+def _aliyun_threshold_pair(limit: int, diagnostics: str = "") -> tuple[str, str]:
+    marker = "BUSINESS_TAIL_MARKER"
+    empty_body = json.dumps({"payload": "", "tail": marker}, ensure_ascii=False, indent=2)
+    payload_size = limit - len(empty_body) - len(diagnostics)
+    payload = {"payload": "X" * payload_size, "tail": marker}
+    body = json.dumps(payload, ensure_ascii=False, indent=2)
+    envelope = json.dumps(
+        {
+            "status": 200,
+            "headers": {"requestid": "req-1"},
+            "body": payload,
+            "content_type": "application/json",
+            "content_encoding": None,
+            "size": len(body),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    return body + diagnostics, envelope + diagnostics
+
+
 def test_load_visible_messages_skips_last_prompt_meta_and_returns_user_message(tmp_path) -> None:
     from iac_code.web.session_manager import WebSessionManager
 
@@ -249,6 +270,125 @@ def test_visible_transcript_groups_tool_calls_thinking_and_markdown_text(tmp_pat
     assert transcript["tools"]["toolu_1"]["results"] == [
         {"content": "wrote template.yml", "isError": False, "toolUseId": "toolu_1"}
     ]
+
+
+def test_normal_web_reload_keeps_business_content_and_omits_internal_aliyun_metadata(tmp_path) -> None:
+    from iac_code.web.session_manager import WebSessionManager
+
+    cwd = str(tmp_path / "project")
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=cwd, session_id="session-aliyun")
+    manager.storage.append(
+        cwd,
+        session.session_id,
+        Message(
+            role="assistant",
+            content=[
+                ToolUseBlock(
+                    id="tool-aliyun",
+                    name="aliyun_api",
+                    input={"action": "DescribeInstances"},
+                )
+            ],
+        ),
+    )
+    manager.storage.append(
+        cwd,
+        session.session_id,
+        Message(
+            role="user",
+            content=[
+                ToolResultBlock(
+                    tool_use_id="tool-aliyun",
+                    content='{"Instances": []}',
+                    metadata={
+                        "aliyun_http": {
+                            "contract_version": "aliyun_body_v1",
+                            "status": 200,
+                            "content_state": "inline_final",
+                        },
+                        "_iac_code_tool_render": {"result_compact": "Call succeeded"},
+                    },
+                )
+            ],
+        ),
+    )
+
+    transcript = manager.load_visible_transcript(session.session_id, cwd=cwd)
+
+    assert transcript["tools"]["tool-aliyun"]["results"] == [
+        {"toolUseId": "tool-aliyun", "content": '{"Instances": []}', "isError": False}
+    ]
+    assert "aliyun_http" not in json.dumps(transcript)
+    assert "_iac_code_tool_render" not in json.dumps(transcript)
+
+
+@pytest.mark.parametrize("diagnostics", ["", "\nDelegated diagnostics: preflight passed"])
+def test_normal_web_reload_preserves_inline_or_externalized_visible_content(tmp_path, diagnostics) -> None:
+    from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY, ResultStorage
+    from iac_code.web.session_manager import WebSessionManager
+
+    cwd = str(tmp_path / "project")
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=cwd, session_id="session-threshold")
+    new_content, old_content = _aliyun_threshold_pair(50_000, diagnostics)
+    storage = ResultStorage(
+        storage_dir=str(tmp_path / "tool-results"),
+        max_inline_chars=50_000,
+        preview_chars=2_000,
+    )
+    new_result = storage.process("new", new_content)
+    old_result = storage.process("old", old_content)
+    manager.storage.append(
+        cwd,
+        session.session_id,
+        Message(
+            role="assistant",
+            content=[
+                ToolUseBlock(id="new", name="aliyun_api", input={}),
+                ToolUseBlock(id="old", name="aliyun_api", input={}),
+            ],
+        ),
+    )
+    manager.storage.append(
+        cwd,
+        session.session_id,
+        Message(
+            role="user",
+            content=[
+                ToolResultBlock(
+                    tool_use_id="new",
+                    content=new_result.content,
+                    metadata={
+                        "aliyun_http": {
+                            "contract_version": "aliyun_body_v1",
+                            "content_state": "inline_final",
+                        }
+                    },
+                ),
+                ToolResultBlock(
+                    tool_use_id="old",
+                    content=old_result.content,
+                    metadata={
+                        "aliyun_http": {
+                            "contract_version": "aliyun_body_v1",
+                            "content_state": "externalized_preview",
+                        },
+                        EXTERNALIZED_RESULT_PATH_METADATA_KEY: old_result.file_path,
+                    },
+                ),
+            ],
+        ),
+    )
+
+    transcript = manager.load_visible_transcript(session.session_id, cwd=cwd)
+
+    assert transcript["tools"]["new"]["results"] == [{"toolUseId": "new", "content": new_content, "isError": False}]
+    assert transcript["tools"]["old"]["results"] == [
+        {"toolUseId": "old", "content": old_result.content, "isError": False}
+    ]
+    assert "aliyun_http" not in json.dumps(transcript)
+    assert EXTERNALIZED_RESULT_PATH_METADATA_KEY not in json.dumps(transcript)
 
 
 def test_visible_transcript_preserves_text_tool_text_boundaries(tmp_path) -> None:

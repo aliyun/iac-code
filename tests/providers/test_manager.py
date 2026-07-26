@@ -622,7 +622,7 @@ class TestProviderManagerStreaming:
 
         with (
             use_span_attributes(scope),
-            patch("iac_code.providers.manager.start_span", return_value=nullcontext(span)),
+            patch("iac_code.providers.manager.start_detached_span", return_value=span),
             patch("iac_code.providers.manager.get_session_id", return_value="iac_sess_1"),
             patch(
                 "iac_code.providers.manager.log_event",
@@ -685,7 +685,7 @@ class TestProviderManagerStreaming:
         manager._provider = mock_provider
 
         with (
-            patch("iac_code.providers.manager.start_span", return_value=nullcontext(span)),
+            patch("iac_code.providers.manager.start_detached_span", return_value=span),
             patch("iac_code.providers.manager.get_session_id", return_value="iac_sess_1"),
         ):
             await _collect_stream_events(manager.stream(messages=[Message.user("hi")], system="sys"))
@@ -710,7 +710,7 @@ class TestProviderManagerStreaming:
         manager._provider = mock_provider
 
         with (
-            patch("iac_code.providers.manager.start_span", return_value=nullcontext(span)),
+            patch("iac_code.providers.manager.start_detached_span", return_value=span),
             patch("iac_code.providers.manager.get_session_id", return_value="iac_sess_1"),
             patch(
                 "iac_code.providers.manager.log_event",
@@ -752,7 +752,7 @@ class TestProviderManagerStreaming:
         manager._provider = mock_provider
 
         with (
-            patch("iac_code.providers.manager.start_span", return_value=nullcontext(MagicMock())),
+            patch("iac_code.providers.manager.start_detached_span", return_value=MagicMock()),
             patch("iac_code.providers.manager.get_session_id", return_value="iac_sess_1"),
             patch(
                 "iac_code.providers.manager.add_metric",
@@ -792,7 +792,7 @@ class TestProviderManagerStreaming:
 
         with (
             use_span_attributes(scope),
-            patch("iac_code.providers.manager.start_span", return_value=nullcontext(span)) as start_span,
+            patch("iac_code.providers.manager.start_detached_span", return_value=span) as start_span,
             patch("iac_code.providers.manager.get_session_id", return_value="iac_sess_1"),
             patch("iac_code.providers.manager.log_event") as log_event,
         ):
@@ -953,6 +953,47 @@ class TestProviderManagerStreaming:
         assert "tombstone" in types and "text_delta" in types and "message_end" in types
         request_statuses = [attrs["status"] for name, _value, attrs in metrics if name == Metrics.API_REQUEST_COUNT]
         assert request_statuses == ["error", "ok"]
+
+    async def test_stream_completion_fallback_reuses_same_telemetry_sidecar_for_each_attempt(self, monkeypatch):
+        mock_provider = AsyncMock()
+        captured_sidecars = []
+
+        async def failing_stream(*args, **kwargs):
+            del args, kwargs
+            yield MessageStartEvent(message_id="m1")
+            raise ConnectionError("stream died")
+
+        mock_provider.stream = failing_stream
+        mock_provider.get_model_name.return_value = "test"
+        mock_provider.complete = AsyncMock(
+            return_value=NonStreamingResponse(
+                message_id="m2",
+                text="complete",
+                tool_uses=[],
+                stop_reason="end_turn",
+                usage=Usage(),
+            )
+        )
+
+        def capture(_attrs, _messages, _system, _tools, telemetry_messages=None):
+            captured_sidecars.append(telemetry_messages)
+
+        monkeypatch.setattr("iac_code.providers.manager._capture_request_content", capture)
+        mgr = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
+        mgr._provider = mock_provider
+        sidecar = [object()]
+
+        events = [
+            event
+            async for event in mgr.stream(
+                messages=[Message.user("hi")],
+                system="sys",
+                telemetry_messages=sidecar,
+            )
+        ]
+
+        assert any(event.type == "message_end" for event in events)
+        assert captured_sidecars == [sidecar, sidecar]
 
     async def test_stream_fallback_tombstone_identifies_orphaned_tools(self):
         mock_provider = AsyncMock()
@@ -1216,6 +1257,9 @@ class TestProviderManagerStreaming:
             def set_attribute(self, key, value):
                 self.attributes[key] = value
 
+            def end(self):
+                return None
+
         class RecordingSpanContext:
             def __init__(self, span):
                 self.span = span
@@ -1236,10 +1280,12 @@ class TestProviderManagerStreaming:
             ),
         )
         monkeypatch.setattr(
+            "iac_code.providers.manager.start_detached_span",
+            lambda name, attrs=None, *, parent_context=None: spans.append(RecordingSpan(name, attrs)) or spans[-1],
+        )
+        monkeypatch.setattr(
             "iac_code.providers.manager.start_span",
-            lambda name, attrs=None: RecordingSpanContext(
-                spans.append(RecordingSpan(name, attrs)) or spans[-1]
-            ),
+            lambda name, attrs=None: RecordingSpanContext(spans.append(RecordingSpan(name, attrs)) or spans[-1]),
         )
         monkeypatch.setattr(
             "iac_code.providers.manager.log_event",
@@ -1692,9 +1738,7 @@ class TestProviderManagerCompleteRetry:
         failure_events = [attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_FAILED]
         started_events = [attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_STARTED]
         assert [attrs["model"] for attrs in started_events] == ["claude-fable-5", "claude-opus-4-8"]
-        assert [(attrs["model"], attrs["status"]) for attrs in success_events] == [
-            ("claude-fable-5", "refusal")
-        ]
+        assert [(attrs["model"], attrs["status"]) for attrs in success_events] == [("claude-fable-5", "refusal")]
         assert [(attrs["model"], attrs["error_type"]) for attrs in failure_events] == [
             ("claude-opus-4-8", "Status503Error")
         ]

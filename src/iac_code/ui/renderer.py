@@ -898,7 +898,20 @@ class Renderer:
 
         tool = self._tool_for_record(rec)
         result_text = None
-        if tool:
+        from iac_code.tools.cloud.aliyun.result_contract import (
+            ALIYUN_HTTP_METADATA_KEY,
+            ALIYUN_MIGRATED_RESULT_TOOLS,
+            sanitize_aliyun_http_metadata,
+        )
+
+        marked_aliyun_result = (
+            rec.tool_name in ALIYUN_MIGRATED_RESULT_TOOLS
+            and isinstance(rec.metadata, dict)
+            and sanitize_aliyun_http_metadata(rec.metadata.get(ALIYUN_HTTP_METADATA_KEY)) is not None
+        )
+        if marked_aliyun_result:
+            result_text = _metadata_tool_result_message(rec, verbose=self._verbose)
+        if result_text is None and tool:
             result_text = tool.render_tool_result_message(
                 rec.result or "", is_error=rec.is_error, verbose=self._verbose
             )

@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock
+
+import pytest
 
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.loader import load_pipeline_dir
 from iac_code.pipeline.engine.step_executor import StepExecutor
 from iac_code.pipeline.engine.step_spec import StepSpec
-from iac_code.tools.base import Tool, ToolRegistry
+from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
+from iac_code.types.permissions import PermissionResult, ToolPermissionContext
 
 ROS_TEMPLATE_TOOLS = {
     "ros_validate_template",
@@ -45,14 +49,50 @@ class _NamedTool(Tool):
         raise AssertionError("test tool should not execute")
 
 
-def _registry_for_step(loaded, step: StepSpec, *, base_registry: ToolRegistry | None = None):
+def _registry_for_step(
+    loaded,
+    step: StepSpec,
+    *,
+    base_registry: ToolRegistry | None = None,
+    aliyun_delegated_executor_factory=None,
+):
     executor = StepExecutor(
         provider_manager=MagicMock(),
         base_tool_registry=base_registry or ToolRegistry(),
         pipeline=loaded,
         pipeline_dir=_selling_dir(),
+        aliyun_delegated_executor_factory=aliyun_delegated_executor_factory,
     )
     return executor._build_step_tools(step, PipelineContext(loaded.context_dependencies))
+
+
+class _DelegatedExecutor:
+    def __init__(self, action: str) -> None:
+        self.action = action
+        self.permission_contexts: list[ToolPermissionContext] = []
+        self.execution_contexts: list[ToolContext] = []
+
+    async def check_permissions(self, tool_input: dict, context: ToolPermissionContext) -> PermissionResult:
+        self.permission_contexts.append(context)
+        return PermissionResult(behavior="allow")
+
+    async def execute(self, tool_input: dict, context: ToolContext) -> ToolResult:
+        self.execution_contexts.append(context)
+        return ToolResult(
+            content=json.dumps({"Action": self.action, "TemplateURL": tool_input["template_url"]}),
+            metadata={
+                "aliyun_http": {
+                    "contract_version": "aliyun_body_v1",
+                    "product": "ros",
+                    "version": "2019-09-10",
+                    "action": self.action,
+                    "status": 200,
+                    "status_class": "2xx",
+                    "response_mode": "json",
+                    "body_format": "json",
+                }
+            },
+        )
 
 
 def test_ros_template_tools_are_only_injected_into_matching_pipeline_steps(monkeypatch):
@@ -79,6 +119,51 @@ def test_ros_template_tools_are_only_injected_into_matching_pipeline_steps(monke
     for step_id in ["intent_parsing", "architecture_planning", "evaluate_candidates", "confirm_and_select"]:
         registry = _registry_for_step(loaded, _step_by_id(loaded.steps, step_id))
         assert all(registry.get(name) is None for name in ROS_TEMPLATE_TOOLS)
+
+
+@pytest.mark.asyncio
+async def test_selling_cost_step_executes_all_delegated_ros_template_tools(monkeypatch):
+    monkeypatch.setenv("IAC_CODE_PIPELINE_SELLING_ENABLE_REVIEWING", "true")
+    loaded = load_pipeline_dir(_selling_dir())
+    step = _step_by_id(loaded.sub_pipelines["evaluate_candidate"].steps, "cost_estimating")
+    executors: dict[str, _DelegatedExecutor] = {}
+
+    def factory(action: str) -> _DelegatedExecutor:
+        executor = _DelegatedExecutor(action)
+        executors[action] = executor
+        return executor
+
+    registry = _registry_for_step(loaded, step, aliyun_delegated_executor_factory=factory)
+    inputs = {
+        "ros_validate_template": {"template_url": "template.yaml"},
+        "ros_get_template_parameter_constraints": {
+            "template_url": "template.yaml",
+            "parameters": {"ZoneId": "cn-hangzhou-h"},
+        },
+        "ros_preview_template": {
+            "template_url": "template.yaml",
+            "stack_name": "preview-stack",
+            "parameters": {"ZoneId": "cn-hangzhou-h"},
+        },
+        "ros_estimate_template_cost": {
+            "template_url": "template.yaml",
+            "parameters": {"ZoneId": "cn-hangzhou-h"},
+        },
+    }
+
+    for tool_name, tool_input in inputs.items():
+        tool = registry.get(tool_name)
+        assert tool is not None
+        permission = await tool.check_permissions(tool_input, ToolPermissionContext(pipeline_mode=True))
+        result = await tool.execute(tool_input=tool_input, context=ToolContext(pipeline_mode=True))
+
+        assert permission.behavior == "allow"
+        assert result.is_error is False
+        assert json.loads(result.content) == {"Action": tool.action, "TemplateURL": "template.yaml"}
+        assert result.metadata is not None
+        assert result.metadata["aliyun_http"]["action"] == tool.action
+        assert executors[tool.action].permission_contexts[-1].pipeline_mode is True
+        assert executors[tool.action].execution_contexts[-1].pipeline_mode is True
 
 
 def test_ros_deploy_is_only_injected_into_deploying_step(monkeypatch):

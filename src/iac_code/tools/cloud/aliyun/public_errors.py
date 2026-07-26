@@ -107,6 +107,16 @@ def public_aliyun_error(
             "Alibaba Cloud API input is invalid for {operation}. "
             "Check product, action, version, region, and parameters."
         ).format(operation=operation)
+    if code == "aliyun_response_headers_too_large":
+        return _(
+            "Alibaba Cloud returned the target response, but its headers are too large to display safely. "
+            "Verify the cloud resource state before retrying."
+        )
+    if code == "aliyun_response_body_invalid":
+        return _(
+            "Alibaba Cloud returned an unsupported response body for {operation}. "
+            "Verify the cloud resource state before retrying."
+        ).format(operation=operation)
     if code == "invalid_detail":
         return _("Alibaba Cloud API {operation} detail must be one of: summary, full.").format(operation=operation)
     if code == "product_not_found":

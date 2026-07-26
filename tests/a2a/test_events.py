@@ -1,10 +1,19 @@
+import json
+
 import pytest
 from a2a.types import TaskArtifactUpdateEvent
 from google.protobuf.json_format import MessageToDict
 
-from iac_code.a2a.events import _ERROR_TEXT_MAX_CHARS, _METADATA_MAX_CHARS, _truncate, publish_stream_event
+from iac_code.a2a.events import (
+    _ERROR_TEXT_MAX_CHARS,
+    _METADATA_MAX_CHARS,
+    _tool_result_metadata,
+    _truncate,
+    publish_stream_event,
+)
 from iac_code.a2a.exposure import A2AExposureType
 from iac_code.services.permissions.audit import fingerprint_text
+from iac_code.tools.cloud.aliyun.result_contract import ALIYUN_HTTP_METADATA_KEY
 from iac_code.types.stream_events import (
     ErrorEvent,
     MCPProgressEvent,
@@ -25,6 +34,27 @@ from .fakes import FakeEventQueue, UnknownEvent, pending_future
 
 def dump(event):
     return MessageToDict(event, preserving_proto_field_name=False)
+
+
+def _aliyun_threshold_pair(limit: int, diagnostics: str = "") -> tuple[str, str]:
+    marker = "BUSINESS_TAIL_MARKER"
+    empty_body = json.dumps({"payload": "", "tail": marker}, ensure_ascii=False, indent=2)
+    payload_size = limit - len(empty_body) - len(diagnostics)
+    payload = {"payload": "X" * payload_size, "tail": marker}
+    body = json.dumps(payload, ensure_ascii=False, indent=2)
+    envelope = json.dumps(
+        {
+            "status": 200,
+            "headers": {"requestid": "req-1"},
+            "body": payload,
+            "content_type": "application/json",
+            "content_encoding": None,
+            "size": len(body),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    return body + diagnostics, envelope + diagnostics
 
 
 @pytest.mark.asyncio
@@ -533,6 +563,49 @@ async def test_tool_events_publish_metadata_updates() -> None:
     }
     assert "input" not in dumped[2]["metadata"]["iac_code"]["tool"]
     assert dumped[3]["metadata"]["iac_code"]["tool"]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_aliyun_tool_result_trace_exposes_business_content_but_not_internal_http_metadata() -> None:
+    queue = FakeEventQueue()
+    event = ToolResultEvent(
+        tool_use_id="tool-aliyun",
+        tool_name="aliyun_api",
+        result='{"Business":"value"}',
+        metadata={ALIYUN_HTTP_METADATA_KEY: {"contract_version": "aliyun_body_v1", "header_count": 1}},
+    )
+
+    await publish_stream_event(queue, task_id="task-1", context_id="ctx-1", event=event)
+
+    dumped = dump(queue.events[0])
+    tool = dumped["metadata"]["iac_code"]["tool"]
+    assert tool["result"] == '{"Business":"value"}'
+    assert ALIYUN_HTTP_METADATA_KEY not in str(dumped)
+    assert "aliyun_body_v1" not in str(dumped)
+
+    disabled_queue = FakeEventQueue()
+    await publish_stream_event(
+        disabled_queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=event,
+        exposure_types=frozenset(),
+    )
+    assert disabled_queue.events == []
+
+
+@pytest.mark.parametrize("diagnostics", ["", "\nDelegated diagnostics: preflight passed"])
+def test_aliyun_body_only_avoids_envelope_induced_a2a_trace_truncation(diagnostics: str) -> None:
+    new_content, old_content = _aliyun_threshold_pair(_METADATA_MAX_CHARS, diagnostics)
+
+    new_projected = _tool_result_metadata(new_content)
+    old_projected = _tool_result_metadata(old_content)
+
+    assert len(new_content) <= _METADATA_MAX_CHARS < len(old_content)
+    assert new_projected == new_content
+    assert len(old_projected) == _METADATA_MAX_CHARS
+    assert "BUSINESS_TAIL_MARKER" in new_projected
+    assert "BUSINESS_TAIL_MARKER" not in old_projected
 
 
 @pytest.mark.asyncio

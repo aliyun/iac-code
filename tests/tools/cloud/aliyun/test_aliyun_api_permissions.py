@@ -31,6 +31,10 @@ from iac_code.tools.cloud.aliyun.contract_store import (
 from iac_code.tools.cloud.aliyun.endpoint_resolver import EndpointResolution
 from iac_code.tools.cloud.aliyun.openmeta import ParameterMetadata
 from iac_code.tools.cloud.aliyun.public_errors import public_aliyun_error
+from iac_code.tools.cloud.aliyun.result_contract import (
+    ALIYUN_BODY_CONTRACT_VERSION,
+    ALIYUN_HTTP_METADATA_KEY,
+)
 from iac_code.tools.cloud.aliyun.retry_policy import RetryBudget
 from iac_code.tools.path_safety import get_iac_code_application_root
 from iac_code.types.permissions import InvocationBinding, PermissionMode, ToolPermissionContext
@@ -1517,6 +1521,77 @@ def _execution_context(permission_context: ToolPermissionContext, permission) ->
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_name", "action", "outer_input"),
+    [
+        (
+            "ros_validate_template",
+            "ValidateTemplate",
+            {"template_url": "https://example.com/template.yml", "region_id": "cn-hangzhou"},
+        ),
+        (
+            "ros_get_template_parameter_constraints",
+            "GetTemplateParameterConstraints",
+            {
+                "template_url": "https://example.com/template.yml",
+                "region_id": "cn-hangzhou",
+                "parameters": {},
+            },
+        ),
+        (
+            "ros_preview_template",
+            "PreviewStack",
+            {
+                "template_url": "https://example.com/template.yml",
+                "region_id": "cn-hangzhou",
+                "stack_name": "preview",
+                "parameters": {},
+            },
+        ),
+        (
+            "ros_estimate_template_cost",
+            "GetTemplateEstimateCost",
+            {
+                "template_url": "https://example.com/template.yml",
+                "region_id": "cn-hangzhou",
+                "parameters": {},
+            },
+        ),
+    ],
+)
+async def test_delegated_ros_tools_propagate_business_body_and_internal_http_metadata(
+    tool_name: str,
+    action: str,
+    outer_input: dict[str, Any],
+) -> None:
+    from iac_code.tools.cloud.aliyun.runtime import AliyunDelegatedExecutor
+
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action=action,
+        operation_type="read",
+    )
+    public_tool, _runtime = _execution_runtime(contract)
+    delegated = AliyunDelegatedExecutor(public_tool, action=action)
+    permission_context = _bound_context(outer_input, tool_name=tool_name, pipeline_mode=True)
+
+    permission = await delegated.check_permissions(outer_input, permission_context)
+    assert permission.behavior == "allow"
+    result = await delegated.execute(outer_input, _execution_context(permission_context, permission))
+
+    assert result.is_error is False
+    assert json.loads(result.content) == {"RequestId": "request", "Business": "value"}
+    assert result.metadata is not None
+    http_metadata = result.metadata[ALIYUN_HTTP_METADATA_KEY]
+    assert http_metadata["contract_version"] == ALIYUN_BODY_CONTRACT_VERSION
+    assert http_metadata["product"] == "ROS"
+    assert http_metadata["action"] == action
+    assert http_metadata["status"] == 200
+    assert http_metadata["body_format"] == "json"
+
+
 async def _approved_execution_context(
     tool: AliyunApi,
     tool_input: dict[str, Any],
@@ -2496,7 +2571,24 @@ async def test_public_runtime_requires_and_consumes_binding_snapshot_digest_once
     result = await tool.execute(tool_input=tool_input, context=context)
 
     assert result.is_error is False
-    assert json.loads(result.content)["body"]["Business"] == "value"
+    assert json.loads(result.content)["Business"] == "value"
+    assert result.metadata["aliyun_http"] == {
+        "contract_version": "aliyun_body_v1",
+        "product": "Ecs",
+        "version": "2014-05-26",
+        "action": "DescribeInstances",
+        "status": 200,
+        "status_class": "2xx",
+        "response_mode": "json",
+        "body_format": "json",
+        "headers_present": True,
+        "body_present": True,
+        "content_type_present": True,
+        "size_present": True,
+        "content_encoding_present": False,
+        "headers_nonempty": True,
+        "header_count": 1,
+    }
     assert runtime.contract_store.size == 0
     assert len(runtime.transport_router.budgets) == 1
 

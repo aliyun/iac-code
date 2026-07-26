@@ -753,9 +753,7 @@ def test_discover_cleanup_network_target_excludes_prior_scenario_cidrs(monkeypat
 
     monkeypatch.setattr(runner, "_call_aliyun_api", call_api)
 
-    target = runner._discover_cleanup_network_target(
-        excluded_cidrs={"192.168.255.0/24", "192.168.254.0/24"}
-    )
+    target = runner._discover_cleanup_network_target(excluded_cidrs={"192.168.255.0/24", "192.168.254.0/24"})
 
     assert target.vswitch_cidr == "192.168.253.0/24"
     assert target.rollback_vswitch_cidr == "192.168.252.0/24"
@@ -784,7 +782,7 @@ def test_wait_for_cleanup_resource_status_drains_pty_while_polling(monkeypatch) 
     assert pty.drain_calls == 2
 
 
-def test_call_aliyun_api_uses_runtime_services_and_unwraps_body(monkeypatch, tmp_path: Path) -> None:
+def test_call_aliyun_api_uses_runtime_services_with_body_only_result(monkeypatch, tmp_path: Path) -> None:
     runner = _load_runner()
     from iac_code import config
     from iac_code.services import cloud_credentials
@@ -847,11 +845,7 @@ def test_call_aliyun_api_uses_runtime_services_and_unwraps_body(monkeypatch, tmp
             assert context.snapshot_id == "snapshot-test"
             assert context.security_digest == "digest-test"
             assert context.execution_class == "concurrent"
-            return base.ToolResult(
-                content=runner.json.dumps(
-                    {"status": 200, "headers": {}, "body": {"Vpcs": {"Vpc": [{"VpcId": "vpc-test"}]}}}
-                )
-            )
+            return base.ToolResult(content=runner.json.dumps({"Vpcs": {"Vpc": [{"VpcId": "vpc-test"}]}}))
 
     monkeypatch.setattr(config, "get_config_dir", lambda: tmp_path)
     monkeypatch.setattr(cloud_credentials, "CloudCredentials", FakeCloudCredentials)

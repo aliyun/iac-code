@@ -8,8 +8,15 @@ gen_ai.tool.call.arguments, and gen_ai.tool.call.result.
 from __future__ import annotations
 
 import json
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
 from typing import Any
 
+from iac_code.tools.cloud.aliyun.result_contract import (
+    ALIYUN_HTTP_METADATA_KEY,
+    ALIYUN_MIGRATED_RESULT_TOOLS,
+    sanitize_aliyun_http_metadata,
+)
 from iac_code.tools.cloud.registry import (
     ANONYMOUS_ALIYUN_TOOL_NAMES,
     CREDENTIAL_GATED_ALIYUN_TOOL_NAMES,
@@ -17,6 +24,27 @@ from iac_code.tools.cloud.registry import (
 from iac_code.utils.tool_result_redaction import redact_tool_result_file_content
 
 _MAX_CONTENT_BYTES = 4096
+
+
+@dataclass(frozen=True)
+class TelemetryInputBlock:
+    """A non-wire content block used only for request telemetry."""
+
+    type: str
+    text: str | None = None
+    tool_use_id: str | None = None
+    name: str | None = None
+    content: str | None = None
+    is_error: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class TelemetryInputMessage:
+    """A non-wire message paired positionally with a provider message."""
+
+    role: str
+    content: str | list[TelemetryInputBlock]
 
 
 def _truncate(s: str, max_bytes: int = _MAX_CONTENT_BYTES) -> str:
@@ -55,22 +83,7 @@ def serialize_input_messages(messages: list) -> str:
 
     OTel semconv: [{role, parts: [{type, content|...}]}]
     """
-    tool_names_by_id: dict[str, str] = {}
-    for msg in messages:
-        content = getattr(msg, "content", "")
-        if not isinstance(content, list):
-            continue
-        for block in content:
-            if getattr(block, "type", "text") != "tool_use":
-                continue
-            tool_use_id = _tool_call_id(block)
-            tool_name = getattr(block, "name", None)
-            if not tool_use_id or not isinstance(tool_name, str):
-                continue
-            existing = tool_names_by_id.get(tool_use_id)
-            if existing is None or (tool_name in _ALIYUN_TOOL_NAMES and existing not in _ALIYUN_TOOL_NAMES):
-                tool_names_by_id[tool_use_id] = tool_name
-
+    unmatched_tool_names: dict[str, deque[str]] = defaultdict(deque)
     result = []
     for msg in messages:
         role = getattr(msg, "role", "unknown")
@@ -84,11 +97,15 @@ def serialize_input_messages(messages: list) -> str:
                 if btype == "text":
                     parts.append({"type": "text", "content": _truncate(getattr(block, "text", "") or "")})
                 elif btype == "tool_use":
+                    tool_use_id = _tool_call_id(block)
+                    tool_name = getattr(block, "name", "")
+                    if tool_use_id and isinstance(tool_name, str):
+                        unmatched_tool_names[tool_use_id].append(tool_name)
                     parts.append(
                         {
                             "type": "tool_call",
-                            "name": getattr(block, "name", ""),
-                            "id": _tool_call_id(block),
+                            "name": tool_name,
+                            "id": tool_use_id,
                         }
                     )
                 elif btype == "tool_result":
@@ -96,9 +113,16 @@ def serialize_input_messages(messages: list) -> str:
                     if response is None or response == "":
                         response = getattr(block, "content", "") or ""
                     tool_use_id = _tool_call_id(block)
-                    tool_name = tool_names_by_id.get(tool_use_id)
+                    explicit_tool_name = getattr(block, "name", None)
+                    matched = unmatched_tool_names.get(tool_use_id)
+                    matched_tool_name = matched.popleft() if matched else None
+                    tool_name = explicit_tool_name if isinstance(explicit_tool_name, str) else matched_tool_name
                     serialized_response = (
-                        _aliyun_tool_result(block)
+                        _aliyun_tool_result(
+                            block,
+                            tool_name=tool_name,
+                            provider_input=True,
+                        )
                         if tool_name in _ALIYUN_TOOL_NAMES
                         else _redacted_tool_result_string(response)
                     )
@@ -218,7 +242,12 @@ def serialize_tool_arguments(arguments: dict | Any, *, tool_name: str | None = N
     return _truncate(_json_dumps(arguments))
 
 
-def _aliyun_tool_result(result: Any) -> str:
+def _aliyun_tool_result(
+    result: Any,
+    *,
+    tool_name: str | None = None,
+    provider_input: bool = False,
+) -> str:
     raw_content = getattr(result, "content", None)
     if raw_content is None:
         raw_content = getattr(result, "text", result)
@@ -234,8 +263,41 @@ def _aliyun_tool_result(result: Any) -> str:
     valid_status = isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599
     metadata = getattr(result, "metadata", None)
     metadata = metadata if isinstance(metadata, dict) else {}
+    aliyun_http = sanitize_aliyun_http_metadata(metadata.get(ALIYUN_HTTP_METADATA_KEY))
+    is_error = bool(getattr(result, "is_error", False))
+    if aliyun_http is not None and tool_name in ALIYUN_MIGRATED_RESULT_TOOLS:
+        output: dict[str, Any] = {
+            "is_error": is_error,
+            "headers_present": bool(aliyun_http.get("headers_present")),
+            "body_present": bool(aliyun_http.get("body_present")),
+            "content_type_present": bool(aliyun_http.get("content_type_present")),
+            "content_encoding_present": bool(aliyun_http.get("content_encoding_present")),
+            "size_present": bool(aliyun_http.get("size_present")),
+            "headers_nonempty": bool(aliyun_http.get("headers_nonempty")),
+            "header_count": int(aliyun_http.get("header_count", 0)),
+            "artifact_present": False if provider_input else bool(metadata.get("artifacts")),
+        }
+        status = aliyun_http.get("status")
+        if isinstance(status, int) and not isinstance(status, bool):
+            output["status"] = status
+            output["status_class"] = aliyun_http.get("status_class", "{}xx".format(status // 100))
+        return _json_dumps(output)
+
+    if tool_name in ALIYUN_MIGRATED_RESULT_TOOLS and (provider_input or is_error):
+        return _json_dumps(
+            {
+                "is_error": is_error,
+                "headers_present": False,
+                "body_present": False,
+                "content_type_present": False,
+                "content_encoding_present": False,
+                "size_present": False,
+                "artifact_present": False if provider_input else bool(metadata.get("artifacts")),
+            }
+        )
+
     output: dict[str, Any] = {
-        "is_error": bool(getattr(result, "is_error", False)),
+        "is_error": is_error,
         "headers_present": "headers" in payload,
         "body_present": "body" in payload,
         "content_type_present": "content_type" in payload,
@@ -243,7 +305,7 @@ def _aliyun_tool_result(result: Any) -> str:
         "size_present": "size" in payload,
         "artifact_present": "artifact_path" in payload or bool(metadata.get("artifacts")),
     }
-    if valid_status:
+    if valid_status and isinstance(status, int):
         output["status"] = status
         output["status_class"] = "{}xx".format(status // 100)
     return _json_dumps(output)
@@ -252,7 +314,7 @@ def _aliyun_tool_result(result: Any) -> str:
 def serialize_tool_result(result: Any, *, tool_name: str | None = None) -> str:
     """Serialize tool call result to JSON string (truncated)."""
     if tool_name in _ALIYUN_TOOL_NAMES:
-        return _aliyun_tool_result(result)
+        return _aliyun_tool_result(result, tool_name=tool_name)
     if isinstance(result, str):
         return _truncate(_redacted_tool_result_string(result))
     content = getattr(result, "content", None)

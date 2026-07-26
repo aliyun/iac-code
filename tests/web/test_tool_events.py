@@ -13,6 +13,27 @@ class _StringySecret:
         return "object api_key=sk-object12345678"
 
 
+def _aliyun_threshold_pair(limit: int, diagnostics: str = "") -> tuple[str, str]:
+    marker = "BUSINESS_TAIL_MARKER"
+    empty_body = json.dumps({"payload": "", "tail": marker}, ensure_ascii=False, indent=2)
+    payload_size = limit - len(empty_body) - len(diagnostics)
+    payload = {"payload": "X" * payload_size, "tail": marker}
+    body = json.dumps(payload, ensure_ascii=False, indent=2)
+    envelope = json.dumps(
+        {
+            "status": 200,
+            "headers": {"requestid": "req-1"},
+            "body": payload,
+            "content_type": "application/json",
+            "content_encoding": None,
+            "size": len(body),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    return body + diagnostics, envelope + diagnostics
+
+
 def _run_reducer_script(tmp_path: Path, source: str) -> dict[str, object]:
     node = shutil.which("node")
     if node is None:
@@ -66,6 +87,79 @@ def test_translator_tool_started_payload_identity_and_status() -> None:
         "parentToolUseId": "tool-parent",
         "status": "running",
     }
+
+
+def test_normal_web_live_tool_result_strips_only_aliyun_internal_carrier() -> None:
+    from iac_code.types.stream_events import ToolResultEvent
+    from iac_code.web.events import WebEventTranslator
+
+    translated = WebEventTranslator("session-1").translate_stream_event(
+        ToolResultEvent(
+            tool_use_id="tool-1",
+            tool_name="aliyun_api",
+            result='{"Instances": []}',
+            metadata={
+                "aliyun_http": {
+                    "contract_version": "aliyun_body_v1",
+                    "status": 200,
+                },
+                "ros_validation": {"valid": True},
+            },
+        ),
+        turn_id="turn-1",
+    )
+
+    assert translated["type"] == "tool.result"
+    assert translated["payload"]["summary"] == '{"Instances": []}'
+    assert translated["payload"]["artifacts"] == [{"ros_validation": {"valid": True}}]
+    assert "aliyun_http" not in json.dumps(translated)
+
+
+@pytest.mark.parametrize("diagnostics", ["", "\nDelegated diagnostics: preflight passed"])
+def test_normal_web_live_preserves_result_storage_boundary_content(tmp_path, diagnostics) -> None:
+    from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY, ResultStorage
+    from iac_code.types.stream_events import ToolResultEvent
+    from iac_code.web.events import WebEventTranslator
+
+    new_content, old_content = _aliyun_threshold_pair(50_000, diagnostics)
+    storage = ResultStorage(
+        storage_dir=str(tmp_path / "tool-results"),
+        max_inline_chars=50_000,
+        preview_chars=2_000,
+    )
+    new_result = storage.process("new", new_content)
+    old_result = storage.process("old", old_content)
+    translator = WebEventTranslator("session-1")
+    new_event = translator.translate_stream_event(
+        ToolResultEvent(
+            tool_use_id="new",
+            tool_name="aliyun_api" if not diagnostics else "ros_validate_template",
+            result=new_result.content,
+            metadata={"aliyun_http": {"contract_version": "aliyun_body_v1", "content_state": "inline_final"}},
+        ),
+        turn_id="turn-1",
+    )
+    old_event = translator.translate_stream_event(
+        ToolResultEvent(
+            tool_use_id="old",
+            tool_name="aliyun_api" if not diagnostics else "ros_validate_template",
+            result=old_result.content,
+            metadata={
+                "aliyun_http": {
+                    "contract_version": "aliyun_body_v1",
+                    "content_state": "externalized_preview",
+                },
+                EXTERNALIZED_RESULT_PATH_METADATA_KEY: old_result.file_path,
+            },
+        ),
+        turn_id="turn-1",
+    )
+
+    assert new_event["payload"]["summary"] == new_content
+    assert new_event["payload"]["artifacts"] == []
+    assert old_event["payload"]["summary"] == old_result.content
+    assert old_event["payload"]["artifacts"] == [{EXTERNALIZED_RESULT_PATH_METADATA_KEY: old_result.file_path}]
+    assert "aliyun_http" not in json.dumps([new_event, old_event])
 
 
 def test_stream_event_translator_backend_event_names_match_contract() -> None:

@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 from iac_code.agent.message import Message as AgentMessage
@@ -30,6 +31,9 @@ class FakeContentBlock:
     text: str | None = None
     tool_use_id: str | None = None
     name: str | None = None
+    content: str | None = None
+    is_error: bool = False
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass
@@ -42,6 +46,27 @@ class FakeToolDef:
 @dataclass
 class FakeToolResult:
     content: Any
+
+
+def _aliyun_http_metadata() -> dict[str, Any]:
+    return {
+        "contract_version": "aliyun_body_v1",
+        "product": "Ecs",
+        "version": "2014-05-26",
+        "action": "DescribeInstances",
+        "status": 200,
+        "status_class": "2xx",
+        "response_mode": "json",
+        "body_format": "json",
+        "headers_present": True,
+        "body_present": True,
+        "content_type_present": True,
+        "size_present": True,
+        "content_encoding_present": False,
+        "headers_nonempty": True,
+        "header_count": 1,
+        "content_state": "inline_final",
+    }
 
 
 def test_serialize_input_messages_text():
@@ -131,7 +156,7 @@ def test_serialize_input_messages_tool_result_uses_provider_content_field():
     assert "sha256-value" in response
 
 
-def test_serialize_input_messages_redacts_associated_aliyun_tool_result():
+def test_serialize_input_messages_does_not_infer_http_fields_from_unmarked_aliyun_result():
     secret_result = json.dumps(
         {
             "status": 200,
@@ -158,14 +183,12 @@ def test_serialize_input_messages_redacts_associated_aliyun_tool_result():
 
     assert response == {
         "is_error": False,
-        "status": 200,
-        "status_class": "2xx",
-        "headers_present": True,
-        "body_present": True,
-        "content_type_present": True,
+        "headers_present": False,
+        "body_present": False,
+        "content_type_present": False,
         "content_encoding_present": False,
-        "size_present": True,
-        "artifact_present": True,
+        "size_present": False,
+        "artifact_present": False,
     }
     for forbidden in (
         "credential-secret",
@@ -177,7 +200,7 @@ def test_serialize_input_messages_redacts_associated_aliyun_tool_result():
         assert forbidden not in serialized
 
 
-def test_serialize_input_messages_redacts_agent_loop_aliyun_tool_result():
+def test_serialize_input_messages_does_not_infer_agent_loop_unmarked_aliyun_result():
     messages = [
         AgentMessage(
             role="assistant",
@@ -204,9 +227,128 @@ def test_serialize_input_messages_redacts_agent_loop_aliyun_tool_result():
     result = json.loads(serialized)
 
     assert result[0]["parts"][0]["id"] == "aliyun-call"
-    assert json.loads(result[1]["parts"][0]["response"])["headers_present"] is True
+    response = json.loads(result[1]["parts"][0]["response"])
+    assert response["headers_present"] is False
+    assert "status" not in response
     assert "credential-secret" not in serialized
     assert "business-secret" not in serialized
+
+
+def test_serialize_direct_unmarked_aliyun_error_uses_fixed_false_presence():
+    result = SimpleNamespace(
+        content=json.dumps(
+            {
+                "status": 503,
+                "headers": {"authorization": "secret"},
+                "body": {"artifact_path": "business-value"},
+                "content_type": "application/json",
+                "content_encoding": "gzip",
+                "size": 123,
+                "artifact_path": "business-value",
+            }
+        ),
+        is_error=True,
+        metadata={},
+    )
+
+    serialized = json.loads(serialize_tool_result(result, tool_name="aliyun_api"))
+
+    assert serialized == {
+        "is_error": True,
+        "headers_present": False,
+        "body_present": False,
+        "content_type_present": False,
+        "content_encoding_present": False,
+        "size_present": False,
+        "artifact_present": False,
+    }
+
+
+def test_serialize_direct_unmarked_aliyun_error_trusts_only_artifacts_metadata():
+    result = SimpleNamespace(
+        content='{"artifact_path":"business-value"}',
+        is_error=True,
+        metadata={"artifacts": [{"name": "trusted"}]},
+    )
+
+    serialized = json.loads(serialize_tool_result(result, tool_name="ros_validate_template"))
+
+    assert serialized["artifact_present"] is True
+    assert "status" not in serialized
+
+
+def test_marked_aliyun_provider_input_uses_sidecar_metadata_and_never_reports_artifact():
+    blocks = [
+        FakeContentBlock(type="tool_use", tool_use_id="tool-1", name="aliyun_api"),
+        FakeContentBlock(
+            type="tool_result",
+            tool_use_id="tool-1",
+            content='{"artifact_path":"business-value"}',
+            metadata={"aliyun_http": _aliyun_http_metadata(), "artifacts": [{"name": "not-in-sidecar"}]},
+        ),
+    ]
+
+    serialized = json.loads(serialize_input_messages([FakeMessage(role="user", content=blocks)]))
+    response = json.loads(serialized[0]["parts"][1]["response"])
+
+    assert response == {
+        "is_error": False,
+        "headers_present": True,
+        "body_present": True,
+        "content_type_present": True,
+        "content_encoding_present": False,
+        "size_present": True,
+        "headers_nonempty": True,
+        "header_count": 1,
+        "artifact_present": False,
+        "status": 200,
+        "status_class": "2xx",
+    }
+
+
+def test_marked_aliyun_direct_result_trusts_artifacts_metadata_not_business_collision():
+    without_artifact = SimpleNamespace(
+        content='{"artifact_path":"business-value"}',
+        is_error=False,
+        metadata={"aliyun_http": _aliyun_http_metadata()},
+    )
+    with_artifact = SimpleNamespace(
+        content='{"artifact_path":"business-value"}',
+        is_error=False,
+        metadata={"aliyun_http": _aliyun_http_metadata(), "artifacts": [{"name": "trusted"}]},
+    )
+
+    assert json.loads(serialize_tool_result(without_artifact, tool_name="aliyun_api"))["artifact_present"] is False
+    assert json.loads(serialize_tool_result(with_artifact, tool_name="aliyun_api"))["artifact_present"] is True
+
+
+def test_non_migrated_aliyun_tool_keeps_legacy_envelope_projection():
+    content = json.dumps(
+        {
+            "status": 200,
+            "headers": {},
+            "body": {"ok": True},
+            "content_type": "application/json",
+            "content_encoding": None,
+            "size": 11,
+            "artifact_path": "legacy",
+        }
+    )
+    result = SimpleNamespace(content=content, is_error=False, metadata={})
+
+    serialized = json.loads(serialize_tool_result(result, tool_name="ros_stack"))
+
+    assert serialized == {
+        "is_error": False,
+        "headers_present": True,
+        "body_present": True,
+        "content_type_present": True,
+        "content_encoding_present": False,
+        "size_present": True,
+        "artifact_present": True,
+        "status": 200,
+        "status_class": "2xx",
+    }
 
 
 def test_serialize_input_messages_keeps_associated_non_aliyun_tool_result_unchanged():

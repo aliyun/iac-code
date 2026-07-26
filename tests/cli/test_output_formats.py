@@ -14,6 +14,7 @@ from iac_code.cli.output_formats import (
     create_writer,
 )
 from iac_code.services.permissions.audit import fingerprint_text
+from iac_code.tools.cloud.aliyun.result_contract import ALIYUN_HTTP_METADATA_KEY
 from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY, ResultStorage
 from iac_code.types.permissions import PermissionAuditMetadata, PermissionAuditSettings, PermissionResult
 from iac_code.types.stream_events import (
@@ -529,6 +530,30 @@ class TestStreamJsonWriter:
         assert EXTERNALIZED_RESULT_PATH_METADATA_KEY not in rendered
         assert "/Users/alice" not in rendered
         assert data["metadata"] == {"step_result": {"step_id": "x"}}
+
+    def test_tool_result_omits_internal_aliyun_http_metadata_only(self) -> None:
+        stream = io.StringIO()
+        writer = StreamJsonWriter(stream)
+        writer.handle(
+            ToolResultEvent(
+                tool_use_id="tu_1",
+                tool_name="aliyun_api",
+                result='{"Business":"value"}',
+                metadata={
+                    ALIYUN_HTTP_METADATA_KEY: {
+                        "contract_version": "aliyun_body_v1",
+                        "header_count": 1,
+                    },
+                    "ros_validation": {"warning_count": 0},
+                },
+            )
+        )
+
+        data = json.loads(stream.getvalue())
+        rendered = json.dumps(data, ensure_ascii=False)
+        assert ALIYUN_HTTP_METADATA_KEY not in rendered
+        assert "aliyun_body_v1" not in rendered
+        assert data["metadata"] == {"ros_validation": {"warning_count": 0}}
 
     def test_tool_result_omits_internal_render_metadata(self) -> None:
         stream = io.StringIO()

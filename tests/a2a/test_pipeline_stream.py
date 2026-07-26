@@ -13,6 +13,7 @@ from google.protobuf.json_format import MessageToDict
 
 import iac_code.a2a.pipeline_stream as pipeline_stream
 from iac_code.a2a.artifacts import A2AArtifactStore
+from iac_code.a2a.events import _METADATA_MAX_CHARS
 from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
@@ -48,6 +49,7 @@ from iac_code.types.stream_events import (
     ToolUseEndEvent,
 )
 from iac_code.utils.public_errors import suppress_all_redaction
+from iac_code.web.pipeline_transcript import PipelineTranscriptTranslator, build_pipeline_transcript_rows
 
 from .fakes import FakeEventQueue
 
@@ -129,6 +131,27 @@ def _encoded_pipeline_batch_size(envelopes: list[dict[str, Any]]) -> int:
     )
 
 
+def _aliyun_threshold_pair(limit: int, diagnostics: str = "") -> tuple[str, str]:
+    marker = "BUSINESS_TAIL_MARKER"
+    empty_body = json.dumps({"payload": "", "tail": marker}, ensure_ascii=False, indent=2)
+    payload_size = limit - len(empty_body) - len(diagnostics)
+    payload = {"payload": "X" * payload_size, "tail": marker}
+    body = json.dumps(payload, ensure_ascii=False, indent=2)
+    envelope = json.dumps(
+        {
+            "status": 200,
+            "headers": {"requestid": "req-1"},
+            "body": payload,
+            "content_type": "application/json",
+            "content_encoding": None,
+            "size": len(body),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    return body + diagnostics, envelope + diagnostics
+
+
 def test_pipeline_warning_is_recovery_semantic() -> None:
     assert is_recovery_semantic_event(_envelope("pipeline_warning")) is True
 
@@ -168,6 +191,47 @@ async def test_publish_text_writes_pipeline_metadata_without_duplicate_status_me
     snapshot = publisher.snapshot_store.load()
     assert snapshot is not None
     assert snapshot["display"]["messages"][0]["text"] == "hello"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("diagnostics", ["", "\nDelegated diagnostics: preflight passed"])
+async def test_aliyun_body_only_avoids_envelope_truncation_in_all_pipeline_outlets(
+    tmp_path: Path,
+    diagnostics: str,
+) -> None:
+    new_content, old_content = _aliyun_threshold_pair(_METADATA_MAX_CHARS, diagnostics)
+
+    async def publish_and_read(content: str, directory: str) -> tuple[str, str, str, str]:
+        publisher, queue = _publisher(tmp_path / directory)
+        await publisher.publish(
+            ToolResultEvent(
+                tool_use_id=f"tool-{directory}",
+                tool_name="aliyun_api" if not diagnostics else "ros_validate_template",
+                result=content,
+                is_error=False,
+            )
+        )
+        remote = dump(queue.events[0])["metadata"]["iac_code"]["pipeline"]
+        journal = publisher.journal.read_all()[0]
+        live_events = PipelineTranscriptTranslator().translate_all([journal])
+        live_result = next(event for event in live_events if event["type"] == "tool.result")
+        [replay_row] = build_pipeline_transcript_rows([journal])
+        replay_result = replay_row["tools"][f"tool-{directory}"]["results"][0]
+        return (
+            remote["data"]["result"],
+            journal["data"]["result"],
+            live_result["payload"]["content"],
+            replay_result["content"],
+        )
+
+    new_outlets = await publish_and_read(new_content, "new")
+    old_outlets = await publish_and_read(old_content, "old")
+
+    assert len(new_content) <= _METADATA_MAX_CHARS < len(old_content)
+    assert new_outlets == (new_content,) * 4
+    assert all(len(value) == _METADATA_MAX_CHARS for value in old_outlets)
+    assert all("BUSINESS_TAIL_MARKER" in value for value in new_outlets)
+    assert all("BUSINESS_TAIL_MARKER" not in value for value in old_outlets)
 
 
 @pytest.mark.asyncio

@@ -798,44 +798,101 @@ class AgentLoop:
         self.context_manager.set_tool_definitions(tool_definitions)
         return tool_definitions
 
-    def _get_provider_messages(self):
-        """Convert context manager messages to provider Message format."""
+    @staticmethod
+    def _provider_message_from_api(api_message: dict[str, Any]):
         from iac_code.providers.base import ContentBlock
         from iac_code.providers.base import Message as ProviderMessage
 
-        api_messages = self.context_manager.get_api_messages()
-        provider_messages = []
-        for msg in api_messages:
-            role = msg["role"]
-            content = msg["content"]
-            if isinstance(content, str):
-                provider_messages.append(ProviderMessage(role=role, content=content))
-            elif isinstance(content, list):
-                blocks = []
-                for block in content:
-                    if isinstance(block, dict):
-                        block_type = block.get("type", "text")
-                        text_value = block.get("thinking") if block_type == "thinking" else block.get("text")
-                        blocks.append(
-                            ContentBlock(
-                                type=block_type,
-                                text=text_value,
-                                tool_use_id=block.get("tool_use_id") or block.get("id"),
-                                name=block.get("name"),
-                                input=block.get("input"),
-                                content=block.get("content"),
-                                is_error=block.get("is_error", False),
-                                media_type=block.get("media_type"),
-                                data=block.get("data"),
-                                provider_metadata=(
-                                    dict(block["provider_metadata"])
-                                    if isinstance(block.get("provider_metadata"), dict)
-                                    else {}
-                                ),
-                            )
+        role = api_message["role"]
+        content = api_message["content"]
+        if isinstance(content, str):
+            return ProviderMessage(role=role, content=content)
+        if isinstance(content, list):
+            blocks = []
+            for block in content:
+                if isinstance(block, dict):
+                    block_type = block.get("type", "text")
+                    text_value = block.get("thinking") if block_type == "thinking" else block.get("text")
+                    blocks.append(
+                        ContentBlock(
+                            type=block_type,
+                            text=text_value,
+                            tool_use_id=block.get("tool_use_id") or block.get("id"),
+                            name=block.get("name"),
+                            input=block.get("input"),
+                            content=block.get("content"),
+                            is_error=block.get("is_error", False),
+                            media_type=block.get("media_type"),
+                            data=block.get("data"),
+                            provider_metadata=(
+                                dict(block["provider_metadata"])
+                                if isinstance(block.get("provider_metadata"), dict)
+                                else {}
+                            ),
                         )
-                provider_messages.append(ProviderMessage(role=role, content=blocks))
+                    )
+            return ProviderMessage(role=role, content=blocks)
+        return None
+
+    def _get_provider_messages(self):
+        """Convert context manager messages to provider Message format."""
+        provider_messages = []
+        for message in self.context_manager.get_context_messages():
+            provider_message = self._provider_message_from_api(message.to_api_format())
+            if provider_message is not None:
+                provider_messages.append(provider_message)
         return provider_messages
+
+    def _get_provider_messages_with_telemetry(self):
+        """Build provider wire messages and their non-wire telemetry sidecar together."""
+        from collections import defaultdict, deque
+
+        from iac_code.services.telemetry.content_serializer import TelemetryInputBlock, TelemetryInputMessage
+        from iac_code.tools.cloud.aliyun.result_contract import (
+            ALIYUN_HTTP_METADATA_KEY,
+            sanitize_aliyun_http_metadata,
+        )
+
+        provider_messages = []
+        unmatched: dict[str, deque[str]] = defaultdict(deque)
+        telemetry_messages: list[TelemetryInputMessage] = []
+        for message in self.context_manager.get_context_messages():
+            provider_message = self._provider_message_from_api(message.to_api_format())
+            if provider_message is not None:
+                provider_messages.append(provider_message)
+            if isinstance(message.content, str):
+                telemetry_messages.append(TelemetryInputMessage(role=message.role, content=message.content))
+                continue
+            blocks: list[TelemetryInputBlock] = []
+            for block in message.content:
+                if isinstance(block, TextBlock):
+                    blocks.append(TelemetryInputBlock(type="text", text=block.text))
+                elif isinstance(block, ToolUseBlock):
+                    unmatched[block.id].append(block.name)
+                    blocks.append(TelemetryInputBlock(type="tool_use", tool_use_id=block.id, name=block.name))
+                elif isinstance(block, ToolResultBlock):
+                    names = unmatched.get(block.tool_use_id)
+                    tool_name = names.popleft() if names else None
+                    aliyun_http = sanitize_aliyun_http_metadata(block.metadata.get(ALIYUN_HTTP_METADATA_KEY))
+                    metadata = {ALIYUN_HTTP_METADATA_KEY: aliyun_http} if aliyun_http is not None else {}
+                    blocks.append(
+                        TelemetryInputBlock(
+                            type="tool_result",
+                            tool_use_id=block.tool_use_id,
+                            name=tool_name,
+                            content=block.content,
+                            is_error=block.is_error,
+                            metadata=metadata,
+                        )
+                    )
+                elif isinstance(block, ThinkingBlock):
+                    blocks.append(TelemetryInputBlock(type="thinking"))
+                elif isinstance(block, RedactedThinkingBlock):
+                    blocks.append(TelemetryInputBlock(type="redacted_thinking"))
+                else:
+                    blocks.append(TelemetryInputBlock(type=block.type))
+            telemetry_messages.append(TelemetryInputMessage(role=message.role, content=blocks))
+        return provider_messages, telemetry_messages
 
     async def run(self, user_input: str | list[ContentBlock]) -> str:
         """Non-streaming execution. Returns final text."""
@@ -1030,8 +1087,19 @@ class AgentLoop:
         messages: list[Any],
         system: str,
         tools: list[Any] | None,
+        telemetry_messages: list[Any] | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
-        provider_stream = self._provider_manager.stream(messages=messages, system=system, tools=tools)
+        with use_span_attributes(self._telemetry_attributes):
+            stream_method = self._provider_manager.stream
+            stream_parameters = inspect.signature(stream_method).parameters.values()
+            supports_telemetry_sidecar = any(
+                parameter.name == "telemetry_messages" or parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in stream_parameters
+            )
+            stream_kwargs = {"messages": messages, "system": system, "tools": tools}
+            if supports_telemetry_sidecar:
+                stream_kwargs["telemetry_messages"] = telemetry_messages
+            provider_stream = stream_method(**stream_kwargs)
         try:
             while True:
                 with use_span_attributes(self._telemetry_attributes):
@@ -1097,7 +1165,7 @@ class AgentLoop:
                 message_ended = False
                 turn_stop_reason = "stop"
 
-                provider_messages = self._get_provider_messages()
+                provider_messages, telemetry_messages = self._get_provider_messages_with_telemetry()
                 provider_tools = tool_definitions or None
                 self._last_provider_request_snapshot = {
                     "system_prompt": system_prompt,
@@ -1110,6 +1178,7 @@ class AgentLoop:
                     messages=provider_messages,
                     system=system_prompt,
                     tools=provider_tools,
+                    telemetry_messages=telemetry_messages,
                 ):
                     if isinstance(event, ToolUseStartEvent):
                         event = replace(
@@ -1543,6 +1612,8 @@ class AgentLoop:
                         self.tool_registry.get(req.name),
                         processed.content,
                         is_error=result.is_error,
+                        tool_name=req.name,
+                        tool_input=req.input,
                     )
 
                     yield ToolResultEvent(
@@ -1618,6 +1689,12 @@ class AgentLoop:
 
     @staticmethod
     def _tool_result_event_metadata(metadata: dict[str, Any] | None, processed: Any) -> dict[str, Any] | None:
+        from iac_code.tools.cloud.aliyun.result_contract import with_aliyun_content_state
+
+        metadata = with_aliyun_content_state(
+            metadata,
+            externalized=bool(getattr(processed, "is_externalized", False)),
+        )
         if not getattr(processed, "is_externalized", False) or not getattr(processed, "file_path", None):
             return metadata
         event_metadata = dict(metadata or {})
@@ -1666,7 +1743,44 @@ class AgentLoop:
         output: str,
         *,
         is_error: bool,
+        tool_name: str | None = None,
+        tool_input: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
+        from iac_code.tools.cloud.aliyun.result_contract import (
+            ALIYUN_HTTP_METADATA_KEY,
+            ALIYUN_MIGRATED_RESULT_TOOLS,
+            render_aliyun_result,
+            sanitize_aliyun_http_metadata,
+        )
+
+        aliyun_http = (
+            sanitize_aliyun_http_metadata(metadata.get(ALIYUN_HTTP_METADATA_KEY))
+            if isinstance(metadata, dict)
+            else None
+        )
+        if tool_name in ALIYUN_MIGRATED_RESULT_TOOLS and aliyun_http is not None:
+            compact = render_aliyun_result(
+                tool_input or {},
+                output,
+                is_error=is_error,
+                aliyun_http=aliyun_http,
+                verbose=False,
+            )
+            verbose = render_aliyun_result(
+                tool_input or {},
+                output,
+                is_error=is_error,
+                aliyun_http=aliyun_http,
+                verbose=True,
+            )
+            render_metadata: dict[str, Any] = {}
+            if compact:
+                render_metadata[TOOL_RENDER_RESULT_COMPACT_KEY] = compact
+            if verbose:
+                render_metadata[TOOL_RENDER_RESULT_VERBOSE_KEY] = verbose
+                render_metadata[TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY] = True
+            return cls._merge_tool_render_metadata(metadata, render_metadata)
+
         render_result = getattr(tool, "render_tool_result_message", None)
         if not callable(render_result):
             return metadata
@@ -1697,6 +1811,14 @@ class AgentLoop:
             metadata[EXTERNALIZED_RESULT_PATH_METADATA_KEY] = str(processed.file_path)
 
         if isinstance(result_metadata, dict):
+            from iac_code.tools.cloud.aliyun.result_contract import (
+                ALIYUN_HTTP_METADATA_KEY,
+                sanitize_aliyun_http_metadata,
+            )
+
+            aliyun_http = sanitize_aliyun_http_metadata(result_metadata.get(ALIYUN_HTTP_METADATA_KEY))
+            if aliyun_http is not None:
+                metadata[ALIYUN_HTTP_METADATA_KEY] = aliyun_http
             render_metadata = result_metadata.get(TOOL_RENDER_METADATA_KEY)
             if isinstance(render_metadata, dict):
                 safe_render_metadata: dict[str, Any] = {}

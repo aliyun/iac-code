@@ -55,3 +55,13 @@ def use_span_attributes(attributes: Mapping[str, Any] | None) -> Iterator[None]:
         yield
     finally:
         _span_attributes.reset(token)
+
+
+@contextmanager
+def replace_span_attributes(attributes: Mapping[str, Any] | None) -> Iterator[None]:
+    """Temporarily replace, rather than merge, request-local dimensions."""
+    token = _span_attributes.set(normalize_span_attributes(attributes))
+    try:
+        yield
+    finally:
+        _span_attributes.reset(token)

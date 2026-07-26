@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -299,6 +300,43 @@ class TestSegmentedCompaction:
         rendered = cm._render_message_for_summary(msg)
         assert rendered.endswith("…")
         assert len(rendered) <= _SUMMARY_BLOCK_TEXT_LIMIT + len("[工具结果] ") + 1
+
+    @pytest.mark.parametrize("diagnostics", ["", "\nDelegated diagnostics: preflight passed"])
+    def test_aliyun_body_only_avoids_envelope_induced_summary_truncation(self, diagnostics):
+        marker = "BUSINESS_TAIL_MARKER"
+        empty_body = json.dumps({"payload": "", "tail": marker}, ensure_ascii=False, indent=2)
+        payload_size = _SUMMARY_BLOCK_TEXT_LIMIT - len(empty_body) - len(diagnostics)
+        body = json.dumps({"payload": "X" * payload_size, "tail": marker}, ensure_ascii=False, indent=2)
+        new_content = body + diagnostics
+        old_content = (
+            json.dumps(
+                {
+                    "status": 200,
+                    "headers": {"requestid": "req-1"},
+                    "body": {"payload": "X" * payload_size, "tail": marker},
+                    "content_type": "application/json",
+                    "content_encoding": None,
+                    "size": len(body),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + diagnostics
+        )
+        cm = ContextManager(system_prompt="", model="qwen")
+
+        new_rendered = cm._render_message_for_summary(
+            Message(role="user", content=[ToolResultBlock(tool_use_id="new", content=new_content)])
+        )
+        old_rendered = cm._render_message_for_summary(
+            Message(role="user", content=[ToolResultBlock(tool_use_id="old", content=old_content)])
+        )
+
+        assert len(new_content.strip()) <= _SUMMARY_BLOCK_TEXT_LIMIT < len(old_content.strip())
+        assert marker in new_rendered
+        assert not new_rendered.endswith("…")
+        assert marker not in old_rendered
+        assert old_rendered.endswith("…")
 
     def test_build_compaction_prompt_excludes_recalled_memory_messages(self):
         cm = ContextManager(system_prompt="sys", model="qwen")

@@ -6,11 +6,21 @@ from typing import Any
 
 from iac_code.services.telemetry.client import TelemetryClient
 from iac_code.services.telemetry.identity import use_session_id, use_user_id
+from iac_code.services.telemetry.tracing import (
+    attach_context,
+    detach_context,
+    get_current_context,
+)
 
 __all__ = [
     "log_event",
     "add_metric",
     "start_span",
+    "start_detached_span",
+    "use_span",
+    "get_current_context",
+    "attach_context",
+    "detach_context",
     "bootstrap_telemetry",
     "graceful_shutdown",
     "flush_telemetry",
@@ -49,6 +59,25 @@ def add_metric(name: str, value: int | float, attributes: dict[str, Any] | None 
 
 def start_span(name: str, attributes: dict[str, Any] | None = None):
     return get_client().start_span(name, attributes)
+
+
+def start_detached_span(name: str, attributes: dict[str, Any] | None = None, *, parent_context=None):
+    return get_client().start_detached_span(name, attributes, parent_context=parent_context)
+
+
+def use_span(
+    span,
+    *,
+    record_exception: bool = False,
+    set_status_on_exception: bool = False,
+    end_on_exit: bool = False,
+):
+    return get_client().use_span(
+        span,
+        record_exception=record_exception,
+        set_status_on_exception=set_status_on_exception,
+        end_on_exit=end_on_exit,
+    )
 
 
 def bootstrap_telemetry(session_id: str | None = None) -> None:

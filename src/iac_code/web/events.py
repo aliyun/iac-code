@@ -420,11 +420,15 @@ class WebEventTranslator:
                 summary={"toolName": event.name, "input": event.input},
             )
         if isinstance(event, ToolResultEvent):
+            from iac_code.tools.cloud.aliyun.result_contract import ALIYUN_HTTP_METADATA_KEY
+
+            public_metadata = dict(event.metadata or {})
+            public_metadata.pop(ALIYUN_HTTP_METADATA_KEY, None)
             return self.tool_result(
                 tool_use_id=event.tool_use_id,
                 result_kind="error" if event.is_error else "text",
                 summary=event.result,
-                artifacts=[event.metadata] if event.metadata else [],
+                artifacts=[public_metadata] if public_metadata else [],
             )
         if isinstance(event, MCPProgressEvent):
             payload = mcp_progress_metadata(event)

@@ -58,6 +58,11 @@ from iac_code.tools.cloud.aliyun.contract_store import (
     canonical_input_sha256,
 )
 from iac_code.tools.cloud.aliyun.public_errors import normalize_api_identity, public_aliyun_error
+from iac_code.tools.cloud.aliyun.result_contract import (
+    ALIYUN_HTTP_METADATA_KEY,
+    build_aliyun_http_metadata,
+    serialize_business_result,
+)
 from iac_code.tools.cloud.aliyun.retry_policy import RetryBudget, TransportFailure
 from iac_code.tools.cloud.aliyun.runtime import (
     _valid_delegated_binding,
@@ -390,9 +395,7 @@ def _exception_telemetry_attrs(error: BaseException) -> dict[str, Any]:
     )
     if status is not None:
         attrs[AliyunApiAttr.HTTP_STATUS_CODE] = status
-    request_id = _safe_request_id(
-        _object_value(error, _REQUEST_ID_BODY_KEYS, ("request_id", "requestId", "RequestId"))
-    )
+    request_id = _safe_request_id(_object_value(error, _REQUEST_ID_BODY_KEYS, ("request_id", "requestId", "RequestId")))
     error_code = _safe_error_code(
         _object_value(error, _ERROR_CODE_BODY_KEYS, ("error_code", "errorCode", "ErrorCode", "code"))
     )
@@ -2454,14 +2457,13 @@ class AliyunApi(BaseCloudApi):
                     public_error = f"{public_error} Response: {target_error_detail}"
                 return ToolResult.error(public_error)
             assert response is not None
-            payload: dict[str, Any] = {
-                "status": response.status,
-                "headers": dict(response.headers),
-                "body": response.body,
-                "content_type": response.content_type,
-                "content_encoding": response.content_encoding,
-                "size": response.size,
-            }
+            business_content, body_format = serialize_business_result(response, request, contract)
+            aliyun_http = build_aliyun_http_metadata(
+                response,
+                request,
+                contract,
+                body_format=body_format,
+            )
             if contract.product.casefold() == "ros" and contract.action == "ValidateTemplate":
                 _emit_validate_template_event(response.body, duration_ms)
             if (
@@ -2484,8 +2486,11 @@ class AliyunApi(BaseCloudApi):
                         )
                     )
             self._last_action = contract.action
-            self._last_result = response.body if isinstance(response.body, dict) else payload
-            return ToolResult(content=json.dumps(payload, ensure_ascii=False, indent=2))
+            self._last_result = response.body
+            return ToolResult(
+                content=business_content,
+                metadata={ALIYUN_HTTP_METADATA_KEY: aliyun_http},
+            )
         except asyncio.CancelledError:
             if trust_path != "internal":
                 if recovery_claim is not None and context.snapshot_id is not None:
