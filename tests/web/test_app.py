@@ -14,6 +14,17 @@ def _error_message(response) -> str:
     return error["message"] if isinstance(error, dict) else error
 
 
+def _task_cancellation_requested(task: asyncio.Task) -> bool:
+    """Report a pending cancellation on Python 3.10 and newer."""
+    cancelling = getattr(task, "cancelling", None)
+    if callable(cancelling):
+        return cancelling() > 0
+    if bool(getattr(task, "_must_cancel", False)):
+        return True
+    waiter = getattr(task, "_fut_waiter", None)
+    return isinstance(waiter, asyncio.Future) and waiter.cancelled()
+
+
 def _mark_web_session(manager, cwd, session_id):
     """给已播种的会话补 web-session.json 侧车,使其在新语义下视为 web(非外来)会话。"""
     sidecar = manager.storage.session_dir(cwd, session_id) / "web-session.json"
@@ -235,7 +246,7 @@ def test_web_app_shutdown_leaves_a_non_running_event_loop_to_drain_its_cancellat
             return None
 
         async def shutdown(self) -> None:
-            self.cancellation_executed_during_shutdown = local_task.cancelling() > 0
+            self.cancellation_executed_during_shutdown = _task_cancellation_requested(local_task)
             self.cleanup_completed_during_shutdown = cleanup_completed.is_set()
 
     runner = RecordingPipelineRunner()
@@ -310,7 +321,7 @@ def test_web_app_shutdown_does_not_drive_a_non_running_event_loop_with_multiple_
             return None
 
         async def shutdown(self) -> None:
-            self.cancellation_executed_during_shutdown = any(task.cancelling() > 0 for task in tasks)
+            self.cancellation_executed_during_shutdown = any(_task_cancellation_requested(task) for task in tasks)
 
     runner = RecordingPipelineRunner()
     app = web_app.create_app(session_manager=manager, pipeline_action_runner_factory=lambda: runner)
@@ -701,7 +712,7 @@ def test_web_app_shutdown_cancels_closed_loop_active_and_admission_work(tmp_path
 
         async def shutdown(self) -> None:
             self.active_future_was_cancelled = active_future.cancelled()
-            self.admission_owner_was_cancelled = admission_owner.cancelling() > 0
+            self.admission_owner_was_cancelled = _task_cancellation_requested(admission_owner)
 
     runner = RecordingPipelineRunner()
     app = create_app(session_manager=manager, pipeline_action_runner_factory=lambda: runner)

@@ -4603,7 +4603,7 @@ def create_app(
             active_turn_task = session.active_turn_task
             if not message.strip() and active_turn_task is not None and not active_turn_task.done():
                 cancel_active_turn_task(active_turn_task)
-                if isinstance(active_turn_task, asyncio.Task):
+                if isinstance(active_turn_task, asyncio.Task) and session.queued_inputs:
                     # Auto-submit any queued inputs once the cancelled turn fully
                     # unwinds. Register in active_local_tasks before releasing the
                     # admission lock so a concurrent shutdown snapshot includes it.
