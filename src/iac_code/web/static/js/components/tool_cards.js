@@ -1206,6 +1206,10 @@ function renderToolGroup(tools, openToolUseId, collapseNonComplete = false, turn
   const group = document.createElement("details");
   const groupActive = tools.some(isToolInProgress);
   const holdsLatest = Boolean(openToolUseId) && tools.some((tool) => text(tool.toolUseId) === openToolUseId);
+  // 组内有栈操作正在进行且已挂实时进度帧(部署/删除)——须先于 collapseNonComplete 的收起短路:
+  // 否则该 ros_stack 卡自身虽由 shouldOpenToolCard 展开,外层收起的分组 <details> 仍把实时进度藏起来
+  // (镜像 shouldOpenToolCard 的同名短路,让「部署时自动展开看进度」在分组场景也成立)。
+  const hasActiveStackProgress = tools.some((tool) => Boolean(tool.stackProgress) && isToolInProgress(tool));
   group.className = groupActive ? "tool-group is-active" : "tool-group";
   // 分组以首个工具的 toolUseId 作稳定键（流式追加时首项不变），跨帧重建保留展开态。
   group.dataset.openKey = `grp:${text(tools[0]?.toolUseId)}`;
@@ -1216,7 +1220,9 @@ function renderToolGroup(tools, openToolUseId, collapseNonComplete = false, turn
   //     holdsLatest 转假, 该组随即自动收起(Issue：所有工具完成且下一事件非工具相关时自动收起)。
   // 组内每张卡仍由 shouldOpenToolCard 保持收起(消除逐条事件到达时卡片反复展开/收起的抖动)。
   // 静息的流水线转录(collapseNonComplete)：整组强制收起(避免 reload 后一屏铺开)。
-  if (collapseNonComplete) {
+  if (hasActiveStackProgress) {
+    group.open = true;
+  } else if (collapseNonComplete) {
     group.open = false;
   } else {
     group.open = groupActive || holdsLatest;

@@ -1106,8 +1106,8 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-300" in html
-    assert "/static/js/app.js?v=web-repl-ui-300" in html
+    assert "/static/styles.css?v=web-repl-ui-302" in html
+    assert "/static/js/app.js?v=web-repl-ui-302" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1115,7 +1115,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     # 同样需 bump api.js 版本位,否则回访浏览器拿不到新导出。
     assert "./api.js?v=web-repl-ui-159" in app_source
     assert "./components/composer.js?v=session-model-v15" in app_source
-    assert "./components/tool_cards.js?v=live-inline-tools-v20" in app_source
+    assert "./components/tool_cards.js?v=live-inline-tools-v21" in app_source
     assert "./components/blocking.js?v=blocking-keys-v4" in app_source
     # events.js 承载队列/消息 reducer,历次修复都在此;它的 import 必须带版本位,
     # 否则回访浏览器会加载「新 app.js + 旧缓存 events.js」,让队列行为与当前代码不一致。
@@ -1139,7 +1139,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-300" in index_html
+    assert "web-repl-ui-302" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-196" in app_source
     assert "./components/workspace.js?v=cloud-creds-v48" in app_source
@@ -9307,8 +9307,8 @@ def test_styles_has_compaction_boundary_rule() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-300" in html
-    assert "web-repl-ui-299" not in html
+    assert "web-repl-ui-302" in html
+    assert "web-repl-ui-301" not in html
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:
@@ -9372,6 +9372,20 @@ def test_stack_progress_rendered_on_tool_card() -> None:
     assert "tool-stack-progress-status" in tool_cards
     assert ".tool-stack-progress-bar-fill" in styles
     assert ".tool-stack-progress-head" in styles
+
+
+def test_stack_progress_refreshes_outputs_panel() -> None:
+    # 资源栈应在部署「开始」即出现,而非完成后:后端 outputs_payload 已能从进行中态派生「创建中」栈,
+    # 但仅在拉取 /outputs 时生效。tool.finished 只在终态触发,故 app.js 需在收到 stack.progress
+    # (约一个轮询间隔后的首帧)时也去抖刷新输出面板。缺此触发器则栈仍要等 tool.finished 才现身。
+    app_source = _source(APP_JS)
+    trigger = app_source.split('if (event.type === "pipeline.event") {', 1)
+    assert len(trigger) == 2, "缺少 pipeline.event 刷新输出面板的触发块"
+    block = trigger[1].split("}", 2)[0] + trigger[1].split("}", 2)[1]
+    assert "pipelineEventKind(event.payload)" in block
+    assert '"stack.progress"' in block
+    assert '"stack.instances.progress"' in block
+    assert "scheduleOutputsRefresh()" in block
 
 
 def test_stack_progress_elapsed_ticks_between_frames() -> None:

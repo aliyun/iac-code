@@ -2,7 +2,7 @@ import * as api from "./api.js?v=web-repl-ui-159";
 import { createComposerController } from "./components/composer.js?v=session-model-v15";
 import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v4";
 import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v5";
-import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v20";
+import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v21";
 import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v48";
 import { createOutputController } from "./components/output_panel.js?v=output-panel-v16";
 import { reduceEvent } from "./events.js?v=web-repl-ui-196";
@@ -5010,6 +5010,15 @@ async function handleStreamEvent(event, generation = sessionLoadGeneration) {
   // 优化开始时也刷新输出面板，让架构图行/预览头的徽标从「待优化」翻到「优化中」。
   if (event.type === "diagram.optimizing") {
     scheduleOutputsRefresh();
+  }
+  // 栈部署进行中的进度帧到达时也刷新输出面板：后端 outputs_payload 已能从 stack_current_changed
+  // 的进行中态派生「创建中」资源栈，但仅在拉取 /outputs 时生效；tool.finished 只在终态触发，
+  // 故这里在首个 stack.progress（约一个轮询间隔后）就刷新，让资源栈在创建开始即出现，而非完成后。
+  if (event.type === "pipeline.event") {
+    const kind = pipelineEventKind(event.payload);
+    if (kind === "stack.progress" || kind === "stack.instances.progress") {
+      scheduleOutputsRefresh();
+    }
   }
   // 合并渲染：高频流式事件下每帧只重建一次正文，避免逐 token 全量重排造成卡顿。
   scheduleStreamRender();

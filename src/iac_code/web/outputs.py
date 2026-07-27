@@ -30,6 +30,17 @@ def _is_stack_write_call(tool_name: Any, action: Any) -> bool:
         return action in ROS_DEPLOY_STACK_ACTIONS
     return False
 
+
+def _is_pending_stack_status(status: Any) -> bool:
+    """判断栈状态是否为「进行中/已请求」的过渡态。
+
+    用于在部署**开始**(而非完成)即把栈落进输出面板:底层栈工具内部轮询、只在**终态**
+    才返回 ToolResult,故终态前面板一直空;而创建一开始就有 CREATE_IN_PROGRESS 的
+    ``stack_current_changed`` 信封,据此过渡态提前入栈。终态仍由 tool_result 权威覆盖。
+    """
+    s = str(status or "").upper()
+    return bool(s) and (s.endswith("_IN_PROGRESS") or s.endswith("_REQUESTED"))
+
 _ROS_MARKERS = ("ROSTemplateFormatVersion", "Resources", "Transform")
 _TF_PATTERN = re.compile(r'(^|\n)\s*(resource|provider|module|terraform)\s*["{]')
 
@@ -284,10 +295,27 @@ def outputs_payload(
     # pipeline 的工具调用记在独立 A2A 子会话日志里(主会话 jsonl 只有用户 prompt),
     # 需按 contextId 读取 envelope 才能识别其生成的模板与部署的栈。
     for envelope in manager._load_a2a_pipeline_envelopes(getattr(session, "context_id", None)):
-        if envelope.get("eventType") != "tool_result":
-            continue
+        event_type = envelope.get("eventType")
         data = envelope.get("data")
         if not isinstance(data, dict):
+            continue
+        if event_type == "stack_current_changed":
+            # 部署一开始(CreateStack 刚返回 stack_id)即落一个「进行中」栈,让输出面板在
+            # 创建开始就出现资源栈,而非等到终态 tool_result(可能是数分钟后)。终态到来时
+            # 下方 tool_result 分支会以相同 region::栈名 键、用权威结果(status_reason/is_success)覆盖之。
+            if _is_pending_stack_status(data.get("stackStatus")) and data.get("stackId"):
+                add_stack(
+                    {
+                        "stack_id": data.get("stackId"),
+                        "stack_name": data.get("stackName") or "",
+                        "status": data.get("stackStatus"),
+                        "status_reason": "",
+                        "is_success": False,
+                    },
+                    data.get("regionId"),
+                )
+            continue
+        if event_type != "tool_result":
             continue
         tool_name = data.get("toolName")
         tool_input = data.get("input") or {}

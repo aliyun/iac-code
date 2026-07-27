@@ -818,6 +818,113 @@ def test_frontend_active_stack_progress_card_auto_expands_in_pipeline(tmp_path) 
     assert output["withoutProgressOpen"] is False
 
 
+def test_frontend_active_stack_progress_group_auto_expands_when_collapsed(tmp_path) -> None:
+    # Issue 2b:部署进行中的 ros_stack 若与别的工具同处一条助手消息,会被折进「工具组」。
+    # collapseNonComplete(如流水线切回 normal chat 仍带 contextId 的会话)下整组强制收起,
+    # 即便组内那张 ros_stack 卡自身已展开,外层收起的 <details> 仍把实时进度藏了起来。
+    # 组内只要有一张「进行中且已挂实时进度帧」的栈卡,整组必须自动展开(先于 collapseNonComplete)。
+    output = _run_reducer_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            import { reduceEvent } from __EVENTS_MODULE__;
+            import { renderToolCards } from __TOOL_CARDS_MODULE__;
+
+            class Element {
+              constructor(tagName) {
+                this.tagName = tagName.toUpperCase();
+                this.children = [];
+                this.dataset = {};
+                this.textContent = "";
+                this.className = "";
+              }
+              append(...children) {
+                this.children.push(...children);
+              }
+            }
+
+            globalThis.document = {
+              createElement(tagName) {
+                return new Element(tagName);
+              },
+            };
+
+            function findByClass(node, cls) {
+              if (typeof node.className === "string" && node.className.includes(cls)) {
+                return node;
+              }
+              for (const child of node.children || []) {
+                const found = findByClass(child, cls);
+                if (found) {
+                  return found;
+                }
+              }
+              return null;
+            }
+
+            function findCard(node, toolUseId) {
+              if (
+                typeof node.className === "string" &&
+                node.className.includes("tool-card") &&
+                node.dataset &&
+                node.dataset.toolUseId === toolUseId
+              ) {
+                return node;
+              }
+              for (const child of node.children || []) {
+                const found = findCard(child, toolUseId);
+                if (found) {
+                  return found;
+                }
+              }
+              return null;
+            }
+
+            // 一条助手消息里的两个工具:ros_stack(进行中 + 实时进度)与另一进行中工具 →
+            // grouped 渲染时二者进同一「工具组」。
+            let state = reduceEvent({}, {
+              type: "tool.started",
+              sequence: 1,
+              payload: { toolUseId: "deploy-1", toolName: "ros_stack" },
+            });
+            state = reduceEvent(state, {
+              type: "tool.started",
+              sequence: 2,
+              payload: { toolUseId: "read-1", toolName: "read_file" },
+            });
+            state = reduceEvent(state, {
+              type: "pipeline.event",
+              sequence: 3,
+              payload: {
+                kind: "stack.progress",
+                toolUseId: "deploy-1",
+                stackName: "my-stack",
+                status: "CREATE_IN_PROGRESS",
+                progressPercentage: 40,
+                resources: [],
+                elapsedSeconds: 5,
+                deploymentComplete: false,
+              },
+            });
+
+            const root = renderToolCards(state, { grouped: true, collapseNonComplete: true });
+            const group = findByClass(root, "tool-group");
+            const card = findCard(root, "deploy-1");
+            console.log(JSON.stringify({
+              groupFound: !!group,
+              groupOpen: group ? group.open === true : null,
+              cardOpen: card ? card.open === true : null,
+            }));
+            """
+        ),
+    )
+
+    assert output["groupFound"] is True
+    # 组内有进行中的栈进度 → 整组自动展开,实时进度不再被收起的分组藏起来。
+    assert output["groupOpen"] is True
+    assert output["cardOpen"] is True
+
+
 def test_frontend_tool_cards_group_multiple_shell_commands(tmp_path) -> None:
     output = _run_reducer_script(
         tmp_path,
