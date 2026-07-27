@@ -1106,8 +1106,8 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-297" in html
-    assert "/static/js/app.js?v=web-repl-ui-297" in html
+    assert "/static/styles.css?v=web-repl-ui-300" in html
+    assert "/static/js/app.js?v=web-repl-ui-300" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1139,7 +1139,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-297" in index_html
+    assert "web-repl-ui-300" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-196" in app_source
     assert "./components/workspace.js?v=cloud-creds-v48" in app_source
@@ -1767,9 +1767,10 @@ def test_active_thinking_shows_shimmering_label() -> None:
 
     # While a message is still streaming (thinking, no text/tool yet) the label reads
     # "正在思考" and carries the is-thinking flag; once done it reads "思考完成".
+    # 进行中用独立 msgid「Thinking…」,与意图开关按钮的「Thinking」解耦(否则被开关译文锁成「思考」)。
     assert "function isThinkingActive" in app_source
     assert 'summaryLabel.className = "message-thinking-label"' in app_source
-    assert 'active ? t("Thinking") : t("Thinking done")' in app_source
+    assert 'active ? t("Thinking…") : t("Thinking done")' in app_source
     assert 'thinking.classList.add("is-thinking")' in app_source
 
     # The shimmer animation is defined and applied to the active thinking label.
@@ -9306,8 +9307,33 @@ def test_styles_has_compaction_boundary_rule() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-297" in html
-    assert "web-repl-ui-296" not in html
+    assert "web-repl-ui-300" in html
+    assert "web-repl-ui-299" not in html
+
+
+def test_load_sessions_preserves_expanded_project_groups() -> None:
+    # 定期后台刷新(perProjectLimit=5)重建 projectGroups 时,必须保留已展开项目的完整会话列表,
+    # 否则展开的会话组会在无操作 12s 后被打回 5 条自动收起。loadSessions 须经 preserve 助手过滤。
+    app_source = _source(APP_JS)
+    assert "function preserveExpandedProjectGroups(freshGroups)" in app_source
+    assert "projectGroups: preserveExpandedProjectGroups(payload.projects || [])" in app_source
+    # 助手仅在存在展开项目时介入,且对已展开的组用「上一份更长的会话列表」覆盖精简数据。
+    assert "if (expandedProjectKeys.size === 0)" in app_source
+    assert "if (previousSessions.length <= freshSessions.length)" in app_source
+    # 关键:后端 projects 载荷只带 cwd、无 key 字段,而 expandedProjectKeys 存的是
+    # groupSessionsByProject 归一化后的 key(projectKeyFromGroup)。保留逻辑必须用同一个
+    # projectKeyFromGroup 派生 key,否则 has(group.key)=has(undefined) 恒 false,展开态照样丢。
+    preserve_body = app_source.split("function preserveExpandedProjectGroups(freshGroups)", 1)[1].split(
+        "async function loadSessions()", 1
+    )[0]
+    assert "const key = projectKeyFromGroup(group)" in preserve_body
+    assert "expandedProjectKeys.has(key)" in preserve_body
+    assert "previousByKey.get(key)" in preserve_body
+    # 回归护栏:不得退回按原始 group.key 字段取键(后端载荷无 key → undefined → 恒不命中)。
+    assert "expandedProjectKeys.has(group.key)" not in preserve_body
+    assert "previousByKey.get(group.key)" not in preserve_body
+    # 直接整体覆盖 projectGroups 的旧写法(丢失展开状态)不得再出现。
+    assert "projectGroups: payload.projects || []," not in app_source
 
 
 def test_update_banner_periodic_polling_present() -> None:

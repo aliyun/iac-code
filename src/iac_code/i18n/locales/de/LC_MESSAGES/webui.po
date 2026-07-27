@@ -3321,3 +3321,7 @@ msgstr "{command} ist im Pipeline-Modus nicht verfügbar"
 #, python-brace-format
 msgid "{command} is only available in an active conversation"
 msgstr "{command} ist nur in einer aktiven Unterhaltung verfügbar"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Thinking…"
+msgstr "Denkt nach…"

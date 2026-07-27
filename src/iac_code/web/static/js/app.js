@@ -2497,7 +2497,9 @@ function buildThinkingElement(message, state) {
   const summary = document.createElement("summary");
   const summaryLabel = document.createElement("span");
   summaryLabel.className = "message-thinking-label";
-  summaryLabel.textContent = active ? t("Thinking") : t("Thinking done");
+  // 进行中用独立 msgid「Thinking…」(zh「正在思考」),与意图开关按钮的「Thinking」(zh「思考」)
+  // 解耦——二者曾共用 msgid,导致进行中指示器被开关的译文锁成「思考」。
+  summaryLabel.textContent = active ? t("Thinking…") : t("Thinking done");
   if (active) {
     // 「正在思考」流光：对齐相位，避免每帧重建把动画重置到不可见起点（见 applyShimmerPhase）。
     applyShimmerPhase(summaryLabel);
@@ -4631,6 +4633,36 @@ function maybeOpenPipelineSelectionWorkspace(candidateState = state) {
   }
 }
 
+// 定期后台刷新用 perProjectLimit(5 条/项目)重建 projectGroups。若用户此前「展开」过某项目
+// (expandedProjectKeys 里有其 key),直接用这份精简数据覆盖,会把展开时加载的完整会话列表打回
+// 5 条 —— 表现为「展开的会话组无操作过一会自动收起」。这里对已展开的组保留上一份更长的会话列表,
+// 并用刷新后的会话对象覆盖重叠项,使可见会话的活动态(转圈/未读)仍随轮询更新。
+function preserveExpandedProjectGroups(freshGroups) {
+  if (expandedProjectKeys.size === 0) {
+    return freshGroups;
+  }
+  // 关键:expandedProjectKeys 存的是渲染层归一化后的 key(groupSessionsByProject 用
+  // cwd || key || projectPath),而后端 projects 载荷只带 cwd、没有 key 字段。这里必须用同一个
+  // projectKeyFromGroup 派生 key,否则 has(group.key) 恒为 has(undefined)=false,保留逻辑永不触发。
+  const previousByKey = new Map((state.projectGroups || []).map((group) => [projectKeyFromGroup(group), group]));
+  return freshGroups.map((group) => {
+    const key = projectKeyFromGroup(group);
+    if (!expandedProjectKeys.has(key)) {
+      return group;
+    }
+    const previousSessions = previousByKey.get(key)?.sessions || [];
+    const freshSessions = group.sessions || [];
+    if (previousSessions.length <= freshSessions.length) {
+      return group;
+    }
+    const freshById = new Map(freshSessions.map((session) => [displaySessionId(session), session]));
+    return {
+      ...group,
+      sessions: previousSessions.map((session) => freshById.get(displaySessionId(session)) || session),
+    };
+  });
+}
+
 async function loadSessions() {
   const payload = await api.listSessions({
     limit: 50,
@@ -4642,7 +4674,7 @@ async function loadSessions() {
     sessions,
     pinnedSessions: payload.pinnedSessions || [],
     pinnedProjects: payload.pinnedProjects || [],
-    projectGroups: payload.projects || [],
+    projectGroups: preserveExpandedProjectGroups(payload.projects || []),
   };
   return sessions;
 }

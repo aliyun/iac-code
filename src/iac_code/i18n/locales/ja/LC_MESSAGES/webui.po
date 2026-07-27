@@ -3217,3 +3217,7 @@ msgstr "{command} はパイプラインモードでは使用できません"
 #, python-brace-format
 msgid "{command} is only available in an active conversation"
 msgstr "{command} は進行中の会話でのみ使用できます"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Thinking…"
+msgstr "思考中…"

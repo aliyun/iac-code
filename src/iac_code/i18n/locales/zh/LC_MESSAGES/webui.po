@@ -3211,3 +3211,7 @@ msgstr "{command} 在流水线模式下不可用"
 #, python-brace-format
 msgid "{command} is only available in an active conversation"
 msgstr "{command} 仅在进行中的会话中可用"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Thinking…"
+msgstr "正在思考"
