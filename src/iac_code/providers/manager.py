@@ -1000,6 +1000,32 @@ class ProviderManager:
                             )
                 except StopAsyncIteration:
                     break
+                except asyncio.TimeoutError:
+                    # Stream idle watchdog fired: no event arrived within the idle
+                    # window. Emit a rich diagnostic before re-raising into the generic
+                    # handler (whose asyncio.TimeoutError carries an empty message, so
+                    # "Streaming failed, falling back to non-streaming: " alone is
+                    # useless). message_started disambiguates the two failure shapes:
+                    #   message_started=False → nothing arrived at all (request never got
+                    #     a response: connection-level / upstream-queue stall);
+                    #   message_started=True, first_token_received=False → response opened
+                    #     then went silent before any content (mid-stream / slow generation).
+                    # scope carries the pipeline candidate, so a parallel-candidate stall
+                    # can be attributed to the exact candidate that starved.
+                    idle_elapsed = time.monotonic() - started
+                    logger.warning(
+                        "Provider stream idle timeout: waited {:.1f}s (idle_limit={:.0f}s) "
+                        "with no further stream event; message_started={}, "
+                        "first_token_received={}, provider={}, model={}, scope={}",
+                        idle_elapsed,
+                        self._stream_idle_timeout,
+                        current_message_id is not None,
+                        first_token_received,
+                        provider_name,
+                        sanitized_model,
+                        captured_scope,
+                    )
+                    raise
 
                 if isinstance(event, MessageEndEvent):
                     watchdog.stop()

@@ -1175,6 +1175,66 @@ class TestProviderManagerStreaming:
         assert events[2].message_id == "fallback-after-partial-timeout"
         assert events[3].text == "recovered"
 
+    async def test_stream_idle_timeout_logs_disambiguating_diagnostic(self):
+        # The idle watchdog fires as a bare asyncio.TimeoutError (empty message), so the
+        # generic handler alone logs an uninformative line. A dedicated warning records
+        # message_started + first_token_received, which distinguishes "nothing arrived"
+        # (upstream-queue/connection stall) from "response opened then went silent"
+        # (mid-stream/slow generation) — the exact question when a parallel pipeline
+        # candidate appears to idle.
+        from loguru import logger
+
+        class HangImmediatelyProvider:
+            def get_model_name(self) -> str:
+                return "claude-sonnet-4-6"
+
+            async def stream(self, messages, system, tools=None, max_tokens=8192):
+                await asyncio.sleep(999)
+                yield MessageEndEvent(stop_reason="never", usage=Usage())
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                return NonStreamingResponse(
+                    message_id="fb",
+                    text="recovered",
+                    tool_uses=[],
+                    stop_reason="end_turn",
+                    usage=Usage(input_tokens=1, output_tokens=1),
+                )
+
+        class HangAfterStartProvider(HangImmediatelyProvider):
+            async def stream(self, messages, system, tools=None, max_tokens=8192):
+                yield MessageStartEvent(message_id="partial")
+                await asyncio.sleep(999)
+                yield MessageEndEvent(stop_reason="never", usage=Usage())
+
+        async def _capture_idle_warning(provider) -> str:
+            records: list[str] = []
+            handler_id = logger.add(records.append, level="WARNING", format="{message}")
+            try:
+                mgr = ProviderManager(
+                    model="claude-sonnet-4-6",
+                    credentials={"anthropic": "k"},
+                    stream_idle_timeout=STREAM_IDLE_TEST_TIMEOUT,
+                )
+                mgr._provider = provider
+                await asyncio.wait_for(
+                    _collect_stream_events(mgr.stream(messages=[Message.user("hi")], system="sys")),
+                    timeout=1.0,
+                )
+            finally:
+                logger.remove(handler_id)
+            idle_lines = [line for line in records if "Provider stream idle timeout" in str(line)]
+            assert idle_lines, records
+            return str(idle_lines[0])
+
+        nothing_arrived = await _capture_idle_warning(HangImmediatelyProvider())
+        assert "message_started=False" in nothing_arrived
+        assert "first_token_received=False" in nothing_arrived
+
+        opened_then_silent = await _capture_idle_warning(HangAfterStartProvider())
+        assert "message_started=True" in opened_then_silent
+        assert "first_token_received=False" in opened_then_silent
+
     async def test_stream_cancelled_error_propagates_without_fallback(self):
         class CancellingStreamProvider:
             def get_model_name(self) -> str:
