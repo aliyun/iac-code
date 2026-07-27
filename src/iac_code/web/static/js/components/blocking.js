@@ -318,6 +318,144 @@ export function renderQuestionRequest(request = {}, handlers = {}) {
   return panel;
 }
 
+function elicitationFields(payload) {
+  return (Array.isArray(payload.fields) ? payload.fields : [])
+    .map((field) => ({
+      name: text(field?.name),
+      label: text(field?.label || field?.name),
+      description: text(field?.description),
+      required: field?.required === true,
+      type: text(field?.type || "string"),
+      enum: Array.isArray(field?.enum) ? field.enum.map((value) => text(value)) : [],
+    }))
+    .filter((field) => field.name);
+}
+
+function elicitationFieldControl(field) {
+  if (field.type === "enum") {
+    const select = document.createElement("select");
+    select.className = "blocking-elicitation-input";
+    if (!field.required) {
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = "";
+      select.append(blank);
+    }
+    for (const value of field.enum) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      select.append(option);
+    }
+    return { control: select, read: () => select.value };
+  }
+  if (field.type === "boolean") {
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "blocking-elicitation-checkbox";
+    return { control: checkbox, read: () => (checkbox.checked ? "yes" : "no") };
+  }
+  const input = document.createElement("input");
+  input.className = "blocking-elicitation-input";
+  input.type = field.type === "integer" || field.type === "number" ? "number" : "text";
+  if (field.type === "integer") {
+    input.step = "1";
+  }
+  return { control: input, read: () => input.value };
+}
+
+export function renderElicitationRequest(request = {}, handlers = {}) {
+  const payload = request.payload || {};
+  const requestId = text(request.requestId);
+  const panel = document.createElement("article");
+  panel.className = "blocking-panel blocking-panel-elicitation";
+  panel.dataset.requestId = requestId;
+
+  const server = text(payload.server);
+  if (server) {
+    const badge = document.createElement("p");
+    badge.className = "blocking-detail blocking-elicitation-server";
+    badge.textContent = t("MCP server {server}", { server });
+    panel.append(badge);
+  }
+
+  const title = document.createElement("h3");
+  title.textContent = text(payload.message || t("Input required"));
+  panel.append(title);
+
+  const url = text(payload.url);
+  if (payload.mode === "url" && url) {
+    const link = document.createElement("a");
+    link.className = "blocking-elicitation-url";
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = url;
+    panel.append(link);
+  }
+
+  const fields = payload.mode === "form" ? elicitationFields(payload) : [];
+  const readers = [];
+  if (fields.length > 0) {
+    const form = document.createElement("div");
+    form.className = "blocking-elicitation-fields";
+    for (const field of fields) {
+      const wrapper = document.createElement("label");
+      wrapper.className = "blocking-elicitation-field";
+
+      const label = document.createElement("span");
+      label.className = "blocking-elicitation-label";
+      label.textContent = field.required ? `${field.label} *` : field.label;
+      wrapper.append(label);
+
+      const { control, read } = elicitationFieldControl(field);
+      wrapper.append(control);
+
+      const description = field.description;
+      if (description) {
+        const hint = document.createElement("span");
+        hint.className = "blocking-elicitation-desc";
+        hint.textContent = description;
+        wrapper.append(hint);
+      }
+
+      readers.push({ name: field.name, read });
+      form.append(wrapper);
+    }
+    panel.append(form);
+  }
+
+  const collectContent = () => {
+    const content = {};
+    for (const { name, read } of readers) {
+      const value = read();
+      if (value !== "" && value !== null && value !== undefined) {
+        content[name] = value;
+      }
+    }
+    return content;
+  };
+
+  const answer = (action, includeContent) => {
+    handlers.onElicitationAnswer?.(requestId, {
+      sessionId: text(payload.sessionId),
+      action,
+      content: includeContent ? collectContent() : {},
+    });
+  };
+
+  const footer = document.createElement("div");
+  footer.className = "blocking-elicitation-footer";
+  footer.append(
+    makeButton(t("Accept"), "blocking-action blocking-action-primary", () => answer("accept", true)),
+    makeButton(t("Decline"), "blocking-action", () => answer("decline", false)),
+    makeButton(t("Cancel"), "blocking-action", () => answer("cancel", false)),
+  );
+  panel.append(footer);
+
+  return panel;
+}
+
 export function renderBlockingPanels(state = {}, handlers = {}) {
   const container = document.createElement("section");
   container.className = "blocking-panels";
@@ -327,6 +465,9 @@ export function renderBlockingPanels(state = {}, handlers = {}) {
   }
   for (const request of Object.values(state.questions || {})) {
     container.append(renderQuestionRequest(request, handlers));
+  }
+  for (const request of Object.values(state.elicitations || {})) {
+    container.append(renderElicitationRequest(request, handlers));
   }
 
   return container;

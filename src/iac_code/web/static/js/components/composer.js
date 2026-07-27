@@ -81,7 +81,7 @@ const COMMAND_DISPLAY_DESCRIPTION_BY_NAME = {
 export function suggestionDisplayParts(suggestion = {}, options = {}) {
   const label = text(suggestion.label || suggestion.value || suggestion.name || "");
   const value = text(suggestion.value || suggestion.name || "");
-  const match = label.match(/^([/@$!]?[^\s]+)\s+(.+)$/);
+  const match = label.match(/^([\/@$!]?[^\s]+)\s+(.+)$/);
   const commandName = suggestionLayoutKind(suggestion) === "command" ? commandNameFromSuggestion(suggestion) : "";
   const commandDisplayToken = COMMAND_DISPLAY_TOKEN_BY_NAME[commandName] || "";
   const commandDisplayDescription = COMMAND_DISPLAY_DESCRIPTION_BY_NAME[commandName] || "";
@@ -150,7 +150,7 @@ function safeSuggestionClassPart(value) {
 
 export function commandNameFromSuggestion(suggestion = {}) {
   const raw = text(suggestion.value || suggestion.name || suggestion.label || "").trim();
-  const withoutPrefix = raw.replace(/^[/@$!]+/, "");
+  const withoutPrefix = raw.replace(/^[\/@$!]+/, "");
   return safeSuggestionClassPart(withoutPrefix.split(/\s+/)[0] || "");
 }
 
@@ -182,7 +182,7 @@ export function skillScopeLabel(suggestion = {}) {
 function skillDisplayName(suggestion = {}) {
   const parts = suggestionDisplayParts(suggestion);
   const raw = text(parts.token || suggestion.name || suggestion.value || suggestion.label).trim();
-  return raw.replace(/^[$/]+/, "").split(/\s+/)[0] || "skill";
+  return raw.replace(/^[$\/]+/, "").split(/\s+/)[0] || "skill";
 }
 
 function skillCommandValue(suggestion = {}) {
@@ -461,6 +461,9 @@ function providerLabel(provider, fallback = "") {
 function effortLabel(effort) {
   return (
     {
+      // DashScope glm-5.2 / Gemini-3 等模型的最低两档;缺映射时会裸露小写英文。
+      none: t("None"),
+      minimal: t("Minimal"),
       low: t("Low"),
       medium: t("Medium"),
       high: t("High"),

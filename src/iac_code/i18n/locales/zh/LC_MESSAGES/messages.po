@@ -9786,6 +9786,21 @@ msgid "Always deny this session"
 msgstr "本会话始终拒绝"
 
 #: src/iac_code/web/permissions.py
+#, python-brace-format
+msgid "Unknown elicitation action {!r}."
+msgstr "未知的征询操作 {!r}。"
+
+#: src/iac_code/web/permissions.py
+#, python-brace-format
+msgid "A value is required for {}."
+msgstr "{} 需要填写一个值。"
+
+#: src/iac_code/web/permissions.py
+#, python-brace-format
+msgid "Invalid value {!r}."
+msgstr "值 {!r} 无效。"
+
+#: src/iac_code/web/permissions.py
 msgid "this action"
 msgstr "该操作"
 
@@ -10279,3 +10294,4 @@ msgstr "允许 Bash?"
 
 #~ msgid "由外部登录管理"
 #~ msgstr "由外部登录管理"
+

@@ -156,6 +156,30 @@ function aliyunApiLabel(tool = {}) {
   return parts.length > 0 ? parts.join(" ") : t("Alibaba Cloud API");
 }
 
+// MCP 工具在注册时被命名为 mcp__{server}__{tool}(见后端 mcp/manager.py)。
+export function isMcpTool(tool = {}) {
+  return lowerToolName(tool).startsWith("mcp__");
+}
+
+// 解析 mcp__server__tool → { server, tool }。首个「__」定界 server 与 tool:
+// server 先注册(单段标识符),tool 段可能自带下划线,故取剩余全部。
+function mcpToolParts(tool = {}) {
+  const raw = toolName(tool);
+  const rest = raw.slice("mcp__".length);
+  const boundary = rest.indexOf("__");
+  if (boundary < 0) {
+    return { server: "", tool: rest };
+  }
+  return { server: rest.slice(0, boundary), tool: rest.slice(boundary + 2) };
+}
+
+// 渲染成「server · tool」;缺 server 时退化为 tool 段本身。
+function mcpToolLabel(tool = {}) {
+  const { server, tool: toolPart } = mcpToolParts(tool);
+  const parts = [server, toolPart].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : toolName(tool);
+}
+
 function basename(pathValue) {
   const value = text(pathValue).trim();
   if (!value) {
@@ -466,6 +490,7 @@ const TOOL_ACTION_LABELS = {
   ros_stack: t("Operated ROS stack"),
   ros_stack_instances: t("Queried ROS stack instances"),
   aliyun_doc_search: t("Searched Alibaba Cloud docs"),
+  aliyun_api_doc: t("Looked up Alibaba Cloud API reference"),
   ask_user_question: t("Asked the user"),
 };
 
@@ -484,6 +509,7 @@ const TOOL_ACTION_LABELS_PROGRESS = {
   ros_stack: t("Operating ROS stack"),
   ros_stack_instances: t("Querying ROS stack instances"),
   aliyun_doc_search: t("Searching Alibaba Cloud docs"),
+  aliyun_api_doc: t("Looking up Alibaba Cloud API reference"),
   ask_user_question: t("Asking the user"),
 };
 
@@ -497,6 +523,9 @@ function toolActionTarget(tool = {}) {
   }
   if (isAliyunApiTool(tool)) {
     return compact(aliyunApiLabel(tool), 96);
+  }
+  if (isMcpTool(tool)) {
+    return compact(mcpToolLabel(tool), 96);
   }
   if (isShellTool(tool)) {
     return compact(commandFromTool(tool) || toolName(tool), 140);
@@ -533,6 +562,18 @@ function toolPhrase(tool = {}, state = "done") {
   }
   if (isAliyunApiTool(tool)) {
     const label = compact(aliyunApiLabel(tool), 96);
+    if (state === "progress") {
+      return t("Calling {label}", { label });
+    }
+    if (state === "failed") {
+      return t("Call failed: {label}", { label });
+    }
+    return t("Called {label}", { label });
+  }
+  // MCP 工具:必须先于 read/list/write 子串启发式,否则 mcp__x__list_* 会被误判成「列出文件」。
+  // 复用 Calling/Called/Call failed 短语(与阿里云 API 一致),不新增 msgid。
+  if (isMcpTool(tool)) {
+    const label = compact(mcpToolLabel(tool), 96);
     if (state === "progress") {
       return t("Calling {label}", { label });
     }
@@ -1151,6 +1192,10 @@ function renderToolCard(tool = {}, options = {}) {
     .filter(Boolean)
     .join(" ");
   card.dataset.toolUseId = text(tool.toolUseId);
+  // MCP 工具挂 data-tool-kind="mcp",供 CSS 换用专属图标(区别于通用 >_ 终端字形)。
+  if (isMcpTool(tool)) {
+    card.dataset.toolKind = "mcp";
+  }
   // 稳定键（toolUseId）让用户手动展开/收起的态跨帧重建保留（app.js 的展开态存储）。
   card.dataset.openKey = `tool:${text(tool.toolUseId)}`;
   card.open = shouldOpenToolCard({

@@ -225,6 +225,7 @@ msgid "Close"
 msgstr "Fermer"
 
 #: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/blocking.js
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Cancel"
 msgstr "Annuler"
@@ -545,6 +546,7 @@ msgid "Pending optimization"
 msgstr "En attente d’optimisation"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
 msgid "Selected"
 msgstr "Sélectionné"
 
@@ -824,6 +826,19 @@ msgstr "Détails complémentaires"
 msgid "Select"
 msgstr "Sélectionner"
 
+#: src/iac_code/web/static/js/components/blocking.js
+#, python-brace-format
+msgid "MCP server {server}"
+msgstr "Serveur MCP {server}"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Accept"
+msgstr "Accepter"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Decline"
+msgstr "Refuser"
+
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Enter sends; Shift+Enter inserts a newline."
 msgstr "Entrée envoie ; Maj+Entrée insère un saut de ligne."
@@ -852,6 +867,102 @@ msgstr "Afficher l’état de la session actuelle"
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Show MCP server status"
 msgstr "Afficher l’état du serveur MCP"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "System"
+msgstr "Système"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Project"
+msgstr "Projet"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Personal"
+msgstr "Personnel"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Skills"
+msgstr "Compétences"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "None"
+msgstr "Aucun"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Minimal"
+msgstr "Minimal"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Low"
+msgstr "Faible"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Medium"
+msgstr "Moyen"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "High"
+msgstr "Élevé"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Very high"
+msgstr "Très élevé"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Max"
+msgstr "Maximal"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Auto"
+msgstr "Automatique"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Ask for approval"
+msgstr "Demander une approbation"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Ask before writes, external files, and restricted tool calls"
+msgstr ""
+"Demander avant les écritures, les fichiers externes et les appels "
+"d’outils restreints"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Approve for me"
+msgstr "Approuver à ma place"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Automatically accept common file edits; still ask for other risky actions"
+msgstr ""
+"Accepter automatiquement les modifications de fichiers courantes ; "
+"continuer à demander pour les autres actions risquées"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Full access"
+msgstr "Accès complet"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Full access permissions"
+msgstr "Autorisations d’accès complet"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Skip permission checks; only ask for safety protections"
+msgstr ""
+"Ignorer les vérifications d’autorisation ; demander uniquement pour les "
+"protections de sécurité"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Don't ask"
+msgstr "Ne pas demander"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Automatically deny actions that need approval"
+msgstr "Refuser automatiquement les actions nécessitant une approbation"
 
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Attachments can be sent after the current turn finishes."
@@ -924,12 +1035,33 @@ msgid "In progress / failed"
 msgstr "En cours / échec"
 
 #: src/iac_code/web/static/js/components/pipeline.js
+msgid "Parameter overrides"
+msgstr "Remplacements de paramètres"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Select candidate"
+msgstr "Sélectionner le candidat"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Submitting..."
+msgstr "Envoi en cours..."
+
+#: src/iac_code/web/static/js/components/pipeline.js
 msgid "Architecture diagram"
 msgstr "Schéma d’architecture"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No architecture diagram"
 msgstr "Aucun schéma d’architecture"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Candidates"
+msgstr "Candidats"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "No candidates."
+msgstr "Aucun candidat."
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Details"
@@ -982,10 +1114,6 @@ msgstr "Besoins non fonctionnels"
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Additional notes"
 msgstr "Notes complémentaires"
-
-#: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Candidates"
-msgstr "Candidats"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
 #: src/iac_code/web/static/js/components/workspace.js
@@ -1445,6 +1573,10 @@ msgid "Searched Alibaba Cloud docs"
 msgstr "Documentation Alibaba Cloud recherchée"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Looked up Alibaba Cloud API reference"
+msgstr "Référence de l'API Alibaba Cloud consultée"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Asked the user"
 msgstr "A interrogé l’utilisateur"
 
@@ -1499,6 +1631,10 @@ msgstr "Interrogation des instances de pile ROS"
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Searching Alibaba Cloud docs"
 msgstr "Recherche dans la documentation Alibaba Cloud"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Looking up Alibaba Cloud API reference"
+msgstr "Consultation de la référence de l'API Alibaba Cloud"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Asking the user"
@@ -2367,10 +2503,6 @@ msgid "Feedback"
 msgstr "Retour"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Project"
-msgstr "Projet"
-
-#: src/iac_code/web/static/js/components/workspace.js
 msgid "Reference"
 msgstr "Référence"
 
@@ -2534,10 +2666,6 @@ msgstr "Mémoire automatique désactivée"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Built-in"
 msgstr "Intégré"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Skills"
-msgstr "Compétences"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid ""
@@ -2835,10 +2963,6 @@ msgid "Not supported: {error}"
 msgstr "Non pris en charge : {error}"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "None"
-msgstr "Aucun"
-
-#: src/iac_code/web/static/js/components/workspace.js
 msgid "Tools"
 msgstr "Outils"
 
@@ -3066,18 +3190,6 @@ msgstr "Suppression de tout…"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Sort by"
 msgstr "Trier par"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Approve for me"
-msgstr "Approuver à ma place"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Full access"
-msgstr "Accès complet"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Don't ask"
-msgstr "Ne pas demander"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Graphite"
@@ -3323,3 +3435,4 @@ msgstr ""
 
 #~ msgid "Template files"
 #~ msgstr "Fichiers de modèle"
+

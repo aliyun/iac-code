@@ -223,6 +223,7 @@ msgid "Close"
 msgstr "閉じる"
 
 #: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/blocking.js
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Cancel"
 msgstr "キャンセル"
@@ -539,6 +540,7 @@ msgid "Pending optimization"
 msgstr "最適化待ち"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
 msgid "Selected"
 msgstr "選択済み"
 
@@ -812,6 +814,19 @@ msgstr "補足情報"
 msgid "Select"
 msgstr "選択"
 
+#: src/iac_code/web/static/js/components/blocking.js
+#, python-brace-format
+msgid "MCP server {server}"
+msgstr "MCP サーバー {server}"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Accept"
+msgstr "承認"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Decline"
+msgstr "拒否"
+
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Enter sends; Shift+Enter inserts a newline."
 msgstr "Enter で送信、Shift+Enter で改行を挿入します。"
@@ -840,6 +855,96 @@ msgstr "現在のセッションの状態を表示"
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Show MCP server status"
 msgstr "MCP サーバーの状態を表示"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "System"
+msgstr "システム"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Project"
+msgstr "プロジェクト"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Personal"
+msgstr "個人"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Skills"
+msgstr "スキル"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "None"
+msgstr "なし"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Minimal"
+msgstr "最小"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Low"
+msgstr "低"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Medium"
+msgstr "中"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "High"
+msgstr "高"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Very high"
+msgstr "非常に高い"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Max"
+msgstr "最大"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Auto"
+msgstr "自動"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Ask for approval"
+msgstr "承認を求める"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Ask before writes, external files, and restricted tool calls"
+msgstr "書き込み、外部ファイル、制限付きツール呼び出しの前に確認する"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Approve for me"
+msgstr "自分の代わりに承認"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Automatically accept common file edits; still ask for other risky actions"
+msgstr "一般的なファイル編集は自動的に受け入れ、その他の危険な操作は引き続き確認する"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Full access"
+msgstr "フルアクセス"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Full access permissions"
+msgstr "フルアクセス権限"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Skip permission checks; only ask for safety protections"
+msgstr "権限チェックをスキップし、安全保護に関してのみ確認する"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Don't ask"
+msgstr "確認しない"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Automatically deny actions that need approval"
+msgstr "承認が必要な操作を自動的に拒否する"
 
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Attachments can be sent after the current turn finishes."
@@ -908,12 +1013,33 @@ msgid "In progress / failed"
 msgstr "進行中／失敗"
 
 #: src/iac_code/web/static/js/components/pipeline.js
+msgid "Parameter overrides"
+msgstr "パラメーターの上書き"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Select candidate"
+msgstr "候補を選択"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Submitting..."
+msgstr "送信中..."
+
+#: src/iac_code/web/static/js/components/pipeline.js
 msgid "Architecture diagram"
 msgstr "アーキテクチャ図"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No architecture diagram"
 msgstr "アーキテクチャ図はありません"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Candidates"
+msgstr "候補"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "No candidates."
+msgstr "候補はありません。"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Details"
@@ -966,10 +1092,6 @@ msgstr "非機能要件"
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Additional notes"
 msgstr "補足事項"
-
-#: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Candidates"
-msgstr "候補"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
 #: src/iac_code/web/static/js/components/workspace.js
@@ -1429,6 +1551,10 @@ msgid "Searched Alibaba Cloud docs"
 msgstr "Alibaba Cloud のドキュメントを検索しました"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Looked up Alibaba Cloud API reference"
+msgstr "Alibaba Cloud API リファレンスを参照しました"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Asked the user"
 msgstr "ユーザーに質問しました"
 
@@ -1483,6 +1609,10 @@ msgstr "ROS スタックインスタンスを照会しています"
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Searching Alibaba Cloud docs"
 msgstr "Alibaba Cloud のドキュメントを検索しています"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Looking up Alibaba Cloud API reference"
+msgstr "Alibaba Cloud API リファレンスを参照しています"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Asking the user"
@@ -2322,10 +2452,6 @@ msgid "Feedback"
 msgstr "フィードバック"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Project"
-msgstr "プロジェクト"
-
-#: src/iac_code/web/static/js/components/workspace.js
 msgid "Reference"
 msgstr "参考"
 
@@ -2476,10 +2602,6 @@ msgstr "自動メモリーを無効にしました"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Built-in"
 msgstr "組み込み"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Skills"
-msgstr "スキル"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid ""
@@ -2764,10 +2886,6 @@ msgid "Not supported: {error}"
 msgstr "サポートされていません: {error}"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "None"
-msgstr "なし"
-
-#: src/iac_code/web/static/js/components/workspace.js
 msgid "Tools"
 msgstr "ツール"
 
@@ -2992,18 +3110,6 @@ msgid "Sort by"
 msgstr "並べ替え"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Approve for me"
-msgstr "自分の代わりに承認"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Full access"
-msgstr "フルアクセス"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Don't ask"
-msgstr "確認しない"
-
-#: src/iac_code/web/static/js/components/workspace.js
 msgid "Graphite"
 msgstr "石墨（グラファイト）"
 
@@ -3218,3 +3324,4 @@ msgstr "再起動しています。サービスが復旧するとページが自
 
 #~ msgid "Template files"
 #~ msgstr "テンプレートファイル"
+

@@ -115,6 +115,49 @@ def test_normal_web_live_tool_result_strips_only_aliyun_internal_carrier() -> No
     assert "aliyun_http" not in json.dumps(translated)
 
 
+def test_normal_web_live_tool_result_strips_internal_render_carrier() -> None:
+    # B1: the live (non-replay) path must match the persisted/replay path and hide the
+    # internal render carrier (_iac_code_tool_render) from the frontend "Artifacts" area,
+    # not just the aliyun_http key. Otherwise raw render metadata leaks as JSON noise.
+    from iac_code.types.stream_events import TOOL_RENDER_METADATA_KEY, ToolResultEvent
+    from iac_code.web.events import WebEventTranslator
+
+    translated = WebEventTranslator("session-1").translate_stream_event(
+        ToolResultEvent(
+            tool_use_id="tool-1",
+            tool_name="aliyun_api",
+            result='{"Instances": []}',
+            metadata={
+                TOOL_RENDER_METADATA_KEY: {"display_name": "List instances"},
+                "ros_validation": {"valid": True},
+            },
+        ),
+        turn_id="turn-1",
+    )
+
+    assert translated["payload"]["artifacts"] == [{"ros_validation": {"valid": True}}]
+    assert TOOL_RENDER_METADATA_KEY not in json.dumps(translated)
+
+
+def test_normal_web_live_tool_result_render_only_metadata_yields_no_artifacts() -> None:
+    # When the only metadata is the internal render carrier, artifacts must be empty
+    # rather than a JSON blob of the carrier.
+    from iac_code.types.stream_events import TOOL_RENDER_METADATA_KEY, ToolResultEvent
+    from iac_code.web.events import WebEventTranslator
+
+    translated = WebEventTranslator("session-1").translate_stream_event(
+        ToolResultEvent(
+            tool_use_id="tool-1",
+            tool_name="bash",
+            result="ok",
+            metadata={TOOL_RENDER_METADATA_KEY: {"display_name": "Run"}},
+        ),
+        turn_id="turn-1",
+    )
+
+    assert translated["payload"]["artifacts"] == []
+
+
 @pytest.mark.parametrize("diagnostics", ["", "\nDelegated diagnostics: preflight passed"])
 def test_normal_web_live_preserves_result_storage_boundary_content(tmp_path, diagnostics) -> None:
     from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY, ResultStorage

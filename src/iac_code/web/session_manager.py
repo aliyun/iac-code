@@ -44,8 +44,12 @@ from iac_code.web.events import WebEventBuffer, normalize_event_payload
 from iac_code.web.permissions import (
     PERMISSION_ALWAYS_ALLOW,
     PERMISSION_ALWAYS_DENY,
+    WebPendingElicitation,
     WebPendingPermission,
     WebPendingQuestion,
+    canceled_elicitation_answer,
+    elicitation_schema_from_payload,
+    normalize_elicitation_payload,
     normalize_permission_payload,
     normalize_question_payload,
     permission_choice_to_allowed,
@@ -217,7 +221,7 @@ def reorder_compaction_markers(messages: list[Message]) -> list[Message]:
 
 
 def _pending_request_details(
-    pending: dict[str, WebPendingPermission] | dict[str, WebPendingQuestion],
+    pending: dict[str, WebPendingPermission] | dict[str, WebPendingQuestion] | dict[str, WebPendingElicitation],
 ) -> list[dict[str, Any]]:
     return [request.to_dict() for request in pending.values()]
 
@@ -695,6 +699,7 @@ class WebSession:
     unread: bool = False
     pending_permissions: dict[str, WebPendingPermission] = field(default_factory=dict)
     pending_questions: dict[str, WebPendingQuestion] = field(default_factory=dict)
+    pending_elicitations: dict[str, WebPendingElicitation] = field(default_factory=dict)
     queued_inputs: list[str] = field(default_factory=list)
     active_turn_task: asyncio.Future[Any] | None = field(default=None, repr=False)
     # Local shell commands do not enter agent context and may run concurrently with
@@ -812,8 +817,10 @@ class WebSession:
             "readOnly": self.read_only,
             "pendingPermissionCount": len(self.pending_permissions),
             "pendingQuestionCount": len(self.pending_questions),
+            "pendingElicitationCount": len(self.pending_elicitations),
             "pendingPermissions": _pending_request_details(self.pending_permissions),
             "pendingQuestions": _pending_request_details(self.pending_questions),
+            "pendingElicitations": _pending_request_details(self.pending_elicitations),
             # 队列消息的完整内容（不只是数量），使前端在 loadSession/resync 重建状态时能恢复
             # “排队中”列表——否则繁忙轮次里权限确认触发 resync 会把排队清空，二者无法共存。
             "queuedInputs": [{"text": item} for item in self.queued_inputs],
@@ -828,6 +835,7 @@ class WebSession:
                 "status": "running" if active_turn or self.turn_lock.locked() else self.status,
                 "pendingPermissions": len(self.pending_permissions),
                 "pendingQuestions": len(self.pending_questions),
+                "pendingElicitations": len(self.pending_elicitations),
                 "queuedInputs": len(self.queued_inputs),
             },
             "pipeline": pipeline,
@@ -1609,6 +1617,7 @@ class WebSessionManager:
                     or any(not task.done() for task in session.active_local_tasks)
                     or session.pending_permissions
                     or session.pending_questions
+                    or session.pending_elicitations
                 ):
                     continue
                 session.archived = True
@@ -2541,7 +2550,11 @@ class WebSessionManager:
         permission_context = load_permission_context(session.cwd)
         if session.permission_mode is not None:
             permission_context.mode = session.permission_mode
-        for directory in build_session_trusted_read_directories(session.session_id):
+        trusted_read_dirs = build_session_trusted_read_directories(
+            session.session_id,
+            session_dir=self.storage.session_dir(session.cwd, session.session_id),
+        )
+        for directory in trusted_read_dirs:
             if directory not in permission_context.trusted_read_directories:
                 permission_context.trusted_read_directories.append(directory)
         session.permission_context = permission_context
@@ -2943,6 +2956,134 @@ class WebSessionManager:
             )
             return
 
+    async def request_mcp_elicitation(
+        self,
+        session: WebSession | str,
+        server_name: str,
+        params: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Bridge an MCP elicitation request to the browser and await the user's answer.
+
+        Runs on whatever loop invokes the MCP handler; resolution from the HTTP endpoint is
+        cross-loop safe via ``_set_future_result``. Cancellation (turn interrupt / teardown)
+        collapses to the MCP contract's ``{"action": "cancel"}``.
+        """
+        session = self._resolve_session_arg(session)
+        future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+        request_id = self.add_elicitation_request(
+            session,
+            {
+                "server": server_name,
+                "message": params.get("message"),
+                "url": params.get("url"),
+                "mode": params.get("mode"),
+                "requestedSchema": params.get("requestedSchema"),
+                "schema": params.get("schema"),
+            },
+            future=future,
+        )
+        try:
+            result = await future
+        except asyncio.CancelledError:
+            self.cancel_elicitation_request(request_id, session_id=session.session_id)
+            return {"action": "cancel"}
+        if isinstance(result, Mapping):
+            return dict(result)
+        return {"action": "cancel"}
+
+    def add_elicitation_request(
+        self,
+        session: WebSession | str,
+        payload: dict[str, Any],
+        *,
+        future: asyncio.Future[Any] | None = None,
+    ) -> str:
+        """Track a pending MCP elicitation request and append a replayable browser event."""
+        session = self._resolve_session_arg(session)
+        request_id = uuid.uuid4().hex
+        pending = WebPendingElicitation(
+            request_id=request_id,
+            session_id=session.session_id,
+            payload=normalize_elicitation_payload(payload, request_id=request_id, session_id=session.session_id),
+            future=future or _new_future(),
+            created_at=_utc_now(),
+            schema=elicitation_schema_from_payload(payload),
+        )
+        session.pending_elicitations[request_id] = pending
+        session.events.append("elicitation.request", pending.to_dict())
+        return request_id
+
+    def get_pending_elicitation(
+        self,
+        request_id: str,
+        *,
+        session_id: str | None = None,
+    ) -> WebPendingElicitation | None:
+        """Return a pending elicitation when it exists and belongs to the expected session."""
+        for session in self._sessions.values():
+            pending = session.pending_elicitations.get(request_id)
+            if pending is None:
+                continue
+            if session_id is not None and pending.session_id != session_id:
+                return None
+            return pending
+        return None
+
+    def resolve_elicitation(
+        self,
+        request_id: str,
+        result: dict[str, Any],
+        *,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Resolve a pending elicitation request across loaded sessions."""
+        for session in self._sessions.values():
+            pending = session.pending_elicitations.get(request_id)
+            if pending is not None:
+                if session_id is not None and pending.session_id != session_id:
+                    return {"requestId": request_id, "resolved": False}
+                session.pending_elicitations.pop(request_id)
+                _set_future_result(pending.future, dict(result))
+                session.events.append(
+                    "elicitation.resolved",
+                    {
+                        "requestId": request_id,
+                        "answer": {"action": str(result.get("action", "cancel"))},
+                    },
+                )
+                return {"requestId": request_id, "resolved": True}
+        return {"requestId": request_id, "resolved": False}
+
+    def discard_elicitation_request(self, request_id: str, *, session_id: str | None = None) -> None:
+        """Remove a pending elicitation without publishing a user-visible answer."""
+        for session in self._sessions.values():
+            pending = session.pending_elicitations.get(request_id)
+            if pending is None:
+                continue
+            if session_id is not None and pending.session_id != session_id:
+                return
+            session.pending_elicitations.pop(request_id, None)
+            return
+
+    def cancel_elicitation_request(self, request_id: str, *, session_id: str | None = None) -> None:
+        """Resolve a pending elicitation as canceled so browser state can clear it."""
+        for session in self._sessions.values():
+            pending = session.pending_elicitations.get(request_id)
+            if pending is None:
+                continue
+            if session_id is not None and pending.session_id != session_id:
+                return
+            session.pending_elicitations.pop(request_id, None)
+            _set_future_result(pending.future, {"action": "cancel"})
+            session.events.append(
+                "elicitation.resolved",
+                {
+                    "requestId": request_id,
+                    "answer": canceled_elicitation_answer(),
+                },
+            )
+            return
+
     def cancel_pending_requests_for_session(
         self,
         session: WebSession | str,
@@ -2952,6 +3093,16 @@ class WebSessionManager:
     ) -> None:
         """Resolve and clear pending futures when the owning turn cannot continue."""
         session = self._resolve_session_arg(session)
+        for pending in list(session.pending_elicitations.values()):
+            session.pending_elicitations.pop(pending.request_id, None)
+            _set_future_result(pending.future, {"action": "cancel"})
+            session.events.append(
+                "elicitation.resolved",
+                {
+                    "requestId": pending.request_id,
+                    "answer": canceled_elicitation_answer(),
+                },
+            )
         for pending in list(session.pending_permissions.values()):
             session.pending_permissions.pop(pending.request_id, None)
             _set_future_result(pending.future, permission_result)

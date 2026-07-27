@@ -421,9 +421,13 @@ class WebEventTranslator:
             )
         if isinstance(event, ToolResultEvent):
             from iac_code.tools.cloud.aliyun.result_contract import ALIYUN_HTTP_METADATA_KEY
+            from iac_code.types.stream_events import TOOL_RENDER_METADATA_KEY
 
             public_metadata = dict(event.metadata or {})
+            # 与回放路径对齐:内部渲染载体(_iac_code_tool_render)与阿里云 HTTP 诊断
+            # (aliyun_http)都是内部键,不能作为「Artifacts」原样下发给前端。
             public_metadata.pop(ALIYUN_HTTP_METADATA_KEY, None)
+            public_metadata.pop(TOOL_RENDER_METADATA_KEY, None)
             return self.tool_result(
                 tool_use_id=event.tool_use_id,
                 result_kind="error" if event.is_error else "text",

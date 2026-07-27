@@ -7,6 +7,7 @@ import copy
 import logging
 import time
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -255,7 +256,17 @@ def agent_factory_options_for_session(
         provider_config_frozen=selection.provider_config_frozen,
         provider_config_override=provider_config_override,
         effort_override=selection.effort,
+        mcp_elicitation_handler=_make_web_mcp_elicitation_handler(session, manager),
     )
+
+
+def _make_web_mcp_elicitation_handler(session: WebSession, manager: WebSessionManager) -> Any:
+    """Bind an MCP elicitation handler to this session's browser request/answer bridge."""
+
+    async def handler(server_name: str, params: Mapping[str, Any]) -> dict[str, Any]:
+        return await manager.request_mcp_elicitation(session, server_name, params)
+
+    return handler
 
 
 def create_session_agent_runtime(

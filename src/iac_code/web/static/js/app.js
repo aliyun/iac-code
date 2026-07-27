@@ -1,11 +1,11 @@
-import * as api from "./api.js?v=web-repl-ui-159";
-import { createComposerController } from "./components/composer.js?v=session-model-v15";
-import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v4";
-import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v5";
-import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v21";
+import * as api from "./api.js?v=web-repl-ui-303";
+import { createComposerController } from "./components/composer.js?v=session-model-v16";
+import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v5";
+import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v6";
+import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v22";
 import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v48";
 import { createOutputController } from "./components/output_panel.js?v=output-panel-v16";
-import { reduceEvent } from "./events.js?v=web-repl-ui-196";
+import { reduceEvent } from "./events.js?v=web-repl-ui-303";
 import { applyDomI18n, t } from "./i18n.js?v=web-repl-ui-277";
 
 const root = document.getElementById("iac-code-web-root");
@@ -323,8 +323,10 @@ function emptyState() {
     localShell: {},
     permissions: {},
     questions: {},
+    elicitations: {},
     resolvedPermissions: {},
     resolvedQuestions: {},
+    resolvedElicitations: {},
     queuedInputs: [],
     queuedInputsSeedSequence: 0,
     commands: [],
@@ -1270,10 +1272,15 @@ function sessionActivityState(session, state = {}) {
   if (isCurrent) {
     const pendingPermissions = Object.keys(state.permissions || {}).length;
     const pendingQuestions = Object.keys(state.questions || {}).length;
-    awaiting = pendingPermissions + pendingQuestions > 0;
+    const pendingElicitations = Object.keys(state.elicitations || {}).length;
+    awaiting = pendingPermissions + pendingQuestions + pendingElicitations > 0;
     running = Boolean(state.currentTurnActive);
   } else {
-    awaiting = (Number(session.pendingPermissionCount) || 0) + (Number(session.pendingQuestionCount) || 0) > 0;
+    awaiting =
+      (Number(session.pendingPermissionCount) || 0) +
+        (Number(session.pendingQuestionCount) || 0) +
+        (Number(session.pendingElicitationCount) || 0) >
+      0;
     running = Boolean(session.currentTurnActive) || session.status === "running";
   }
   if (awaiting) {
@@ -3840,6 +3847,9 @@ function renderBlocking(state) {
         }
         await api.answerQuestion(requestId, answer);
       },
+      onElicitationAnswer: async (requestId, answer) => {
+        await api.answerElicitation(requestId, answer);
+      },
     }),
   );
   // 权限面板首次出现时把焦点从输入框移到面板，让上下键 / 回车立即可用，
@@ -3887,7 +3897,8 @@ function renderStatus(state) {
   const session = state.currentSession || {};
   const pendingPermissions = Object.keys(state.permissions || {}).length;
   const pendingQuestions = Object.keys(state.questions || {}).length;
-  const pendingTotal = pendingPermissions + pendingQuestions;
+  const pendingElicitations = Object.keys(state.elicitations || {}).length;
+  const pendingTotal = pendingPermissions + pendingQuestions + pendingElicitations;
 
   const pipelineWorkspaceOpen = byShell("pipeline-workspace-open");
   if (pipelineWorkspaceOpen) {
@@ -4895,6 +4906,9 @@ async function loadSession(sessionId, options = {}) {
     tools: storedTools,
     permissions: Object.fromEntries((session.pendingPermissions || []).map((request) => [request.requestId, request])),
     questions: Object.fromEntries((session.pendingQuestions || []).map((request) => [request.requestId, request])),
+    elicitations: Object.fromEntries(
+      (session.pendingElicitations || []).map((request) => [request.requestId, request]),
+    ),
     // 从会话快照恢复“排队中”列表：resync/切换会话会用 emptyState() 归零，若不在此恢复，
     // 繁忙轮次里权限确认触发的 resync 会让排队凭空消失（排队与权限确认需共存）。
     queuedInputs: (Array.isArray(session.queuedInputs) ? session.queuedInputs : [])

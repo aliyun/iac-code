@@ -10694,6 +10694,21 @@ msgid "Always deny this session"
 msgstr "Diese Sitzung immer verweigern"
 
 #: src/iac_code/web/permissions.py
+#, python-brace-format
+msgid "Unknown elicitation action {!r}."
+msgstr "Unbekannte Anforderungsaktion {!r}."
+
+#: src/iac_code/web/permissions.py
+#, python-brace-format
+msgid "A value is required for {}."
+msgstr "Für {} ist ein Wert erforderlich."
+
+#: src/iac_code/web/permissions.py
+#, python-brace-format
+msgid "Invalid value {!r}."
+msgstr "Ungültiger Wert {!r}."
+
+#: src/iac_code/web/permissions.py
 msgid "this action"
 msgstr "diese Aktion"
 
@@ -11317,3 +11332,4 @@ msgstr "Bash zulassen?"
 
 #~ msgid "由外部登录管理"
 #~ msgstr "Durch externe Anmeldung verwaltet"
+

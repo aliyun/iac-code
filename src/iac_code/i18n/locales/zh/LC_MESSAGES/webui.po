@@ -223,6 +223,7 @@ msgid "Close"
 msgstr "关闭"
 
 #: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/blocking.js
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Cancel"
 msgstr "取消"
@@ -539,6 +540,7 @@ msgid "Pending optimization"
 msgstr "待优化"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
 msgid "Selected"
 msgstr "已选择"
 
@@ -812,6 +814,19 @@ msgstr "补充说明"
 msgid "Select"
 msgstr "选择"
 
+#: src/iac_code/web/static/js/components/blocking.js
+#, python-brace-format
+msgid "MCP server {server}"
+msgstr "MCP 服务器 {server}"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Accept"
+msgstr "接受"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Decline"
+msgstr "拒绝"
+
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Enter sends; Shift+Enter inserts a newline."
 msgstr "Enter sends; Shift+Enter inserts a newline."
@@ -840,6 +855,96 @@ msgstr "显示当前会话状态"
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Show MCP server status"
 msgstr "显示 MCP 服务器状态"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "System"
+msgstr "系统"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Project"
+msgstr "项目"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Personal"
+msgstr "个人"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Skills"
+msgstr "技能"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "None"
+msgstr "无"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Minimal"
+msgstr "最小"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Low"
+msgstr "低"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Medium"
+msgstr "中"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "High"
+msgstr "高"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Very high"
+msgstr "极高"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Max"
+msgstr "最大"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Auto"
+msgstr "自动"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Ask for approval"
+msgstr "请求审批"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Ask before writes, external files, and restricted tool calls"
+msgstr "写入、访问外部文件及调用受限工具前询问"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Approve for me"
+msgstr "替我审批"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Automatically accept common file edits; still ask for other risky actions"
+msgstr "自动接受常见文件编辑;其他高风险操作仍会询问"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Full access"
+msgstr "完全访问"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Full access permissions"
+msgstr "完全访问权限"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Skip permission checks; only ask for safety protections"
+msgstr "跳过权限检查;仅在涉及安全防护时询问"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Don't ask"
+msgstr "不询问"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Automatically deny actions that need approval"
+msgstr "自动拒绝需要审批的操作"
 
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Attachments can be sent after the current turn finishes."
@@ -908,12 +1013,33 @@ msgid "In progress / failed"
 msgstr "进行中/失败"
 
 #: src/iac_code/web/static/js/components/pipeline.js
+msgid "Parameter overrides"
+msgstr "参数覆盖"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Select candidate"
+msgstr "选择候选方案"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Submitting..."
+msgstr "提交中..."
+
+#: src/iac_code/web/static/js/components/pipeline.js
 msgid "Architecture diagram"
 msgstr "架构图"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No architecture diagram"
 msgstr "无架构图"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Candidates"
+msgstr "候选方案"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "No candidates."
+msgstr "暂无候选方案。"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Details"
@@ -966,10 +1092,6 @@ msgstr "非功能需求"
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Additional notes"
 msgstr "补充说明"
-
-#: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Candidates"
-msgstr "候选方案"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
 #: src/iac_code/web/static/js/components/workspace.js
@@ -1429,6 +1551,10 @@ msgid "Searched Alibaba Cloud docs"
 msgstr "已检索阿里云文档"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Looked up Alibaba Cloud API reference"
+msgstr "已查阅阿里云 API 文档"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Asked the user"
 msgstr "已向用户提问"
 
@@ -1483,6 +1609,10 @@ msgstr "正在查询 ROS 资源栈实例"
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Searching Alibaba Cloud docs"
 msgstr "正在检索阿里云文档"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Looking up Alibaba Cloud API reference"
+msgstr "正在查阅阿里云 API 文档"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Asking the user"
@@ -2320,10 +2450,6 @@ msgid "Feedback"
 msgstr "反馈"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Project"
-msgstr "项目"
-
-#: src/iac_code/web/static/js/components/workspace.js
 msgid "Reference"
 msgstr "参考"
 
@@ -2474,10 +2600,6 @@ msgstr "已关闭自动记忆"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Built-in"
 msgstr "内置"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Skills"
-msgstr "技能"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid ""
@@ -2762,10 +2884,6 @@ msgid "Not supported: {error}"
 msgstr "不支持:{error}"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "None"
-msgstr "无"
-
-#: src/iac_code/web/static/js/components/workspace.js
 msgid "Tools"
 msgstr "工具"
 
@@ -2990,18 +3108,6 @@ msgid "Sort by"
 msgstr "排序方式"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Approve for me"
-msgstr "替我审批"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Full access"
-msgstr "完全访问"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Don't ask"
-msgstr "不询问"
-
-#: src/iac_code/web/static/js/components/workspace.js
 msgid "Graphite"
 msgstr "石墨"
 
@@ -3212,3 +3318,4 @@ msgstr "重启中,服务恢复后会自动刷新…"
 
 #~ msgid "Template files"
 #~ msgstr "模板文件"
+

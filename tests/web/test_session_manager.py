@@ -125,6 +125,106 @@ def test_create_session_preserves_storage_layout_v2_metadata(tmp_path) -> None:
     )
 
 
+def test_ensure_permission_context_trusts_v2_session_runtime_dirs(tmp_path) -> None:
+    # 回归：V2 会话在首个回合之前改权限模式会提前构造会话级权限上下文；
+    # 该上下文的授信读目录必须包含新布局的 session_dir/tool-results 与
+    # session_dir/image-cache，否则 agent 读自己落盘的外部化工具结果/图片时会莫名弹权限框
+    # （见 docs/web-rebase-impact-gaps-20260727.md A1）。
+    cwd = str(tmp_path / "project")
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=cwd, session_id="layout-v2-perm")
+
+    manager.set_permission_mode(session, "default")
+
+    session_dir = manager.storage.session_dir(cwd, session.session_id)
+    trusted = set(session.permission_context.trusted_read_directories)
+    assert str(session_dir / "tool-results") in trusted
+    assert str(session_dir / "image-cache") in trusted
+
+
+def test_web_mcp_elicitation_handler_resolves_form_answer(tmp_path) -> None:
+    # A2：web 必须像权限/提问一样，把 MCP elicitation 请求转成前端待办 + future 回灌。
+    # 见 docs/web-rebase-impact-gaps-20260727.md A2。
+    from iac_code.web.permissions import elicitation_result_from_body
+
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=str(tmp_path / "project"), mode="normal")
+    params = {
+        "message": "Provide a region",
+        "requestedSchema": {
+            "type": "object",
+            "properties": {
+                "region": {"title": "Region", "type": "string", "enum": ["cn-hangzhou", "cn-beijing"]},
+                "confirm": {"title": "Confirm", "type": "boolean"},
+            },
+            "required": ["region"],
+        },
+    }
+
+    async def scenario():
+        handler_task = asyncio.ensure_future(manager.request_mcp_elicitation(session, "acme", params))
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if session.pending_elicitations:
+                break
+        assert session.pending_elicitations
+        request_id = next(iter(session.pending_elicitations))
+        pending = manager.get_pending_elicitation(request_id, session_id=session.session_id)
+        assert pending is not None
+        assert pending.payload["mode"] == "form"
+        assert pending.payload["server"] == "acme"
+        assert {field["name"] for field in pending.payload["fields"]} == {"region", "confirm"}
+        result = elicitation_result_from_body(
+            {"action": "accept", "content": {"region": "cn-hangzhou", "confirm": "yes"}},
+            schema=pending.schema,
+        )
+        manager.resolve_elicitation(request_id, result, session_id=session.session_id)
+        return await handler_task
+
+    outcome = asyncio.run(scenario())
+    assert outcome == {"action": "accept", "content": {"region": "cn-hangzhou", "confirm": True}}
+
+
+def test_web_mcp_elicitation_handler_cancel_returns_cancel(tmp_path) -> None:
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=str(tmp_path / "project"), mode="normal")
+
+    async def scenario():
+        handler_task = asyncio.ensure_future(
+            manager.request_mcp_elicitation(session, "acme", {"message": "hi", "mode": "url", "url": "https://x"})
+        )
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if session.pending_elicitations:
+                break
+        assert session.pending_elicitations
+        request_id = next(iter(session.pending_elicitations))
+        pending = manager.get_pending_elicitation(request_id, session_id=session.session_id)
+        assert pending is not None
+        assert pending.payload["mode"] == "url"
+        manager.cancel_elicitation_request(request_id, session_id=session.session_id)
+        return await handler_task
+
+    assert asyncio.run(scenario()) == {"action": "cancel"}
+
+
+def test_cancel_pending_requests_clears_elicitations(tmp_path) -> None:
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=str(tmp_path / "project"), mode="normal")
+
+    async def scenario():
+        handler_task = asyncio.ensure_future(manager.request_mcp_elicitation(session, "acme", {"message": "hi"}))
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if session.pending_elicitations:
+                break
+        manager.cancel_pending_requests_for_session(session)
+        return await handler_task
+
+    assert asyncio.run(scenario()) == {"action": "cancel"}
+    assert session.pending_elicitations == {}
+
+
 def test_to_dict_exposes_queued_input_contents(tmp_path) -> None:
     # 回归：to_dict 必须暴露排队消息的完整内容（不只是数量），否则前端在 resync/
     # 切换会话重建状态时无法恢复“排队中”列表，权限确认一出现排队就会消失。

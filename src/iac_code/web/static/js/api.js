@@ -18,6 +18,8 @@ export const WEB_EVENT_TYPES = [
   "permission.resolved",
   "question.request",
   "question.resolved",
+  "elicitation.request",
+  "elicitation.resolved",
   "queued-input.accepted",
   "queued-input.submitted",
   "queued-input.removed",
@@ -810,6 +812,13 @@ export function answerPermission(requestId, answer) {
 
 export function answerQuestion(requestId, answer) {
   return jsonFetch(`/api/questions/${encodeURIComponent(requestId)}/answer`, {
+    method: "POST",
+    body: JSON.stringify(answer || {}),
+  });
+}
+
+export function answerElicitation(requestId, answer) {
+  return jsonFetch(`/api/elicitations/${encodeURIComponent(requestId)}/answer`, {
     method: "POST",
     body: JSON.stringify(answer || {}),
   });

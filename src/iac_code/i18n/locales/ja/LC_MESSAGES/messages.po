@@ -9959,6 +9959,21 @@ msgid "Always deny this session"
 msgstr "このセッションでは常に拒否"
 
 #: src/iac_code/web/permissions.py
+#, python-brace-format
+msgid "Unknown elicitation action {!r}."
+msgstr "不明な要求アクション {!r}。"
+
+#: src/iac_code/web/permissions.py
+#, python-brace-format
+msgid "A value is required for {}."
+msgstr "{} には値が必要です。"
+
+#: src/iac_code/web/permissions.py
+#, python-brace-format
+msgid "Invalid value {!r}."
+msgstr "無効な値 {!r}。"
+
+#: src/iac_code/web/permissions.py
 msgid "this action"
 msgstr "この操作"
 
@@ -10488,3 +10503,4 @@ msgstr "Bash を許可しますか？"
 
 #~ msgid "由外部登录管理"
 #~ msgstr "外部ログインによって管理"
+

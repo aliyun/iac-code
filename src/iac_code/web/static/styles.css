@@ -7324,6 +7324,16 @@ body.is-resizing-sidebar {
   content: "_";
 }
 
+/* MCP 工具卡:图标换成「M·」字形,给 mcp__server__tool 一个可辨的 server 归属提示,
+   区别于通用工具的 >_ 终端字形。 */
+.message-tool-cards .tool-card[data-tool-kind="mcp"] > .tool-card-row .tool-card-icon::before {
+  content: "M";
+}
+
+.message-tool-cards .tool-card[data-tool-kind="mcp"] > .tool-card-row .tool-card-icon::after {
+  content: "·";
+}
+
 .message-tool-cards .tool-group-title,
 .message-tool-cards .tool-card-title {
   min-width: 0;

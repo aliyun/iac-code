@@ -568,7 +568,7 @@ function renderCandidateActions(card, candidate, state, callbacks, isSelected) {
   const overrides = document.createElement("details");
   overrides.className = "pipeline-candidate-overrides-panel";
   const overridesSummary = document.createElement("summary");
-  overridesSummary.textContent = "Parameter overrides";
+  overridesSummary.textContent = t("Parameter overrides");
 
   const label = document.createElement("label");
   label.className = "pipeline-candidate-override-label";
@@ -586,13 +586,13 @@ function renderCandidateActions(card, candidate, state, callbacks, isSelected) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "pipeline-candidate-select";
-  button.textContent = isSelected ? "Selected" : "Select candidate";
+  button.textContent = isSelected ? t("Selected") : t("Select candidate");
   button.disabled = isSelected || typeof callbacks.onSelectCandidate !== "function" || !pipelineSessionId(state);
 
   const status = document.createElement("p");
   status.className = "pipeline-candidate-action-status";
   if (isSelected) {
-    status.textContent = "Selected";
+    status.textContent = t("Selected");
   }
 
   const handleSelection = async () => {
@@ -606,7 +606,7 @@ function renderCandidateActions(card, candidate, state, callbacks, isSelected) {
 
     button.disabled = true;
     status.className = "pipeline-candidate-action-status";
-    status.textContent = "Submitting...";
+    status.textContent = t("Submitting...");
     try {
       const result = await callbacks.onSelectCandidate({
         sessionId: pipelineSessionId(state),
@@ -615,7 +615,7 @@ function renderCandidateActions(card, candidate, state, callbacks, isSelected) {
         parameterOverrides,
       });
       card.className = "pipeline-candidate is-selected";
-      button.textContent = "Selected";
+      button.textContent = t("Selected");
       setCandidateActionStatus(status, actionResultMessage(result) || "accepted", "notice");
     } catch (error) {
       button.disabled = false;
@@ -678,11 +678,11 @@ function renderCandidates(container, state, callbacks) {
   const candidates = combinedCandidates(state);
   const diagrams = combinedDiagrams(state);
   const selected = selectedCandidate(state);
-  const section = appendSection(container, "Candidates", "pipeline-candidates");
+  const section = appendSection(container, t("Candidates"), "pipeline-candidates");
   if (candidates.length === 0) {
     const empty = document.createElement("p");
     empty.className = "pipeline-muted";
-    empty.textContent = "No candidates.";
+    empty.textContent = t("No candidates.");
     section.append(empty);
     return;
   }
@@ -711,7 +711,7 @@ function renderCandidates(container, state, callbacks) {
         ? ""
         : `Monthly ${candidateTotalMonthlyCost(candidate)}`,
       candidate.status || "",
-      isSelected ? "Selected" : "",
+      isSelected ? t("Selected") : "",
     ]
       .filter(Boolean)
       .join(" · ");

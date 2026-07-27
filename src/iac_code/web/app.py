@@ -166,7 +166,11 @@ def create_app(
         outputs_payload,
         read_output_file,
     )
-    from iac_code.web.permissions import PERMISSION_CHOICES, offered_permission_choice_ids
+    from iac_code.web.permissions import (
+        PERMISSION_CHOICES,
+        elicitation_result_from_body,
+        offered_permission_choice_ids,
+    )
     from iac_code.web.pipeline import (
         PipelineCandidateSelectionRequestError,
         PipelineStateNotFoundError,
@@ -2588,7 +2592,10 @@ def create_app(
                 if manager.get_session(session.web_session_id) is not session:
                     return json_error("session not found", 404)
                 if archived is True and (
-                    active_session_work_running(session) or session.pending_permissions or session.pending_questions
+                    active_session_work_running(session)
+                    or session.pending_permissions
+                    or session.pending_questions
+                    or session.pending_elicitations
                 ):
                     return json_error(
                         "session has work in progress",
@@ -3096,9 +3103,11 @@ def create_app(
             ),
             "pendingPermissionCount": len(session.pending_permissions),
             "pendingQuestionCount": len(session.pending_questions),
+            "pendingElicitationCount": len(session.pending_elicitations),
             "pending": {
                 "permissions": len(session.pending_permissions),
                 "questions": len(session.pending_questions),
+                "elicitations": len(session.pending_elicitations),
                 "queuedInputs": len(session.queued_inputs),
             },
             "currentTurnActive": current_turn_active,
@@ -4348,6 +4357,24 @@ def create_app(
         status_code = 200 if result["resolved"] else 404
         return JSONResponse(result, status_code=status_code)
 
+    async def answer_elicitation(request):
+        request_id = request.path_params["request_id"]
+        try:
+            data = await json_object_body(request)
+            session_id = required_string(data, "sessionId")
+        except ValueError as exc:
+            return json_error(str(exc), 400)
+        pending = manager.get_pending_elicitation(request_id, session_id=session_id)
+        if pending is None:
+            return JSONResponse({"requestId": request_id, "resolved": False}, status_code=404)
+        try:
+            elicitation_result = elicitation_result_from_body(data, schema=pending.schema)
+        except ValueError as exc:
+            return json_error(str(exc), 400)
+        result = manager.resolve_elicitation(request_id, elicitation_result, session_id=session_id)
+        status_code = 200 if result["resolved"] else 404
+        return JSONResponse(result, status_code=status_code)
+
     async def post_queued_input(request):
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
@@ -4738,6 +4765,7 @@ def create_app(
             Route("/api/pipeline/candidates/select", post_pipeline_candidate_selection, methods=["POST"]),
             Route("/api/permissions/{request_id}/answer", answer_permission, methods=["POST"]),
             Route("/api/questions/{request_id}/answer", answer_question, methods=["POST"]),
+            Route("/api/elicitations/{request_id}/answer", answer_elicitation, methods=["POST"]),
             Route("/api/sessions/{session_id}/commands", post_command, methods=["POST"]),
             Route("/api/sessions/{session_id}/cleanup", get_session_cleanup, methods=["GET"]),
             Route("/api/sessions/{session_id}/status", get_status, methods=["GET"]),

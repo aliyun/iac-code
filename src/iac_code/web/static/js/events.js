@@ -169,11 +169,17 @@ export function reduceEvent(state = {}, event = {}) {
   if (!next.questions || typeof next.questions !== "object") {
     next.questions = {};
   }
+  if (!next.elicitations || typeof next.elicitations !== "object") {
+    next.elicitations = {};
+  }
   if (!next.resolvedPermissions || typeof next.resolvedPermissions !== "object") {
     next.resolvedPermissions = {};
   }
   if (!next.resolvedQuestions || typeof next.resolvedQuestions !== "object") {
     next.resolvedQuestions = {};
+  }
+  if (!next.resolvedElicitations || typeof next.resolvedElicitations !== "object") {
+    next.resolvedElicitations = {};
   }
   if (!next.turns || typeof next.turns !== "object") {
     next.turns = {};
@@ -533,6 +539,25 @@ export function reduceEvent(state = {}, event = {}) {
       if (payload.requestId) {
         delete next.questions[payload.requestId];
         next.resolvedQuestions[payload.requestId] = {
+          requestId: payload.requestId,
+          answer: payload.answer || {},
+        };
+      }
+      break;
+    }
+    case "elicitation.request": {
+      if (payload.requestId) {
+        next.elicitations[payload.requestId] = {
+          requestId: payload.requestId,
+          payload: payload.payload || {},
+        };
+      }
+      break;
+    }
+    case "elicitation.resolved": {
+      if (payload.requestId) {
+        delete next.elicitations[payload.requestId];
+        next.resolvedElicitations[payload.requestId] = {
           requestId: payload.requestId,
           answer: payload.answer || {},
         };
