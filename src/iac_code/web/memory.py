@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from iac_code.config import get_config_dir
+from iac_code.i18n import _
 from iac_code.memory.memory_manager import MemoryManager
 from iac_code.memory.project_memory import (
     ProjectMemoryRuntime,
@@ -91,7 +92,7 @@ def save_user_instruction(content: str) -> dict[str, Any]:
     runtime = ProjectMemoryRuntime(str(Path.cwd()))
     path = runtime.ensure_instruction_file("user")
     if path.is_symlink():
-        raise ValueError("user memory path is invalid")
+        raise ValueError(_("user memory path is invalid"))
     ensure_private_dir(path.parent)
     atomic_write_text(path, content, encoding="utf-8")
     ensure_private_file(path)
@@ -171,7 +172,7 @@ def _read_text_if_present(path: Path) -> str:
 
 def _write_project_file(path: Path, content: str) -> None:
     if path.is_symlink():
-        raise ValueError("project memory path is invalid")
+        raise ValueError(_("project memory path is invalid"))
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_project_text(path, content, encoding="utf-8")
 

@@ -1,3 +1,5 @@
+import { t } from "./i18n.js?v=web-repl-ui-277";
+
 function cloneState(state) {
   if (typeof structuredClone === "function") {
     return structuredClone(state || {});
@@ -59,7 +61,7 @@ function ensureLocalShell(localShell, toolUseId) {
   if (!localShell[toolUseId]) {
     localShell[toolUseId] = {
       toolUseId,
-      toolName: "Local shell",
+      toolName: t("Local shell"),
       status: "running",
       local: true,
       entersAgentContext: false,
@@ -650,7 +652,7 @@ export function reduceEvent(state = {}, event = {}) {
     }
     case "error": {
       next.lastError = {
-        message: typeof payload.message === "string" ? payload.message : "Unknown error",
+        message: typeof payload.message === "string" ? payload.message : t("Unknown error"),
         payload,
       };
       break;

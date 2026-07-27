@@ -737,7 +737,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       const label =
         attachment.status === "ready" ? `${prefix}${attachment.name}` : `${attachment.name} · ${attachment.status}`;
       chip.title = label;
-      chip.setAttribute("aria-label", `Remove ${label}`);
+      chip.setAttribute("aria-label", t("Remove {name}", { name: label }));
       if (attachment.isImage && attachment.previewUrl) {
         const image = document.createElement("img");
         image.className = "attachment-chip-preview";
@@ -898,7 +898,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       clearError();
       renderPermissionControls();
     } catch (error) {
-      setError(error.message || "Could not save permission mode");
+      setError(error.message || t("Could not save permission mode"));
     }
   }
 
@@ -930,7 +930,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       clearError();
       renderThinkingToggle();
     } catch (error) {
-      setError(error.message || "Could not save thinking toggle");
+      setError(error.message || t("Could not save thinking toggle"));
     }
   }
 
@@ -1222,7 +1222,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
     } catch (error) {
       modelControl.textContent = t("Configure model");
       if (!isRecoverableError(error)) {
-        setError(error.message || "Could not load model settings");
+        setError(error.message || t("Could not load model settings"));
       }
     }
   }
@@ -1246,7 +1246,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       clearError();
       await loadProviderControls();
     } catch (error) {
-      setError(error.message || "Could not switch provider");
+      setError(error.message || t("Could not switch provider"));
     }
   }
 
@@ -1288,7 +1288,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       clearError();
       renderProviderControls();
     } catch (error) {
-      setError(error.message || "Could not save model settings");
+      setError(error.message || t("Could not save model settings"));
     }
   }
 
@@ -1460,7 +1460,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       renderSuggestions();
     } catch (error) {
       if (requestVersion === suggestionRequestVersion && !isRecoverableError(error)) {
-        setError(error.message || "Could not load suggestions");
+        setError(error.message || t("Could not load suggestions"));
       }
     }
   }
@@ -1481,9 +1481,9 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       options.onSubmitAccepted?.({ sessionId, result, kind: "command", text: commandText });
     } catch (error) {
       if (!isRecoverableError(error)) {
-        setError(error.message || "Command failed");
+        setError(error.message || t("Command failed"));
       } else {
-        setError(error.message || "The command was not accepted");
+        setError(error.message || t("The command was not accepted"));
       }
     }
     return true;
@@ -1547,7 +1547,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
     for (const file of [...(files || [])]) {
       const attachment = makeAttachment(file);
       if (!attachment.isImage) {
-        setError("Use @ suggestions for workspace file references.", "unsupported_file_picker");
+        setError(t("Use @ suggestions for workspace file references."), "unsupported_file_picker");
         continue;
       }
       assignLocalPreviewUrl(attachment);
@@ -1555,7 +1555,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       renderAttachmentChips();
       if (!SUPPORTED_IMAGE_TYPES.has(attachment.mediaType)) {
         attachment.status = "unsupported";
-        setError("Unsupported image type.", "unsupported_image");
+        setError(t("Unsupported image type."), "unsupported_image");
         renderAttachmentChips();
         continue;
       }
@@ -1579,7 +1579,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
         renderAttachmentChips();
       } catch (error) {
         attachment.status = "failed";
-        setError(error.message || "Image upload failed", "unsupported_image");
+        setError(error.message || t("Image upload failed"), "unsupported_image");
         renderAttachmentChips();
       }
     }
@@ -1608,13 +1608,13 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
     if (unsupportedImage) {
       unsupportedImage.status = "unsupported";
       renderAttachmentChips();
-      const error = new Error("Unsupported image type.");
+      const error = new Error(t("Unsupported image type."));
       error.code = "unsupported_image";
       throw error;
     }
     const pendingImage = attachments.find((attachment) => attachment.isImage && !attachment.imageId);
     if (pendingImage && !api.uploadImage) {
-      const error = new Error("This image has not been uploaded yet.");
+      const error = new Error(t("This image has not been uploaded yet."));
       error.code = "unsupported_image";
       throw error;
     }
@@ -1628,12 +1628,12 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       if (!SUPPORTED_IMAGE_TYPES.has(attachment.mediaType)) {
         attachment.status = "unsupported";
         renderAttachmentChips();
-        const error = new Error("Unsupported image type.");
+        const error = new Error(t("Unsupported image type."));
         error.code = "unsupported_image";
         throw error;
       }
       if (!api.uploadImage) {
-        const error = new Error("This image has not been uploaded yet.");
+        const error = new Error(t("This image has not been uploaded yet."));
         error.code = "unsupported_image";
         throw error;
       }
@@ -1661,7 +1661,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
   function attachmentPayload() {
     const unsupportedImage = attachments.find((attachment) => attachment.isImage && !attachment.imageId);
     if (unsupportedImage) {
-      const error = new Error("This image has not been uploaded yet.");
+      const error = new Error(t("This image has not been uploaded yet."));
       error.code = "unsupported_image";
       throw error;
     }
@@ -1789,9 +1789,9 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
     } catch (error) {
       if (sessionRevision === submittedSessionRevision) {
         if (!isRecoverableError(error)) {
-          setError(error.message || "Send failed");
+          setError(error.message || t("Send failed"));
         } else {
-          setError(error.message || "The message was not accepted");
+          setError(error.message || t("The message was not accepted"));
         }
       }
     }
@@ -1805,7 +1805,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       await api.postInterrupt?.(sessionId, { message: "" });
     } catch (error) {
       if (!isRecoverableError(error)) {
-        setError(error.message || "Stop failed");
+        setError(error.message || t("Stop failed"));
       }
     }
   }

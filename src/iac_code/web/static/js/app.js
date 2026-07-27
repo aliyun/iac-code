@@ -1,11 +1,11 @@
 import * as api from "./api.js?v=web-repl-ui-303";
-import { createComposerController } from "./components/composer.js?v=session-model-v16";
+import { createComposerController } from "./components/composer.js?v=session-model-v17";
 import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v5";
-import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v6";
-import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v22";
-import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v48";
+import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v7";
+import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v23";
+import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v49";
 import { createOutputController } from "./components/output_panel.js?v=output-panel-v16";
-import { reduceEvent } from "./events.js?v=web-repl-ui-303";
+import { reduceEvent } from "./events.js?v=web-repl-ui-304";
 import { applyDomI18n, t } from "./i18n.js?v=web-repl-ui-277";
 
 const root = document.getElementById("iac-code-web-root");
@@ -2889,7 +2889,7 @@ function renderConversationMessage(message, state, options = {}) {
   if (!options.hideLabel) {
     const label = document.createElement("p");
     label.className = "message-label";
-    label.textContent = message.role === "user" ? "You" : "IaC Code";
+    label.textContent = message.role === "user" ? t("You") : "IaC Code";
     article.append(label);
   }
   if (message.role !== "user") {
@@ -3525,7 +3525,7 @@ function renderMessages(state) {
 
     const label = document.createElement("p");
     label.className = "message-label";
-    label.textContent = "Error";
+    label.textContent = t("Error");
 
     const body = document.createElement("div");
     body.className = "message-body markdown-body";

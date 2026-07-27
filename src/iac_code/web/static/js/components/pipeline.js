@@ -379,7 +379,7 @@ function renderRecoveryActivity(container, state) {
   if (!hasRecoveredActivity) {
     return;
   }
-  const section = appendSection(container, "Recovered State", "pipeline-recovery");
+  const section = appendSection(container, t("Recovered State"), "pipeline-recovery");
   const grid = document.createElement("div");
   grid.className = "pipeline-recovery-grid";
   for (const group of groups) {
@@ -460,20 +460,20 @@ function stepperItems(state) {
 function renderDiagnostics(container, state) {
   const snapshot = state.pipelineSnapshot || {};
   const identity = snapshot.identity || {};
-  const diagnostics = appendSection(container, "Diagnostics", "pipeline-diagnostics");
+  const diagnostics = appendSection(container, t("Diagnostics"), "pipeline-diagnostics");
   const list = document.createElement("dl");
   list.className = "pipeline-metrics";
-  appendMetric(list, "Context", valueAt(snapshot, ["contextId"]) || identity.contextId || state.currentSession?.contextId);
-  appendMetric(list, "Task", valueAt(snapshot, ["taskId"]) || identity.taskId || state.currentSession?.taskId);
-  appendMetric(list, "Sequence", valueAt(snapshot, ["lastSequence"]) || state.lastSequence);
-  appendMetric(list, "Pipeline", valueAt(snapshot, ["pipelineName"]) || identity.pipelineName || snapshot.display?.pipelineName);
-  appendMetric(list, "Status", valueAt(snapshot, ["status"]) || snapshot.status?.state || state.currentSession?.status);
+  appendMetric(list, t("Context"), valueAt(snapshot, ["contextId"]) || identity.contextId || state.currentSession?.contextId);
+  appendMetric(list, t("Task"), valueAt(snapshot, ["taskId"]) || identity.taskId || state.currentSession?.taskId);
+  appendMetric(list, t("Sequence"), valueAt(snapshot, ["lastSequence"]) || state.lastSequence);
+  appendMetric(list, t("Pipeline"), valueAt(snapshot, ["pipelineName"]) || identity.pipelineName || snapshot.display?.pipelineName);
+  appendMetric(list, t("Status"), valueAt(snapshot, ["status"]) || snapshot.status?.state || state.currentSession?.status);
   diagnostics.append(list);
 }
 
 function renderStepper(container, state) {
   const items = stepperItems(state);
-  const stepper = appendSection(container, "Timeline", "pipeline-stepper");
+  const stepper = appendSection(container, t("Timeline"), "pipeline-stepper");
   const list = document.createElement("ol");
   list.className = "pipeline-step-list";
   for (const stepItem of items) {
@@ -488,7 +488,7 @@ function renderStepper(container, state) {
     title.textContent = stepItem.title;
     const meta = document.createElement("p");
     meta.className = "pipeline-step-meta";
-    meta.textContent = [stepItem.status, stepItem.meta, stepItem.active ? "Active" : ""].map(text).filter(Boolean).join(" · ");
+    meta.textContent = [stepItem.status, stepItem.meta, stepItem.active ? t("Active") : ""].map(text).filter(Boolean).join(" · ");
     item.append(title, meta);
 
     if (asArray(stepItem.candidates).length > 0) {
@@ -506,7 +506,7 @@ function renderStepper(container, state) {
   if (list.children.length === 0) {
     const empty = document.createElement("p");
     empty.className = "pipeline-muted";
-    empty.textContent = "No pipeline events.";
+    empty.textContent = t("No pipeline events.");
     stepper.append(empty);
     return;
   }
@@ -700,7 +700,7 @@ function renderCandidates(container, state, callbacks) {
     card.dataset.candidateName = candidateName(candidate);
 
     const heading = document.createElement("h4");
-    heading.textContent = candidateName(candidate) || `Candidate ${candidateIndex(candidate) ?? ""}`.trim();
+    heading.textContent = candidateName(candidate) || t("Candidate {n}", { n: candidateIndex(candidate) ?? "" }).trim();
     const meta = document.createElement("p");
     meta.className = "pipeline-candidate-meta";
     meta.textContent = [
@@ -709,7 +709,7 @@ function renderCandidates(container, state, callbacks) {
         : `#${candidateIndex(candidate)}`,
       candidateTotalMonthlyCost(candidate) === null
         ? ""
-        : `Monthly ${candidateTotalMonthlyCost(candidate)}`,
+        : t("Monthly {cost}", { cost: candidateTotalMonthlyCost(candidate) }),
       candidate.status || "",
       isSelected ? t("Selected") : "",
     ]
@@ -746,10 +746,10 @@ function renderDiagrams(container, state) {
     diagrams.find((item) => selected.candidateIndex !== null && item.candidateIndex === selected.candidateIndex) ||
     diagrams.find((item) => selected.candidateName && item.candidateName === selected.candidateName) ||
     lastItem(diagrams);
-  const section = appendSection(container, "Diagram", "pipeline-diagram");
+  const section = appendSection(container, t("Diagram"), "pipeline-diagram");
   const preview = document.createElement("pre");
   preview.className = "pipeline-diagram-preview";
-  preview.textContent = text(diagram?.mermaidSource || diagram?.templateContent || "No diagram.");
+  preview.textContent = text(diagram?.mermaidSource || diagram?.templateContent || t("No diagram."));
   preview.dataset.candidateName = text(diagram?.candidateName);
   section.append(preview);
 }
@@ -780,7 +780,7 @@ function snapshotProgressEvents(state) {
 }
 
 function renderProgress(container, state) {
-  const section = appendSection(container, "Deployment", "pipeline-progress");
+  const section = appendSection(container, t("Deployment"), "pipeline-progress");
   const list = document.createElement("div");
   list.className = "pipeline-progress-list";
   for (const event of [...snapshotProgressEvents(state), ...progressEvents(state)]) {
@@ -811,7 +811,7 @@ function renderProgress(container, state) {
   if (list.children.length === 0) {
     const empty = document.createElement("p");
     empty.className = "pipeline-muted";
-    empty.textContent = "No deployment progress.";
+    empty.textContent = t("No deployment progress.");
     section.append(empty);
     return;
   }
@@ -937,13 +937,13 @@ function cleanupSource(state) {
 function renderCleanup(container, state) {
   const cleanup = cleanupSource(state);
   const resources = asArray(cleanup.resources);
-  const section = appendSection(container, "Cleanup", "pipeline-cleanup");
+  const section = appendSection(container, t("Cleanup"), "pipeline-cleanup");
   section.dataset.cleanupStatus = text(cleanup.status || cleanup.rawStatus || "none");
   const summary = document.createElement("p");
   summary.className = "pipeline-cleanup-summary";
   summary.textContent = [
     cleanup.status || cleanup.rawStatus || "none",
-    `${cleanup.resourceCount ?? resources.length} resources`,
+    t("{n} resources", { n: cleanup.resourceCount ?? resources.length }),
     cleanup.blocksNormalChat ? "blocking" : "",
     cleanup.message || cleanup.statusMessage,
   ]
@@ -956,7 +956,7 @@ function renderCleanup(container, state) {
   table.className = "pipeline-cleanup-table";
   const head = document.createElement("thead");
   const headRow = document.createElement("tr");
-  for (const label of ["Resource", "Status", "Region"]) {
+  for (const label of [t("Resource"), t("Status"), t("Region")]) {
     const cell = document.createElement("th");
     cell.textContent = label;
     headRow.append(cell);
@@ -981,7 +981,7 @@ function renderCleanup(container, state) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
     cell.colSpan = 3;
-    cell.textContent = "No cleanup resources.";
+    cell.textContent = t("No cleanup resources.");
     row.append(cell);
     body.append(row);
   }
@@ -1007,13 +1007,13 @@ function renderDisplayReplay(container, state) {
   if (!replay || attempts.length === 0) {
     return;
   }
-  const section = appendSection(container, replay.pipelineName || "Pipeline replay", "pipeline-display-replay");
+  const section = appendSection(container, replay.pipelineName || t("Pipeline replay"), "pipeline-display-replay");
   const meta = document.createElement("p");
   meta.className = "pipeline-replay-meta";
   meta.textContent = [
     replay.completed ? "completed" : replay.failed ? "failed" : replay.interrupted ? "interrupted" : "",
     replay.durationS ? `${Math.round(Number(replay.durationS))}s` : "",
-    `${attempts.length} steps`,
+    t("{n} steps", { n: attempts.length }),
   ]
     .map(text)
     .filter(Boolean)
@@ -1056,20 +1056,20 @@ function renderDisplayReplay(container, state) {
     detailsSummary.textContent = t("Details");
     const metrics = document.createElement("dl");
     metrics.className = "pipeline-replay-detail-metrics";
-    appendReplayMetric(metrics, "Step", attempt.stepId);
-    appendReplayMetric(metrics, "Attempt", attempt.attemptNo);
-    appendReplayMetric(metrics, "Type", attempt.stepType);
-    appendReplayMetric(metrics, "Mode", attempt.uiMode);
-    appendReplayMetric(metrics, "Transcript", attempt.transcriptId);
-    appendReplayMetric(metrics, "Rollback", attempt.rollbackReason);
-    appendReplayMetric(metrics, "Error", attempt.error);
+    appendReplayMetric(metrics, t("Step"), attempt.stepId);
+    appendReplayMetric(metrics, t("Attempt"), attempt.attemptNo);
+    appendReplayMetric(metrics, t("Type"), attempt.stepType);
+    appendReplayMetric(metrics, t("Mode"), attempt.uiMode);
+    appendReplayMetric(metrics, t("Transcript"), attempt.transcriptId);
+    appendReplayMetric(metrics, t("Rollback"), attempt.rollbackReason);
+    appendReplayMetric(metrics, t("Error"), attempt.error);
     details.append(detailsSummary, metrics);
-    appendReplayList(details, "Tools", tools, (tool) => [tool.name || tool.toolName, tool.toolUseId].map(text).filter(Boolean).join(" · "));
-    appendReplayList(details, "Sub-pipelines", Object.values(attempt.subPipelines || {}), (sub) =>
+    appendReplayList(details, t("Tools"), tools, (tool) => [tool.name || tool.toolName, tool.toolUseId].map(text).filter(Boolean).join(" · "));
+    appendReplayList(details, t("Sub-pipelines"), Object.values(attempt.subPipelines || {}), (sub) =>
       [sub.subPipelineName || sub.subPipelineId, sub.status].map(text).filter(Boolean).join(" · "),
     );
     const candidates = Object.values(attempt.candidateSelection?.candidates || {});
-    appendReplayList(details, "Candidates", candidates, (candidate) =>
+    appendReplayList(details, t("Candidates"), candidates, (candidate) =>
       [candidate.candidateIndex, candidate.name, candidate.totalMonthlyCost].map(text).filter(Boolean).join(" · "),
     );
     if (details.children.length > 1) {
@@ -1097,12 +1097,12 @@ function handoffSource(state) {
 
 function renderHandoff(container, state) {
   const handoff = handoffSource(state);
-  const section = appendSection(container, "Handoff", "pipeline-handoff");
+  const section = appendSection(container, t("Handoff"), "pipeline-handoff");
   const list = document.createElement("dl");
   list.className = "pipeline-metrics";
-  appendMetric(list, "Mode", handoff.targetNormalMode || handoff.targetMode || handoff.mode);
-  appendMetric(list, "Outcome", handoff.outcome || handoff.judgeOutcome || handoff.status);
-  appendMetric(list, "Summary", handoff.summary || handoff.message || handoff.reason);
+  appendMetric(list, t("Mode"), handoff.targetNormalMode || handoff.targetMode || handoff.mode);
+  appendMetric(list, t("Outcome"), handoff.outcome || handoff.judgeOutcome || handoff.status);
+  appendMetric(list, t("Summary"), handoff.summary || handoff.message || handoff.reason);
   section.append(list);
 }
 
@@ -1116,7 +1116,7 @@ export function renderPipelineWorkspace(state = {}, callbacks = {}) {
   if (!hasPipelineData(renderState)) {
     const empty = document.createElement("p");
     empty.className = "pipeline-workspace-empty";
-    empty.textContent = "No pipeline data.";
+    empty.textContent = t("No pipeline data.");
     container.append(empty);
     return container;
   }

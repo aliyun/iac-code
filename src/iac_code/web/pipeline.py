@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from iac_code.i18n import _
+
 _MAX_AFTER_SEQUENCE_DIGITS = 20
 
 
@@ -60,13 +62,13 @@ def parse_after_sequence(value: str | None) -> int | None:
     if value is None or value == "":
         return None
     if len(value) > _MAX_AFTER_SEQUENCE_DIGITS:
-        raise PipelineStateRequestError("afterSequence must be a non-negative integer")
+        raise PipelineStateRequestError(_("afterSequence must be a non-negative integer"))
     if value.isascii() and value.isdecimal():
         try:
             return int(value)
         except ValueError:
             pass
-    raise PipelineStateRequestError("afterSequence must be a non-negative integer")
+    raise PipelineStateRequestError(_("afterSequence must be a non-negative integer"))
 
 
 def parse_candidate_selection_body(data: Mapping[str, Any]) -> PipelineCandidateSelection:
@@ -78,7 +80,7 @@ def parse_candidate_selection_body(data: Mapping[str, Any]) -> PipelineCandidate
     candidate_index = _optional_candidate_index(data, "candidateIndex")
     parameter_overrides = _optional_parameter_overrides(data, "parameterOverrides")
     if not candidate_name.strip() and candidate_index is None:
-        raise PipelineCandidateSelectionRequestError("candidateName or candidateIndex is required")
+        raise PipelineCandidateSelectionRequestError(_("candidateName or candidateIndex is required"))
     candidate_name = candidate_name.strip()
     return PipelineCandidateSelection(
         session_id=session_id,
@@ -111,7 +113,7 @@ async def pipeline_state_from_query(
     context_id = _non_empty_query_value(query_params, "contextId")
     task_id = _non_empty_query_value(query_params, "taskId")
     if context_id is None and task_id is None:
-        raise PipelineStateRequestError("contextId or taskId is required")
+        raise PipelineStateRequestError(_("contextId or taskId is required"))
     context_id = _validated_protocol_id(context_id, "contextId")
     task_id = _validated_protocol_id(task_id, "taskId")
     after_sequence = parse_after_sequence(query_params.get("afterSequence"))
@@ -123,7 +125,7 @@ async def pipeline_state_from_query(
             after_sequence=after_sequence,
         )
     except ValueError as exc:
-        raise PipelineStateNotFoundError("pipeline state not found") from exc
+        raise PipelineStateNotFoundError(_("pipeline state not found")) from exc
 
 
 def _non_empty_query_value(query_params: Mapping[str, str], key: str) -> str | None:

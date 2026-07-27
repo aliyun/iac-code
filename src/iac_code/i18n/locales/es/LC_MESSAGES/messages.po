@@ -34,10 +34,11 @@ msgstr ""
 "paralelo."
 
 #: src/iac_code/a2a/app.py src/iac_code/a2a/pipeline_recovery.py
+#: src/iac_code/web/pipeline.py
 msgid "contextId or taskId is required"
 msgstr "contextId o taskId es obligatorio"
 
-#: src/iac_code/a2a/app.py
+#: src/iac_code/a2a/app.py src/iac_code/web/pipeline.py
 msgid "afterSequence must be a non-negative integer"
 msgstr "afterSequence debe ser un entero no negativo"
 
@@ -1666,6 +1667,7 @@ msgid "Invalid MCP scope {scope!r}. Valid values: user, local, project."
 msgstr "Ámbito MCP no válido {scope!r}. Valores válidos: user, local, project."
 
 #: src/iac_code/commands/mcp.py src/iac_code/mcp/cli.py
+#: src/iac_code/web/mcp_settings.py
 #, python-brace-format
 msgid "Scope {scope!r} cannot be used for persisted MCP config."
 msgstr "El ámbito {scope!r} no se puede usar para configuración MCP persistida."
@@ -2529,7 +2531,7 @@ msgstr "--url es obligatorio para servidores MCP remotos."
 msgid "Invalid JSON: {error}"
 msgstr "JSON no válido: {error}"
 
-#: src/iac_code/mcp/cli.py
+#: src/iac_code/mcp/cli.py src/iac_code/web/mcp_settings.py
 msgid "MCP server JSON must be an object."
 msgstr "El JSON del servidor MCP debe ser un objeto."
 
@@ -10588,6 +10590,75 @@ msgid "This session was created outside the web entry and is read-only."
 msgstr "Esta sesión se creó fuera de la entrada web y es de solo lectura."
 
 #: src/iac_code/web/app.py
+#, python-brace-format
+msgid "Current model {} does not support image input."
+msgstr "El modelo actual {} no admite entrada de imágenes."
+
+#: src/iac_code/web/app.py src/iac_code/web/images.py
+msgid "image data is too large"
+msgstr "los datos de imagen son demasiado grandes"
+
+#: src/iac_code/web/app.py
+msgid "session is archived"
+msgstr "la sesión está archivada"
+
+#: src/iac_code/web/app.py src/iac_code/web/pipeline_actions.py
+msgid "pipeline action failed"
+msgstr "la acción del pipeline falló"
+
+#: src/iac_code/web/app.py
+msgid "not found"
+msgstr "no encontrado"
+
+#: src/iac_code/web/app.py src/iac_code/web/pipeline_actions.py
+msgid "pipeline contextId and taskId are required"
+msgstr "se requieren contextId y taskId del pipeline"
+
+#: src/iac_code/web/app.py
+msgid "pipeline contextId or taskId is invalid"
+msgstr "contextId o taskId del pipeline no es válido"
+
+#: src/iac_code/web/app.py src/iac_code/web/session_manager.py
+msgid "session not found"
+msgstr "sesión no encontrada"
+
+#: src/iac_code/web/app.py
+msgid "resume target is ambiguous"
+msgstr "el objetivo de reanudación es ambiguo"
+
+#: src/iac_code/web/app.py
+msgid "malformed JSON request body"
+msgstr "cuerpo de solicitud JSON con formato incorrecto"
+
+#: src/iac_code/web/app.py
+msgid "request body must be a JSON object"
+msgstr "el cuerpo de la solicitud debe ser un objeto JSON"
+
+#: src/iac_code/web/app.py
+msgid "choice is invalid"
+msgstr "la elección no es válida"
+
+#: src/iac_code/web/app.py
+msgid "free_text is not allowed"
+msgstr "free_text no está permitido"
+
+#: src/iac_code/web/app.py
+msgid "selected_id was not offered"
+msgstr "selected_id no fue ofrecido"
+
+#: src/iac_code/web/app.py
+msgid "selected_label is not allowed without selected_id"
+msgstr "selected_label no está permitido sin selected_id"
+
+#: src/iac_code/web/app.py
+msgid "selected_id is required unless free text is allowed"
+msgstr "selected_id es obligatorio a menos que se permita texto libre"
+
+#: src/iac_code/web/app.py
+msgid "afterSequence must be an integer"
+msgstr "afterSequence debe ser un entero"
+
+#: src/iac_code/web/app.py
 msgid "No update is currently available."
 msgstr "Actualmente no hay ninguna actualización disponible."
 
@@ -10600,9 +10671,248 @@ msgstr "Ya hay una actualización en curso."
 msgid "The update command exited with code {}."
 msgstr "El comando de actualización finalizó con el código {}."
 
+#: src/iac_code/web/app.py src/iac_code/web/session_manager.py
+#: src/iac_code/web/settings.py
+msgid "mode must be normal or pipeline"
+msgstr "el modo debe ser normal o pipeline"
+
+#: src/iac_code/web/app.py
+msgid "message text, image, or file is required"
+msgstr "se requiere texto de mensaje, imagen o archivo"
+
+#: src/iac_code/web/app.py
+msgid "sessionId is required"
+msgstr "sessionId es obligatorio"
+
+#: src/iac_code/web/app.py
+msgid "image not found"
+msgstr "imagen no encontrada"
+
+#: src/iac_code/web/app.py
+msgid "path required"
+msgstr "se requiere ruta"
+
+#: src/iac_code/web/app.py
+msgid "forbidden"
+msgstr "prohibido"
+
+#: src/iac_code/web/app.py
+msgid "file not found"
+msgstr "archivo no encontrado"
+
+#: src/iac_code/web/app.py
+msgid "transcript not found"
+msgstr "transcripción no encontrada"
+
+#: src/iac_code/web/app.py
+msgid "debugEnabled must be a boolean"
+msgstr "debugEnabled debe ser un booleano"
+
+#: src/iac_code/web/app.py
+msgid "pinned must be a boolean"
+msgstr "pinned debe ser un booleano"
+
+#: src/iac_code/web/app.py
+msgid "archived must be a boolean"
+msgstr "archived debe ser un booleano"
+
+#: src/iac_code/web/app.py
+msgid "enabled is required"
+msgstr "enabled es obligatorio"
+
+#: src/iac_code/web/app.py
+msgid "enabled must be a boolean or null"
+msgstr "enabled debe ser un booleano o null"
+
+#: src/iac_code/web/app.py
+msgid "label must be a string"
+msgstr "label debe ser una cadena"
+
+#: src/iac_code/web/app.py
+msgid "project directory is not available on disk"
+msgstr "el directorio del proyecto no está disponible en disco"
+
+#: src/iac_code/web/app.py
+#, python-brace-format
+msgid "failed to reveal project: {}"
+msgstr "no se pudo mostrar el proyecto: {}"
+
+#: src/iac_code/web/app.py
+msgid "suggestion kind is invalid"
+msgstr "el tipo de sugerencia no es válido"
+
+#: src/iac_code/web/app.py
+msgid "project not found"
+msgstr "proyecto no encontrado"
+
 #: src/iac_code/web/app.py
 msgid "Installation in progress"
 msgstr "Instalación en curso"
+
+#: src/iac_code/web/app.py
+msgid "project or session not found"
+msgstr "proyecto o sesión no encontrado"
+
+#: src/iac_code/web/app.py
+msgid "name is required"
+msgstr "el nombre es obligatorio"
+
+#: src/iac_code/web/app.py
+msgid "decision must be 'approve' or 'reject'"
+msgstr "la decisión debe ser 'approve' o 'reject'"
+
+#: src/iac_code/web/app.py src/iac_code/web/pipeline.py
+msgid "pipeline state not found"
+msgstr "estado del pipeline no encontrado"
+
+#: src/iac_code/web/app.py
+msgid "internal server error"
+msgstr "error interno del servidor"
+
+#: src/iac_code/web/app.py
+msgid "session is not a pipeline session"
+msgstr "la sesión no es una sesión de pipeline"
+
+#: src/iac_code/web/app.py
+msgid "No active provider is configured."
+msgstr "No hay ningún proveedor activo configurado."
+
+#: src/iac_code/web/app.py
+msgid "No active model is configured."
+msgstr "No hay ningún modelo activo configurado."
+
+#: src/iac_code/web/app.py
+msgid "user escape commands are not available in pipeline mode"
+msgstr "los comandos de escape de usuario no están disponibles en modo pipeline"
+
+#: src/iac_code/web/app.py
+msgid "Shell command canceled."
+msgstr "Comando de shell cancelado."
+
+#: src/iac_code/web/app.py
+msgid "choice was not offered"
+msgstr "la elección no fue ofrecida"
+
+#: src/iac_code/web/app.py
+msgid "index must be an integer"
+msgstr "el índice debe ser un entero"
+
+#: src/iac_code/web/app.py
+msgid "normal-mode interrupts do not support attachments"
+msgstr "las interrupciones en modo normal no admiten adjuntos"
+
+#: src/iac_code/web/files.py
+msgid "session cwd is not available"
+msgstr "el directorio de trabajo de la sesión no está disponible"
+
+#: src/iac_code/web/files.py
+msgid "query is invalid"
+msgstr "la consulta no es válida"
+
+#: src/iac_code/web/files.py
+msgid "file reference is invalid"
+msgstr "la referencia de archivo no es válida"
+
+#: src/iac_code/web/files.py
+msgid "file reference escapes the workspace"
+msgstr "la referencia de archivo sale del espacio de trabajo"
+
+#: src/iac_code/web/images.py
+msgid "image id is invalid"
+msgstr "el id de imagen no es válido"
+
+#: src/iac_code/web/images.py
+msgid "session id is invalid"
+msgstr "el id de sesión no es válido"
+
+#: src/iac_code/web/images.py
+msgid "media type is invalid"
+msgstr "el tipo de medio no es válido"
+
+#: src/iac_code/web/images.py
+msgid "image data is empty"
+msgstr "los datos de imagen están vacíos"
+
+#: src/iac_code/web/images.py
+msgid "image data is not a supported image"
+msgstr "los datos de imagen no son una imagen compatible"
+
+#: src/iac_code/web/images.py
+msgid "image data does not match media type"
+msgstr "los datos de imagen no coinciden con el tipo de medio"
+
+#: src/iac_code/web/images.py
+msgid "cwd is invalid"
+msgstr "cwd no es válido"
+
+#: src/iac_code/web/images.py
+msgid "image fallback cache limit exceeded"
+msgstr "se superó el límite de caché de reserva de imágenes"
+
+#: src/iac_code/web/images.py
+msgid "failed to write image data"
+msgstr "no se pudieron escribir los datos de imagen"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "MCP scope is required."
+msgstr "Se requiere el ámbito de MCP."
+
+#: src/iac_code/web/mcp_settings.py
+#, python-brace-format
+msgid "MCP server {name!r} not found."
+msgstr "Servidor MCP {name!r} no encontrado."
+
+#: src/iac_code/web/mcp_settings.py
+msgid "command is required for stdio MCP servers."
+msgstr "command es obligatorio para los servidores MCP stdio."
+
+#: src/iac_code/web/mcp_settings.py
+msgid "url is required for remote MCP servers."
+msgstr "url es obligatorio para los servidores MCP remotos."
+
+#: src/iac_code/web/mcp_settings.py
+msgid "url is required for ws MCP servers."
+msgstr "url es obligatorio para los servidores MCP ws."
+
+#: src/iac_code/web/mcp_settings.py
+#, python-brace-format
+msgid "Invalid transport {transport!r}. Valid values: stdio, http, sse, ws."
+msgstr "Transporte no válido {transport!r}. Valores válidos: stdio, http, sse, ws."
+
+#: src/iac_code/web/mcp_settings.py
+msgid "OAuth callback port must be an integer."
+msgstr "El puerto de callback de OAuth debe ser un entero."
+
+#: src/iac_code/web/mcp_settings.py
+msgid "MCP server name is required."
+msgstr "Se requiere el nombre del servidor MCP."
+
+#: src/iac_code/web/mcp_settings.py
+#, python-brace-format
+msgid "MCP server {name!r} is not defined in a project config."
+msgstr ""
+"El servidor MCP {name!r} no está definido en una configuración de "
+"proyecto."
+
+#: src/iac_code/web/mcp_settings.py
+msgid "Failed to start MCP OAuth flow."
+msgstr "No se pudo iniciar el flujo de OAuth de MCP."
+
+#: src/iac_code/web/mcp_settings.py
+msgid "Unknown OAuth flow."
+msgstr "Flujo de OAuth desconocido."
+
+#: src/iac_code/web/mcp_settings.py
+msgid "callback_url is required."
+msgstr "callback_url es obligatorio."
+
+#: src/iac_code/web/memory.py
+msgid "user memory path is invalid"
+msgstr "la ruta de memoria del usuario no es válida"
+
+#: src/iac_code/web/memory.py
+msgid "project memory path is invalid"
+msgstr "la ruta de memoria del proyecto no es válida"
 
 #: src/iac_code/web/permissions.py
 msgid "Deny once"
@@ -10649,6 +10959,42 @@ msgstr "Denegar siempre {}"
 msgid "Always deny this tool"
 msgstr "Denegar siempre esta herramienta"
 
+#: src/iac_code/web/pipeline.py
+msgid "candidateName or candidateIndex is required"
+msgstr "candidateName o candidateIndex es obligatorio"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline is not waiting for candidate input"
+msgstr "el pipeline no está esperando la entrada del candidato"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline is not active"
+msgstr "el pipeline no está activo"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline context not found"
+msgstr "contexto del pipeline no encontrado"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline context belongs to a different workspace"
+msgstr "el contexto del pipeline pertenece a otro espacio de trabajo"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline task not found"
+msgstr "tarea del pipeline no encontrada"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline task belongs to a different context"
+msgstr "la tarea del pipeline pertenece a otro contexto"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline action canceled"
+msgstr "acción del pipeline cancelada"
+
+#: src/iac_code/web/pipeline_transcript.py
+msgid "Step"
+msgstr "Paso"
+
 #: src/iac_code/web/pipeline_transcript.py src/iac_code/web/session_manager.py
 #, python-brace-format
 msgid "◆ Plan: {}"
@@ -10661,6 +11007,28 @@ msgstr "↪ Chat normal"
 #: src/iac_code/web/pipeline_transcript.py src/iac_code/web/session_manager.py
 msgid "Normal chat"
 msgstr "Chat normal"
+
+#: src/iac_code/web/runtime.py
+#, python-brace-format
+msgid ""
+"{}\n"
+"\n"
+"Referenced files:\n"
+"{}"
+msgstr ""
+"{}\n"
+"\n"
+"Archivos referenciados:\n"
+"{}"
+
+#: src/iac_code/web/runtime.py
+#, python-brace-format
+msgid ""
+"Referenced files:\n"
+"{}"
+msgstr ""
+"Archivos referenciados:\n"
+"{}"
 
 #: src/iac_code/web/server.py
 msgid "IaC Code Web is running"
@@ -10684,6 +11052,22 @@ msgstr ""
 "'iac-code[http]'"
 
 #: src/iac_code/web/session_manager.py
+msgid "sessionId is invalid"
+msgstr "sessionId no es válido"
+
+#: src/iac_code/web/session_manager.py src/iac_code/web/settings.py
+msgid "unknown provider"
+msgstr "proveedor desconocido"
+
+#: src/iac_code/web/session_manager.py src/iac_code/web/settings.py
+msgid "unknown model"
+msgstr "modelo desconocido"
+
+#: src/iac_code/web/session_manager.py src/iac_code/web/settings.py
+msgid "unknown effort"
+msgstr "esfuerzo desconocido"
+
+#: src/iac_code/web/session_manager.py
 #, python-brace-format
 msgid "Pipeline · {}"
 msgstr "Pipeline · {}"
@@ -10694,12 +11078,44 @@ msgid "Session · {}"
 msgstr "Sesión · {}"
 
 #: src/iac_code/web/settings.py
+msgid "unknown theme"
+msgstr "tema desconocido"
+
+#: src/iac_code/web/settings.py
+msgid "unknown language"
+msgstr "idioma desconocido"
+
+#: src/iac_code/web/settings.py
+msgid "unknown permission mode"
+msgstr "modo de permisos desconocido"
+
+#: src/iac_code/web/settings.py
 msgid "Other"
 msgstr "Otro"
 
 #: src/iac_code/web/settings.py
 msgid "Managed by external login"
 msgstr "Gestionado por inicio de sesión externo"
+
+#: src/iac_code/web/settings.py
+msgid "provider is not configured"
+msgstr "el proveedor no está configurado"
+
+#: src/iac_code/web/settings.py
+msgid "cannot clear active provider"
+msgstr "no se puede borrar el proveedor activo"
+
+#: src/iac_code/web/settings.py
+msgid "unknown partner source"
+msgstr "fuente de socio desconocida"
+
+#: src/iac_code/web/settings.py
+msgid "unknown aliyun credential mode"
+msgstr "modo de credencial de aliyun desconocido"
+
+#: src/iac_code/web/settings.py
+msgid "stored aliyun credentials are invalid"
+msgstr "las credenciales de aliyun almacenadas no son válidas"
 
 #: src/iac_code/web/shell.py
 msgid "Allow Bash?"

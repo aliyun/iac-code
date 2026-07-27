@@ -24,8 +24,8 @@ const CLOUD_VENDORS = [{ id: "aliyun", label: t("Alibaba Cloud") }];
 const CREDENTIAL_MODE_ORDER = ["AK", "StsToken", "RamRoleArn", "OAuth"];
 
 const CLOUD_MODE_LABELS = {
-  AK: "AccessKey",
-  StsToken: "STS Token",
+  AK: t("AccessKey"),
+  StsToken: t("STS Token"),
   RamRoleArn: t("RAM role"),
   OAuth: t("OAuth browser login"),
 };
@@ -506,17 +506,17 @@ function createStatusPanel(api, context) {
     className: "workspace-tab-panel",
     attributes: { "data-workspace-panel": "status" },
   });
-  const heading = makeElement("h3", { textContent: "Status" });
+  const heading = makeElement("h3", { textContent: t("Status") });
   const board = makeElement("div", { className: "workspace-status-board" });
-  const boardTitle = makeElement("strong", { className: "workspace-status-title", textContent: "Session ready" });
-  const boardMeta = makeElement("span", { className: "workspace-status-meta", textContent: "normal / idle" });
+  const boardTitle = makeElement("strong", { className: "workspace-status-title", textContent: t("Session ready") });
+  const boardMeta = makeElement("span", { className: "workspace-status-meta", textContent: t("normal / idle") });
   const boardBadge = makeElement("span", { className: "workspace-status-badge", textContent: "idle" });
   board.append(boardTitle, boardMeta, boardBadge);
   const summary = makeElement("dl", { className: "workspace-list workspace-status-summary" });
   const actions = makeElement("div", { className: "workspace-action-row" });
   const resultDetails = makeElement("details", { className: "workspace-status-details" });
-  const resultSummary = makeElement("summary", { textContent: "Response detail" });
-  const result = makeElement("pre", { className: "workspace-result", textContent: "Choose an action." });
+  const resultSummary = makeElement("summary", { textContent: t("Response detail") });
+  const result = makeElement("pre", { className: "workspace-result", textContent: t("Choose an action.") });
   resultDetails.append(resultSummary, result);
   let requestToken = 0;
 
@@ -551,7 +551,7 @@ function createStatusPanel(api, context) {
   const run = async (label, action) => {
     const requestedSessionId = context.sessionId();
     if (!requestedSessionId) {
-      setOutput(result, { error: "No active session." });
+      setOutput(result, { error: t("No active session.") });
       return;
     }
     const token = ++requestToken;
@@ -570,14 +570,14 @@ function createStatusPanel(api, context) {
     }
   };
 
-  const statusButton = makeButton("Session Status", "workspace-status-load");
-  statusButton.addEventListener("click", () => run("Loading status", api.getSessionStatus));
-  const debugButton = makeButton("Debug", "workspace-debug-load");
-  debugButton.addEventListener("click", () => run("Loading debug", api.getSessionDebug));
-  const promptButton = makeButton("Prompt", "workspace-prompt-load");
-  promptButton.addEventListener("click", () => run("Loading prompt", api.getSessionPrompt));
-  const compactButton = makeButton("Compact", "workspace-compact-run", "workspace-action workspace-action-primary");
-  compactButton.addEventListener("click", () => run("Compacting", api.compactSession));
+  const statusButton = makeButton(t("Session Status"), "workspace-status-load");
+  statusButton.addEventListener("click", () => run(t("Loading status"), api.getSessionStatus));
+  const debugButton = makeButton(t("Debug"), "workspace-debug-load");
+  debugButton.addEventListener("click", () => run(t("Loading debug"), api.getSessionDebug));
+  const promptButton = makeButton(t("Prompt"), "workspace-prompt-load");
+  promptButton.addEventListener("click", () => run(t("Loading prompt"), api.getSessionPrompt));
+  const compactButton = makeButton(t("Compact"), "workspace-compact-run", "workspace-action workspace-action-primary");
+  compactButton.addEventListener("click", () => run(t("Compacting"), api.compactSession));
 
   actions.append(statusButton, debugButton, promptButton, compactButton);
   panel.append(heading, board, summary, actions, resultDetails);
@@ -589,22 +589,22 @@ function createStatusPanel(api, context) {
       const status = session?.status || "idle";
       const mode = session?.mode || "normal";
       const sessionId = displaySessionId(session) || context.sessionId();
-      boardTitle.textContent = status === "running" ? "Session working" : "Session ready";
-      boardMeta.textContent = `${mode} / ${sessionId || "no session"}`;
+      boardTitle.textContent = status === "running" ? t("Session working") : t("Session ready");
+      boardMeta.textContent = `${mode} / ${sessionId || t("no session")}`;
       boardBadge.textContent = status;
       boardBadge.dataset.status = status;
       statusSessionId = sessionId || "";
       copyIdButton.disabled = !statusSessionId;
       renderSummaryList(summary, [
-        ["Session", sessionId, copyIdButton],
-        ["Mode", mode],
-        ["Status", status],
-        ["Debug", session?.debugEnabled === true ? "enabled" : "off"],
+        [t("Session"), sessionId, copyIdButton],
+        [t("Mode"), mode],
+        [t("Status"), status],
+        [t("Debug"), session?.debugEnabled === true ? t("enabled") : t("off")],
       ]);
     },
     showResult(payload) {
       setOutput(result, payload);
-      resultSummary.textContent = "Response detail updated";
+      resultSummary.textContent = t("Response detail updated");
     },
     reset() {
       requestToken += 1;
@@ -1116,15 +1116,15 @@ function createCloudPanel(api, context) {
     const mode = selectedValue(cloudModeSelect) || "AK";
     const rows = [];
     if (mode === "AK" || mode === "StsToken" || mode === "RamRoleArn") {
-      rows.push(makeField("AccessKeyId", cloudAccessKeyIdInput, t("Alibaba Cloud access key ID"), hintFor("accessKeyId")));
-      rows.push(makeField("AccessKeySecret", cloudAccessKeySecretField.wrap, t("Access key secret; stored locally only"), hintFor("hasAccessKeySecret", { secret: true })));
+      rows.push(makeField(t("AccessKeyId"), cloudAccessKeyIdInput, t("Alibaba Cloud access key ID"), hintFor("accessKeyId")));
+      rows.push(makeField(t("AccessKeySecret"), cloudAccessKeySecretField.wrap, t("Access key secret; stored locally only"), hintFor("hasAccessKeySecret", { secret: true })));
     }
     if (mode === "StsToken") {
-      rows.push(makeField("StsToken", cloudStsTokenField.wrap, t("Temporary security token"), hintFor("hasStsToken", { secret: true })));
+      rows.push(makeField(t("StsToken"), cloudStsTokenField.wrap, t("Temporary security token"), hintFor("hasStsToken", { secret: true })));
     }
     if (mode === "RamRoleArn") {
-      rows.push(makeField("RamRoleArn", cloudRamRoleArnInput, t("The RAM role ARN to assume"), hintFor("ramRoleArn")));
-      rows.push(makeField("RamSessionName", cloudRamSessionNameInput, t("Role session name (optional)"), hintFor("ramSessionName")));
+      rows.push(makeField(t("RamRoleArn"), cloudRamRoleArnInput, t("The RAM role ARN to assume"), hintFor("ramRoleArn")));
+      rows.push(makeField(t("RamSessionName"), cloudRamSessionNameInput, t("Role session name (optional)"), hintFor("ramSessionName")));
     }
     if (mode === "OAuth") {
       rows.push(makeField(t("Login site"), cloudOauthSiteSelect, t("Select the site your Alibaba Cloud account belongs to")));
@@ -2444,16 +2444,16 @@ function createMcpPanel(api, context) {
     );
     const remoteFields = makeElement("div", { className: "workspace-mcp-fields workspace-mcp-fields-remote" });
     remoteFields.append(
-      makeField("URL", urlInput, t("Remote server address for http/sse/ws.")),
+      makeField(t("URL"), urlInput, t("Remote server address for http/sse/ws.")),
       makeField(t("Request headers"), headersInput, t("Name: Value; reference secrets with ${VAR} (ws does not support request headers).")),
     );
     const oauthFields = makeElement("details", { className: "workspace-mcp-oauth-fields" });
     oauthFields.append(
       makeElement("summary", { textContent: t("OAuth (optional)") }),
-      makeField("Client ID", oauthClientId),
+      makeField(t("Client ID"), oauthClientId),
       makeField(t("Client Secret environment variable"), oauthClientSecretEnv, t("Name of the environment variable storing the secret (do not enter the plaintext secret).")),
       makeField(t("Callback port"), oauthCallbackPort),
-      makeField("Metadata URL", oauthMetadataUrl),
+      makeField(t("Metadata URL"), oauthMetadataUrl),
     );
 
     const jsonToggle = makeElement("label", { className: "workspace-mcp-json-toggle" });

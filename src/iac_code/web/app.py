@@ -580,7 +580,7 @@ def create_app(
         supports_images, model = active_model_supports_images(session, model_selection=model_selection)
         if supports_images:
             return None
-        return json_error("Current model {} does not support image input.".format(model), 400)
+        return json_error(_("Current model {} does not support image input.").format(model), 400)
 
     def suggestion_to_json(item: SuggestionItem) -> dict[str, str]:
         payload = {
@@ -770,7 +770,7 @@ def create_app(
 
         max_encoded_length = ((MAX_IMAGE_BYTES + 2) // 3) * 4
         if len(image_data_base64) > max_encoded_length:
-            raise ValueError("image data is too large")
+            raise ValueError(_("image data is too large"))
 
     def active_turn_running(session: WebSession) -> bool:
         return session.turn_lock.locked() or (
@@ -788,7 +788,7 @@ def create_app(
     def session_archived_response(session: WebSession) -> JSONResponse | None:
         if not session.archived:
             return None
-        return json_error("session is archived", 409, code="session_archived")
+        return json_error(_("session is archived"), 409, code="session_archived")
 
     async def delete_session_if_idle(session: WebSession) -> bool | None:
         async with session.turn_admission_lock:
@@ -1023,7 +1023,7 @@ def create_app(
                         "error",
                         {
                             "turnId": turn_id,
-                            "message": result.response.get("error", {}).get("message", "pipeline action failed"),
+                            "message": result.response.get("error", {}).get("message", _("pipeline action failed")),
                             "retryable": result.status_code < 500,
                             "contextId": session.context_id,
                             "taskId": session.task_id,
@@ -1289,7 +1289,7 @@ def create_app(
                 session.active_local_tasks.discard(current)
 
     async def not_found(_request, _exc):
-        return json_error("not found", 404)
+        return json_error(_("not found"), 404)
 
     def optional_string(data: dict, field: str) -> str | None:
         if field not in data:
@@ -1498,14 +1498,14 @@ def create_app(
 
     def require_pipeline_metadata(session: WebSession) -> None:
         if not session.context_id or not session.task_id:
-            raise ValueError("pipeline contextId and taskId are required")
+            raise ValueError(_("pipeline contextId and taskId are required"))
         from iac_code.a2a.types import validate_protocol_id
 
         try:
             validate_protocol_id(session.context_id)
             validate_protocol_id(session.task_id)
         except ValueError as exc:
-            raise ValueError("pipeline contextId or taskId is invalid") from exc
+            raise ValueError(_("pipeline contextId or taskId is invalid")) from exc
 
     def session_candidate_payload(session: WebSession) -> dict[str, Any]:
         return normalize_event_payload(
@@ -1593,7 +1593,7 @@ def create_app(
                 {
                     "accepted": False,
                     "command": "resume",
-                    "error": {"code": "resume_not_found", "message": "session not found"},
+                    "error": {"code": "resume_not_found", "message": _("session not found")},
                     "candidates": [],
                 },
                 404,
@@ -1603,7 +1603,7 @@ def create_app(
                 {
                     "accepted": False,
                     "command": "resume",
-                    "error": {"code": "resume_ambiguous", "message": "resume target is ambiguous"},
+                    "error": {"code": "resume_ambiguous", "message": _("resume target is ambiguous")},
                     "candidates": [session_entry_candidate_payload(match) for match in matches],
                 },
                 409,
@@ -1654,16 +1654,16 @@ def create_app(
         try:
             data = json.loads(body)
         except json.JSONDecodeError as exc:
-            raise ValueError("malformed JSON request body") from exc
+            raise ValueError(_("malformed JSON request body")) from exc
         if not isinstance(data, dict):
-            raise ValueError("request body must be a JSON object")
+            raise ValueError(_("request body must be a JSON object"))
         return data
 
     def validate_permission_answer(data: dict) -> dict:
         session_id = required_string(data, "sessionId")
         choice = required_string(data, "choice")
         if choice not in PERMISSION_CHOICES:
-            raise ValueError("choice is invalid")
+            raise ValueError(_("choice is invalid"))
         return {"sessionId": session_id, "choice": choice}
 
     def validate_question_answer(data: dict) -> dict:
@@ -1716,25 +1716,25 @@ def create_app(
         selected_id = answer["selected_id"]
         has_free_text = bool(answer["free_text"].strip())
         if has_free_text and not question_allows_free_text(payload):
-            raise ValueError("free_text is not allowed")
+            raise ValueError(_("free_text is not allowed"))
         if selected_id:
             selected_label = question_option_label(payload, selected_id)
             if selected_label is None:
-                raise ValueError("selected_id was not offered")
+                raise ValueError(_("selected_id was not offered"))
             return {
                 "selected_id": selected_id,
                 "selected_label": selected_label,
                 "free_text": answer["free_text"],
             }
         if answer["selected_label"].strip():
-            raise ValueError("selected_label is not allowed without selected_id")
+            raise ValueError(_("selected_label is not allowed without selected_id"))
         if question_allows_free_text(payload) and has_free_text:
             return {
                 "selected_id": "",
                 "selected_label": "",
                 "free_text": answer["free_text"],
             }
-        raise ValueError("selected_id is required unless free text is allowed")
+        raise ValueError(_("selected_id is required unless free text is allowed"))
 
     def event_cursor(request) -> int:
         cursors: list[int] = []
@@ -1747,7 +1747,7 @@ def create_app(
             try:
                 after_sequence = int(raw_value)
             except ValueError as exc:
-                raise ValueError("afterSequence must be an integer") from exc
+                raise ValueError(_("afterSequence must be an integer")) from exc
             if after_sequence < 0:
                 raise ValueError("afterSequence must be non-negative")
             cursors.append(after_sequence)
@@ -1861,7 +1861,7 @@ def create_app(
             cwd = optional_string(data, "cwd")
             raw_mode = optional_string(data, "mode") if "mode" in data else os.environ.get("IAC_CODE_MODE", "normal")
             if raw_mode not in {"normal", "pipeline"}:
-                raise ValueError("mode must be normal or pipeline")
+                raise ValueError(_("mode must be normal or pipeline"))
             mode = cast(WebMode, raw_mode)
             pipeline_name = (
                 optional_string(data, "pipelineName")
@@ -2032,7 +2032,7 @@ def create_app(
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         if (read_only := foreign_read_only_response(session)) is not None:
             return read_only
         if (archived := session_archived_response(session)) is not None:
@@ -2043,7 +2043,7 @@ def create_app(
             image_ids = optional_string_list(data, "imageIds")
             file_refs = optional_string_list(data, "fileRefs")
             if not text.strip() and not image_ids and not file_refs:
-                raise ValueError("message text, image, or file is required")
+                raise ValueError(_("message text, image, or file is required"))
         except ValueError as exc:
             return json_error(str(exc), 400)
 
@@ -2066,7 +2066,7 @@ def create_app(
             reservation = await reserve_pipeline_action(session, wait_for_admission=True)
             if reservation is None:
                 if manager.get_session(session.web_session_id) is not session:
-                    return json_error("session not found", 404)
+                    return json_error(_("session not found"), 404)
                 if (archived := session_archived_response(session)) is not None:
                     return archived
                 return turn_busy_response()
@@ -2119,11 +2119,11 @@ def create_app(
         reservation = await reserve_agent_turn(session)
         if reservation is None:
             if manager.get_session(session.web_session_id) is not session:
-                return json_error("session not found", 404)
+                return json_error(_("session not found"), 404)
             if (archived := session_archived_response(session)) is not None:
                 return archived
             return turn_busy_response()
-        _, placeholder = reservation
+        _reserved, placeholder = reservation
         owns_reservation = True
         try:
             model_selection = active_model_selection(session)
@@ -2206,7 +2206,7 @@ def create_app(
         scoped_session_ref = request.path_params.get("session_id")
         scoped_session = manager.get_session(scoped_session_ref) if scoped_session_ref else None
         if scoped_session_ref and scoped_session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         try:
             data = await json_object_body(request)
             session_id = scoped_session_ref or required_string(data, "sessionId")
@@ -2218,14 +2218,14 @@ def create_app(
             return json_error(str(exc), 400)
         session = scoped_session or manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         if scoped_session is None and manager.session_reference_mutated_since(
             session_id, session, request_lifecycle_epoch
         ):
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         async with session.turn_admission_lock:
             if manager.get_session(session.web_session_id) is not session:
-                return json_error("session not found", 404)
+                return json_error(_("session not found"), 404)
             if (read_only := foreign_read_only_response(session)) is not None:
                 return read_only
             if (archived := session_archived_response(session)) is not None:
@@ -2233,7 +2233,7 @@ def create_app(
             supports_images, model = active_model_supports_images(session)
             if not supports_images:
                 return json_error(
-                    "Current model {} does not support image input.".format(model),
+                    _("Current model {} does not support image input.").format(model),
                     400,
                 )
 
@@ -2261,24 +2261,24 @@ def create_app(
         image_id = request.path_params["image_id"]
         session_id = query_string(request, "sessionId", "")
         if not session_id:
-            return json_error("sessionId is required", 400)
+            return json_error(_("sessionId is required"), 400)
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("image not found", 404)
+            return json_error(_("image not found"), 404)
 
         from iac_code.web.images import load_cached_image
 
         try:
             image = load_cached_image(image_id, cwd=session.cwd, session_id=session.session_id)
         except (FileNotFoundError, ValueError):
-            return json_error("image not found", 404)
+            return json_error(_("image not found"), 404)
         return Response(image.data, media_type=image.media_type)
 
     async def get_messages(request):
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         transcript = manager.load_visible_transcript(session.session_id, cwd=session.cwd)
         # 服务器重启后 buffer 从序号 1 重新计数,而前端把存储转录里的可见行按位置重排为
         # 1..N。若不播种,流水线恢复后补发的实时事件(如 step 标记)会拿到低序号排到存储行
@@ -2290,7 +2290,7 @@ def create_app(
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         # 注入协调器在途优化集:优化进度态在前端易失(resync 清空),后端权威 optimizing 标志让
         # 正在优化的候选徽标跨 resync 保持「优化中」,不再倒退成「待优化」。
         optimizing = frozenset(
@@ -2302,24 +2302,24 @@ def create_app(
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         path = query_string(request, "path", "")
         if not path:
-            return json_error("path required", 400)
+            return json_error(_("path required"), 400)
         # 只放行面板已派生的输出文件(可能在 cwd 之外,如 /tmp),不放开任意路径穿越。
         allowed = {entry["path"] for entry in outputs_payload(manager, session)["files"]}
         try:
             return JSONResponse(read_output_file(session, path, allowed_paths=allowed))
         except OutputPathForbidden:
-            return json_error("forbidden", 403)
+            return json_error(_("forbidden"), 403)
         except OutputFileMissing:
-            return json_error("file not found", 404)
+            return json_error(_("file not found"), 404)
 
     async def get_file_search(request):
         session_id = query_string(request, "sessionId", "")
         session = manager.get_session(session_id) if session_id else None
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         try:
             query = query_string(request, "q", "")
             limit = query_int(request, "limit")
@@ -2334,7 +2334,7 @@ def create_app(
         session_id = query_string(request, "sessionId", "")
         session = manager.get_session(session_id) if session_id else None
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         try:
             query = query_string(request, "q", "")
             limit = query_int(request, "limit")
@@ -2355,7 +2355,7 @@ def create_app(
             if session_id:
                 session = manager.get_session(session_id)
                 if session is None:
-                    return json_error("session not found", 404)
+                    return json_error(_("session not found"), 404)
                 entries.extend(
                     search_visible_user_history(
                         manager.load_visible_messages(session.session_id, cwd=session.cwd),
@@ -2372,7 +2372,7 @@ def create_app(
         session_id = query_string(request, "sessionId", "")
         session = manager.get_session(session_id) if session_id else None
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         from iac_code.web.files import transcript_for_identifier
 
         identifier = request.path_params["turn_id"]
@@ -2382,7 +2382,7 @@ def create_app(
             resume_messages=manager.load_resume_messages(session.session_id, cwd=session.cwd),
         )
         if transcript is None:
-            return json_error("transcript not found", 404)
+            return json_error(_("transcript not found"), 404)
         return JSONResponse(transcript)
 
     async def list_sessions(request):
@@ -2532,7 +2532,7 @@ def create_app(
         session_id = _request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         # 切换会话时补齐系统提示 + 工具定义开销(重启后首个实时回合前 /status 会少算这约 13k),
         # 令切换即刻显示的用量与 composer 圆环口径一致;仅在开销未知时建一次 runtime,失败降级为 0。
         await prime_session_context_overhead(session, manager)
@@ -2542,7 +2542,7 @@ def create_app(
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         try:
             data = await json_object_body(request)
             supported_fields = {"title", "name", "debugEnabled", "allowUserEscapes", "pinned", "archived"}
@@ -2557,14 +2557,14 @@ def create_app(
             if "debugEnabled" in data:
                 debug_enabled = data["debugEnabled"]
                 if not isinstance(debug_enabled, bool):
-                    raise ValueError("debugEnabled must be a boolean")
+                    raise ValueError(_("debugEnabled must be a boolean"))
             allow_user_escapes = optional_bool_map(data, "allowUserEscapes")
             pinned = data.get("pinned") if "pinned" in data else None
             if pinned is not None and not isinstance(pinned, bool):
-                raise ValueError("pinned must be a boolean")
+                raise ValueError(_("pinned must be a boolean"))
             archived = data.get("archived") if "archived" in data else None
             if archived is not None and not isinstance(archived, bool):
-                raise ValueError("archived must be a boolean")
+                raise ValueError(_("archived must be a boolean"))
         except ValueError as exc:
             return json_error(str(exc), 400)
         if manager.is_session_read_only(session) and set(data) - {"pinned", "archived"}:
@@ -2590,7 +2590,7 @@ def create_app(
         try:
             async with session.turn_admission_lock:
                 if manager.get_session(session.web_session_id) is not session:
-                    return json_error("session not found", 404)
+                    return json_error(_("session not found"), 404)
                 if archived is True and (
                     active_session_work_running(session)
                     or session.pending_permissions
@@ -2611,7 +2611,7 @@ def create_app(
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         if (read_only := foreign_read_only_response(session)) is not None:
             return read_only
         try:
@@ -2619,7 +2619,7 @@ def create_app(
             mode = required_string(data, "mode")
             async with session.turn_admission_lock:
                 if manager.get_session(session.web_session_id) is not session:
-                    return json_error("session not found", 404)
+                    return json_error(_("session not found"), 404)
                 manager.set_permission_mode(session, mode)
                 manager.persist_web_metadata(session)
         except ValueError as exc:
@@ -2630,19 +2630,19 @@ def create_app(
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         if (read_only := foreign_read_only_response(session)) is not None:
             return read_only
         try:
             data = await json_object_body(request)
             if "enabled" not in data:
-                raise ValueError("enabled is required")
+                raise ValueError(_("enabled is required"))
             raw = data["enabled"]
             if raw is not None and not isinstance(raw, bool):
-                raise ValueError("enabled must be a boolean or null")
+                raise ValueError(_("enabled must be a boolean or null"))
             async with session.turn_admission_lock:
                 if manager.get_session(session.web_session_id) is not session:
-                    return json_error("session not found", 404)
+                    return json_error(_("session not found"), 404)
                 manager.set_thinking_enabled(session, raw)
                 manager.persist_web_metadata(session)
         except ValueError as exc:
@@ -2653,7 +2653,7 @@ def create_app(
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         if (read_only := foreign_read_only_response(session)) is not None:
             return read_only
         try:
@@ -2663,7 +2663,7 @@ def create_app(
             effort = optional_string(data, "effort")
             async with session.turn_admission_lock:
                 if manager.get_session(session.web_session_id) is not session:
-                    return json_error("session not found", 404)
+                    return json_error(_("session not found"), 404)
                 manager.set_session_model(session, provider=provider, model=model, effort=effort)
         except ValueError as exc:
             return json_error(str(exc), 400)
@@ -2673,12 +2673,12 @@ def create_app(
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         if (read_only := foreign_read_only_response(session)) is not None:
             return read_only
         async with session.turn_admission_lock:
             if manager.get_session(session.web_session_id) is not session:
-                return json_error("session not found", 404)
+                return json_error(_("session not found"), 404)
             manager.clear_session_model(session)
         return JSONResponse(normalize_event_payload(session.to_dict()))
 
@@ -2703,7 +2703,7 @@ def create_app(
                 elif isinstance(label, str):
                     kwargs["label"] = label
                 else:
-                    raise ValueError("label must be a string")
+                    raise ValueError(_("label must be a string"))
         except ValueError as exc:
             return json_error(str(exc), 400)
         metadata = manager.update_project_metadata(cwd, **kwargs)
@@ -2717,7 +2717,7 @@ def create_app(
             return json_error(str(exc), 400)
         target = Path(cwd).expanduser()
         if not target.is_dir():
-            return json_error("project directory is not available on disk", 404)
+            return json_error(_("project directory is not available on disk"), 404)
         try:
             import subprocess
             import sys
@@ -2730,7 +2730,7 @@ def create_app(
                 command = ["xdg-open", str(target)]
             subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except OSError as exc:
-            return json_error("failed to reveal project: {}".format(exc), 500)
+            return json_error(_("failed to reveal project: {}").format(exc), 500)
         return JSONResponse({"cwd": cwd, "revealed": True})
 
     async def archive_project_sessions_route(request):
@@ -3050,14 +3050,14 @@ def create_app(
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         return JSONResponse(await prompt_snapshot(session))
 
     async def post_session_compact(request):
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         if (read_only := foreign_read_only_response(session)) is not None:
             return read_only
         if (archived := session_archived_response(session)) is not None:
@@ -3065,9 +3065,9 @@ def create_app(
         payload, status_code = await run_session_compaction(session)
         if payload is None:
             if status_code == 404:
-                return json_error("session not found", 404)
+                return json_error(_("session not found"), 404)
             return session_archived_response(session) or json_error(
-                "session is archived",
+                _("session is archived"),
                 409,
                 code="session_archived",
             )
@@ -3077,7 +3077,7 @@ def create_app(
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         current_turn_active = (
             session.active_turn_task is not None and not session.active_turn_task.done()
         ) or session.turn_lock.locked()
@@ -3233,7 +3233,7 @@ def create_app(
             ]
             return JSONResponse({"suggestions": suggestions})
 
-        return json_error("suggestion kind is invalid", 400)
+        return json_error(_("suggestion kind is invalid"), 400)
 
     async def get_memory(request):
         cwd_param = query_string(request, "cwd", "").strip()
@@ -3243,11 +3243,11 @@ def create_app(
             with manager.batch_reads():
                 cwd = resolve_project_cwd(cwd_param, Path(manager.cwd), known_project_entries())
             if cwd is None:
-                return json_error("project not found", 404)
+                return json_error(_("project not found"), 404)
             return JSONResponse(memory_payload(cwd))
         cwd = cwd_for_session_id(query_string(request, "sessionId", ""))
         if cwd is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         return JSONResponse(memory_payload(cwd))
 
     async def get_memory_projects(request):
@@ -3268,11 +3268,11 @@ def create_app(
         if cwd_param.strip():
             cwd = resolve_project_cwd(cwd_param, Path(manager.cwd), known_project_entries())
             if cwd is None:
-                return json_error("project not found", 404)
+                return json_error(_("project not found"), 404)
         else:
             cwd = cwd_for_session_id(session_id)
             if cwd is None:
-                return json_error("session not found", 404)
+                return json_error(_("session not found"), 404)
         try:
             return JSONResponse(save_project_instruction(cwd, content))
         except OSError as exc:
@@ -3288,7 +3288,7 @@ def create_app(
         except ValueError as exc:
             return json_error(str(exc), 400)
         if session_id and cwd_for_session_id(session_id) is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         try:
             return JSONResponse(save_user_instruction(content))
         except OSError as exc:
@@ -3394,7 +3394,7 @@ def create_app(
         if cwd_param:
             cwd = resolve_project_cwd(cwd_param, Path(manager.cwd), known_project_entries())
             if cwd is None:
-                return json_error("project not found", 404)
+                return json_error(_("project not found"), 404)
         return JSONResponse({"memories": legacy_memory_summaries(query, cwd)})
 
     async def delete_legacy_memory_route(request):
@@ -3404,10 +3404,10 @@ def create_app(
         cwd = None
         if scope == "project":
             if not cwd_param:
-                return json_error("project not found", 404)
+                return json_error(_("project not found"), 404)
             cwd = resolve_project_cwd(cwd_param, Path(manager.cwd), known_project_entries())
             if cwd is None:
-                return json_error("project not found", 404)
+                return json_error(_("project not found"), 404)
         try:
             deleted = delete_legacy_memory(memory_id, cwd, scope)
         except ValueError as exc:
@@ -3422,11 +3422,11 @@ def create_app(
             with manager.batch_reads():
                 cwd = resolve_project_cwd(cwd_param, Path(manager.cwd), known_project_entries())
             if cwd is None:
-                return json_error("project not found", 404)
+                return json_error(_("project not found"), 404)
         else:
             cwd = cwd_for_session_id(query_string(request, "sessionId", ""))
             if cwd is None:
-                return json_error("session not found", 404)
+                return json_error(_("session not found"), 404)
         return JSONResponse(skills_payload(cwd))
 
     async def put_disabled_skills(request):
@@ -3440,11 +3440,11 @@ def create_app(
         if cwd_param:
             cwd = resolve_project_cwd(cwd_param, Path(manager.cwd), known_project_entries())
             if cwd is None:
-                return json_error("project not found", 404)
+                return json_error(_("project not found"), 404)
         else:
             cwd = cwd_for_session_id(session_id)
             if cwd is None:
-                return json_error("session not found", 404)
+                return json_error(_("session not found"), 404)
         try:
             payload = save_disabled_payload(cwd, disabled)
             invalidate_dynamic_suggestions()
@@ -3466,7 +3466,7 @@ def create_app(
     async def get_mcp_servers(request):
         cwd = mcp_cwd_from_params(query_string(request, "cwd", ""), query_string(request, "sessionId", ""))
         if cwd is None:
-            return json_error("project or session not found", 404)
+            return json_error(_("project or session not found"), 404)
         try:
             payload = await run_in_threadpool(mcp_settings.list_mcp_servers, cwd)
         except MCPWebError as exc:
@@ -3476,7 +3476,7 @@ def create_app(
     async def get_mcp_check(request):
         cwd = mcp_cwd_from_params(query_string(request, "cwd", ""), query_string(request, "sessionId", ""))
         if cwd is None:
-            return json_error("project or session not found", 404)
+            return json_error(_("project or session not found"), 404)
         name = query_string(request, "name", "").strip() or None
         scope = query_string(request, "scope", "").strip() or None
         source_path = query_string(request, "sourcePath", "").strip() or None
@@ -3497,10 +3497,10 @@ def create_app(
     async def get_mcp_capabilities(request):
         cwd = mcp_cwd_from_params(query_string(request, "cwd", ""), query_string(request, "sessionId", ""))
         if cwd is None:
-            return json_error("project or session not found", 404)
+            return json_error(_("project or session not found"), 404)
         name = query_string(request, "name", "").strip()
         if not name:
-            return json_error("name is required", 400)
+            return json_error(_("name is required"), 400)
         scope = query_string(request, "scope", "").strip() or None
         source_path = query_string(request, "sourcePath", "").strip() or None
         try:
@@ -3534,7 +3534,7 @@ def create_app(
             return json_error(str(exc), 400)
         cwd = await _mcp_body_cwd(data)
         if cwd is None:
-            return json_error("project or session not found", 404)
+            return json_error(_("project or session not found"), 404)
         try:
             if raw_config is not None:
                 payload = await run_in_threadpool(
@@ -3559,7 +3559,7 @@ def create_app(
             return json_error(str(exc), 400)
         cwd = await _mcp_body_cwd(data)
         if cwd is None:
-            return json_error("project or session not found", 404)
+            return json_error(_("project or session not found"), 404)
         try:
             payload = await run_in_threadpool(
                 partial(
@@ -3581,7 +3581,7 @@ def create_app(
         source_path = query_string(request, "sourcePath", "").strip() or None
         cwd = mcp_cwd_from_params(query_string(request, "cwd", ""), query_string(request, "sessionId", ""))
         if cwd is None:
-            return json_error("project or session not found", 404)
+            return json_error(_("project or session not found"), 404)
         try:
             payload = await run_in_threadpool(
                 partial(mcp_settings.remove_mcp_server, cwd, name=name, scope=scope, source_path=source_path)
@@ -3601,7 +3601,7 @@ def create_app(
             return json_error(str(exc), 400)
         cwd = await _mcp_body_cwd(data)
         if cwd is None:
-            return json_error("project or session not found", 404)
+            return json_error(_("project or session not found"), 404)
         try:
             payload = await run_in_threadpool(
                 partial(
@@ -3625,10 +3625,10 @@ def create_app(
         except ValueError as exc:
             return json_error(str(exc), 400)
         if decision not in {"approve", "reject"}:
-            return json_error("decision must be 'approve' or 'reject'", 400)
+            return json_error(_("decision must be 'approve' or 'reject'"), 400)
         cwd = await _mcp_body_cwd(data)
         if cwd is None:
-            return json_error("project or session not found", 404)
+            return json_error(_("project or session not found"), 404)
         func = mcp_settings.approve_mcp_server if decision == "approve" else mcp_settings.reject_mcp_server
         try:
             payload = await run_in_threadpool(partial(func, cwd, name=name))
@@ -3646,7 +3646,7 @@ def create_app(
             return json_error(str(exc), 400)
         cwd = await _mcp_body_cwd(data)
         if cwd is None:
-            return json_error("project or session not found", 404)
+            return json_error(_("project or session not found"), 404)
         try:
             payload = await run_in_threadpool(
                 partial(mcp_settings.reset_mcp_auth, cwd, name=name, scope=scope, source_path=source_path)
@@ -3666,7 +3666,7 @@ def create_app(
             return json_error(str(exc), 400)
         cwd = await _mcp_body_cwd(data)
         if cwd is None:
-            return json_error("project or session not found", 404)
+            return json_error(_("project or session not found"), 404)
         try:
             payload = await run_in_threadpool(
                 partial(
@@ -3717,10 +3717,10 @@ def create_app(
         except PipelineStateRequestError as exc:
             return json_error(str(exc), 400)
         except PipelineStateNotFoundError:
-            return json_error("pipeline state not found", 404)
+            return json_error(_("pipeline state not found"), 404)
         except Exception:
             logger.exception("Failed to load web pipeline state")
-            return json_error("internal server error", 500)
+            return json_error(_("internal server error"), 500)
         return JSONResponse(payload)
 
     async def post_pipeline_candidate_selection(request):
@@ -3731,7 +3731,7 @@ def create_app(
             return json_error(str(exc), 400)
         session = manager.get_session(selection.session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         if (read_only := foreign_read_only_response(session)) is not None:
             return read_only
         if (archived := session_archived_response(session)) is not None:
@@ -3754,7 +3754,7 @@ def create_app(
         drain_queued_after_action = False
         try:
             if session.mode != "pipeline":
-                return json_error("session is not a pipeline session", 409, code="pipeline_not_active")
+                return json_error(_("session is not a pipeline session"), 409, code="pipeline_not_active")
             try:
                 require_pipeline_metadata(session)
             except ValueError as exc:
@@ -3836,18 +3836,18 @@ def create_app(
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         try:
             return JSONResponse(await session_cleanup_summary(session))
         except Exception:
             logger.exception("Failed to load web session cleanup state")
-            return json_error("internal server error", 500)
+            return json_error(_("internal server error"), 500)
 
     async def get_status(request):
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         payload = manager.status(session)
         payload["providerSummary"] = provider_summary_for_recovery(payload.get("activeProvider"))
         payload["cloudSummary"] = payload.get("cloud")
@@ -3875,7 +3875,7 @@ def create_app(
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         try:
             data = await json_object_body(request)
             command_text = required_string(data, "command")
@@ -3884,7 +3884,7 @@ def create_app(
 
         def command_session_error() -> JSONResponse | None:
             if manager.get_session(session.web_session_id) is not session:
-                return json_error("session not found", 404)
+                return json_error(_("session not found"), 404)
             allowed_without_write = {"exit", "help", "?", "prompt", "status"}
             parsed_command = parse_slash_command_text(command_text)
             command_name = parsed_command[0] if parsed_command is not None else None
@@ -3935,9 +3935,9 @@ def create_app(
                 compact_payload, status_code = await run_session_compaction(session)
                 if compact_payload is None:
                     if status_code == 404:
-                        return json_error("session not found", 404)
+                        return json_error(_("session not found"), 404)
                     return session_archived_response(session) or json_error(
-                        "session is archived",
+                        _("session is archived"),
                         409,
                         code="session_archived",
                     )
@@ -3978,7 +3978,7 @@ def create_app(
                             "command": command_name,
                             "error": {
                                 "code": "no_active_provider",
-                                "message": "No active provider is configured.",
+                                "message": _("No active provider is configured."),
                             },
                         },
                         status_code=400,
@@ -3990,7 +3990,7 @@ def create_app(
                             "command": command_name,
                             "error": {
                                 "code": "no_active_model",
-                                "message": "No active model is configured.",
+                                "message": _("No active model is configured."),
                             },
                         },
                         status_code=400,
@@ -4038,7 +4038,7 @@ def create_app(
                 result = {"accepted": False, "reason": "turn already running", "command": "skill"}
                 await session.events.publish("command.finished", {"command": command_text, "result": result})
                 return JSONResponse(result, status_code=409)
-            _, dynamic_placeholder = skill_reservation
+            _reserved, dynamic_placeholder = skill_reservation
             dynamic_owner = asyncio.current_task()
             assert dynamic_owner is not None
             dynamic_command_placeholders[dynamic_owner] = dynamic_placeholder
@@ -4127,7 +4127,7 @@ def create_app(
                     "command": command.name,
                     "error": {
                         "code": "user_escape_not_allowed_in_pipeline",
-                        "message": "user escape commands are not available in pipeline mode",
+                        "message": _("user escape commands are not available in pipeline mode"),
                     },
                 }
                 await session.events.publish("command.finished", {"command": command_text, "result": result})
@@ -4139,7 +4139,7 @@ def create_app(
                 result = {"accepted": False, "reason": "turn already running", "command": command.name}
                 await session.events.publish("command.finished", {"command": command_text, "result": result})
                 return JSONResponse(result, status_code=409)
-            _, placeholder = reservation
+            _reserved, placeholder = reservation
             owns_reservation = True
             try:
                 if processed_skill is None:
@@ -4238,7 +4238,7 @@ def create_app(
                     raise RuntimeError("shell request task is unavailable")
                 async with session.turn_admission_lock:
                     if manager.get_session(session.web_session_id) is not session:
-                        return json_error("session not found", 404)
+                        return json_error(_("session not found"), 404)
                     if (archived := session_archived_response(session)) is not None:
                         return archived
                     session.active_local_tasks.add(shell_task)
@@ -4251,7 +4251,7 @@ def create_app(
                         "accepted": False,
                         "error": {
                             "code": "shell_escape_canceled",
-                            "message": "Shell command canceled.",
+                            "message": _("Shell command canceled."),
                         },
                     }
                     await session.events.publish(
@@ -4330,7 +4330,7 @@ def create_app(
         if pending is None:
             return JSONResponse({"requestId": request_id, "resolved": False}, status_code=404)
         if answer["choice"] not in offered_permission_choice_ids(pending.payload):
-            return json_error("choice was not offered", 400)
+            return json_error(_("choice was not offered"), 400)
         result = manager.resolve_permission(request_id, {"choice": answer["choice"]}, session_id=answer["sessionId"])
         status_code = 200 if result["resolved"] else 404
         return JSONResponse(result, status_code=status_code)
@@ -4379,7 +4379,7 @@ def create_app(
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         if (read_only := foreign_read_only_response(session)) is not None:
             return read_only
         if (archived := session_archived_response(session)) is not None:
@@ -4396,7 +4396,7 @@ def create_app(
             return JSONResponse(manager.classify_queued_input(session, text))
         async with session.turn_admission_lock:
             if manager.get_session(session.web_session_id) is not session:
-                return json_error("session not found", 404)
+                return json_error(_("session not found"), 404)
             if (archived := session_archived_response(session)) is not None:
                 return archived
             return JSONResponse(manager.classify_queued_input(session, text))
@@ -4406,13 +4406,13 @@ def create_app(
         try:
             return int(raw)
         except (TypeError, ValueError) as exc:
-            raise ValueError("index must be an integer") from exc
+            raise ValueError(_("index must be an integer")) from exc
 
     async def delete_queued_input(request):
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         if (read_only := foreign_read_only_response(session)) is not None:
             return read_only
         if (archived := session_archived_response(session)) is not None:
@@ -4425,7 +4425,7 @@ def create_app(
             return json_error(str(exc), 400)
         async with session.turn_admission_lock:
             if manager.get_session(session.web_session_id) is not session:
-                return json_error("session not found", 404)
+                return json_error(_("session not found"), 404)
             if (archived := session_archived_response(session)) is not None:
                 return archived
             try:
@@ -4437,7 +4437,7 @@ def create_app(
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         if (read_only := foreign_read_only_response(session)) is not None:
             return read_only
         if (archived := session_archived_response(session)) is not None:
@@ -4451,7 +4451,7 @@ def create_app(
             return json_error(str(exc), 400)
         async with session.turn_admission_lock:
             if manager.get_session(session.web_session_id) is not session:
-                return json_error("session not found", 404)
+                return json_error(_("session not found"), 404)
             if (archived := session_archived_response(session)) is not None:
                 return archived
             try:
@@ -4463,7 +4463,7 @@ def create_app(
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         if (read_only := foreign_read_only_response(session)) is not None:
             return read_only
         if (archived := session_archived_response(session)) is not None:
@@ -4476,7 +4476,7 @@ def create_app(
             return json_error(str(exc), 400)
         async with session.turn_admission_lock:
             if manager.get_session(session.web_session_id) is not session:
-                return json_error("session not found", 404)
+                return json_error(_("session not found"), 404)
             if (archived := session_archived_response(session)) is not None:
                 return archived
             try:
@@ -4488,7 +4488,7 @@ def create_app(
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         if (read_only := foreign_read_only_response(session)) is not None:
             return read_only
         if (archived := session_archived_response(session)) is not None:
@@ -4506,7 +4506,7 @@ def create_app(
                     "accepted": False,
                     "error": {
                         "code": "interrupt_attachments_not_supported",
-                        "message": "normal-mode interrupts do not support attachments",
+                        "message": _("normal-mode interrupts do not support attachments"),
                     },
                     "draft": {
                         "message": message,
@@ -4528,7 +4528,7 @@ def create_app(
             if not message.strip():
                 async with session.turn_admission_lock:
                     if manager.get_session(session.web_session_id) is not session:
-                        return json_error("session not found", 404)
+                        return json_error(_("session not found"), 404)
                     if (archived := session_archived_response(session)) is not None:
                         return archived
                     active_turn_task = session.active_turn_task
@@ -4548,14 +4548,14 @@ def create_app(
                         return JSONResponse({"accepted": True})
             if session.pipeline_interrupt_lock.locked():
                 if manager.get_session(session.web_session_id) is not session:
-                    return json_error("session not found", 404)
+                    return json_error(_("session not found"), 404)
                 if (archived := session_archived_response(session)) is not None:
                     return archived
                 return turn_busy_response()
             await session.pipeline_interrupt_lock.acquire()
             try:
                 if session.mode != "pipeline":
-                    return json_error("session is not a pipeline session", 409, code="pipeline_not_active")
+                    return json_error(_("session is not a pipeline session"), 409, code="pipeline_not_active")
                 model_selection = active_model_selection(session)
                 if (
                     capability_error := image_capability_error(
@@ -4623,7 +4623,7 @@ def create_app(
 
         async with session.turn_admission_lock:
             if manager.get_session(session.web_session_id) is not session:
-                return json_error("session not found", 404)
+                return json_error(_("session not found"), 404)
             if (archived := session_archived_response(session)) is not None:
                 return archived
             manager.cancel_pending_requests_for_session(session)
@@ -4653,7 +4653,7 @@ def create_app(
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
-            return json_error("session not found", 404)
+            return json_error(_("session not found"), 404)
         try:
             after_sequence = event_cursor(request)
         except ValueError as exc:

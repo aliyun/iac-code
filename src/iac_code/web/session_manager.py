@@ -108,7 +108,7 @@ def _timestamp_from_utc(value: str) -> float:
 
 def _validate_session_id(session_id: str) -> str:
     if not isinstance(session_id, str):
-        raise ValueError("sessionId is invalid")
+        raise ValueError(_("sessionId is invalid"))
     if (
         Path(session_id).is_absolute()
         or PureWindowsPath(session_id).is_absolute()
@@ -117,7 +117,7 @@ def _validate_session_id(session_id: str) -> str:
         or ".." in session_id
         or not SESSION_ID_PATTERN.fullmatch(session_id)
     ):
-        raise ValueError("sessionId is invalid")
+        raise ValueError(_("sessionId is invalid"))
     return session_id
 
 
@@ -910,7 +910,7 @@ class WebSessionManager:
         effort: str | None = None,
     ) -> WebSession:
         if mode not in {"normal", "pipeline"}:
-            raise ValueError("mode must be normal or pipeline")
+            raise ValueError(_("mode must be normal or pipeline"))
         actual_cwd = str(Path(cwd).expanduser().resolve()) if cwd else str(self.cwd)
         actual_session_id = _validate_session_id(session_id) if session_id is not None else uuid.uuid4().hex
         expected_project_dir = self.storage.session_dir(actual_cwd, "__session_probe__").parent.resolve(strict=False)
@@ -918,7 +918,7 @@ class WebSessionManager:
         try:
             session_dir.relative_to(expected_project_dir)
         except ValueError as exc:
-            raise ValueError("sessionId is invalid") from exc
+            raise ValueError(_("sessionId is invalid")) from exc
         session_key = (actual_cwd, actual_session_id)
         existing = self._sessions.get(session_key)
         if existing is not None:
@@ -2052,7 +2052,7 @@ class WebSessionManager:
                     # Weave the persisted user answer(s) directly after the prompt row
                     # they answered, so a mid-pipeline "0" lands between the confirm
                     # prompt and the next step marker instead of at the very end.
-                    for _ in range(int(row.get("inputAnswerSlots") or 0)):
+                    for _slot in range(int(row.get("inputAnswerSlots") or 0)):
                         if not pipeline_answer_queue:
                             break
                         answer = pipeline_answer_queue.pop(0)
@@ -2283,7 +2283,7 @@ class WebSessionManager:
             return session
         resolved = self.get_session(session)
         if resolved is None:
-            raise ValueError("session not found")
+            raise ValueError(_("session not found"))
         return resolved
 
     def status(self, session: WebSession | str) -> dict[str, Any]:
@@ -2614,9 +2614,9 @@ class WebSessionManager:
         session = self._resolve_session_arg(session)
         descriptor = PROVIDER_REGISTRY.get(provider)
         if descriptor is None:
-            raise ValueError("unknown provider")
+            raise ValueError(_("unknown provider"))
         if descriptor.model_ids and model not in descriptor.model_ids:
-            raise ValueError("unknown model")
+            raise ValueError(_("unknown model"))
         normalized_effort = effort or None
         if normalized_effort is not None:
             from iac_code.providers.thinking import get_thinking_spec, normalize_effort
@@ -2624,7 +2624,7 @@ class WebSessionManager:
             normalized = normalize_effort(normalized_effort)
             allowed = {item.value for item in get_thinking_spec(provider, model).allowed_efforts}
             if normalized is None or normalized not in allowed:
-                raise ValueError("unknown effort")
+                raise ValueError(_("unknown effort"))
             normalized_effort = normalized
         session.provider = provider
         session.model = model

@@ -1108,16 +1108,16 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-304" in html
-    assert "/static/js/app.js?v=web-repl-ui-304" in html
+    assert "/static/styles.css?v=web-repl-ui-305" in html
+    assert "/static/js/app.js?v=web-repl-ui-305" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
     # 已归档面板复刻(archived tab)新增 listArchivedSessions/deleteArchivedSessions,
     # 同样需 bump api.js 版本位,否则回访浏览器拿不到新导出。
     assert "./api.js?v=web-repl-ui-303" in app_source
-    assert "./components/composer.js?v=session-model-v16" in app_source
-    assert "./components/tool_cards.js?v=live-inline-tools-v22" in app_source
+    assert "./components/composer.js?v=session-model-v17" in app_source
+    assert "./components/tool_cards.js?v=live-inline-tools-v23" in app_source
     assert "./components/blocking.js?v=blocking-keys-v5" in app_source
     # events.js 承载队列/消息 reducer,历次修复都在此;它的 import 必须带版本位,
     # 否则回访浏览器会加载「新 app.js + 旧缓存 events.js」,让队列行为与当前代码不一致。
@@ -1141,10 +1141,10 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-304" in index_html
+    assert "web-repl-ui-305" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
-    assert "./events.js?v=web-repl-ui-303" in app_source
-    assert "./components/workspace.js?v=cloud-creds-v48" in app_source
+    assert "./events.js?v=web-repl-ui-304" in app_source
+    assert "./components/workspace.js?v=cloud-creds-v49" in app_source
     assert "workspace-cloud-vendors" in workspace_source
     assert "Alibaba Cloud" in workspace_source
     assert "workspace-cloud-mode-fields" in workspace_source
@@ -6930,7 +6930,7 @@ def test_status_panel_exposes_copy_session_id_control() -> None:
     assert '"workspace-status-copy-icon"' in source
     assert 't("Copy session ID")' in source
     assert "copyTextToClipboard(statusSessionId)" in source
-    assert '["Session", sessionId, copyIdButton]' in source
+    assert '[t("Session"), sessionId, copyIdButton]' in source
 
     # 图标样式:mask 复制图标 + 复制成功切换对勾。
     assert ".workspace-status-copy {" in css
@@ -7173,7 +7173,7 @@ def test_workspace_cloud_panel_prefills_secrets_and_resets_on_mode_switch() -> N
 def test_app_wires_workspace_controls_to_current_session() -> None:
     source = _source(APP_JS)
 
-    assert 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v48";' in source
+    assert 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v49";' in source
     assert "workspace = createWorkspaceController" in source
     assert 'tabs: byShell("workspace-tabs")' in source
     assert 'content: byShell("workspace-content")' in source
@@ -9410,8 +9410,8 @@ def test_styles_has_compaction_boundary_rule() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-304" in html
-    assert "web-repl-ui-303" not in html
+    assert "web-repl-ui-305" in html
+    assert "web-repl-ui-304" not in html
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:
@@ -9802,7 +9802,7 @@ def test_pipeline_js_import_is_versioned() -> None:
     # pipeline.js 之前是 app.js 里唯一无版本位的 import;内容改动(含本轮 index 优先
     # 匹配修复)在回访浏览器的 warm cache 下不会重新拉取。加版本位以确保修复落地。
     app_source = _source(APP_JS)
-    assert "./components/pipeline.js?v=pipeline-arch-v6" in app_source
+    assert "./components/pipeline.js?v=pipeline-arch-v7" in app_source
 
 
 def test_app_stores_web_diagrams_from_outputs() -> None:

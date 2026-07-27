@@ -701,8 +701,8 @@ def _append_file_references(text: str, file_refs: list[str], *, cwd: str) -> str
         return text
     reference_text = "\n".join("- {}".format(reference) for reference in references)
     if text.strip():
-        return "{}\n\nReferenced files:\n{}".format(text, reference_text)
-    return "Referenced files:\n{}".format(reference_text)
+        return _("{}\n\nReferenced files:\n{}").format(text, reference_text)
+    return _("Referenced files:\n{}").format(reference_text)
 
 
 def _unwrap_sub_pipeline_event(stream_event: object) -> tuple[object, dict[str, Any]]:

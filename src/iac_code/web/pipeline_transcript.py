@@ -483,7 +483,7 @@ class PipelineTranscriptTranslator:
         title = display_step_name(step_id)
         index = _optional_int(step.get("index"))
         total = _optional_int(step.get("total"))
-        content = "● {}".format(title or step_id or "Step")
+        content = "● {}".format(title or step_id or _("Step"))
         if index is not None and total is not None:
             content += " ({}/{})".format(index, total)
         self._record_group_start(f"step:{run_id}", env)
@@ -512,7 +512,7 @@ class PipelineTranscriptTranslator:
         title = display_step_name(step_id)
         index = _optional_int(step.get("index"))
         total = _optional_int(step.get("total"))
-        content = "● {}".format(title or step_id or "Step")
+        content = "● {}".format(title or step_id or _("Step"))
         if index is not None and total is not None:
             content += " ({}/{})".format(index, total)
         duration_s = _optional_float(_as_mapping(env.get("data")).get("durationS"))
@@ -620,7 +620,7 @@ class PipelineTranscriptTranslator:
         title = display_step_name(step_id)
         candidate_name = str(candidate.get("name") or data.get("candidateName") or "")
         index, total = self._candidate_step_progress(env)
-        content = "· {}".format(title or step_id or "Step")
+        content = "· {}".format(title or step_id or _("Step"))
         if index is not None and total is not None:
             content += " ({}/{})".format(index, total)
         self._record_group_start(group_id, env)
@@ -656,7 +656,7 @@ class PipelineTranscriptTranslator:
         if duration_s is None or duration_s <= 0:
             duration_s = self._duration_for(group_id, env)
         index, total = self._candidate_step_progress(env)
-        content = "· {}".format(title or step_id or "Step")
+        content = "· {}".format(title or step_id or _("Step"))
         if index is not None and total is not None:
             content += " ({}/{})".format(index, total)
         self._complete_active_marker(group_id)

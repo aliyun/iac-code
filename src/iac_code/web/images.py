@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 
 from iac_code.config import get_config_dir
+from iac_code.i18n import _
 from iac_code.utils.file_security import atomic_write_text, ensure_private_dir, ensure_private_file
 
 IMAGE_CACHE_DIR_NAME = "image-cache"
@@ -52,7 +53,7 @@ def _validate_image_id(image_id: str) -> str:
         or ".." in image_id
         or not IMAGE_ID_PATTERN.fullmatch(image_id)
     ):
-        raise ValueError("image id is invalid")
+        raise ValueError(_("image id is invalid"))
     return image_id
 
 
@@ -66,13 +67,13 @@ def _validate_session_id(session_id: str) -> str:
         or ".." in session_id
         or not IMAGE_ID_PATTERN.fullmatch(session_id)
     ):
-        raise ValueError("session id is invalid")
+        raise ValueError(_("session id is invalid"))
     return session_id
 
 
 def _validate_media_type(media_type: str) -> str:
     if not isinstance(media_type, str) or len(media_type) > 128 or media_type not in SUPPORTED_IMAGE_MEDIA_TYPES:
-        raise ValueError("media type is invalid")
+        raise ValueError(_("media type is invalid"))
     return media_type
 
 
@@ -91,20 +92,20 @@ def _detect_media_type(data: bytes) -> str | None:
 def _validate_image_data(data: bytes, media_type: str) -> bytes:
     image_data = bytes(data)
     if not image_data:
-        raise ValueError("image data is empty")
+        raise ValueError(_("image data is empty"))
     if len(image_data) > MAX_IMAGE_BYTES:
-        raise ValueError("image data is too large")
+        raise ValueError(_("image data is too large"))
     detected_media_type = _detect_media_type(image_data)
     if detected_media_type is None:
-        raise ValueError("image data is not a supported image")
+        raise ValueError(_("image data is not a supported image"))
     if detected_media_type != media_type:
-        raise ValueError("image data does not match media type")
+        raise ValueError(_("image data does not match media type"))
     return image_data
 
 
 def _normalize_cwd(cwd: str) -> str:
     if not isinstance(cwd, str) or not cwd:
-        raise ValueError("cwd is invalid")
+        raise ValueError(_("cwd is invalid"))
     expanded = os.path.expandvars(os.path.expanduser(cwd))
     return str(Path(expanded).resolve(strict=False))
 
@@ -166,7 +167,7 @@ def _in_memory_fallback_bytes() -> int:
 
 def _reserve_in_memory_fallback_space(key: tuple[str, str, str], image_size: int) -> None:
     if image_size > MAX_IN_MEMORY_FALLBACK_BYTES:
-        raise OSError("image fallback cache limit exceeded")
+        raise OSError(_("image fallback cache limit exceeded"))
 
     _IN_MEMORY_IMAGE_CACHE.pop(key, None)
     current_bytes = _in_memory_fallback_bytes()
@@ -179,7 +180,7 @@ def _reserve_in_memory_fallback_space(key: tuple[str, str, str], image_size: int
         current_bytes -= len(old_image.data)
 
     if current_bytes + image_size > MAX_IN_MEMORY_FALLBACK_BYTES:
-        raise OSError("image fallback cache limit exceeded")
+        raise OSError(_("image fallback cache limit exceeded"))
 
 
 def _legacy_cache_paths(image_id: str, *, session_id: str) -> tuple[Path, Path]:
@@ -256,7 +257,7 @@ def _write_all(fd: int, data: bytes) -> None:
     while written_total < len(view):
         written = os.write(fd, view[written_total:])
         if written == 0:
-            raise OSError("failed to write image data")
+            raise OSError(_("failed to write image data"))
         written_total += written
 
 

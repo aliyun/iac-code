@@ -19,6 +19,7 @@ msgstr ""
 "Generated-By: Babel 2.18.0\n"
 
 #: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Session"
 msgstr "セッション"
 
@@ -76,6 +77,15 @@ msgid "Resize sidebar"
 msgstr "サイドバーの幅を調整"
 
 #: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Transcript"
+msgstr "トランスクリプト"
+
+#: src/iac_code/web/static/index.html
+msgid "Ready"
+msgstr "準備完了"
+
+#: src/iac_code/web/static/index.html
 msgid "Conversation actions"
 msgstr "会話操作"
 
@@ -116,6 +126,10 @@ msgid "Describe your infrastructure needs"
 msgstr "インフラのニーズを記述してください"
 
 #: src/iac_code/web/static/index.html
+msgid "Attach image"
+msgstr "画像を添付"
+
+#: src/iac_code/web/static/index.html
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Approval requested"
 msgstr "承認をリクエスト中"
@@ -151,6 +165,41 @@ msgstr "出力を閉じる"
 #: src/iac_code/web/static/index.html
 msgid "File preview"
 msgstr "ファイルプレビュー"
+
+#: src/iac_code/web/static/index.html
+msgid "Workspace"
+msgstr "ワークスペース"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Project"
+msgstr "プロジェクト"
+
+#: src/iac_code/web/static/index.html
+msgid "Loading"
+msgstr "読み込み中"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Mode"
+msgstr "モード"
+
+#: src/iac_code/web/static/index.html
+msgid "Normal"
+msgstr "通常"
+
+#: src/iac_code/web/static/index.html
+msgid "Pending"
+msgstr "保留中"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Tools"
+msgstr "ツール"
 
 #: src/iac_code/web/static/index.html
 msgid "Close settings"
@@ -201,7 +250,9 @@ msgstr "アーカイブ済みの会話"
 
 #: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
 #: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/pipeline.js
 #: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Status"
 msgstr "ステータス"
 
@@ -210,9 +261,14 @@ msgid "Loading session controls."
 msgstr "セッションコントロールを読み込んでいます。"
 
 #: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/pipeline.js
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Pipeline"
 msgstr "パイプライン"
+
+#: src/iac_code/web/static/index.html
+msgid "Close command menu"
+msgstr "コマンドメニューを閉じる"
 
 #: src/iac_code/web/static/index.html
 msgid "Search chats or run a command"
@@ -625,6 +681,10 @@ msgid "A task is already running; this compaction was skipped."
 msgstr "すでに実行中のタスクがあるため、今回の圧縮はスキップされました。"
 
 #: src/iac_code/web/static/js/app.js
+msgid "You"
+msgstr "あなた"
+
+#: src/iac_code/web/static/js/app.js
 msgid "Processed"
 msgstr "処理済み"
 
@@ -641,6 +701,12 @@ msgid ""
 "Describe a task, command, or infrastructure change and hand it to IaC "
 "Code."
 msgstr "タスク、コマンド、またはインフラの変更内容を記述して IaC Code に委ねます。"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Error"
+msgstr "エラー"
 
 #: src/iac_code/web/static/js/app.js
 msgid "Submit now"
@@ -781,6 +847,15 @@ msgstr "更新しています…"
 msgid "Failed to start update: {error}"
 msgstr "更新の開始に失敗しました: {error}"
 
+#: src/iac_code/web/static/js/events.js
+msgid "Local shell"
+msgstr "ローカルシェル"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#: src/iac_code/web/static/js/events.js
+msgid "Unknown error"
+msgstr "不明なエラー"
+
 #: src/iac_code/web/static/js/mermaid_render.js
 #, python-brace-format
 msgid "View {n}"
@@ -841,6 +916,7 @@ msgid "(Used {percent}%)"
 msgstr "（{percent}% 使用中）"
 
 #: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Compact"
 msgstr "圧縮"
 
@@ -859,11 +935,6 @@ msgstr "MCP サーバーの状態を表示"
 #: src/iac_code/web/static/js/components/composer.js
 msgid "System"
 msgstr "システム"
-
-#: src/iac_code/web/static/js/components/composer.js
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Project"
-msgstr "プロジェクト"
 
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Personal"
@@ -955,8 +1026,21 @@ msgid "This session was created outside the web entry point and is read-only."
 msgstr "このセッションは web 以外のエントリーポイントで作成されたため、読み取り専用です"
 
 #: src/iac_code/web/static/js/components/composer.js
+#, python-brace-format
+msgid "Remove {name}"
+msgstr "{name} を削除"
+
+#: src/iac_code/web/static/js/components/composer.js
 msgid "How should IaC Code actions be approved?"
 msgstr "IaC Code の操作をどのように承認しますか？"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Could not save permission mode"
+msgstr "権限モードを保存できませんでした"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Could not save thinking toggle"
+msgstr "思考トグルを保存できませんでした"
 
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Model"
@@ -987,6 +1071,46 @@ msgid "Not supported"
 msgstr "サポートされていません"
 
 #: src/iac_code/web/static/js/components/composer.js
+msgid "Could not load model settings"
+msgstr "モデル設定を読み込めませんでした"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Could not switch provider"
+msgstr "プロバイダーを切り替えられませんでした"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Could not save model settings"
+msgstr "モデル設定を保存できませんでした"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Could not load suggestions"
+msgstr "候補を読み込めませんでした"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Command failed"
+msgstr "コマンドが失敗しました"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "The command was not accepted"
+msgstr "コマンドは受け付けられませんでした"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Use @ suggestions for workspace file references."
+msgstr "@ 候補を使ってワークスペースのファイルを参照します。"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Unsupported image type."
+msgstr "サポートされていない画像形式です。"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Image upload failed"
+msgstr "画像のアップロードに失敗しました"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "This image has not been uploaded yet."
+msgstr "この画像はまだアップロードされていません。"
+
+#: src/iac_code/web/static/js/components/composer.js
 #, python-brace-format
 msgid "{command} is not available in pipeline mode"
 msgstr "{command} はパイプラインモードでは使用できません"
@@ -995,6 +1119,18 @@ msgstr "{command} はパイプラインモードでは使用できません"
 #, python-brace-format
 msgid "{command} is only available in an active conversation"
 msgstr "{command} は進行中の会話でのみ使用できます"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Send failed"
+msgstr "送信に失敗しました"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "The message was not accepted"
+msgstr "メッセージは受け付けられませんでした"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Stop failed"
+msgstr "停止に失敗しました"
 
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Stop"
@@ -1011,6 +1147,38 @@ msgstr "成功"
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "In progress / failed"
 msgstr "進行中／失敗"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Recovered State"
+msgstr "復元された状態"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Diagnostics"
+msgstr "診断"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Context"
+msgstr "コンテキスト"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Task"
+msgstr "タスク"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Sequence"
+msgstr "シーケンス"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Timeline"
+msgstr "タイムライン"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Active"
+msgstr "アクティブ"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "No pipeline events."
+msgstr "パイプラインイベントはありません。"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Parameter overrides"
@@ -1042,8 +1210,106 @@ msgid "No candidates."
 msgstr "候補はありません。"
 
 #: src/iac_code/web/static/js/components/pipeline.js
+#, python-brace-format
+msgid "Candidate {n}"
+msgstr "候補 {n}"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#, python-brace-format
+msgid "Monthly {cost}"
+msgstr "月額 {cost}"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Diagram"
+msgstr "ダイアグラム"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "No diagram."
+msgstr "ダイアグラムはありません。"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Deployment"
+msgstr "デプロイ"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "No deployment progress."
+msgstr "デプロイの進捗はありません。"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Cleanup"
+msgstr "クリーンアップ"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#, python-brace-format
+msgid "{n} resources"
+msgstr "{n} 個のリソース"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Resource"
+msgstr "リソース"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Region"
+msgstr "リージョン"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "No cleanup resources."
+msgstr "クリーンアップするリソースはありません。"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Pipeline replay"
+msgstr "パイプラインの再生"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#, python-brace-format
+msgid "{n} steps"
+msgstr "{n} ステップ"
+
+#: src/iac_code/web/static/js/components/pipeline.js
 msgid "Details"
 msgstr "詳細"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Step"
+msgstr "ステップ"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Attempt"
+msgstr "試行"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Type"
+msgstr "タイプ"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Rollback"
+msgstr "ロールバック"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Sub-pipelines"
+msgstr "サブパイプライン"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Handoff"
+msgstr "引き継ぎ"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Outcome"
+msgstr "結果"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Summary"
+msgstr "サマリー"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "No pipeline data."
+msgstr "パイプラインデータはありません。"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Alibaba Cloud API"
@@ -1155,10 +1421,6 @@ msgid "Currency"
 msgstr "通貨"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Summary"
-msgstr "サマリー"
-
-#: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Description"
 msgstr "説明"
 
@@ -1187,18 +1449,8 @@ msgid "File path"
 msgstr "ファイルパス"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Region"
-msgstr "リージョン"
-
-#: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Validated"
 msgstr "検証済み"
-
-#: src/iac_code/web/static/js/components/tool_cards.js
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Type"
-msgstr "タイプ"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Key"
@@ -1289,10 +1541,6 @@ msgid "API summary"
 msgstr "API サマリー"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Error"
-msgstr "エラー"
-
-#: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Resources created"
 msgstr "作成されたリソース"
 
@@ -1380,10 +1628,6 @@ msgstr "コマンド"
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Exit code"
 msgstr "終了コード"
-
-#: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Mode"
-msgstr "モード"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Findings"
@@ -1901,6 +2145,10 @@ msgid "{phrase} {count} times"
 msgstr "{phrase} {count} 回"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Shell"
+msgstr "シェル"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
 msgid "No output"
 msgstr "出力なし"
 
@@ -1938,13 +2186,17 @@ msgstr "スタック: {name}"
 msgid "Account"
 msgstr "アカウント"
 
-#: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Resource"
-msgstr "リソース"
-
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Alibaba Cloud"
 msgstr "Alibaba Cloud"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "AccessKey"
+msgstr "AccessKey"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "STS Token"
+msgstr "STS Token"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "RAM role"
@@ -2097,6 +2349,70 @@ msgstr "シークレットを非表示"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Expand list"
 msgstr "リストを展開"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Session ready"
+msgstr "セッション準備完了"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "normal / idle"
+msgstr "通常 / アイドル"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Response detail"
+msgstr "応答の詳細"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Choose an action."
+msgstr "アクションを選択してください。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "No active session."
+msgstr "アクティブなセッションはありません。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Session Status"
+msgstr "セッションの状態"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading status"
+msgstr "状態を読み込み中"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Debug"
+msgstr "デバッグ"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading debug"
+msgstr "デバッグを読み込み中"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Prompt"
+msgstr "プロンプト"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading prompt"
+msgstr "プロンプトを読み込み中"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Compacting"
+msgstr "圧縮中"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Session working"
+msgstr "セッション実行中"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "enabled"
+msgstr "有効"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "off"
+msgstr "オフ"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Response detail updated"
+msgstr "応答の詳細を更新しました"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Provider groups"
@@ -2316,20 +2632,40 @@ msgid "Region for deployment and resource queries"
 msgstr "デプロイとリソース照会のリージョン"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "AccessKeyId"
+msgstr "AccessKeyId"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Alibaba Cloud access key ID"
 msgstr "Alibaba Cloud アクセスキー ID"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "AccessKeySecret"
+msgstr "AccessKeySecret"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Access key secret; stored locally only"
 msgstr "アクセスキーシークレット。ローカルにのみ保存されます"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "StsToken"
+msgstr "StsToken"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Temporary security token"
 msgstr "一時セキュリティトークン"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "RamRoleArn"
+msgstr "RamRoleArn"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "The RAM role ARN to assume"
 msgstr "引き受ける RAM ロールの ARN"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "RamSessionName"
+msgstr "RamSessionName"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Role session name (optional)"
@@ -2801,6 +3137,10 @@ msgid "KEY=VALUE; reference secrets with ${VAR}, no plaintext."
 msgstr "KEY=VALUE。シークレットは ${VAR} で参照し、平文は使用しないでください。"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "URL"
+msgstr "URL"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Remote server address for http/sse/ws."
 msgstr "http/sse/ws のリモートサーバーアドレス。"
 
@@ -2820,6 +3160,10 @@ msgid "OAuth (optional)"
 msgstr "OAuth（任意）"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Client ID"
+msgstr "Client ID"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Client Secret environment variable"
 msgstr "Client Secret 環境変数"
 
@@ -2832,6 +3176,10 @@ msgstr "シークレットを格納する環境変数の名前（平文のシー
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Callback port"
 msgstr "コールバックポート"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Metadata URL"
+msgstr "Metadata URL"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Edit configuration directly as JSON"
@@ -2884,10 +3232,6 @@ msgstr "接続して機能を取得しています…"
 #, python-brace-format
 msgid "Not supported: {error}"
 msgstr "サポートされていません: {error}"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Tools"
-msgstr "ツール"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Prompts"
@@ -3275,10 +3619,6 @@ msgstr "infraguard ツールが検出されず、現在の環境では自動イ�
 #, python-brace-format
 msgid "Install failed: {error}"
 msgstr "インストールに失敗しました: {error}"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Unknown error"
-msgstr "不明なエラー"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"

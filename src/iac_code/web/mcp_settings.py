@@ -19,6 +19,7 @@ from typing import Any
 
 import typer
 
+from iac_code.i18n import _
 from iac_code.mcp.cli import (
     _checked_server_payload,
     _health_diagnostic_for_persisted_warning,
@@ -86,7 +87,7 @@ class MCPWebError(Exception):
 
 def _parse_scope(scope: str | None) -> MCPConfigScope:
     if not scope:
-        raise MCPWebError("MCP scope is required.")
+        raise MCPWebError(_("MCP scope is required."))
     try:
         parsed = MCPConfigScope(scope)
     except ValueError as exc:
@@ -94,7 +95,7 @@ def _parse_scope(scope: str | None) -> MCPConfigScope:
             "Invalid MCP scope {scope!r}. Valid values: user, local, project.".format(scope=scope)
         ) from exc
     if parsed not in _PERSISTABLE_SCOPES:
-        raise MCPWebError("Scope {scope!r} cannot be used for persisted MCP config.".format(scope=scope))
+        raise MCPWebError(_("Scope {scope!r} cannot be used for persisted MCP config.").format(scope=scope))
     return parsed
 
 
@@ -364,7 +365,7 @@ def server_capabilities(
         result = load_all_persisted_mcp_configs(cwd=cwd, include_pending_project=True)
         scoped_config = result.by_name().get(name)
         if scoped_config is None:
-            raise MCPWebError("MCP server {name!r} not found.".format(name=name), status_code=404)
+            raise MCPWebError(_("MCP server {name!r} not found.").format(name=name), status_code=404)
 
     workspace_root = resolve_mcp_workspace_root(cwd)
     snapshot = _run_cli(_connect_and_fetch, scoped_config, workspace_root)
@@ -451,7 +452,7 @@ def _build_config_from_fields(fields: dict[str, Any]) -> dict[str, Any]:
     if transport == "stdio":
         command = (fields.get("command") or "").strip()
         if not command:
-            raise MCPWebError("command is required for stdio MCP servers.")
+            raise MCPWebError(_("command is required for stdio MCP servers."))
         config["command"] = command
         args = [str(item) for item in fields.get("args") or [] if str(item).strip()]
         if args:
@@ -462,7 +463,7 @@ def _build_config_from_fields(fields: dict[str, Any]) -> dict[str, Any]:
     elif transport in {"http", "sse"}:
         url = (fields.get("url") or "").strip()
         if not url:
-            raise MCPWebError("url is required for remote MCP servers.")
+            raise MCPWebError(_("url is required for remote MCP servers."))
         config["type"] = transport
         config["url"] = url
         headers = _normalise_mapping(fields.get("headers"))
@@ -471,11 +472,11 @@ def _build_config_from_fields(fields: dict[str, Any]) -> dict[str, Any]:
     elif transport == "ws":
         url = (fields.get("url") or "").strip()
         if not url:
-            raise MCPWebError("url is required for ws MCP servers.")
+            raise MCPWebError(_("url is required for ws MCP servers."))
         config["type"] = transport
         config["url"] = url
     else:
-        raise MCPWebError("Invalid transport {transport!r}. Valid values: stdio, http, sse, ws.".format(
+        raise MCPWebError(_("Invalid transport {transport!r}. Valid values: stdio, http, sse, ws.").format(
             transport=transport
         ))
 
@@ -512,7 +513,7 @@ def _build_oauth(value: Any) -> dict[str, Any]:
         try:
             oauth["callbackPort"] = int(callback_port)
         except (TypeError, ValueError) as exc:
-            raise MCPWebError("OAuth callback port must be an integer.") from exc
+            raise MCPWebError(_("OAuth callback port must be an integer.")) from exc
     metadata_url = (
         value.get("authServerMetadataUrl") or value.get("auth_server_metadata_url") or ""
     ).strip()
@@ -538,7 +539,7 @@ def add_mcp_server(
 ) -> dict[str, Any]:
     server_name = (name or "").strip()
     if not server_name:
-        raise MCPWebError("MCP server name is required.")
+        raise MCPWebError(_("MCP server name is required."))
     resolved_scope = _resolve_scope_default(cwd, scope)
     existing = load_exact_mcp_config(server_name, scope=resolved_scope, cwd=cwd)
     if existing.servers:
@@ -562,9 +563,9 @@ def add_mcp_server_json(
 ) -> dict[str, Any]:
     server_name = (name or "").strip()
     if not server_name:
-        raise MCPWebError("MCP server name is required.")
+        raise MCPWebError(_("MCP server name is required."))
     if not isinstance(config, dict):
-        raise MCPWebError("MCP server JSON must be an object.")
+        raise MCPWebError(_("MCP server JSON must be an object."))
     resolved_scope = _resolve_scope_default(cwd, scope)
     path = _write_server(server_name, dict(config), scope=resolved_scope, cwd=cwd)
     return {"name": server_name, "scope": resolved_scope.value, "path": str(path)}
@@ -580,7 +581,7 @@ def update_mcp_server(
 ) -> dict[str, Any]:
     server_name = (name or "").strip()
     if not server_name:
-        raise MCPWebError("MCP server name is required.")
+        raise MCPWebError(_("MCP server name is required."))
     resolved_scope = _parse_scope(scope)
     existing = load_exact_mcp_config(server_name, scope=resolved_scope, cwd=cwd)
     if not existing.servers:
@@ -592,7 +593,7 @@ def update_mcp_server(
         )
     if config is not None:
         if not isinstance(config, dict):
-            raise MCPWebError("MCP server JSON must be an object.")
+            raise MCPWebError(_("MCP server JSON must be an object."))
         payload = dict(config)
     else:
         payload = _build_config_from_fields(fields or {})
@@ -651,7 +652,7 @@ def set_mcp_enabled(
 def _project_file_for(cwd: Path, name: str) -> Path:
     project_file = find_project_mcp_server_file(name, cwd=cwd)
     if project_file is None:
-        raise MCPWebError("MCP server {name!r} is not defined in a project config.".format(name=name))
+        raise MCPWebError(_("MCP server {name!r} is not defined in a project config.").format(name=name))
     return project_file
 
 
@@ -745,7 +746,7 @@ def start_mcp_auth(
     except MCPConfigError as exc:
         raise MCPWebError(str(exc)) from exc
     except typer.Exit as exc:
-        raise MCPWebError("Failed to start MCP OAuth flow.") from exc
+        raise MCPWebError(_("Failed to start MCP OAuth flow.")) from exc
     except Exception as exc:  # noqa: BLE001 - surface OAuth setup errors to the client
         raise MCPWebError(str(exc) or exc.__class__.__name__) from exc
     flow_id = _OAUTH_FLOWS.add(pending)
@@ -760,7 +761,7 @@ def start_mcp_auth(
 def wait_mcp_auth(flow_id: str) -> dict[str, Any]:
     pending = _OAUTH_FLOWS.get(flow_id)
     if pending is None:
-        raise MCPWebError("Unknown OAuth flow.", status_code=404)
+        raise MCPWebError(_("Unknown OAuth flow."), status_code=404)
     try:
         result = pending.wait()
     except Exception as exc:  # noqa: BLE001 - report auth failures to the client
@@ -775,10 +776,10 @@ def wait_mcp_auth(flow_id: str) -> dict[str, Any]:
 def complete_mcp_auth(flow_id: str, callback_url: str) -> dict[str, Any]:
     pending = _OAUTH_FLOWS.get(flow_id)
     if pending is None:
-        raise MCPWebError("Unknown OAuth flow.", status_code=404)
+        raise MCPWebError(_("Unknown OAuth flow."), status_code=404)
     url = (callback_url or "").strip()
     if not url:
-        raise MCPWebError("callback_url is required.")
+        raise MCPWebError(_("callback_url is required."))
     try:
         pending.complete_manually(url)
     except Exception as exc:  # noqa: BLE001 - report auth failures to the client
@@ -793,7 +794,7 @@ def complete_mcp_auth(flow_id: str, callback_url: str) -> dict[str, Any]:
 def cancel_mcp_auth(flow_id: str) -> dict[str, Any]:
     pending = _OAUTH_FLOWS.pop(flow_id)
     if pending is None:
-        raise MCPWebError("Unknown OAuth flow.", status_code=404)
+        raise MCPWebError(_("Unknown OAuth flow."), status_code=404)
     with suppress(Exception):
         cancel_pending_mcp_oauth_flow(pending)
     return {"flow_id": flow_id, "cancelled": True}

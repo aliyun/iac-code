@@ -10,6 +10,7 @@ from typing import Any
 
 from iac_code.agent.message import Message
 from iac_code.config import get_history_path
+from iac_code.i18n import _
 from iac_code.pipeline.constants import CLEANUP_PROMPT_METADATA_TYPE
 from iac_code.ui.core.input_history import InputHistory
 from iac_code.web.events import normalize_event_payload
@@ -55,7 +56,7 @@ def _context(value: int | None) -> int:
 def _root(cwd: str) -> Path:
     root = Path(cwd).expanduser().resolve()
     if not root.is_dir():
-        raise ValueError("session cwd is not available")
+        raise ValueError(_("session cwd is not available"))
     return root
 
 
@@ -196,7 +197,7 @@ def search_files(
 def quick_open_files(cwd: str, query: str, *, limit: int | None = None) -> list[dict[str, object]]:
     """Return quick-open file candidates scoped to *cwd*."""
     if not _is_safe_query(query):
-        raise ValueError("query is invalid")
+        raise ValueError(_("query is invalid"))
     root = _root(cwd)
     needle = query.lower()
     results: list[dict[str, object]] = []
@@ -357,12 +358,12 @@ def safe_file_references(file_refs: list[str], *, cwd: str, must_exist: bool = F
     safe_refs: list[str] = []
     for file_ref in file_refs:
         if not file_ref or Path(file_ref).is_absolute() or PureWindowsPath(file_ref).is_absolute():
-            raise ValueError("file reference is invalid")
+            raise ValueError(_("file reference is invalid"))
         candidate = (root / file_ref).resolve()
         try:
             relative = candidate.relative_to(root)
         except ValueError as exc:
-            raise ValueError("file reference escapes the workspace") from exc
+            raise ValueError(_("file reference escapes the workspace")) from exc
         if must_exist and not candidate.exists():
             raise ValueError("file reference is not available: {}".format(relative.as_posix()))
         safe_refs.append(relative.as_posix())

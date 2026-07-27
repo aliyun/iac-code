@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from iac_code.i18n import _
 from iac_code.pipeline.engine.user_input import PipelineInputContent, normalize_pipeline_user_input
 from iac_code.web.events import normalize_event_payload
 from iac_code.web.pipeline import PipelineCandidateSelection
@@ -132,7 +133,7 @@ class A2APipelineActionRunner:
         envelope_observer: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> PipelineActionResult:
         if not getattr(session, "context_id", None) or not getattr(session, "task_id", None):
-            return _action_error("pipeline contextId and taskId are required", status_code=400)
+            return _action_error(_("pipeline contextId and taskId are required"), status_code=400)
         pipeline_input = _pipeline_user_input_from_web(session, message, image_ids, file_refs)
         return await self._execute(
             session,
@@ -165,7 +166,7 @@ class A2APipelineActionRunner:
             return unavailable
         task_record = await self._task_store.get_task_record(session.task_id)
         if task_record.state != "input-required":
-            return _action_error("pipeline is not waiting for candidate input", status_code=409)
+            return _action_error(_("pipeline is not waiting for candidate input"), status_code=409)
         return await self._execute(
             session,
             selection.encoded_input,
@@ -199,7 +200,7 @@ class A2APipelineActionRunner:
         if unavailable is not None:
             return unavailable
         if not await self._task_store.is_task_active(session.task_id):
-            return _action_error("pipeline is not active", status_code=409)
+            return _action_error(_("pipeline is not active"), status_code=409)
         pipeline_input = _pipeline_user_input_from_web(session, message, image_ids, file_refs)
         return await self._execute(
             session,
@@ -225,21 +226,21 @@ class A2APipelineActionRunner:
         context_id = getattr(session, "context_id", None)
         task_id = getattr(session, "task_id", None)
         if not context_id or not task_id:
-            return _action_error("pipeline contextId and taskId are required", status_code=400)
+            return _action_error(_("pipeline contextId and taskId are required"), status_code=400)
         try:
             context_record = await self._task_store.get_context_record(context_id)
         except ValueError:
-            return _action_error("pipeline context not found", status_code=404)
+            return _action_error(_("pipeline context not found"), status_code=404)
         if context_record.cwd != session.cwd:
-            return _action_error("pipeline context belongs to a different workspace", status_code=409)
+            return _action_error(_("pipeline context belongs to a different workspace"), status_code=409)
         try:
             task_record = await self._task_store.get_task_record(task_id)
         except ValueError:
-            return _action_error("pipeline task not found", status_code=404)
+            return _action_error(_("pipeline task not found"), status_code=404)
         if task_record.context_id != context_id:
-            return _action_error("pipeline task belongs to a different context", status_code=409)
+            return _action_error(_("pipeline task belongs to a different context"), status_code=409)
         if require_active_task and context_record.active_task_id != task_id:
-            return _action_error("pipeline is not active", status_code=409)
+            return _action_error(_("pipeline is not active"), status_code=409)
         return None
 
     def _resolve_auto_approve(self, session: Any) -> bool:
@@ -379,11 +380,11 @@ class A2APipelineActionRunner:
         try:
             task_record = await self._task_store.get_task_record(session.task_id)
         except ValueError:
-            return _action_error("pipeline task not found", status_code=404)
+            return _action_error(_("pipeline task not found"), status_code=404)
         if task_record.state == "failed":
-            return _action_error("pipeline action failed", status_code=409, terminal_outcome="failed")
+            return _action_error(_("pipeline action failed"), status_code=409, terminal_outcome="failed")
         if task_record.state == "canceled":
-            return _action_error("pipeline action canceled", status_code=409, terminal_outcome="canceled")
+            return _action_error(_("pipeline action canceled"), status_code=409, terminal_outcome="canceled")
         return None
 
 
@@ -555,11 +556,13 @@ def _terminal_result_from_status_events(events: list[Any]) -> PipelineActionResu
         state = _state_name(getattr(status, "state", None))
         if state == "TASK_STATE_FAILED":
             return _action_error(
-                _status_message_text(event) or "pipeline action failed", status_code=409, terminal_outcome="failed"
+                _status_message_text(event) or _("pipeline action failed"), status_code=409, terminal_outcome="failed"
             )
         if state == "TASK_STATE_CANCELED":
             return _action_error(
-                _status_message_text(event) or "pipeline action canceled", status_code=409, terminal_outcome="canceled"
+                _status_message_text(event) or _("pipeline action canceled"),
+                status_code=409,
+                terminal_outcome="canceled",
             )
     return None
 

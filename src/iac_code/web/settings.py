@@ -95,7 +95,7 @@ def get_appearance_theme() -> str:
 def save_appearance_theme(theme: str) -> dict[str, str]:
     """Persist the UI theme slug, preserving other section keys."""
     if theme not in VALID_THEMES:
-        raise ValueError("unknown theme")
+        raise ValueError(_("unknown theme"))
     settings_path = get_settings_path()
     settings = _load_yaml(settings_path)
     section = settings.get(_APPEARANCE_SETTINGS_KEY)
@@ -123,7 +123,7 @@ def get_ui_language() -> str | None:
 def save_ui_language(lang: str) -> dict[str, str]:
     """Persist the UI language code, preserving other section keys."""
     if lang not in SUPPORTED_LANGUAGES:
-        raise ValueError("unknown language")
+        raise ValueError(_("unknown language"))
     settings_path = get_settings_path()
     settings = _load_yaml(settings_path)
     section = settings.get(_UI_SETTINGS_KEY)
@@ -190,9 +190,9 @@ def save_session_defaults(
     it only takes effect when ``mode`` is ``pipeline``.
     """
     if permission_mode not in _VALID_PERMISSION_MODES:
-        raise ValueError("unknown permission mode")
+        raise ValueError(_("unknown permission mode"))
     if mode not in _VALID_SESSION_MODES:
-        raise ValueError("mode must be normal or pipeline")
+        raise ValueError(_("mode must be normal or pipeline"))
     resolved_pipeline = (
         pipeline_name.strip()
         if isinstance(pipeline_name, str) and pipeline_name.strip()
@@ -315,7 +315,7 @@ def save_active_provider(data: dict[str, Any]) -> dict[str, Any]:
 
     provider = PROVIDER_REGISTRY.get(provider_key)
     if provider is None:
-        raise ValueError("unknown provider")
+        raise ValueError(_("unknown provider"))
     _validate_model(provider, model)
     if effort is not None:
         _validate_effort(provider_key, model, effort)
@@ -347,7 +347,7 @@ def save_provider_config(data: dict[str, Any]) -> dict[str, Any]:
 
     provider = PROVIDER_REGISTRY.get(provider_key)
     if provider is None:
-        raise ValueError("unknown provider")
+        raise ValueError(_("unknown provider"))
     _validate_model(provider, model)
     if effort is not None:
         _validate_effort(provider_key, model, effort)
@@ -375,10 +375,10 @@ def set_active_provider(data: dict[str, Any]) -> dict[str, Any]:
         return _set_active_partner(provider_key)
     provider = PROVIDER_REGISTRY.get(provider_key)
     if provider is None:
-        raise ValueError("unknown provider")
+        raise ValueError(_("unknown provider"))
     saved = get_provider_config(provider_key)
     if not _string_or_none(saved.get("model")):
-        raise ValueError("provider is not configured")
+        raise ValueError(_("provider is not configured"))
 
     settings_path = get_settings_path()
     config = _load_yaml(settings_path)
@@ -397,9 +397,9 @@ def clear_provider_config(data: dict[str, Any]) -> dict[str, Any]:
     provider_key = _required_string(data, "provider")
     provider = PROVIDER_REGISTRY.get(provider_key)
     if provider is None:
-        raise ValueError("unknown provider")
+        raise ValueError(_("unknown provider"))
     if provider_key == get_active_provider_key():
-        raise ValueError("cannot clear active provider")
+        raise ValueError(_("cannot clear active provider"))
 
     _remove_provider_config(provider_key)
     _remove_llm_key(provider_key)
@@ -414,7 +414,7 @@ def _set_active_partner(provider_key: str) -> dict[str, Any]:
     """
     partner_key = provider_key.split(":", 1)[1]
     if not any(source.key == partner_key for source in get_available_partner_sources()):
-        raise ValueError("unknown partner source")
+        raise ValueError(_("unknown partner source"))
 
     settings_path = get_settings_path()
     config = _load_yaml(settings_path)
@@ -528,7 +528,7 @@ def save_aliyun_cloud(data: dict[str, Any]) -> dict[str, Any]:
     """Persist Alibaba Cloud credentials and return the redacted summary."""
     mode = _required_string(data, "mode")
     if mode not in CREDENTIAL_MODES:
-        raise ValueError("unknown aliyun credential mode")
+        raise ValueError(_("unknown aliyun credential mode"))
 
     existing = AliyunCredentials.load()
     credential = AliyunCredential(
@@ -693,19 +693,19 @@ def _model_payload(provider_key: str, model, provider_config: dict[str, Any] | N
 
 def _validate_model(provider: ProviderDescriptor, model: str) -> None:
     if provider.model_ids and model not in provider.model_ids:
-        raise ValueError("unknown model")
+        raise ValueError(_("unknown model"))
 
 
 def _validate_effort(provider_key: str, model: str, effort: str) -> None:
     normalized = normalize_effort(effort)
     if normalized is None:
-        raise ValueError("unknown effort")
+        raise ValueError(_("unknown effort"))
     thinking = get_thinking_spec(provider_key, model)
     allowed = {item.value for item in thinking.allowed_efforts}
     # 无已知推理强度规格(手动输入模型/兼容模式等)时放行任意合法强度,
     # 支持前端组合框的自由输入;有规格时仍强制校验。
     if allowed and normalized not in allowed:
-        raise ValueError("unknown effort")
+        raise ValueError(_("unknown effort"))
 
 
 def _write_provider_config(
@@ -949,7 +949,7 @@ def _load_existing_aliyun_credential(*, strict: bool) -> AliyunCredential | None
         return AliyunCredentials._load_from_iac_code_config()
     except (TypeError, ValueError) as exc:
         if strict:
-            raise ValueError("stored aliyun credentials are invalid") from exc
+            raise ValueError(_("stored aliyun credentials are invalid")) from exc
         return None
 
 

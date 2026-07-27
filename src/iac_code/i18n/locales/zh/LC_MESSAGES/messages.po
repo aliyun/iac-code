@@ -29,10 +29,11 @@ msgid ""
 msgstr "可选的 iac-code 流程事件扩展，用于状态快照、回放、中断和并行候选流。"
 
 #: src/iac_code/a2a/app.py src/iac_code/a2a/pipeline_recovery.py
+#: src/iac_code/web/pipeline.py
 msgid "contextId or taskId is required"
 msgstr "contextId 或 taskId 为必填项"
 
-#: src/iac_code/a2a/app.py
+#: src/iac_code/a2a/app.py src/iac_code/web/pipeline.py
 msgid "afterSequence must be a non-negative integer"
 msgstr "afterSequence 必须是非负整数"
 
@@ -1598,6 +1599,7 @@ msgid "Invalid MCP scope {scope!r}. Valid values: user, local, project."
 msgstr "无效的 MCP 作用域 {scope!r}。有效值：user、local、project。"
 
 #: src/iac_code/commands/mcp.py src/iac_code/mcp/cli.py
+#: src/iac_code/web/mcp_settings.py
 #, python-brace-format
 msgid "Scope {scope!r} cannot be used for persisted MCP config."
 msgstr "作用域 {scope!r} 不能用于持久化 MCP 配置。"
@@ -2429,7 +2431,7 @@ msgstr "远程 MCP 服务器需要 --url。"
 msgid "Invalid JSON: {error}"
 msgstr "无效 JSON：{error}"
 
-#: src/iac_code/mcp/cli.py
+#: src/iac_code/mcp/cli.py src/iac_code/web/mcp_settings.py
 msgid "MCP server JSON must be an object."
 msgstr "MCP 服务器 JSON 必须是对象。"
 
@@ -9757,6 +9759,75 @@ msgid "This session was created outside the web entry and is read-only."
 msgstr "此会话由非 web 入口产生,仅供只读查看。"
 
 #: src/iac_code/web/app.py
+#, python-brace-format
+msgid "Current model {} does not support image input."
+msgstr "当前模型 {} 不支持图片输入。"
+
+#: src/iac_code/web/app.py src/iac_code/web/images.py
+msgid "image data is too large"
+msgstr "图片数据过大"
+
+#: src/iac_code/web/app.py
+msgid "session is archived"
+msgstr "会话已归档"
+
+#: src/iac_code/web/app.py src/iac_code/web/pipeline_actions.py
+msgid "pipeline action failed"
+msgstr "流水线操作失败"
+
+#: src/iac_code/web/app.py
+msgid "not found"
+msgstr "未找到"
+
+#: src/iac_code/web/app.py src/iac_code/web/pipeline_actions.py
+msgid "pipeline contextId and taskId are required"
+msgstr "需要 pipeline contextId 和 taskId"
+
+#: src/iac_code/web/app.py
+msgid "pipeline contextId or taskId is invalid"
+msgstr "pipeline contextId 或 taskId 无效"
+
+#: src/iac_code/web/app.py src/iac_code/web/session_manager.py
+msgid "session not found"
+msgstr "未找到会话"
+
+#: src/iac_code/web/app.py
+msgid "resume target is ambiguous"
+msgstr "恢复目标不明确"
+
+#: src/iac_code/web/app.py
+msgid "malformed JSON request body"
+msgstr "JSON 请求体格式错误"
+
+#: src/iac_code/web/app.py
+msgid "request body must be a JSON object"
+msgstr "请求体必须是 JSON 对象"
+
+#: src/iac_code/web/app.py
+msgid "choice is invalid"
+msgstr "选择无效"
+
+#: src/iac_code/web/app.py
+msgid "free_text is not allowed"
+msgstr "不允许 free_text"
+
+#: src/iac_code/web/app.py
+msgid "selected_id was not offered"
+msgstr "未提供 selected_id"
+
+#: src/iac_code/web/app.py
+msgid "selected_label is not allowed without selected_id"
+msgstr "没有 selected_id 时不允许 selected_label"
+
+#: src/iac_code/web/app.py
+msgid "selected_id is required unless free text is allowed"
+msgstr "除非允许自由文本，否则需要 selected_id"
+
+#: src/iac_code/web/app.py
+msgid "afterSequence must be an integer"
+msgstr "afterSequence 必须是整数"
+
+#: src/iac_code/web/app.py
 msgid "No update is currently available."
 msgstr "当前没有可用更新。"
 
@@ -9769,9 +9840,246 @@ msgstr "更新已在进行中。"
 msgid "The update command exited with code {}."
 msgstr "更新命令以退出码 {} 结束。"
 
+#: src/iac_code/web/app.py src/iac_code/web/session_manager.py
+#: src/iac_code/web/settings.py
+msgid "mode must be normal or pipeline"
+msgstr "mode 必须是 normal 或 pipeline"
+
+#: src/iac_code/web/app.py
+msgid "message text, image, or file is required"
+msgstr "需要消息文本、图片或文件"
+
+#: src/iac_code/web/app.py
+msgid "sessionId is required"
+msgstr "需要 sessionId"
+
+#: src/iac_code/web/app.py
+msgid "image not found"
+msgstr "未找到图片"
+
+#: src/iac_code/web/app.py
+msgid "path required"
+msgstr "需要路径"
+
+#: src/iac_code/web/app.py
+msgid "forbidden"
+msgstr "禁止访问"
+
+#: src/iac_code/web/app.py
+msgid "file not found"
+msgstr "未找到文件"
+
+#: src/iac_code/web/app.py
+msgid "transcript not found"
+msgstr "未找到转录记录"
+
+#: src/iac_code/web/app.py
+msgid "debugEnabled must be a boolean"
+msgstr "debugEnabled 必须是布尔值"
+
+#: src/iac_code/web/app.py
+msgid "pinned must be a boolean"
+msgstr "pinned 必须是布尔值"
+
+#: src/iac_code/web/app.py
+msgid "archived must be a boolean"
+msgstr "archived 必须是布尔值"
+
+#: src/iac_code/web/app.py
+msgid "enabled is required"
+msgstr "需要 enabled"
+
+#: src/iac_code/web/app.py
+msgid "enabled must be a boolean or null"
+msgstr "enabled 必须是布尔值或 null"
+
+#: src/iac_code/web/app.py
+msgid "label must be a string"
+msgstr "label 必须是字符串"
+
+#: src/iac_code/web/app.py
+msgid "project directory is not available on disk"
+msgstr "项目目录在磁盘上不可用"
+
+#: src/iac_code/web/app.py
+#, python-brace-format
+msgid "failed to reveal project: {}"
+msgstr "无法显示项目：{}"
+
+#: src/iac_code/web/app.py
+msgid "suggestion kind is invalid"
+msgstr "建议类型无效"
+
+#: src/iac_code/web/app.py
+msgid "project not found"
+msgstr "未找到项目"
+
 #: src/iac_code/web/app.py
 msgid "Installation in progress"
 msgstr "安装进行中"
+
+#: src/iac_code/web/app.py
+msgid "project or session not found"
+msgstr "未找到项目或会话"
+
+#: src/iac_code/web/app.py
+msgid "name is required"
+msgstr "需要名称"
+
+#: src/iac_code/web/app.py
+msgid "decision must be 'approve' or 'reject'"
+msgstr "decision 必须是 'approve' 或 'reject'"
+
+#: src/iac_code/web/app.py src/iac_code/web/pipeline.py
+msgid "pipeline state not found"
+msgstr "未找到流水线状态"
+
+#: src/iac_code/web/app.py
+msgid "internal server error"
+msgstr "内部服务器错误"
+
+#: src/iac_code/web/app.py
+msgid "session is not a pipeline session"
+msgstr "会话不是流水线会话"
+
+#: src/iac_code/web/app.py
+msgid "No active provider is configured."
+msgstr "未配置活跃的提供方。"
+
+#: src/iac_code/web/app.py
+msgid "No active model is configured."
+msgstr "未配置活跃的模型。"
+
+#: src/iac_code/web/app.py
+msgid "user escape commands are not available in pipeline mode"
+msgstr "流水线模式下不支持用户转义命令"
+
+#: src/iac_code/web/app.py
+msgid "Shell command canceled."
+msgstr "Shell 命令已取消。"
+
+#: src/iac_code/web/app.py
+msgid "choice was not offered"
+msgstr "未提供该选择"
+
+#: src/iac_code/web/app.py
+msgid "index must be an integer"
+msgstr "index 必须是整数"
+
+#: src/iac_code/web/app.py
+msgid "normal-mode interrupts do not support attachments"
+msgstr "普通模式的中断不支持附件"
+
+#: src/iac_code/web/files.py
+msgid "session cwd is not available"
+msgstr "会话工作目录不可用"
+
+#: src/iac_code/web/files.py
+msgid "query is invalid"
+msgstr "查询无效"
+
+#: src/iac_code/web/files.py
+msgid "file reference is invalid"
+msgstr "文件引用无效"
+
+#: src/iac_code/web/files.py
+msgid "file reference escapes the workspace"
+msgstr "文件引用超出了工作区范围"
+
+#: src/iac_code/web/images.py
+msgid "image id is invalid"
+msgstr "图片 id 无效"
+
+#: src/iac_code/web/images.py
+msgid "session id is invalid"
+msgstr "会话 id 无效"
+
+#: src/iac_code/web/images.py
+msgid "media type is invalid"
+msgstr "媒体类型无效"
+
+#: src/iac_code/web/images.py
+msgid "image data is empty"
+msgstr "图片数据为空"
+
+#: src/iac_code/web/images.py
+msgid "image data is not a supported image"
+msgstr "图片数据不是受支持的图片"
+
+#: src/iac_code/web/images.py
+msgid "image data does not match media type"
+msgstr "图片数据与媒体类型不匹配"
+
+#: src/iac_code/web/images.py
+msgid "cwd is invalid"
+msgstr "cwd 无效"
+
+#: src/iac_code/web/images.py
+msgid "image fallback cache limit exceeded"
+msgstr "图片回退缓存已超出限制"
+
+#: src/iac_code/web/images.py
+msgid "failed to write image data"
+msgstr "写入图片数据失败"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "MCP scope is required."
+msgstr "需要 MCP 作用域。"
+
+#: src/iac_code/web/mcp_settings.py
+#, python-brace-format
+msgid "MCP server {name!r} not found."
+msgstr "未找到 MCP 服务器 {name!r}。"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "command is required for stdio MCP servers."
+msgstr "stdio MCP 服务器需要 command。"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "url is required for remote MCP servers."
+msgstr "远程 MCP 服务器需要 url。"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "url is required for ws MCP servers."
+msgstr "ws MCP 服务器需要 url。"
+
+#: src/iac_code/web/mcp_settings.py
+#, python-brace-format
+msgid "Invalid transport {transport!r}. Valid values: stdio, http, sse, ws."
+msgstr "无效的传输方式 {transport!r}。有效值：stdio、http、sse、ws。"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "OAuth callback port must be an integer."
+msgstr "OAuth 回调端口必须是整数。"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "MCP server name is required."
+msgstr "需要 MCP 服务器名称。"
+
+#: src/iac_code/web/mcp_settings.py
+#, python-brace-format
+msgid "MCP server {name!r} is not defined in a project config."
+msgstr "MCP 服务器 {name!r} 未在项目配置中定义。"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "Failed to start MCP OAuth flow."
+msgstr "启动 MCP OAuth 流程失败。"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "Unknown OAuth flow."
+msgstr "未知的 OAuth 流程。"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "callback_url is required."
+msgstr "需要 callback_url。"
+
+#: src/iac_code/web/memory.py
+msgid "user memory path is invalid"
+msgstr "用户记忆路径无效"
+
+#: src/iac_code/web/memory.py
+msgid "project memory path is invalid"
+msgstr "项目记忆路径无效"
 
 #: src/iac_code/web/permissions.py
 msgid "Deny once"
@@ -9818,6 +10126,42 @@ msgstr "始终拒绝 {}"
 msgid "Always deny this tool"
 msgstr "始终拒绝该工具"
 
+#: src/iac_code/web/pipeline.py
+msgid "candidateName or candidateIndex is required"
+msgstr "需要 candidateName 或 candidateIndex"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline is not waiting for candidate input"
+msgstr "流水线未在等待候选输入"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline is not active"
+msgstr "流水线未激活"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline context not found"
+msgstr "未找到流水线上下文"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline context belongs to a different workspace"
+msgstr "流水线上下文属于其他工作区"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline task not found"
+msgstr "未找到流水线任务"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline task belongs to a different context"
+msgstr "流水线任务属于其他上下文"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline action canceled"
+msgstr "流水线操作已取消"
+
+#: src/iac_code/web/pipeline_transcript.py
+msgid "Step"
+msgstr "步骤"
+
 #: src/iac_code/web/pipeline_transcript.py src/iac_code/web/session_manager.py
 #, python-brace-format
 msgid "◆ Plan: {}"
@@ -9830,6 +10174,28 @@ msgstr "↪ 普通对话"
 #: src/iac_code/web/pipeline_transcript.py src/iac_code/web/session_manager.py
 msgid "Normal chat"
 msgstr "普通对话"
+
+#: src/iac_code/web/runtime.py
+#, python-brace-format
+msgid ""
+"{}\n"
+"\n"
+"Referenced files:\n"
+"{}"
+msgstr ""
+"{}\n"
+"\n"
+"引用的文件：\n"
+"{}"
+
+#: src/iac_code/web/runtime.py
+#, python-brace-format
+msgid ""
+"Referenced files:\n"
+"{}"
+msgstr ""
+"引用的文件：\n"
+"{}"
 
 #: src/iac_code/web/server.py
 msgid "IaC Code Web is running"
@@ -9851,6 +10217,22 @@ msgid ""
 msgstr "缺少 Web 服务器依赖。请使用以下命令安装：pip install 'iac-code[http]'"
 
 #: src/iac_code/web/session_manager.py
+msgid "sessionId is invalid"
+msgstr "sessionId 无效"
+
+#: src/iac_code/web/session_manager.py src/iac_code/web/settings.py
+msgid "unknown provider"
+msgstr "未知的提供方"
+
+#: src/iac_code/web/session_manager.py src/iac_code/web/settings.py
+msgid "unknown model"
+msgstr "未知的模型"
+
+#: src/iac_code/web/session_manager.py src/iac_code/web/settings.py
+msgid "unknown effort"
+msgstr "未知的推理强度"
+
+#: src/iac_code/web/session_manager.py
 #, python-brace-format
 msgid "Pipeline · {}"
 msgstr "流水线 · {}"
@@ -9861,12 +10243,44 @@ msgid "Session · {}"
 msgstr "会话 · {}"
 
 #: src/iac_code/web/settings.py
+msgid "unknown theme"
+msgstr "未知的主题"
+
+#: src/iac_code/web/settings.py
+msgid "unknown language"
+msgstr "未知的语言"
+
+#: src/iac_code/web/settings.py
+msgid "unknown permission mode"
+msgstr "未知的权限模式"
+
+#: src/iac_code/web/settings.py
 msgid "Other"
 msgstr "其他"
 
 #: src/iac_code/web/settings.py
 msgid "Managed by external login"
 msgstr "由外部登录管理"
+
+#: src/iac_code/web/settings.py
+msgid "provider is not configured"
+msgstr "提供方未配置"
+
+#: src/iac_code/web/settings.py
+msgid "cannot clear active provider"
+msgstr "无法清除活跃的提供方"
+
+#: src/iac_code/web/settings.py
+msgid "unknown partner source"
+msgstr "未知的伙伴来源"
+
+#: src/iac_code/web/settings.py
+msgid "unknown aliyun credential mode"
+msgstr "未知的阿里云凭证模式"
+
+#: src/iac_code/web/settings.py
+msgid "stored aliyun credentials are invalid"
+msgstr "存储的阿里云凭证无效"
 
 #: src/iac_code/web/shell.py
 msgid "Allow Bash?"

@@ -920,7 +920,7 @@ function renderShellDetail(tool = {}) {
 
   const label = document.createElement("p");
   label.className = "tool-shell-label";
-  label.textContent = "Shell";
+  label.textContent = t("Shell");
 
   const command = document.createElement("pre");
   command.className = "tool-shell-command";

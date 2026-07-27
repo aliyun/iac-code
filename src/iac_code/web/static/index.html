@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="application-name" content="IaC Code Web" />
     <title>IaC Code</title>
-    <link rel="stylesheet" href="/static/styles.css?v=web-repl-ui-304" />
+    <link rel="stylesheet" href="/static/styles.css?v=web-repl-ui-305" />
   </head>
   <body>
     <main id="iac-code-web-root" class="workbench">
@@ -79,10 +79,10 @@
         tabindex="0"
       ></div>
 
-      <section class="transcript-panel" aria-label="Transcript">
+      <section class="transcript-panel" aria-label="Transcript" data-i18n-attr="aria-label:Transcript">
         <header class="panel-header">
           <div class="thread-current" data-app-shell="thread-current">
-            <button class="thread-title-button" data-app-shell="thread-title" type="button">Ready</button>
+            <button class="thread-title-button" data-app-shell="thread-title" type="button" data-i18n="Ready">Ready</button>
             <div class="thread-menu-anchor">
             <button
               class="thread-menu-button"
@@ -170,7 +170,7 @@
               <div class="suggestions" data-app-shell="suggestions" hidden></div>
             </div>
             <div class="composer-actions">
-              <label class="file-action" aria-label="Attach image">
+              <label class="file-action" aria-label="Attach image" data-i18n-attr="aria-label:Attach image">
                 <svg class="composer-icon composer-icon-plus" viewBox="0 0 20 20" aria-hidden="true">
                   <path d="M10 3V17" />
                   <path d="M3 10H17" />
@@ -301,30 +301,30 @@
         <aside class="output-file-preview" data-app-shell="output-file-preview" aria-label="File preview" data-i18n-attr="aria-label:File preview" hidden></aside>
       </section>
 
-      <aside class="workspace-panel" aria-label="Workspace">
+      <aside class="workspace-panel" aria-label="Workspace" data-i18n-attr="aria-label:Workspace">
         <section>
-          <p class="eyebrow">Workspace</p>
+          <p class="eyebrow" data-i18n="Workspace">Workspace</p>
           <dl class="workspace-list">
             <div>
-              <dt>Project</dt>
-              <dd data-field="cwd">Loading</dd>
+              <dt data-i18n="Project">Project</dt>
+              <dd data-field="cwd" data-i18n="Loading">Loading</dd>
             </div>
             <div>
-              <dt>Mode</dt>
-              <dd data-field="mode">Normal</dd>
+              <dt data-i18n="Mode">Mode</dt>
+              <dd data-field="mode" data-i18n="Normal">Normal</dd>
             </div>
             <div>
-              <dt>Pending</dt>
+              <dt data-i18n="Pending">Pending</dt>
               <dd data-field="pending">0</dd>
             </div>
             <div>
-              <dt>Session</dt>
+              <dt data-i18n="Session">Session</dt>
               <dd data-field="session-id">-</dd>
             </div>
           </dl>
         </section>
         <section>
-          <p class="eyebrow">Tools</p>
+          <p class="eyebrow" data-i18n="Tools">Tools</p>
           <div class="tool-region" data-app-shell="tool-stack"></div>
         </section>
         <p class="app-error" data-app-shell="app-error"></p>
@@ -424,6 +424,7 @@
           data-app-shell="command-palette-backdrop"
           type="button"
           aria-label="Close command menu"
+          data-i18n-attr="aria-label:Close command menu"
         ></button>
         <section
           class="command-palette-dialog"
@@ -473,6 +474,6 @@
       </div>
     </main>
     <script src="/static/js/vendor/markdown-it.min.js?v=14.1.0"></script>
-    <script type="module" src="/static/js/app.js?v=web-repl-ui-304"></script>
+    <script type="module" src="/static/js/app.js?v=web-repl-ui-305"></script>
   </body>
 </html>
