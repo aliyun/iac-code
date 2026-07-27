@@ -266,7 +266,7 @@ class PipelineA2AEventPublisher:
 
     async def publish_batch(self, events: list[Any]) -> None:
         persisted = await self.persist_batch_events(events)
-        await self.enqueue_persisted_batch(persisted)
+        await self.enqueue_persisted_batch(persisted, local_envelopes=persisted)
 
     async def persist_batch_events(self, events: list[Any]) -> list[dict[str, Any]]:
         persisted: list[dict[str, Any]] = []
@@ -714,24 +714,38 @@ class PipelineA2AEventPublisher:
             if artifact_metadata is not None:
                 await self._enqueue_artifact_update(envelope, artifact_metadata)
             if local_envelope is not None:
-                local_enqueue = getattr(self.event_queue, "enqueue_local_pipeline_envelope", None)
-                if local_enqueue is not None:
-                    await local_enqueue(dict(to_json_safe(local_envelope) or {}))
+                await self._forward_local_pipeline_envelope(local_envelope)
             await self._enqueue_status(envelope, wait_for_transport=wait_for_transport)
             self.last_envelope = envelope
         return True
+
+    async def _forward_local_pipeline_envelope(self, local_envelope: dict[str, Any]) -> None:
+        """Forward a single pre-remote-redaction envelope to the loopback Web sink, if any.
+
+        This is the only bridge that streams pipeline progress into a watching Web
+        session's live event buffer. The remote A2A transport (``_enqueue_status`` /
+        ``_enqueue_status_batch``) does not feed it, so every enqueue path that should
+        appear live in the browser must route through here.
+        """
+        local_enqueue = getattr(self.event_queue, "enqueue_local_pipeline_envelope", None)
+        if local_enqueue is not None:
+            await local_enqueue(dict(to_json_safe(local_envelope) or {}))
 
     async def enqueue_persisted_batch(
         self,
         envelopes: list[dict[str, Any]],
         *,
         wait_for_transport: bool = False,
+        local_envelopes: list[dict[str, Any]] | None = None,
     ) -> int:
         if not envelopes:
             return 0
 
         frame_count = 0
         async with self._delivery_guard():
+            if local_envelopes:
+                for local_envelope in local_envelopes:
+                    await self._forward_local_pipeline_envelope(local_envelope)
             deliverable = [envelope for envelope in envelopes if await self._run_before_enqueue_hook(envelope)]
             pending: list[dict[str, Any]] = []
             for envelope in deliverable:

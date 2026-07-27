@@ -399,6 +399,42 @@ async def test_publish_batch_persists_each_delta_but_enqueues_once(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_publish_batch_forwards_each_delta_to_local_web_sink(tmp_path: Path) -> None:
+    # 回归 bug 9be9e9d9:批量发布(extreme_performance 默认路径)必须把每条 delta 直通
+    # loopback web sink,订阅 web 会话的浏览器才能实时看到流水线进度。远程虽合并成一帧,
+    # 本地环回必须逐条转发,且顺序不乱。
+    class LocalAwareQueue(FakeEventQueue):
+        def __init__(self) -> None:
+            super().__init__()
+            self.local_envelopes: list[dict[str, Any]] = []
+
+        async def enqueue_local_pipeline_envelope(self, envelope: dict[str, Any]) -> None:
+            self.local_envelopes.append(envelope)
+
+    queue = LocalAwareQueue()
+    context = PipelineA2AContext(
+        pipeline_run_id="run-1",
+        task_id="task-1",
+        context_id="ctx-1",
+        pipeline_name="selling",
+    )
+    pipeline_dir = tmp_path / "pipeline"
+    publisher = PipelineA2AEventPublisher(
+        event_queue=queue,
+        translator=PipelineEventTranslator(context),
+        journal=A2APipelineJournal(pipeline_dir),
+        snapshot_store=A2APipelineSnapshotStore(pipeline_dir),
+    )
+
+    await publisher.publish_batch([TextDeltaEvent(text="a"), TextDeltaEvent(text="b")])
+
+    # 远程侧仍是单帧合并投递(既有契约)。
+    assert len(queue.events) == 1
+    # 本地环回侧:逐条、按序转发,浏览器实时流据此渲染。
+    assert [envelope["data"]["text"] for envelope in queue.local_envelopes] == ["a", "b"]
+
+
+@pytest.mark.asyncio
 async def test_publish_batch_mixes_adjacent_exposed_thinking_and_text_deltas(tmp_path: Path) -> None:
     publisher, queue = _publisher(tmp_path, exposure_types=[A2AExposureType.RAW_THINKING])
 

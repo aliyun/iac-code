@@ -571,7 +571,9 @@ class QueueLifecyclePublisher:
             )
         return persisted
 
-    async def enqueue_persisted_batch(self, events, *, wait_for_transport: bool = False) -> None:
+    async def enqueue_persisted_batch(
+        self, events, *, wait_for_transport: bool = False, local_envelopes=None
+    ) -> None:
         await self.publish_batch(events)
 
     async def publish(self, event, **kwargs) -> str | None:
