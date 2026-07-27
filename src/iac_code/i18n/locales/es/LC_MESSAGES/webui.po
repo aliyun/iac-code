@@ -122,7 +122,7 @@ msgstr "Describe tus necesidades de infraestructura"
 msgid "Approval requested"
 msgstr "Aprobación solicitada"
 
-#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/index.html
 msgid "Thinking"
 msgstr "Pensamiento"
 
@@ -298,12 +298,12 @@ msgid "Output {n}"
 msgstr "Salida {n}"
 
 #: src/iac_code/web/static/js/app.js
-msgid "Session:"
-msgstr "Sesión:"
-
-#: src/iac_code/web/static/js/app.js
 msgid "Context:"
 msgstr "Contexto:"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Session:"
+msgstr "Sesión:"
 
 #: src/iac_code/web/static/js/app.js
 #: src/iac_code/web/static/js/components/workspace.js
@@ -577,6 +577,10 @@ msgstr "Pipeline finalizado"
 #: src/iac_code/web/static/js/app.js
 msgid "Context automatically compacted"
 msgstr "Contexto compactado automáticamente"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Thinking…"
+msgstr "Pensando…"
 
 #: src/iac_code/web/static/js/app.js
 msgid "Thinking done"
@@ -884,6 +888,16 @@ msgstr "Razonamiento"
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Not supported"
 msgstr "No admitido"
+
+#: src/iac_code/web/static/js/components/composer.js
+#, python-brace-format
+msgid "{command} is not available in pipeline mode"
+msgstr "{command} no está disponible en modo pipeline"
+
+#: src/iac_code/web/static/js/components/composer.js
+#, python-brace-format
+msgid "{command} is only available in an active conversation"
+msgstr "{command} solo está disponible en una conversación activa"
 
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Stop"
@@ -3288,25 +3302,8 @@ msgstr ""
 #~ msgid "Completed step: {step}"
 #~ msgstr "Paso completado: {step}"
 
+#~ msgid "Resource stacks"
+#~ msgstr "Pilas de recursos"
 
-#: src/iac_code/web/static/js/components/output_panel.js
-msgid "Resource stacks"
-msgstr "Pilas de recursos"
-
-#: src/iac_code/web/static/js/components/output_panel.js
-msgid "Template files"
-msgstr "Archivos de plantilla"
-
-#: src/iac_code/web/static/js/components/composer.js
-#, python-brace-format
-msgid "{command} is not available in pipeline mode"
-msgstr "{command} no está disponible en modo pipeline"
-
-#: src/iac_code/web/static/js/components/composer.js
-#, python-brace-format
-msgid "{command} is only available in an active conversation"
-msgstr "{command} solo está disponible en una conversación activa"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Thinking…"
-msgstr "Pensando…"
+#~ msgid "Template files"
+#~ msgstr "Archivos de plantilla"

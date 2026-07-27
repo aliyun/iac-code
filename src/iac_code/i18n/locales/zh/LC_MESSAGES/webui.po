@@ -120,7 +120,7 @@ msgstr "描述你的基础设施需求"
 msgid "Approval requested"
 msgstr "请求批准"
 
-#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/index.html
 msgid "Thinking"
 msgstr "思考"
 
@@ -294,12 +294,12 @@ msgid "Output {n}"
 msgstr "输出 {n}"
 
 #: src/iac_code/web/static/js/app.js
-msgid "Session:"
-msgstr "会话:"
-
-#: src/iac_code/web/static/js/app.js
 msgid "Context:"
 msgstr "背景信息:"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Session:"
+msgstr "会话:"
 
 #: src/iac_code/web/static/js/app.js
 #: src/iac_code/web/static/js/components/workspace.js
@@ -573,6 +573,10 @@ msgstr "流水线已结束"
 #: src/iac_code/web/static/js/app.js
 msgid "Context automatically compacted"
 msgstr "上下文已自动压缩"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Thinking…"
+msgstr "正在思考"
 
 #: src/iac_code/web/static/js/app.js
 msgid "Thinking done"
@@ -878,6 +882,16 @@ msgid "Not supported"
 msgstr "不支持"
 
 #: src/iac_code/web/static/js/components/composer.js
+#, python-brace-format
+msgid "{command} is not available in pipeline mode"
+msgstr "{command} 在流水线模式下不可用"
+
+#: src/iac_code/web/static/js/components/composer.js
+#, python-brace-format
+msgid "{command} is only available in an active conversation"
+msgstr "{command} 仅在进行中的会话中可用"
+
+#: src/iac_code/web/static/js/components/composer.js
 msgid "Stop"
 msgstr "停止"
 
@@ -892,14 +906,6 @@ msgstr "成功"
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "In progress / failed"
 msgstr "进行中/失败"
-
-#: src/iac_code/web/static/js/components/output_panel.js
-msgid "Resource stacks"
-msgstr "资源栈"
-
-#: src/iac_code/web/static/js/components/output_panel.js
-msgid "Template files"
-msgstr "模板文件"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Architecture diagram"
@@ -3201,17 +3207,8 @@ msgstr "重启中,服务恢复后会自动刷新…"
 #~ msgid "Completed step: {step}"
 #~ msgstr "已完成步骤：{step}"
 
+#~ msgid "Resource stacks"
+#~ msgstr "资源栈"
 
-#: src/iac_code/web/static/js/components/composer.js
-#, python-brace-format
-msgid "{command} is not available in pipeline mode"
-msgstr "{command} 在流水线模式下不可用"
-
-#: src/iac_code/web/static/js/components/composer.js
-#, python-brace-format
-msgid "{command} is only available in an active conversation"
-msgstr "{command} 仅在进行中的会话中可用"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Thinking…"
-msgstr "正在思考"
+#~ msgid "Template files"
+#~ msgstr "模板文件"

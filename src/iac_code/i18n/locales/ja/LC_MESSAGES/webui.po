@@ -120,7 +120,7 @@ msgstr "インフラのニーズを記述してください"
 msgid "Approval requested"
 msgstr "承認をリクエスト中"
 
-#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/index.html
 msgid "Thinking"
 msgstr "思考"
 
@@ -294,12 +294,12 @@ msgid "Output {n}"
 msgstr "出力 {n}"
 
 #: src/iac_code/web/static/js/app.js
-msgid "Session:"
-msgstr "セッション:"
-
-#: src/iac_code/web/static/js/app.js
 msgid "Context:"
 msgstr "背景情報:"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Session:"
+msgstr "セッション:"
 
 #: src/iac_code/web/static/js/app.js
 #: src/iac_code/web/static/js/components/workspace.js
@@ -573,6 +573,10 @@ msgstr "パイプラインが終了しました"
 #: src/iac_code/web/static/js/app.js
 msgid "Context automatically compacted"
 msgstr "コンテキストを自動圧縮しました"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Thinking…"
+msgstr "思考中…"
 
 #: src/iac_code/web/static/js/app.js
 msgid "Thinking done"
@@ -876,6 +880,16 @@ msgstr "推論"
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Not supported"
 msgstr "サポートされていません"
+
+#: src/iac_code/web/static/js/components/composer.js
+#, python-brace-format
+msgid "{command} is not available in pipeline mode"
+msgstr "{command} はパイプラインモードでは使用できません"
+
+#: src/iac_code/web/static/js/components/composer.js
+#, python-brace-format
+msgid "{command} is only available in an active conversation"
+msgstr "{command} は進行中の会話でのみ使用できます"
 
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Stop"
@@ -3199,25 +3213,8 @@ msgstr "再起動しています。サービスが復旧するとページが自
 #~ msgid "Completed step: {step}"
 #~ msgstr "ステップ完了: {step}"
 
+#~ msgid "Resource stacks"
+#~ msgstr "リソーススタック"
 
-#: src/iac_code/web/static/js/components/output_panel.js
-msgid "Resource stacks"
-msgstr "リソーススタック"
-
-#: src/iac_code/web/static/js/components/output_panel.js
-msgid "Template files"
-msgstr "テンプレートファイル"
-
-#: src/iac_code/web/static/js/components/composer.js
-#, python-brace-format
-msgid "{command} is not available in pipeline mode"
-msgstr "{command} はパイプラインモードでは使用できません"
-
-#: src/iac_code/web/static/js/components/composer.js
-#, python-brace-format
-msgid "{command} is only available in an active conversation"
-msgstr "{command} は進行中の会話でのみ使用できます"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Thinking…"
-msgstr "思考中…"
+#~ msgid "Template files"
+#~ msgstr "テンプレートファイル"

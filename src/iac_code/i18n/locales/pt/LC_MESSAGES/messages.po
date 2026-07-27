@@ -5412,10 +5412,12 @@ msgid "Calling {action}..."
 msgstr "Chamando {action}..."
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#: src/iac_code/tools/cloud/aliyun/result_contract.py
 #: src/iac_code/tools/cloud/base_api.py
 msgid "Call succeeded"
 msgstr "Chamada bem-sucedida"
 
+#: src/iac_code/tools/cloud/aliyun/result_contract.py
 #: src/iac_code/tools/cloud/base_api.py
 #, python-brace-format
 msgid "Received response ({count} lines)"
@@ -5581,6 +5583,7 @@ msgid "matched deny rule: {rule}"
 msgstr "Regra de negação correspondente: {rule}"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#: src/iac_code/tools/cloud/aliyun/result_contract.py
 #, python-brace-format
 msgid "Call succeeded (RequestId: {request_id})"
 msgstr "Chamada bem-sucedida (RequestId: {request_id})"
@@ -5716,6 +5719,25 @@ msgid ""
 msgstr ""
 "A entrada da API do Alibaba Cloud é inválida para {operation}. Verifique "
 "o produto, a ação, a versão, a região e os parâmetros."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid ""
+"Alibaba Cloud returned the target response, but its headers are too large"
+" to display safely. Verify the cloud resource state before retrying."
+msgstr ""
+"A Alibaba Cloud retornou a resposta esperada, mas os cabeçalhos são "
+"grandes demais para serem exibidos com segurança. Verifique o estado do "
+"recurso de nuvem antes de tentar novamente."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud returned an unsupported response body for {operation}. "
+"Verify the cloud resource state before retrying."
+msgstr ""
+"A Alibaba Cloud retornou um corpo de resposta não compatível para "
+"{operation}. Verifique o estado do recurso de nuvem antes de tentar "
+"novamente."
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
@@ -11105,5 +11127,6 @@ msgstr "Permitir Bash?"
 #~ "A validação da estrutura do modelo "
 #~ "encontrou os seguintes problemas, por "
 #~ "favor corrija e tente novamente:"
+
 #~ msgid "由外部登录管理"
 #~ msgstr "Gerenciado por login externo"

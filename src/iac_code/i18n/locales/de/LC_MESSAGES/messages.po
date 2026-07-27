@@ -5483,10 +5483,12 @@ msgid "Calling {action}..."
 msgstr "{action} wird aufgerufen …"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#: src/iac_code/tools/cloud/aliyun/result_contract.py
 #: src/iac_code/tools/cloud/base_api.py
 msgid "Call succeeded"
 msgstr "Aufruf erfolgreich"
 
+#: src/iac_code/tools/cloud/aliyun/result_contract.py
 #: src/iac_code/tools/cloud/base_api.py
 #, python-brace-format
 msgid "Received response ({count} lines)"
@@ -5652,6 +5654,7 @@ msgid "matched deny rule: {rule}"
 msgstr "Übereinstimmende Ablehnungsregel: {rule}"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#: src/iac_code/tools/cloud/aliyun/result_contract.py
 #, python-brace-format
 msgid "Call succeeded (RequestId: {request_id})"
 msgstr "Aufruf erfolgreich (RequestId: {request_id})"
@@ -5788,6 +5791,25 @@ msgid ""
 msgstr ""
 "Die Eingabe der Alibaba-Cloud-API für {operation} ist ungültig. Prüfen "
 "Sie Produkt, Aktion, Version, Region und Parameter."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid ""
+"Alibaba Cloud returned the target response, but its headers are too large"
+" to display safely. Verify the cloud resource state before retrying."
+msgstr ""
+"Alibaba Cloud hat die erwartete Antwort zurückgegeben, aber ihre Header "
+"sind zu groß, um sicher angezeigt zu werden. Überprüfen Sie den Status "
+"der Cloud-Ressource, bevor Sie es erneut versuchen."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud returned an unsupported response body for {operation}. "
+"Verify the cloud resource state before retrying."
+msgstr ""
+"Alibaba Cloud hat für {operation} einen nicht unterstützten Antworttext "
+"zurückgegeben. Überprüfen Sie den Status der Cloud-Ressource, bevor Sie "
+"es erneut versuchen."
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
@@ -11292,5 +11314,6 @@ msgstr "Bash zulassen?"
 #~ "Die Strukturvalidierung der Vorlage hat "
 #~ "folgende Probleme gefunden, bitte beheben "
 #~ "und erneut versuchen:"
+
 #~ msgid "由外部登录管理"
 #~ msgstr "Durch externe Anmeldung verwaltet"

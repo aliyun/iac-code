@@ -5474,10 +5474,12 @@ msgid "Calling {action}..."
 msgstr "Appel de {action}…"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#: src/iac_code/tools/cloud/aliyun/result_contract.py
 #: src/iac_code/tools/cloud/base_api.py
 msgid "Call succeeded"
 msgstr "Appel réussi"
 
+#: src/iac_code/tools/cloud/aliyun/result_contract.py
 #: src/iac_code/tools/cloud/base_api.py
 #, python-brace-format
 msgid "Received response ({count} lines)"
@@ -5643,6 +5645,7 @@ msgid "matched deny rule: {rule}"
 msgstr "Règle de refus correspondante : {rule}"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#: src/iac_code/tools/cloud/aliyun/result_contract.py
 #, python-brace-format
 msgid "Call succeeded (RequestId: {request_id})"
 msgstr "Appel réussi (RequestId : {request_id})"
@@ -5780,6 +5783,24 @@ msgid ""
 msgstr ""
 "L'entrée de l'API Alibaba Cloud n'est pas valide pour {operation}. "
 "Vérifiez le produit, l'action, la version, la région et les paramètres."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid ""
+"Alibaba Cloud returned the target response, but its headers are too large"
+" to display safely. Verify the cloud resource state before retrying."
+msgstr ""
+"Alibaba Cloud a renvoyé la réponse attendue, mais ses en-têtes sont trop "
+"volumineux pour être affichés en toute sécurité. Vérifiez l'état de la "
+"ressource cloud avant de réessayer."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud returned an unsupported response body for {operation}. "
+"Verify the cloud resource state before retrying."
+msgstr ""
+"Alibaba Cloud a renvoyé un corps de réponse non pris en charge pour "
+"{operation}. Vérifiez l'état de la ressource cloud avant de réessayer."
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
@@ -11265,5 +11286,6 @@ msgstr "Autoriser Bash ?"
 #~ "La validation de la structure du "
 #~ "modèle a détecté les problèmes suivants,"
 #~ " veuillez corriger et réessayer :"
+
 #~ msgid "由外部登录管理"
 #~ msgstr "Géré par une connexion externe"
