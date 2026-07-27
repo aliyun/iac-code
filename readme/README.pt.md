@@ -54,6 +54,16 @@ A leitura a partir do stdin também é suportada:
 echo "Criar um bucket OSS" | iac-code --prompt -
 ```
 
+### Aplicativo web
+
+Prefere uma interface gráfica? Inicie o aplicativo web local, que executa o mesmo motor da CLI e compartilha as mesmas sessões:
+
+```bash
+iac-code web
+```
+
+Por padrão, ele abre `http://127.0.0.1:8766` no seu navegador (apenas loopback). Consulte o [guia do aplicativo web](https://aliyun.github.io/iac-code/pt/web-app) para mais detalhes.
+
 ## Contribuir
 
 Instale o [uv](https://docs.astral.sh/uv/getting-started/installation/), depois:

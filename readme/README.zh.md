@@ -54,6 +54,16 @@ iac-code --prompt "创建一个 VPC 和两台 ECS 实例"
 echo "创建一个 OSS Bucket" | iac-code --prompt -
 ```
 
+### Web 应用
+
+更喜欢图形界面？可以启动本地 Web 应用，它运行与 CLI 相同的引擎，并共享同一份会话：
+
+```bash
+iac-code web
+```
+
+默认会在浏览器中打开 `http://127.0.0.1:8766`（仅限回环地址）。详见 [Web 应用指南](https://aliyun.github.io/iac-code/zh-Hans/web-app)。
+
 ## 贡献
 
 安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)，然后：

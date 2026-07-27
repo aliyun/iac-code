@@ -54,6 +54,16 @@ Das Lesen von stdin wird ebenfalls unterstützt:
 echo "Erstelle einen OSS-Bucket" | iac-code --prompt -
 ```
 
+### Web-App
+
+Sie bevorzugen eine grafische Oberfläche? Starten Sie die lokale Web-App, die dieselbe Engine wie die CLI ausführt und dieselben Sitzungen teilt:
+
+```bash
+iac-code web
+```
+
+Standardmäßig öffnet sie `http://127.0.0.1:8766` in Ihrem Browser (nur Loopback). Weitere Details finden Sie im [Web-App-Leitfaden](https://aliyun.github.io/iac-code/de/web-app).
+
 ## Mitwirken
 
 Installieren Sie [uv](https://docs.astral.sh/uv/getting-started/installation/), dann:

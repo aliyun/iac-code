@@ -25,6 +25,7 @@ const sidebars: SidebarsConfig = {
         'cli/commands',
         'cli/skills',
         'cli/sessions',
+        'web-app',
         {
           type: 'category',
           label: 'MCP Integration',
