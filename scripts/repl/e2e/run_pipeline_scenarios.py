@@ -71,6 +71,9 @@ CANDIDATE_SELECTION_PATTERNS = (
 CANDIDATE_EVALUATION_PATTERNS = (r"(?i)Evaluate candidates\s*\(\d+/\d+\)", r"evaluate_candidates")
 ARCHITECTURE_PLANNING_PATTERNS = (r"(?i)Architecture planning\s*\(\d+/\d+\)", r"architecture_planning")
 ASK_PATTERNS = (r"Ask user question", r"请.*输入", r"请.*补充", r"请描述", r"需要.*信息", r"澄清", r"问题")
+ASK_INPUT_READY_PATTERNS = (
+    r"(?m)^[ \t]*>[ \t]*\r?$",
+)
 PIPELINE_COMPLETED_PATTERNS = (
     r"(?i)Pipeline completed",
     r"CREATE_COMPLETE",
@@ -201,6 +204,46 @@ class CleanupNetworkTarget:
     zone_id: str
     vswitch_cidr: str
     rollback_vswitch_cidr: str
+
+
+@dataclass(frozen=True)
+class ScenarioRuntimePaths:
+    """Per-scenario state roots that remain stable across child restarts."""
+
+    config_dir: Path
+    backup_dir: Path
+
+    @classmethod
+    def for_run(
+        cls,
+        run_dir: Path,
+        *,
+        environment: dict[str, str],
+    ) -> "ScenarioRuntimePaths":
+        fallback_root = run_dir.parent / ".iac-code-state"
+        config_root = Path(
+            environment.get(
+                "IAC_CODE_CONFIG_DIR",
+                str(fallback_root / "config"),
+            )
+        ).expanduser()
+        backup_root = Path(
+            environment.get(
+                "IAC_CODE_CONFIG_BACKUP_DIR",
+                str(fallback_root / "backup"),
+            )
+        ).expanduser()
+        isolated_name = run_dir.name
+        return cls(
+            config_dir=config_root / ".e2e-runs" / isolated_name,
+            backup_dir=backup_root / ".e2e-runs" / isolated_name,
+        )
+
+    def apply(self, environment: dict[str, str]) -> dict[str, str]:
+        isolated = dict(environment)
+        isolated["IAC_CODE_CONFIG_DIR"] = str(self.config_dir)
+        isolated["IAC_CODE_CONFIG_BACKUP_DIR"] = str(self.backup_dir)
+        return isolated
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -674,7 +717,11 @@ def _run_with_pty(
     run_dir = _scenario_run_dir(args, scenario)
     workspace_dir = Path(args.cwd).expanduser().resolve() if args.cwd else run_dir / "workspace"
     workspace_dir.mkdir(parents=True, exist_ok=True)
-    env = _build_child_env(args)
+    shared_env = _build_child_env(args)
+    env = ScenarioRuntimePaths.for_run(
+        run_dir,
+        environment=shared_env,
+    ).apply(shared_env)
     pty = ReplPty(args=args, run_dir=run_dir, cwd=workspace_dir, env=env)
     checks: dict[str, bool] = {}
     notes: list[str] = []
@@ -986,7 +1033,7 @@ def _cleanup_rollback_prompt(args: argparse.Namespace, run_dir: Path) -> str:
 async def _call_aliyun_api_async(product: str, action: str, params: dict[str, Any]) -> dict[str, Any]:
     from iac_code.config import get_config_dir
     from iac_code.services.cloud_credentials import CloudCredentials
-    from iac_code.services.providers.aliyun import AliyunCredentials, DEFAULT_REGION
+    from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredentials
     from iac_code.tools.base import ToolContext
     from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
     from iac_code.tools.cloud.aliyun.contract_store import canonical_input_sha256
@@ -1171,7 +1218,11 @@ def _cleanup_ledger_path(pty: Any) -> Path | None:
     try:
         from iac_code.services.session_storage import SessionStorage
 
-        storage = SessionStorage()
+        environment = getattr(pty, "env", {})
+        config_dir = environment.get("IAC_CODE_CONFIG_DIR") if isinstance(environment, dict) else None
+        storage = SessionStorage(
+            projects_dir=Path(config_dir) / "projects" if isinstance(config_dir, str) and config_dir else None
+        )
         session_path: Path | None = None
         if session_id:
             session_path = Path(storage.session_dir(cwd, session_id)) / "pipeline" / "cleanup.yaml"
@@ -2151,16 +2202,36 @@ def _expect_initial_prompt(pty: ReplPty, args: argparse.Namespace) -> None:
 
 def _expect_candidate_selection(pty: ReplPty, args: argparse.Namespace, *, description: str) -> None:
     pty.expect_any(CANDIDATE_SELECTION_PATTERNS, description=description, timeout=args.stream_timeout)
-    pty.expect_optional(
+    controls_ready = pty.expect_optional(
         CANDIDATE_SELECTION_READY_PATTERNS,
         description="candidate selection controls ready",
         timeout=args.candidate_selection_ready_timeout,
     )
-    _expect_raw_input_ready(pty, args, description="candidate selection input ready")
+    if not controls_ready:
+        _expect_raw_input_ready(pty, args, description="candidate selection input ready")
 
 
 def _expect_raw_input_ready(pty: ReplPty, args: argparse.Namespace, *, description: str) -> None:
     pty.expect_any(REPL_INPUT_READY_PATTERNS, description=description, timeout=args.timeout)
+
+
+def _expect_ask_input_ready(pty: ReplPty, args: argparse.Namespace, *, description: str) -> None:
+    pty.expect_any(ASK_INPUT_READY_PATTERNS, description=description, timeout=args.timeout)
+
+
+def _expect_interrupt_input_ready(
+    pty: ReplPty,
+    args: argparse.Namespace,
+    *,
+    visible_description: str,
+    ready_description: str,
+) -> None:
+    pty.expect_any(
+        INTERRUPT_INPUT_PATTERNS,
+        description=visible_description,
+        timeout=args.timeout,
+    )
+    _expect_raw_input_ready(pty, args, description=ready_description)
 
 
 def _expect_parallel_interrupt_ready(pty: ReplPty, args: argparse.Namespace) -> None:
@@ -2203,12 +2274,13 @@ def _finish_vswitch_pipeline_after_possible_selection(
     completion_description: str,
 ) -> None:
     if matched_pattern in CANDIDATE_SELECTION_PATTERNS:
-        pty.expect_optional(
+        controls_ready = pty.expect_optional(
             CANDIDATE_SELECTION_READY_PATTERNS,
             description="candidate selection controls ready after ask",
             timeout=args.candidate_selection_ready_timeout,
         )
-        _expect_raw_input_ready(pty, args, description="candidate selection input ready after ask")
+        if not controls_ready:
+            _expect_raw_input_ready(pty, args, description="candidate selection input ready after ask")
         _select_default_candidate(pty, args)
         checks[selection_check] = True
         pty.expect_any(PIPELINE_COMPLETED_PATTERNS, description=completion_description, timeout=args.stream_timeout)
@@ -2264,6 +2336,8 @@ def run_ask_waiting(args: argparse.Namespace, scenario: str) -> int:
         pty.sendline(args.ask_prompt)
         pty.expect_any(ASK_PATTERNS, description="ask question visible", timeout=args.stream_timeout)
         checks["ask question became visible"] = True
+        _expect_ask_input_ready(pty, args, description="ask answer input ready")
+        checks["ask answer input ready"] = True
         pty.sendline(_stack_creating_prompt(args.ask_answer, pty.run_dir, scenario))
         checks["ask answer sent"] = True
         matched = pty.expect_any(
@@ -2314,12 +2388,14 @@ def run_image_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int
         pty.sendline(args.ask_prompt)
         pty.expect_any(ASK_PATTERNS, description="ask question visible before kill", timeout=args.stream_timeout)
         checks["ask question became visible before kill"] = True
+        _expect_ask_input_ready(pty, args, description="ask answer input ready before kill")
+        checks["ask answer input ready before kill"] = True
         pty.terminate(force=True)
         checks["first process killed"] = True
         pty.spawn(extra_args=["--continue"])
         pty.expect_any(ASK_PATTERNS, description="ask question replayed", timeout=args.stream_timeout)
         checks["ask question replayed"] = True
-        _expect_raw_input_ready(pty, args, description="ask image answer input ready after resume")
+        _expect_ask_input_ready(pty, args, description="ask image answer input ready after resume")
         checks["ask image answer input ready after resume"] = True
         _submit_image_fixture(pty, "ask-first-answer", caption=_stack_name_constraint(pty.run_dir, scenario))
         checks["ask first answer image fixture pasted after resume"] = True
@@ -2328,7 +2404,7 @@ def run_image_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int
             description="second ask question after image answer",
             timeout=min(args.timeout, 30.0),
         ):
-            _expect_raw_input_ready(pty, args, description="second ask image answer input ready")
+            _expect_ask_input_ready(pty, args, description="second ask image answer input ready")
             _submit_image_fixture(pty, "ask-second-answer", caption=_stack_name_constraint(pty.run_dir, scenario))
             checks["ask second answer image fixture pasted"] = True
         matched = pty.expect_any(
@@ -2467,12 +2543,14 @@ def run_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
         pty.sendline(args.ask_prompt)
         pty.expect_any(ASK_PATTERNS, description="ask question visible before kill", timeout=args.stream_timeout)
         checks["ask question became visible before kill"] = True
+        _expect_ask_input_ready(pty, args, description="ask answer input ready before kill")
+        checks["ask answer input ready before kill"] = True
         pty.terminate(force=True)
         checks["first process killed"] = True
         pty.spawn(extra_args=["--continue"])
         pty.expect_any(ASK_PATTERNS, description="ask question replayed", timeout=args.stream_timeout)
         checks["ask question replayed"] = True
-        _expect_raw_input_ready(pty, args, description="ask answer input ready after resume")
+        _expect_ask_input_ready(pty, args, description="ask answer input ready after resume")
         checks["ask answer input ready after resume"] = True
         pty.sendline(_stack_creating_prompt(args.ask_answer, pty.run_dir, scenario))
         checks["ask answer sent after resume"] = True
@@ -2622,7 +2700,12 @@ def run_rollback_step4_selection(args: argparse.Namespace, scenario: str) -> int
         checks["candidate selection input ready"] = True
         pty.send("\x1b", label="send-esc")
         checks["esc sent"] = True
-        _expect_raw_input_ready(pty, args, description="candidate selection interrupt text input ready")
+        _expect_interrupt_input_ready(
+            pty,
+            args,
+            visible_description="candidate selection interrupt input visible",
+            ready_description="candidate selection interrupt text input ready",
+        )
         checks["candidate selection interrupt text input ready"] = True
         pty.sendline(args.rollback_prompt)
         checks["rollback prompt sent"] = True
@@ -2669,7 +2752,12 @@ def _run_rollback_step5_cleanup(
         )
         pty.send("\x1b", label="send-esc")
         checks["esc sent during deploying"] = True
-        _expect_raw_input_ready(pty, args, description="deploying interrupt input ready")
+        _expect_interrupt_input_ready(
+            pty,
+            args,
+            visible_description="deploying interrupt input visible",
+            ready_description="deploying interrupt input ready",
+        )
         checks["deploying interrupt input ready"] = True
 
         first_stack_id = _wait_for_latest_observed_stack_id(pty, exclude=set(), timeout=args.stream_timeout)
@@ -2711,6 +2799,7 @@ def _run_rollback_step5_cleanup(
             bool(second_stack_id) and _cleanup_resource_for_stack(pty, second_stack_id) is None
         )
 
+        _expect_raw_input_ready(pty, args, description="normal follow-up prompt input ready")
         pty.sendline(args.normal_followup_prompt)
         if kill_during_cleanup:
             pty.expect_any(

@@ -501,6 +501,68 @@ async def test_startup_waiting_candidate_selection_reenters_selection_ui(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_startup_pending_ask_user_question_replays_prompt_and_resumes_pipeline(
+    monkeypatch,
+    repl_for_sidecar_restore,
+):
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    from iac_code.pipeline.config import RunMode
+    from iac_code.ui.repl import InlineREPL
+
+    repl_for_sidecar_restore._runtime_mode = RunMode.PIPELINE
+    answer = {"selected_id": "nginx", "selected_label": "Nginx 网站", "free_text": ""}
+    pending = {
+        "kind": "ask_user_question",
+        "toolUseId": "ask-1",
+        "question": "请选择部署目标",
+        "options": [{"id": "nginx", "label": "Nginx 网站"}],
+        "allowFreeText": True,
+        "freeTextPrompt": "也可以直接描述你的目标",
+    }
+    terminal_event = PipelineEvent(
+        type=PipelineEventType.PIPELINE_COMPLETED,
+        step_id=None,
+        timestamp=1.0,
+        data={"total_steps": 1},
+    )
+
+    async def resumed_stream():
+        yield terminal_event
+
+    pipeline = MagicMock()
+    pipeline.sidecar_restore_result = MagicMock(ok=True, status="waiting_input", reason=None)
+    pipeline.pending_ask_user_question.return_value = pending
+    pipeline.persist_pending_ask_user_question_answer = AsyncMock()
+    pipeline.resume_ask_user_question = MagicMock(return_value=resumed_stream())
+    pipeline.state_machine.current_step.step_id = "intent"
+    pipeline.state_machine.current_step.ui_mode = ""
+    pipeline.state_machine.is_complete = False
+    pipeline.sidecar_status = "waiting_input"
+    pipeline.display_transcript_path = None
+    repl_for_sidecar_restore.renderer.prompt_user_question = AsyncMock(return_value=answer)
+    repl_for_sidecar_restore._render_pipeline_display_replay_on_startup = MagicMock()
+    repl_for_sidecar_restore._render_pipeline_stream = AsyncMock(return_value=terminal_event)
+    repl_for_sidecar_restore._maybe_start_pipeline_cleanup = AsyncMock(return_value=False)
+    _seed_sidecar(repl_for_sidecar_restore, "waiting_input")
+
+    with patch("iac_code.pipeline.create_pipeline", return_value=pipeline):
+        handled = await InlineREPL._resume_pipeline_sidecar_on_startup(repl_for_sidecar_restore)
+
+    assert handled is True
+    question = repl_for_sidecar_restore.renderer.prompt_user_question.await_args.args[0]
+    assert question.tool_use_id == "ask-1"
+    assert question.question == "请选择部署目标"
+    assert question.options == [{"id": "nginx", "label": "Nginx 网站"}]
+    pipeline.persist_pending_ask_user_question_answer.assert_awaited_once_with("ask-1", answer)
+    pipeline.resume_ask_user_question.assert_called_once_with(
+        answer,
+        tool_use_id="ask-1",
+        pending_input=pending,
+    )
+    repl_for_sidecar_restore._render_pipeline_stream.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_startup_waiting_candidate_selection_starts_cleanup_after_terminal_handoff(
     monkeypatch,
     repl_for_sidecar_restore,

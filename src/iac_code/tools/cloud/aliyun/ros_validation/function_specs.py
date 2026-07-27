@@ -183,9 +183,7 @@ _RETURN_TYPES: dict[str, RosType] = {
 
 def _context_contract(name: str, context: ExpressionContext) -> FunctionContextContract:
     implementation = (
-        "ParamRef"
-        if name == "Ref" and context not in {ExpressionContext.NORMAL, ExpressionContext.MODULE}
-        else name
+        "ParamRef" if name == "Ref" and context not in {ExpressionContext.NORMAL, ExpressionContext.MODULE} else name
     )
     if name == "Ref" and context in {ExpressionContext.NORMAL, ExpressionContext.MODULE}:
         implementation = "RefFactory"

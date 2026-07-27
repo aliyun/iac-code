@@ -101,9 +101,7 @@ def test_registry_rejects_missing_duplicate_and_future_dependencies() -> None:
         raise AssertionError("duplicate fact provider was accepted")
 
     self_cycle = ValidationRegistry()
-    self_cycle.register_provider(
-        Provider("self", RulePhase.PARSE, frozenset({"x"}), requires=frozenset({"x"}))
-    )
+    self_cycle.register_provider(Provider("self", RulePhase.PARSE, frozenset({"x"}), requires=frozenset({"x"})))
     try:
         self_cycle.freeze()
     except ValueError as error:
@@ -142,9 +140,7 @@ def test_optional_fact_preserves_unavailable_available_and_poisoned_states() -> 
 def test_registry_rejects_future_optional_dependency_and_provider_cycle() -> None:
     future_optional = ValidationRegistry()
     future_optional.register_provider(Provider("future", RulePhase.QUALITY, frozenset({"future"})))
-    future_optional.register_rule(
-        Rule("early", RulePhase.PARSE, "X", optional_requires=frozenset({"future"}))
-    )
+    future_optional.register_rule(Rule("early", RulePhase.PARSE, "X", optional_requires=frozenset({"future"})))
     try:
         future_optional.freeze()
     except ValueError as error:
@@ -153,12 +149,8 @@ def test_registry_rejects_future_optional_dependency_and_provider_cycle() -> Non
         raise AssertionError("future optional fact dependency was accepted")
 
     cycle = ValidationRegistry()
-    cycle.register_provider(
-        Provider("a", RulePhase.PARSE, frozenset({"a"}), requires=frozenset({"b"}))
-    )
-    cycle.register_provider(
-        Provider("b", RulePhase.PARSE, frozenset({"b"}), requires=frozenset({"a"}))
-    )
+    cycle.register_provider(Provider("a", RulePhase.PARSE, frozenset({"a"}), requires=frozenset({"b"})))
+    cycle.register_provider(Provider("b", RulePhase.PARSE, frozenset({"b"}), requires=frozenset({"a"})))
     try:
         cycle.freeze()
     except ValueError as error:

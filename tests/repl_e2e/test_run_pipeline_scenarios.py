@@ -536,7 +536,40 @@ def test_ask_patterns_match_real_repl_question_prompt() -> None:
     assert any(re.search(pattern, real_prompt) for pattern in runner.ASK_PATTERNS)
 
 
-def test_candidate_selection_waits_for_input_ready_sequence() -> None:
+def test_ask_input_ready_patterns_match_answer_prompt_only() -> None:
+    runner = _load_runner()
+    colored_normal_prompt = "\x1b[1m\x1b[36m❯ \x1b[0m\r\x1b[2C\x1b[>4;2m"
+
+    assert any(re.search(pattern, "\r\n  > ") for pattern in runner.ASK_INPUT_READY_PATTERNS)
+    assert not any(re.search(pattern, colored_normal_prompt) for pattern in runner.ASK_INPUT_READY_PATTERNS)
+    assert not any(re.search(pattern, "● Ask user question") for pattern in runner.ASK_INPUT_READY_PATTERNS)
+    assert not any(re.search(pattern, "  → candidate 1") for pattern in runner.ASK_INPUT_READY_PATTERNS)
+
+
+def test_candidate_selection_uses_semantic_controls_without_waiting_for_stale_raw_marker() -> None:
+    runner = _load_runner()
+    descriptions: list[str] = []
+
+    class FakePty:
+        def expect_any(self, patterns, *, description, timeout):
+            descriptions.append(description)
+            return patterns[0]
+
+        def expect_optional(self, patterns, *, description, timeout):
+            descriptions.append(description)
+            return True
+
+    args = runner.parse_args(["--allow-real-cloud"])
+
+    runner._expect_candidate_selection(FakePty(), args, description="candidate selection visible")
+
+    assert descriptions == [
+        "candidate selection visible",
+        "candidate selection controls ready",
+    ]
+
+
+def test_candidate_selection_falls_back_to_raw_marker_when_semantic_controls_are_missing() -> None:
     runner = _load_runner()
     descriptions: list[str] = []
 
@@ -2139,12 +2172,46 @@ def test_image_initial_pastes_static_prompt_image(monkeypatch, tmp_path: Path) -
         ("sendline", runner._stack_name_constraint(tmp_path, "image-initial")),
         ("expect", "pipeline started"),
         ("expect", "candidate selection visible"),
-        ("expect", "candidate selection input ready"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after image initial"),
         ("sendline", "/exit"),
     ]
     assert ("sendline", args.initial_prompt) not in actions
+
+
+def test_ask_waiting_waits_for_answer_prompt_before_sending(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud", "--run-dir", str(tmp_path)])
+    actions: list[tuple[str, str]] = []
+    stack_owned_answer = runner._stack_creating_prompt(args.ask_answer, tmp_path, "ask-waiting")
+    transcript = (
+        "● Ask user question\n" + stack_owned_answer + "\n● Confirm and select (4/5)\n"
+        "✔ Pipeline completed\n"
+        "交换机 ID   vsw-bp1234567890\n"
+    )
+    _install_flow_fake_pty(monkeypatch, runner, transcript, actions, scenario="ask-waiting")
+
+    assert runner.run_ask_waiting(args, "ask-waiting") == 0
+
+    ordered_actions = [
+        (kind, value)
+        for kind, value in actions
+        if kind in {"expect", "spawn", "terminate", "sendline", "select-default-candidate"}
+    ]
+    assert ordered_actions == [
+        ("spawn", ""),
+        ("expect", "initial prompt"),
+        ("expect", "prompt input ready"),
+        ("sendline", args.ask_prompt),
+        ("expect", "ask question visible"),
+        ("expect", "ask answer input ready"),
+        ("sendline", stack_owned_answer),
+        ("expect", "pipeline continued after ask"),
+        ("select-default-candidate", f"{args.selection_prompt}\r"),
+        ("expect", "pipeline completed after ask"),
+        ("sendline", "/exit"),
+        ("terminate", "False"),
+    ]
 
 
 def test_image_ask_waiting_resume_pastes_static_answer_image(monkeypatch, tmp_path: Path) -> None:
@@ -2173,6 +2240,7 @@ def test_image_ask_waiting_resume_pastes_static_answer_image(monkeypatch, tmp_pa
         ("expect", "prompt input ready"),
         ("sendline", args.ask_prompt),
         ("expect", "ask question visible before kill"),
+        ("expect", "ask answer input ready before kill"),
         ("terminate", "True"),
         ("spawn", "--continue"),
         ("expect", "ask question replayed"),
@@ -2180,7 +2248,6 @@ def test_image_ask_waiting_resume_pastes_static_answer_image(monkeypatch, tmp_pa
         ("paste-image-fixture", "ask-first-answer"),
         ("sendline", runner._stack_name_constraint(tmp_path, "image-ask-waiting-resume")),
         ("expect", "pipeline continued after ask image resume"),
-        ("expect", "candidate selection input ready after ask"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after ask image resume"),
         ("sendline", "/exit"),
@@ -2212,11 +2279,9 @@ def test_image_selection_waiting_resume_starts_with_image_and_recovers_selection
         ("paste-image-fixture", "initial"),
         ("sendline", runner._stack_name_constraint(tmp_path, "image-selection-waiting-resume")),
         ("expect", "candidate selection visible before image resume kill"),
-        ("expect", "candidate selection input ready"),
         ("terminate", "True"),
         ("spawn", "--continue"),
         ("expect", "candidate selection replayed after image resume"),
-        ("expect", "candidate selection input ready"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after image selection resume"),
         ("sendline", "/exit"),
@@ -2252,7 +2317,6 @@ def test_image_normal_handoff_pastes_static_followup_image(monkeypatch, tmp_path
         ("sendline", stack_owned_initial),
         ("expect", "pipeline started"),
         ("expect", "candidate selection visible"),
-        ("expect", "candidate selection input ready"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline fully completed"),
         ("expect", "normal prompt input ready"),
@@ -2456,8 +2520,8 @@ def test_rollback_step4_selection_runs_expected_terminal_flow(monkeypatch, tmp_p
         ("expect", "prompt input ready"),
         ("sendline", args.initial_prompt),
         ("expect", "candidate selection visible"),
-        ("expect", "candidate selection input ready"),
         ("send-esc", "\x1b"),
+        ("expect", "candidate selection interrupt input visible"),
         ("expect", "candidate selection interrupt text input ready"),
         ("sendline", args.rollback_prompt),
         ("expect", "post-rollback pipeline progress visible"),
@@ -2500,7 +2564,6 @@ def test_evaluate_resume_runs_expected_terminal_flow(monkeypatch, tmp_path: Path
         ("expect", "evaluate resume prompt input ready"),
         ("sendline", args.evaluate_resume_continue_prompt),
         ("expect", "candidate selection visible after resume continue"),
-        ("expect", "candidate selection input ready"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after evaluate resume"),
         ("sendline", "/exit"),
@@ -2534,13 +2597,13 @@ def test_ask_waiting_resume_runs_expected_terminal_flow(monkeypatch, tmp_path: P
         ("expect", "prompt input ready"),
         ("sendline", args.ask_prompt),
         ("expect", "ask question visible before kill"),
+        ("expect", "ask answer input ready before kill"),
         ("terminate", "True"),
         ("spawn", "--continue"),
         ("expect", "ask question replayed"),
         ("expect", "ask answer input ready after resume"),
         ("sendline", stack_owned_answer),
         ("expect", "pipeline continued after ask resume"),
-        ("expect", "candidate selection input ready after ask"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after ask resume"),
         ("sendline", "/exit"),
@@ -2572,7 +2635,6 @@ def test_selection_invalid_then_valid_runs_expected_terminal_flow(monkeypatch, t
         ("expect", "prompt input ready"),
         ("sendline", stack_owned_initial),
         ("expect", "candidate selection visible"),
-        ("expect", "candidate selection input ready"),
         ("select-invalid-candidate", "9"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed"),
@@ -2693,22 +2755,73 @@ def test_rollback_step5_cleanup_runs_expected_terminal_flow(monkeypatch, tmp_pat
         ("expect", "prompt input ready"),
         ("sendline", runner._cleanup_pipeline_prompt(args, tmp_path)),
         ("expect", "initial candidate selection visible"),
-        ("expect", "candidate selection input ready"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "first stack create started"),
         ("send-esc", "\x1b"),
+        ("expect", "deploying interrupt input visible"),
         ("expect", "deploying interrupt input ready"),
         ("sendline", runner._cleanup_rollback_prompt(args, tmp_path)),
         ("expect", "post-rollback candidate selection visible"),
-        ("expect", "candidate selection input ready"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after second deployment"),
+        ("expect", "normal follow-up prompt input ready"),
         ("sendline", args.normal_followup_prompt),
         ("expect", "cleanup started"),
         ("expect_optional", "cleanup completed"),
         ("expect", "post-cleanup prompt input ready"),
         ("sendline", "/exit"),
     ]
+
+
+def test_scenario_runtime_paths_override_shared_sandbox_state(tmp_path: Path) -> None:
+    runner = _load_runner()
+    run_dir = tmp_path / "runs" / "case-run-1"
+    shared_environment = {
+        "IAC_CODE_CONFIG_DIR": "/home/iac_code_config",
+        "IAC_CODE_CONFIG_BACKUP_DIR": "/home/iac_code_config_backup",
+    }
+    paths = runner.ScenarioRuntimePaths.for_run(
+        run_dir,
+        environment=shared_environment,
+    )
+    environment = paths.apply(shared_environment)
+
+    assert paths.config_dir == Path("/home/iac_code_config/.e2e-runs/case-run-1")
+    assert paths.backup_dir == Path("/home/iac_code_config_backup/.e2e-runs/case-run-1")
+    assert environment["IAC_CODE_CONFIG_DIR"] == str(paths.config_dir)
+    assert environment["IAC_CODE_CONFIG_BACKUP_DIR"] == str(paths.backup_dir)
+
+
+def test_cleanup_ledger_lookup_uses_case_isolated_config_dir(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    from iac_code.services.session_storage import SessionStorage
+
+    cwd = str(tmp_path / "workspace")
+    session_id = "session-current"
+    isolated_config = tmp_path / "isolated-config"
+    shared_config = tmp_path / "shared-config"
+    isolated_storage = SessionStorage(projects_dir=isolated_config / "projects")
+    shared_storage = SessionStorage(projects_dir=shared_config / "projects")
+    isolated_path = isolated_storage.session_dir(cwd, session_id) / "pipeline" / "cleanup.yaml"
+    shared_path = shared_storage.session_dir(cwd, "session-stale") / "pipeline" / "cleanup.yaml"
+    isolated_path.parent.mkdir(parents=True)
+    shared_path.parent.mkdir(parents=True)
+    isolated_path.write_text("observed_resources: []\n", encoding="utf-8")
+    shared_path.write_text("observed_resources:\n  - resource_id: stale\n", encoding="utf-8")
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(shared_config))
+
+    pty = type(
+        "FakePty",
+        (),
+        {
+            "cwd": cwd,
+            "session_id": session_id,
+            "transcript": "",
+            "env": {"IAC_CODE_CONFIG_DIR": str(isolated_config)},
+        },
+    )()
+
+    assert runner._cleanup_ledger_path(pty) == isolated_path
 
 
 def test_rollback_step5_cleanup_recovery_runs_expected_terminal_flow(monkeypatch, tmp_path: Path) -> None:
@@ -2760,16 +2873,16 @@ def test_rollback_step5_cleanup_recovery_runs_expected_terminal_flow(monkeypatch
         ("expect", "prompt input ready"),
         ("sendline", runner._cleanup_pipeline_prompt(args, tmp_path)),
         ("expect", "initial candidate selection visible"),
-        ("expect", "candidate selection input ready"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "first stack create started"),
         ("send-esc", "\x1b"),
+        ("expect", "deploying interrupt input visible"),
         ("expect", "deploying interrupt input ready"),
         ("sendline", runner._cleanup_rollback_prompt(args, tmp_path)),
         ("expect", "post-rollback candidate selection visible"),
-        ("expect", "candidate selection input ready"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after second deployment"),
+        ("expect", "normal follow-up prompt input ready"),
         ("sendline", args.normal_followup_prompt),
         ("expect", "cleanup started before kill"),
         ("terminate", "True"),
