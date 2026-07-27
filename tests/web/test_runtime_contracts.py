@@ -347,11 +347,18 @@ def test_web_turn_bounds_runtime_close_and_always_clears_active_state(tmp_path, 
     async def scenario():
         manager = WebSessionManager(projects_dir=tmp_path / "projects")
         session = manager.create_session(session_id="session-hanging-close")
+        # Outer deadline is only a safety net so a genuinely wedged turn cannot
+        # hang the suite forever. It must stay well above real runtime-creation
+        # time (agent_factory_options_for_session runs in a worker thread and,
+        # against a cold $HOME under CI/xdist load, can take a few hundred ms),
+        # otherwise it spuriously cancels the turn mid-creation. The meaningful
+        # bound under test — a hanging aclose must not hang the turn — is
+        # enforced by WEB_RUNTIME_CLOSE_TIMEOUT_SECONDS=0.005 above, not here.
         result = await asyncio.wait_for(
             WebSessionRuntime(session, manager=manager).start_turn(
                 WebTurnRequest(text="hello", image_ids=[], file_refs=[])
             ),
-            timeout=0.1,
+            timeout=5.0,
         )
         return result, session
 
