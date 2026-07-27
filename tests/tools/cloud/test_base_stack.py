@@ -203,7 +203,7 @@ class TestBaseCloudStackExecute:
     @pytest.mark.asyncio
     async def test_execute_emits_progress_events_to_queue(self, stack: MockCloudStack) -> None:
         queue: asyncio.Queue = asyncio.Queue()
-        context = ToolContext(event_queue=queue)
+        context = ToolContext(event_queue=queue, tool_use_id="toolu-progress")
 
         await stack.execute(
             tool_input={"action": "CreateStack", "params": {"StackName": "test"}},
@@ -219,6 +219,8 @@ class TestBaseCloudStackExecute:
         first = progress_events[0]
         assert first.stack_id == "stack-id-123"
         assert first.stack_name == "test-stack"
+        # 进度事件须带 tool_use_id,web 前端才能把进度挂回发起该操作的工具卡。
+        assert first.tool_use_id == "toolu-progress"
 
     @pytest.mark.asyncio
     async def test_execute_emits_resource_observed_before_progress(self, stack: MockCloudStack) -> None:

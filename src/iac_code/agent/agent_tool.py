@@ -140,6 +140,7 @@ class AgentTool(Tool):
         tool_registry: Any = None,
         system_prompt: str = "",
         permission_context: Any = None,
+        permission_context_getter: Any = None,
     ):
         self._task_manager = task_manager
         self._notification_queue = notification_queue
@@ -147,6 +148,14 @@ class AgentTool(Tool):
         self._tool_registry = tool_registry
         self._system_prompt = system_prompt
         self._permission_context = permission_context
+        self._permission_context_getter = permission_context_getter
+
+    def _current_permission_context(self) -> Any:
+        if self._permission_context_getter is not None:
+            permission_context = self._permission_context_getter()
+            if permission_context is not None:
+                return permission_context
+        return self._permission_context
 
     def set_system_prompt(self, system_prompt: str) -> None:
         self._system_prompt = system_prompt
@@ -229,7 +238,7 @@ class AgentTool(Tool):
                 parent_tool_registry=self._tool_registry,
                 parent_system_prompt=self._system_prompt,
                 event_queue=event_queue,
-                permission_context=self._permission_context,
+                permission_context=self._current_permission_context(),
                 telemetry_attributes=context.telemetry_attributes,
             )
             if event_queue is not None:
@@ -264,7 +273,7 @@ class AgentTool(Tool):
                 parent_provider_manager=self._provider_manager,
                 parent_tool_registry=self._tool_registry,
                 parent_system_prompt=self._system_prompt,
-                permission_context=self._permission_context,
+                permission_context=self._current_permission_context(),
                 telemetry_attributes=context.telemetry_attributes,
             )
             self._task_manager.complete(task_id, result=result_text)

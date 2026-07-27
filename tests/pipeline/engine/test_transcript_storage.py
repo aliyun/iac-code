@@ -512,3 +512,38 @@ def test_step_executor_keeps_legacy_root_on_legacy_runtime_paths(tmp_path: Path)
     assert Path(loop._result_storage._storage_dir).parts[-2:] == ("tool-results", "transcript_att_0001")
     assert loop._audit_log_path is None
     assert not (root_session_dir / "pipeline" / "transcripts" / "transcript_att_0001").exists()
+
+
+def test_save_accepts_preserve_cleanup_prompts(tmp_path: Path):
+    from iac_code.agent.message import create_compaction_summary_message
+
+    storage = PipelineTranscriptStorage(tmp_path / "pipeline")
+    messages = [
+        Message(role="user", content="hi"),
+        create_compaction_summary_message("summary text"),
+    ]
+
+    # 不得抛 TypeError
+    storage.save("/repo", "transcript_att_0001", messages, git_branch="main", preserve_cleanup_prompts=True)
+
+    loaded = storage.load("/repo", "transcript_att_0001")
+    assert any(message.get_text().startswith("[Conversation Summary]") for message in loaded)
+
+
+def test_save_preserves_prior_cleanup_prompt_once(tmp_path: Path):
+    from iac_code.pipeline.constants import CLEANUP_PROMPT_METADATA_TYPE
+
+    storage = PipelineTranscriptStorage(tmp_path / "pipeline")
+    cleanup = Message(role="user", content="C", metadata={"type": CLEANUP_PROMPT_METADATA_TYPE})
+    storage.save("/repo", "transcript_att_0001", [cleanup, Message(role="assistant", content="a")])
+
+    # 第二次保存不含 cleanup,但 preserve=True 应把旧 cleanup 合并回,且只一份
+    storage.save(
+        "/repo",
+        "transcript_att_0001",
+        [Message(role="assistant", content="b")],
+        preserve_cleanup_prompts=True,
+    )
+
+    loaded = storage.load("/repo", "transcript_att_0001")
+    assert sum(1 for message in loaded if message.metadata.get("type") == CLEANUP_PROMPT_METADATA_TYPE) == 1

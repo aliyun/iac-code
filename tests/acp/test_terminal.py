@@ -7,6 +7,7 @@ import pytest
 
 from iac_code.acp.tools import TERMINAL_TIMEOUT, ACPTerminalBashTool, replace_bash_with_acp_terminal
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
+from iac_code.tools.bash import BashTool
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -234,6 +235,9 @@ def test_terminal_tool_proxy_attributes() -> None:
     assert tool.description == original.description
     assert tool.input_schema == original.input_schema
     assert tool.timeout == original.timeout
+    assert tool.execution_timeout({"command": "sleep", "timeout": 300}) == original.execution_timeout(
+        {"command": "sleep", "timeout": 300}
+    )
     assert tool.supports_blanket_allow == original.supports_blanket_allow
     assert tool.user_facing_name({"command": "ls"}) == original.user_facing_name({"command": "ls"})
     assert tool.get_activity_description({"command": "ls"}) == original.get_activity_description({"command": "ls"})
@@ -259,6 +263,12 @@ def test_terminal_tool_proxies_disabled_blanket_allow() -> None:
     tool = ACPTerminalBashTool(original, FakeConn(), "s1")
 
     assert tool.supports_blanket_allow is False
+
+
+def test_terminal_tool_proxies_bash_execution_timeout() -> None:
+    tool = ACPTerminalBashTool(BashTool(), FakeConn(), "s1")
+
+    assert tool.execution_timeout({"command": "sleep", "timeout": 300}) == 310.0
 
 
 # ---------------------------------------------------------------------------

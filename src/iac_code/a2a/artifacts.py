@@ -20,7 +20,7 @@ from iac_code.services.session_layout import (
     ensure_session_owned_dir,
     require_supported_session_layout,
 )
-from iac_code.utils.public_errors import sanitize_public_text
+from iac_code.utils.public_errors import all_redaction_suppressed, sanitize_public_text
 from iac_code.utils.public_paths import relativize_public_file_uri
 from iac_code.utils.state_io import atomic_write_bytes
 from iac_code.utils.tool_result_redaction import (
@@ -124,6 +124,10 @@ def sanitize_public_artifact_data(
     *,
     public_path_roots: Iterable[Mapping[str, str]] | None = None,
 ) -> Any:
+    if all_redaction_suppressed():
+        # 环回 web 上下文：结构化数据整体原样（含敏感键 → 不再打 [REDACTED]、不再删文件内容），
+        # 使 journal 与快照保留完整模板/结论，重载可正常出图。
+        return value
     if isinstance(value, list):
         return [sanitize_public_artifact_data(item, public_path_roots=public_path_roots) for item in value]
     if isinstance(value, tuple):
@@ -166,6 +170,10 @@ def sanitize_public_tool_output_data(
     *,
     public_path_roots: Iterable[Mapping[str, str]] | None = None,
 ) -> Any:
+    if all_redaction_suppressed():
+        # 环回 web 上下文：工具输出整体原样（敏感键也不打 [REDACTED]、不再删文件内容），
+        # 与 sanitize_public_artifact_data 一致，使 journal/快照保留完整结果供重载。
+        return value
     if isinstance(value, str):
         value = redact_file_content_from_json_string(value)
         return sanitize_public_artifact_text(value, fallback_summary="", public_path_roots=public_path_roots)
@@ -229,6 +237,8 @@ def _sanitize_artifact_string(
             except UnsafeArtifactNameError:
                 pass
     if value.lower().startswith("file://"):
+        if all_redaction_suppressed():
+            return value
         return relativize_public_file_uri(value, public_path_roots) or "[PATH]"
     return _sanitize_artifact_scalar_string(value, public_path_roots=public_path_roots)
 
@@ -239,10 +249,14 @@ def _sanitize_artifact_scalar_string(
     public_path_roots: Iterable[Mapping[str, str]] | None = None,
 ) -> str:
     if value.lower().startswith("file://"):
+        if all_redaction_suppressed():
+            return value
         return relativize_public_file_uri(value, public_path_roots) or "[PATH]"
     decoded = unquote(value)
     if decoded != value:
         if decoded.lower().startswith("file://"):
+            if all_redaction_suppressed():
+                return value
             return relativize_public_file_uri(decoded, public_path_roots) or "[PATH]"
         decoded_sanitized = sanitize_public_artifact_text(
             decoded,
@@ -287,6 +301,9 @@ def _replace_file_uri_tokens(
     *,
     public_path_roots: Iterable[Mapping[str, str]] | None = None,
 ) -> str:
+    if all_redaction_suppressed():
+        return value
+
     def replace_file_uri(match: re.Match[str]) -> str:
         uri = match.group(0)
         trailing = ""
@@ -330,7 +347,7 @@ def _replace_public_artifact_uri_tokens(
             trailing = uri[-1] + trailing
             uri = uri[:-1]
         if not is_valid_public_artifact_uri(uri):
-            return "[PATH]"
+            return match.group(0) if all_redaction_suppressed() else "[PATH]"
         placeholder = f"{prefix}{len(placeholders)}__"
         placeholders[placeholder] = uri
         return f"{placeholder}{trailing}"

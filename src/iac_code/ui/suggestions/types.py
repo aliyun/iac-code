@@ -28,6 +28,7 @@ class SuggestionItem:
     source: str  # "command" | "skill" | "file" | "directory" | "shell"
     score: float
     arg_hint: str | None = None  # inline ghost-text hint shown after the full command
+    origin: str | None = None  # skill origin: "bundled" | "project" | "user"
 
 
 class SuggestionProvider(ABC):

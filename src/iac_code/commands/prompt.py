@@ -13,10 +13,11 @@ from html import escape
 from pathlib import Path
 from typing import Any, cast
 
-from iac_code.agent.message import RECALLED_MEMORY_MARKER
+from iac_code.agent.message import RECALLED_MEMORY_MARKER, ToolResultBlock
 from iac_code.agent.message import Message as AgentMessage
 from iac_code.agent.system_prompt import DYNAMIC_BOUNDARY
 from iac_code.i18n import _
+from iac_code.tools.cloud.aliyun.result_contract import ALIYUN_HTTP_METADATA_KEY
 from iac_code.utils.file_security import ensure_private_file
 
 
@@ -196,7 +197,7 @@ def _format_pipeline_context(item: object, title: str) -> str:
     system_prompt = str(getattr(item, "system_prompt", "") or "")
     lines.extend(["", _("System Prompt:"), system_prompt])
     initial_prompt = str(getattr(item, "initial_prompt", "") or "")
-    messages = list(getattr(item, "messages", []) or [])
+    messages = [_pipeline_export_message(message) for message in list(getattr(item, "messages", []) or [])]
     if initial_prompt and not messages:
         lines.extend(["", _("Initial User Prompt:"), initial_prompt])
     lines.append("")
@@ -208,6 +209,17 @@ def _format_pipeline_context(item: object, title: str) -> str:
         lines.append("[{role}]".format(role=role))
         lines.append(_message_text(message))
     return "\n".join(lines)
+
+
+def _pipeline_export_message(message: object) -> object:
+    """Remove the Aliyun transport carrier from an export-only message copy."""
+    if not isinstance(message, AgentMessage) or isinstance(message.content, str):
+        return message
+    exported = message.model_copy(deep=True)
+    for block in exported.content:
+        if isinstance(block, ToolResultBlock):
+            block.metadata.pop(ALIYUN_HTTP_METADATA_KEY, None)
+    return exported
 
 
 def _message_text(message: object) -> str:

@@ -28,6 +28,7 @@ MODE_FIELDS: dict[str, list[tuple[str, str, bool]]] = {
         ("access_key_id", "AccessKey ID", True),
         ("access_key_secret", "AccessKey Secret", True),
         ("sts_token", "STS Token", True),
+        ("sts_expiration", "STS Expiration", False),
     ],
     "RamRoleArn": [
         ("access_key_id", "AccessKey ID", True),

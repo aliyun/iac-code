@@ -13,6 +13,7 @@ from google.protobuf.json_format import MessageToDict
 
 import iac_code.a2a.pipeline_stream as pipeline_stream
 from iac_code.a2a.artifacts import A2AArtifactStore
+from iac_code.a2a.events import _METADATA_MAX_CHARS
 from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
@@ -47,6 +48,8 @@ from iac_code.types.stream_events import (
     ToolResultEvent,
     ToolUseEndEvent,
 )
+from iac_code.utils.public_errors import suppress_all_redaction
+from iac_code.web.pipeline_transcript import PipelineTranscriptTranslator, build_pipeline_transcript_rows
 
 from .fakes import FakeEventQueue
 
@@ -128,6 +131,27 @@ def _encoded_pipeline_batch_size(envelopes: list[dict[str, Any]]) -> int:
     )
 
 
+def _aliyun_threshold_pair(limit: int, diagnostics: str = "") -> tuple[str, str]:
+    marker = "BUSINESS_TAIL_MARKER"
+    empty_body = json.dumps({"payload": "", "tail": marker}, ensure_ascii=False, indent=2)
+    payload_size = limit - len(empty_body) - len(diagnostics)
+    payload = {"payload": "X" * payload_size, "tail": marker}
+    body = json.dumps(payload, ensure_ascii=False, indent=2)
+    envelope = json.dumps(
+        {
+            "status": 200,
+            "headers": {"requestid": "req-1"},
+            "body": payload,
+            "content_type": "application/json",
+            "content_encoding": None,
+            "size": len(body),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    return body + diagnostics, envelope + diagnostics
+
+
 def test_pipeline_warning_is_recovery_semantic() -> None:
     assert is_recovery_semantic_event(_envelope("pipeline_warning")) is True
 
@@ -143,6 +167,10 @@ def test_mcp_status_is_metadata_only_not_recovery_semantic() -> None:
     envelope = _envelope("mcp_status")
 
     assert is_recovery_semantic_event(envelope) is False
+
+
+def test_message_tombstone_is_display_only_not_recovery_semantic() -> None:
+    assert is_recovery_semantic_event(_envelope("message_tombstone")) is False
 
 
 @pytest.mark.asyncio
@@ -163,6 +191,47 @@ async def test_publish_text_writes_pipeline_metadata_without_duplicate_status_me
     snapshot = publisher.snapshot_store.load()
     assert snapshot is not None
     assert snapshot["display"]["messages"][0]["text"] == "hello"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("diagnostics", ["", "\nDelegated diagnostics: preflight passed"])
+async def test_aliyun_body_only_avoids_envelope_truncation_in_all_pipeline_outlets(
+    tmp_path: Path,
+    diagnostics: str,
+) -> None:
+    new_content, old_content = _aliyun_threshold_pair(_METADATA_MAX_CHARS, diagnostics)
+
+    async def publish_and_read(content: str, directory: str) -> tuple[str, str, str, str]:
+        publisher, queue = _publisher(tmp_path / directory)
+        await publisher.publish(
+            ToolResultEvent(
+                tool_use_id=f"tool-{directory}",
+                tool_name="aliyun_api" if not diagnostics else "ros_validate_template",
+                result=content,
+                is_error=False,
+            )
+        )
+        remote = dump(queue.events[0])["metadata"]["iac_code"]["pipeline"]
+        journal = publisher.journal.read_all()[0]
+        live_events = PipelineTranscriptTranslator().translate_all([journal])
+        live_result = next(event for event in live_events if event["type"] == "tool.result")
+        [replay_row] = build_pipeline_transcript_rows([journal])
+        replay_result = replay_row["tools"][f"tool-{directory}"]["results"][0]
+        return (
+            remote["data"]["result"],
+            journal["data"]["result"],
+            live_result["payload"]["content"],
+            replay_result["content"],
+        )
+
+    new_outlets = await publish_and_read(new_content, "new")
+    old_outlets = await publish_and_read(old_content, "old")
+
+    assert len(new_content) <= _METADATA_MAX_CHARS < len(old_content)
+    assert new_outlets == (new_content,) * 4
+    assert all(len(value) == _METADATA_MAX_CHARS for value in old_outlets)
+    assert all("BUSINESS_TAIL_MARKER" in value for value in new_outlets)
+    assert all("BUSINESS_TAIL_MARKER" not in value for value in old_outlets)
 
 
 @pytest.mark.asyncio
@@ -327,6 +396,42 @@ async def test_publish_batch_persists_each_delta_but_enqueues_once(tmp_path: Pat
     snapshot = publisher.snapshot_store.load()
     assert snapshot is not None
     assert snapshot["display"]["messages"][0]["text"] == "ab"
+
+
+@pytest.mark.asyncio
+async def test_publish_batch_forwards_each_delta_to_local_web_sink(tmp_path: Path) -> None:
+    # 回归 bug 9be9e9d9:批量发布(extreme_performance 默认路径)必须把每条 delta 直通
+    # loopback web sink,订阅 web 会话的浏览器才能实时看到流水线进度。远程虽合并成一帧,
+    # 本地环回必须逐条转发,且顺序不乱。
+    class LocalAwareQueue(FakeEventQueue):
+        def __init__(self) -> None:
+            super().__init__()
+            self.local_envelopes: list[dict[str, Any]] = []
+
+        async def enqueue_local_pipeline_envelope(self, envelope: dict[str, Any]) -> None:
+            self.local_envelopes.append(envelope)
+
+    queue = LocalAwareQueue()
+    context = PipelineA2AContext(
+        pipeline_run_id="run-1",
+        task_id="task-1",
+        context_id="ctx-1",
+        pipeline_name="selling",
+    )
+    pipeline_dir = tmp_path / "pipeline"
+    publisher = PipelineA2AEventPublisher(
+        event_queue=queue,
+        translator=PipelineEventTranslator(context),
+        journal=A2APipelineJournal(pipeline_dir),
+        snapshot_store=A2APipelineSnapshotStore(pipeline_dir),
+    )
+
+    await publisher.publish_batch([TextDeltaEvent(text="a"), TextDeltaEvent(text="b")])
+
+    # 远程侧仍是单帧合并投递(既有契约)。
+    assert len(queue.events) == 1
+    # 本地环回侧:逐条、按序转发,浏览器实时流据此渲染。
+    assert [envelope["data"]["text"] for envelope in queue.local_envelopes] == ["a", "b"]
 
 
 @pytest.mark.asyncio
@@ -1224,9 +1329,14 @@ async def test_publish_pipeline_write_file_result_does_not_infer_artifact_from_t
         )
     )
 
-    assert len(queue.events) == 1
+    assert len(queue.events) == 2
     assert isinstance(queue.events[0], TaskStatusUpdateEvent)
-    status = dump(queue.events[0])["metadata"]["iac_code"]["pipeline"]
+    started = dump(queue.events[0])["metadata"]["iac_code"]["pipeline"]
+    assert started["eventType"] == "tool_started"
+    assert started["scope"] == "pipeline"
+    assert started["data"]["toolUseId"] == "toolu-write"
+    assert isinstance(queue.events[1], TaskStatusUpdateEvent)
+    status = dump(queue.events[1])["metadata"]["iac_code"]["pipeline"]
     assert status["eventType"] == "tool_result"
     assert status["scope"] == "pipeline"
     assert status["data"]["toolUseId"] == "toolu-write"
@@ -1234,6 +1344,94 @@ async def test_publish_pipeline_write_file_result_does_not_infer_artifact_from_t
     assert snapshot is not None
     assert snapshot["display"]["artifacts"] == []
     assert snapshot["display"]["toolResults"][0]["toolUseId"] == "toolu-write"
+
+
+@pytest.mark.asyncio
+async def test_publish_tool_trace_preserves_paths_in_journal_when_suppressed(tmp_path: Path) -> None:
+    # 环回 web(expose_local_paths)下抑制路径脱敏时:journal / 远程状态 / 快照均保留真实路径,
+    # 以便「重新加载」会话时能从 journal 重建出真路径(否则重载会退回 [PATH])。密钥恒脱敏。
+    # 真正远程 A2A 服务从不设该抑制标志,其脱敏由下方 without-suppression 用例锁定。
+    publisher, queue = _publisher(tmp_path, exposure_types=[A2AExposureType.TOOL_TRACE])
+    raw_path = "/Users/alice/.iac-code/settings.yml"
+
+    with suppress_all_redaction():
+        await publisher.publish(
+            ToolUseEndEvent(
+                tool_use_id="toolu-secret",
+                name="bash",
+                input={"api_key": "sk-test-secret", "path": raw_path},
+            )
+        )
+        await publisher.publish(
+            ToolResultEvent(
+                tool_use_id="toolu-secret",
+                tool_name="bash",
+                result={"note": raw_path, "api_key": "sk-result-secret"},
+                is_error=False,
+            )
+        )
+
+    published = [dump(event)["metadata"]["iac_code"]["pipeline"] for event in queue.events]
+    journal = publisher.journal.read_all()
+    snapshot = publisher.snapshot_store.load()
+    assert snapshot is not None
+    # journal 里明确保留真实路径(重载数据源)。
+    assert any(raw_path in json.dumps(entry) for entry in journal)
+    rendered = json.dumps((published, journal, snapshot))
+    assert raw_path in rendered
+    assert "[PATH]" not in rendered
+    # 全抑制上下文(环回 web):journal/远程状态/快照连密钥也原样,供重载还原完整 YAML/结论。
+    assert "sk-test-secret" in rendered
+    assert "sk-result-secret" in rendered
+
+
+@pytest.mark.asyncio
+async def test_publish_tool_trace_redacts_paths_without_suppression(tmp_path: Path) -> None:
+    # 无抑制(真正远程 A2A 服务的默认上下文):本地通道 + 远程状态 + journal + 快照一律把路径脱敏
+    # 成 [PATH],密钥 ***。这锁定远程边界:只有 loopback web 显式 suppress_all_redaction() 时才
+    # 放行真路径(见 ..._preserves_paths_in_journal_when_suppressed),默认绝不外泄本地路径。
+    class LocalAwareQueue(FakeEventQueue):
+        def __init__(self) -> None:
+            super().__init__()
+            self.local_envelopes: list[dict[str, Any]] = []
+
+        async def enqueue_local_pipeline_envelope(self, envelope: dict[str, Any]) -> None:
+            self.local_envelopes.append(envelope)
+
+    queue = LocalAwareQueue()
+    context = PipelineA2AContext(
+        pipeline_run_id="run-1",
+        task_id="task-1",
+        context_id="ctx-1",
+        pipeline_name="selling",
+    )
+    pipeline_dir = tmp_path / "pipeline"
+    publisher = PipelineA2AEventPublisher(
+        event_queue=queue,
+        translator=PipelineEventTranslator(context),
+        journal=A2APipelineJournal(pipeline_dir),
+        snapshot_store=A2APipelineSnapshotStore(pipeline_dir),
+        exposure_types=[A2AExposureType.TOOL_TRACE],
+    )
+    raw_path = "/Users/alice/project/template.yml"
+
+    # 不进入 suppress_all_redaction():模拟远程服务的默认上下文。
+    await publisher.publish(
+        ToolUseEndEvent(
+            tool_use_id="toolu-local",
+            name="read_file",
+            input={"api_key": "sk-test-secret", "path": raw_path},
+        )
+    )
+
+    # 直通后本地 sink 拿到原始 input（web 实时流用）；远程/journal/快照仍由 serve 层脱敏。
+    assert queue.local_envelopes[0]["data"]["input"] == {"api_key": "sk-test-secret", "path": raw_path}
+    remote = dump(queue.events[0])["metadata"]["iac_code"]["pipeline"]
+    assert remote["data"]["input"] == {"api_key": "***", "path": "[PATH]"}
+    assert publisher.journal.read_all()[0]["data"]["input"]["path"] == "[PATH]"
+    snapshot = publisher.snapshot_store.load()
+    assert snapshot is not None
+    assert raw_path not in json.dumps(snapshot)
 
 
 @pytest.mark.asyncio
@@ -2163,3 +2361,25 @@ async def test_publish_hard_interrupt_false_parent_without_candidate_does_not_em
 
     event_types = [event["eventType"] for event in publisher.journal.read_all()]
     assert event_types == ["interrupt_received", "interrupt_classified"]
+
+
+def test_sanitize_remote_envelope_exempts_complete_step_conclusion() -> None:
+    from iac_code.a2a.pipeline_stream import _sanitize_remote_envelope
+
+    envelope = {
+        "data": {
+            "toolName": "complete_step",
+            "toolUseId": "toolu-x",
+            "input": {"deployment_parameters": {"RdsMasterPassword": "S3cret!"}},
+        }
+    }
+    out = _sanitize_remote_envelope(envelope)
+    assert out["data"]["input"]["deployment_parameters"]["RdsMasterPassword"] == "S3cret!"
+
+
+def test_sanitize_remote_envelope_still_redacts_non_complete_step() -> None:
+    from iac_code.a2a.pipeline_stream import _sanitize_remote_envelope
+
+    envelope = {"data": {"toolName": "write_file", "input": {"password": "S3cret!"}}}
+    out = _sanitize_remote_envelope(envelope)
+    assert out["data"]["input"]["password"] == "***"

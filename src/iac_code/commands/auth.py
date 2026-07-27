@@ -890,25 +890,9 @@ def _llm_auth_flow(console, store) -> str | None | _BackSentinel:
     """LLM provider auth flow with two-step vendor group selection."""
     active_key_name = _get_active_key_name()
 
-    provider_groups: list[tuple[str, list[str]]] = [
-        (
-            "Alibaba Cloud",
-            ["dashscope", "dashscope_token_plan", "aliyun_codingplan", "aliyun_codingplan_intl", "modelscope"],
-        ),
-        ("ZhiPu AI", ["zhipu_cn", "zhipu_intl", "zhipu_cn_codingplan", "zhipu_intl_codingplan"]),
-        ("Kimi", ["kimi_cn", "kimi_intl"]),
-        ("MiniMax", ["minimax_cn", "minimax_intl"]),
-        ("Volcengine", ["volcengine_cn", "volcengine_cn_codingplan"]),
-        ("SiliconFlow", ["siliconflow_cn", "siliconflow_intl"]),
-        ("DeepSeek", ["deepseek"]),
-        ("OpenAI", ["openai"]),
-        ("Anthropic", ["anthropic"]),
-        ("Google Gemini", ["gemini"]),
-        ("Azure OpenAI", ["azure_openai"]),
-        ("OpenRouter", ["openrouter"]),
-        ("Local", ["ollama", "lmstudio"]),
-        ("Compatible", ["openai_compatible", "anthropic_compatible"]),
-    ]
+    from iac_code.providers.registry import PROVIDER_GROUPS
+
+    provider_groups = PROVIDER_GROUPS
 
     provider_map: dict[str, LLMProvider] = {str(p["key_name"]): p for p in PROVIDERS}
 

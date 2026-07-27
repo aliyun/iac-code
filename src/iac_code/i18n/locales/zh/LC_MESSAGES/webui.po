@@ -1,0 +1,3661 @@
+# Chinese translations for iac-code.
+# Copyright (C) 2026 ORGANIZATION
+# This file is distributed under the same license as the iac-code project.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: iac-code 0.9.1\n"
+"Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
+"POT-Creation-Date: 2026-07-21 23:40+0800\n"
+"PO-Revision-Date: 2026-07-21 23:40+0800\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: zh\n"
+"Language-Team: zh <LL@li.org>\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Session"
+msgstr "会话"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+msgid "Open navigation"
+msgstr "打开导航"
+
+#: src/iac_code/web/static/index.html
+msgid "Menu"
+msgstr "菜单"
+
+#: src/iac_code/web/static/index.html
+msgid "Global actions"
+msgstr "全局操作"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+msgid "New chat"
+msgstr "新对话"
+
+#: src/iac_code/web/static/index.html
+msgid "Search"
+msgstr "搜索"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Plugins"
+msgstr "插件"
+
+#: src/iac_code/web/static/index.html
+msgid "Pinned conversations"
+msgstr "置顶对话"
+
+#: src/iac_code/web/static/index.html
+msgid "Pinned"
+msgstr "置顶"
+
+#: src/iac_code/web/static/index.html
+msgid "Projects"
+msgstr "项目"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+msgid "Collapse all sessions"
+msgstr "收起全部会话"
+
+#: src/iac_code/web/static/index.html
+msgid "Projects and conversations"
+msgstr "项目和对话"
+
+#: src/iac_code/web/static/index.html
+msgid "Settings"
+msgstr "设置"
+
+#: src/iac_code/web/static/index.html
+msgid "Resize sidebar"
+msgstr "调整侧边栏宽度"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Transcript"
+msgstr "会话记录"
+
+#: src/iac_code/web/static/index.html
+msgid "Ready"
+msgstr "就绪"
+
+#: src/iac_code/web/static/index.html
+msgid "Conversation actions"
+msgstr "对话操作"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+msgid "Pin conversation"
+msgstr "置顶对话"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+msgid "Rename conversation"
+msgstr "重命名对话"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+msgid "Archive conversation"
+msgstr "归档对话"
+
+#: src/iac_code/web/static/index.html
+msgid "View pipeline"
+msgstr "查看流水线"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Output"
+msgstr "输出"
+
+#: src/iac_code/web/static/index.html
+msgid ""
+"This conversation was created outside the web entry point and is read-"
+"only."
+msgstr "此会话由非 web 入口产生,仅供只读查看。"
+
+#: src/iac_code/web/static/index.html
+msgid "Enter your requirement"
+msgstr "输入需求"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Describe your infrastructure needs"
+msgstr "描述你的基础设施需求"
+
+#: src/iac_code/web/static/index.html
+msgid "Attach image"
+msgstr "附加图片"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Approval requested"
+msgstr "请求批准"
+
+#: src/iac_code/web/static/index.html
+msgid "Thinking"
+msgstr "思考"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Configure model"
+msgstr "配置模型"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Send"
+msgstr "发送"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Select project"
+msgstr "选择项目"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Normal mode"
+msgstr "普通模式"
+
+#: src/iac_code/web/static/index.html
+msgid "Close output"
+msgstr "关闭输出"
+
+#: src/iac_code/web/static/index.html
+msgid "File preview"
+msgstr "文件预览"
+
+#: src/iac_code/web/static/index.html
+msgid "Workspace"
+msgstr "工作区"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Project"
+msgstr "项目"
+
+#: src/iac_code/web/static/index.html
+msgid "Loading"
+msgstr "加载中"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Mode"
+msgstr "模式"
+
+#: src/iac_code/web/static/index.html
+msgid "Normal"
+msgstr "普通"
+
+#: src/iac_code/web/static/index.html
+msgid "Pending"
+msgstr "待处理"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Tools"
+msgstr "工具"
+
+#: src/iac_code/web/static/index.html
+msgid "Close settings"
+msgstr "关闭设置"
+
+#: src/iac_code/web/static/index.html
+msgid "Back to app"
+msgstr "返回应用"
+
+#: src/iac_code/web/static/index.html
+msgid "Workspace views"
+msgstr "工作台视图"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Configuration"
+msgstr "配置"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "General"
+msgstr "常规"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Models"
+msgstr "模型"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Cloud credentials"
+msgstr "云凭证"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Memory"
+msgstr "记忆"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "History"
+msgstr "历史"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Archived conversations"
+msgstr "已归档对话"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Status"
+msgstr "状态"
+
+#: src/iac_code/web/static/index.html
+msgid "Loading session controls."
+msgstr "正在加载会话控制项。"
+
+#: src/iac_code/web/static/index.html
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Pipeline"
+msgstr "流水线"
+
+#: src/iac_code/web/static/index.html
+msgid "Close command menu"
+msgstr "关闭命令菜单"
+
+#: src/iac_code/web/static/index.html
+msgid "Search chats or run a command"
+msgstr "搜索聊天或运行命令"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+msgid "Close"
+msgstr "关闭"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Cancel"
+msgstr "取消"
+
+#: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Save"
+msgstr "保存"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Start a new working conversation."
+msgstr "开启一个新的工作对话。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "General configuration"
+msgstr "常规配置"
+
+#: src/iac_code/web/static/js/app.js
+msgid "General options and foreign session visibility."
+msgstr "常规选项与外来会话可见性。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Configure models and providers."
+msgstr "配置模型与提供商。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Configure cloud account access credentials."
+msgstr "配置云账号访问凭证。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Edit project and user memory."
+msgstr "编辑项目和用户记忆。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "View and enable IaC plugins."
+msgstr "查看和启用 IaC 插件。"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Sales pipeline"
+msgstr "售卖流水线"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pipeline planning, generation, and validation for sales scenarios"
+msgstr "售卖场景的流水线规划、生成和验证"
+
+#: src/iac_code/web/static/js/app.js
+msgid "No context usage recorded yet"
+msgstr "暂无上下文使用记录"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "{percent} left (used {used} of {limit})"
+msgstr "剩余 {percent} （已使用 {used}/共 {limit}）"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "Used {n} tokens"
+msgstr "已使用 {n} tokens"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "Input {n}"
+msgstr "输入 {n}"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "Output {n}"
+msgstr "输出 {n}"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Context:"
+msgstr "背景信息:"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Session:"
+msgstr "会话:"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Copy session ID"
+msgstr "复制会话 ID"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Session ID copied"
+msgstr "已复制会话 ID"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Copy failed"
+msgstr "复制失败"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Authenticated"
+msgstr "已通过身份验证"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Authentication required"
+msgstr "待完成身份验证"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Authentication failed"
+msgstr "身份验证失败"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Not authenticated"
+msgstr "未进行身份验证"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Authentication not supported"
+msgstr "不支持身份验证"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Disabled"
+msgstr "已禁用"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Enabled"
+msgstr "已启用"
+
+#: src/iac_code/web/static/js/app.js
+msgid "No MCP servers configured"
+msgstr "未配置 MCP 服务器"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Conversation"
+msgstr "对话"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Unread"
+msgstr "未读"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Awaiting approval"
+msgstr "等待批准"
+
+#: src/iac_code/web/static/js/app.js
+msgid "In progress"
+msgstr "进行中"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Chats"
+msgstr "聊天"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Unread chats"
+msgstr "未读聊天"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Commands"
+msgstr "命令"
+
+#: src/iac_code/web/static/js/app.js
+msgid "No matching results."
+msgstr "无匹配结果。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Failed to search sessions. Please try again."
+msgstr "搜索会话失败,请重试。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Close navigation"
+msgstr "关闭导航"
+
+#: src/iac_code/web/static/js/app.js
+msgid "No project"
+msgstr "不使用项目"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Just now"
+msgstr "刚刚"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "{n}m"
+msgstr "{n}分"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "{n}h"
+msgstr "{n}小时"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "{n}d"
+msgstr "{n}天"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "{n}w"
+msgstr "{n}周"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "{n}y"
+msgstr "{n}年"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Read-only"
+msgstr "只读"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Unpin conversation"
+msgstr "取消置顶对话"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Please enter content"
+msgstr "请输入内容"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Please enter a name"
+msgstr "请输入名称"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Operation failed"
+msgstr "操作失败"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Archive failed"
+msgstr "归档失败"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "Remove {label}?"
+msgstr "移除 {label}?"
+
+#: src/iac_code/web/static/js/app.js
+msgid ""
+"This will remove the project from Codex. Files on disk will not be "
+"deleted."
+msgstr "这将从 Codex 中移除该项目。磁盘上的文件不会被删除。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Remove"
+msgstr "移除"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Unable to reveal the project in Finder"
+msgstr "无法在 Finder 中显示该项目"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Rename project"
+msgstr "重命名项目"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Keep it short and recognizable"
+msgstr "保持简短且易于识别"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Unpin project"
+msgstr "取消置顶项目"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pin project"
+msgstr "置顶项目"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Reveal in Finder"
+msgstr "在 Finder 中显示"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "{label} project actions"
+msgstr "{label} 项目操作"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "New chat in {label}"
+msgstr "在 {label} 新建对话"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Loading..."
+msgstr "加载中..."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Show less"
+msgstr "折叠显示"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Show more"
+msgstr "展开显示"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Expand all sessions"
+msgstr "展开全部会话"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Select this option"
+msgstr "选择该方案"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Waiting for input"
+msgstr "等待输入"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "Processed {elapsed}"
+msgstr "已处理 {elapsed}"
+
+#: src/iac_code/web/static/js/app.js
+msgid "View diagram"
+msgstr "查看架构图"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Optimizing"
+msgstr "优化中"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pending optimization"
+msgstr "待优化"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Selected"
+msgstr "已选择"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Confirm selection?"
+msgstr "确认选择?"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Selecting…"
+msgstr "选择中…"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pipeline completed"
+msgstr "流水线已完成"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pipeline failed"
+msgstr "流水线失败"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pipeline canceled"
+msgstr "流水线已取消"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pipeline exited early"
+msgstr "流水线提前结束"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pipeline ended"
+msgstr "流水线已结束"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Context automatically compacted"
+msgstr "上下文已自动压缩"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Thinking…"
+msgstr "正在思考"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Thinking done"
+msgstr "思考完成"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Attached image"
+msgstr "已附加图片"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Processing"
+msgstr "处理中"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Executing"
+msgstr "执行中"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Running"
+msgstr "运行中"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Auto-compacting context"
+msgstr "正在自动压缩上下文"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Compacting context"
+msgstr "正在压缩上下文"
+
+#: src/iac_code/web/static/js/app.js
+msgid "The conversation is short; no context compaction needed yet."
+msgstr "对话较短,暂无需压缩上下文。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "There is no context to compact."
+msgstr "没有可压缩的上下文。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Context compaction failed. Please try again later."
+msgstr "上下文压缩失败,请稍后重试。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "A task is already running; this compaction was skipped."
+msgstr "已有任务在进行,本次压缩已跳过。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "You"
+msgstr "你"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Processed"
+msgstr "已处理"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Loading session…"
+msgstr "正在载入会话…"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Start building your infrastructure"
+msgstr "开始构建你的基础设施"
+
+#: src/iac_code/web/static/js/app.js
+msgid ""
+"Describe a task, command, or infrastructure change and hand it to IaC "
+"Code."
+msgstr "描述一个任务、命令或基础设施变更，交给 IaC Code。"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Error"
+msgstr "错误"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Submit now"
+msgstr "立即插队提交"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Steer"
+msgstr "引导"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Delete"
+msgstr "删除"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Delete queued message"
+msgstr "删除排队消息"
+
+#: src/iac_code/web/static/js/app.js
+msgid "More"
+msgstr "更多"
+
+#: src/iac_code/web/static/js/app.js
+msgid "More actions"
+msgstr "更多操作"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Edit queued message"
+msgstr "编辑排队消息"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Multiple lines supported; ⌘/Ctrl + Enter to save"
+msgstr "支持多行；⌘/Ctrl + Enter 保存"
+
+#: src/iac_code/web/static/js/app.js
+msgid ""
+"The queued messages changed (one has started processing or was modified)."
+" Please edit again."
+msgstr "排队消息已更新（有一条已开始处理或被改动），请重新编辑。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Save failed. Please try again."
+msgstr "保存失败，请重试。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Edit message"
+msgstr "编辑消息"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Search projects"
+msgstr "搜索项目"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Use directory"
+msgstr "使用目录"
+
+#: src/iac_code/web/static/js/app.js
+msgid "No matching projects"
+msgstr "没有匹配项目"
+
+#: src/iac_code/web/static/js/app.js
+msgid "New project"
+msgstr "新建项目"
+
+#: src/iac_code/web/static/js/app.js
+msgid "New blank project"
+msgstr "新建空白项目"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Use existing folder"
+msgstr "使用现有文件夹"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enter the standard conversational IaC assistant"
+msgstr "进入常规对话式 IaC 助手"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Pipeline mode"
+msgstr "流水线模式"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Plan, generate, and validate with the pipeline"
+msgstr "使用流水线规划、生成和验证"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Elapsed {n}s"
+msgstr "已用 {n} 秒"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Failed to load session. Please try again."
+msgstr "会话加载失败，请重试。"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "New version v{latest} available (current v{current})"
+msgstr "发现新版本 v{latest}(当前 v{current})"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Update now"
+msgstr "立即更新"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Don't remind me about this version"
+msgstr "不再提醒此版本"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Update complete. Please refresh manually."
+msgstr "更新完成,请手动刷新。"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "Update failed: {error}"
+msgstr "更新失败:{error}"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Retry"
+msgstr "重试"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Update complete. Restarting…"
+msgstr "更新完成,重启中…"
+
+#: src/iac_code/web/static/js/app.js
+msgid "The update is taking a while. Please refresh manually later."
+msgstr "更新耗时较长,请稍后手动刷新。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Updating…"
+msgstr "更新中…"
+
+#: src/iac_code/web/static/js/app.js
+#, python-brace-format
+msgid "Failed to start update: {error}"
+msgstr "更新启动失败:{error}"
+
+#: src/iac_code/web/static/js/events.js
+msgid "Local shell"
+msgstr "本地 Shell"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#: src/iac_code/web/static/js/events.js
+msgid "Unknown error"
+msgstr "未知错误"
+
+#: src/iac_code/web/static/js/mermaid_render.js
+#, python-brace-format
+msgid "View {n}"
+msgstr "视图 {n}"
+
+#: src/iac_code/web/static/js/mermaid_render.js
+msgid "No pricing information"
+msgstr "暂无询价信息"
+
+#: src/iac_code/web/static/js/mermaid_render.js
+msgid "Estimated monthly cost"
+msgstr "预估月度费用"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Authorization required"
+msgstr "需要授权"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Submit"
+msgstr "提交"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Input required"
+msgstr "需要输入"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Additional details"
+msgstr "补充说明"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Select"
+msgstr "选择"
+
+#: src/iac_code/web/static/js/components/blocking.js
+#, python-brace-format
+msgid "MCP server {server}"
+msgstr "MCP 服务器 {server}"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Accept"
+msgstr "接受"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Decline"
+msgstr "拒绝"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Enter sends; Shift+Enter inserts a newline."
+msgstr "Enter sends; Shift+Enter inserts a newline."
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Continue adding or adjusting requirements"
+msgstr "继续补充或调整需求"
+
+#: src/iac_code/web/static/js/components/composer.js
+#, python-brace-format
+msgid "(Used {percent}%)"
+msgstr "（已使用 {percent}%）"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Compact"
+msgstr "压缩"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Compact this session's context"
+msgstr "压缩此会话的上下文"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Show current session status"
+msgstr "显示当前会话状态"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Show MCP server status"
+msgstr "显示 MCP 服务器状态"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "System"
+msgstr "系统"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Personal"
+msgstr "个人"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Skills"
+msgstr "技能"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "None"
+msgstr "无"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Minimal"
+msgstr "最小"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Low"
+msgstr "低"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Medium"
+msgstr "中"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "High"
+msgstr "高"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Very high"
+msgstr "极高"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Max"
+msgstr "最大"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Auto"
+msgstr "自动"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Ask for approval"
+msgstr "请求审批"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Ask before writes, external files, and restricted tool calls"
+msgstr "写入、访问外部文件及调用受限工具前询问"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Approve for me"
+msgstr "替我审批"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Automatically accept common file edits; still ask for other risky actions"
+msgstr "自动接受常见文件编辑;其他高风险操作仍会询问"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Full access"
+msgstr "完全访问"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Full access permissions"
+msgstr "完全访问权限"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Skip permission checks; only ask for safety protections"
+msgstr "跳过权限检查;仅在涉及安全防护时询问"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Don't ask"
+msgstr "不询问"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Automatically deny actions that need approval"
+msgstr "自动拒绝需要审批的操作"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Attachments can be sent after the current turn finishes."
+msgstr "附件需等当前回合结束后再发送。"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "This session was created outside the web entry point and is read-only."
+msgstr "此会话由非 web 入口产生,仅供只读查看"
+
+#: src/iac_code/web/static/js/components/composer.js
+#, python-brace-format
+msgid "Remove {name}"
+msgstr "移除 {name}"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "How should IaC Code actions be approved?"
+msgstr "应如何批准 IaC Code 操作?"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Could not save permission mode"
+msgstr "无法保存权限模式"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Could not save thinking toggle"
+msgstr "无法保存思考开关"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Model"
+msgstr "模型"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Provider"
+msgstr "提供商"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Normal chat"
+msgstr "普通对话"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Loading model configuration..."
+msgstr "正在加载模型配置..."
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Model configuration unavailable"
+msgstr "模型配置不可用"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Reasoning"
+msgstr "推理"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Not supported"
+msgstr "不支持"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Could not load model settings"
+msgstr "无法加载模型设置"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Could not switch provider"
+msgstr "无法切换提供方"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Could not save model settings"
+msgstr "无法保存模型设置"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Could not load suggestions"
+msgstr "无法加载建议"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Command failed"
+msgstr "命令失败"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "The command was not accepted"
+msgstr "命令未被接受"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Use @ suggestions for workspace file references."
+msgstr "使用 @ 建议来引用工作区文件。"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Unsupported image type."
+msgstr "不支持的图片类型。"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Image upload failed"
+msgstr "图片上传失败"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "This image has not been uploaded yet."
+msgstr "该图片尚未上传。"
+
+#: src/iac_code/web/static/js/components/composer.js
+#, python-brace-format
+msgid "{command} is not available in pipeline mode"
+msgstr "{command} 在流水线模式下不可用"
+
+#: src/iac_code/web/static/js/components/composer.js
+#, python-brace-format
+msgid "{command} is only available in an active conversation"
+msgstr "{command} 仅在进行中的会话中可用"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Send failed"
+msgstr "发送失败"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "The message was not accepted"
+msgstr "消息未被接受"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Stop failed"
+msgstr "停止失败"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Stop"
+msgstr "停止"
+
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Stop the current reply"
+msgstr "停止当前回复"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Success"
+msgstr "成功"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "In progress / failed"
+msgstr "进行中/失败"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Recovered State"
+msgstr "已恢复状态"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Diagnostics"
+msgstr "诊断"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Context"
+msgstr "上下文"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Task"
+msgstr "任务"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Sequence"
+msgstr "序列"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Timeline"
+msgstr "时间线"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Active"
+msgstr "活跃"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "No pipeline events."
+msgstr "没有流水线事件。"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Parameter overrides"
+msgstr "参数覆盖"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Select candidate"
+msgstr "选择候选方案"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Submitting..."
+msgstr "提交中..."
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Architecture diagram"
+msgstr "架构图"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "No architecture diagram"
+msgstr "无架构图"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Candidates"
+msgstr "候选方案"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "No candidates."
+msgstr "暂无候选方案。"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#, python-brace-format
+msgid "Candidate {n}"
+msgstr "候选 {n}"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#, python-brace-format
+msgid "Monthly {cost}"
+msgstr "每月 {cost}"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Diagram"
+msgstr "图表"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "No diagram."
+msgstr "没有图表。"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Deployment"
+msgstr "部署"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "No deployment progress."
+msgstr "没有部署进度。"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Cleanup"
+msgstr "清理"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#, python-brace-format
+msgid "{n} resources"
+msgstr "{n} 个资源"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Resource"
+msgstr "资源"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Region"
+msgstr "地域"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "No cleanup resources."
+msgstr "没有需要清理的资源。"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Pipeline replay"
+msgstr "流水线回放"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#, python-brace-format
+msgid "{n} steps"
+msgstr "{n} 个步骤"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Details"
+msgstr "详情"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Step"
+msgstr "步骤"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Attempt"
+msgstr "尝试"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Type"
+msgstr "类型"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Rollback"
+msgstr "回滚"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Sub-pipelines"
+msgstr "子流水线"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Handoff"
+msgstr "交接"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Outcome"
+msgstr "结果"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Summary"
+msgstr "摘要"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "No pipeline data."
+msgstr "没有流水线数据。"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Alibaba Cloud API"
+msgstr "阿里云 API"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Completing step"
+msgstr "正在完成步骤"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Completed step"
+msgstr "已完成步骤"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Is infrastructure intent"
+msgstr "是否基础设施需求"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Confidence"
+msgstr "置信度"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Requirement summary"
+msgstr "需求摘要"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Cloud platform"
+msgstr "云平台"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Business type"
+msgstr "业务类型"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Core requirements"
+msgstr "核心需求"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Resource intents"
+msgstr "资源意图"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Non-functional requirements"
+msgstr "非功能需求"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Additional notes"
+msgstr "补充说明"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Name"
+msgstr "名称"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Output path"
+msgstr "输出路径"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Cloud products"
+msgstr "云产品"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Action"
+msgstr "操作"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Role"
+msgstr "角色"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Source"
+msgstr "来源"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Notes"
+msgstr "备注"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Region preference"
+msgstr "地域偏好"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Scale hint"
+msgstr "规模提示"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Topology"
+msgstr "拓扑"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Monthly estimate"
+msgstr "月度预估"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Pros"
+msgstr "优点"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Cons"
+msgstr "缺点"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Cost"
+msgstr "成本"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Currency"
+msgstr "币种"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Description"
+msgstr "描述"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Reason"
+msgstr "理由"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Stack ID"
+msgstr "资源栈 ID"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Template"
+msgstr "模板"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Template SHA256"
+msgstr "模板 SHA256"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Template fixed"
+msgstr "模板已修复"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "File path"
+msgstr "文件路径"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Validated"
+msgstr "已校验"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Key"
+msgstr "标识"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Review passed"
+msgstr "评审是否通过"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Review issues"
+msgstr "评审问题"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Selected review aspects"
+msgstr "选中的评审维度"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Skipped review aspects"
+msgstr "跳过的评审维度"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Resolved InfraGuard policies"
+msgstr "生效的 InfraGuard 策略"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "InfraGuard summary"
+msgstr "InfraGuard 摘要"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Passed"
+msgstr "是否通过"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Blocking findings"
+msgstr "阻断项"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Total violations"
+msgstr "违规总数"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Severity counts"
+msgstr "各级别数量"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Files scanned"
+msgstr "扫描文件数"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Files with violations"
+msgstr "违规文件数"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Fix summary"
+msgstr "修复摘要"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "High risk"
+msgstr "高危"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Medium risk"
+msgstr "中危"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Low risk"
+msgstr "低危"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Resource inventory"
+msgstr "资源清单"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Deployment parameters"
+msgstr "部署参数"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Missing deployment parameters"
+msgstr "缺失的部署参数"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Parameter set summary"
+msgstr "参数集摘要"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "API summary"
+msgstr "API 摘要"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Resources created"
+msgstr "已创建资源"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Outputs"
+msgstr "输出"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Stack name"
+msgstr "资源栈名称"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Status reason"
+msgstr "状态原因"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Progress percentage"
+msgstr "进度百分比"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Elapsed seconds"
+msgstr "耗时（秒）"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Is success"
+msgstr "是否成功"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Error code"
+msgstr "错误码"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Recommended action"
+msgstr "建议操作"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Message"
+msgstr "消息"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "User prompt"
+msgstr "用户提示"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "User input"
+msgstr "用户输入"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Options"
+msgstr "选项"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Candidate index"
+msgstr "方案序号"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Selected candidate name"
+msgstr "选中方案名称"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Selected candidate index"
+msgstr "选中方案序号"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Question"
+msgstr "问题"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Selected ID"
+msgstr "选中项 ID"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Selected item"
+msgstr "选中项"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Free text"
+msgstr "自由文本"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Command"
+msgstr "命令"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Exit code"
+msgstr "退出码"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Findings"
+msgstr "发现项"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "File SHA256"
+msgstr "文件 SHA256"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Error output"
+msgstr "错误输出"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Parameters"
+msgstr "参数"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Resources"
+msgstr "资源"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Resource types"
+msgstr "资源类型"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Request ID"
+msgstr "请求 ID"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Stack"
+msgstr "资源栈"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Parameter constraints"
+msgstr "参数约束"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Update info"
+msgstr "更新信息"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Creating"
+msgstr "创建中"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Create failed"
+msgstr "创建失败"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Create complete"
+msgstr "创建完成"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Updating"
+msgstr "更新中"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Update failed"
+msgstr "更新失败"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Update complete"
+msgstr "更新完成"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Rolling back"
+msgstr "回滚中"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Rollback failed"
+msgstr "回滚失败"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Rollback complete"
+msgstr "回滚完成"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Deleting"
+msgstr "删除中"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Delete failed"
+msgstr "删除失败"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Delete complete"
+msgstr "删除完成"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Checking"
+msgstr "检查中"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Check failed"
+msgstr "检查失败"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Check complete"
+msgstr "检查完成"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Yes"
+msgstr "是"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "No"
+msgstr "否"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Conclusion"
+msgstr "结论"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Read memory"
+msgstr "已读取记忆"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Saved memory"
+msgstr "已保存记忆"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Ran InfraGuard scan"
+msgstr "已执行 InfraGuard 扫描"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Showed architecture diagram"
+msgstr "已展示架构图"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Showed candidate details"
+msgstr "已展示方案详情"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Validated template"
+msgstr "已校验模板"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Fetched template parameter constraints"
+msgstr "已获取模板参数约束"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Previewed stack changes"
+msgstr "已预览资源栈变更"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Estimated resource cost"
+msgstr "已预估资源成本"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Deployed stack"
+msgstr "已部署资源栈"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Operated ROS stack"
+msgstr "已操作 ROS 资源栈"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Queried ROS stack instances"
+msgstr "已查询 ROS 资源栈实例"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Searched Alibaba Cloud docs"
+msgstr "已检索阿里云文档"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Looked up Alibaba Cloud API reference"
+msgstr "已查阅阿里云 API 文档"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Asked the user"
+msgstr "已向用户提问"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Reading memory"
+msgstr "正在读取记忆"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Saving memory"
+msgstr "正在保存记忆"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Running InfraGuard scan"
+msgstr "正在执行 InfraGuard 扫描"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Showing architecture diagram"
+msgstr "正在展示架构图"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Showing candidate details"
+msgstr "正在展示方案详情"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Validating template"
+msgstr "正在校验模板"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Fetching template parameter constraints"
+msgstr "正在获取模板参数约束"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Previewing stack changes"
+msgstr "正在预览资源栈变更"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Estimating resource cost"
+msgstr "正在预估资源成本"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Deploying stack"
+msgstr "正在部署资源栈"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Operating ROS stack"
+msgstr "正在操作 ROS 资源栈"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Querying ROS stack instances"
+msgstr "正在查询 ROS 资源栈实例"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Searching Alibaba Cloud docs"
+msgstr "正在检索阿里云文档"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Looking up Alibaba Cloud API reference"
+msgstr "正在查阅阿里云 API 文档"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Asking the user"
+msgstr "正在向用户提问"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Step failed"
+msgstr "完成步骤失败"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Calling {label}"
+msgstr "正在调用 {label}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Call failed: {label}"
+msgstr "调用失败：{label}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Called {label}"
+msgstr "已调用 {label}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Running {command}"
+msgstr "正在运行 {command}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Run failed: {command}"
+msgstr "运行失败：{command}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Ran {command}"
+msgstr "已运行 {command}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Reading file"
+msgstr "正在读取文件"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Read failed"
+msgstr "读取失败"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Read file"
+msgstr "已读取文件"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Reading {target}"
+msgstr "正在读取 {target}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Read failed: {target}"
+msgstr "读取失败：{target}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Read {target}"
+msgstr "已读取 {target}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Listing files"
+msgstr "正在列出文件"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "List failed"
+msgstr "列出失败"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Listed files"
+msgstr "已列出文件"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Listing {target}"
+msgstr "正在列出 {target}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "List failed: {target}"
+msgstr "列出失败：{target}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Listed {target}"
+msgstr "已列出 {target}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Modifying {target}"
+msgstr "正在修改 {target}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Modify failed: {target}"
+msgstr "修改失败：{target}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Modified {target}"
+msgstr "已修改 {target}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Using {name}"
+msgstr "正在使用 {name}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Use failed: {name}"
+msgstr "使用失败：{name}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Used {name}"
+msgstr "已使用 {name}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Canceled {target}"
+msgstr "已取消 {target}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Canceled"
+msgstr "已取消"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Denied {target}"
+msgstr "已拒绝 {target}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Denied"
+msgstr "已拒绝"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Exit code {code}"
+msgstr "退出码 {code}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Failed"
+msgstr "失败"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Waiting"
+msgstr "等待中"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "running {n} command"
+msgstr "正在运行 {n} 条命令"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "running {n} commands"
+msgstr "正在运行 {n} 条命令"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "ran {n} command"
+msgstr "已运行 {n} 条命令"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "ran {n} commands"
+msgstr "已运行 {n} 条命令"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "calling {n} Alibaba Cloud API"
+msgstr "正在调用 {n} 个阿里云 API"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "calling {n} Alibaba Cloud APIs"
+msgstr "正在调用 {n} 个阿里云 API"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "called {n} Alibaba Cloud API"
+msgstr "已调用 {n} 个阿里云 API"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "called {n} Alibaba Cloud APIs"
+msgstr "已调用 {n} 个阿里云 API"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "reading {n} file"
+msgstr "正在读取 {n} 个文件"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "reading {n} files"
+msgstr "正在读取 {n} 个文件"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "read {n} file"
+msgstr "已读取 {n} 个文件"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "read {n} files"
+msgstr "已读取 {n} 个文件"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "listing files"
+msgstr "正在列出文件"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "listing {n} times"
+msgstr "正在列出 {n} 次"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "listed files"
+msgstr "已列出文件"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "listed {n} times"
+msgstr "已列出 {n} 次"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "modifying {n} item"
+msgstr "正在修改 {n} 项"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "modifying {n} items"
+msgstr "正在修改 {n} 项"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "modified {n} item"
+msgstr "已修改 {n} 项"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "modified {n} items"
+msgstr "已修改 {n} 项"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "using {n} tool"
+msgstr "正在使用 {n} 个工具"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "using {n} tools"
+msgstr "正在使用 {n} 个工具"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "used {n} tool"
+msgstr "已使用 {n} 个工具"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "used {n} tools"
+msgstr "已使用 {n} 个工具"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Canceled {n} tool"
+msgstr "已取消 {n} 个工具"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Canceled {n} tools"
+msgstr "已取消 {n} 个工具"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "{phrase} {count} times"
+msgstr "{phrase} {count} 次"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Shell"
+msgstr "Shell"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "No output"
+msgstr "无输出"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Input"
+msgstr "输入"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Result"
+msgstr "结果"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Artifacts"
+msgstr "产物"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Sub-tools"
+msgstr "子工具"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "No details yet"
+msgstr "暂无详情"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Stack: {name} ({id})"
+msgstr "栈: {name} ({id})"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+#, python-brace-format
+msgid "Stack: {name}"
+msgstr "栈: {name}"
+
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Account"
+msgstr "账号"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Alibaba Cloud"
+msgstr "阿里云"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "AccessKey"
+msgstr "AccessKey"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "STS Token"
+msgstr "STS Token"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "RAM role"
+msgstr "RAM 角色"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "OAuth browser login"
+msgstr "OAuth 浏览器登录"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Environment variables"
+msgstr "环境变量"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Saved locally"
+msgstr "本地已保存"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "aliyun CLI config"
+msgstr "aliyun CLI 配置"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "North China 1 (Qingdao)"
+msgstr "华北1(青岛)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "North China 2 (Beijing)"
+msgstr "华北2(北京)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "North China 3 (Zhangjiakou)"
+msgstr "华北3(张家口)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "North China 5 (Hohhot)"
+msgstr "华北5(呼和浩特)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "North China 6 (Ulanqab)"
+msgstr "华北6(乌兰察布)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "East China 1 (Hangzhou)"
+msgstr "华东1(杭州)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "East China 2 (Shanghai)"
+msgstr "华东2(上海)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "East China 5 (Nanjing - Local Region)"
+msgstr "华东5(南京-本地地域)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "East China 6 (Fuzhou - Local Region)"
+msgstr "华东6(福州-本地地域)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "South China 1 (Shenzhen)"
+msgstr "华南1(深圳)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "South China 2 (Heyuan)"
+msgstr "华南2(河源)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "South China 3 (Guangzhou)"
+msgstr "华南3(广州)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Central China 1 (Wuhan - Local Region)"
+msgstr "华中1(武汉-本地地域)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Southwest China 1 (Chengdu)"
+msgstr "西南1(成都)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Hong Kong, China"
+msgstr "中国香港"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Singapore"
+msgstr "新加坡"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Australia (Sydney)"
+msgstr "澳大利亚(悉尼)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Malaysia (Kuala Lumpur)"
+msgstr "马来西亚(吉隆坡)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Indonesia (Jakarta)"
+msgstr "印度尼西亚(雅加达)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Philippines (Manila)"
+msgstr "菲律宾(马尼拉)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Thailand (Bangkok)"
+msgstr "泰国(曼谷)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Japan (Tokyo)"
+msgstr "日本(东京)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "South Korea (Seoul)"
+msgstr "韩国(首尔)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "India (Mumbai)"
+msgstr "印度(孟买)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "US (Silicon Valley)"
+msgstr "美国(硅谷)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "US (Virginia)"
+msgstr "美国(弗吉尼亚)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Germany (Frankfurt)"
+msgstr "德国(法兰克福)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "UK (London)"
+msgstr "英国(伦敦)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "UAE (Dubai)"
+msgstr "阿联酋(迪拜)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Saudi Arabia (Riyadh)"
+msgstr "沙特(利雅得)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Show secret"
+msgstr "显示密钥"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Hide secret"
+msgstr "隐藏密钥"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Expand list"
+msgstr "展开列表"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Session ready"
+msgstr "会话就绪"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "normal / idle"
+msgstr "普通 / 空闲"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Response detail"
+msgstr "响应详情"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Choose an action."
+msgstr "选择一个操作。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "No active session."
+msgstr "没有活跃会话。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Session Status"
+msgstr "会话状态"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading status"
+msgstr "加载状态中"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Debug"
+msgstr "调试"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading debug"
+msgstr "加载调试中"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Prompt"
+msgstr "提示词"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading prompt"
+msgstr "加载提示词中"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Compacting"
+msgstr "压缩中"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Session working"
+msgstr "会话工作中"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "enabled"
+msgstr "已启用"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "off"
+msgstr "关闭"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Response detail updated"
+msgstr "响应详情已更新"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Provider groups"
+msgstr "服务商分组"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Model providers"
+msgstr "模型服务商"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enter or select a model"
+msgstr "输入或选择模型"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enter or select reasoning effort"
+msgstr "输入或选择推理强度"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enter API key"
+msgstr "输入 API 密钥"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Leave blank to use model default"
+msgstr "留空使用模型默认"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Max output tokens"
+msgstr "最大输出 tokens"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Max output tokens per reply; leave blank to use model default"
+msgstr "单次回复的输出上限,留空使用模型默认"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Thinking budget"
+msgstr "思考预算"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Token budget allocated to the thinking process; leave blank to use model "
+"default"
+msgstr "分配给思考过程的 token 预算,留空使用模型默认"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Advanced settings"
+msgstr "高级设置"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Save configuration"
+msgstr "保存配置"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Set as current model"
+msgstr "设为当前模型"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Clear configuration"
+msgstr "清空配置"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Select a provider on the left to view and edit its configuration."
+msgstr "选择左侧服务商以查看与编辑其配置。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The model used for generation under this provider"
+msgstr "该服务商下用于生成的模型"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Reasoning effort"
+msgstr "推理强度"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "How deeply the model thinks; higher is slower but more detailed"
+msgstr "模型思考的深度,越高越慢但更细致"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "API base URL"
+msgstr "API 地址"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Custom API Base URL; leave blank to use default"
+msgstr "自定义 API Base URL,留空使用默认"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "API key"
+msgstr "API 密钥"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The key required to call this provider; stored locally only"
+msgstr "调用该服务商所需的密钥,仅保存在本地"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Leave blank to use model default ({value})"
+msgstr "留空使用模型默认({value})"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Other"
+msgstr "其他"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Current"
+msgstr "当前"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Available"
+msgstr "可用"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Unavailable"
+msgstr "不可用"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Managed by external login"
+msgstr "由外部登录管理"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid ""
+"This source is managed by an external application login and cannot be "
+"edited here. Current provider: {provider}"
+msgstr "该来源由外部应用登录管理,无法在此编辑。当前服务商:{provider}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"This source is managed by an external application login and cannot be "
+"edited here."
+msgstr "该来源由外部应用登录管理,无法在此编辑。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Configure this provider's model and credentials."
+msgstr "配置该服务商的模型与凭证。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The current model cannot be cleared; switch to another model first"
+msgstr "当前模型不可清空,请先切换到其它模型"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Current model"
+msgstr "当前模型"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Configured"
+msgstr "已配置"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Not configured"
+msgstr "未配置"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading model configuration…"
+msgstr "正在加载模型配置…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Saving configuration…"
+msgstr "正在保存配置…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Configuration saved."
+msgstr "配置已保存。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Setting as current model…"
+msgstr "正在设为当前模型…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Set as current model."
+msgstr "已设为当前模型。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Clearing configuration…"
+msgstr "正在清空配置…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Configuration cleared."
+msgstr "配置已清空。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Cloud provider"
+msgstr "云厂商"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Select or enter a region, e.g. cn-hangzhou"
+msgstr "选择或输入区域,如 cn-hangzhou"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "STS token"
+msgstr "STS 令牌"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Session name"
+msgstr "会话名称"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "China (aliyun.com)"
+msgstr "中国(aliyun.com)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "International (alibabacloud.com)"
+msgstr "国际(alibabacloud.com)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Log in with browser"
+msgstr "用浏览器登录"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Save cloud credentials"
+msgstr "保存云凭证"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Read from {source} · {shown}"
+msgstr "已从{source}读取 · {shown}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Region for deployment and resource queries"
+msgstr "部署与资源查询所在区域"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "AccessKeyId"
+msgstr "AccessKeyId"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Alibaba Cloud access key ID"
+msgstr "阿里云访问密钥 ID"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "AccessKeySecret"
+msgstr "AccessKeySecret"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Access key secret; stored locally only"
+msgstr "访问密钥 Secret,仅保存在本地"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "StsToken"
+msgstr "StsToken"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Temporary security token"
+msgstr "临时安全令牌"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "RamRoleArn"
+msgstr "RamRoleArn"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The RAM role ARN to assume"
+msgstr "要扮演的 RAM 角色 ARN"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "RamSessionName"
+msgstr "RamSessionName"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Role session name (optional)"
+msgstr "角色会话名称(可选)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Login site"
+msgstr "登录站点"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Select the site your Alibaba Cloud account belongs to"
+msgstr "选择阿里云账号所属站点"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Access token expiry"
+msgstr "访问令牌过期"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Current access token expiry time (local time zone)"
+msgstr "当前访问令牌到期时间(本地时区)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Refresh token expiry"
+msgstr "刷新令牌过期"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Unknown (Alibaba Cloud did not provide an expiry)"
+msgstr "未知(阿里云未提供有效期)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Refresh token expiry time (local time zone); re-login required after "
+"expiry"
+msgstr "刷新令牌到期时间(本地时区),到期后需重新登录"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "STS expiry"
+msgstr "STS 过期"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Unknown (STS credentials not yet obtained)"
+msgstr "未知(尚未换取 STS 凭证)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Expiry time of the STS temporary credentials derived from OAuth (local "
+"time zone)"
+msgstr "OAuth 派生的 STS 临时凭证到期时间(本地时区)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Currently saved: {mode}"
+msgstr "当前已保存:{mode}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "No cloud credentials saved yet"
+msgstr "尚未保存云凭证"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading cloud credentials…"
+msgstr "正在加载云凭证…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Saving cloud credentials…"
+msgstr "正在保存云凭证…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Opening the browser; please complete login on the Alibaba Cloud page… (if"
+" the browser did not open or was closed, click Cancel)"
+msgstr "正在打开浏览器,请在阿里云页面完成登录…(若浏览器未弹出或已关闭,可点「取消」)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Login succeeded."
+msgstr "登录成功。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Login failed: {error}"
+msgstr "登录失败:{error}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Login canceled. You can start again or switch to another authentication "
+"method."
+msgstr "已取消登录。可重新发起,或改用其它认证方式。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Select the Alibaba Cloud region for deployment and resource queries."
+msgstr "选择部署与资源查询所在的阿里云区域。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Credentials"
+msgstr "凭证"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Select the authentication method for accessing Alibaba Cloud; stored "
+"locally only."
+msgstr "选择访问阿里云的认证方式,仅保存在本地。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Authentication method"
+msgstr "认证方式"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Different methods require different parameters; only relevant fields are "
+"shown"
+msgstr "不同方式所需参数不同,仅显示相关字段"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "User"
+msgstr "用户"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Feedback"
+msgstr "反馈"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Reference"
+msgstr "参考"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Global memory"
+msgstr "全局记忆"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Project memory"
+msgstr "项目记忆"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "No memory entries yet"
+msgstr "还没有记忆条目"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Write project-level instructions to inject into every conversation turn; "
+"Markdown supported"
+msgstr "写下希望每轮对话都注入的项目级指令,支持 Markdown"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Write personal preferences to inject across all projects; Markdown "
+"supported"
+msgstr "写下希望在所有项目里都注入的个人偏好,支持 Markdown"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Selected project"
+msgstr "所选项目"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Persistent memory"
+msgstr "常驻记忆"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Long-term instructions injected to the Agent every conversation turn, "
+"split into two layers: Selected project and All projects."
+msgstr "每轮对话都会注入给 Agent 的长期指令,分为「所选项目」和「所有项目」两层。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "User memory"
+msgstr "用户记忆"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "All projects"
+msgstr "所有项目"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Automatic memory"
+msgstr "自动记忆"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Let the Agent automatically record noteworthy facts while working."
+msgstr "让 Agent 在工作时自动记录值得留存的事实。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Auto-record"
+msgstr "自动记录"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, the Agent writes noteworthy facts into the memory library "
+"below at appropriate times."
+msgstr "开启后 Agent 会在合适时机把值得留存的事实写入下方记忆库。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Search memory…"
+msgstr "搜索记忆…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Search memory"
+msgstr "搜索记忆"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Memory library"
+msgstr "记忆库"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Structured memory automatically recorded by the Agent; searchable and "
+"deletable."
+msgstr "Agent 自动记录的结构化记忆,可搜索、删除。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Delete this memory"
+msgstr "删除这条记忆"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Confirm delete?"
+msgstr "确认删除?"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Delete failed: {error}"
+msgstr "删除失败:{error}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "No matching memory found"
+msgstr "未找到匹配的记忆"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Load failed: {error}"
+msgstr "加载失败:{error}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "{label} (current)"
+msgstr "{label}(当前)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading…"
+msgstr "加载中…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "File: {path}"
+msgstr "文件:{path}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Saving…"
+msgstr "正在保存…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Saved · {name}"
+msgstr "已保存 · {name}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Saved"
+msgstr "已保存"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Save failed: {error}"
+msgstr "保存失败:{error}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Automatic memory enabled"
+msgstr "已开启自动记忆"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Automatic memory disabled"
+msgstr "已关闭自动记忆"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Built-in"
+msgstr "内置"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Each skill can be invoked by the Agent or used as a / command. Built-in "
+"skills are always on and cannot be disabled."
+msgstr "每个技能可被 Agent 调用,或作为 / 命令使用。内置技能常驻,不可禁用。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Search skills…"
+msgstr "搜索技能…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Unknown"
+msgstr "未知"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Locked"
+msgstr "锁定"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "/command"
+msgstr "/命令"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Built-in skills cannot be disabled"
+msgstr "内置技能不可禁用"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "No skills available yet."
+msgstr "还没有可用的技能。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "No matching skills found."
+msgstr "未找到匹配的技能。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Updated."
+msgstr "已更新。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading skills…"
+msgstr "正在加载技能…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Local"
+msgstr "本地"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Connected"
+msgstr "已连接"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Connection failed"
+msgstr "连接失败"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Needs authentication"
+msgstr "待认证"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Pending connection"
+msgstr "待连接"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Not checked"
+msgstr "未检查"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Pending approval"
+msgstr "待审批"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Missing environment variables"
+msgstr "缺少环境变量"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Invalid configuration"
+msgstr "配置无效"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Authentication error"
+msgstr "认证错误"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "stdio (local command)"
+msgstr "stdio(本地命令)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "http (remote)"
+msgstr "http(远程)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "sse (remote)"
+msgstr "sse(远程)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "User (~/.iac-code/settings.yml)"
+msgstr "用户(~/.iac-code/settings.yml)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Local (.iac-code/settings.local.yml)"
+msgstr "本地(.iac-code/settings.local.yml)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Project (.mcp.json)"
+msgstr "项目(.mcp.json)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "MCP servers"
+msgstr "MCP 服务器"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Manage MCP servers: add/edit/delete, enable/disable, approve project-"
+"level configs, connection checks, view capabilities, and OAuth "
+"authentication."
+msgstr "管理 MCP 服务器:新增/编辑/删除、启停、审批项目级配置、连接检查、查看能力与 OAuth 认证。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Add server"
+msgstr "新增服务器"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Refresh"
+msgstr "刷新"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Check all connections"
+msgstr "检查全部连接"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Edit server: {name}"
+msgstr "编辑服务器:{name}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Add MCP server"
+msgstr "新增 MCP 服务器"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Server name"
+msgstr "服务器名称"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "e.g. npx"
+msgstr "例如 npx"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "One argument per line"
+msgstr "每行一个参数"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid ""
+"KEY=${VAR}\n"
+"one per line"
+msgstr ""
+"KEY=${VAR}\n"
+"每行一个"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid ""
+"Name: ${VAR}\n"
+"one per line"
+msgstr ""
+"Name: ${VAR}\n"
+"每行一个"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Client Secret environment variable name"
+msgstr "Client Secret 环境变量名"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Callback port (optional)"
+msgstr "回调端口(可选)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Authorization server metadata URL (optional)"
+msgstr "授权服务器 metadata URL(可选)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The executable command for the stdio server."
+msgstr "stdio 服务器的可执行命令。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Arguments"
+msgstr "参数"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "One command argument per line."
+msgstr "每行一个命令参数。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "KEY=VALUE; reference secrets with ${VAR}, no plaintext."
+msgstr "KEY=VALUE;密钥请用 ${VAR} 引用,禁止明文。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "URL"
+msgstr "URL"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Remote server address for http/sse/ws."
+msgstr "http/sse/ws 远程服务器地址。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Request headers"
+msgstr "请求头"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid ""
+"Name: Value; reference secrets with ${VAR} (ws does not support request "
+"headers)."
+msgstr "Name: Value;密钥请用 ${VAR} 引用(ws 不支持请求头)。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "OAuth (optional)"
+msgstr "OAuth(可选)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Client ID"
+msgstr "Client ID"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Client Secret environment variable"
+msgstr "Client Secret 环境变量"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Name of the environment variable storing the secret (do not enter the "
+"plaintext secret)."
+msgstr "存储密钥的环境变量名(不要填明文密钥)。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Callback port"
+msgstr "回调端口"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Metadata URL"
+msgstr "Metadata URL"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Edit configuration directly as JSON"
+msgstr "使用 JSON 直接编辑配置"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Configuration JSON"
+msgstr "配置 JSON"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"MCP server configuration object (with command/args/env or "
+"type/url/headers/oauth)."
+msgstr "MCP 服务器配置对象(含 command/args/env 或 type/url/headers/oauth)。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Create"
+msgstr "创建"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Please enter a server name."
+msgstr "请填写服务器名称。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "JSON parse failed: {error}"
+msgstr "JSON 解析失败:{error}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Saved."
+msgstr "已保存。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Created."
+msgstr "已创建。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Scope"
+msgstr "作用域"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Transport type"
+msgstr "传输类型"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Connecting and fetching capabilities…"
+msgstr "正在连接并获取能力…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Not supported: {error}"
+msgstr "不支持:{error}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Prompts"
+msgstr "提示"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Starting authentication flow…"
+msgstr "正在启动认证流程…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Open the following address in your browser to complete authorization; the"
+" system detects the callback automatically once done."
+msgstr "请在浏览器中打开以下地址完成授权;完成后系统会自动检测回调。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "If automatic detection fails, paste the callback URL"
+msgstr "如自动检测失败,粘贴回调 URL"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Submit callback URL"
+msgstr "提交回调 URL"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Cancel authentication"
+msgstr "取消认证"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Authentication succeeded."
+msgstr "认证成功。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Authentication canceled."
+msgstr "已取消认证。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Processing…"
+msgstr "正在处理…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enabled."
+msgstr "已启用。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Disabled."
+msgstr "已禁用。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Tools {tools} · Resources {resources} · Prompts {prompts}"
+msgstr "工具 {tools} · 资源 {resources} · 提示 {prompts}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Auth: {state}"
+msgstr "认证:{state}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Auth: not performed"
+msgstr "认证:未进行"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Approve"
+msgstr "批准"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Approved."
+msgstr "已批准。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Reject"
+msgstr "拒绝"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Rejected."
+msgstr "已拒绝。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Check connection"
+msgstr "检查连接"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Checking {name}…"
+msgstr "正在检查 {name}…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Hide capabilities"
+msgstr "收起能力"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "View capabilities"
+msgstr "查看能力"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Re-authenticate"
+msgstr "重新认证"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Authenticate"
+msgstr "认证"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Clear authentication"
+msgstr "清除认证"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Authentication state cleared."
+msgstr "已清除认证状态。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Edit"
+msgstr "编辑"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Delete MCP server {name}?"
+msgstr "确定删除 MCP 服务器 {name}?"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Deleted."
+msgstr "已删除。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "No MCP servers configured yet. Click Add server to add one."
+msgstr "还没有配置 MCP 服务器,点击「新增服务器」添加。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading MCP servers…"
+msgstr "正在加载 MCP 服务器…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Checking all connections…"
+msgstr "正在检查全部连接…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "All chats"
+msgstr "全部聊天"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Updated"
+msgstr "更新时间"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Created"
+msgstr "创建时间"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Alphabetical"
+msgstr "按字母顺序"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "{year}-{month}-{day} {hh}:{mm}"
+msgstr "{year}年{month}月{day}日,{hh}:{mm}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Delete all"
+msgstr "全部删除"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Search archived chats"
+msgstr "搜索已归档聊天"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading archived conversations…"
+msgstr "正在加载已归档对话…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Delete conversation"
+msgstr "删除对话"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Deleting…"
+msgstr "正在删除…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Unarchive"
+msgstr "取消归档"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Unarchiving…"
+msgstr "正在取消归档…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "{count} chats"
+msgstr "{count} 个聊天"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Project actions"
+msgstr "项目操作"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Delete all content in project"
+msgstr "删除项目中的全部内容"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Deleting project content…"
+msgstr "正在删除项目内容…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "No matching archived conversations."
+msgstr "没有匹配的已归档对话。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "No archived conversations yet."
+msgstr "还没有已归档对话。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Confirm delete all?"
+msgstr "确认全部删除?"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Deleting all…"
+msgstr "正在删除全部…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Sort by"
+msgstr "排序方式"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Graphite"
+msgstr "石墨"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Midnight blue"
+msgstr "午夜蓝"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Evergreen"
+msgstr "松墨"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Sepia"
+msgstr "暖褐"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Ivory"
+msgstr "象牙"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Foreign session visibility"
+msgstr "外来会话可见性"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Sessions created outside the web entry point (CLI / A2A / ACP, etc.) are "
+"hidden by default; reveal them here as needed."
+msgstr "非 web 入口(CLI / A2A / ACP 等)产生的会话默认隐藏,按需在此显露。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Show foreign pipeline sessions (read-only)"
+msgstr "显示外来 pipeline 会话(只读)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, pipeline sessions created outside the web entry point "
+"appear in the list for read-only viewing."
+msgstr "打开后,非 web 入口产生的流水线会话在列表出现,仅供只读查看。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Show foreign normal sessions (resumable)"
+msgstr "显示外来普通会话(可续聊)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, normal sessions created outside the web entry point appear "
+"in the list and can be resumed and taken over in the web."
+msgstr "打开后,非 web 入口产生的普通会话在列表出现,并可在 web 中续聊接手。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Control optional steps of the sales pipeline; affects only newly started "
+"pipeline runs. Running pipelines keep their original configuration."
+msgstr "控制售卖流水线的可选步骤,仅影响新发起的流水线运行;进行中的流水线保持原有配置。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enable review step"
+msgstr "开启审查步骤"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, the sales pipeline appends a review round after generating "
+"the template (requires the infraguard tool); the backend skips it "
+"automatically when the tool is not installed."
+msgstr "打开后,售卖流水线在生成模板后追加一轮审查(需要 infraguard 工具);未安装该工具时后端会自动跳过。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"The review step depends on the infraguard tool, which was not detected. "
+"Install it here with one click."
+msgstr "审查步骤依赖 infraguard 工具,当前未检测到。可在此一键安装。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Install infraguard"
+msgstr "安装 infraguard"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "New session defaults"
+msgstr "新会话默认"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Set the default permission and mode for new sessions; applies only to new"
+" sessions. Existing sessions keep their own choices."
+msgstr "设定新建会话的默认权限与模式,只作用于新会话;已有会话保留原有选择。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Default mode"
+msgstr "默认模式"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"The normal mode or specific pipeline preset for new sessions, consistent "
+"with the session selector."
+msgstr "新建会话时预置的普通模式或具体流水线,与会话选择器一致。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Default permission"
+msgstr "默认权限"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The permission mode preset for new sessions."
+msgstr "新建会话时预置的权限模式。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Color scheme"
+msgstr "配色方案"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Switch the color scheme of the entire interface; consistent across all "
+"devices after saving."
+msgstr "切换整个界面的配色,保存后所有设备一致。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Language"
+msgstr "界面语言"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Choose the interface language; the page reloads after saving."
+msgstr "选择界面语言,保存后页面自动刷新。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Downloading…"
+msgstr "正在下载…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Installing…"
+msgstr "正在安装…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Verifying version…"
+msgstr "正在校验版本…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Finishing post-install configuration…"
+msgstr "正在完成安装后配置…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Configuring path…"
+msgstr "正在配置路径…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Preparing…"
+msgstr "正在准备…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "infraguard is installed; the review step is available."
+msgstr "infraguard 已安装,审查步骤可用。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"The infraguard tool was not detected and cannot be installed "
+"automatically in the current environment; please install it manually "
+"first."
+msgstr "未检测到 infraguard 工具,且当前环境无法自动安装,请先手动安装。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#, python-brace-format
+msgid "Install failed: {error}"
+msgstr "安装失败:{error}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Restart service"
+msgstr "重启服务"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Restart the local web service process (interrupts ongoing conversations);"
+" the page refreshes automatically once complete."
+msgstr "重启本地 Web 服务进程(会中断进行中的对话),重启完成后页面自动刷新。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Restart the current service?"
+msgstr "确认重启当前服务?"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Confirm restart"
+msgstr "确认重启"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The restart is taking a while. Please refresh manually."
+msgstr "重启耗时较长,请手动刷新。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Retry refresh"
+msgstr "重试刷新"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Restarting; the page refreshes automatically once the service recovers…"
+msgstr "重启中,服务恢复后会自动刷新…"
+
+#~ msgid "Completing step: {step}"
+#~ msgstr "正在完成步骤：{step}"
+
+#~ msgid "Step failed: {step}"
+#~ msgstr "完成步骤失败：{step}"
+
+#~ msgid "Completed step: {step}"
+#~ msgstr "已完成步骤：{step}"
+
+#~ msgid "Resource stacks"
+#~ msgstr "资源栈"
+
+#~ msgid "Template files"
+#~ msgstr "模板文件"
+

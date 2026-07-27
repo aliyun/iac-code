@@ -16,6 +16,24 @@ A2A JSON-RPC streaming endpoint，记录 SSE 事件和 pipeline snapshot，用 `
 cd /path/to/iac-code
 ```
 
+### Aliyun 结果契约与 telemetry 场景
+
+以下 wrapper 复用本目录真实 A2A server、JSON-RPC/SSE client 和 session persistence，但使用确定性
+LLM、Aliyun transport 与 ROS stack fixture。默认一次执行三条场景：
+
+- `e3a-recovery`：pipeline snapshot 后 `SIGKILL`，重启并继续同一 task/context。
+- `e3b-success`：完整 graceful success，校验 Aliyun business body、公开出口和 telemetry 归属。
+- `e3b-cancel`：流式 provider attempt 进行中取消 task，校验唯一 failed terminal。
+
+```bash
+uv run python scripts/a2a/e2e/run_contract_scenarios.py \
+  --run-dir /tmp/iac-code-contract-e3
+```
+
+可重复传 `--scenario` 只运行指定场景。每个子目录都会生成 `contract-summary.json`、
+`aliyun-contract-audit.json`（非 cancel 场景）、`public-payload-audit.json`、`telemetry-audit.json`、
+provider/A2A attribution audit，以及原有恢复 runner 的 task、event 和 snapshot 产物。
+
 如果只想做最短恢复检查，先跑 deterministic crash smoke。它会在 A2A pipeline
 snapshot 保存后注入一次 crash，然后重启 server，并验证 task 恢复 artifact：
 

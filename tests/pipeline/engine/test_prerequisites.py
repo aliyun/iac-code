@@ -186,6 +186,32 @@ def test_inspect_passes_default_timeout_to_version_check():
     assert observed_timeouts == [30.0]
 
 
+def test_inspect_finds_existing_direct_binary_install_dir_when_not_on_path(tmp_path):
+    # Detection must resolve infraguard the same way use-time lookup does: a binary
+    # sitting in the installer's install_dir (~/bin) but absent from PATH is available.
+    install_dir = tmp_path / "bin"
+    install_dir.mkdir()
+    installed = install_dir / "infraguard"
+    installed.write_text("#!/bin/sh\n", encoding="utf-8")
+    installed.chmod(0o755)
+
+    resolution = inspect_prerequisites(
+        _direct_binary_prereqs("https://example.com/infraguard", str(install_dir), "0" * 64),
+        feature_flags={"enable_reviewing": True},
+        platform_system="darwin",
+        platform_machine="arm64",
+        command_exists=lambda _command: None,
+        run_command=lambda command, env=None: CommandResult(command=command, returncode=0, stdout="", stderr=""),
+    )
+
+    decision = resolution.decisions["infraguard"]
+    assert resolution.feature_flags == {"enable_reviewing": True}
+    assert decision.status == "available"
+    assert decision.resolved_path == str(installed)
+    assert decision.installer_id == "direct-binary"
+    assert resolution.env_overrides["PATH"].split(os.pathsep)[0] == str(install_dir)
+
+
 def test_prepare_offers_only_platform_matching_installers_with_available_required_commands():
     offered_installer_ids = []
 
@@ -228,6 +254,73 @@ def test_prepare_preserves_installer_display_metadata_for_repl_choice():
 
     assert offered_installers[0].display_key == "homebrew"
     assert offered_installers[0].display_name == "Homebrew"
+
+
+def _infraguard_prereqs_web():
+    prereqs = _infraguard_prereqs()
+    prereqs["infraguard"]["on_missing"] = {
+        "repl": "prompt_install",
+        "web": "prompt_install",
+        "non_interactive": "disable_feature",
+    }
+    return prereqs
+
+
+def test_prepare_web_surface_offers_install_when_on_missing_web_is_prompt_install():
+    offered_installer_ids = []
+
+    def choose_installer(_name, installers):
+        offered_installer_ids.extend(installer.id for installer in installers)
+        return None
+
+    resolution = prepare_prerequisites(
+        _infraguard_prereqs_web(),
+        feature_flags={"enable_reviewing": True},
+        surface="web",
+        platform_system="linux",
+        command_exists=lambda command: command == "brew",
+        choose_installer=choose_installer,
+    )
+
+    # Gate passed: the installer chooser was reached under surface="web".
+    assert offered_installer_ids == ["homebrew"]
+    assert resolution.decisions["infraguard"].status == "declined_or_unavailable"
+
+
+def test_prepare_web_surface_disables_feature_when_no_web_action_configured():
+    reached_chooser = False
+
+    def choose_installer(_name, installers):
+        nonlocal reached_chooser
+        reached_chooser = True
+        return None
+
+    # on_missing has no "web" key -> web must fall back to non_interactive disable.
+    resolution = prepare_prerequisites(
+        _infraguard_prereqs(),
+        feature_flags={"enable_reviewing": True},
+        surface="web",
+        platform_system="linux",
+        command_exists=lambda command: command == "brew",
+        choose_installer=choose_installer,
+    )
+
+    assert reached_chooser is False
+    assert resolution.feature_flags == {"enable_reviewing": False}
+    assert resolution.decisions["infraguard"].status == "disabled_feature"
+
+
+def test_prepare_non_interactive_still_disables_even_with_web_prompt_install():
+    resolution = prepare_prerequisites(
+        _infraguard_prereqs_web(),
+        feature_flags={"enable_reviewing": True},
+        surface="non_interactive",
+        platform_system="linux",
+        command_exists=lambda command: command == "brew",
+    )
+
+    assert resolution.feature_flags == {"enable_reviewing": False}
+    assert resolution.decisions["infraguard"].status == "disabled_feature"
 
 
 def test_prepare_accepted_install_runs_installer_commands_then_policy_update_and_keeps_review_enabled():

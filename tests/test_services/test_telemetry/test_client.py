@@ -99,6 +99,43 @@ def test_start_span_uses_configured_channel(tmp_path, monkeypatch):
     )
 
 
+def test_start_detached_span_merges_channel_and_forwards_parent(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    tracer = MagicMock()
+    span = object()
+    tracer.start_span.return_value = span
+    factory = SpanFactory()
+    factory.attach(tracer)
+    client = TelemetryClient(tracer=factory)
+    parent = object()
+
+    assert client.start_detached_span(Spans.ENTRY, {"k": 1}, parent_context=parent) is span
+
+    tracer.start_span.assert_called_once_with(
+        Spans.ENTRY,
+        context=parent,
+        attributes={"k": 1, "iac_code.channel": "unknown"},
+    )
+
+
+def test_use_span_forwards_explicit_lifetime_flags(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    factory = MagicMock(spec=SpanFactory)
+    context_manager = MagicMock()
+    factory.use.return_value = context_manager
+    client = TelemetryClient(tracer=factory)
+    span = object()
+
+    assert client.use_span(span) is context_manager
+
+    factory.use.assert_called_once_with(
+        span,
+        record_exception=False,
+        set_status_on_exception=False,
+        end_on_exit=False,
+    )
+
+
 def test_bootstrap_with_no_default_endpoint_does_not_crash(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("IAC_CODE_TELEMETRY_ENDPOINT", raising=False)

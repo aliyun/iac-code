@@ -54,6 +54,16 @@ stdin からの読み取りもサポートされています：
 echo "OSS バケットを作成" | iac-code --prompt -
 ```
 
+### Web アプリ
+
+グラフィカルな画面がお好みですか？ローカルの Web アプリを起動できます。CLI と同じエンジンで動作し、同じセッションを共有します：
+
+```bash
+iac-code web
+```
+
+デフォルトではブラウザで `http://127.0.0.1:8766` を開きます（ループバックのみ）。詳しくは [Web アプリガイド](https://aliyun.github.io/iac-code/ja/web-app)をご覧ください。
+
 ## コントリビュート
 
 [uv](https://docs.astral.sh/uv/getting-started/installation/) をインストールしてから：

@@ -33,6 +33,9 @@ class ACPTerminalBashTool(Tool):
     def timeout(self) -> float | None:
         return self._original.timeout
 
+    def execution_timeout(self, tool_input: dict) -> float | None:
+        return self._original.execution_timeout(tool_input)
+
     @property
     def supports_blanket_allow(self) -> bool:
         return self._original.supports_blanket_allow

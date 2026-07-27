@@ -3,16 +3,22 @@ from __future__ import annotations
 import json
 import logging
 
+import pytest
+
 from iac_code.agent.message import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from iac_code.pipeline.engine import completion_guard_state
+from iac_code.pipeline.engine.complete_step_tool import CompleteStepTool
 from iac_code.pipeline.engine.completion_guard_state import record_completion_guard_tool_result
 from iac_code.pipeline.engine.recovery import (
     last_successful_tool_input,
     reconstruct_completion_guard_state,
     reconstruct_step_result,
 )
-from iac_code.pipeline.engine.types import StepStatus
-from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY
+from iac_code.pipeline.engine.step_executor import _completion_guard_tool_result_content
+from iac_code.pipeline.engine.types import StepConfig, StepStatus
+from iac_code.tools.base import ToolContext
+from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY, ResultStorage
+from iac_code.types.stream_events import ToolResultEvent
 
 
 def test_reconstruct_step_result_from_successful_complete_step():
@@ -360,6 +366,118 @@ def test_reconstruct_completion_guard_state_reads_externalized_tool_result_metad
 
     assert state["successful_tools"] == {"infraguard_scan"}
     assert state["tool_results"]["infraguard_scan"] == payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tool_name",
+    [
+        "aliyun_api",
+        "ros_validate_template",
+        "ros_get_template_parameter_constraints",
+        "ros_preview_template",
+        "ros_estimate_template_cost",
+    ],
+)
+@pytest.mark.parametrize("state_source", ["live", "resume"])
+@pytest.mark.parametrize("externalized", [False, True])
+@pytest.mark.parametrize(
+    ("contract_case", "required_fields", "expected_success"),
+    [
+        ("future_body", {"ready": True, "resource_id": "resource-1"}, True),
+        ("old_nested_body", {"ready": True, "resource_id": "resource-1"}, False),
+        ("old_top_level", {"status": 200}, True),
+    ],
+)
+async def test_aliyun_completion_guard_contract_for_live_and_resume(
+    tmp_path,
+    tool_name,
+    state_source,
+    externalized,
+    contract_case,
+    required_fields,
+    expected_success,
+):
+    business = {"ready": True, "resource_id": "resource-1"}
+    if externalized:
+        business["padding"] = "X" * 50_000
+    if contract_case == "future_body":
+        content = json.dumps(business)
+        metadata = {"aliyun_http": {"contract_version": "aliyun_body_v1"}}
+    else:
+        content = json.dumps(
+            {
+                "status": 200,
+                "headers": {},
+                "body": business,
+                "content_type": "application/json",
+                "content_encoding": None,
+                "size": len(json.dumps(business)),
+            }
+        )
+        metadata = {}
+
+    storage = ResultStorage(
+        storage_dir=str(tmp_path / "tool-results"),
+        max_inline_chars=50_000,
+        preview_chars=2_000,
+    )
+    processed = storage.process("tool-1", content)
+    if processed.is_externalized:
+        metadata[EXTERNALIZED_RESULT_PATH_METADATA_KEY] = processed.file_path
+    if state_source == "live":
+        event = ToolResultEvent(
+            tool_use_id="tool-1",
+            tool_name=tool_name,
+            result=processed.content,
+            metadata=metadata,
+        )
+        state = {}
+        record_completion_guard_tool_result(
+            state,
+            tool_name=tool_name,
+            tool_input={},
+            content=_completion_guard_tool_result_content(event),
+            is_error=False,
+        )
+    else:
+        state = reconstruct_completion_guard_state(
+            [
+                Message(
+                    role="assistant",
+                    content=[ToolUseBlock(id="tool-1", name=tool_name, input={})],
+                ),
+                Message(
+                    role="user",
+                    content=[
+                        ToolResultBlock(
+                            tool_use_id="tool-1",
+                            content=processed.content,
+                            metadata=metadata,
+                        )
+                    ],
+                ),
+            ]
+        )
+
+    tool = CompleteStepTool(
+        StepConfig(step_id="reviewing", conclusion_field="result", forward=None),
+        completion_guards=[
+            {
+                "when_conclusion_field_equals": {"done": True},
+                "require_tool_result": {
+                    "tool": tool_name,
+                    "result_field_equals": required_fields,
+                },
+            }
+        ],
+        completion_guard_state=state,
+    )
+
+    result = await tool.execute(tool_input={"conclusion": {"done": True}}, context=ToolContext())
+
+    assert processed.is_externalized is externalized
+    assert (not result.is_error) is expected_success
 
 
 def test_reconstruct_completion_guard_state_falls_back_when_externalized_tool_result_is_missing(tmp_path, caplog):

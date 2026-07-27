@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any, Literal
 
@@ -123,7 +124,13 @@ class Message(BaseModel):
     @classmethod
     def from_dict(cls, data: dict) -> "Message":
         """Deserialize from a dict."""
-        return cls.model_validate(data)
+        normalized = dict(data)
+        if is_legacy_compaction_summary_storage_row(normalized):
+            metadata = normalized.get("metadata")
+            normalized["metadata"] = dict(metadata) if isinstance(metadata, dict) else {}
+            normalized["metadata"]["type"] = COMPACTION_SUMMARY_METADATA_TYPE
+            normalized["metadata"]["legacy"] = True
+        return cls.model_validate(normalized)
 
     def to_api_format(self) -> dict:
         """Convert to API-compatible format for litellm."""
@@ -185,6 +192,55 @@ def create_recalled_memory_message(content: str, selected_files: list[str]) -> M
 def is_recalled_memory_message(message: Message) -> bool:
     """Return True when a message was generated for recalled memory context."""
     return message.metadata.get("type") == RECALLED_MEMORY_METADATA_TYPE
+
+
+COMPACTION_SUMMARY_METADATA_TYPE = "compaction_summary"
+
+# 压缩标记在存储/LLM 上下文里排在其保留尾部（recent）之前（有效切片须从标记起始才带得上最近
+# 上下文），但标记是在压缩那一刻创建的、时间上晚于尾部。这里记录「标记之后、时间上却早于它的
+# 保留尾部消息条数」，供可见转录把边界下沉到尾部之后、还原到压缩真实发生的位置。
+COMPACTION_SUMMARY_TAIL_METADATA_KEY = "preserved_tail"
+
+_LEGACY_COMPACTION_SUMMARY_PREFIX = "[Conversation Summary]"
+_COMPACTION_METADATA_INTRODUCED_VERSION = (0, 9, 1)
+_SEMVER_PREFIX_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)")
+
+
+def is_legacy_compaction_summary_storage_row(data: dict[str, Any]) -> bool:
+    """Return whether a pre-metadata persisted row is an old compaction marker."""
+    metadata = data.get("metadata")
+    if isinstance(metadata, dict) and metadata.get("type") == COMPACTION_SUMMARY_METADATA_TYPE:
+        return False
+    if data.get("role") != "user":
+        return False
+    content = data.get("content")
+    if not isinstance(content, str) or not content.startswith(_LEGACY_COMPACTION_SUMMARY_PREFIX):
+        return False
+    version = data.get("version")
+    match = _SEMVER_PREFIX_RE.match(version) if isinstance(version, str) else None
+    if match is None:
+        return False
+    return tuple(int(part) for part in match.groups()) < _COMPACTION_METADATA_INTRODUCED_VERSION
+
+
+def create_compaction_summary_message(summary: str) -> Message:
+    """内联压缩标记：role=user，content 为 LLM 就绪的摘要文本。"""
+    return Message(
+        role="user",
+        content=f"{_LEGACY_COMPACTION_SUMMARY_PREFIX}\n{summary}",
+        metadata={"type": COMPACTION_SUMMARY_METADATA_TYPE},
+    )
+
+
+def compaction_summary_tail_count(message: Message) -> int:
+    """标记后属于保留尾部（时间上早于标记）的消息条数；旧会话无此字段时为 0。"""
+    value = message.metadata.get(COMPACTION_SUMMARY_TAIL_METADATA_KEY)
+    return value if isinstance(value, int) and value > 0 else 0
+
+
+def is_compaction_summary_message(message: Message) -> bool:
+    """Return whether a message is an explicit or migrated compaction marker."""
+    return message.metadata.get("type") == COMPACTION_SUMMARY_METADATA_TYPE
 
 
 def get_recalled_memory_files(message: Message) -> list[str]:

@@ -28,6 +28,11 @@ class TestBashTool:
         assert "shell" in bash_tool.description.lower() or "command" in bash_tool.description.lower()
         assert bash_tool.input_schema["required"] == ["command"]
 
+    def test_executor_timeout_allows_internal_timeout_to_report_structured_result(self, bash_tool):
+        """Outer executor timeout leaves room for BashTool's own timeout and cleanup."""
+        assert bash_tool.execution_timeout({"command": "sleep 999"}) == 130.0
+        assert bash_tool.execution_timeout({"command": "sleep 999", "timeout": 300}) == 310.0
+
     @_skip_on_windows
     @pytest.mark.asyncio
     async def test_execute_simple_command(self, bash_tool, tmp_path):
@@ -81,6 +86,23 @@ class TestBashTool:
         assert result.is_error is False
         assert "STDOUT:" in result.content
         assert "stdout message" in result.content
+
+    @_skip_on_windows
+    @pytest.mark.asyncio
+    async def test_execute_preserves_structured_output_metadata(self, bash_tool, tmp_path):
+        """Structured metadata preserves stdout that contains rendered section markers."""
+        context = ToolContext(cwd=str(tmp_path))
+        result = await bash_tool.execute(
+            tool_input={"command": "printf 'first\\nSTDERR:\\nnot stderr\\n'"},
+            context=context,
+        )
+
+        assert result.is_error is False
+        assert result.metadata == {
+            "exitCode": 0,
+            "stdout": "first\nSTDERR:\nnot stderr\n",
+            "stderr": "",
+        }
 
     @_skip_on_windows
     @pytest.mark.asyncio

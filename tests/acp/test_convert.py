@@ -6,6 +6,7 @@ import acp
 
 from iac_code.acp.convert import ACPEventConverter, _tool_kind, acp_blocks_to_multimodal, acp_blocks_to_prompt_text
 from iac_code.acp.state import ToolCallState, TurnState
+from iac_code.tools.cloud.aliyun.result_contract import ALIYUN_HTTP_METADATA_KEY
 from iac_code.types.stream_events import (
     CompactionEvent,
     ErrorEvent,
@@ -114,6 +115,12 @@ def test_compaction_event_to_message_chunk() -> None:
     assert "5000" in updates[0].content.text
     assert "2000" in updates[0].content.text
     assert "compacted" in updates[0].content.text.lower()
+
+
+def test_compaction_started_does_not_emit_completed_message() -> None:
+    converter = ACPEventConverter(turn_id="turn-1")
+
+    assert converter.event_to_updates(CompactionEvent(phase="started")) == []
 
 
 # ---------------------------------------------------------------------------
@@ -607,6 +614,25 @@ def test_tool_result_emits_progress_then_end() -> None:
     assert updates[1].session_update == "tool_call_update"
     assert updates[1].status == "completed"
     assert updates[1].content is None  # no duplicate content on end marker
+
+
+def test_aliyun_tool_result_exposes_business_content_but_not_internal_http_metadata() -> None:
+    converter = ACPEventConverter(turn_id="turn-1")
+    converter.event_to_updates(ToolUseStartEvent(tool_use_id="t1", name="aliyun_api"))
+
+    updates = converter.event_to_updates(
+        ToolResultEvent(
+            tool_use_id="t1",
+            tool_name="aliyun_api",
+            result='{"Business":"value"}',
+            metadata={ALIYUN_HTTP_METADATA_KEY: {"contract_version": "aliyun_body_v1", "header_count": 1}},
+        )
+    )
+
+    assert updates[0].content[0].content.text == '{"Business":"value"}'
+    assert updates[1].status == "completed"
+    assert ALIYUN_HTTP_METADATA_KEY not in str(updates)
+    assert "aliyun_body_v1" not in str(updates)
 
 
 def test_failed_tool_result_content_is_sanitized() -> None:

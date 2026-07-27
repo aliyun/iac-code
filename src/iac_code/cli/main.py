@@ -85,6 +85,27 @@ from iac_code.mcp.cli import app as _mcp_app  # noqa: E402
 app.add_typer(_mcp_app, name="mcp")
 
 
+@app.command(help=_("Run iac-code as a local Web app."))
+def web(
+    host: str = typer.Option("127.0.0.1", help=_("HTTP server host")),
+    port: int = typer.Option(8766, help=_("HTTP server port")),
+    open_browser: bool = typer.Option(
+        True,
+        "--open/--no-open",
+        help=_("Open the Web app in the default browser on startup (use --no-open to disable)."),
+    ),
+) -> None:
+    """Run iac-code as a local Web app."""
+    from iac_code.services.telemetry import bootstrap_telemetry, graceful_shutdown
+    from iac_code.web.server import run_web_server
+
+    bootstrap_telemetry(session_id="web-server-{}".format(uuid.uuid4()))
+    try:
+        run_web_server(host=host, port=port, open_browser=open_browser)
+    finally:
+        graceful_shutdown()
+
+
 @a2a_client_app.callback()
 def a2a_client(
     ctx: typer.Context,

@@ -84,6 +84,22 @@ def test_intent_prompt_requires_dynamic_contextual_questions_for_known_deploymen
     assert '"id": "high_availability"' not in known_object_section
 
 
+def test_intent_prompt_requires_single_focused_question_per_call():
+    body = PROMPT_FILE.read_text(encoding="utf-8")
+
+    assert "每次 `ask_user_question` 只针对" in body
+    assert "不要把多个问题合并进同一个 `question`" in body
+    assert "不要把针对不同问题的选项混进同一个 `options`" in body
+
+
+def test_intent_skill_requires_single_focused_question_per_call():
+    body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "每次 `ask_user_question` 只问一个问题" in body
+    assert "不要把多个问题塞进同一个 `question`" in body
+    assert "不要把不同问题的候选混进同一个 `options`" in body
+
+
 def test_intent_prompt_guides_non_deployment_users_to_reenter_deployment_need():
     body = PROMPT_FILE.read_text(encoding="utf-8")
 

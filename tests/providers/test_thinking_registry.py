@@ -6,6 +6,7 @@ from iac_code.providers.thinking import (
     EffortLevel,
     ThinkingFamily,
     get_thinking_spec,
+    resolve_thinking_active,
 )
 
 
@@ -168,6 +169,20 @@ class TestGetThinkingSpec:
         assert kimi.use_max_completion_tokens is True
         assert kimi.uses_reasoning_effort_param is False
 
+    def test_thinking_budget_capability_false_for_effort_families(self):
+        # UI gating contract: the 思考预算 field must NOT appear for effort-driven
+        # families (Anthropic/OpenAI/Gemini). Lock the negative side so a registry
+        # edit can't silently start exposing the budget knob where it has no effect.
+        for provider_key, model in (
+            ("anthropic", "claude-opus-4-7"),
+            ("openai", "gpt-5.5"),
+            ("gemini", "gemini-3.5-flash"),
+        ):
+            spec = get_thinking_spec(provider_key, model)
+            assert spec.supports_thinking_budget is False, (provider_key, model)
+            assert spec.use_max_completion_tokens is False, (provider_key, model)
+            assert spec.default_thinking_budget is None, (provider_key, model)
+
     def test_dashscope_deepseek_supports_high_max(self):
         spec = get_thinking_spec("dashscope", "deepseek-v4-pro")
         assert spec.family is ThinkingFamily.DASHSCOPE
@@ -235,3 +250,43 @@ class TestGetThinkingSpec:
         dashscope_hosted = get_thinking_spec("dashscope", "deepseek-v4-pro")
         assert official.family is ThinkingFamily.OPENAI
         assert dashscope_hosted.family is ThinkingFamily.DASHSCOPE
+
+
+class TestResolveThinkingActive:
+    def test_dashscope_unset_defaults_on(self):
+        # 用户报告场景:qwen3.7-max 未配置 thinkingEnabled → 本回合仍思考。
+        assert resolve_thinking_active("dashscope", "qwen3.7-max", None) is True
+
+    def test_kimi_and_zhipu_unset_default_on(self):
+        assert resolve_thinking_active("kimi_cn", "kimi-k2.6", None) is True
+        assert resolve_thinking_active("zhipu_cn", "glm-5.2", None) is True
+
+    def test_reasoning_families_unset_default_off(self):
+        # reasoning-effort / budget 家族:未配置时不下发思考指令 → 视为关。
+        assert resolve_thinking_active("openai", "gpt-5.5", None) is False
+        assert resolve_thinking_active("anthropic", "claude-opus-4-8", None) is False
+        assert resolve_thinking_active("gemini", "gemini-3.5-flash", None) is False
+
+    def test_explicit_true_forces_on_across_families(self):
+        assert resolve_thinking_active("openai", "gpt-5.5", True) is True
+        assert resolve_thinking_active("dashscope", "qwen3.7-max", True) is True
+
+    def test_explicit_false_forces_off_across_families(self):
+        assert resolve_thinking_active("dashscope", "qwen3.7-max", False) is False
+        assert resolve_thinking_active("openai", "gpt-5.5", False) is False
+
+    def test_none_family_never_thinks(self):
+        # 未知模型 → NONE 家族,即使显式打开也无思考协议可用。
+        assert resolve_thinking_active("dashscope", "unknown-model", None) is False
+        assert resolve_thinking_active("dashscope", "unknown-model", True) is False
+
+    def test_dashscope_disable_effort_overrides_config(self):
+        # DashScope 的 disable-effort 令牌压过配置的“开”。
+        assert resolve_thinking_active("dashscope", "qwen3.7-max", True, effort="off") is False
+        assert resolve_thinking_active("dashscope", "qwen3.7-max", None, effort="none") is False
+        # 常规 effort 不影响默认开。
+        assert resolve_thinking_active("dashscope", "qwen3.7-max", None, effort="high") is True
+
+    def test_empty_provider_or_model_is_off(self):
+        assert resolve_thinking_active(None, None, None) is False
+        assert resolve_thinking_active("", "", True) is False

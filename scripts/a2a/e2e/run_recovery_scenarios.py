@@ -1441,6 +1441,66 @@ def run_fault_after_snapshot(args: argparse.Namespace, scenario: str) -> int:
     return _run_with_harness(args, scenario, callback)
 
 
+def run_contract_graceful_success(args: argparse.Namespace, scenario: str) -> int:
+    def callback(h: ScenarioHarness) -> None:
+        _complete_pipeline(h, args)
+        snapshot = h.fetch_state("contract-graceful-success")
+        h.checks["graceful pipeline snapshot completed"] = _snapshot_value(snapshot, "status") == "completed"
+        h.checks["graceful pipeline produced Aliyun evidence"] = _has_any_marker(
+            _all_evidence(h),
+            VSWITCH_MARKERS,
+        )
+
+    return _run_with_harness(args, scenario, callback)
+
+
+def run_contract_graceful_cancel(args: argparse.Namespace, scenario: str) -> int:
+    def callback(h: ScenarioHarness) -> None:
+        stream = h.start_stream(
+            prompt=args.initial_prompt,
+            name="01-contract-cancel-running",
+            context_id="",
+            task_id="",
+        )
+        observed_streams = _wait_for_with_intervening_ask_inputs(
+            h,
+            [stream],
+            _step_started("intent_parsing"),
+            description="step_started(intent_parsing)",
+            timeout=args.event_timeout,
+            name_prefix="contract-cancel",
+        )
+        _wait_for_contract_provider_request(h)
+        cancel_response = h.cancel_pipeline_task("contract-cancel")
+        h.checks["CancelTask returned response"] = isinstance(cancel_response, dict) and "error" not in cancel_response
+        _wait_any_or_note(
+            observed_streams,
+            _status_state("TASK_STATE_CANCELED"),
+            h,
+            description="TASK_STATE_CANCELED",
+        )
+        _join_stream_or_note(stream, h)
+        snapshot = h.fetch_state("contract-graceful-cancel")
+        h.checks["graceful cancel persisted canceled state"] = _snapshot_value(snapshot, "status") == "canceled"
+
+    return _run_with_harness(args, scenario, callback)
+
+
+def _wait_for_contract_provider_request(h: ScenarioHarness) -> None:
+    capture_value = h.server_env.get("IAC_CODE_E2E_PROVIDER_CAPTURE", "")
+    if not capture_value:
+        return
+    capture_path = Path(capture_value)
+    deadline = time.monotonic() + min(30.0, h.args.event_timeout)
+    while time.monotonic() < deadline:
+        if capture_path.exists() and capture_path.stat().st_size > 0:
+            h.checks["provider request started before graceful cancel"] = True
+            return
+        time.sleep(0.05)
+    h.checks["provider request started before graceful cancel"] = False
+    raise TimeoutError("provider request did not start before graceful cancel")
+
+
 def run_rollback_step5_cleanup(args: argparse.Namespace, scenario: str) -> int:
     return _run_rollback_step5_cleanup(args, scenario, kill_during_cleanup=False)
 
@@ -3134,6 +3194,8 @@ _CANCEL_SCENARIOS = {
     "cancel-step5": "deploying",
 }
 _REAL_CLOUD_SCENARIOS = {
+    "contract-graceful-cancel",
+    "contract-graceful-success",
     "fault-after-snapshot",
     "image-ask-waiting",
     "image-initial",
@@ -3152,6 +3214,8 @@ _REAL_CLOUD_SCENARIOS = {
     *_CANCEL_SCENARIOS,
 }
 _SCENARIOS: dict[str, Callable[[argparse.Namespace, str], int]] = {
+    "contract-graceful-cancel": run_contract_graceful_cancel,
+    "contract-graceful-success": run_contract_graceful_success,
     "image-ask-waiting": run_image_ask_waiting,
     "image-initial": run_image_initial,
     "image-interrupt": run_image_interrupt,

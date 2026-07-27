@@ -254,6 +254,48 @@ class TestGrepExecute:
         assert "secret.txt" not in result.content
 
 
+@pytest.mark.asyncio
+class TestGrepDoesNotBlockEventLoop:
+    """The pure-Python fallback walks the tree synchronously; it must run off the
+    event loop (asyncio.to_thread) so it never starves web turns / SSE / handlers.
+    """
+
+    async def test_python_fallback_does_not_starve_loop(self, tool, tmp_path, monkeypatch):
+        import asyncio
+        import threading
+
+        import iac_code.tools.grep as grep_module
+
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocking_python_grep(*args, **kwargs):
+            entered.set()
+            release.wait(5)
+            return ""
+
+        monkeypatch.setattr(grep_module, "_is_rg_available", lambda: False)
+        monkeypatch.setattr(grep_module, "_python_grep", blocking_python_grep)
+
+        context = ToolContext(cwd=str(tmp_path))
+        task = asyncio.create_task(
+            tool.execute(tool_input={"pattern": "needle", "path": str(tmp_path)}, context=context)
+        )
+
+        # Worker thread entered the blocking body while the loop stayed free.
+        await asyncio.wait_for(asyncio.to_thread(entered.wait, 1), timeout=2)
+        assert not task.done()
+        # The loop is still scheduling coroutines despite the blocked worker.
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert not task.done()
+
+        release.set()
+        result = await asyncio.wait_for(task, timeout=2)
+        assert result.is_error is False
+        assert result.content == "No matches"
+
+
 class TestGrepRendering:
     def test_render_tool_use_empty(self, tool):
         assert tool.render_tool_use_message({}) is None

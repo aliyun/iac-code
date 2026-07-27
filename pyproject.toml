@@ -51,6 +51,7 @@ dependencies = [
 
 [project.optional-dependencies]
 http = [
+    "a2a-sdk[http-server,signing]>=1.0.2,<2",
     "starlette>=0.39.0",
     "uvicorn[standard]>=0.30.0",
 ]
@@ -105,6 +106,11 @@ version = {attr = "iac_code.__version__"}
     "**/*.yaml",
     "**/*.json",
     "**/*.md",
+    "**/*.html",
+    "**/*.css",
+    "**/*.js",
+    "**/*.svg",
+    "**/*.LICENSE",
     "**/*.rego",
     "**/*.mo",
     "**/*.po",

@@ -4,11 +4,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from iac_code.agent.message import Message as AgentMessage
+from iac_code.agent.message import ToolResultBlock
 from iac_code.commands import create_default_registry
 from iac_code.commands import prompt as prompt_module
 from iac_code.pipeline.config import RunMode
 from iac_code.pipeline.engine.cleanup import create_cleanup_prompt_message
 from iac_code.providers.base import ContentBlock, Message, ToolDefinition
+from iac_code.tools.cloud.aliyun.result_contract import ALIYUN_HTTP_METADATA_KEY
+from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY
+from iac_code.types.stream_events import TOOL_RENDER_METADATA_KEY
 
 
 class _FakeAgentLoop:
@@ -67,6 +71,39 @@ def test_default_registry_hides_prompt_command():
     assert command.hidden is True
     assert "prompt" not in {cmd.name for cmd in registry.get_all()}
     assert "prompt" not in registry.get_completions("p")
+
+
+def test_pipeline_export_removes_only_aliyun_http_from_copy() -> None:
+    source = AgentMessage(
+        role="user",
+        content=[
+            ToolResultBlock(
+                tool_use_id="tool-1",
+                content='{"Business":"value"}',
+                metadata={
+                    ALIYUN_HTTP_METADATA_KEY: {
+                        "contract_version": "aliyun_body_v1",
+                        "header_count": 2,
+                    },
+                    TOOL_RENDER_METADATA_KEY: {"result_compact": "Call succeeded"},
+                    EXTERNALIZED_RESULT_PATH_METADATA_KEY: "/tmp/result.json",
+                },
+            )
+        ],
+    )
+
+    exported = prompt_module._pipeline_export_message(source)
+
+    assert exported is not source
+    assert isinstance(exported, AgentMessage)
+    exported_block = exported.content[0]
+    source_block = source.content[0]
+    assert isinstance(exported_block, ToolResultBlock)
+    assert isinstance(source_block, ToolResultBlock)
+    assert ALIYUN_HTTP_METADATA_KEY not in exported_block.metadata
+    assert exported_block.metadata[TOOL_RENDER_METADATA_KEY] == {"result_compact": "Call succeeded"}
+    assert exported_block.metadata[EXTERNALIZED_RESULT_PATH_METADATA_KEY] == "/tmp/result.json"
+    assert source_block.metadata[ALIYUN_HTTP_METADATA_KEY]["contract_version"] == "aliyun_body_v1"
 
 
 def test_prompt_html_uses_tabs_without_memory_tab():

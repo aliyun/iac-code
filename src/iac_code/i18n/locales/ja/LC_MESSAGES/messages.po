@@ -29,10 +29,11 @@ msgid ""
 msgstr "状態スナップショット、再生、中断、並列候補ストリーム用の任意の iac-code パイプラインイベント拡張です。"
 
 #: src/iac_code/a2a/app.py src/iac_code/a2a/pipeline_recovery.py
+#: src/iac_code/web/pipeline.py
 msgid "contextId or taskId is required"
 msgstr "contextId または taskId が必要です"
 
-#: src/iac_code/a2a/app.py
+#: src/iac_code/a2a/app.py src/iac_code/web/pipeline.py
 msgid "afterSequence must be a non-negative integer"
 msgstr "afterSequence は非負整数である必要があります"
 
@@ -235,7 +236,7 @@ msgstr "[切り詰め]"
 msgid "Authentication required. Please configure your API credentials."
 msgstr "認証が必要です。API 認証情報を設定してください。"
 
-#: src/iac_code/acp/session.py
+#: src/iac_code/acp/session.py src/iac_code/web/permissions.py
 msgid "Allow once"
 msgstr "今回のみ許可"
 
@@ -244,7 +245,7 @@ msgstr "今回のみ許可"
 msgid "Always allow \"{rule}\" (this session)"
 msgstr "\"{rule}\" を常に許可（このセッション）"
 
-#: src/iac_code/acp/session.py
+#: src/iac_code/acp/session.py src/iac_code/web/permissions.py
 msgid "Always allow this tool"
 msgstr "このツールを常に許可"
 
@@ -675,6 +676,24 @@ msgid "Update iac-code to the latest version."
 msgstr "iac-code を最新バージョンに更新します。"
 
 #: src/iac_code/cli/main.py
+msgid "Run iac-code as a local Web app."
+msgstr "iac-code をローカル Web アプリとして実行します。"
+
+#: src/iac_code/cli/main.py
+msgid "HTTP server host"
+msgstr "HTTP サーバーのホスト"
+
+#: src/iac_code/cli/main.py
+msgid "HTTP server port"
+msgstr "HTTP サーバーのポート"
+
+#: src/iac_code/cli/main.py
+msgid ""
+"Open the Web app in the default browser on startup (use --no-open to "
+"disable)."
+msgstr "起動時に既定のブラウザーで Web アプリを開きます(無効にするには --no-open を使用)。"
+
+#: src/iac_code/cli/main.py
 msgid "YAML config file containing A2A client options"
 msgstr "A2A クライアントオプションを含む YAML 設定ファイル"
 
@@ -783,14 +802,6 @@ msgstr "iac-code を ACP サーバーとして実行します。"
 #: src/iac_code/cli/main.py
 msgid "Transport type: stdio or http"
 msgstr "トランスポートの種類：stdio または http"
-
-#: src/iac_code/cli/main.py
-msgid "HTTP server port"
-msgstr "HTTP サーバーのポート"
-
-#: src/iac_code/cli/main.py
-msgid "HTTP server host"
-msgstr "HTTP サーバーのホスト"
 
 #: src/iac_code/cli/main.py
 msgid "Run iac-code as an A2A 1.0 server."
@@ -1219,7 +1230,7 @@ msgstr "認証をキャンセルしました"
 msgid "Select provider — {group}"
 msgstr "プロバイダーを選択 — {group}"
 
-#: src/iac_code/commands/auth.py
+#: src/iac_code/commands/auth.py src/iac_code/web/settings.py
 msgid "Third-party"
 msgstr "サードパーティ"
 
@@ -1600,6 +1611,7 @@ msgid "Invalid MCP scope {scope!r}. Valid values: user, local, project."
 msgstr "無効な MCP スコープ {scope!r}。有効な値: user、local、project。"
 
 #: src/iac_code/commands/mcp.py src/iac_code/mcp/cli.py
+#: src/iac_code/web/mcp_settings.py
 #, python-brace-format
 msgid "Scope {scope!r} cannot be used for persisted MCP config."
 msgstr "スコープ {scope!r} は永続化された MCP 設定には使用できません。"
@@ -2433,7 +2445,7 @@ msgstr "リモート MCP server には --url が必要です。"
 msgid "Invalid JSON: {error}"
 msgstr "無効な JSON: {error}"
 
-#: src/iac_code/mcp/cli.py
+#: src/iac_code/mcp/cli.py src/iac_code/web/mcp_settings.py
 msgid "MCP server JSON must be an object."
 msgstr "MCP server JSON はオブジェクトでなければなりません。"
 
@@ -3105,6 +3117,7 @@ msgstr "server {server!r} の MCP tool {tool!r}。"
 #: src/iac_code/services/permissions/pipeline.py src/iac_code/tools/base.py
 #: src/iac_code/tools/bash/bash_tool.py
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#: src/iac_code/web/permissions.py src/iac_code/web/runtime.py
 #, python-brace-format
 msgid "Allow {}?"
 msgstr "{} を許可しますか？"
@@ -5181,10 +5194,12 @@ msgid "Calling {action}..."
 msgstr "{action} を呼び出しています…"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#: src/iac_code/tools/cloud/aliyun/result_contract.py
 #: src/iac_code/tools/cloud/base_api.py
 msgid "Call succeeded"
 msgstr "呼び出しに成功しました"
 
+#: src/iac_code/tools/cloud/aliyun/result_contract.py
 #: src/iac_code/tools/cloud/base_api.py
 #, python-brace-format
 msgid "Received response ({count} lines)"
@@ -5350,6 +5365,7 @@ msgid "matched deny rule: {rule}"
 msgstr "一致した拒否ルール: {rule}"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#: src/iac_code/tools/cloud/aliyun/result_contract.py
 #, python-brace-format
 msgid "Call succeeded (RequestId: {request_id})"
 msgstr "呼び出しに成功しました（RequestId: {request_id}）"
@@ -5476,6 +5492,23 @@ msgid ""
 msgstr ""
 "{operation} の Alibaba Cloud API "
 "入力が無効です。プロダクト、アクション、バージョン、リージョン、パラメーターを確認してください。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid ""
+"Alibaba Cloud returned the target response, but its headers are too large"
+" to display safely. Verify the cloud resource state before retrying."
+msgstr ""
+"Alibaba Cloud "
+"は対象のレスポンスを返しましたが、ヘッダーが大きすぎるため安全に表示できません。再試行する前にクラウドリソースの状態を確認してください。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud returned an unsupported response body for {operation}. "
+"Verify the cloud resource state before retrying."
+msgstr ""
+"Alibaba Cloud は {operation} "
+"に対してサポートされていないレスポンス本文を返しました。再試行する前にクラウドリソースの状態を確認してください。"
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
@@ -9894,6 +9927,538 @@ msgstr "シンボリックリンクまたは再解析ポイントの追跡を拒
 msgid "refusing to open non-regular file: {path}"
 msgstr "通常ファイルではないファイルを開くことを拒否しました: {path}"
 
+#: src/iac_code/web/app.py
+msgid "This session was created outside the web entry and is read-only."
+msgstr "このセッションは web 以外のエントリーで作成されたため、読み取り専用です。"
+
+#: src/iac_code/web/app.py
+#, python-brace-format
+msgid "Current model {} does not support image input."
+msgstr "現在のモデル {} は画像入力をサポートしていません。"
+
+#: src/iac_code/web/app.py src/iac_code/web/images.py
+msgid "image data is too large"
+msgstr "画像データが大きすぎます"
+
+#: src/iac_code/web/app.py
+msgid "session is archived"
+msgstr "セッションはアーカイブされています"
+
+#: src/iac_code/web/app.py src/iac_code/web/pipeline_actions.py
+msgid "pipeline action failed"
+msgstr "パイプライン操作が失敗しました"
+
+#: src/iac_code/web/app.py
+msgid "not found"
+msgstr "見つかりません"
+
+#: src/iac_code/web/app.py src/iac_code/web/pipeline_actions.py
+msgid "pipeline contextId and taskId are required"
+msgstr "パイプラインの contextId と taskId が必要です"
+
+#: src/iac_code/web/app.py
+msgid "pipeline contextId or taskId is invalid"
+msgstr "パイプラインの contextId または taskId が無効です"
+
+#: src/iac_code/web/app.py src/iac_code/web/session_manager.py
+msgid "session not found"
+msgstr "セッションが見つかりません"
+
+#: src/iac_code/web/app.py
+msgid "resume target is ambiguous"
+msgstr "再開対象が曖昧です"
+
+#: src/iac_code/web/app.py
+msgid "malformed JSON request body"
+msgstr "JSON リクエストボディの形式が不正です"
+
+#: src/iac_code/web/app.py
+msgid "request body must be a JSON object"
+msgstr "リクエストボディは JSON オブジェクトである必要があります"
+
+#: src/iac_code/web/app.py
+msgid "choice is invalid"
+msgstr "選択が無効です"
+
+#: src/iac_code/web/app.py
+msgid "free_text is not allowed"
+msgstr "free_text は許可されていません"
+
+#: src/iac_code/web/app.py
+msgid "selected_id was not offered"
+msgstr "selected_id は提示されていません"
+
+#: src/iac_code/web/app.py
+msgid "selected_label is not allowed without selected_id"
+msgstr "selected_id なしで selected_label は許可されていません"
+
+#: src/iac_code/web/app.py
+msgid "selected_id is required unless free text is allowed"
+msgstr "自由テキストが許可されていない限り selected_id が必要です"
+
+#: src/iac_code/web/app.py
+msgid "afterSequence must be an integer"
+msgstr "afterSequence は整数である必要があります"
+
+#: src/iac_code/web/app.py
+msgid "No update is currently available."
+msgstr "現在利用可能な更新はありません。"
+
+#: src/iac_code/web/app.py
+msgid "An update is already in progress."
+msgstr "更新はすでに進行中です。"
+
+#: src/iac_code/web/app.py
+#, python-brace-format
+msgid "The update command exited with code {}."
+msgstr "更新コマンドは終了コード {} で終了しました。"
+
+#: src/iac_code/web/app.py src/iac_code/web/session_manager.py
+#: src/iac_code/web/settings.py
+msgid "mode must be normal or pipeline"
+msgstr "mode は normal または pipeline である必要があります"
+
+#: src/iac_code/web/app.py
+msgid "message text, image, or file is required"
+msgstr "メッセージテキスト、画像、またはファイルが必要です"
+
+#: src/iac_code/web/app.py
+msgid "sessionId is required"
+msgstr "sessionId が必要です"
+
+#: src/iac_code/web/app.py
+msgid "image not found"
+msgstr "画像が見つかりません"
+
+#: src/iac_code/web/app.py
+msgid "path required"
+msgstr "パスが必要です"
+
+#: src/iac_code/web/app.py
+msgid "forbidden"
+msgstr "禁止されています"
+
+#: src/iac_code/web/app.py
+msgid "file not found"
+msgstr "ファイルが見つかりません"
+
+#: src/iac_code/web/app.py
+msgid "transcript not found"
+msgstr "トランスクリプトが見つかりません"
+
+#: src/iac_code/web/app.py
+msgid "debugEnabled must be a boolean"
+msgstr "debugEnabled はブール値である必要があります"
+
+#: src/iac_code/web/app.py
+msgid "pinned must be a boolean"
+msgstr "pinned はブール値である必要があります"
+
+#: src/iac_code/web/app.py
+msgid "archived must be a boolean"
+msgstr "archived はブール値である必要があります"
+
+#: src/iac_code/web/app.py
+msgid "enabled is required"
+msgstr "enabled が必要です"
+
+#: src/iac_code/web/app.py
+msgid "enabled must be a boolean or null"
+msgstr "enabled はブール値または null である必要があります"
+
+#: src/iac_code/web/app.py
+msgid "label must be a string"
+msgstr "label は文字列である必要があります"
+
+#: src/iac_code/web/app.py
+msgid "project directory is not available on disk"
+msgstr "プロジェクトディレクトリがディスク上で利用できません"
+
+#: src/iac_code/web/app.py
+#, python-brace-format
+msgid "failed to reveal project: {}"
+msgstr "プロジェクトを表示できませんでした: {}"
+
+#: src/iac_code/web/app.py
+msgid "suggestion kind is invalid"
+msgstr "候補の種類が無効です"
+
+#: src/iac_code/web/app.py
+msgid "project not found"
+msgstr "プロジェクトが見つかりません"
+
+#: src/iac_code/web/app.py
+msgid "Installation in progress"
+msgstr "インストール進行中"
+
+#: src/iac_code/web/app.py
+msgid "project or session not found"
+msgstr "プロジェクトまたはセッションが見つかりません"
+
+#: src/iac_code/web/app.py
+msgid "name is required"
+msgstr "名前が必要です"
+
+#: src/iac_code/web/app.py
+msgid "decision must be 'approve' or 'reject'"
+msgstr "decision は 'approve' または 'reject' である必要があります"
+
+#: src/iac_code/web/app.py src/iac_code/web/pipeline.py
+msgid "pipeline state not found"
+msgstr "パイプラインの状態が見つかりません"
+
+#: src/iac_code/web/app.py
+msgid "internal server error"
+msgstr "内部サーバーエラー"
+
+#: src/iac_code/web/app.py
+msgid "session is not a pipeline session"
+msgstr "セッションはパイプラインセッションではありません"
+
+#: src/iac_code/web/app.py
+msgid "No active provider is configured."
+msgstr "アクティブなプロバイダーが設定されていません。"
+
+#: src/iac_code/web/app.py
+msgid "No active model is configured."
+msgstr "アクティブなモデルが設定されていません。"
+
+#: src/iac_code/web/app.py
+msgid "user escape commands are not available in pipeline mode"
+msgstr "ユーザーエスケープコマンドはパイプラインモードでは使用できません"
+
+#: src/iac_code/web/app.py
+msgid "Shell command canceled."
+msgstr "シェルコマンドがキャンセルされました。"
+
+#: src/iac_code/web/app.py
+msgid "choice was not offered"
+msgstr "その選択は提示されていません"
+
+#: src/iac_code/web/app.py
+msgid "index must be an integer"
+msgstr "index は整数である必要があります"
+
+#: src/iac_code/web/app.py
+msgid "normal-mode interrupts do not support attachments"
+msgstr "通常モードの割り込みは添付ファイルをサポートしていません"
+
+#: src/iac_code/web/files.py
+msgid "session cwd is not available"
+msgstr "セッションの作業ディレクトリが利用できません"
+
+#: src/iac_code/web/files.py
+msgid "query is invalid"
+msgstr "クエリが無効です"
+
+#: src/iac_code/web/files.py
+msgid "file reference is invalid"
+msgstr "ファイル参照が無効です"
+
+#: src/iac_code/web/files.py
+msgid "file reference escapes the workspace"
+msgstr "ファイル参照がワークスペースの外に出ています"
+
+#: src/iac_code/web/images.py
+msgid "image id is invalid"
+msgstr "画像 id が無効です"
+
+#: src/iac_code/web/images.py
+msgid "session id is invalid"
+msgstr "セッション id が無効です"
+
+#: src/iac_code/web/images.py
+msgid "media type is invalid"
+msgstr "メディアタイプが無効です"
+
+#: src/iac_code/web/images.py
+msgid "image data is empty"
+msgstr "画像データが空です"
+
+#: src/iac_code/web/images.py
+msgid "image data is not a supported image"
+msgstr "画像データはサポートされている画像ではありません"
+
+#: src/iac_code/web/images.py
+msgid "image data does not match media type"
+msgstr "画像データがメディアタイプと一致しません"
+
+#: src/iac_code/web/images.py
+msgid "cwd is invalid"
+msgstr "cwd が無効です"
+
+#: src/iac_code/web/images.py
+msgid "image fallback cache limit exceeded"
+msgstr "画像フォールバックキャッシュの上限を超えました"
+
+#: src/iac_code/web/images.py
+msgid "failed to write image data"
+msgstr "画像データの書き込みに失敗しました"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "MCP scope is required."
+msgstr "MCP スコープが必要です。"
+
+#: src/iac_code/web/mcp_settings.py
+#, python-brace-format
+msgid "MCP server {name!r} not found."
+msgstr "MCP サーバー {name!r} が見つかりません。"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "command is required for stdio MCP servers."
+msgstr "stdio MCP サーバーには command が必要です。"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "url is required for remote MCP servers."
+msgstr "リモート MCP サーバーには url が必要です。"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "url is required for ws MCP servers."
+msgstr "ws MCP サーバーには url が必要です。"
+
+#: src/iac_code/web/mcp_settings.py
+#, python-brace-format
+msgid "Invalid transport {transport!r}. Valid values: stdio, http, sse, ws."
+msgstr "無効なトランスポート {transport!r}。有効な値: stdio、http、sse、ws。"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "OAuth callback port must be an integer."
+msgstr "OAuth コールバックポートは整数である必要があります。"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "MCP server name is required."
+msgstr "MCP サーバー名が必要です。"
+
+#: src/iac_code/web/mcp_settings.py
+#, python-brace-format
+msgid "MCP server {name!r} is not defined in a project config."
+msgstr "MCP サーバー {name!r} はプロジェクト設定で定義されていません。"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "Failed to start MCP OAuth flow."
+msgstr "MCP OAuth フローの開始に失敗しました。"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "Unknown OAuth flow."
+msgstr "不明な OAuth フローです。"
+
+#: src/iac_code/web/mcp_settings.py
+msgid "callback_url is required."
+msgstr "callback_url が必要です。"
+
+#: src/iac_code/web/memory.py
+msgid "user memory path is invalid"
+msgstr "ユーザーメモリのパスが無効です"
+
+#: src/iac_code/web/memory.py
+msgid "project memory path is invalid"
+msgstr "プロジェクトメモリのパスが無効です"
+
+#: src/iac_code/web/permissions.py
+msgid "Deny once"
+msgstr "今回のみ拒否"
+
+#: src/iac_code/web/permissions.py
+msgid "Always allow this session"
+msgstr "このセッションでは常に許可"
+
+#: src/iac_code/web/permissions.py
+msgid "Always deny this session"
+msgstr "このセッションでは常に拒否"
+
+#: src/iac_code/web/permissions.py
+#, python-brace-format
+msgid "Unknown elicitation action {!r}."
+msgstr "不明な要求アクション {!r}。"
+
+#: src/iac_code/web/permissions.py
+#, python-brace-format
+msgid "A value is required for {}."
+msgstr "{} には値が必要です。"
+
+#: src/iac_code/web/permissions.py
+#, python-brace-format
+msgid "Invalid value {!r}."
+msgstr "無効な値 {!r}。"
+
+#: src/iac_code/web/permissions.py
+msgid "this action"
+msgstr "この操作"
+
+#: src/iac_code/web/permissions.py
+#, python-brace-format
+msgid "Always allow {}"
+msgstr "{} を常に許可"
+
+#: src/iac_code/web/permissions.py
+#, python-brace-format
+msgid "Always deny {}"
+msgstr "{} を常に拒否"
+
+#: src/iac_code/web/permissions.py
+msgid "Always deny this tool"
+msgstr "このツールを常に拒否"
+
+#: src/iac_code/web/pipeline.py
+msgid "candidateName or candidateIndex is required"
+msgstr "candidateName または candidateIndex が必要です"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline is not waiting for candidate input"
+msgstr "パイプラインは候補の入力を待っていません"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline is not active"
+msgstr "パイプラインはアクティブではありません"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline context not found"
+msgstr "パイプラインコンテキストが見つかりません"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline context belongs to a different workspace"
+msgstr "パイプラインコンテキストは別のワークスペースに属しています"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline task not found"
+msgstr "パイプラインタスクが見つかりません"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline task belongs to a different context"
+msgstr "パイプラインタスクは別のコンテキストに属しています"
+
+#: src/iac_code/web/pipeline_actions.py
+msgid "pipeline action canceled"
+msgstr "パイプライン操作がキャンセルされました"
+
+#: src/iac_code/web/pipeline_transcript.py
+msgid "Step"
+msgstr "ステップ"
+
+#: src/iac_code/web/pipeline_transcript.py src/iac_code/web/session_manager.py
+#, python-brace-format
+msgid "◆ Plan: {}"
+msgstr "◆ プラン: {}"
+
+#: src/iac_code/web/pipeline_transcript.py src/iac_code/web/session_manager.py
+msgid "↪ Normal chat"
+msgstr "↪ 通常チャット"
+
+#: src/iac_code/web/pipeline_transcript.py src/iac_code/web/session_manager.py
+msgid "Normal chat"
+msgstr "通常チャット"
+
+#: src/iac_code/web/runtime.py
+#, python-brace-format
+msgid ""
+"{}\n"
+"\n"
+"Referenced files:\n"
+"{}"
+msgstr ""
+"{}\n"
+"\n"
+"参照ファイル:\n"
+"{}"
+
+#: src/iac_code/web/runtime.py
+#, python-brace-format
+msgid ""
+"Referenced files:\n"
+"{}"
+msgstr ""
+"参照ファイル:\n"
+"{}"
+
+#: src/iac_code/web/server.py
+msgid "IaC Code Web is running"
+msgstr "IaC Code Web が起動しました"
+
+#: src/iac_code/web/server.py
+#, python-brace-format
+msgid "Local:  {}"
+msgstr "ローカル:  {}"
+
+#: src/iac_code/web/server.py
+msgid "Press Ctrl+C to stop"
+msgstr "停止するには Ctrl+C を押してください"
+
+#: src/iac_code/web/server.py
+msgid ""
+"Web server dependencies are missing. Install with: pip install 'iac-"
+"code[http]'"
+msgstr "Web サーバーの依存関係が不足しています。次でインストールしてください: pip install 'iac-code[http]'"
+
+#: src/iac_code/web/session_manager.py
+msgid "sessionId is invalid"
+msgstr "sessionId が無効です"
+
+#: src/iac_code/web/session_manager.py src/iac_code/web/settings.py
+msgid "unknown provider"
+msgstr "不明なプロバイダー"
+
+#: src/iac_code/web/session_manager.py src/iac_code/web/settings.py
+msgid "unknown model"
+msgstr "不明なモデル"
+
+#: src/iac_code/web/session_manager.py src/iac_code/web/settings.py
+msgid "unknown effort"
+msgstr "不明な推論強度"
+
+#: src/iac_code/web/session_manager.py
+#, python-brace-format
+msgid "Pipeline · {}"
+msgstr "パイプライン · {}"
+
+#: src/iac_code/web/session_manager.py
+#, python-brace-format
+msgid "Session · {}"
+msgstr "セッション · {}"
+
+#: src/iac_code/web/settings.py
+msgid "unknown theme"
+msgstr "不明なテーマ"
+
+#: src/iac_code/web/settings.py
+msgid "unknown language"
+msgstr "不明な言語"
+
+#: src/iac_code/web/settings.py
+msgid "unknown permission mode"
+msgstr "不明な権限モード"
+
+#: src/iac_code/web/settings.py
+msgid "Other"
+msgstr "その他"
+
+#: src/iac_code/web/settings.py
+msgid "Managed by external login"
+msgstr "外部ログインによって管理"
+
+#: src/iac_code/web/settings.py
+msgid "provider is not configured"
+msgstr "プロバイダーが設定されていません"
+
+#: src/iac_code/web/settings.py
+msgid "cannot clear active provider"
+msgstr "アクティブなプロバイダーをクリアできません"
+
+#: src/iac_code/web/settings.py
+msgid "unknown partner source"
+msgstr "不明なパートナーソース"
+
+#: src/iac_code/web/settings.py
+msgid "unknown aliyun credential mode"
+msgstr "不明な Aliyun 認証情報モード"
+
+#: src/iac_code/web/settings.py
+msgid "stored aliyun credentials are invalid"
+msgstr "保存された Aliyun 認証情報が無効です"
+
+#: src/iac_code/web/shell.py
+msgid "Allow Bash?"
+msgstr "Bash を許可しますか？"
+
 #~ msgid "toggle preview"
 #~ msgstr "プレビューを切り替え"
 
@@ -10349,3 +10914,7 @@ msgstr "通常ファイルではないファイルを開くことを拒否しま
 #~ "Template structure validation found the "
 #~ "following issues, please fix and retry:"
 #~ msgstr "テンプレート構造の検証で以下の問題が見つかりました。修正して再試行してください:"
+
+#~ msgid "由外部登录管理"
+#~ msgstr "外部ログインによって管理"
+

@@ -15,6 +15,7 @@ from iac_code.a2a.artifacts import sanitize_public_tool_output_data
 from iac_code.mcp.progress import mcp_progress_metadata
 from iac_code.mcp.redaction import sanitize_mcp_public_data
 from iac_code.services.permissions.audit import build_input_summary
+from iac_code.tools.cloud.aliyun.result_contract import ALIYUN_HTTP_METADATA_KEY
 from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY
 from iac_code.types.stream_events import (
     TOOL_RENDER_METADATA_KEY,
@@ -64,7 +65,12 @@ def _strip_internal_tool_metadata(metadata: Any) -> Any:
         return {
             str(key): _strip_internal_tool_metadata(value)
             for key, value in metadata.items()
-            if key not in {EXTERNALIZED_RESULT_PATH_METADATA_KEY, TOOL_RENDER_METADATA_KEY}
+            if key
+            not in {
+                ALIYUN_HTTP_METADATA_KEY,
+                EXTERNALIZED_RESULT_PATH_METADATA_KEY,
+                TOOL_RENDER_METADATA_KEY,
+            }
         }
     if isinstance(metadata, list):
         return [_strip_internal_tool_metadata(item) for item in metadata]

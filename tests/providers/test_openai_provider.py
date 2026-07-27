@@ -279,6 +279,71 @@ class TestOpenAIBuildThinkingKwargs:
         assert p._effort_request_kwargs() == p._build_thinking_kwargs()
 
 
+class TestOpenAIMaxOutputTokens:
+    def test_configured_cap_overrides_default_thinking_disabled(self):
+        from iac_code.providers.openai_provider import OpenAIProvider
+
+        p = OpenAIProvider(
+            model="gpt-5.5",
+            api_key="k",
+            thinking_enabled=False,
+            max_completion_tokens=40000,
+        )
+        assert p._token_limit_kwargs(8192) == {"max_tokens": 40000}
+
+    def test_configured_cap_overrides_default_for_non_max_completion_model(self):
+        from iac_code.providers.openai_provider import OpenAIProvider
+
+        # gpt-5.5 uses the OpenAI family spec (use_max_completion_tokens=False).
+        p = OpenAIProvider(model="gpt-5.5", api_key="k", effort="high", max_completion_tokens=40000)
+        assert p._token_limit_kwargs(8192) == {"max_tokens": 40000}
+
+    def test_blank_config_falls_back_to_request_default(self):
+        from iac_code.providers.openai_provider import OpenAIProvider
+
+        p = OpenAIProvider(model="gpt-5.5", api_key="k", thinking_enabled=False)
+        assert p._token_limit_kwargs(8192) == {"max_tokens": 8192}
+
+    def test_configured_cap_uses_new_model_capability_without_thinking_budget(self):
+        from iac_code.providers.openai_provider import OpenAIProvider
+
+        # The current DashScope capability table does not expose a thinking budget for glm-5.2.
+        p = OpenAIProvider(
+            model="glm-5.2",
+            api_key="k",
+            provider_key="dashscope",
+            thinking_enabled=True,
+            max_completion_tokens=50000,
+        )
+        assert p._token_limit_kwargs(8192) == {"max_completion_tokens": 50000}
+
+    def test_unsupported_explicit_thinking_budget_does_not_inflate_cap(self):
+        from iac_code.providers.openai_provider import OpenAIProvider
+
+        # An explicit budget is ignored when the current model capability does not support it.
+        p = OpenAIProvider(
+            model="glm-5.2",
+            api_key="k",
+            provider_key="dashscope",
+            thinking_enabled=True,
+            thinking_budget=2000,
+            max_completion_tokens=50000,
+        )
+        assert p._token_limit_kwargs(8192) == {"max_completion_tokens": 50000}
+
+    def test_blank_cap_uses_request_default_for_max_completion_model(self):
+        from iac_code.providers.openai_provider import OpenAIProvider
+
+        # Without a configured cap or supported budget, preserve the caller's default.
+        p = OpenAIProvider(
+            model="glm-5.2",
+            api_key="k",
+            provider_key="dashscope",
+            thinking_enabled=True,
+        )
+        assert p._token_limit_kwargs(8192) == {"max_completion_tokens": 8192}
+
+
 @pytest.mark.asyncio
 class TestOpenAIStream:
     async def test_text_chunks_and_usage(self):

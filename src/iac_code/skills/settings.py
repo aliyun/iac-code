@@ -7,7 +7,7 @@ from typing import Any
 import yaml
 
 from iac_code.config import get_settings_path
-from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
+from iac_code.utils.file_security import atomic_write_text, ensure_private_dir, ensure_private_file
 
 
 def normalize_skill_name(name: str) -> str:
@@ -50,6 +50,8 @@ def save_disabled_skills(disabled: set[str], *, locked_skill_names: set[str] | N
     )
 
     path = get_settings_path()
+    if path.is_symlink():
+        raise ValueError("settings path is invalid")
     data = _load_settings()
     if normalized:
         data["disabled_skills"] = normalized
@@ -57,5 +59,5 @@ def save_disabled_skills(disabled: set[str], *, locked_skill_names: set[str] | N
         data.pop("disabled_skills", None)
 
     ensure_private_dir(path.parent)
-    path.write_text(yaml.safe_dump(data, default_flow_style=False, allow_unicode=True), encoding="utf-8")
+    atomic_write_text(path, yaml.safe_dump(data, default_flow_style=False, allow_unicode=True), encoding="utf-8")
     ensure_private_file(path)

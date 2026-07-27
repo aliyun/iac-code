@@ -469,6 +469,31 @@ PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
 }
 
 
+# Shared vendor grouping and ordering for provider selection UIs.
+# Single source of truth consumed by both the REPL `/auth` flow
+# (commands/auth.py) and the Web workbench model settings (web/settings.py)
+# so the two never drift. The union of keys must cover PROVIDER_REGISTRY.
+PROVIDER_GROUPS: list[tuple[str, tuple[str, ...]]] = [
+    (
+        "Alibaba Cloud",
+        ("dashscope", "dashscope_token_plan", "aliyun_codingplan", "aliyun_codingplan_intl", "modelscope"),
+    ),
+    ("ZhiPu AI", ("zhipu_cn", "zhipu_intl", "zhipu_cn_codingplan", "zhipu_intl_codingplan")),
+    ("Kimi", ("kimi_cn", "kimi_intl")),
+    ("MiniMax", ("minimax_cn", "minimax_intl")),
+    ("Volcengine", ("volcengine_cn", "volcengine_cn_codingplan")),
+    ("SiliconFlow", ("siliconflow_cn", "siliconflow_intl")),
+    ("DeepSeek", ("deepseek",)),
+    ("OpenAI", ("openai",)),
+    ("Anthropic", ("anthropic",)),
+    ("Google Gemini", ("gemini",)),
+    ("Azure OpenAI", ("azure_openai",)),
+    ("OpenRouter", ("openrouter",)),
+    ("Local", ("ollama", "lmstudio")),
+    ("Compatible", ("openai_compatible", "anthropic_compatible")),
+]
+
+
 # Extraction markers for pybabel — these calls let the tool discover
 # all display_name strings so they appear in messages.pot.
 _DISPLAY_NAME_MARKERS = [

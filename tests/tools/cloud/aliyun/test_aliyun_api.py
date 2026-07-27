@@ -37,6 +37,7 @@ from iac_code.tools.cloud.aliyun.openmeta import MetadataFetch, ProductMetadata,
 from iac_code.tools.cloud.aliyun.oss_v4_adapter import OssOperationCatalog
 from iac_code.tools.cloud.aliyun.product_resolver import ProductResolver
 from iac_code.tools.cloud.aliyun.public_errors import public_aliyun_error
+from iac_code.tools.cloud.aliyun.result_contract import ALIYUN_BODY_CONTRACT_VERSION, ALIYUN_HTTP_METADATA_KEY
 from iac_code.tools.cloud.aliyun.retry_policy import RetryBudget, RetryExhausted, RetryReason, TransportFailure
 from iac_code.tools.tool_executor import ToolCallRequest, ToolExecutor
 from iac_code.types.permissions import InvocationBinding, ToolPermissionContext
@@ -2759,7 +2760,10 @@ async def test_production_runtime_anonymous_contract_does_not_load_credentials()
     )
 
     assert result.is_error is False
-    assert json.loads(result.content)["status"] == 200
+    assert json.loads(result.content) == {"RequestId": "request-1", "Action": "GetPublicInfo"}
+    assert result.metadata is not None
+    assert result.metadata[ALIYUN_HTTP_METADATA_KEY]["contract_version"] == ALIYUN_BODY_CONTRACT_VERSION
+    assert result.metadata[ALIYUN_HTTP_METADATA_KEY]["status"] == 200
     assert endpoint_resolver.calls[0][2] is None
     assert transport.calls[0]["credential"] is None
 
@@ -2919,14 +2923,14 @@ async def test_production_runtime_binary_body_file_and_json_xml_text_binary_resp
             tool,
             {"product": "Ecs", "action": action, "region_id": "cn-hangzhou"},
         )
-        assert json.loads(result.content)["body"] == expected
+        assert result.content == expected
 
     binary = await _production_execute(
         tool,
         {"product": "Ecs", "action": "GetBinary", "region_id": "cn-hangzhou"},
     )
     binary_payload = json.loads(binary.content)
-    assert binary_payload["body"] == {"encoding": "base64", "data": "ZGF0YQ=="}
+    assert binary_payload == {"encoding": "base64", "data": "ZGF0YQ=="}
 
 
 @pytest.mark.asyncio
@@ -3175,7 +3179,7 @@ async def test_inline_text_contract_executes_without_tool_use_id(
     )
 
     assert result.is_error is False
-    assert json.loads(result.content)["body"] == body
+    assert result.content == body
     assert stages.index("contract") < stages.index("credential") < stages.index("endpoint") < stages.index("target")
     assert endpoint_resolver.calls
     assert transport.calls
@@ -3184,6 +3188,14 @@ async def test_inline_text_contract_executes_without_tool_use_id(
 @pytest.mark.asyncio
 async def test_production_runtime_oss_get_put_metadata_head_and_unsupported_catalog(tmp_path: Path) -> None:
     services, _, _, transport = _production_services()
+    transport.responses["GetObject"] = NormalizedApiResponse(
+        200,
+        MappingProxyType({"content-type": "application/octet-stream"}),
+        {"encoding": "base64", "data": "b2JqZWN0"},
+        "application/octet-stream",
+        None,
+        6,
+    )
     tool = AliyunApi(services=services)
     common = {"bucket": "demo-bucket", "key": "dir/object.txt"}
     body_file = tmp_path / "object.bin"
@@ -3221,7 +3233,6 @@ async def test_production_runtime_oss_get_put_metadata_head_and_unsupported_cata
     assert put_request.body == b"object"
     assert put_request.headers["content-type"] == "application/custom"
     assert put_request.headers["x-oss-meta-owner"] == "iac"
-
     before = len(transport.calls)
     unsupported_input = {
         "product": "Oss",
@@ -3247,6 +3258,41 @@ async def test_production_runtime_oss_get_put_metadata_head_and_unsupported_cata
     )
     assert "field_mapping_missing" not in unsupported.message
     assert len(transport.calls) == before
+
+
+@pytest.mark.asyncio
+async def test_production_runtime_headers_only_limit_returns_stable_public_error() -> None:
+    services, _, _, transport = _production_services()
+    secret_value = "must-not-reach-public-result"
+    transport.responses["HeadObject"] = NormalizedApiResponse(
+        200,
+        MappingProxyType({f"x-response-{index}": secret_value for index in range(65)}),
+        None,
+        None,
+        None,
+        0,
+    )
+
+    result = await _production_execute(
+        AliyunApi(services=services),
+        {
+            "product": "Oss",
+            "action": "HeadObject",
+            "params": {"bucket": "demo-bucket", "key": "dir/object.txt"},
+            "region_id": "cn-hangzhou",
+        },
+    )
+
+    assert result.is_error is True
+    assert result.content == public_aliyun_error(
+        "aliyun_response_headers_too_large",
+        product="Oss",
+        action="HeadObject",
+        region_id="cn-hangzhou",
+    )
+    assert "Verify the cloud resource state before retrying." in result.content
+    assert "aliyun_response_headers_too_large" not in result.content
+    assert secret_value not in result.content
 
 
 @pytest.mark.asyncio
@@ -3321,3 +3367,50 @@ async def test_production_runtime_transport_unknown_outcome_keeps_approved_contr
     assert services.contract_store.size == 0
     assert transport.calls[-1]["budget"] is services.budgets[-1]
     assert len(services.budgets) == 1
+
+
+class TestAliyunApiDoesNotBlockEventLoop:
+    """The blocking OpenAPI network call must run off the event loop (asyncio.to_thread)
+    so it never starves web agent turns, SSE streams, and HTTP handlers.
+    """
+
+    @pytest.mark.asyncio
+    async def test_call_api_does_not_starve_loop(self, api: AliyunApi, context: ToolContext, mock_credentials) -> None:
+        import threading
+
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocking_call_api(*args, **kwargs):
+            entered.set()
+            release.wait(5)
+            return {"body": {"Instances": []}}
+
+        mock_client = MagicMock()
+        mock_client.call_api.side_effect = blocking_call_api
+
+        with patch("iac_code.tools.cloud.aliyun.aliyun_api.OpenApiClient", return_value=mock_client):
+            task = asyncio.create_task(
+                api.execute(
+                    tool_input={
+                        "product": "ecs",
+                        "action": "DescribeInstances",
+                        "region_id": "cn-hangzhou",
+                    },
+                    context=context,
+                )
+            )
+
+            # Worker thread entered the blocking call while the loop stayed free.
+            await asyncio.wait_for(asyncio.to_thread(entered.wait, 1), timeout=2)
+            assert not task.done()
+            for _ in range(5):
+                await asyncio.sleep(0)
+            assert not task.done()
+
+            release.set()
+            result = await asyncio.wait_for(task, timeout=2)
+
+        assert result.is_error is False
+        data = json.loads(result.content)
+        assert data == {"Instances": []}

@@ -27,6 +27,12 @@ class AgentFactoryOptions:
     mcp_interactive_project_approval: bool = False
     a2a_safe_mode: bool = False
     mcp_elicitation_handler: Any = None
+    provider_key_override: str | None = None
+    provider_api_key_override: str | None = field(default=None, repr=False)
+    provider_base_url_override: str | None = None
+    provider_config_frozen: bool = False
+    effort_override: str | None = None
+    provider_config_override: dict[str, Any] | None = field(default=None, repr=False)
 
 
 @dataclass
@@ -134,18 +140,34 @@ def _create_agent_runtime(options: AgentFactoryOptions, aliyun_services: Any) ->
     session_id = options.session_id or str(uuid.uuid4())[:8]
     runtime_current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    credentials = load_credentials(model=options.model)
+    credentials = {} if options.provider_config_frozen else load_credentials(model=options.model)
 
-    provider_key_override = None
-    base_url_override = None
+    provider_key_override = options.provider_key_override
+    base_url_override = options.provider_base_url_override if options.provider_config_frozen else None
+    # 会话级显式 provider 覆盖时,让 ProviderManager 忽略全局 llm_source 合作方源(如 QwenPaw)的热切换,
+    # 否则 stream() 每轮开头的 _check_qwenpaw_config_change 会把本会话选定的 provider 改回。
+    ignore_llm_source = False
 
     from iac_code.config import _get_env_overrides, get_llm_source
 
     env = _get_env_overrides()
     model = options.model
 
-    if env["api_key"]:
+    if options.provider_config_frozen:
+        credentials = (
+            {provider_key_override: options.provider_api_key_override or ""}
+            if provider_key_override is not None
+            else {}
+        )
+        ignore_llm_source = provider_key_override is not None
+    elif env["api_key"]:
         pass  # env overrides handled by load_credentials
+    elif provider_key_override:
+        # 会话级显式 provider 覆盖优先于全局合作方源 llm_source。
+        # 否则 Web 端在合作方(如 QwenPaw)失效后切到普通 provider 发送时,
+        # get_llm_source() 仍返回 "qwenpaw",会把本次会话选定的 provider/模型/base_url
+        # 强行改回(失效的)合作方端点,导致换 provider 后仍报同样的错。
+        ignore_llm_source = True
     elif get_llm_source() == "qwenpaw":
         from iac_code.services.qwenpaw_source import QwenPawError, load_from_qwenpaw
 
@@ -164,13 +186,18 @@ def _create_agent_runtime(options: AgentFactoryOptions, aliyun_services: Any) ->
             provider_key_override = qwenpaw_config.provider_key
             base_url_override = qwenpaw_config.base_url
 
-    provider_manager = ProviderManager(
-        model=model,
-        credentials=credentials,
-        provider_key_override=provider_key_override,
-        base_url_override=base_url_override,
-        request_policy_override=options.request_policy_override,
-    )
+    provider_manager_options: dict[str, Any] = {
+        "model": model,
+        "credentials": credentials,
+        "provider_key_override": provider_key_override,
+        "base_url_override": base_url_override,
+        "request_policy_override": options.request_policy_override,
+        "effort_override": options.effort_override,
+        "ignore_llm_source": ignore_llm_source,
+    }
+    if options.provider_config_override is not None:
+        provider_manager_options["provider_config_override"] = options.provider_config_override
+    provider_manager = ProviderManager(**provider_manager_options)
 
     def aliyun_default_region_provider() -> str:
         from iac_code.services.providers.aliyun import DEFAULT_REGION

@@ -408,6 +408,7 @@ class PipelineA2AOutboundQueue:
             frame_count_result = await self._publisher.enqueue_persisted_batch(
                 network_envelopes,
                 wait_for_transport=True,
+                local_envelopes=persisted,
             )
             network_frames = (
                 int(frame_count_result) if isinstance(frame_count_result, int) else int(bool(network_envelopes))

@@ -71,11 +71,14 @@ class AnthropicProvider(Provider):
         effort: str | None = None,
         thinking_enabled: bool | None = None,
         thinking_budget: int | None = None,
+        max_completion_tokens: int | None = None,
         provider_key: str = "anthropic",
         **kwargs: Any,
     ) -> None:
         self._model = model
         self._max_tokens = max_tokens
+        # 用户配置的「最大输出 tokens」硬上限(留空为 None,沿用调用方默认)。
+        self._max_output_tokens = positive_int_or_none(max_completion_tokens)
         self._effort = effort
         self._thinking_enabled = bool_or_none(thinking_enabled)
         normalized_thinking_budget = positive_int_or_none(thinking_budget)
@@ -176,11 +179,13 @@ class AnthropicProvider(Provider):
         return budget
 
     def _adjust_max_tokens(self, max_tokens: int) -> int:
+        # 用户配置的输出上限覆盖调用方默认;仍保证 max_tokens 高于思考预算,预留正文空间。
+        base = self._max_output_tokens or max_tokens
         budget = self._effective_thinking_budget()
         if budget is None:
-            return max_tokens
+            return base
         min_max = budget + 4096
-        return max(max_tokens, min_max)
+        return max(base, min_max)
 
     def _thinking_disabled(self) -> bool:
         return bool_or_none(getattr(self, "_thinking_enabled", None)) is False

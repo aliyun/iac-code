@@ -28,6 +28,7 @@ async def process_prompt_command(
     args: str,
     *,
     session_id: str = "",
+    cwd: str | None = None,
 ) -> ProcessedSkillResult:
     """Unified skill processing — called by BOTH slash commands AND SkillTool.
 
@@ -40,7 +41,7 @@ async def process_prompt_command(
         raise ValueError(f"Command '{command.name}' is not a skill")
 
     skill_context = SkillContext(
-        cwd=os.getcwd(),
+        cwd=cwd or os.getcwd(),
         session_id=session_id,
         skill_dir=skill.skill_root or "",
         skill_root=skill.skill_root or "",

@@ -1233,6 +1233,10 @@ def _oauth_client_state(diagnostic: MCPHealthDiagnostic) -> dict[str, Any]:
     scope = _oauth_scope_for_cli(diagnostic.scope, source_path=source_path)
     storage = MCPSecretStorage()
     return {
+        # oauth_configured 反映配置里是否声明了 oauth 段(与 REPL 判定一致:见 _echo_add_success)。
+        # 这是「服务器支持 OAuth」的持久信号,不随清除认证/动态注册凭据的增删而消失,
+        # 供前端判断是否提供「认证/清除认证」操作(动态注册的服务器没有显式 client_id)。
+        "oauth_configured": config.oauth is not None,
         "configured_client_id": bool(config.oauth and config.oauth.client_id),
         "stored_client_auth_method": get_oauth_storage_secret(config, storage, "client_auth_method", scope=scope),
         "stored_client_id": bool(get_oauth_storage_secret(config, storage, "client_id", scope=scope)),

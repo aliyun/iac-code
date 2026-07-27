@@ -105,6 +105,34 @@ class TelemetryClient:
     def start_span(self, name: str, attrs: dict[str, Any] | None = None):
         return self._tracer.start(name, self._with_signal_attributes(attrs))
 
+    def start_detached_span(
+        self,
+        name: str,
+        attrs: dict[str, Any] | None = None,
+        *,
+        parent_context=None,
+    ):
+        return self._tracer.start_detached(
+            name,
+            self._with_signal_attributes(attrs),
+            parent_context=parent_context,
+        )
+
+    def use_span(
+        self,
+        span,
+        *,
+        record_exception: bool = False,
+        set_status_on_exception: bool = False,
+        end_on_exit: bool = False,
+    ):
+        return self._tracer.use(
+            span,
+            record_exception=record_exception,
+            set_status_on_exception=set_status_on_exception,
+            end_on_exit=end_on_exit,
+        )
+
     def get_session_id(self) -> str:
         return self._identity.get_session_id()
 

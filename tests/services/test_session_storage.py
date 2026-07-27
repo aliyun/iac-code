@@ -1,4 +1,5 @@
 import json
+import shutil
 import sys
 
 import pytest
@@ -806,6 +807,133 @@ def test_long_cwd_legacy_project_remains_readable_after_bounded_project_exists(t
 
     assert [message.content for message in loaded] == ["old"]
     assert storage.exists(cwd, "legacy-long")
+
+
+def test_delete_session_removes_all_long_project_aliases(tmp_path):
+    cwd = "/" + "long-project/" * 24
+    storage = SessionStorage(projects_dir=tmp_path)
+    storage.append(cwd, "duplicate", Message(role="user", content="prompt"), git_branch=None)
+    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+    shutil.copytree(current_project_dir, legacy_project_dir)
+
+    assert storage.delete_session(cwd, "duplicate") is True
+    assert not (current_project_dir / "duplicate" / SESSION_JSONL_FILENAME).exists()
+    assert not (legacy_project_dir / "duplicate" / SESSION_JSONL_FILENAME).exists()
+    assert not storage.exists(cwd, "duplicate")
+
+
+def test_delete_session_removes_nested_legacy_conflict_sidecar_before_same_id_is_reused(storage):
+    session_id = "legacy-delete-nested-sidecar"
+    legacy_path = storage.legacy_session_path(CWD, session_id)
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text('{"role":"user","content":"old"}\n', encoding="utf-8")
+    placeholder_dir = storage._legacy_sidecar_placeholder_dir(legacy_path)
+    placeholder_dir.write_text("placeholder collision\n", encoding="utf-8")
+    nested_sidecar_dir = storage.session_dir(CWD, session_id)
+    assert nested_sidecar_dir.name == f"{placeholder_dir.name}.conflict-sidecars"
+    (nested_sidecar_dir / "pipeline").mkdir(parents=True)
+    stale_pipeline = nested_sidecar_dir / "pipeline" / "meta.yaml"
+    stale_pipeline.write_text("status: stale\n", encoding="utf-8")
+
+    assert storage.delete_session(CWD, session_id) is True
+
+    assert not nested_sidecar_dir.exists()
+    legacy_path.write_text('{"role":"user","content":"fresh"}\n', encoding="utf-8")
+    reused_sidecar_dir = storage.session_dir(CWD, session_id)
+    assert reused_sidecar_dir == nested_sidecar_dir
+    assert not (reused_sidecar_dir / "pipeline" / "meta.yaml").exists()
+
+
+def test_delete_session_removes_primary_and_historical_legacy_conflict_sidecars(storage):
+    session_id = "legacy-delete-both-sidecars"
+    legacy_path = storage.legacy_session_path(CWD, session_id)
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text('{"role":"user","content":"old"}\n', encoding="utf-8")
+
+    primary_sidecar_dir = storage._legacy_sidecar_placeholder_dir(legacy_path)
+    (primary_sidecar_dir / "pipeline").mkdir(parents=True)
+    (primary_sidecar_dir / "pipeline" / "current.yaml").write_text("status: current\n", encoding="utf-8")
+    historical_conflict_dir = storage._conflicting_sidecar_placeholder_dir(primary_sidecar_dir)
+    (historical_conflict_dir / "pipeline").mkdir(parents=True)
+    (historical_conflict_dir / "pipeline" / "stale.yaml").write_text("status: stale\n", encoding="utf-8")
+
+    assert storage.delete_session(CWD, session_id) is True
+
+    assert not primary_sidecar_dir.exists()
+    assert not historical_conflict_dir.exists()
+
+
+def test_delete_session_removes_legacy_sidecars_with_web_metadata(storage):
+    session_id = "legacy-delete-web-metadata"
+    legacy_path = storage.legacy_session_path(CWD, session_id)
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text('{"role":"user","content":"old"}\n', encoding="utf-8")
+
+    sidecar_dir = storage._legacy_sidecar_placeholder_dir(legacy_path)
+    (sidecar_dir / "pipeline").mkdir(parents=True)
+    (sidecar_dir / "pipeline" / "events.jsonl").write_text("{}\n", encoding="utf-8")
+    (sidecar_dir / "web-session.json").write_text('{"mode":"pipeline"}\n', encoding="utf-8")
+    (sidecar_dir / "web-session.json.tmp").write_text('{"mode":"pipeline"}\n', encoding="utf-8")
+
+    assert storage.delete_session(CWD, session_id) is True
+
+    assert not legacy_path.exists()
+    assert not sidecar_dir.exists()
+
+
+def test_delete_session_removes_atomic_web_metadata_temp_sidecar(storage):
+    session_id = "legacy-delete-atomic-web-metadata"
+    legacy_path = storage.legacy_session_path(CWD, session_id)
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text('{"role":"user","content":"old"}\n', encoding="utf-8")
+
+    sidecar_dir = storage._legacy_sidecar_placeholder_dir(legacy_path)
+    sidecar_dir.mkdir(parents=True)
+    (sidecar_dir / "web-session.json").write_text('{"mode":"normal"}\n', encoding="utf-8")
+    (sidecar_dir / ".web-session.json.deadbeef.tmp").write_text('{"mode":"normal"}\n', encoding="utf-8")
+
+    assert storage.delete_session(CWD, session_id) is True
+
+    assert not legacy_path.exists()
+    assert not sidecar_dir.exists()
+
+
+def test_delete_session_ignores_symlinked_project_alias(tmp_path):
+    projects_dir = tmp_path / "projects"
+    outside_project = tmp_path / "outside-project"
+    session_dir = outside_project / "victim"
+    session_dir.mkdir(parents=True)
+    session_file = session_dir / SESSION_JSONL_FILENAME
+    session_file.write_text('{"role":"user","content":"outside"}\n', encoding="utf-8")
+
+    cwd = "/symlinked/project"
+    project_alias = project_paths.project_dir_candidates(cwd, projects_dir)[0]
+    project_alias.parent.mkdir(parents=True, exist_ok=True)
+    _symlink_or_skip(outside_project, project_alias)
+    storage = SessionStorage(projects_dir=projects_dir)
+
+    assert storage.delete_session(cwd, "victim") is False
+    assert session_file.exists()
+
+
+def test_delete_session_ignores_reparse_point_project_alias(tmp_path, monkeypatch):
+    projects_dir = tmp_path / "projects"
+    cwd = "/junction/project"
+    project_alias = project_paths.project_dir_candidates(cwd, projects_dir)[0]
+    session_dir = project_alias / "victim"
+    session_dir.mkdir(parents=True)
+    session_file = session_dir / SESSION_JSONL_FILENAME
+    session_file.write_text('{"role":"user","content":"junction"}\n', encoding="utf-8")
+    storage = SessionStorage(projects_dir=projects_dir)
+    original = SessionStorage._is_reparse_point
+    monkeypatch.setattr(
+        SessionStorage,
+        "_is_reparse_point",
+        staticmethod(lambda path: path == project_alias or original(path)),
+    )
+
+    assert storage.delete_session(cwd, "victim") is False
+    assert session_file.exists()
 
 
 def test_long_cwd_legacy_directory_session_dir_not_shadowed_by_new_sidecar(tmp_path):

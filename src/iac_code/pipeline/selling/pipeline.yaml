@@ -46,6 +46,7 @@ prerequisites:
     required_by_flags: [enable_reviewing]
     on_missing:
       repl: prompt_install
+      web: prompt_install
       non_interactive: disable_feature
     version_check:
       command: [infraguard, version]

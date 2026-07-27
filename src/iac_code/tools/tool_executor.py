@@ -105,7 +105,9 @@ class ToolExecutor:
             trusted_ros_account_context=context.trusted_ros_account_context,
         )
 
-        timeout = tool.timeout if tool.timeout is not None else self._tool_timeout
+        timeout = tool.execution_timeout(call.input)
+        if timeout is None:
+            timeout = self._tool_timeout
 
         # Telemetry instrumentation
         tool_name = sanitize_tool_name(call.name)

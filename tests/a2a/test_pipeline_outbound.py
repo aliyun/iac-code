@@ -28,6 +28,7 @@ class FakePreparedPermission:
 class RecordingPublisher:
     def __init__(self, *, block_first_send: bool = False) -> None:
         self.frames: list[tuple[str, list[dict[str, Any]]]] = []
+        self.local_envelope_frames: list[list[dict[str, Any]] | None] = []
         self.persisted_events: list[Any] = []
         self.order: list[str] = []
         self.first_send_started = asyncio.Event()
@@ -50,8 +51,10 @@ class RecordingPublisher:
         envelopes: list[dict[str, Any]],
         *,
         wait_for_transport: bool = False,
+        local_envelopes: list[dict[str, Any]] | None = None,
     ) -> None:
         assert wait_for_transport is True
+        self.local_envelope_frames.append(list(local_envelopes) if local_envelopes is not None else None)
         await self._record_frame("batch", envelopes)
 
     async def prepare_permission_event(
@@ -138,6 +141,32 @@ async def test_sender_busy_drains_all_candidate_queues_into_one_next_batch() -> 
 
     assert len(publisher.frames) == 2
     assert _frame_texts(publisher.frames[1]) == ["B1", "A1A2"]
+
+
+@pytest.mark.asyncio
+async def test_publish_batch_forwards_uncoalesced_envelopes_to_local_web_sink() -> None:
+    # 回归 bug 9be9e9d9:extreme_performance 批量路径把同源 delta 合并成一帧发往远程 A2A,
+    # 但订阅 web 会话的浏览器实时流必须拿到*未合并*的逐条 envelope(经 loopback sink),
+    # 否则整段流水线运行期间界面零更新。锁定:远程帧合并、本地帧不合并。
+    publisher = RecordingPublisher(block_first_send=True)
+    outbound = PipelineA2AOutboundQueue(publisher, max_batch_delay_seconds=10)
+
+    await outbound.start()
+    await outbound.submit(TextDeltaEvent(text="in-flight"))
+    await asyncio.wait_for(publisher.first_send_started.wait(), timeout=0.2)
+
+    await outbound.submit(_candidate(0, TextDeltaEvent(text="A1")))
+    await outbound.submit(_candidate(1, TextDeltaEvent(text="B1")))
+    await outbound.submit(_candidate(0, TextDeltaEvent(text="A2")))
+    publisher.release_first_send.set()
+    await outbound.close()
+
+    # 远程帧:同源 delta 合并(B1 单独,A1+A2 合成 A1A2),2 条。
+    assert _frame_texts(publisher.frames[1]) == ["B1", "A1A2"]
+    # loopback web sink:同一帧收到未合并的逐条 envelope(3 条,提交顺序),浏览器据此逐字渲染。
+    local_frame = publisher.local_envelope_frames[1]
+    assert local_frame is not None
+    assert [envelope["data"]["text"] for envelope in local_frame] == ["A1", "B1", "A2"]
 
 
 @pytest.mark.asyncio

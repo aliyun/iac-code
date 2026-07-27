@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 from pathlib import Path
@@ -7,6 +8,27 @@ import pytest
 from iac_code.services.session_layout import SESSION_LAYOUT_VERSION_V2, UnsupportedSessionLayoutError
 from iac_code.services.session_metadata import SessionMetadata, write_session_metadata
 from iac_code.tools.result_storage import ResultStorage
+
+
+def _aliyun_threshold_pair(limit: int, diagnostics: str = "") -> tuple[str, str]:
+    marker = "BUSINESS_TAIL_MARKER"
+    empty_body = json.dumps({"payload": "", "tail": marker}, ensure_ascii=False, indent=2)
+    payload_size = limit - len(empty_body) - len(diagnostics)
+    payload = {"payload": "X" * payload_size, "tail": marker}
+    body = json.dumps(payload, ensure_ascii=False, indent=2)
+    envelope = json.dumps(
+        {
+            "status": 200,
+            "headers": {"requestid": "req-1"},
+            "body": payload,
+            "content_type": "application/json",
+            "content_encoding": None,
+            "size": len(body),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    return body + diagnostics, envelope + diagnostics
 
 
 def _symlink_or_skip(target: Path, link: Path, *, target_is_directory: bool = False) -> None:
@@ -26,6 +48,26 @@ class TestResultStorage:
         result = storage.process(tool_use_id="t1", content="short")
         assert result.content == "short"
         assert result.is_externalized is False
+
+    @pytest.mark.parametrize("diagnostics", ["", "\nDelegated diagnostics: preflight passed"])
+    def test_aliyun_body_only_avoids_envelope_induced_externalization(self, tmp_path, diagnostics):
+        new_content, old_content = _aliyun_threshold_pair(50_000, diagnostics)
+        storage = ResultStorage(
+            storage_dir=str(tmp_path / "tool-results"),
+            max_inline_chars=50_000,
+            preview_chars=2_000,
+        )
+
+        new_result = storage.process(tool_use_id="new", content=new_content)
+        old_result = storage.process(tool_use_id="old", content=old_content)
+
+        assert len(new_content) <= 50_000 < len(old_content)
+        assert new_result.content == new_content
+        assert new_result.is_externalized is False
+        assert new_result.file_path is None
+        assert old_result.is_externalized is True
+        assert old_result.file_path is not None
+        assert old_result.file_path in old_result.content
 
     def test_large_result_externalized(self, storage):
         content = "x" * 1000

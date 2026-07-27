@@ -10,19 +10,50 @@ from iac_code.a2a.pipeline_events import PIPELINE_EVENTS_EXTENSION_URI, Pipeline
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.step_spec import A2AArtifactSpec
 from iac_code.services.permissions.audit import fingerprint_text
+from iac_code.tools.cloud.aliyun.result_contract import ALIYUN_HTTP_METADATA_KEY
 from iac_code.tools.result_storage import ResultStorage
 from iac_code.types.stream_events import (
     CandidateDetailEvent,
+    CompactionEvent,
     DiagramEvent,
     MCPProgressEvent,
+    MessageStartEvent,
     PermissionRequestEvent,
     ResourceObservedEvent,
+    StackInstancesProgressEvent,
+    StackProgressEvent,
     SubPipelineStreamEvent,
     TextDeltaEvent,
     ThinkingDeltaEvent,
+    TombstoneEvent,
     ToolResultEvent,
     ToolUseEndEvent,
 )
+from iac_code.utils.public_errors import suppress_all_redaction
+
+
+def test_tombstone_event_preserves_message_and_affected_tool_ids() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    [envelope] = translator.translate(
+        TombstoneEvent(message_id="message-orphaned", affected_tool_use_ids=["tool-a", "tool-b"])
+    )
+
+    assert envelope["eventType"] == "message_tombstone"
+    assert envelope["data"] == {
+        "messageId": "message-orphaned",
+        "affectedToolUseIds": ["tool-a", "tool-b"],
+    }
+
+
+def test_message_start_preserves_provider_message_id() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    [envelope] = translator.translate(MessageStartEvent(message_id="provider-message"))
+
+    assert envelope["eventType"] == "message_started"
+    assert envelope["scope"] == "pipeline"
+    assert envelope["data"] == {"messageId": "provider-message"}
 
 
 def _ctx() -> PipelineA2AContext:
@@ -42,6 +73,27 @@ def _has_truncated_object(value: object) -> bool:
             return True
         return any(_has_truncated_object(child) for child in value.values())
     return False
+
+
+def _aliyun_threshold_pair(limit: int, diagnostics: str = "") -> tuple[str, str]:
+    marker = "BUSINESS_TAIL_MARKER"
+    empty_body = json.dumps({"payload": "", "tail": marker}, ensure_ascii=False, indent=2)
+    payload_size = limit - len(empty_body) - len(diagnostics)
+    payload = {"payload": "X" * payload_size, "tail": marker}
+    body = json.dumps(payload, ensure_ascii=False, indent=2)
+    envelope = json.dumps(
+        {
+            "status": 200,
+            "headers": {"requestid": "req-1"},
+            "body": payload,
+            "content_type": "application/json",
+            "content_encoding": None,
+            "size": len(body),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    return body + diagnostics, envelope + diagnostics
 
 
 def test_pipeline_started_has_stable_envelope() -> None:
@@ -108,6 +160,112 @@ def test_mcp_progress_event_has_tool_progress_envelope() -> None:
     }
 
 
+def test_stack_progress_event_has_stack_progress_envelope() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    [envelope] = translator.translate(
+        StackProgressEvent(
+            stack_id="stack-1",
+            stack_name="test-stack",
+            status="CREATE_IN_PROGRESS",
+            progress_percentage=42.5,
+            resources=[{"logicalId": "vpc", "status": "CREATE_COMPLETE"}],
+            elapsed_seconds=12,
+            tool_use_id="toolu-stack",
+        )
+    )
+
+    assert envelope["eventType"] == "stack_progress"
+    assert envelope["scope"] == "pipeline"
+    assert envelope["data"]["toolUseId"] == "toolu-stack"
+    assert envelope["data"]["stackId"] == "stack-1"
+    assert envelope["data"]["stackName"] == "test-stack"
+    assert envelope["data"]["status"] == "CREATE_IN_PROGRESS"
+    assert envelope["data"]["progressPercentage"] == 42.5
+    assert envelope["data"]["resources"] == [{"logicalId": "vpc", "status": "CREATE_COMPLETE"}]
+    assert envelope["data"]["elapsedSeconds"] == 12
+
+
+def test_stack_instances_progress_event_has_envelope() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    [envelope] = translator.translate(
+        StackInstancesProgressEvent(
+            stack_group_name="group-1",
+            operation_id="op-1",
+            status="RUNNING",
+            progress_percentage=60,
+            instances=[{"accountId": "123", "status": "SUCCEEDED"}],
+            elapsed_seconds=30,
+            tool_use_id="toolu-instances",
+        )
+    )
+
+    assert envelope["eventType"] == "stack_instances_progress"
+    assert envelope["scope"] == "pipeline"
+    assert envelope["data"]["toolUseId"] == "toolu-instances"
+    assert envelope["data"]["stackGroupName"] == "group-1"
+    assert envelope["data"]["operationId"] == "op-1"
+    assert envelope["data"]["status"] == "RUNNING"
+    assert envelope["data"]["progressPercentage"] == 60
+    assert envelope["data"]["instances"] == [{"accountId": "123", "status": "SUCCEEDED"}]
+    assert envelope["data"]["elapsedSeconds"] == 30
+
+
+def test_stack_progress_inner_sub_pipeline_event_translated() -> None:
+    translator = PipelineEventTranslator(_ctx())
+    translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.SUB_PIPELINE_STARTED,
+            step_id=None,
+            timestamp=time.time(),
+            data={
+                "sub_pipeline_id": "evaluate_candidate_abcd",
+                "candidate_index": 0,
+                "candidate_name": "low cost",
+                "sub_pipeline_name": "evaluate_candidate",
+                "total_steps": 3,
+                "parent_step_id": "evaluate_candidates",
+            },
+        )
+    )
+    translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.SUB_STEP_STARTED,
+            step_id="template_generating",
+            timestamp=time.time(),
+            data={
+                "sub_pipeline_id": "evaluate_candidate_abcd",
+                "candidate_index": 0,
+                "step_id": "template_generating",
+                "step_index": 0,
+                "total_steps": 3,
+            },
+        )
+    )
+
+    envs = translator.translate(
+        SubPipelineStreamEvent(
+            sub_pipeline_id="evaluate_candidate_abcd",
+            candidate_index=0,
+            inner=StackProgressEvent(
+                stack_id="stack-2",
+                stack_name="preview-stack",
+                status="CREATE_IN_PROGRESS",
+                progress_percentage=10.0,
+                resources=[],
+                elapsed_seconds=1,
+                tool_use_id="toolu-preview",
+            ),
+        )
+    )
+
+    envelope = [e for e in envs if e["eventType"] == "stack_progress"][0]
+    assert envelope["data"]["toolUseId"] == "toolu-preview"
+    assert envelope["data"]["stackName"] == "preview-stack"
+    assert envelope["scope"] in {"candidate", "candidate_step"}
+
+
 def test_tool_result_redacts_embedded_infraguard_file_content() -> None:
     translator = PipelineEventTranslator(_ctx())
     raw_template = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n"
@@ -134,6 +292,60 @@ def test_tool_result_redacts_embedded_infraguard_file_content() -> None:
     assert "ROSTemplateFormatVersion" not in rendered
     assert "file_content" in rendered
     assert "sha256-value" in rendered
+
+
+def test_aliyun_tool_result_translation_exposes_business_content_but_not_internal_http_metadata() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    [envelope] = translator.translate(
+        ToolResultEvent(
+            tool_use_id="toolu-aliyun",
+            tool_name="aliyun_api",
+            result='{"Business":"value"}',
+            metadata={ALIYUN_HTTP_METADATA_KEY: {"contract_version": "aliyun_body_v1", "header_count": 1}},
+        )
+    )
+
+    assert envelope["eventType"] == "tool_result"
+    assert envelope["data"]["result"] == '{"Business":"value"}'
+    rendered = json.dumps(envelope, ensure_ascii=False)
+    assert ALIYUN_HTTP_METADATA_KEY not in rendered
+    assert "aliyun_body_v1" not in rendered
+
+
+@pytest.mark.parametrize("diagnostics", ["", "\nDelegated diagnostics: preflight passed"])
+def test_pipeline_result_storage_precedes_public_4000_projection_for_aliyun_results(tmp_path, diagnostics) -> None:
+    new_content, old_content = _aliyun_threshold_pair(50_000, diagnostics)
+    storage = ResultStorage(
+        storage_dir=str(tmp_path / "tool-results"),
+        max_inline_chars=50_000,
+        preview_chars=2_000,
+    )
+    new_result = storage.process("new", new_content)
+    old_result = storage.process("old", old_content)
+    translator = PipelineEventTranslator(_ctx())
+
+    [new_envelope] = translator.translate(
+        ToolResultEvent(
+            tool_use_id="new",
+            tool_name="aliyun_api" if not diagnostics else "ros_validate_template",
+            result=new_result.content,
+        )
+    )
+    [old_envelope] = translator.translate(
+        ToolResultEvent(
+            tool_use_id="old",
+            tool_name="aliyun_api" if not diagnostics else "ros_validate_template",
+            result=old_result.content,
+        )
+    )
+
+    assert new_result.is_externalized is False
+    assert len(new_envelope["data"]["result"]) == 4_000
+    assert old_result.is_externalized is True
+    assert old_result.file_path not in old_envelope["data"]["result"]
+    assert "saved to [PATH]" in old_envelope["data"]["result"]
+    assert len(old_envelope["data"]["result"]) < 4_000
 
 
 def test_tool_result_redacts_externalized_infraguard_file_content_preview(tmp_path) -> None:
@@ -1193,6 +1405,48 @@ def test_show_candidate_detail_tool_result_recovers_detail_from_tool_input() -> 
     assert detail_event["data"]["detail"]["costItems"] == [{"name": "ecs", "monthly_cost": "CNY 60"}]
 
 
+def test_tool_trace_input_passthrough_keeps_raw() -> None:
+    translator = PipelineEventTranslator(_ctx())
+    raw_path = "/Users/alice/.iac-code/settings.yml"
+
+    [started] = translator.translate(
+        ToolUseEndEvent(
+            tool_use_id="toolu-secret",
+            name="bash",
+            input={"api_key": "sk-test-secret", "path": raw_path},
+        )
+    )
+    [finished] = translator.translate(
+        ToolResultEvent(
+            tool_use_id="toolu-secret",
+            tool_name="bash",
+            result="done",
+            is_error=False,
+        )
+    )
+
+    for envelope in (started, finished):
+        assert envelope["data"]["input"]["api_key"] == "sk-test-secret"
+        assert envelope["data"]["input"]["path"] == raw_path
+
+
+def test_tool_trace_input_keeps_everything_raw_for_suppressed_web_sink() -> None:
+    translator = PipelineEventTranslator(_ctx())
+    raw_path = "/Users/alice/project/template.yml"
+
+    with suppress_all_redaction():
+        [started] = translator.translate(
+            ToolUseEndEvent(
+                tool_use_id="toolu-local",
+                name="read_file",
+                input={"api_key": "sk-test-secret", "path": raw_path},
+            )
+        )
+
+    assert started["data"]["input"]["path"] == raw_path
+    assert started["data"]["input"]["api_key"] == "sk-test-secret"
+
+
 @pytest.mark.parametrize(
     ("stream_event", "event_type"),
     [
@@ -2159,4 +2413,149 @@ def test_stream_scope_returns_to_candidate_after_candidate_step_completes() -> N
     assert during_step["scope"] == "candidate_step"
     assert during_step["candidateStep"]["id"] == "template_generating"
     assert after_step["scope"] == "candidate"
-    assert "candidateStep" not in after_step
+
+
+def test_translate_compaction_parent_pipeline_scope() -> None:
+    tr = PipelineEventTranslator(_ctx())
+    envs = tr.translate(CompactionEvent(phase="finished", summary="S", original_tokens=100, compacted_tokens=10))
+    assert len(envs) == 1
+    e = envs[0]
+    assert e["eventType"] == "context_compacted"
+    assert e["scope"] == "pipeline"
+    assert e["data"]["summary"] == "S"
+    assert e["data"]["originalTokens"] == 100
+    assert e["data"]["compactedTokens"] == 10
+
+
+def test_translate_compaction_parent_step_scope() -> None:
+    tr = PipelineEventTranslator(_ctx())
+    tr._current_parent_step_id = "architecture_planning"
+    envs = tr.translate(CompactionEvent(phase="finished", summary="S", original_tokens=100, compacted_tokens=10))
+    assert envs[0]["scope"] == "step"
+    assert "step" in envs[0]
+
+
+def test_translate_compaction_started_phase_forwarded() -> None:
+    # 自动压缩的 started/failed 相位必须转发(旧实现丢弃),否则流水线子代理里压缩时前端只见步骤计时、
+    # 看不到「正在自动压缩上下文」流光条。started → context_compaction_started。
+    tr = PipelineEventTranslator(_ctx())
+    envs = tr.translate(CompactionEvent(phase="started"))
+    assert len(envs) == 1
+    assert envs[0]["eventType"] == "context_compaction_started"
+    assert envs[0]["scope"] == "pipeline"
+
+
+def test_translate_compaction_failed_phase_forwarded() -> None:
+    tr = PipelineEventTranslator(_ctx())
+    envs = tr.translate(CompactionEvent(phase="failed", reason="no_result"))
+    assert len(envs) == 1
+    assert envs[0]["eventType"] == "context_compaction_failed"
+
+
+def test_translate_compaction_started_within_candidate_step_scope() -> None:
+    tr = PipelineEventTranslator(_ctx())
+    tr.translate(
+        PipelineEvent(
+            type=PipelineEventType.SUB_PIPELINE_STARTED,
+            step_id=None,
+            timestamp=time.time(),
+            data={
+                "sub_pipeline_id": "evaluate_candidate_abcd",
+                "candidate_index": 0,
+                "candidate_name": "low cost",
+                "sub_pipeline_name": "evaluate_candidate",
+                "total_steps": 3,
+                "parent_step_id": "evaluate_candidates",
+            },
+        )
+    )
+    tr.translate(
+        PipelineEvent(
+            type=PipelineEventType.SUB_STEP_STARTED,
+            step_id="template_generating",
+            timestamp=time.time(),
+            data={
+                "sub_pipeline_id": "evaluate_candidate_abcd",
+                "candidate_index": 0,
+                "step_id": "template_generating",
+                "step_index": 0,
+                "total_steps": 3,
+            },
+        )
+    )
+    envs = tr.translate(
+        SubPipelineStreamEvent(
+            sub_pipeline_id="evaluate_candidate_abcd",
+            candidate_index=0,
+            inner=CompactionEvent(phase="started"),
+        )
+    )
+    started = [x for x in envs if x["eventType"] == "context_compaction_started"]
+    assert len(started) == 1
+    assert started[0]["scope"] == "candidate_step"
+
+
+def test_translate_compaction_candidate_step_scope() -> None:
+    tr = PipelineEventTranslator(_ctx())
+    tr.translate(
+        PipelineEvent(
+            type=PipelineEventType.SUB_PIPELINE_STARTED,
+            step_id=None,
+            timestamp=time.time(),
+            data={
+                "sub_pipeline_id": "evaluate_candidate_abcd",
+                "candidate_index": 0,
+                "candidate_name": "low cost",
+                "sub_pipeline_name": "evaluate_candidate",
+                "total_steps": 3,
+                "parent_step_id": "evaluate_candidates",
+            },
+        )
+    )
+    tr.translate(
+        PipelineEvent(
+            type=PipelineEventType.SUB_STEP_STARTED,
+            step_id="template_generating",
+            timestamp=time.time(),
+            data={
+                "sub_pipeline_id": "evaluate_candidate_abcd",
+                "candidate_index": 0,
+                "step_id": "template_generating",
+                "step_index": 0,
+                "total_steps": 3,
+            },
+        )
+    )
+    envs = tr.translate(
+        SubPipelineStreamEvent(
+            sub_pipeline_id="evaluate_candidate_abcd",
+            candidate_index=0,
+            inner=CompactionEvent(phase="finished", summary="S", original_tokens=100, compacted_tokens=10),
+        )
+    )
+    e = [x for x in envs if x["eventType"] == "context_compacted"][0]
+    assert e["scope"] == "candidate_step"
+    assert "candidateStep" in e
+    assert e["data"]["summary"] == "S"
+
+
+def test_sanitize_tool_input_passthrough_keeps_template_and_conclusion() -> None:
+    from iac_code.a2a.pipeline_events import _sanitize_tool_input
+
+    tool_input = {
+        "path": "/Users/alice/.iac-code/projects/demo/template.yaml",
+        "content": (
+            "ROSTemplateFormatVersion: '2015-09-01'\n"
+            "Resources:\n  Db:\n    Type: ALIYUN::RDS::DBInstance\n"
+            "    Properties:\n      MasterUserName: admin\n"
+            "      RdsMasterPassword: S3cret!\n      SecurityGroupId: !Ref Sg\n"
+        ),
+        "conclusion": {
+            "template": "Type: ALIYUN::RDS::DBInstance",
+            "deployment_parameters": {"RdsMasterPassword": "S3cret!"},
+        },
+    }
+    result = _sanitize_tool_input(tool_input)
+    assert result == tool_input
+    assert "[REDACTED]" not in json.dumps(result)
+    assert "***" not in json.dumps(result)

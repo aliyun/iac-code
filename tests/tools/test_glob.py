@@ -231,3 +231,79 @@ class TestGlobRendering:
 
     def test_is_read_only(self, tool):
         assert tool.is_read_only() is True
+
+
+class TestGlobDoesNotBlockEventLoop:
+    """The blocking filesystem walk must run off the event loop (asyncio.to_thread).
+
+    Web agent turns, SSE streams, and all HTTP handlers share one event loop; a
+    synchronous glob would starve them. These tests block the walk on a
+    ``threading.Event`` and assert the loop keeps scheduling other coroutines.
+    """
+
+    @pytest.mark.asyncio
+    async def test_execute_does_not_starve_loop(self, tool, tmp_path, monkeypatch):
+        import asyncio
+        import threading
+
+        import iac_code.tools.glob as glob_module
+
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocking_glob_matches(*args, **kwargs):
+            entered.set()
+            release.wait(5)
+            return [], []
+
+        monkeypatch.setattr(glob_module, "_glob_matches", blocking_glob_matches)
+
+        context = ToolContext(cwd=str(tmp_path))
+        task = asyncio.create_task(
+            tool.execute(tool_input={"pattern": "**/*.py", "path": str(tmp_path)}, context=context)
+        )
+
+        # Worker thread entered the blocking body while the loop stayed free.
+        await asyncio.wait_for(asyncio.to_thread(entered.wait, 1), timeout=2)
+        assert not task.done()
+        # The loop is still scheduling coroutines despite the blocked worker.
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert not task.done()
+
+        release.set()
+        result = await asyncio.wait_for(task, timeout=2)
+        assert result.is_error is False
+        assert result.content == "No files found"
+
+    @pytest.mark.asyncio
+    async def test_check_permissions_does_not_starve_loop(self, tool, tmp_path, monkeypatch):
+        import asyncio
+        import threading
+
+        import iac_code.tools.glob as glob_module
+
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocking_glob_matches(*args, **kwargs):
+            entered.set()
+            release.wait(5)
+            return [], []
+
+        monkeypatch.setattr(glob_module, "_glob_matches", blocking_glob_matches)
+
+        context = ToolPermissionContext(cwd=str(tmp_path))
+        task = asyncio.create_task(
+            tool.check_permissions({"pattern": "**/*.py", "path": str(tmp_path)}, context)
+        )
+
+        await asyncio.wait_for(asyncio.to_thread(entered.wait, 1), timeout=2)
+        assert not task.done()
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert not task.done()
+
+        release.set()
+        result = await asyncio.wait_for(task, timeout=2)
+        assert result.behavior == "allow"

@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="application-name" content="IaC Code Web" />
+    <title>IaC Code</title>
+    <link rel="stylesheet" href="/static/styles.css?v=web-repl-ui-305" />
+  </head>
+  <body>
+    <main id="iac-code-web-root" class="workbench">
+      <aside class="session-rail" aria-label="Session" data-i18n-attr="aria-label:Session">
+        <button
+          class="sidebar-drawer-toggle"
+          data-app-shell="sidebar-drawer-toggle"
+          type="button"
+          aria-label="Open navigation"
+          data-i18n-attr="aria-label:Open navigation"
+          aria-expanded="false"
+        >
+          <span class="sr-only" data-i18n="Menu">Menu</span>
+        </button>
+        <nav class="sidebar-global-actions" data-app-shell="sidebar-global-actions" aria-label="Global actions" data-i18n-attr="aria-label:Global actions">
+          <button class="sidebar-action sidebar-action-new primary-action" data-app-shell="new-session" type="button">
+            <span class="sidebar-action-icon sidebar-action-icon-new" aria-hidden="true"></span>
+            <span data-i18n="New chat">New chat</span>
+          </button>
+          <button class="sidebar-action" data-app-shell="sidebar-search" type="button">
+            <span class="sidebar-action-icon sidebar-action-icon-search" aria-hidden="true"></span>
+            <span data-i18n="Search">Search</span>
+          </button>
+          <button class="sidebar-action" data-app-shell="sidebar-skills" type="button">
+            <span class="sidebar-action-icon sidebar-action-icon-skills" aria-hidden="true"></span>
+            <span data-i18n="Plugins">Plugins</span>
+          </button>
+        </nav>
+        <nav class="session-list pinned-thread-nav" data-app-shell="pinned-session-list" aria-label="Pinned conversations" data-label="Pinned" data-i18n-attr="aria-label:Pinned conversations;data-label:Pinned" hidden></nav>
+        <div class="project-nav-header" data-app-shell="project-nav-header">
+          <button
+            class="project-nav-toggle"
+            data-app-shell="projects-section-toggle"
+            type="button"
+            aria-expanded="true"
+          >
+            <span class="project-nav-title" data-i18n="Projects">Projects</span>
+            <span class="project-nav-chevron" aria-hidden="true"></span>
+          </button>
+          <button
+            class="project-nav-collapse-all"
+            data-app-shell="projects-collapse-all"
+            type="button"
+            aria-label="Collapse all sessions"
+            title="Collapse all sessions"
+            data-i18n-attr="aria-label:Collapse all sessions;title:Collapse all sessions"
+          >
+            <span class="project-nav-collapse-icon" aria-hidden="true"></span>
+          </button>
+        </div>
+        <nav class="session-list project-thread-nav" data-app-shell="session-list" aria-label="Projects and conversations" data-i18n-attr="aria-label:Projects and conversations"></nav>
+        <div class="sidebar-footer">
+          <button
+            class="workspace-config-button sidebar-settings-action"
+            data-app-shell="workspace-open-config"
+            type="button"
+          >
+            <span class="sidebar-action-icon sidebar-action-icon-settings" aria-hidden="true"></span>
+            <span data-i18n="Settings">Settings</span>
+          </button>
+        </div>
+      </aside>
+
+      <div
+        class="sidebar-resize-handle"
+        data-app-shell="sidebar-resize"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        data-i18n-attr="aria-label:Resize sidebar"
+        tabindex="0"
+      ></div>
+
+      <section class="transcript-panel" aria-label="Transcript" data-i18n-attr="aria-label:Transcript">
+        <header class="panel-header">
+          <div class="thread-current" data-app-shell="thread-current">
+            <button class="thread-title-button" data-app-shell="thread-title" type="button" data-i18n="Ready">Ready</button>
+            <div class="thread-menu-anchor">
+            <button
+              class="thread-menu-button"
+              data-app-shell="thread-menu-toggle"
+              type="button"
+              aria-label="Conversation actions"
+              data-i18n-attr="aria-label:Conversation actions"
+              aria-haspopup="menu"
+              aria-expanded="false"
+            >
+              ...
+            </button>
+            <div class="thread-menu" data-app-shell="thread-menu" role="menu" hidden>
+              <button class="thread-menu-item" data-app-shell="thread-pin" type="button" role="menuitem">
+                <span class="thread-menu-icon thread-menu-icon-pin" aria-hidden="true"></span>
+                <span data-app-shell="thread-pin-label" data-i18n="Pin conversation">Pin conversation</span>
+                <kbd>⌥⌘P</kbd>
+              </button>
+              <button class="thread-menu-item" data-app-shell="thread-rename" type="button" role="menuitem">
+                <span class="thread-menu-icon thread-menu-icon-rename" aria-hidden="true"></span>
+                <span data-i18n="Rename conversation">Rename conversation</span>
+                <kbd>⌥⌘R</kbd>
+              </button>
+              <button class="thread-menu-item" data-app-shell="thread-archive" type="button" role="menuitem">
+                <span class="thread-menu-icon thread-menu-icon-archive" aria-hidden="true"></span>
+                <span data-i18n="Archive conversation">Archive conversation</span>
+                <kbd>⇧⌘A</kbd>
+              </button>
+            </div>
+            </div>
+          </div>
+          <button
+            class="pipeline-workspace-open"
+            data-app-shell="pipeline-workspace-open"
+            type="button"
+            aria-label="View pipeline"
+            title="View pipeline"
+            data-i18n-attr="aria-label:View pipeline;title:View pipeline"
+            hidden
+          >
+            <span class="pipeline-workspace-open-icon" aria-hidden="true"></span>
+          </button>
+          <button
+            class="output-toggle"
+            data-app-shell="output-toggle"
+            type="button"
+            aria-label="Output"
+            title="Output"
+            data-i18n-attr="aria-label:Output;title:Output"
+            hidden
+          >
+            <span class="output-toggle-icon" aria-hidden="true"></span>
+            <span class="output-count" data-app-shell="output-count" hidden>0</span>
+          </button>
+        </header>
+
+        <div class="read-only-banner" data-app-shell="read-only-banner" data-i18n="This conversation was created outside the web entry point and is read-only." hidden>
+          This conversation was created outside the web entry point and is read-only.
+        </div>
+
+        <div class="message-stack" data-app-shell="message-stack" aria-live="polite"></div>
+        <div class="tool-activity-region" data-app-shell="tool-activity-stack" aria-live="polite"></div>
+        <div class="blocking-region" data-app-shell="blocking-stack" aria-live="polite"></div>
+        <div class="session-status-panel" data-app-shell="session-status-panel" hidden></div>
+        <div class="mcp-status-panel" data-app-shell="mcp-status-panel" hidden></div>
+
+        <form class="composer" data-app-shell="composer-form">
+          <div class="composer-topline">
+            <output class="composer-error" data-app-shell="composer-error"></output>
+          </div>
+          <div class="queued-input-strip" data-app-shell="queued-inputs" hidden></div>
+          <div class="composer-row">
+            <div class="composer-input-wrap">
+              <div class="composer-skill-row" data-app-shell="composer-skill-row" hidden></div>
+              <div class="attachment-row" data-app-shell="attachment-chips"></div>
+              <textarea
+                id="prompt"
+                name="prompt"
+                rows="4"
+                data-app-shell="composer-input"
+                aria-label="Enter your requirement"
+                placeholder="Describe your infrastructure needs"
+                data-i18n-attr="aria-label:Enter your requirement;placeholder:Describe your infrastructure needs"
+              ></textarea>
+              <div class="suggestions" data-app-shell="suggestions" hidden></div>
+            </div>
+            <div class="composer-actions">
+              <label class="file-action" aria-label="Attach image" data-i18n-attr="aria-label:Attach image">
+                <svg class="composer-icon composer-icon-plus" viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M10 3V17" />
+                  <path d="M3 10H17" />
+                </svg>
+                <input
+                  data-app-shell="composer-file-input"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  multiple
+                />
+              </label>
+              <div class="permission-mode-picker">
+                <button
+                  class="permission-mode-control"
+                  data-app-shell="permission-mode-control"
+                  type="button"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                  data-i18n="Approval requested"
+                >
+                  Approval requested
+                </button>
+                <div
+                  class="permission-mode-menu"
+                  data-app-shell="permission-mode-menu"
+                  role="menu"
+                  hidden
+                ></div>
+              </div>
+              <button
+                class="thinking-toggle"
+                data-app-shell="thinking-toggle"
+                type="button"
+                aria-pressed="false"
+                aria-label="Thinking"
+                title="Thinking"
+                data-i18n-attr="aria-label:Thinking;title:Thinking"
+              >
+                <svg class="thinking-toggle-icon" viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M10 2.5a5 5 0 0 0-3 9v1.5h6V11.5a5 5 0 0 0-3-9z" />
+                  <path d="M8 16h4" />
+                  <path d="M8.5 17.75h3" />
+                </svg>
+                <span class="thinking-toggle-label" data-i18n="Thinking">Thinking</span>
+              </button>
+              <div class="composer-model-picker">
+                <button
+                  class="composer-model-control"
+                  data-app-shell="composer-model-control"
+                  type="button"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                  data-i18n="Configure model"
+                >
+                  Configure model
+                </button>
+                <div
+                  class="composer-model-menu"
+                  data-app-shell="composer-model-menu"
+                  role="menu"
+                  hidden
+                ></div>
+              </div>
+              <button class="send-action" data-app-shell="composer-send" type="submit" aria-label="Send" data-i18n-attr="aria-label:Send" disabled>
+                <svg class="composer-icon composer-icon-send" viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M10 15.25V4.75" />
+                  <path d="M5.75 9L10 4.75L14.25 9" />
+                </svg>
+                <svg class="composer-icon composer-icon-stop" viewBox="0 0 20 20" aria-hidden="true">
+                  <rect x="5.75" y="5.75" width="8.5" height="8.5" rx="1.6" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="draft-session-controls" data-app-shell="draft-session-controls" hidden>
+            <div class="draft-session-picker">
+              <button
+                class="draft-session-control"
+                data-app-shell="draft-project-control"
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded="false"
+                data-i18n="Select project"
+              >
+                Select project
+              </button>
+              <div
+                class="draft-session-menu draft-project-menu"
+                data-app-shell="draft-project-menu"
+                role="menu"
+                hidden
+              ></div>
+              <div
+                class="draft-session-menu draft-session-submenu draft-project-new-menu"
+                data-app-shell="draft-project-new-menu"
+                role="menu"
+                hidden
+              ></div>
+            </div>
+            <div class="draft-session-picker draft-mode-picker">
+              <button
+                class="draft-session-control"
+                data-app-shell="draft-mode-control"
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded="false"
+                data-i18n="Normal mode"
+              >
+                Normal mode
+              </button>
+              <div class="draft-session-menu draft-mode-menu" data-app-shell="draft-mode-menu" role="menu" hidden></div>
+              <div
+                class="draft-session-menu draft-session-submenu draft-pipeline-submenu"
+                data-app-shell="draft-pipeline-menu"
+                role="menu"
+                hidden
+              ></div>
+            </div>
+          </div>
+        </form>
+        <aside class="output-panel" data-app-shell="output-panel" aria-label="Output" data-i18n-attr="aria-label:Output" hidden>
+          <header class="output-panel-head">
+            <span class="output-panel-title" data-i18n="Output">Output</span>
+            <button class="output-panel-close" data-app-shell="output-panel-close" type="button" aria-label="Close output" data-i18n-attr="aria-label:Close output">×</button>
+          </header>
+          <div class="output-panel-body" data-app-shell="output-panel-body"></div>
+        </aside>
+        <aside class="output-file-preview" data-app-shell="output-file-preview" aria-label="File preview" data-i18n-attr="aria-label:File preview" hidden></aside>
+      </section>
+
+      <aside class="workspace-panel" aria-label="Workspace" data-i18n-attr="aria-label:Workspace">
+        <section>
+          <p class="eyebrow" data-i18n="Workspace">Workspace</p>
+          <dl class="workspace-list">
+            <div>
+              <dt data-i18n="Project">Project</dt>
+              <dd data-field="cwd" data-i18n="Loading">Loading</dd>
+            </div>
+            <div>
+              <dt data-i18n="Mode">Mode</dt>
+              <dd data-field="mode" data-i18n="Normal">Normal</dd>
+            </div>
+            <div>
+              <dt data-i18n="Pending">Pending</dt>
+              <dd data-field="pending">0</dd>
+            </div>
+            <div>
+              <dt data-i18n="Session">Session</dt>
+              <dd data-field="session-id">-</dd>
+            </div>
+          </dl>
+        </section>
+        <section>
+          <p class="eyebrow" data-i18n="Tools">Tools</p>
+          <div class="tool-region" data-app-shell="tool-stack"></div>
+        </section>
+        <p class="app-error" data-app-shell="app-error"></p>
+      </aside>
+
+      <div class="workspace-modal" data-app-shell="workspace-modal" hidden>
+        <button
+          class="workspace-modal-backdrop"
+          data-app-shell="workspace-modal-backdrop"
+          type="button"
+          aria-label="Close settings"
+          data-i18n-attr="aria-label:Close settings"
+        ></button>
+        <section
+          class="workspace-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="workspace-dialog-title"
+        >
+          <header class="workspace-dialog-header">
+            <div>
+              <button
+                class="workspace-dialog-close"
+                data-app-shell="workspace-modal-close"
+                type="button"
+                aria-label="Back to app"
+                data-i18n-attr="aria-label:Back to app"
+                data-i18n="Back to app"
+              >
+                Back to app
+              </button>
+            </div>
+            <h2 id="workspace-dialog-title" data-i18n="Settings">Settings</h2>
+          </header>
+          <nav class="workspace-tabs" data-app-shell="workspace-tabs" aria-label="Workspace views" data-i18n-attr="aria-label:Workspace views" role="tablist">
+            <p class="workspace-tab-group-title" data-i18n="Configuration">Configuration</p>
+            <button class="is-active" data-workspace-tab="other" type="button" role="tab" aria-selected="true">
+              <span class="workspace-tab-icon workspace-tab-icon-other" aria-hidden="true"></span>
+              <span data-i18n="General">General</span>
+            </button>
+            <button data-workspace-tab="model" type="button" role="tab" aria-selected="false">
+              <span class="workspace-tab-icon workspace-tab-icon-model" aria-hidden="true"></span>
+              <span data-i18n="Models">Models</span>
+            </button>
+            <button data-workspace-tab="cloud" type="button" role="tab" aria-selected="false">
+              <span class="workspace-tab-icon workspace-tab-icon-cloud" aria-hidden="true"></span>
+              <span data-i18n="Cloud credentials">Cloud credentials</span>
+            </button>
+            <button data-workspace-tab="memory" type="button" role="tab" aria-selected="false">
+              <span class="workspace-tab-icon workspace-tab-icon-memory" aria-hidden="true"></span>
+              <span data-i18n="Memory">Memory</span>
+            </button>
+            <button data-workspace-tab="skills" type="button" role="tab" aria-selected="false">
+              <span class="workspace-tab-icon workspace-tab-icon-skills" aria-hidden="true"></span>
+              <span data-i18n="Plugins">Plugins</span>
+            </button>
+            <p class="workspace-tab-group-title" data-i18n="History">History</p>
+            <button data-workspace-tab="archived" type="button" role="tab" aria-selected="false">
+              <span class="workspace-tab-icon workspace-tab-icon-archived" aria-hidden="true"></span>
+              <span data-i18n="Archived conversations">Archived conversations</span>
+            </button>
+          </nav>
+          <div class="workspace-content" data-app-shell="workspace-content">
+            <section class="workspace-tab-panel" data-workspace-panel="status">
+              <h3 data-i18n="Status">Status</h3>
+              <div class="empty-state" data-i18n="Loading session controls.">Loading session controls.</div>
+            </section>
+            <section class="workspace-tab-panel" data-workspace-panel="model" hidden>
+              <h3 data-i18n="Models">Models</h3>
+            </section>
+            <section class="workspace-tab-panel" data-workspace-panel="cloud" hidden>
+              <h3 data-i18n="Cloud credentials">Cloud credentials</h3>
+            </section>
+            <section class="workspace-tab-panel" data-workspace-panel="memory" hidden>
+              <h3 data-i18n="Memory">Memory</h3>
+            </section>
+            <section class="workspace-tab-panel" data-workspace-panel="skills" hidden>
+              <h3 data-i18n="Plugins">Plugins</h3>
+            </section>
+            <section class="workspace-tab-panel workspace-archived-panel" data-workspace-panel="archived" hidden>
+              <h3 data-i18n="Archived conversations">Archived conversations</h3>
+            </section>
+            <section class="workspace-tab-panel" data-workspace-panel="other" hidden>
+              <h3 data-i18n="General">General</h3>
+            </section>
+            <section class="workspace-tab-panel" data-workspace-panel="pipeline" hidden>
+              <h3 data-i18n="Pipeline">Pipeline</h3>
+              <div class="pipeline-region" data-app-shell="pipeline-workspace"></div>
+            </section>
+          </div>
+        </section>
+      </div>
+
+      <div class="command-palette" data-app-shell="command-palette" hidden>
+        <button
+          class="command-palette-backdrop"
+          data-app-shell="command-palette-backdrop"
+          type="button"
+          aria-label="Close command menu"
+          data-i18n-attr="aria-label:Close command menu"
+        ></button>
+        <section
+          class="command-palette-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Search chats or run a command"
+          data-i18n-attr="aria-label:Search chats or run a command"
+        >
+          <label class="command-palette-search">
+            <span class="sr-only" data-i18n="Search chats or run a command">Search chats or run a command</span>
+            <input type="search" placeholder="Search chats or run a command" data-i18n-attr="placeholder:Search chats or run a command" data-app-shell="command-palette-search" />
+            <kbd class="command-palette-search-hint" aria-hidden="true">⌘K</kbd>
+          </label>
+          <div class="command-palette-list" data-app-shell="command-palette-list"></div>
+        </section>
+      </div>
+
+      <div class="app-modal-backdrop" data-app-shell="app-modal-backdrop" hidden>
+        <section class="app-modal" data-app-shell="app-modal" role="dialog" aria-modal="true">
+          <button class="app-modal-close" data-app-shell="app-modal-close" type="button" aria-label="Close" data-i18n-attr="aria-label:Close">
+            <span aria-hidden="true"></span>
+          </button>
+          <h2 class="app-modal-title" data-app-shell="app-modal-title"></h2>
+          <p class="app-modal-subtitle" data-app-shell="app-modal-subtitle"></p>
+          <form class="app-modal-form" data-app-shell="app-modal-form">
+            <input
+              class="app-modal-input"
+              data-app-shell="app-modal-input"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <textarea
+              class="app-modal-textarea"
+              data-app-shell="app-modal-textarea"
+              rows="4"
+              spellcheck="false"
+              hidden
+            ></textarea>
+            <output class="app-modal-error" data-app-shell="app-modal-error" role="status"></output>
+            <div class="app-modal-actions">
+              <button class="app-modal-cancel" data-app-shell="app-modal-cancel" type="button" data-i18n="Cancel">Cancel</button>
+              <button class="app-modal-confirm" data-app-shell="app-modal-confirm" type="submit" data-i18n="Save">Save</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </main>
+    <script src="/static/js/vendor/markdown-it.min.js?v=14.1.0"></script>
+    <script type="module" src="/static/js/app.js?v=web-repl-ui-305"></script>
+  </body>
+</html>

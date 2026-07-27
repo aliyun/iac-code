@@ -513,6 +513,7 @@ class _PipelineSnapshotReducer:
         elif event_type == "input_received":
             self._snapshot["pendingInput"] = None
             self._snapshot["status"] = "working"
+            self._apply_candidate_selection(data)
         elif event_type == "backup_blocked":
             self._snapshot["normalHandoff"] = None
             self._snapshot["pendingNormalHandoff"] = None
@@ -560,6 +561,20 @@ class _PipelineSnapshotReducer:
         event_status = _normalized_status(event.get("status"))
         if event_status is not None:
             self._snapshot["status"] = event_status
+
+    def _apply_candidate_selection(self, data: dict[str, Any]) -> None:
+        """Record the plan the user picked so a reload can render the ✓ on that
+        candidate and keep the selection buttons suppressed.
+
+        The live path relies on the frontend's transient ``pipelineSelectedCandidate``
+        which is lost on reload; persisting the choice in ``control`` lets
+        ``resolvePipelineSelectedCandidate`` recover it from the snapshot.
+        """
+        if data.get("kind") != "candidate_selection":
+            return
+        selection = _candidate_selection_from_input(data)
+        if selection is not None:
+            self._snapshot["control"]["selectedCandidate"] = selection
 
     def _upsert_step(self, coordinate_value: Any, event: dict[str, Any]) -> dict[str, Any] | None:
         coordinate = _dict_or_none(coordinate_value)
@@ -1712,6 +1727,41 @@ def _int_or_none(value: Any) -> int | None:
         except ValueError:
             return None
     return None
+
+
+def _candidate_selection_from_input(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract ``{candidateName, candidateIndex}`` from a ``candidate_selection``
+    ``input_received`` payload, falling back to the encoded ``selectedValue`` JSON."""
+    option = _dict_or_none(data.get("selectedOption"))
+    name = _string_or_none(option.get("name")) if option is not None else None
+    index = _int_or_none(data.get("selectedIndex"))
+    if index is None and option is not None:
+        index = _int_or_none(option.get("candidate_index"))
+    if name is None or index is None:
+        parsed = _parse_selected_value(data.get("selectedValue"))
+        if parsed is not None:
+            if name is None:
+                name = _string_or_none(parsed.get("selected_candidate_name"))
+            if index is None:
+                index = _int_or_none(parsed.get("selected_candidate_index"))
+    if name is None and index is None:
+        return None
+    selection: dict[str, Any] = {}
+    if name is not None:
+        selection["candidateName"] = name
+    if index is not None:
+        selection["candidateIndex"] = index
+    return selection
+
+
+def _parse_selected_value(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = json.loads(value)
+    except (ValueError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _set_time(target: dict[str, Any], key: str, value: str | None) -> None:

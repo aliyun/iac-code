@@ -581,6 +581,11 @@ class ReplPty:
             self._capture_child_output(str(getattr(child, "before", "") or ""))
             self.events.append({"type": "terminate", "force": force, "at": _utc_now()})
 
+    def drain_output(self) -> None:
+        child = self.child
+        if child is not None:
+            _drain_child_output(child)
+
     def _capture_child_output(self, text: str) -> None:
         if text and not self._live_transcript:
             self.raw_chunks.append(text)
@@ -1038,8 +1043,7 @@ async def _call_aliyun_api_async(product: str, action: str, params: dict[str, An
     payload = json.loads(result.content)
     if not isinstance(payload, dict):
         return {}
-    body = payload.get("body")
-    return body if isinstance(body, dict) else payload
+    return payload
 
 
 def _call_aliyun_api(product: str, action: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -1093,7 +1097,7 @@ def _find_available_vswitch_cidr(vpc_cidr: str, used_cidrs: Iterable[str]) -> st
     return cidrs[0] if cidrs else None
 
 
-def _discover_cleanup_network_target() -> CleanupNetworkTarget:
+def _discover_cleanup_network_target(*, excluded_cidrs: Iterable[str] = ()) -> CleanupNetworkTarget:
     vpcs_data = _call_aliyun_api("vpc", "DescribeVpcs", {"PageSize": 50})
     for vpc in _nested_api_items(vpcs_data, "Vpcs", "Vpc"):
         vpc_id = str(vpc.get("VpcId") or "")
@@ -1105,6 +1109,7 @@ def _discover_cleanup_network_target() -> CleanupNetworkTarget:
         vswitches = _nested_api_items(vswitches_data, "VSwitches", "VSwitch")
         zone_ids = [str(item.get("ZoneId") or "") for item in vswitches if str(item.get("ZoneId") or "")]
         used_cidrs = [str(item.get("CidrBlock") or "") for item in vswitches if str(item.get("CidrBlock") or "")]
+        used_cidrs.extend(excluded_cidrs)
         vswitch_cidrs = _find_available_vswitch_cidrs(vpc_cidr, used_cidrs, count=2)
         if zone_ids and len(vswitch_cidrs) >= 2:
             return CleanupNetworkTarget(
@@ -1119,9 +1124,17 @@ def _discover_cleanup_network_target() -> CleanupNetworkTarget:
 
 
 def _ensure_cleanup_network_target(args: argparse.Namespace, run_dir: Path) -> CleanupNetworkTarget:
-    target = _cleanup_network_target_from_args(args)
+    explicit_target = getattr(args, "_cleanup_network_target_explicit", None)
+    if explicit_target is None:
+        explicit_target = _cleanup_network_target_from_args(args) is not None
+        args._cleanup_network_target_explicit = explicit_target
+
+    target = _cleanup_network_target_from_args(args) if explicit_target else None
     if target is None:
-        target = _discover_cleanup_network_target()
+        used_cidrs = set(getattr(args, "_cleanup_network_target_used_cidrs", ()))
+        target = _discover_cleanup_network_target(excluded_cidrs=used_cidrs)
+        used_cidrs.update((target.vswitch_cidr, target.rollback_vswitch_cidr))
+        args._cleanup_network_target_used_cidrs = used_cidrs
         args.cleanup_vpc_id = target.vpc_id
         args.cleanup_vpc_cidr = target.vpc_cidr
         args.cleanup_zone_id = target.zone_id
@@ -1326,6 +1339,9 @@ def _cleanup_resource_completed(resource: dict[str, Any] | None) -> bool:
 def _wait_for_cleanup_resource_status(pty: Any, stack_id: str, statuses: set[str], *, timeout: float) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        drain_output = getattr(pty, "drain_output", None)
+        if callable(drain_output):
+            drain_output()
         resource = _cleanup_resource_for_stack(pty, stack_id)
         status = ""
         if isinstance(resource, dict):

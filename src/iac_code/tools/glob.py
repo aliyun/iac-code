@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import fnmatch
 import os
 from pathlib import Path
@@ -145,6 +146,53 @@ def _glob_matches(
     return matches, unsafe_directories
 
 
+def _run_glob_execute(search_root: Path, pattern: str, allowed_roots: list[str]) -> list[Path]:
+    """Blocking glob body for ``GlobTool.execute``.
+
+    Runs the recursive filesystem walk and the per-file ``stat()`` sort. This is
+    offloaded to a worker thread via ``asyncio.to_thread`` so it never starves the
+    shared event loop (web agent turns, SSE, and HTTP handlers all run on it).
+    Reads only ``search_root``/``allowed_roots`` and the filesystem, so it is safe
+    to run off-loop; a running walk cannot be interrupted by task cancellation.
+    """
+    matches, _ = _glob_matches(search_root, pattern, allowed_roots=allowed_roots)
+    matches = [match for match in matches if _path_is_under_any_real_root(str(match), allowed_roots)]
+    # Sort by mtime descending (newest first); per-file stat() is blocking I/O.
+    matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return matches
+
+
+def _run_glob_permission_check(
+    search_root: Path,
+    pattern: str,
+    *,
+    allowed_roots: list[str],
+    context: ToolPermissionContext,
+) -> PermissionResult:
+    """Blocking permission body for ``GlobTool.check_permissions``.
+
+    Same rationale as ``_run_glob_execute``: the walk plus per-match ``check_read_path``
+    would otherwise block the event loop, so it is offloaded to a worker thread.
+    """
+    matches, unsafe_directories = _glob_matches(search_root, pattern, allowed_roots=allowed_roots)
+    if unsafe_directories:
+        detail = _("glob pattern outside allowed directories")
+        return _glob_path_constraint_result(detail, context)
+    for match in matches:
+        match_decision = check_read_path(
+            str(match),
+            cwd=context.cwd,
+            additional_directories=context.additional_directories,
+            trusted_read_directories=context.trusted_read_directories,
+            relative_read_directories=context.relative_read_directories,
+            strict_read_directories=context.strict_read_directories,
+            read_path_violation_behavior=context.read_path_violation_behavior,
+        )
+        if match_decision.behavior != "allow":
+            return match_decision.to_permission_result()
+    return PermissionResult(behavior="allow")
+
+
 class GlobTool(Tool):
     @property
     def name(self) -> str:
@@ -189,16 +237,12 @@ class GlobTool(Tool):
 
         try:
             allowed_roots = _effective_allowed_roots(search_root, context)
-            matches, _ = _glob_matches(search_root, pattern, allowed_roots=allowed_roots)
-            matches = [match for match in matches if _path_is_under_any_real_root(str(match), allowed_roots)]
+            matches = await asyncio.to_thread(_run_glob_execute, search_root, pattern, allowed_roots)
         except Exception as e:
             return ToolResult.error(f"Error during glob: {e}")
 
         if not matches:
             return ToolResult.success("No files found")
-
-        # Sort by mtime descending (newest first)
-        matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
 
         # Return relative paths
         relative_paths = [str(p.relative_to(search_root)) for p in matches]
@@ -229,30 +273,17 @@ class GlobTool(Tool):
                     context.cwd,
                     relative_read_directories=context.relative_read_directories,
                 )
-                matches, unsafe_directories = _glob_matches(
+                allowed_roots = _effective_allowed_roots(search_root, context)
+                return await asyncio.to_thread(
+                    _run_glob_permission_check,
                     search_root,
                     pattern,
-                    allowed_roots=_effective_allowed_roots(search_root, context),
+                    allowed_roots=allowed_roots,
+                    context=context,
                 )
             except Exception:
                 detail = _("glob pattern outside allowed directories")
                 return _glob_path_constraint_result(detail, context)
-            if unsafe_directories:
-                detail = _("glob pattern outside allowed directories")
-                return _glob_path_constraint_result(detail, context)
-            for match in matches:
-                match_decision = check_read_path(
-                    str(match),
-                    cwd=context.cwd,
-                    additional_directories=context.additional_directories,
-                    trusted_read_directories=context.trusted_read_directories,
-                    relative_read_directories=context.relative_read_directories,
-                    strict_read_directories=context.strict_read_directories,
-                    read_path_violation_behavior=context.read_path_violation_behavior,
-                )
-                if match_decision.behavior != "allow":
-                    return match_decision.to_permission_result()
-            return PermissionResult(behavior="allow")
         return decision.to_permission_result()
 
     # UI rendering methods

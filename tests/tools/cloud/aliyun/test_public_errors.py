@@ -42,6 +42,10 @@ def test_aliyun_public_error_templates_are_directly_extractable(tmp_path: Path) 
         "Alibaba Cloud API authorization expired or changed. Run {operation} again to approve the current contract.",
         "Alibaba Cloud API execution is unavailable for {operation}. Retry from an active runtime.",
         "Alibaba Cloud API input is invalid for {operation}. Check product, action, version, region, and parameters.",
+        "Alibaba Cloud returned the target response, but its headers are too large to display safely. "
+        "Verify the cloud resource state before retrying.",
+        "Alibaba Cloud returned an unsupported response body for {operation}. "
+        "Verify the cloud resource state before retrying.",
         "Alibaba Cloud API metadata for {operation} is temporarily unavailable; try again later.",
         "Alibaba Cloud endpoint cache could not be updated for {operation} in {region}. "
         "Check local configuration storage and retry.",

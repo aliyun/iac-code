@@ -353,14 +353,19 @@ class GrepTool(Tool):
                 return ToolResult.error(f"ripgrep error: {stderr.strip()}")
             output = stdout.strip()
         else:
-            output = _python_grep(
-                pattern,
-                path,
-                glob=glob,
-                case_insensitive=case_insensitive,
-                output_mode=output_mode,
-                max_results=max_results,
-                allowed_roots=allowed_roots,
+            # Pure-Python fallback walks the tree and reads files synchronously;
+            # offload it so it never starves the shared event loop.
+            output = (
+                await asyncio.to_thread(
+                    _python_grep,
+                    pattern,
+                    path,
+                    glob=glob,
+                    case_insensitive=case_insensitive,
+                    output_mode=output_mode,
+                    max_results=max_results,
+                    allowed_roots=allowed_roots,
+                )
             ).strip()
 
         if not output:

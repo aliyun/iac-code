@@ -12,6 +12,38 @@ REPL / PTY 入口，而 A2A runner 走 JSON-RPC / SSE 入口。
 - 不属于普通 `make test`，也不会在 pytest 中执行真实场景。
 - 该 runner 通过 `pexpect` 使用真实 PTY，仅支持 POSIX 环境；Windows 会提前报错，不作为本脚本支持目标。
 
+## Aliyun 结果契约与 telemetry 回归
+
+本目录额外包含三条针对 Aliyun business body 和 provider stream telemetry 的回归：
+
+- E1：真实 REPL/PTY normal 会话、`aliyun_api` 调用、退出后 `--continue` 恢复；provider 和 Aliyun transport 使用确定性 fixture。
+- E2：真实 REPL/PTY selling pipeline、delegated `ValidateTemplate`、候选选择等待点和恢复；provider 与 Aliyun transport 使用确定性 fixture。
+- E5：真实 REPL/PTY、当前已配置的真实 LLM provider 和真实阿里云 VPC `DescribeVpcs` 只读调用。
+
+```bash
+# E1：normal + resume
+uv run python scripts/repl/e2e/run_contract_scenarios.py \
+  --run-dir /tmp/iac-code-contract-e1
+
+# E2：selling pipeline + resume
+uv run python scripts/repl/e2e/run_pipeline_contract_scenario.py \
+  --run-dir /tmp/iac-code-contract-e2
+
+# E5：真实 LLM + 真实阿里云只读 canary
+uv run python scripts/repl/e2e/run_real_aliyun_contract_canary.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-code-contract-e5
+```
+
+E5 会把当前配置目录中的 `.credentials.yml`、`.cloud-credentials.yml` 和 `settings.yml` 复制到权限为
+`0600` 的隔离目录，不打印凭证；验收要求模型恰好调用一次
+`Vpc/2016-04-28/DescribeVpcs`，且参数只能是 `PageSize=10`。它不会创建、修改或删除云资源，未显式传
+`--allow-real-cloud` 时会直接拒绝运行。
+
+三条场景都校验：持久化工具结果是业务对象、`aliyun_http` 只存在于内部 metadata、恢复和公开输出不泄漏
+metadata，以及每个 provider attempt 恰有一个 started 和一个 terminal。各 run 目录中的
+`summary.json`、`aliyun-contract-audit.json`、`telemetry-audit.json` 和 transcript 是最终证据。
+
 ## 快速开始
 
 ```bash

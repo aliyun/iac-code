@@ -47,6 +47,7 @@ INSTALL_REQUIRES = [
 ]
 EXTRAS_REQUIRE = {
     "http": [
+        "a2a-sdk[http-server,signing]>=1.0.2,<2",
         "starlette>=0.39.0",
         "uvicorn[standard]>=0.30.0",
     ],
@@ -77,6 +78,11 @@ PACKAGE_DATA = {
         "**/*.json",
         "**/*.md",
         "**/*.rego",
+        "**/*.html",
+        "**/*.css",
+        "**/*.js",
+        "**/*.svg",
+        "**/*.LICENSE",
         "**/*.mo",
         "**/*.po",
     ],
@@ -194,7 +200,7 @@ def _compile_translations():
 
 
 def _replace_release_date():
-    if platform.system() == 'Darwin':
+    if platform.system() == "Darwin":
         return
     content = INIT_PATH.read_text(encoding="utf-8")
     today = date.today().isoformat()
@@ -325,5 +331,5 @@ setup(
     cmdclass={
         "build_py": InjectReleaseDateBuildPy,
         "sdist": CompileTranslationsSdist,
-    }
+    },
 )

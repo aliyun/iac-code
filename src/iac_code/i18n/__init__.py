@@ -15,6 +15,17 @@ SUPPORTED_LANGUAGES = ["en", "zh", "es", "fr", "de", "ja", "pt"]
 # Default language (English is the source language, no .po file needed)
 DEFAULT_LANGUAGE = "en"
 
+# Human-readable display names for the supported languages (used by the web UI).
+LANGUAGE_DISPLAY_NAMES: dict[str, str] = {
+    "en": "English",
+    "zh": "简体中文",
+    "es": "Español",
+    "fr": "Français",
+    "de": "Deutsch",
+    "ja": "日本語",
+    "pt": "Português",
+}
+
 # Module-level mutable reference to the actual gettext function
 # Initially set to a pass-through function that returns the original string
 
@@ -147,11 +158,12 @@ def _detect_windows_ui_language() -> str | None:
         return None
 
 
-def setup_i18n() -> None:
-    """Initialize internationalization.
+def set_language(lang: str) -> None:
+    """Bind the process-global translation functions to ``lang``.
 
-    This function sets up gettext with the detected system language.
-    It updates the module-level `_` function to use the appropriate translation.
+    This sets up gettext for the given language and updates the module-level
+    `_` function to use the appropriate translation. Unsupported languages fall
+    back to the default (English) language.
 
     The locales directory is expected to be at `locales/` relative to this file.
     English is the default fallback language (source strings are in English).
@@ -164,7 +176,8 @@ def setup_i18n() -> None:
     """
     global _gettext_func, _ngettext_func, _current_language
 
-    lang = _detect_language()
+    if lang not in SUPPORTED_LANGUAGES:
+        lang = DEFAULT_LANGUAGE
     _current_language = lang
 
     # Get the locales directory path
@@ -194,3 +207,31 @@ def setup_i18n() -> None:
     # captured `_` reference work without patching or import-order tricks.
     gettext.bindtextdomain("messages", str(locales_dir))
     gettext.textdomain("messages")
+
+
+def setup_i18n() -> None:
+    """Initialize internationalization from the detected system language."""
+    set_language(_detect_language())
+
+
+def resolve_ui_language(override: str | None) -> str:
+    """Return ``override`` when it is a supported language, else env detection."""
+    if override and override in SUPPORTED_LANGUAGES:
+        return override
+    return _detect_language()
+
+
+def load_webui_catalog(lang: str) -> dict[str, str]:
+    """Return {msgid: msgstr} from the compiled `webui` catalog for ``lang``.
+
+    Empty dict for English (base) or when no catalog exists.
+    """
+    if lang == DEFAULT_LANGUAGE or lang not in SUPPORTED_LANGUAGES:
+        return {}
+    locales_dir = Path(__file__).parent / "locales"
+    try:
+        translation = gettext.translation("webui", localedir=str(locales_dir), languages=[lang])
+    except Exception:
+        return {}
+    catalog = getattr(translation, "_catalog", {})
+    return {k: v for k, v in catalog.items() if isinstance(k, str) and k and v}

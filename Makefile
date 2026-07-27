@@ -62,6 +62,17 @@ translate: ## Extract, update and compile translations
 	@for lang in $(LOCALES); do \
 		uv run pybabel compile -d src/iac_code/i18n/locales -l $$lang > /dev/null 2>&1 && echo "Compile $$lang: OK" || (echo "Compile $$lang: FAILED"; exit 1); \
 	done
+	@uv run pybabel extract -F babel_webui.cfg --ignore-dirs='vendor' --add-location=file --project=iac-code --version=$(VERSION) -o src/iac_code/i18n/webui.pot . > /dev/null 2>&1 && echo "Extract webui: OK" || (echo "Extract webui: FAILED"; exit 1)
+	@for lang in $(LOCALES); do \
+		if [ -f src/iac_code/i18n/locales/$$lang/LC_MESSAGES/webui.po ]; then \
+			uv run pybabel update --ignore-pot-creation-date -D webui -i src/iac_code/i18n/webui.pot -d src/iac_code/i18n/locales -l $$lang > /dev/null 2>&1 && echo "Update  webui $$lang: OK" || (echo "Update  webui $$lang: FAILED"; exit 1); \
+		else \
+			uv run pybabel init -D webui -i src/iac_code/i18n/webui.pot -d src/iac_code/i18n/locales -l $$lang > /dev/null 2>&1 && echo "Init    webui $$lang: OK" || (echo "Init    webui $$lang: FAILED"; exit 1); \
+		fi; \
+	done
+	@for lang in $(LOCALES); do \
+		uv run pybabel compile -D webui -d src/iac_code/i18n/locales -l $$lang > /dev/null 2>&1 && echo "Compile webui $$lang: OK" || (echo "Compile webui $$lang: FAILED"; exit 1); \
+	done
 
 run: ## Run iac-code
 	IAC_CODE_INSTRUCTION_MEMORY_FILE=IAC-CODE.md uv run iac-code

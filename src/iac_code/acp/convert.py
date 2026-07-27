@@ -288,7 +288,7 @@ class ACPEventConverter:
                     status="failed" if is_error else "completed",
                 )
                 return [progress, end]
-            case CompactionEvent(original_tokens=original, compacted_tokens=compacted):
+            case CompactionEvent(phase="finished", original_tokens=original, compacted_tokens=compacted):
                 return [
                     acp.schema.AgentMessageChunk(
                         session_update="agent_message_chunk",

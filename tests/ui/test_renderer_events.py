@@ -13,6 +13,7 @@ from iac_code.types.stream_events import (
     TOOL_RENDER_RESULT_COMPACT_KEY,
     TOOL_RENDER_RESULT_VERBOSE_KEY,
     TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY,
+    CompactionEvent,
     MessageEndEvent,
     MessageStartEvent,
     PermissionRequestEvent,
@@ -78,6 +79,19 @@ class TestRendererStreamEvents:
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
 
         await renderer.run_streaming_output(events(), permission_handler=None)
+
+    async def test_compaction_started_does_not_render_completed_message(self, renderer):
+        async def events():
+            yield MessageStartEvent(message_id="m1")
+            yield CompactionEvent(phase="started")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        await renderer.run_streaming_output(events(), permission_handler=None)
+
+        rendered_text = " ".join(
+            segment.text for turn in renderer.message_history for segment in turn.segments if segment.kind == "text"
+        )
+        assert "Context auto-compacted" not in rendered_text
 
     async def test_thinking_delta(self, renderer):
         async def events():

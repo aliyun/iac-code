@@ -100,13 +100,18 @@ def inspect_prerequisites(
     raw_prerequisites: Mapping[str, Mapping[str, Any]],
     *,
     feature_flags: Mapping[str, bool],
+    platform_system: str | None = None,
+    platform_machine: str | None = None,
     command_exists: CommandExists | None = None,
     run_command: RunCommand | None = None,
 ) -> PrerequisiteResolution:
     checker = command_exists or _default_command_exists
     runner = run_command or _default_run_command
+    current_platform = _normalize_platform(platform_system or platform.system())
+    current_architecture = _normalize_architecture(platform_machine or platform.machine())
     resolved_flags = dict(feature_flags)
     decisions: dict[str, PrerequisiteDecision] = {}
+    env_overrides: dict[str, str] = {}
 
     for name, raw_prerequisite in raw_prerequisites.items():
         command = str(raw_prerequisite.get("command", name))
@@ -129,7 +134,7 @@ def inspect_prerequisites(
                 command=command,
                 resolved_path=resolved_path,
                 run_command=runner,
-                env_overrides={},
+                env_overrides=env_overrides,
                 installer_id=None,
                 progress_handler=None,
             )
@@ -153,6 +158,34 @@ def inspect_prerequisites(
             )
             continue
 
+        # Not on PATH: resolve infraguard the same way use-time lookup does — check the
+        # installer's install_dir (e.g. ~/bin) and version-check it. This is read-only
+        # (no download/mkdir) and keeps detection consistent with prepare_prerequisites,
+        # so a binary present in install_dir is reported available without touching PATH.
+        available_installers = _available_installers(
+            raw_prerequisite, current_platform, current_architecture, checker
+        )
+        resolved_path, resolved_installer_id, _hint_version_message = _resolve_path_hint_from_installers(
+            raw_prerequisite,
+            name,
+            command,
+            available_installers,
+            runner,
+            env_overrides,
+            current_platform,
+            None,
+        )
+        if resolved_path is not None:
+            decisions[name] = PrerequisiteDecision(
+                name=name,
+                command=command,
+                status="available",
+                required_flags=required_flags,
+                resolved_path=resolved_path,
+                installer_id=resolved_installer_id,
+            )
+            continue
+
         if _on_missing_action(raw_prerequisite, "non_interactive") == "disable_feature":
             _disable_flags(resolved_flags, required_flags)
             decisions[name] = PrerequisiteDecision(
@@ -170,7 +203,7 @@ def inspect_prerequisites(
             required_flags=required_flags,
         )
 
-    return PrerequisiteResolution(feature_flags=resolved_flags, decisions=decisions)
+    return PrerequisiteResolution(feature_flags=resolved_flags, decisions=decisions, env_overrides=env_overrides)
 
 
 def prepare_prerequisites(
@@ -255,7 +288,7 @@ def prepare_prerequisites(
             )
             continue
 
-        if str(surface) != "repl" or _on_missing_action(raw_prerequisite, "repl") != "prompt_install":
+        if _on_missing_action(raw_prerequisite, str(surface)) != "prompt_install":
             decisions[name] = _non_interactive_missing_decision(
                 raw_prerequisite,
                 resolved_flags,
