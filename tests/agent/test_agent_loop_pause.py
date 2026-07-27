@@ -8,8 +8,19 @@ import pytest
 
 @pytest.fixture
 def mock_provider_manager():
+    from iac_code.types.stream_events import MessageEndEvent, Usage
+
     pm = MagicMock()
     pm.get_model_name.return_value = "test-model"
+
+    # `stream` must be a real async generator that terminates: AgentLoop drives
+    # it with `while True: await anext(...)` and relies on StopAsyncIteration to
+    # end the turn. A bare MagicMock attribute never raises StopAsyncIteration,
+    # so `anext` would spin forever once the pause is released.
+    async def _stream(**_kwargs):
+        yield MessageEndEvent(stop_reason="stop", usage=Usage())
+
+    pm.stream = _stream
     return pm
 
 

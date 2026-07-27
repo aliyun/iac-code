@@ -97,7 +97,7 @@ def _run_workspace_script(tmp_path: Path, source: str) -> dict[str, object]:
     script = tmp_path / "workspace-test.mjs"
     script_source = source.strip().replace("__WORKSPACE_MODULE__", json.dumps(WORKSPACE_JS.as_uri()))
     script.write_text(script_source, encoding="utf-8")
-    result = subprocess.run([node, str(script)], capture_output=True, text=True, check=False)
+    result = subprocess.run([node, str(script)], capture_output=True, text=True, encoding="utf-8", check=False)
 
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
@@ -115,7 +115,7 @@ def _run_api_script(tmp_path: Path, source: str) -> dict[str, object]:
         .replace("__EVENTS_MODULE__", json.dumps(EVENTS_JS.as_uri()))
     )
     script.write_text(script_source, encoding="utf-8")
-    result = subprocess.run([node, str(script)], capture_output=True, text=True, check=False)
+    result = subprocess.run([node, str(script)], capture_output=True, text=True, encoding="utf-8", check=False)
 
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
@@ -129,7 +129,7 @@ def _run_events_script(tmp_path: Path, source: str) -> dict[str, object]:
     script = tmp_path / "events-test.mjs"
     script_source = source.strip().replace("__EVENTS_MODULE__", json.dumps(EVENTS_JS.as_uri()))
     script.write_text(script_source, encoding="utf-8")
-    result = subprocess.run([node, str(script)], capture_output=True, text=True, check=False)
+    result = subprocess.run([node, str(script)], capture_output=True, text=True, encoding="utf-8", check=False)
 
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
@@ -143,7 +143,7 @@ def _run_app_script(tmp_path: Path, source: str) -> dict[str, object]:
     script = tmp_path / "app-test.mjs"
     script_source = source.strip().replace("__APP_MODULE__", json.dumps(APP_JS.as_uri()))
     script.write_text(script_source, encoding="utf-8")
-    result = subprocess.run([node, str(script)], capture_output=True, text=True, check=False)
+    result = subprocess.run([node, str(script)], capture_output=True, text=True, encoding="utf-8", check=False)
 
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
@@ -157,7 +157,7 @@ def _run_toolcards_script(tmp_path: Path, source: str) -> dict[str, object]:
     script = tmp_path / "toolcards-test.mjs"
     script_source = source.strip().replace("__TOOLCARDS_MODULE__", json.dumps(TOOL_CARDS_JS.as_uri()))
     script.write_text(script_source, encoding="utf-8")
-    result = subprocess.run([node, str(script)], capture_output=True, text=True, check=False)
+    result = subprocess.run([node, str(script)], capture_output=True, text=True, encoding="utf-8", check=False)
 
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
@@ -171,7 +171,7 @@ def _run_composer_script(tmp_path: Path, source: str) -> dict[str, object]:
     script = tmp_path / "composer-test.mjs"
     script_source = source.strip().replace("__COMPOSER_MODULE__", json.dumps(COMPOSER_JS.as_uri()))
     script.write_text(script_source, encoding="utf-8")
-    result = subprocess.run([node, str(script)], capture_output=True, text=True, check=False)
+    result = subprocess.run([node, str(script)], capture_output=True, text=True, encoding="utf-8", check=False)
 
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
@@ -185,7 +185,7 @@ def _run_output_panel_script(tmp_path: Path, source: str) -> dict[str, object]:
     script = tmp_path / "output-panel-test.mjs"
     script_source = source.strip().replace("__OUTPUT_PANEL_MODULE__", json.dumps(OUTPUT_PANEL_JS.as_uri()))
     script.write_text(script_source, encoding="utf-8")
-    result = subprocess.run([node, str(script)], capture_output=True, text=True, check=False)
+    result = subprocess.run([node, str(script)], capture_output=True, text=True, encoding="utf-8", check=False)
 
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
@@ -10088,7 +10088,7 @@ def _run_mermaid_render_script(tmp_path, source):
     )
     script = tmp_path / "probe.mjs"
     script.write_text(harness, encoding="utf-8")
-    out = subprocess.run(["node", str(script)], capture_output=True, text=True, timeout=30)
+    out = subprocess.run(["node", str(script)], capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert out.returncode == 0, out.stderr
     return out.stdout
 

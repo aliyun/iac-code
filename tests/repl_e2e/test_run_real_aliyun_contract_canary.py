@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -34,7 +35,10 @@ def test_copy_runtime_config_requires_all_files_and_restricts_permissions(tmp_pa
     for name in CONFIG_FILES:
         target = destination / name
         assert target.read_text(encoding="utf-8") == "fixture: true\n"
-        assert target.stat().st_mode & 0o777 == 0o600
+        # POSIX permission bits are not meaningful on Windows, which cannot
+        # represent an owner-only 0o600 mode via os.chmod.
+        if sys.platform != "win32":
+            assert target.stat().st_mode & 0o777 == 0o600
 
     (source / CONFIG_FILES[0]).unlink()
     with pytest.raises(FileNotFoundError, match=CONFIG_FILES[0]):

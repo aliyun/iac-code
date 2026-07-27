@@ -37,7 +37,9 @@ def _skill_items_from_skills(skills: list[SkillDefinition]) -> list[dict[str, An
             "name": item.name,
             "description": item.description,
             "source": item.source.value,
-            "path": item.path,
+            # Normalize to POSIX separators so the path contract is stable
+            # across platforms (native paths would use backslashes on Windows).
+            "path": Path(item.path).as_posix() if item.path else item.path,
             "contentLength": item.content_length,
             "enabled": item.enabled,
             "locked": item.locked,

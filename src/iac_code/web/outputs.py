@@ -269,7 +269,9 @@ def outputs_payload(
         if not any(is_template_content(text, suffix) for text in candidates):
             return
         try:
-            rel = str(abs_path.relative_to(cwd))
+            # Use POSIX separators so the web API path contract is stable
+            # across platforms (Windows relative_to() would emit backslashes).
+            rel = abs_path.relative_to(cwd).as_posix()
         except ValueError:
             rel = abs_path.name
         files[str(abs_path)] = {

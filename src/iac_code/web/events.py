@@ -14,6 +14,7 @@ from contextvars import ContextVar
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime, time, timezone
 from os import PathLike
+from pathlib import PurePath
 from typing import Any
 
 from iac_code.mcp.progress import mcp_progress_metadata
@@ -147,6 +148,10 @@ def _normalize_event_value(value: Any) -> Any:
         return value.isoformat()
     if isinstance(value, (date, time)):
         return value.isoformat()
+    if isinstance(value, PurePath):
+        # POSIX separators keep the serialized path stable across platforms
+        # (str() on a Windows path would emit backslashes).
+        return _redact_secret_text(value.as_posix())
     if isinstance(value, PathLike):
         return _redact_secret_text(str(value))
     if isinstance(value, (bytes, bytearray, memoryview)):

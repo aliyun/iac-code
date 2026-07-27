@@ -41,8 +41,20 @@ def pipeline_runner(tmp_path):
         encoding="utf-8",
     )
 
+    from iac_code.types.stream_events import MessageEndEvent, Usage
+
     pm = MagicMock()
     pm.get_model_name.return_value = "test-model"
+
+    # `stream` must be a real async generator that terminates: the AgentLoop
+    # constructed by the runner drives it with `while True: await anext(...)`
+    # and relies on StopAsyncIteration to end the turn. A bare MagicMock
+    # attribute never raises StopAsyncIteration, so `anext` would spin forever
+    # once pause is released, starving the event loop.
+    async def _stream(**_kwargs):
+        yield MessageEndEvent(stop_reason="stop", usage=Usage())
+
+    pm.stream = _stream
     return PipelineRunner(
         pipeline_dir=tmp_path,
         provider_manager=pm,

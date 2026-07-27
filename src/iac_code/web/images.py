@@ -221,7 +221,7 @@ def store_cached_image(
     image_data = _validate_image_data(data, safe_media_type)
     try:
         ensure_private_dir(data_path.parent)
-        fd = os.open(str(data_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        fd = os.open(str(data_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0), 0o600)
         try:
             _write_all(fd, image_data)
         finally:

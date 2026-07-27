@@ -50,7 +50,7 @@ def _run_scrubbed_env(tmp_path: Path, *, source_env: dict[str, str], platform: s
         ),
         encoding="utf-8",
     )
-    result = subprocess.run([node, str(script)], capture_output=True, text=True, check=False)
+    result = subprocess.run([node, str(script)], capture_output=True, text=True, encoding="utf-8", check=False)
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
 

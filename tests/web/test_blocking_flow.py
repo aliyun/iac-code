@@ -25,7 +25,7 @@ def _run_frontend_script(tmp_path: Path, source: str) -> dict[str, object]:
     )
     script.write_text(script_source, encoding="utf-8")
 
-    result = subprocess.run([node, str(script)], capture_output=True, text=True, check=False)
+    result = subprocess.run([node, str(script)], capture_output=True, text=True, encoding="utf-8", check=False)
 
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)

@@ -1918,6 +1918,9 @@ def test_suggestions_route_serves_commands_files_and_shell_history(tmp_path, mon
     home.mkdir()
     (home / ".zsh_history").write_text(": 1700000000:0;git status --short\n: 1700000001:0;pwd\n", encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
+    # os.path.expanduser("~") ignores HOME on Windows and reads USERPROFILE, so
+    # point that at the temp home too or the shell-history lookup escapes tmp_path.
+    monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("SHELL", "/bin/zsh")
     manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=project)
     session = manager.create_session(session_id="suggestions-route")
