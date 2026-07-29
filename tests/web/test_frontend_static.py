@@ -1460,7 +1460,7 @@ def test_mcp_tools_render_server_dot_tool_label_and_icon() -> None:
 
     # 卡片挂 data-tool-kind="mcp",供 CSS 换用 MCP 图标。
     card_body = tool_cards.split("function renderToolCard", 1)[1]
-    assert 'toolKind = "mcp"' in card_body or 'dataset.toolKind' in card_body
+    assert 'toolKind = "mcp"' in card_body or "dataset.toolKind" in card_body
 
     # 样式:MCP 卡的图标字形区别于通用 >_。
     styles = _source(Path(__file__).parents[2] / "src/iac_code/web/static/styles.css")
@@ -1838,9 +1838,9 @@ def test_in_progress_tool_labels_use_present_tense() -> None:
     assert 'toolPhrase(tool, "progress")' in command_body
 
     # The grouped summary also flips to present tense when any tool is still in progress.
-    group_body = tool_cards.split("export function toolGroupSummary", 1)[1].split(
-        "function toolGroupSummaryParts", 1
-    )[0]
+    group_body = tool_cards.split("export function toolGroupSummary", 1)[1].split("function toolGroupSummaryParts", 1)[
+        0
+    ]
     assert "tools.some(isToolInProgress)" in group_body
     assert 'toolGroupSummaryParts(tools, "progress")' in group_body
 
@@ -5701,10 +5701,7 @@ def test_pipeline_thinking_indicator_is_injected_per_working_step(tmp_path) -> N
     # 流式助手消息打 is-streaming,供上面的判据识别。
     assert 'article.classList.add("is-streaming");' in app_source
     # handleStreamEvent 收到 text/thinking delta 时打点 lastStreamDeltaAt,喂给上面的时效判据。
-    assert (
-        'if (event.type === "assistant.text.delta" || event.type === "assistant.thinking.delta") {'
-        in app_source
-    )
+    assert 'if (event.type === "assistant.text.delta" || event.type === "assistant.thinking.delta") {' in app_source
     assert "lastStreamDeltaAt = Date.now();" in app_source
     # renderMessages 末尾及心跳按模式分派:流水线→逐叶子;普通→底部单枚。分派内仍调 syncPipelineThinking。
     assert "syncPipelineThinking(stack);" in app_source
@@ -6551,7 +6548,7 @@ def test_plugins_panel_hosts_skills_and_mcp_subtabs() -> None:
     assert 'child.panel.removeAttribute?.("data-workspace-panel")' in source
 
     # 横向子标签栏:技能 / MCP,默认选中技能;切换时激活对应子面板。
-    assert 'const PLUGINS_SUBTABS = [' in source
+    assert "const PLUGINS_SUBTABS = [" in source
     assert '{ id: "skills", label: t("Skills") }' in source
     assert '{ id: "mcp", label: "MCP" }' in source
     assert "workspace-plugins-subtabs" in source
@@ -6973,7 +6970,7 @@ def test_workspace_model_panel_has_provider_subnav() -> None:
     # 唯一非重复的「状态」收成标题旁的徽章(当前模型/已配置/未配置),active 态绿色。
     assert "workspace-provider-status-badge" in source
     assert "workspace-provider-title-row" in source
-    assert 'statusBadge.dataset.state' in source
+    assert "statusBadge.dataset.state" in source
     assert "Current model" in source
     assert ".workspace-provider-title-row" in styles
     assert '.workspace-provider-status-badge[data-state="active"]' in styles
@@ -10191,6 +10188,7 @@ def test_composer_wires_thinking_toggle():
     assert "export function saveThinkingEnabled" in api
     assert '"/thinking-enabled"' in api
 
+
 def test_app_reads_injected_session_defaults():
     app = _source(APP_JS)
     # 后端把新会话默认注入 <body> data 属性,app.js 读一次做模块级常量,避免异步拉取闪烁。
@@ -10271,7 +10269,7 @@ def test_restart_server_wired_across_frontend():
     # api.js 暴露重启调用。
     api_src = _source(API_JS)
     assert "export function restartServer()" in api_src
-    assert '/api/server/restart' in api_src
+    assert "/api/server/restart" in api_src
 
     # workspace.js 常规面板渲染「重启服务」按钮 + 全屏确认遮罩 + 健康轮询后自动刷新。
     ws = _source(WORKSPACE_JS)

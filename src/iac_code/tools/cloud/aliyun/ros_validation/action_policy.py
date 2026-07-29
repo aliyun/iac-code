@@ -188,9 +188,7 @@ def _preview_source_cardinality(
             _request_error(
                 policy.action,
                 _("PreviewStack must provide Parameters when reusing the existing template."),
-                _(
-                    "A source-less update preview reuses the template only when Parameters is provided."
-                ),
+                _("A source-less update preview reuses the template only when Parameters is provided."),
                 "update-reuse-without-parameters",
             )
         )

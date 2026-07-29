@@ -152,14 +152,13 @@ async def test_maybe_trigger_skips_when_cached(monkeypatch, tmp_path):
     _patch_engine(monkeypatch, plan_spy)
     monkeypatch.setattr(dc, "get_config_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        opt, "model_selection_for_session",
+        opt,
+        "model_selection_for_session",
         lambda session: WebModelSelection(provider=None, model="m", effort=None),
     )
     session = _make_session(tmp_path)
     manager = _FakeManager([_tool_result("a.yaml", _TPL0, 0, "c0")])
-    dc.write_cached(
-        "ctx-1", 0, _TPL0, [{"id": "overview", "title": "", "mermaidSource": "graph TD\n  CACHED"}], "m"
-    )
+    dc.write_cached("ctx-1", 0, _TPL0, [{"id": "overview", "title": "", "mermaidSource": "graph TD\n  CACHED"}], "m")
 
     coord = opt.DiagramOptimizationCoordinator()
     coord.maybe_trigger(session, manager, _confirm_and_select_envelope())
@@ -175,7 +174,8 @@ async def test_non_candidate_input_required_ignored(monkeypatch, tmp_path):
     _patch_engine(monkeypatch, plan_spy)
     monkeypatch.setattr(dc, "get_config_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        opt, "model_selection_for_session",
+        opt,
+        "model_selection_for_session",
         lambda session: WebModelSelection(provider=None, model="m", effort=None),
     )
     session = _make_session(tmp_path)
@@ -194,7 +194,8 @@ async def test_optimize_failure_publishes_failed_and_skips_cache(monkeypatch, tm
     _patch_engine(monkeypatch)
     monkeypatch.setattr(dc, "get_config_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        opt, "model_selection_for_session",
+        opt,
+        "model_selection_for_session",
         lambda session: WebModelSelection(provider=None, model="m", effort=None),
     )
 
@@ -220,7 +221,8 @@ async def test_views_render_raises_publishes_failed_and_skips_cache(monkeypatch,
     _patch_engine(monkeypatch)
     monkeypatch.setattr(dc, "get_config_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        opt, "model_selection_for_session",
+        opt,
+        "model_selection_for_session",
         lambda session: WebModelSelection(provider=None, model="m", effort=None),
     )
 
@@ -246,15 +248,14 @@ async def test_all_views_filtered_publishes_failed_and_skips_cache(monkeypatch, 
     _patch_engine(monkeypatch)
     monkeypatch.setattr(dc, "get_config_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        opt, "model_selection_for_session",
+        opt,
+        "model_selection_for_session",
         lambda session: WebModelSelection(provider=None, model="m", effort=None),
     )
     monkeypatch.setattr(
         opt,
         "render_ros_template_architecture_views",
-        lambda tpl, *, semantic_plan=None: _Multi(
-            (_V("overview", "总览", "graph TD"), _V("detail", "细节", ""))
-        ),
+        lambda tpl, *, semantic_plan=None: _Multi((_V("overview", "总览", "graph TD"), _V("detail", "细节", ""))),
     )
     session = _make_session(tmp_path)
     manager = _FakeManager([_tool_result("a.yaml", _TPL0, 0, "c0")])

@@ -140,9 +140,7 @@ def ui_language_payload() -> dict[str, Any]:
     """Return the saved UI language plus the available-languages list."""
     return {
         "uiLanguage": get_ui_language(),
-        "availableLanguages": [
-            {"code": code, "name": LANGUAGE_DISPLAY_NAMES[code]} for code in SUPPORTED_LANGUAGES
-        ],
+        "availableLanguages": [{"code": code, "name": LANGUAGE_DISPLAY_NAMES[code]} for code in SUPPORTED_LANGUAGES],
     }
 
 

@@ -512,17 +512,11 @@ def test_connect_and_fetch_snapshots_before_disconnect(monkeypatch) -> None:
     """
 
     scope_sentinel = object()  # identity is compared with ``is``
-    scoped_config = SimpleNamespace(
-        name="probe", scope=scope_sentinel, disabled=False, approved=True
-    )
+    scoped_config = SimpleNamespace(name="probe", scope=scope_sentinel, disabled=False, approved=True)
     record = SimpleNamespace(
         name="probe",
         scoped_config=SimpleNamespace(scope=scope_sentinel),
-        tools=[
-            SimpleNamespace(
-                tool_name="echo", description="Echo back", input_schema={}, annotations={}
-            )
-        ],
+        tools=[SimpleNamespace(tool_name="echo", description="Echo back", input_schema={}, annotations={})],
         resources=[],
         prompts=[
             SimpleNamespace(
@@ -554,9 +548,7 @@ def test_connect_and_fetch_snapshots_before_disconnect(monkeypatch) -> None:
     monkeypatch.setattr(
         mcp_settings,
         "health_diagnostic_for_record",
-        lambda rec: SimpleNamespace(
-            connection_state="connected", auth_state="not-configured", failure_reason=None
-        ),
+        lambda rec: SimpleNamespace(connection_state="connected", auth_state="not-configured", failure_reason=None),
     )
 
     snapshot = mcp_settings._connect_and_fetch(scoped_config, Path("/tmp/workspace"))
@@ -564,16 +556,12 @@ def test_connect_and_fetch_snapshots_before_disconnect(monkeypatch) -> None:
     assert snapshot is not None
     assert [tool["name"] for tool in snapshot.tools] == ["echo"]
     assert [prompt["name"] for prompt in snapshot.prompts] == ["greeting"]
-    assert snapshot.prompts[0]["arguments"] == [
-        {"name": "name", "description": "who", "required": True}
-    ]
+    assert snapshot.prompts[0]["arguments"] == [{"name": "name", "description": "who", "required": True}]
     assert snapshot.diagnostic.connection_state == "connected"
     # The live record really was wiped by disconnect_all — proving we snapshotted first.
     assert record.tools == []
     # And the whole snapshot survives JSON serialisation.
-    json.dumps(
-        {"tools": snapshot.tools, "resources": snapshot.resources, "prompts": snapshot.prompts}
-    )
+    json.dumps({"tools": snapshot.tools, "resources": snapshot.resources, "prompts": snapshot.prompts})
 
 
 def test_connect_and_fetch_skips_disabled_server(monkeypatch) -> None:
@@ -583,7 +571,5 @@ def test_connect_and_fetch_skips_disabled_server(monkeypatch) -> None:
         raise AssertionError("MCPManager must not be constructed for a disabled server")
 
     monkeypatch.setattr(mcp_settings, "MCPManager", _boom)
-    scoped_config = SimpleNamespace(
-        name="probe", scope=object(), disabled=True, approved=True
-    )
+    scoped_config = SimpleNamespace(name="probe", scope=object(), disabled=True, approved=True)
     assert mcp_settings._connect_and_fetch(scoped_config, Path("/tmp/workspace")) is None

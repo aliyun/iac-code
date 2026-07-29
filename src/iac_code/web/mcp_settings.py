@@ -156,10 +156,7 @@ def _offline_diagnostics(
 ) -> list[MCPHealthDiagnostic]:
     """Build per-server diagnostics without connecting (mirrors CLI listing)."""
 
-    loaded = {
-        _scoped_server_listing_identity(server): server
-        for server in [*result.servers, *result.pending]
-    }
+    loaded = {_scoped_server_listing_identity(server): server for server in [*result.servers, *result.pending]}
     diagnostics: list[MCPHealthDiagnostic] = []
     represented: set[Any] = set()
     for entry in raw_entries:
@@ -369,9 +366,7 @@ def server_capabilities(
 
     workspace_root = resolve_mcp_workspace_root(cwd)
     snapshot = _run_cli(_connect_and_fetch, scoped_config, workspace_root)
-    diagnostic = (
-        snapshot.diagnostic if snapshot is not None else health_diagnostic_for_config(scoped_config)
-    )
+    diagnostic = snapshot.diagnostic if snapshot is not None else health_diagnostic_for_config(scoped_config)
     tools = snapshot.tools if snapshot is not None else []
     resources = snapshot.resources if snapshot is not None else []
     prompts = snapshot.prompts if snapshot is not None else []
@@ -476,9 +471,9 @@ def _build_config_from_fields(fields: dict[str, Any]) -> dict[str, Any]:
         config["type"] = transport
         config["url"] = url
     else:
-        raise MCPWebError(_("Invalid transport {transport!r}. Valid values: stdio, http, sse, ws.").format(
-            transport=transport
-        ))
+        raise MCPWebError(
+            _("Invalid transport {transport!r}. Valid values: stdio, http, sse, ws.").format(transport=transport)
+        )
 
     oauth = _build_oauth(fields.get("oauth"))
     if oauth:
@@ -514,9 +509,7 @@ def _build_oauth(value: Any) -> dict[str, Any]:
             oauth["callbackPort"] = int(callback_port)
         except (TypeError, ValueError) as exc:
             raise MCPWebError(_("OAuth callback port must be an integer.")) from exc
-    metadata_url = (
-        value.get("authServerMetadataUrl") or value.get("auth_server_metadata_url") or ""
-    ).strip()
+    metadata_url = (value.get("authServerMetadataUrl") or value.get("auth_server_metadata_url") or "").strip()
     if metadata_url:
         oauth["authServerMetadataUrl"] = metadata_url
     return oauth
@@ -586,9 +579,7 @@ def update_mcp_server(
     existing = load_exact_mcp_config(server_name, scope=resolved_scope, cwd=cwd)
     if not existing.servers:
         raise MCPWebError(
-            "MCP server {name!r} not found in {scope} config.".format(
-                name=server_name, scope=resolved_scope.value
-            ),
+            "MCP server {name!r} not found in {scope} config.".format(name=server_name, scope=resolved_scope.value),
             status_code=404,
         )
     if config is not None:

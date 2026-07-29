@@ -41,6 +41,7 @@ def _is_pending_stack_status(status: Any) -> bool:
     s = str(status or "").upper()
     return bool(s) and (s.endswith("_IN_PROGRESS") or s.endswith("_REQUESTED"))
 
+
 _ROS_MARKERS = ("ROSTemplateFormatVersion", "Resources", "Transform")
 _TF_PATTERN = re.compile(r'(^|\n)\s*(resource|provider|module|terraform)\s*["{]')
 
@@ -184,11 +185,15 @@ def pipeline_candidate_costs(manager: Any, session: Any) -> dict[int, dict[str, 
             if not isinstance(cost, dict):
                 continue
             resources = cost.get("resources")
-            items = [
-                {"name": res.get("type") or "", "monthly_cost": res.get("cost") or ""}
-                for res in resources
-                if isinstance(res, dict)
-            ] if isinstance(resources, list) else []
+            items = (
+                [
+                    {"name": res.get("type") or "", "monthly_cost": res.get("cost") or ""}
+                    for res in resources
+                    if isinstance(res, dict)
+                ]
+                if isinstance(resources, list)
+                else []
+            )
             total = cost.get("monthly_estimate")
             costs[index] = {
                 "costItems": items,
@@ -211,9 +216,7 @@ def pipeline_candidate_costs(manager: Any, session: Any) -> dict[int, dict[str, 
     return costs
 
 
-def outputs_payload(
-    manager: Any, session: Any, optimizing_indices: frozenset[int] = frozenset()
-) -> dict[str, Any]:
+def outputs_payload(manager: Any, session: Any, optimizing_indices: frozenset[int] = frozenset()) -> dict[str, Any]:
     """扫描会话已存储消息 + pipeline A2A 日志,派生资源栈与模板文件列表。
 
     optimizing_indices 透传给 diagram_items,把协调器在途优化态挂到架构图的后端权威 optimizing 标志上。

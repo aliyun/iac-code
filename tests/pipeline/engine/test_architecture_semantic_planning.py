@@ -56,9 +56,7 @@ async def test_create_semantic_plan_with_llm_defaults_unchanged(monkeypatch):
     monkeypatch.setattr(asp, "ProviderManager", _FakeManager)
     monkeypatch.setattr(asp, "load_credentials", lambda *, model: {"default": "dk"})
 
-    await asp.create_semantic_plan_with_llm(
-        {"visible_nodes": []}, model="m", max_tokens=100, user_prompt="x"
-    )
+    await asp.create_semantic_plan_with_llm({"visible_nodes": []}, model="m", max_tokens=100, user_prompt="x")
 
     assert captured["credentials"] == {"default": "dk"}
     assert captured["provider_key_override"] is None

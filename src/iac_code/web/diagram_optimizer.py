@@ -92,9 +92,7 @@ class DiagramOptimizationCoordinator:
         idx = cand.index
         name = cand.name
         try:
-            await session.events.publish(
-                "diagram.optimizing", {"candidateIndex": idx, "candidateName": name}
-            )
+            await session.events.publish("diagram.optimizing", {"candidateIndex": idx, "candidateName": name})
             selection = model_selection_for_session(session)
             base = await asyncio.to_thread(render_ros_template_architecture, cand.template_content)
             if base.mermaid_source.startswith(_ERROR_MERMAID_PREFIX):

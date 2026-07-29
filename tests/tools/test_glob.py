@@ -294,9 +294,7 @@ class TestGlobDoesNotBlockEventLoop:
         monkeypatch.setattr(glob_module, "_glob_matches", blocking_glob_matches)
 
         context = ToolPermissionContext(cwd=str(tmp_path))
-        task = asyncio.create_task(
-            tool.check_permissions({"pattern": "**/*.py", "path": str(tmp_path)}, context)
-        )
+        task = asyncio.create_task(tool.check_permissions({"pattern": "**/*.py", "path": str(tmp_path)}, context))
 
         await asyncio.wait_for(asyncio.to_thread(entered.wait, 1), timeout=2)
         assert not task.done()

@@ -92,9 +92,7 @@ def iter_candidate_templates(manager: Any, session: Any) -> list[CandidateTempla
     return list(latest.values())
 
 
-def diagram_items(
-    manager: Any, session: Any, optimizing_indices: frozenset[int] = frozenset()
-) -> list[dict[str, Any]]:
+def diagram_items(manager: Any, session: Any, optimizing_indices: frozenset[int] = frozenset()) -> list[dict[str, Any]]:
     """扫描 pipeline A2A envelope 里各候选生成的模板,产出架构图列表(按候选去重,保留最新)。
 
     optimizing_indices:当前仍在后台优化的候选 index(来自协调器 _inflight)。优化进度态本只活在前端

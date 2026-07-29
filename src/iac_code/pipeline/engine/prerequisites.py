@@ -162,9 +162,7 @@ def inspect_prerequisites(
         # installer's install_dir (e.g. ~/bin) and version-check it. This is read-only
         # (no download/mkdir) and keeps detection consistent with prepare_prerequisites,
         # so a binary present in install_dir is reported available without touching PATH.
-        available_installers = _available_installers(
-            raw_prerequisite, current_platform, current_architecture, checker
-        )
+        available_installers = _available_installers(raw_prerequisite, current_platform, current_architecture, checker)
         resolved_path, resolved_installer_id, _hint_version_message = _resolve_path_hint_from_installers(
             raw_prerequisite,
             name,
