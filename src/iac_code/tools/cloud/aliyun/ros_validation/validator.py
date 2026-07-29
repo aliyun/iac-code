@@ -29,6 +29,10 @@ from iac_code.tools.cloud.aliyun.ros_validation.resource_value_specs import (
     DEFAULT_RESOURCE_SPECS,
     ResourceValueSpecRegistry,
 )
+from iac_code.tools.cloud.aliyun.ros_validation.rules.association_property import (
+    AssociationPropertyRule,
+    AssociationPropertySpecsProvider,
+)
 from iac_code.tools.cloud.aliyun.ros_validation.rules.registry import create_validation_registry
 from iac_code.tools.cloud.aliyun.ros_validation.symbols import collect_symbols
 
@@ -240,12 +244,13 @@ class _ResourceRule:
 _VALIDATION_REGISTRY = create_validation_registry(
     providers=(
         _ParserProvider(),
+        AssociationPropertySpecsProvider(),
         _SymbolsProvider(),
         _AnalyzerProvider(),
         _LocalsPrecompileProvider(),
         _CountPrecompileProvider(),
     ),
-    rules=(_StructureRule(), _ConditionRule(), _ResourceRule()),
+    rules=(AssociationPropertyRule(), _StructureRule(), _ConditionRule(), _ResourceRule()),
 )
 
 

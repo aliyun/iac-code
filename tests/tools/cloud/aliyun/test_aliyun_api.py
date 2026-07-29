@@ -1960,6 +1960,51 @@ async def test_ros_hook_structure_error_preserves_actionable_detail(tmp_path: Pa
 
 
 @pytest.mark.asyncio
+async def test_ros_association_property_error_blocks_before_credentials_endpoint_and_transport(
+    tmp_path: Path,
+) -> None:
+    services, _, endpoint_resolver, transport = _production_services()
+    credential_calls: list[None] = []
+    services.credential_provider = lambda: credential_calls.append(None)
+    tool = AliyunApi(services=services)
+    template = tmp_path / "association-property.yml"
+    template.write_text(
+        "ROSTemplateFormatVersion: '2015-09-01'\n"
+        "Parameters:\n"
+        "  PasswordSuffix:\n"
+        "    Type: String\n"
+        "    AssociationProperty: AutoCompleteInput\n"
+        "    AssociationPropertyMetadata:\n"
+        "      Length: 8\n"
+        "      CharacterClasses:\n"
+        "        - Class: digit\n"
+        "          Min: 1\n"
+        "Resources: {}\n",
+        encoding="utf-8",
+    )
+
+    result = await _production_execute(
+        tool,
+        {
+            "product": "ros",
+            "action": "ValidateTemplate",
+            "params": {"TemplateURL": str(template)},
+            "region_id": "cn-hangzhou",
+        },
+        cwd=str(tmp_path),
+    )
+
+    assert result.is_error is True
+    assert "ROS1305" in result.content
+    assert "CharacterClasses[0].Class" in result.content
+    assert "Use number instead" in result.content
+    assert result.metadata["ros_validation"]["counts_by_code"] == {"ROS1305": 1}
+    assert credential_calls == []
+    assert endpoint_resolver.calls == []
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
 async def test_openmeta_preserves_hook_error_result(monkeypatch) -> None:
     services, _, _, transport = _production_services()
     hook_detail = "actionable hook detail"

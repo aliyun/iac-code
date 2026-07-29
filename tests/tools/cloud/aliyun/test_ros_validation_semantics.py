@@ -740,6 +740,34 @@ Resources:
     assert "generated JSON" not in render_validation_report(report, blocking=True)
 
 
+def test_renderer_condenses_high_volume_association_property_limitations() -> None:
+    from iac_code.tools.cloud.aliyun.ros_validation.renderer import render_validation_report
+
+    report = ValidationReport.build(
+        [
+            make_diagnostic(
+                code="ROS5305",
+                severity=Severity.LIMITATION,
+                category=Category.LIMITATION,
+                summary="Runtime-dependent metadata cannot be checked locally.",
+                detail="The value depends on runtime context.",
+                path=(mapping_segment("Parameters"), mapping_segment("P{}".format(index))),
+                subject="P{}".format(index),
+            )
+            for index in range(11)
+        ]
+    )
+
+    rendered = render_validation_report(report, blocking=False)
+
+    assert report.limitation_count == 11
+    assert report.to_dict()["limitation_count"] == 11
+    assert "11 local-analysis limitations; details condensed." in rendered
+    assert "11 occurrences; showing 3 examples." in rendered
+    assert "8 additional occurrences are available in structured diagnostics." in rendered
+    assert rendered.count("example path:") == 3
+
+
 def test_json_parser_accepts_tab_whitespace_and_retains_positions() -> None:
     result = parse_template_source('{\n\t"ROSTemplateFormatVersion": "2015-09-01",\n\t"Resources": {}\n}')
 

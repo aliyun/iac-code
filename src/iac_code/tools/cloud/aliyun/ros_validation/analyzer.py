@@ -54,6 +54,7 @@ from iac_code.tools.cloud.aliyun.ros_validation.symbols import (
     ResourceSymbol,
     TemplateSymbols,
 )
+from iac_code.tools.cloud.aliyun.ros_validation.template_kind import is_terraform_template
 from iac_code.tools.cloud.aliyun.ros_validation.types import (
     ANY_VALUE,
     BOOLEAN,
@@ -812,7 +813,7 @@ class ExpressionAnalyzer:
         if (
             "ROSTemplateFormatVersion" in data
             and data.get("ROSTemplateFormatVersion") != "2015-09-01"
-            and not self._is_terraform(data)
+            and not is_terraform_template(data)
         ):
             self.diagnostic(
                 "ROS1120",
@@ -906,7 +907,7 @@ class ExpressionAnalyzer:
             )
 
     def _structure(self, data: Mapping[Any, Any]) -> None:
-        if "ROSTemplateFormatVersion" not in data and not self._is_terraform(data):
+        if "ROSTemplateFormatVersion" not in data and not is_terraform_template(data):
             self.diagnostic(
                 "ROS1004",
                 _("The template is missing ROSTemplateFormatVersion."),
@@ -914,7 +915,7 @@ class ExpressionAnalyzer:
                 (),
                 suggestion=_("Add ROSTemplateFormatVersion: '2015-09-01'."),
             )
-        if self._is_terraform(data):
+        if is_terraform_template(data):
             return
         for section in ("Parameters", "Mappings", "Conditions", "Rules", "Outputs"):
             value = data.get(section)
@@ -1055,14 +1056,6 @@ class ExpressionAnalyzer:
             for item in nested:
                 result.update(self._condition_dependencies(item))
         return result
-
-    @staticmethod
-    def _is_terraform(data: Mapping[Any, Any]) -> bool:
-        transform = data.get("Transform")
-        values = transform if isinstance(transform, list) else [transform]
-        return any(
-            isinstance(value, str) and value.startswith(("Aliyun::Terraform-", "Aliyun::OpenTofu-")) for value in values
-        )
 
     def _existing_vpc_rule(
         self,
