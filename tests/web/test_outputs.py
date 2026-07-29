@@ -361,9 +361,7 @@ def test_payload_pipeline_stack_appears_in_progress(tmp_path):
     # 部署开始:仅有进行中态 stack_current_changed(尚无终态 tool_result)时,资源栈就应出现,
     # 状态为 CREATE_IN_PROGRESS、isSuccess=False、带 console URL——让面板在创建开始即显示,而非完成后。
     envelopes = [
-        _env_stack_current_changed(
-            stack_id="stk-inprog", stack_name="webapp", stack_status="CREATE_IN_PROGRESS"
-        ),
+        _env_stack_current_changed(stack_id="stk-inprog", stack_name="webapp", stack_status="CREATE_IN_PROGRESS"),
     ]
     session = _FakeSession(tmp_path, context_id="ctx-1")
     payload = outputs.outputs_payload(_FakeManager([], envelopes), session)
@@ -380,9 +378,7 @@ def test_payload_pipeline_terminal_result_overwrites_in_progress(tmp_path):
     # 进行中态先落面板,终态 tool_result 到来后应以相同 region::栈名 键覆盖:单个栈、终态权威
     # (status_reason/is_success 来自 tool_result),不残留「创建中」行。
     envelopes = [
-        _env_stack_current_changed(
-            stack_id="stk-1", stack_name="webapp", stack_status="CREATE_IN_PROGRESS"
-        ),
+        _env_stack_current_changed(stack_id="stk-1", stack_name="webapp", stack_status="CREATE_IN_PROGRESS"),
         _env_tool_result(
             "ros_deploy",
             tool_input={"action": "create", "region_id": "cn-hangzhou"},
@@ -405,9 +401,7 @@ def test_payload_pipeline_terminal_stack_current_changed_ignored(tmp_path):
     # 终态 stack_current_changed(CREATE_COMPLETE,非进行中)不应单独入栈:终态一律走 tool_result
     # 权威路径。仅有一条终态 stack_current_changed、无 tool_result 时,面板为空(避免用非权威结果建栈)。
     envelopes = [
-        _env_stack_current_changed(
-            stack_id="stk-done", stack_name="webapp", stack_status="CREATE_COMPLETE"
-        ),
+        _env_stack_current_changed(stack_id="stk-done", stack_name="webapp", stack_status="CREATE_COMPLETE"),
     ]
     session = _FakeSession(tmp_path, context_id="ctx-1")
     payload = outputs.outputs_payload(_FakeManager([], envelopes), session)

@@ -102,9 +102,7 @@ class A2APipelineActionRunner:
                 # for the local Web sink so pipeline mode shows 正在思考/思考完成 like normal mode.
                 # Only touches this fallback owner (standalone Web); a shared dispatcher owner
                 # keeps its own exposure config and remote clients are unaffected.
-                thinking_exposure_types=frozenset(
-                    {A2AExposureType.RAW_THINKING, A2AExposureType.TOOL_TRACE}
-                ),
+                thinking_exposure_types=frozenset({A2AExposureType.RAW_THINKING, A2AExposureType.TOOL_TRACE}),
             )
         self._owner = owner
         self._task_store = owner.task_store

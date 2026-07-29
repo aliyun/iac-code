@@ -427,10 +427,7 @@ async def test_refusal_commits_closes_and_discards_buffer_before_fallback(
         assert all(getattr(event, "text", None) != "discard me" for event in output)
     else:
         assert any(getattr(event, "text", None) == "discard me" for event in output)
-    assert all(
-        not isinstance(event, MessageEndEvent) or event.stop_reason != "refusal"
-        for event in output
-    )
+    assert all(not isinstance(event, MessageEndEvent) or event.stop_reason != "refusal" for event in output)
     assert iterator.close_calls == 1
     assert iterator.close_completed is True
     assert span.end_calls == 1

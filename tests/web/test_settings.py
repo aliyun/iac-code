@@ -781,9 +781,7 @@ def test_save_provider_config_round_trips_output_and_budget_knobs(_isolate_confi
 
 def test_save_provider_config_knobs_are_per_model(_isolate_config):
     # 同一 provider 下不同模型互不干扰:给 glm-5.2 设值不应波及 kimi-k2.7-code。
-    web_settings.save_provider_config(
-        {"provider": "dashscope", "model": "glm-5.2", "maxCompletionTokens": 40000}
-    )
+    web_settings.save_provider_config({"provider": "dashscope", "model": "glm-5.2", "maxCompletionTokens": 40000})
     web_settings.save_provider_config(
         {"provider": "dashscope", "model": "kimi-k2.7-code", "maxCompletionTokens": 12000}
     )
@@ -843,13 +841,9 @@ def test_save_provider_config_absent_fields_preserve_existing_knobs(_isolate_con
 @pytest.mark.parametrize("bad", [0, -5, "big", True])
 def test_save_provider_config_rejects_non_positive_or_non_int_knobs(_isolate_config, bad):
     with pytest.raises(ValueError):
-        web_settings.save_provider_config(
-            {"provider": "dashscope", "model": "glm-5.2", "maxCompletionTokens": bad}
-        )
+        web_settings.save_provider_config({"provider": "dashscope", "model": "glm-5.2", "maxCompletionTokens": bad})
     with pytest.raises(ValueError):
-        web_settings.save_provider_config(
-            {"provider": "dashscope", "model": "glm-5.2", "thinkingBudget": bad}
-        )
+        web_settings.save_provider_config({"provider": "dashscope", "model": "glm-5.2", "thinkingBudget": bad})
 
 
 def test_save_active_provider_persists_output_and_budget_knobs(_isolate_config):

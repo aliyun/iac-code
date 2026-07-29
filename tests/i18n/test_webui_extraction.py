@@ -23,9 +23,7 @@ import iac_code.i18n as i18n
 
 # babel_webui.cfg registers the ``t`` keyword for the webui JS domain.
 _WEBUI_KEYWORD = "t"
-_COMPOSER_JS = (
-    Path(i18n.__file__).parent.parent / "web" / "static" / "js" / "components" / "composer.js"
-)
+_COMPOSER_JS = Path(i18n.__file__).parent.parent / "web" / "static" / "js" / "components" / "composer.js"
 
 # Representative msgids from inside the historical dead zone. "Minimal"/"None"
 # are the two lowest effort tiers B4 added; the rest bracket the affected range.

@@ -70,6 +70,5 @@ def test_pipeline_provider_attribution_ignores_control_spans_but_checks_pipeline
 
     assert _audit_pipeline_provider_attribution([control_span, pipeline_span], context_id="ctx-1")["passed"] is True
     assert (
-        _audit_pipeline_provider_attribution([control_span, pipeline_span], context_id="ctx-other")["passed"]
-        is False
+        _audit_pipeline_provider_attribution([control_span, pipeline_span], context_id="ctx-other")["passed"] is False
     )

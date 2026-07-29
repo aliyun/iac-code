@@ -734,7 +734,7 @@ class PipelineTranscriptTranslator:
                 parent_group_id=str(base_step.get("parentGroupId") or ""),
                 parent_step_id=str(base_step.get("parentStepId") or ""),
                 candidate_name=str(base_step.get("candidateName") or ""),
-            )
+            ),
         ]
 
     def _on_text_delta(self, env: Mapping[str, Any]) -> list[dict[str, Any]]:

@@ -351,9 +351,7 @@ def test_diagram_items_prefers_cached_and_flags_optimized(monkeypatch, tmp_path)
     monkeypatch.setattr(dc, "get_config_dir", lambda: tmp_path)
     monkeypatch.setattr("iac_code.web.diagrams.pipeline_candidate_costs", lambda m, s: {})
     session = SimpleNamespace(cwd=str(tmp_path), context_id="ctx-1")
-    manager = _FakeManager(
-        [_tool_result("a.yaml", _TPL0, 0, "c0"), _tool_result("b.yaml", _TPL1, 1, "c1")]
-    )
+    manager = _FakeManager([_tool_result("a.yaml", _TPL0, 0, "c0"), _tool_result("b.yaml", _TPL1, 1, "c1")])
     views = [{"id": "overview", "title": "总览", "mermaidSource": "graph TD\n  OPTIMIZED"}]
     dc.write_cached("ctx-1", 1, _TPL1, views, "m")
 
@@ -370,9 +368,7 @@ def test_diagram_items_uses_cached_views(monkeypatch, tmp_path):
     monkeypatch.setattr(dc, "get_config_dir", lambda: tmp_path)
     monkeypatch.setattr("iac_code.web.diagrams.pipeline_candidate_costs", lambda m, s: {})
     session = SimpleNamespace(cwd=str(tmp_path), context_id="ctx-1")
-    manager = _FakeManager(
-        [_tool_result("a.yaml", _TPL0, 0, "c0"), _tool_result("b.yaml", _TPL1, 1, "c1")]
-    )
+    manager = _FakeManager([_tool_result("a.yaml", _TPL0, 0, "c0"), _tool_result("b.yaml", _TPL1, 1, "c1")])
     views = [
         {"id": "overview", "title": "总览", "mermaidSource": "graph TD\n  OVERVIEW"},
         {"id": "network", "title": "网络", "mermaidSource": "graph TD\n  NETWORK"},
