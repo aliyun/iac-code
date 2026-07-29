@@ -1,44 +1,43 @@
-"""Tests for the loopback Web workbench all-redaction suppression middleware."""
+"""Local Web sessions retain the no-redaction context for unchanged consumers."""
 
 from __future__ import annotations
 
-import asyncio
+from starlette.applications import Starlette
+from starlette.responses import PlainTextResponse
+from starlette.routing import Route
+from starlette.testclient import TestClient
 
-from iac_code.utils.public_errors import all_redaction_suppressed
+
+def test_create_app_installs_local_redaction_suppression_middleware() -> None:
+    from iac_code.web.app import create_app
+
+    for app in (create_app(), create_app(expose_local_paths=True)):
+        middleware_names = {middleware.cls.__name__ for middleware in app.user_middleware}
+        assert "_SuppressAllRedactionMiddleware" in middleware_names
 
 
-def test_middleware_suppresses_all_redaction_during_request_and_resets() -> None:
+def test_expose_local_paths_compatibility_flag_does_not_change_local_payloads() -> None:
+    from iac_code.web.app import create_app
+
+    default_app = create_app()
+    compatibility_app = create_app(expose_local_paths=True)
+
+    assert [item.cls for item in default_app.user_middleware] == [
+        item.cls for item in compatibility_app.user_middleware
+    ]
+
+
+def test_web_suppression_keeps_existing_permission_audit_behavior() -> None:
+    from iac_code.services.permissions.audit import sanitize_free_text
     from iac_code.web.app import _SuppressAllRedactionMiddleware
 
-    seen: dict[str, bool] = {}
+    async def audit_text(_request):
+        return PlainTextResponse(sanitize_free_text("read /tmp/private/result.json") or "")
 
-    async def downstream(scope, receive, send) -> None:
-        seen["during"] = all_redaction_suppressed()
-        # A background task created inside the request copies the current context,
-        # so it must keep redaction suppressed even after the request returns.
-        seen["task"] = None
+    app = Starlette(routes=[Route("/", audit_text)])
+    app.add_middleware(_SuppressAllRedactionMiddleware)
 
-        async def _bg() -> None:
-            seen["task"] = all_redaction_suppressed()
+    with TestClient(app) as client:
+        response = client.get("/")
 
-        task = asyncio.create_task(_bg())
-        await task
-
-    middleware = _SuppressAllRedactionMiddleware(downstream)
-
-    assert all_redaction_suppressed() is False
-    asyncio.run(middleware({"type": "http"}, None, None))
-    assert seen["during"] is True
-    assert seen["task"] is True
-    # ContextVar must reset once the request scope exits.
-    assert all_redaction_suppressed() is False
-
-
-def test_create_app_wires_middleware_only_when_exposing_local_paths() -> None:
-    from iac_code.web.app import _SuppressAllRedactionMiddleware, create_app
-
-    def _has_suppress_mw(app) -> bool:
-        return any(mw.cls is _SuppressAllRedactionMiddleware for mw in app.user_middleware)
-
-    assert _has_suppress_mw(create_app(expose_local_paths=True)) is True
-    assert _has_suppress_mw(create_app()) is False
+    assert response.text == "read /tmp/private/result.json"

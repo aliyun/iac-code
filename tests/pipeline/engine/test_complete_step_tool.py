@@ -1329,7 +1329,7 @@ class TestSchemaValidation:
         assert "name" in result.content
         assert result.metadata is None
 
-    def test_invalid_tool_input_error_redacts_previous_invalid_input(self):
+    def test_invalid_tool_input_error_preserves_previous_invalid_input_for_llm_retry(self):
         config = StepConfig(
             step_id="test",
             conclusion_field="out",
@@ -1350,13 +1350,14 @@ class TestSchemaValidation:
         )
 
         assert not valid
-        assert "tok-completestepsecret123" not in error
-        assert r"C:\Users" not in error
-        assert r"Alice Smith\.iac-code" not in error
-        assert "[REDACTED]" in error
-        assert "[PATH]" in error
+        assert "tok-completestepsecret123" in error
+        assert "config_path" in error
+        assert "Alice Smith" in error
+        assert "settings.yml" in error
+        assert "[REDACTED]" not in error
+        assert "[PATH]" not in error
 
-    def test_invalid_conclusion_schema_error_redacts_secret_value(self):
+    def test_invalid_conclusion_schema_error_preserves_value_for_llm_retry(self):
         config = StepConfig(
             step_id="test",
             conclusion_field="out",
@@ -1372,11 +1373,13 @@ class TestSchemaValidation:
         valid, error = tool.validate_input({"conclusion": {"admin_token": "tok-completestepsecret123"}})
 
         assert not valid
-        assert "tok-completestepsecret123" not in error
-        assert "[REDACTED]" in error
+        assert "tok-completestepsecret123" in error
+        assert "[REDACTED]" not in error
 
     @pytest.mark.asyncio
-    async def test_execute_schema_error_redacts_sensitive_field_value(self):
+    async def test_execute_schema_error_preserves_functional_value_but_strictly_sanitizes_log(
+        self, caplog: pytest.LogCaptureFixture
+    ):
         config = StepConfig(
             step_id="test",
             conclusion_field="out",
@@ -1401,10 +1404,11 @@ class TestSchemaValidation:
 
         assert r1.is_error
         assert r2.is_error
-        assert "tok-plainsecret123" not in r1.content
-        assert "tok-plainsecret123" not in r2.content
-        assert "[REDACTED]" in r1.content
-        assert "[REDACTED]" in r2.metadata["step_result"].error
+        assert "tok-plainsecret123" in r1.content
+        assert "tok-plainsecret123" in r2.content
+        assert "tok-plainsecret123" in r2.metadata["step_result"].error
+        assert "tok-plainsecret123" not in caplog.text
+        assert "validator=type" in caplog.text
 
     @pytest.mark.asyncio
     async def test_retry_succeeds_after_fix(self):

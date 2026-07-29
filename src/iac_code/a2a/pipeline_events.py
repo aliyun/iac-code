@@ -8,8 +8,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from iac_code.a2a.artifacts import UnsafeArtifactNameError, artifact_filename_from_path, sanitize_public_artifact_text
-from iac_code.a2a.events import _tool_result_metadata, _truncate
+from iac_code.a2a.artifacts import UnsafeArtifactNameError, artifact_filename_from_path
+from iac_code.a2a.events import _truncate
+from iac_code.a2a.pipeline_journal import to_json_safe
 from iac_code.mcp.progress import mcp_progress_metadata
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.services.permissions.audit import build_input_summary, build_redacted_tool_input, fingerprint_text
@@ -369,7 +370,7 @@ class PipelineEventTranslator:
                     data={
                         "candidateScope": candidate_scope,
                         "targetCandidateStepId": target_candidate_step_id,
-                        "reason": sanitize_public_artifact_text(str(reason)),
+                        "reason": str(reason),
                     },
                 )
             ]
@@ -381,7 +382,7 @@ class PipelineEventTranslator:
                 "candidateScope": candidate_scope,
                 "targetCandidateStepId": target_candidate_step_id,
                 "nextCandidateAttempt": state.attempt + 1,
-                "reason": sanitize_public_artifact_text(str(reason)),
+                "reason": str(reason),
             }
             envelope = self._envelope("candidate_restart_requested", "candidate", "working", data)
             self._add_candidate_coordinates(envelope, state)
@@ -1208,8 +1209,7 @@ def _event_data(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _warning_event_data(data: dict[str, Any]) -> dict[str, Any]:
-    private_keys = {"ledger_path", "ledgerPath", "load_error", "loadError"}
-    return _event_data({key: value for key, value in data.items() if str(key) not in private_keys})
+    return _event_data(data)
 
 
 def _sanitize_event_value(key: str, value: Any) -> Any:
@@ -1219,8 +1219,6 @@ def _sanitize_event_value(key: str, value: Any) -> Any:
 
         return sanitize_mcp_status_metadata(value)
     if isinstance(value, str):
-        if any(marker in key_lower for marker in ("reason", "error", "message", "traceback")):
-            return sanitize_public_artifact_text(value)
         return value
     if isinstance(value, list):
         return [_sanitize_event_value(key, item) for item in value]
@@ -1486,17 +1484,13 @@ def _tool_result_data(event: ToolResultEvent) -> dict[str, Any]:
         "toolName": event.tool_name,
         "toolUseId": event.tool_use_id,
         "isError": event.is_error,
-        "result": _tool_result_metadata(
-            event.result,
-            is_error=event.is_error,
-            public_path_roots=event.public_path_roots,
-        ),
+        "result": to_json_safe(event.result),
     }
 
 
 def _sanitize_tool_input(tool_input: dict[str, Any]) -> dict[str, Any]:
-    # journal 是本地用户数据；真正远程出口由 pipeline_stream._sanitize_remote_envelope 兜底脱敏，
-    # 故写入时不再脱敏，避免把 [REDACTED]/*** 注入模板 YAML 与 complete_step conclusion。
+    # Journal 是 canonical 功能数据；远程出口只在实际 A2A wire boundary
+    # 按当前 safe mode 投影副本，不能反向污染这里的真实工具输入。
     return dict(tool_input) if isinstance(tool_input, dict) else {}
 
 
@@ -1627,7 +1621,7 @@ def _artifact_from_spec(spec: Any, root: dict[str, Any]) -> dict[str, Any] | Non
         "mediaType": media_type,
         "content": content,
         "role": role,
-        "supersedesPath": sanitize_public_artifact_text(supersedes_path),
+        "supersedesPath": supersedes_path,
         "supersedesKey": fingerprint_text(supersedes_path),
     }
 

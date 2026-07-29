@@ -195,7 +195,7 @@ async def test_publish_text_writes_pipeline_metadata_without_duplicate_status_me
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("diagnostics", ["", "\nDelegated diagnostics: preflight passed"])
-async def test_aliyun_body_only_avoids_envelope_truncation_in_all_pipeline_outlets(
+async def test_aliyun_body_only_is_not_truncated_in_pipeline_outlets(
     tmp_path: Path,
     diagnostics: str,
 ) -> None:
@@ -229,9 +229,9 @@ async def test_aliyun_body_only_avoids_envelope_truncation_in_all_pipeline_outle
 
     assert len(new_content) <= _METADATA_MAX_CHARS < len(old_content)
     assert new_outlets == (new_content,) * 4
-    assert all(len(value) == _METADATA_MAX_CHARS for value in old_outlets)
+    assert old_outlets == (old_content,) * 4
     assert all("BUSINESS_TAIL_MARKER" in value for value in new_outlets)
-    assert all("BUSINESS_TAIL_MARKER" not in value for value in old_outlets)
+    assert all("BUSINESS_TAIL_MARKER" in value for value in old_outlets)
 
 
 @pytest.mark.asyncio
@@ -1254,7 +1254,7 @@ async def test_batch_persistence_failure_is_explicit_instead_of_dropping_event(t
 
 
 @pytest.mark.asyncio
-async def test_publish_tool_result_uri_only_artifact_drops_legacy_file_uri(tmp_path: Path) -> None:
+async def test_publish_tool_result_preserves_canonical_legacy_file_uri(tmp_path: Path) -> None:
     publisher, queue = _publisher(tmp_path, exposure_types=[A2AExposureType.TOOL_TRACE])
 
     await publisher.publish(
@@ -1295,18 +1295,13 @@ async def test_publish_tool_result_uri_only_artifact_drops_legacy_file_uri(tmp_p
         snapshot["display"]["toolResults"][0]["result"]["artifact"],
     ):
         assert artifact["filename"] == "template.yaml"
-        assert artifact["metadata"] == {"byteSize": 10}
-        assert "uri" not in artifact
-        assert "publicUrl" not in artifact
-        assert "encodedOwnerUrl" not in artifact
-        assert "backupUri" not in artifact
-        assert artifact["source"] == "[PATH]"
-        assert "url" not in artifact["parts"][0]
-        assert "uri" not in artifact["parts"][0]["metadata"]
+        assert artifact["metadata"]["byteSize"] == 10
+        assert artifact["uri"] == r"file://C:\Users\alice\.iac-code\projects\demo\template.yaml"
+        assert artifact["source"] == artifact["uri"]
+        assert artifact["parts"][0]["url"] == artifact["uri"]
     rendered = str((status, journal_event, snapshot))
-    assert "file://" not in rendered
-    assert "Users" not in rendered
-    assert ".iac-code" not in rendered
+    assert "file://" in rendered
+    assert ".iac-code" in rendered
 
 
 @pytest.mark.asyncio
@@ -1347,10 +1342,7 @@ async def test_publish_pipeline_write_file_result_does_not_infer_artifact_from_t
 
 
 @pytest.mark.asyncio
-async def test_publish_tool_trace_preserves_paths_in_journal_when_suppressed(tmp_path: Path) -> None:
-    # 环回 web(expose_local_paths)下抑制路径脱敏时:journal / 远程状态 / 快照均保留真实路径,
-    # 以便「重新加载」会话时能从 journal 重建出真路径(否则重载会退回 [PATH])。密钥恒脱敏。
-    # 真正远程 A2A 服务从不设该抑制标志,其脱敏由下方 without-suppression 用例锁定。
+async def test_publish_tool_trace_is_canonical_even_in_legacy_suppression_context(tmp_path: Path) -> None:
     publisher, queue = _publisher(tmp_path, exposure_types=[A2AExposureType.TOOL_TRACE])
     raw_path = "/Users/alice/.iac-code/settings.yml"
 
@@ -1375,21 +1367,16 @@ async def test_publish_tool_trace_preserves_paths_in_journal_when_suppressed(tmp
     journal = publisher.journal.read_all()
     snapshot = publisher.snapshot_store.load()
     assert snapshot is not None
-    # journal 里明确保留真实路径(重载数据源)。
     assert any(raw_path in json.dumps(entry) for entry in journal)
     rendered = json.dumps((published, journal, snapshot))
     assert raw_path in rendered
     assert "[PATH]" not in rendered
-    # 全抑制上下文(环回 web):journal/远程状态/快照连密钥也原样,供重载还原完整 YAML/结论。
     assert "sk-test-secret" in rendered
     assert "sk-result-secret" in rendered
 
 
 @pytest.mark.asyncio
-async def test_publish_tool_trace_redacts_paths_without_suppression(tmp_path: Path) -> None:
-    # 无抑制(真正远程 A2A 服务的默认上下文):本地通道 + 远程状态 + journal + 快照一律把路径脱敏
-    # 成 [PATH],密钥 ***。这锁定远程边界:只有 loopback web 显式 suppress_all_redaction() 时才
-    # 放行真路径(见 ..._preserves_paths_in_journal_when_suppressed),默认绝不外泄本地路径。
+async def test_publish_tool_trace_remains_canonical_without_suppression(tmp_path: Path) -> None:
     class LocalAwareQueue(FakeEventQueue):
         def __init__(self) -> None:
             super().__init__()
@@ -1415,7 +1402,6 @@ async def test_publish_tool_trace_redacts_paths_without_suppression(tmp_path: Pa
     )
     raw_path = "/Users/alice/project/template.yml"
 
-    # 不进入 suppress_all_redaction():模拟远程服务的默认上下文。
     await publisher.publish(
         ToolUseEndEvent(
             tool_use_id="toolu-local",
@@ -1424,14 +1410,13 @@ async def test_publish_tool_trace_redacts_paths_without_suppression(tmp_path: Pa
         )
     )
 
-    # 直通后本地 sink 拿到原始 input（web 实时流用）；远程/journal/快照仍由 serve 层脱敏。
     assert queue.local_envelopes[0]["data"]["input"] == {"api_key": "sk-test-secret", "path": raw_path}
     remote = dump(queue.events[0])["metadata"]["iac_code"]["pipeline"]
-    assert remote["data"]["input"] == {"api_key": "***", "path": "[PATH]"}
-    assert publisher.journal.read_all()[0]["data"]["input"]["path"] == "[PATH]"
+    assert remote["data"]["input"] == {"api_key": "sk-test-secret", "path": raw_path}
+    assert publisher.journal.read_all()[0]["data"]["input"]["path"] == raw_path
     snapshot = publisher.snapshot_store.load()
     assert snapshot is not None
-    assert raw_path not in json.dumps(snapshot)
+    assert snapshot["display"]["toolResults"] == []
 
 
 @pytest.mark.asyncio
@@ -1643,25 +1628,25 @@ async def test_publish_externalized_conclusion_artifact_preserves_final_metadata
     artifact_status = status_events[-1]
     assert artifact_status["eventType"] == "artifact_created"
     assert artifact_status["artifact"]["role"] == "final"
-    assert artifact_status["artifact"]["supersedesPath"] == "[PATH]"
+    assert artifact_status["artifact"]["supersedesPath"] == raw_superseded_path
     assert artifact_status["artifact"]["supersedesKey"] == supersedes_key
     assert artifact_status["data"]["role"] == "final"
-    assert artifact_status["data"]["supersedesPath"] == "[PATH]"
+    assert artifact_status["data"]["supersedesPath"] == raw_superseded_path
     assert artifact_status["data"]["supersedesKey"] == supersedes_key
 
     journal_event = publisher.journal.read_all()[-1]
     assert journal_event["artifact"]["role"] == "final"
-    assert journal_event["artifact"]["supersedesPath"] == "[PATH]"
+    assert journal_event["artifact"]["supersedesPath"] == raw_superseded_path
     assert journal_event["artifact"]["supersedesKey"] == supersedes_key
     assert journal_event["data"]["role"] == "final"
-    assert journal_event["data"]["supersedesPath"] == "[PATH]"
+    assert journal_event["data"]["supersedesPath"] == raw_superseded_path
     assert journal_event["data"]["supersedesKey"] == supersedes_key
 
     snapshot = publisher.snapshot_store.load()
     assert snapshot is not None
     artifact = snapshot["display"]["artifacts"][0]
     assert artifact["role"] == "final"
-    assert artifact["supersedesPath"] == "[PATH]"
+    assert artifact["supersedesPath"] == raw_superseded_path
     assert artifact["supersedesKey"] == supersedes_key
     artifact_metadata = (
         artifact_status["artifact"],
@@ -1670,7 +1655,7 @@ async def test_publish_externalized_conclusion_artifact_preserves_final_metadata
         journal_event["data"],
         artifact,
     )
-    assert raw_superseded_path not in str(artifact_metadata)
+    assert all(item["supersedesPath"] == raw_superseded_path for item in artifact_metadata)
 
 
 @pytest.mark.asyncio
@@ -2361,25 +2346,3 @@ async def test_publish_hard_interrupt_false_parent_without_candidate_does_not_em
 
     event_types = [event["eventType"] for event in publisher.journal.read_all()]
     assert event_types == ["interrupt_received", "interrupt_classified"]
-
-
-def test_sanitize_remote_envelope_exempts_complete_step_conclusion() -> None:
-    from iac_code.a2a.pipeline_stream import _sanitize_remote_envelope
-
-    envelope = {
-        "data": {
-            "toolName": "complete_step",
-            "toolUseId": "toolu-x",
-            "input": {"deployment_parameters": {"RdsMasterPassword": "S3cret!"}},
-        }
-    }
-    out = _sanitize_remote_envelope(envelope)
-    assert out["data"]["input"]["deployment_parameters"]["RdsMasterPassword"] == "S3cret!"
-
-
-def test_sanitize_remote_envelope_still_redacts_non_complete_step() -> None:
-    from iac_code.a2a.pipeline_stream import _sanitize_remote_envelope
-
-    envelope = {"data": {"toolName": "write_file", "input": {"password": "S3cret!"}}}
-    out = _sanitize_remote_envelope(envelope)
-    assert out["data"]["input"]["password"] == "***"

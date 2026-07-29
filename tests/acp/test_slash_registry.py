@@ -126,7 +126,7 @@ async def test_compact_failed_status(registry: ACPSlashRegistry) -> None:
 
 
 @pytest.mark.asyncio
-async def test_compact_exception(registry: ACPSlashRegistry) -> None:
+async def test_compact_exception(registry: ACPSlashRegistry, caplog) -> None:
     agent_loop = MagicMock()
 
     async def _compact():
@@ -137,11 +137,13 @@ async def test_compact_exception(registry: ACPSlashRegistry) -> None:
     agent_loop.compact = _compact
     result = await registry.execute("/compact", agent_loop=agent_loop)
     assert "network error" in result
-    assert "sk-compactsecret123" not in result
-    assert "Authorization: Bearer" not in result
-    assert "/Users/alice" not in result
-    assert "[REDACTED]" in result
-    assert "[PATH]" in result
+    assert "sk-compactsecret123" in result
+    assert "Authorization: Bearer" in result
+    assert "/Users/alice" in result
+    assert "sk-compactsecret123" not in caplog.text
+    assert "/Users/alice" not in caplog.text
+    assert "[REDACTED]" in caplog.text
+    assert "[PATH]" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -158,16 +160,18 @@ async def test_clear_success(registry: ACPSlashRegistry) -> None:
 
 
 @pytest.mark.asyncio
-async def test_clear_exception(registry: ACPSlashRegistry) -> None:
+async def test_clear_exception(registry: ACPSlashRegistry, caplog) -> None:
     agent_loop = MagicMock()
     agent_loop.reset.side_effect = RuntimeError("db error\nCookie: session=sk-clearsecret123\ncache: ~/.iac-code/cache")
     result = await registry.execute("/clear", agent_loop=agent_loop)
     assert "db error" in result
-    assert "sk-clearsecret123" not in result
-    assert "Cookie:" not in result
-    assert "~/.iac-code" not in result
-    assert "[REDACTED]" in result
-    assert "[PATH]" in result
+    assert "sk-clearsecret123" in result
+    assert "Cookie:" in result
+    assert "~/.iac-code" in result
+    assert "sk-clearsecret123" not in caplog.text
+    assert "~/.iac-code" not in caplog.text
+    assert "[REDACTED]" in caplog.text
+    assert "[PATH]" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -370,7 +374,7 @@ async def test_rename_value_error_returns_message(registry: ACPSlashRegistry) ->
 
 
 @pytest.mark.asyncio
-async def test_rename_value_error_sanitizes_public_output(registry: ACPSlashRegistry) -> None:
+async def test_rename_value_error_preserves_local_output(registry: ACPSlashRegistry) -> None:
     agent_loop = MagicMock()
     agent_loop._cwd = "/project"
     agent_loop._session_id = "session-1"
@@ -385,10 +389,8 @@ async def test_rename_value_error_sanitizes_public_output(registry: ACPSlashRegi
         result = await registry.execute("/rename deploy-prod", agent_loop=agent_loop)
 
     assert "Duplicate session" in result
-    assert "/Users/alice" not in result
-    assert "sk-renamesecret123" not in result
-    assert "[PATH]" in result
-    assert "[REDACTED]" in result
+    assert "/Users/alice" in result
+    assert "sk-renamesecret123" in result
 
 
 @pytest.mark.asyncio

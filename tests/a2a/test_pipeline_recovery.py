@@ -92,19 +92,23 @@ async def test_recovery_keeps_pipeline_warning_visible_after_snapshot_sequence(t
     assert state["snapshot"]["lastSequence"] == 2
     assert state["snapshot"]["control"]["warningHistory"][0]["eventId"] == "evt-warning"
     assert state["snapshot"]["control"]["warningHistory"][0]["data"]["reason"] == "cleanup_tracking_unavailable"
-    assert "ledger_path" not in state["snapshot"]["control"]["warningHistory"][0]["data"]
-    assert "load_error" not in state["snapshot"]["control"]["warningHistory"][0]["data"]
+    assert state["snapshot"]["control"]["warningHistory"][0]["data"]["ledger_path"].endswith(
+        "/cleanup.yaml"
+    )
+    assert "while parsing /Users/alice" in state["snapshot"]["control"]["warningHistory"][0]["data"][
+        "load_error"
+    ]
 
     replay_state = await service.get_state(context_id="ctx-1", after_sequence=1)
 
     assert replay_state["events"][0]["eventType"] == "pipeline_warning"
     assert replay_state["events"][0]["data"]["reason"] == "cleanup_tracking_unavailable"
-    assert "ledger_path" not in replay_state["events"][0]["data"]
-    assert "load_error" not in replay_state["events"][0]["data"]
+    assert replay_state["events"][0]["data"]["ledger_path"].endswith("/cleanup.yaml")
+    assert replay_state["events"][0]["data"]["load_error"].startswith("while parsing ")
 
 
 @pytest.mark.asyncio
-async def test_recovery_sanitizes_legacy_artifact_file_uris_from_snapshot_and_replay(tmp_path) -> None:
+async def test_recovery_preserves_canonical_legacy_artifact_file_uris(tmp_path) -> None:
     persistence = A2APersistenceStore(tmp_path / "a2a")
     store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
     await store.get_or_create_context(
@@ -171,28 +175,25 @@ async def test_recovery_sanitizes_legacy_artifact_file_uris_from_snapshot_and_re
     state = await service.get_state(context_id="ctx-1", after_sequence=0)
 
     assert state["snapshot"]["display"]["artifacts"][0]["artifactId"] == "artifact-1"
-    assert state["snapshot"]["display"]["artifacts"][0]["filename"] == "template.yaml"
-    assert "uri" not in state["snapshot"]["display"]["artifacts"][0]
-    assert "encodedOwnerUrl" not in state["snapshot"]["display"]["artifacts"][0]
-    assert state["snapshot"]["display"]["toolResults"][0]["result"]["artifact"][0] == "[PATH]"
+    assert state["snapshot"]["display"]["artifacts"][0]["filename"] == legacy_windows_path
+    assert state["snapshot"]["display"]["artifacts"][0]["uri"] == legacy_uri
+    assert "encodedOwnerUrl" in state["snapshot"]["display"]["artifacts"][0]
+    assert state["snapshot"]["display"]["toolResults"][0]["result"]["artifact"][0] == legacy_uri
     replay_artifact = state["snapshot"]["display"]["toolResults"][0]["result"]["artifact"][1]
-    assert "uri" not in replay_artifact
-    assert replay_artifact["filename"] == "template.yaml"
-    assert replay_artifact["source"] == "[PATH]"
-    assert "url" not in state["snapshot"]["display"]["artifacts"][0]["parts"][0]
-    assert "url" not in replay_artifact["parts"][0]
-    assert "uri" not in state["events"][0]["artifact"]
-    assert "encodedOwnerUrl" not in state["events"][0]["artifact"]
-    assert state["events"][0]["artifact"]["filename"] == "template.yaml"
-    assert "uri" not in state["events"][0]["data"]
-    assert state["events"][1]["data"]["result"]["artifact"][0] == "[PATH]"
-    assert "uri" not in state["events"][1]["data"]["result"]["artifact"][1]
-    assert state["events"][2]["artifact"][0] == "[PATH]"
-    assert "uri" not in state["events"][2]["artifact"][1]
-    assert state["events"][2]["data"][0] == "[PATH]"
+    assert replay_artifact["uri"] == legacy_uri
+    assert replay_artifact["filename"] == legacy_windows_path
+    assert replay_artifact["source"] == legacy_uri
+    assert state["snapshot"]["display"]["artifacts"][0]["parts"][0]["url"] == legacy_uri
+    assert replay_artifact["parts"][0]["url"] == legacy_uri
+    assert state["events"][0]["artifact"]["uri"] == [legacy_uri]
+    assert "encodedOwnerUrl" in state["events"][0]["artifact"]
+    assert state["events"][0]["artifact"]["filename"] == legacy_windows_path
+    assert state["events"][1]["data"]["result"]["artifact"][0] == legacy_uri
+    assert state["events"][2]["artifact"][0] == legacy_uri
+    assert state["events"][2]["data"][0] == legacy_uri
     rendered = json.dumps(state, ensure_ascii=False)
-    assert "file://" not in rendered
-    assert ".iac-code" not in rendered
+    assert "file://" in rendered
+    assert ".iac-code" in rendered
 
 
 @pytest.mark.asyncio
@@ -333,19 +334,21 @@ async def test_recovery_resolves_cleanup_snapshot_from_normal_delivery_task_id(t
     assert state["snapshot"]["taskId"] == "task-pipeline"
     assert state["snapshot"]["cleanup"]["status"] == "started"
     assert state["snapshot"]["cleanup"]["resources"][0]["resourceId"] == "stack-123"
-    assert "prompt" not in state["snapshot"]["cleanup"]
-    assert "ledgerPath" not in state["snapshot"]["cleanup"]
-    assert "prompt" not in state["snapshot"]["cleanup"]["history"][0]["data"]
-    assert "ledgerPath" not in state["snapshot"]["cleanup"]["history"][0]["data"]
-    assert raw_error not in state["snapshot"]["cleanup"]["history"][0]["data"]["lastError"]
+    assert state["snapshot"]["cleanup"]["prompt"] == "hidden cleanup prompt for stack-123"
+    assert state["snapshot"]["cleanup"]["ledgerPath"].endswith("/cleanup.yaml")
+    assert state["snapshot"]["cleanup"]["history"][0]["data"]["prompt"] == (
+        "hidden cleanup prompt for stack-123"
+    )
+    assert state["snapshot"]["cleanup"]["history"][0]["data"]["ledgerPath"].endswith("/cleanup.yaml")
+    assert state["snapshot"]["cleanup"]["history"][0]["data"]["lastError"] == raw_error
     assert [event["eventId"] for event in state["events"]] == ["evt-cleanup-started"]
-    assert "prompt" not in state["events"][0]["data"]
-    assert "ledgerPath" not in state["events"][0]["data"]
-    assert raw_error not in state["events"][0]["data"]["lastError"]
+    assert state["events"][0]["data"]["prompt"] == "hidden cleanup prompt for stack-123"
+    assert state["events"][0]["data"]["ledgerPath"].endswith("/cleanup.yaml")
+    assert state["events"][0]["data"]["lastError"] == raw_error
     rendered = json.dumps(state, ensure_ascii=False)
-    assert "super-secret" not in rendered
-    assert "sk-live-1234567890" not in rendered
-    assert "/Users/alice" not in rendered
+    assert "super-secret" in rendered
+    assert "sk-live-1234567890" in rendered
+    assert "/Users/alice" in rendered
 
 
 @pytest.mark.asyncio

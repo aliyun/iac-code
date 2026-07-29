@@ -11,8 +11,6 @@ from iac_code.a2a.pipeline_snapshot import (
     SNAPSHOT_SCHEMA_VERSION,
     A2APipelineSnapshotStore,
     reduce_pipeline_events,
-    sanitize_pipeline_artifact_uris,
-    sanitize_pipeline_cleanup_private_fields,
     snapshot_needs_backup_commit_repair,
 )
 from iac_code.i18n import _
@@ -186,8 +184,8 @@ class A2APipelineRecoveryService:
         replay_after = after_sequence if after_sequence is not None else _int_value(snapshot.get("lastSequence"), 0)
         events_after_replay = [event for event in replay_events if _int_value(event.get("sequence"), 0) > replay_after]
         return {
-            "snapshot": _json_compatible(_sanitize_public_recovery_payload(snapshot)),
-            "events": _json_compatible(_sanitize_public_recovery_payload(events_after_replay)),
+            "snapshot": _json_compatible(snapshot),
+            "events": _json_compatible(events_after_replay),
         }
 
     async def _verify_task_owner(
@@ -217,10 +215,6 @@ def _json_compatible(value: Any) -> Any:
     if isinstance(value, list):
         return [_json_compatible(item) for item in value]
     return value
-
-
-def _sanitize_public_recovery_payload(value: Any) -> Any:
-    return sanitize_pipeline_cleanup_private_fields(sanitize_pipeline_artifact_uris(value))
 
 
 def _events_for_task(

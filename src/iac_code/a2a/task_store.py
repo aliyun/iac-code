@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import json
 import logging
 import time
@@ -377,6 +378,18 @@ class A2ATaskStore(TaskStore):
                     )
 
         raise ValueError(_("A2A context not found"))
+
+    async def get_context_runtime_path_directories(
+        self,
+        context_id: str,
+    ) -> tuple[builtins.list[str], builtins.list[str], builtins.list[str]]:
+        """Return current runtime path directories without persisting them."""
+
+        context_id = validate_protocol_id(context_id)
+        async with self._mutation_lock:
+            record = self._contexts.get(context_id)
+            runtime = record.runtime if record is not None else None
+            return _runtime_path_directories(runtime)
 
     async def discard_context_runtime(self, context_id: str) -> None:
         """Drop a cached runtime so the next turn rebuilds the context cleanly."""
@@ -1068,6 +1081,41 @@ async def _close_runtime(runtime: Any | None) -> None:
     agent_runtime = getattr(runtime, "agent_runtime", None)
     if agent_runtime is not None and agent_runtime is not runtime:
         await _close_runtime(agent_runtime)
+
+
+def _runtime_path_directories(runtime: Any | None) -> tuple[list[str], list[str], list[str]]:
+    """Copy path roots exposed by the current agent runtime."""
+
+    agent_runtime = getattr(runtime, "agent_runtime", runtime)
+    agent_loop = getattr(agent_runtime, "agent_loop", None)
+    if agent_loop is None:
+        return [], [], []
+
+    permission_context = None
+    permission_context_getter = getattr(agent_loop, "_permission_context_getter", None)
+    if callable(permission_context_getter):
+        try:
+            permission_context = permission_context_getter()
+        except Exception:
+            permission_context = None
+    if permission_context is None:
+        permission_context = getattr(agent_loop, "_permission_context", None)
+
+    additional = list(getattr(permission_context, "additional_directories", []) or [])
+    trusted = list(getattr(permission_context, "trusted_read_directories", []) or [])
+    relative = list(getattr(permission_context, "relative_read_directories", []) or [])
+    _extend_unique_strings(trusted, getattr(permission_context, "strict_read_directories", []) or [])
+    _extend_unique_strings(trusted, getattr(agent_loop, "_tool_context_trusted_read_directories", []) or [])
+    _extend_unique_strings(relative, getattr(agent_loop, "_tool_context_relative_read_directories", []) or [])
+    return additional, trusted, relative
+
+
+def _extend_unique_strings(target: list[str], values: Any) -> None:
+    seen = set(target)
+    for value in values:
+        if isinstance(value, str) and value not in seen:
+            target.append(value)
+            seen.add(value)
 
 
 def _close_runtime_task_when_done(

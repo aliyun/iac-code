@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import inspect
 import logging
 from collections.abc import Awaitable, Callable
@@ -18,15 +19,10 @@ from a2a.types import (
 )
 from google.protobuf.json_format import ParseDict
 
-from iac_code.a2a.artifacts import (
-    sanitize_public_artifact_text,
-    sanitize_public_tool_output_data,
-)
+from iac_code.a2a.artifacts import sanitize_public_artifact_text
 from iac_code.a2a.exposure import A2AExposureType, normalize_a2a_exposure_types
-from iac_code.a2a.metadata_redaction import A2AMetadataEchoRedactor
 from iac_code.i18n import _
 from iac_code.mcp.progress import mcp_progress_metadata, mcp_progress_public_name
-from iac_code.mcp.redaction import sanitize_mcp_public_data
 from iac_code.services.permissions.audit import (
     build_input_summary,
     build_redacted_tool_input,
@@ -51,10 +47,11 @@ from iac_code.types.stream_events import (
 _METADATA_MAX_CHARS = 4000
 _ERROR_TEXT_MAX_CHARS = 1000
 _METADATA_MAX_DEPTH = 32
+_ARTIFACT_CONTAINER_KEYS = {"artifact", "artifacts"}
+_ARTIFACT_PAYLOAD_KEYS = {"content", "bytes", "base64", "raw", "path"}
 logger = logging.getLogger(__name__)
 A2APermissionResolver: TypeAlias = Callable[[PermissionRequestEvent], "bool | Awaitable[bool]"]
 IAC_CODE_SESSION_ID_METADATA_KEY = "iacCodeSessionId"
-_METADATA_REDACTOR = A2AMetadataEchoRedactor()
 
 
 def iac_code_session_metadata(session_id: str) -> dict[str, Any]:
@@ -75,16 +72,12 @@ def _truncate(value: Any, *, _depth: int = 0) -> Any:
     if _depth >= _METADATA_MAX_DEPTH:
         return "[truncated-depth]"
     if isinstance(value, str):
-        return sanitize_public_artifact_text(value)[:_METADATA_MAX_CHARS]
+        return value[:_METADATA_MAX_CHARS]
     if isinstance(value, dict):
         return {str(k): _truncate(v, _depth=_depth + 1) for k, v in value.items()}
     if isinstance(value, list):
         return [_truncate(v, _depth=_depth + 1) for v in value]
     return value
-
-
-def _sanitize_trace_input(value: Any) -> Any:
-    return _METADATA_REDACTOR.redact(_truncate(value))
 
 
 def _public_tool_input_metadata(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
@@ -183,10 +176,42 @@ def _tool_result_metadata(
     is_error: bool = False,
     public_path_roots: list[dict[str, str]] | None = None,
 ) -> Any:
-    sanitized = sanitize_public_tool_output_data(result, public_path_roots=public_path_roots)
-    if is_error and isinstance(sanitized, str):
-        return sanitize_public_artifact_text(sanitized, public_path_roots=public_path_roots)
-    return _truncate(sanitized)
+    del is_error, public_path_roots
+    return _tool_result_metadata_value(copy.deepcopy(result))
+
+
+def _tool_result_metadata_value(value: Any, *, _depth: int = 0, _artifact_scope: bool = False) -> Any:
+    """Build protobuf-safe trace metadata without applying redaction.
+
+    Artifact payload bodies remain outside the trace metadata, matching the
+    existing artifact externalization contract. All other already-exposed
+    values are preserved, subject only to the existing depth/string bounds.
+    """
+
+    if _depth >= _METADATA_MAX_DEPTH:
+        return "[truncated-depth]"
+    if isinstance(value, str):
+        return value[:_METADATA_MAX_CHARS]
+    if isinstance(value, dict):
+        output: dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            key_lower = key_text.lower()
+            if _artifact_scope and key_lower in _ARTIFACT_PAYLOAD_KEYS:
+                continue
+            output[key_text] = _tool_result_metadata_value(
+                item,
+                _depth=_depth + 1,
+                _artifact_scope=_artifact_scope or key_lower in _ARTIFACT_CONTAINER_KEYS,
+            )
+        return output
+    if isinstance(value, list | tuple):
+        return [
+            _tool_result_metadata_value(item, _depth=_depth + 1, _artifact_scope=_artifact_scope) for item in value
+        ]
+    if value is None or isinstance(value, bool | int | float):
+        return value
+    return str(value)[:_METADATA_MAX_CHARS]
 
 
 def _artifact_update_event(*, task_id: str, context_id: str, metadata: dict[str, Any]) -> TaskArtifactUpdateEvent:
@@ -355,13 +380,7 @@ async def publish_stream_event(
                     _artifact_update_event(task_id=task_id, context_id=context_id, metadata=artifact_metadata)
                 )
             return None
-        result_metadata = _tool_result_metadata(
-            event.result,
-            is_error=event.is_error,
-            public_path_roots=event.public_path_roots,
-        )
-        if event.tool_name.startswith("mcp__"):
-            result_metadata = sanitize_mcp_public_data(result_metadata, fallback_summary="")
+        result_metadata = _tool_result_metadata(event.result, is_error=event.is_error)
         tool_metadata = {
             "status": "failed" if event.is_error else "completed",
             "toolUseId": event.tool_use_id,
@@ -476,6 +495,8 @@ async def publish_stream_event(
             state = TaskState.TASK_STATE_INPUT_REQUIRED
         else:
             raw = event.error or "Unknown error"
+            # Provider ErrorEvent is an explicitly retained compatibility
+            # exception; ordinary A2A payloads are projected at the wire edge.
             text = sanitize_public_artifact_text(raw)[:_ERROR_TEXT_MAX_CHARS]
             state = TaskState.TASK_STATE_FAILED
         await _enqueue_status(

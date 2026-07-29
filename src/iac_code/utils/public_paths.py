@@ -11,9 +11,19 @@ from dataclasses import dataclass
 from urllib.parse import unquote, urlsplit
 
 _CONNECTOR_TOKEN_END_PATTERN = r"""\s+(?:and|at|because|for|from|in|on|to|with)\b(?=\s+[A-Za-z0-9_.-]+\s*[:=])"""
+_NARRATIVE_TOKEN_END_PATTERN = r"""\s+(?=(?:after|before|during|then|while)\b)"""
+_KEY_ASSIGNMENT_TOKEN_END_PATTERN = r"""\s+(?=[A-Za-z0-9_.-]+\s*[:=])"""
 _ABSOLUTE_PATH_TOKEN_END_PATTERN = r"""\s+(?=(?:/(?!/)|[A-Za-z]:[\\/]|\\\\))"""
 _PATH_END_PATTERN = (
-    r"""(?=""" + _CONNECTOR_TOKEN_END_PATTERN + r"""|""" + _ABSOLUTE_PATH_TOKEN_END_PATTERN + r"""|$|[\r\n,;:)"'])"""
+    r"""(?="""
+    + _CONNECTOR_TOKEN_END_PATTERN
+    + r"""|"""
+    + _KEY_ASSIGNMENT_TOKEN_END_PATTERN
+    + r"""|"""
+    + _NARRATIVE_TOKEN_END_PATTERN
+    + r"""|"""
+    + _ABSOLUTE_PATH_TOKEN_END_PATTERN
+    + r"""|$|[\r\n,;:)"'])"""
 )
 _POSIX_PATH_TEXT_PATTERN = re.compile(r"""(?<![A-Za-z0-9._~%:/\]-])/(?!/)[^\r\n,;:)\"']*?""" + _PATH_END_PATTERN)
 _WINDOWS_UNICODE_LIKE_UNC_PATH_TEXT_PATTERN = re.compile(
@@ -24,6 +34,16 @@ _WINDOWS_PATH_TEXT_PATTERN = re.compile(
     r"""(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/]|\\\\(?!u[0-9A-Fa-f]{4}))[^\r\n,;:)\"']*?""" + _PATH_END_PATTERN
 )
 _ABSOLUTE_PATH_AFTER_SPACE_PATTERN = re.compile(r"""(\s+)(?=(?:/(?!/)|[A-Za-z]:[\\/]|\\\\))""")
+_URI_TOKEN_END_PATTERN = (
+    r"""(?="""
+    + _CONNECTOR_TOKEN_END_PATTERN
+    + r"""|"""
+    + _KEY_ASSIGNMENT_TOKEN_END_PATTERN
+    + r"""|"""
+    + _NARRATIVE_TOKEN_END_PATTERN
+    + r"""|$|[\r\n,;)\"'\]}]|:(?![\\/]|%5[Cc]|%2[Ff]))"""
+)
+_FILE_URI_TEXT_PATTERN = re.compile(r"""file://[^\r\n,;)\"'\]}]*?""" + _URI_TOKEN_END_PATTERN, re.IGNORECASE)
 
 _TRUSTED_ROOT_LABEL = "[trusted]"
 _WORKSPACE_ROOT_LABEL = "."
@@ -84,6 +104,111 @@ def sanitize_public_paths(value: str, public_path_roots: Iterable[Mapping[str, s
     sanitized = _WINDOWS_UNICODE_LIKE_UNC_PATH_TEXT_PATTERN.sub(replace, value)
     sanitized = _WINDOWS_PATH_TEXT_PATTERN.sub(replace, sanitized)
     return _POSIX_PATH_TEXT_PATTERN.sub(replace, sanitized)
+
+
+def redact_known_public_paths(value: str, public_path_roots: Iterable[Mapping[str, str]] | None) -> str:
+    """Replace only paths proven to be under a server root with ``[PATH]``.
+
+    Unlike :func:`sanitize_public_paths`, this is an A2A path-only projection:
+    unmatched absolute paths are preserved and matching paths never expose a
+    root label, relative suffix, directory name, or filename.
+    """
+
+    roots = _normalize_public_path_roots(public_path_roots)
+    if not roots:
+        return value
+
+    leading_length = len(value) - len(value.lstrip())
+    trailing_length = len(value) - len(value.rstrip())
+    scalar_end = len(value) - trailing_length if trailing_length else len(value)
+    scalar = value[leading_length:scalar_end]
+    if scalar:
+        if _file_uri_is_under_roots(scalar, roots) or (
+            _is_absolute_path_token(scalar) and _path_matches_roots(scalar, roots)
+        ):
+            return f"{value[:leading_length]}[PATH]{value[scalar_end:]}"
+
+    def replace_file_uri(match: re.Match[str]) -> str:
+        token = match.group(0)
+        trailing = ""
+        while token and token[-1] in ".,:!?":
+            trailing = token[-1] + trailing
+            token = token[:-1]
+        return f"[PATH]{trailing}" if _file_uri_is_under_roots(token, roots) else match.group(0)
+
+    def replace_path(match: re.Match[str]) -> str:
+        quoted = (
+            match.start() > 0
+            and match.end() < len(match.string)
+            and match.string[match.start() - 1] in {"'", '"'}
+            and match.string[match.start() - 1] == match.string[match.end()]
+        )
+        return _redact_known_path_token(match.group(0), roots, whole_token=quoted)
+
+    redacted = _FILE_URI_TEXT_PATTERN.sub(replace_file_uri, value)
+    redacted = _WINDOWS_UNICODE_LIKE_UNC_PATH_TEXT_PATTERN.sub(replace_path, redacted)
+    redacted = _WINDOWS_PATH_TEXT_PATTERN.sub(replace_path, redacted)
+    return _POSIX_PATH_TEXT_PATTERN.sub(replace_path, redacted)
+
+
+def _redact_known_path_token(
+    token: str,
+    roots: list[_NormalizedRoot],
+    *,
+    whole_token: bool = False,
+) -> str:
+    if whole_token:
+        return "[PATH]" if _path_matches_roots(token, roots) else token
+    parts = re.split(r"(\s+)", token)
+    rendered: list[str] = []
+    for part in parts:
+        if not part or part.isspace():
+            rendered.append(part)
+        else:
+            candidate = part
+            trailing = ""
+            while candidate and candidate[-1] in ".!?":
+                trailing = candidate[-1] + trailing
+                candidate = candidate[:-1]
+            rendered.append(
+                f"[PATH]{trailing}"
+                if _is_absolute_path_token(candidate) and _path_matches_roots(candidate, roots)
+                else part
+            )
+    return "".join(rendered)
+
+
+def _path_matches_roots(path: str, roots: list[_NormalizedRoot]) -> bool:
+    windows = _is_windows_path(path)
+    return any(
+        root.windows == windows
+        and _path_is_under_root(candidate, root.norm_path, windows=windows)
+        for candidate in _candidate_norm_paths(path, windows=windows)
+        for root in roots
+    )
+
+
+def _is_absolute_path_token(path: str) -> bool:
+    return (
+        (path.startswith("/") and not path.startswith("//"))
+        or bool(ntpath.splitdrive(path)[0])
+        or path.startswith("\\\\")
+    )
+
+
+def _file_uri_is_under_roots(uri: str, roots: list[_NormalizedRoot]) -> bool:
+    parsed = urlsplit(uri)
+    if parsed.scheme.lower() != "file":
+        return False
+    path = unquote(parsed.path or "")
+    if parsed.netloc and parsed.netloc.lower() != "localhost":
+        if _looks_like_windows_drive(parsed.netloc):
+            path = parsed.netloc + path
+        elif path:
+            path = f"//{parsed.netloc}{path}"
+    if re.match(r"^/[A-Za-z]:[\\/]", path):
+        path = path[1:]
+    return _path_matches_roots(path, roots)
 
 
 def _sanitize_public_path_token(token: str, roots: list[_NormalizedRoot]) -> str:

@@ -8,9 +8,10 @@ import threading
 from collections.abc import AsyncIterator
 from typing import Any
 
+from iac_code.a2a.projection import project_a2a_exception
 from iac_code.a2a.transports.base import A2AFrameError
 from iac_code.a2a.transports.dispatcher import A2AJsonRpcDispatcher, A2ARuntimeComponents
-from iac_code.utils.public_errors import public_error_from_exception
+from iac_code.utils.public_errors import sanitize_strict_text
 
 logger = logging.getLogger(__name__)
 
@@ -76,8 +77,16 @@ class StdioA2AServer:
                     writer.write(encode_frame(await self._dispatcher.dispatch(payload)))
                     await writer.drain()
             except Exception as exc:
-                logger.exception("A2A stdio transport request failed")
-                failure = public_error_from_exception(exc)
+                failure = await project_a2a_exception(
+                    exc,
+                    task_store=self._components.task_store,
+                    request_data=payload if "payload" in locals() else None,
+                )
+                logger.warning(
+                    "A2A stdio transport request failed: error_id=%s summary=%s",
+                    failure.error_id,
+                    sanitize_strict_text(str(exc)),
+                )
                 response = _error_response(request_id, failure.summary, error_id=failure.error_id)
                 if streaming_request:
                     response["final"] = True

@@ -363,8 +363,7 @@ async def test_fork_session_from_storage_loads_history(monkeypatch, tmp_path) ->
 
 
 @pytest.mark.asyncio
-async def test_create_runtime_non_auth_exception_returns_public_error(monkeypatch) -> None:
-    """Non-auth runtime creation errors are returned as sanitized ACP errors."""
+async def test_create_runtime_non_auth_exception_returns_local_error(monkeypatch, caplog) -> None:
 
     def _raise_generic(options):
         raise RuntimeError("disk full for sk-live-secret at /Users/alice/.iac-code/settings.yml")
@@ -377,13 +376,20 @@ async def test_create_runtime_non_auth_exception_returns_public_error(monkeypatc
     server = ACPServer()
     server.on_connect(FakeConn())
 
-    with pytest.raises(acp.RequestError) as exc_info:
+    with (
+        caplog.at_level(logging.ERROR, logger="iac_code.acp.server"),
+        pytest.raises(acp.RequestError) as exc_info,
+    ):
         await server.new_session(cwd="/tmp")
 
     rendered = str(exc_info.value.data)
-    assert "sk-live-secret" not in rendered
-    assert "/Users/alice" not in rendered
+    assert "sk-live-secret" in rendered
+    assert "/Users/alice" in rendered
     assert exc_info.value.data["error_id"]
+    assert "sk-live-secret" not in caplog.text
+    assert "/Users/alice" not in caplog.text
+    assert "[REDACTED]" in caplog.text
+    assert "[PATH]" in caplog.text
 
 
 # ===========================================================================

@@ -15,7 +15,7 @@ from iac_code.i18n import _
 from iac_code.pipeline.display_names import display_step_name
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.tools.base import Tool, ToolContext, ToolResult
-from iac_code.utils.public_errors import sanitize_public_text
+from iac_code.utils.public_errors import sanitize_strict_text
 
 if TYPE_CHECKING:
     from iac_code.pipeline.engine.types import StepConfig
@@ -24,11 +24,6 @@ logger = logging.getLogger(__name__)
 
 MAX_PARALLEL_CANDIDATES = 5
 MAX_ROLLBACK_TARGETS = 5
-_SENSITIVE_VALIDATION_FIELD_PATTERN = re.compile(
-    r"(?i)(auth|authorization|cookie|credential|credentials|passphrase|password|passwd|private[_-]?key|pwd|secret|"
-    r"session|signature|token|api[_-]?key|access[_-]?key)"
-)
-
 _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
     "reviewing_rerun_after_validate_template_write": (
         "reviewing ran write_file/edit_file after ros_validate_template; "
@@ -206,7 +201,7 @@ class CompleteStepTool(Tool):
             return False, self._format_input_validation_error(self._public_validation_error(e), tool_input)
 
     def _format_input_validation_error(self, error: str, tool_input: dict[str, Any]) -> str:
-        invalid_json = sanitize_public_text(json.dumps(tool_input or {}, ensure_ascii=False))
+        invalid_json = json.dumps(tool_input or {}, ensure_ascii=False)
         example = json.dumps(
             {"conclusion": self._example_from_schema(self._step_config.conclusion_schema)},
             ensure_ascii=False,
@@ -229,21 +224,7 @@ class CompleteStepTool(Tool):
 
     @classmethod
     def _public_validation_error(cls, error: jsonschema.ValidationError) -> str:
-        message = sanitize_public_text(error.message)
-        if not any(_SENSITIVE_VALIDATION_FIELD_PATTERN.search(str(part)) for part in error.path):
-            return message
-
-        instance = error.instance
-        replacements: set[str] = set()
-        if isinstance(instance, str):
-            replacements.add(repr(instance))
-            replacements.add(json.dumps(instance, ensure_ascii=False))
-        elif isinstance(instance, (int, float, bool)) or instance is None:
-            replacements.add(repr(instance))
-            replacements.add(json.dumps(instance, ensure_ascii=False))
-        for value in replacements:
-            message = message.replace(value, "[REDACTED]")
-        return sanitize_public_text(message)
+        return error.message
 
     def _complete_step_schema_hint(self) -> str:
         if not self._step_config.conclusion_schema:
@@ -318,7 +299,11 @@ class CompleteStepTool(Tool):
             return None
         except jsonschema.ValidationError as e:
             public_message = self._public_validation_error(e)
-            logger.warning("Schema validation failed for step %s: %s", self._step_config.step_id, public_message)
+            logger.warning(
+                "Schema validation failed for step %s (validator=%s)",
+                sanitize_strict_text(self._step_config.step_id),
+                sanitize_strict_text(str(e.validator)),
+            )
             return public_message
 
     def _validate_completion_guards(self, conclusion: dict) -> str | None:
@@ -1073,7 +1058,11 @@ class CompleteStepTool(Tool):
         rollback = tool_input.get("rollback_request")
         rollback_tuple = (rollback["target_step"], rollback["reason"]) if rollback else None
 
-        logger.debug("[complete_step] step=%s input=%r", self._step_config.step_id, tool_input)
+        logger.debug(
+            "[complete_step] step=%s input=%s",
+            self._step_config.step_id,
+            sanitize_strict_text(repr(tool_input)),
+        )
 
         if rollback_tuple and self._step_config.rollback_count >= self._step_config.max_rollbacks:
             max_rollbacks = self._step_config.max_rollbacks
@@ -1122,7 +1111,11 @@ class CompleteStepTool(Tool):
             rollback_request=rollback_tuple,
         )
 
-        logger.debug("[complete_step] step=%s validation=OK conclusion=%r", self._step_config.step_id, conclusion)
+        logger.debug(
+            "[complete_step] step=%s validation=OK conclusion=%s",
+            self._step_config.step_id,
+            sanitize_strict_text(repr(conclusion)),
+        )
         return ToolResult(
             content=_("Step {step_id} completed. Conclusion submitted.").format(
                 step_id=display_step_name(self._step_config.step_id)

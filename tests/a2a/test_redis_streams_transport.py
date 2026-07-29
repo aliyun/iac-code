@@ -203,7 +203,9 @@ async def test_redis_server_creates_group_and_reads_with_consumer_group(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_redis_server_returns_sanitized_error_when_dispatch_fails() -> None:
+async def test_redis_server_returns_raw_error_when_safe_mode_is_disabled(monkeypatch) -> None:
+    monkeypatch.delenv("IAC_CODE_A2A_SAFE_MODE", raising=False)
+
     class FailingDispatcher:
         async def dispatch(self, payload):
             raise RuntimeError(
@@ -234,10 +236,9 @@ async def test_redis_server_returns_sanitized_error_when_dispatch_fails() -> Non
     error = response.payload["error"]
     assert error["code"] == -32603
     assert "dispatch failed" in error["message"]
-    assert "sk-redissecret123" not in error["message"]
-    assert "Authorization: Bearer" not in error["message"]
-    assert "/Users/alice" not in error["message"]
-    assert "[REDACTED]" in error["message"]
+    assert "sk-redissecret123" in error["message"]
+    assert "Authorization: Bearer" in error["message"]
+    assert "/Users/alice" in error["message"]
     assert error["data"]["error_id"]
     assert redis.acked == [("requests", "iac-code", "9-0")]
     assert redis.operations[-2:] == [("xadd", "responses"), ("xack", "requests")]
@@ -245,7 +246,50 @@ async def test_redis_server_returns_sanitized_error_when_dispatch_fails() -> Non
 
 
 @pytest.mark.asyncio
-async def test_redis_server_returns_final_error_when_stream_dispatch_fails() -> None:
+async def test_redis_server_projects_error_from_new_request_cwd_in_safe_mode(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", "on")
+    server_path = tmp_path / "private" / "redis.sock"
+
+    class FailingDispatcher:
+        async def dispatch(self, payload):
+            raise RuntimeError(f"dispatch failed token=real-secret at {server_path}")
+
+    redis = FakeRedis()
+    components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
+    server = RedisStreamsA2AServer(
+        redis=redis,
+        components=components,
+        request_stream="requests",
+        response_stream="responses",
+        consumer_group="iac-code",
+    )
+    server._dispatcher = FailingDispatcher()
+    request = {
+        "jsonrpc": "2.0",
+        "id": "1",
+        "method": "message/send",
+        "params": {"message": {"metadata": {"iac_code": {"cwd": str(tmp_path)}}}},
+    }
+    fields = {
+        "correlation_id": "corr-server",
+        "reply_stream": "responses",
+        "payload": json.dumps(request),
+    }
+
+    await server._process_entry("9-0", fields)
+
+    response = parse_redis_entry("1-0", redis.streams["responses"][0])
+    message = response.payload["error"]["message"]
+    assert "[PATH]" in message
+    assert str(tmp_path) not in message
+    assert "real-secret" in message
+    await server.aclose()
+
+
+@pytest.mark.asyncio
+async def test_redis_server_returns_raw_final_error_when_safe_mode_is_disabled(monkeypatch) -> None:
+    monkeypatch.delenv("IAC_CODE_A2A_SAFE_MODE", raising=False)
+
     class FailingStreamingDispatcher:
         async def dispatch_stream(self, payload):
             yield {"jsonrpc": "2.0", "id": payload["id"], "result": {"delta": "hello"}}
@@ -276,8 +320,8 @@ async def test_redis_server_returns_final_error_when_stream_dispatch_fails() -> 
     assert second.final is True
     error = second.payload["error"]
     assert error["code"] == -32603
-    assert "tok-redistreamsecret123" not in error["message"]
-    assert "/Users/alice" not in error["message"]
+    assert "tok-redistreamsecret123" in error["message"]
+    assert "/Users/alice" in error["message"]
     assert error["data"]["error_id"]
     assert redis.acked == [("requests", "iac-code", "9-0")]
     assert redis.operations[-2:] == [("xadd", "responses"), ("xack", "requests")]

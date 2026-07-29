@@ -73,12 +73,10 @@ from iac_code.services.session_layout import SessionPaths
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import AskUserQuestionEvent, SubPipelineStreamEvent, TextDeltaEvent
 from iac_code.utils.path_locks import PathLockRegistry
-from iac_code.utils.public_errors import public_exception_summary, sanitize_public_text
 
 logger = logging.getLogger(__name__)
 _CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS = 1
 _ERROR_TEXT_MAX_CHARS = 1000
-_AUTH_ERROR_MARKERS = ("api key", "api_key", "access key", "secret", "credential")
 _TERMINAL_SIDECAR_STATUSES = {"completed", "failed", "user_aborted", "discarded", "canceled"}
 _TERMINAL_SNAPSHOT_STATUSES = {"completed", "failed", "canceled"}
 _TERMINAL_A2A_STATUSES = {"completed", "failed", "canceled"}
@@ -121,10 +119,6 @@ _CANCEL_WAITING_INPUT_BACKUP_BLOCKED = WaitingInputCancelResult.BACKUP_BLOCKED
 
 def _retry_text() -> str:
     return _("A temporary error occurred. Please retry.")
-
-
-def _auth_error_text() -> str:
-    return _("Authentication required. Configure credentials and retry.")
 
 
 class RecoverablePipelineInvalidParamsError(InvalidParamsError):
@@ -1878,7 +1872,7 @@ class IacCodeA2APipelineExecutor:
                 status="input_required",
                 data={
                     "reason": reason.value,
-                    "error": public_exception_summary(exc, max_chars=_ERROR_TEXT_MAX_CHARS),
+                    "error": _format_exception(exc),
                     "recoverable": True,
                 },
                 require_durable_metadata=True,
@@ -2711,7 +2705,7 @@ class IacCodeA2APipelineExecutor:
 
         retryable = _is_retryable_executor_error(exc)
         task_state = TASK_STATE_INPUT_REQUIRED if retryable else TASK_STATE_FAILED
-        text = _retry_text() if retryable else _sanitize_error(exc)
+        text = _retry_text() if retryable else _format_exception(exc)
         failure = None if retryable else public_error(message=text, error_type=type(exc).__name__)
         terminal_status_available = retryable or preserve_task_record
         if not retryable and not preserve_task_record:
@@ -3431,7 +3425,7 @@ def _cancel_waiting_input_task_from_sidecar_locked(
             snapshot_store=snapshot_store,
             translator=translator,
             pending_input=pending_input,
-            error=public_exception_summary(exc, max_chars=_ERROR_TEXT_MAX_CHARS),
+            error=_format_exception(exc),
         )
         _record_backup_blocked_metric(
             metrics,
@@ -3463,7 +3457,7 @@ def _cancel_waiting_input_task_from_sidecar_locked(
             snapshot_store=snapshot_store,
             translator=translator,
             pending_input=pending_input,
-            error=public_exception_summary(blocked_exc, max_chars=_ERROR_TEXT_MAX_CHARS),
+            error=_format_exception(blocked_exc),
         )
         _record_backup_blocked_metric(
             metrics,
@@ -3957,7 +3951,7 @@ def _cleanup_resource_handoff_data(resource: Any) -> dict[str, Any]:
 def _public_cleanup_error(value: Any) -> str | None:
     if not value:
         return None
-    text = sanitize_public_text(value)
+    text = str(value)
     return text[:1000] + "..." if len(text) > 1000 else text
 
 
@@ -4818,18 +4812,6 @@ def _a2a_state_from_task_state(state: str) -> int:
     if state == TASK_STATE_WORKING:
         return TaskState.TASK_STATE_WORKING
     return TaskState.TASK_STATE_INPUT_REQUIRED
-
-
-def _sanitize_error(exc: Exception) -> str:
-    msg = str(exc).lower()
-    if any(marker in msg for marker in _AUTH_ERROR_MARKERS):
-        return _auth_error_text()
-    if type(exc).__name__ == "AuthenticationError":
-        return _auth_error_text()
-    status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
-    if status == 401:
-        return _auth_error_text()
-    return public_error(message=_format_exception(exc), error_type=type(exc).__name__).summary
 
 
 def _public_error_details_for_a2a(details: dict[str, Any]) -> dict[str, Any]:

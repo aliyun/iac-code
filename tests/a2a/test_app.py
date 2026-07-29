@@ -278,6 +278,74 @@ def test_pipeline_state_endpoint_returns_recovery_state(tmp_path) -> None:
     assert [event["eventId"] for event in data["events"]] == ["evt-2"]
 
 
+@pytest.mark.parametrize(("safe_mode", "expected_path"), [("1", "[PATH]"), ("0", "raw")])
+def test_pipeline_state_endpoint_projects_recovery_state_at_a2a_boundary(
+    monkeypatch, tmp_path, safe_mode, expected_path
+) -> None:
+    monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", safe_mode)
+    persistence_dir = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), "session-1") / "pipeline"
+    event = _pipeline_event(1, "evt-1")
+    raw_path = str(tmp_path / "private" / "result.json")
+    event["data"] = {"path": raw_path, "password": "real-secret"}
+    A2APipelineJournal(pipeline_dir).append(event)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([event]))
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/iac-code/pipeline/state?contextId=ctx-1&afterSequence=0")
+
+    data = response.json()
+    assert data["events"][0]["data"]["password"] == "real-secret"
+    if expected_path == "[PATH]":
+        assert data["events"][0]["data"]["path"] == "[PATH]"
+    else:
+        assert data["events"][0]["data"]["path"] == raw_path
+
+
+@pytest.mark.parametrize(("safe_mode", "expected_path"), [("1", "[PATH]"), ("0", "raw")])
+def test_pipeline_state_endpoint_projects_value_error_without_changing_schema(
+    monkeypatch, tmp_path, safe_mode, expected_path
+) -> None:
+    monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", safe_mode)
+    persistence_dir = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    raw_path = str(tmp_path / "private" / "snapshot.json")
+
+    async def fail_get_state(self, **kwargs):
+        raise ValueError(f"recovery failed token=real-secret at {raw_path}")
+
+    monkeypatch.setattr("iac_code.a2a.pipeline_recovery.A2APipelineRecoveryService.get_state", fail_get_state)
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/iac-code/pipeline/state?contextId=ctx-1")
+
+    assert response.status_code == 404
+    assert set(response.json()) == {"error"}
+    assert "real-secret" in response.json()["error"]
+    if expected_path == "[PATH]":
+        assert "[PATH]" in response.json()["error"]
+        assert raw_path not in response.json()["error"]
+    else:
+        assert raw_path in response.json()["error"]
+
+
 def test_pipeline_state_endpoint_repairs_pending_backup_snapshot_after_committed_ack(tmp_path) -> None:
     persistence_dir = tmp_path / "a2a"
     persistence = A2APersistenceStore(persistence_dir)
@@ -2295,8 +2363,8 @@ async def test_cancel_input_required_pipeline_task_backup_blocked_returns_input_
         assert events[-1]["status"] == "input_required"
         assert events[-1]["data"]["reason"] == "terminal"
         assert events[-1]["data"]["recoverable"] is True
-        assert "tok-live" not in events[-1]["data"]["error"]
-        assert "/tmp/iac-code" not in events[-1]["data"]["error"]
+        assert "tok-live" in events[-1]["data"]["error"]
+        assert "/tmp/iac-code" in events[-1]["data"]["error"]
     finally:
         await components.aclose()
 

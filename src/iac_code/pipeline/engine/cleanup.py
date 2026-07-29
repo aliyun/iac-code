@@ -22,7 +22,7 @@ from iac_code.pipeline.constants import (
 )
 from iac_code.types.stream_events import StackProgressEvent, ToolResultEvent, ToolUseEndEvent
 from iac_code.utils.path_locks import PathLockRegistry
-from iac_code.utils.public_errors import sanitize_public_text
+from iac_code.utils.public_errors import sanitize_strict_text
 from iac_code.utils.state_io import atomic_write_text
 
 logger = logging.getLogger(__name__)
@@ -541,12 +541,16 @@ class CleanupLedger:
         try:
             loaded = yaml.safe_load(self.path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
-            logger.warning("Failed to load cleanup ledger %s: %s", self.path, exc)
+            logger.warning(
+                "Failed to load cleanup ledger %s: %s",
+                sanitize_strict_text(str(self.path)),
+                sanitize_strict_text(str(exc)),
+            )
             return _failed_ledger_data(str(exc))
         if not isinstance(loaded, dict):
             logger.warning(
                 "Failed to load cleanup ledger %s: expected mapping, got %s",
-                self.path,
+                sanitize_strict_text(str(self.path)),
                 type(loaded).__name__,
             )
             return _failed_ledger_data(f"expected mapping, got {type(loaded).__name__}")
@@ -655,8 +659,8 @@ class CleanupObserver:
                 if _is_cleanup_stack_tool_name(event.tool_name):
                     logger.warning(
                         "Unmatched cleanup tool result: tool_use_id=%s tool_name=%s",
-                        event.tool_use_id,
-                        event.tool_name,
+                        sanitize_strict_text(event.tool_use_id),
+                        sanitize_strict_text(event.tool_name),
                     )
                     self._ledger.record_tool_result_unmatched(
                         tool_use_id=event.tool_use_id,
@@ -726,16 +730,12 @@ class CleanupObserver:
         mapped_resource_id: str,
         result_resource_id: str,
     ) -> None:
-        safe_tool_use_id = _safe_history_error(tool_use_id) or ""
-        safe_tool_name = _safe_history_error(tool_name) or ""
-        safe_mapped_resource_id = _safe_history_error(mapped_resource_id) or ""
-        safe_result_resource_id = _safe_history_error(result_resource_id) or ""
         logger.warning(
             "Mismatched cleanup tool result: tool_use_id=%s tool_name=%s mapped_resource_id=%s result_resource_id=%s",
-            safe_tool_use_id,
-            safe_tool_name,
-            safe_mapped_resource_id,
-            safe_result_resource_id,
+            sanitize_strict_text(tool_use_id),
+            sanitize_strict_text(tool_name),
+            sanitize_strict_text(mapped_resource_id),
+            sanitize_strict_text(result_resource_id),
         )
         self._ledger.record_tool_result_mismatch(
             tool_use_id=tool_use_id,
@@ -971,8 +971,7 @@ def _cleanup_resource_history_data(resource: CleanupResource) -> dict[str, Any]:
 def _safe_history_error(value: str | None) -> str | None:
     if not value:
         return None
-    text = sanitize_public_text(value)
-    return text[:1000] + "..." if len(text) > 1000 else text
+    return value[:1000] + "..." if len(value) > 1000 else value
 
 
 def _status_from_result(result: dict[str, Any]) -> str | None:

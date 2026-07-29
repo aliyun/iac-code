@@ -2783,14 +2783,14 @@ def test_stack_progress_event_payload_includes_region_progress_and_redacted_erro
                 "resourceId": "vpc-1",
                 "regionId": "cn-hangzhou",
                 "status": "CREATE_FAILED",
-                "statusReason": "api_key=[REDACTED] failed",
+                "statusReason": "api_key=sk-stack12345678 failed",
             }
         ],
         "elapsedSeconds": 12,
     }
 
 
-def test_stack_instances_progress_event_payload_includes_region_progress_and_redacted_errors() -> None:
+def test_stack_instances_progress_event_payload_includes_region_progress_and_local_errors() -> None:
     from iac_code.types.stream_events import StackInstancesProgressEvent
     from iac_code.web.events import WebEventTranslator
 
@@ -2830,7 +2830,7 @@ def test_stack_instances_progress_event_payload_includes_region_progress_and_red
                 "stackId": "stack-i-1",
                 "regionId": "cn-shanghai",
                 "status": "OUTDATED",
-                "statusReason": "AccessKeySecret=[REDACTED] blocked",
+                "statusReason": "AccessKeySecret=LTAI123456789012 blocked",
             }
         ],
         "elapsedSeconds": 6,
@@ -2886,7 +2886,7 @@ def test_translator_assistant_text_delta_uses_delta_key() -> None:
     }
 
 
-def test_translator_tool_result_redacts_key_based_secret_values() -> None:
+def test_translator_tool_result_preserves_local_key_based_values() -> None:
     from iac_code.web.events import WebEventTranslator
 
     translator = WebEventTranslator("session-1")
@@ -2912,18 +2912,18 @@ def test_translator_tool_result_redacts_key_based_secret_values() -> None:
         "resultKind": "artifact",
         "summary": {
             "message": "created template",
-            "apiKey": "[REDACTED]",
+            "apiKey": "sk-unsafe",
         },
         "artifacts": [
             {
                 "path": "/tmp/template.yaml",
-                "access_key_secret": "[REDACTED]",
+                "access_key_secret": "secret-value",
             }
         ],
     }
 
 
-def test_translator_tool_result_redacts_secret_assignments_inside_strings() -> None:
+def test_translator_tool_result_preserves_local_assignments_inside_strings() -> None:
     from iac_code.web.events import WebEventTranslator
 
     translator = WebEventTranslator("session-1")
@@ -2939,14 +2939,11 @@ def test_translator_tool_result_redacts_secret_assignments_inside_strings() -> N
     )
 
     assert event["type"] == "tool.result"
-    assert event["payload"]["summary"] == "created with api_key=[REDACTED] and token: [REDACTED]"
-    assert event["payload"]["artifacts"] == [
-        "access_key_secret=[REDACTED]",
-        {"raw": "token: [REDACTED]"},
-    ]
+    assert event["payload"]["summary"] == "created with api_key=sk-real and token: abc"
+    assert event["payload"]["artifacts"] == ["access_key_secret=secret", {"raw": "token: abc"}]
 
 
-def test_translator_tool_result_redacts_bare_string_secrets() -> None:
+def test_translator_tool_result_preserves_local_bare_string_values() -> None:
     from iac_code.web.events import WebEventTranslator
 
     translator = WebEventTranslator("session-1")
@@ -2963,15 +2960,14 @@ def test_translator_tool_result_redacts_bare_string_secrets() -> None:
     )
 
     payload_text = json.dumps(event["payload"], sort_keys=True)
-    assert "sk-1234567890abcd" not in payload_text
-    assert "abc.def.ghi" not in payload_text
-    assert "sk-abcdefgh12345678" not in payload_text
-    assert "LTAI1234567890abcdef" not in payload_text
-    assert "sk-json123456789" not in payload_text
-    assert payload_text.count("[REDACTED]") >= 5
+    assert "sk-1234567890abcd" in payload_text
+    assert "abc.def.ghi" in payload_text
+    assert "sk-abcdefgh12345678" in payload_text
+    assert "LTAI1234567890abcdef" in payload_text
+    assert "sk-json123456789" in payload_text
 
 
-def test_translator_tool_result_redacts_cookie_bytes_and_fallback_strings() -> None:
+def test_translator_tool_result_preserves_local_cookie_bytes_and_fallback_strings() -> None:
     from iac_code.web.events import WebEventTranslator
 
     translator = WebEventTranslator("session-1")
@@ -2988,16 +2984,16 @@ def test_translator_tool_result_redacts_cookie_bytes_and_fallback_strings() -> N
     )
 
     payload_text = json.dumps(event["payload"], sort_keys=True)
-    assert "supersecret" not in payload_text
-    assert "alsosensitive" not in payload_text
-    assert "sk-bytes12345678" not in payload_text
-    assert "sk-object12345678" not in payload_text
-    assert "secret-one" not in payload_text
-    assert "secret-two" not in payload_text
-    assert event["payload"]["summary"] == "Cookie: [REDACTED]"
+    assert "supersecret" in payload_text
+    assert "alsosensitive" in payload_text
+    assert "sk-bytes12345678" in payload_text
+    assert "sk-object12345678" in payload_text
+    assert "secret-one" in payload_text
+    assert "secret-two" in payload_text
+    assert event["payload"]["summary"] == "Cookie: sid=supersecret; pref=alsosensitive"
 
 
-def test_translator_tool_result_redacts_structured_header_secret_keys() -> None:
+def test_translator_tool_result_preserves_local_structured_header_values() -> None:
     from iac_code.web.events import WebEventTranslator
 
     translator = WebEventTranslator("session-1")
@@ -3020,15 +3016,15 @@ def test_translator_tool_result_redacts_structured_header_secret_keys() -> None:
     assert event["payload"]["artifacts"] == [
         {
             "headers": {
-                "X-Api-Key": "[REDACTED]",
-                "Private-Key": "[REDACTED]",
+                "X-Api-Key": "plain-secret-value",
+                "Private-Key": "plain-private-value",
             },
-            "privateKey": "[REDACTED]",
+            "privateKey": "camel-private-value",
         }
     ]
 
 
-def test_translator_tool_result_redacts_json_like_x_api_key_strings() -> None:
+def test_translator_tool_result_preserves_local_json_like_x_api_key_strings() -> None:
     from iac_code.web.events import WebEventTranslator
 
     translator = WebEventTranslator("session-1")
@@ -3041,9 +3037,9 @@ def test_translator_tool_result_redacts_json_like_x_api_key_strings() -> None:
     )
 
     payload_text = json.dumps(event["payload"], sort_keys=True)
-    assert "plain-secret-value" not in payload_text
-    assert "plain-private-value" not in payload_text
-    assert "another-secret-value" not in payload_text
+    assert "plain-secret-value" in payload_text
+    assert "plain-private-value" in payload_text
+    assert "another-secret-value" in payload_text
 
 
 def test_publishing_translator_output_assigns_buffer_sequence(tmp_path) -> None:

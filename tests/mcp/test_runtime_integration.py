@@ -1035,7 +1035,7 @@ async def test_repl_mcp_elicitation_cancels_without_printing_when_non_interactiv
 
 
 @pytest.mark.asyncio
-async def test_repl_mcp_elicitation_sanitizes_and_bounds_interactive_text(monkeypatch) -> None:
+async def test_repl_mcp_elicitation_preserves_and_bounds_interactive_text(monkeypatch) -> None:
     from iac_code.ui.repl import InlineREPL
 
     class CapturingConsole:
@@ -1067,8 +1067,8 @@ async def test_repl_mcp_elicitation_sanitizes_and_bounds_interactive_text(monkey
 
     printed = "\n".join(console.printed)
     assert result == {"action": "accept"}
-    assert "super-secret-token" not in printed
-    assert "[REDACTED]" in printed
+    assert "super-secret-token" in printed
+    assert "[REDACTED]" not in printed
     assert all(len(line) <= 1100 for line in console.printed)
     assert console.prompts
 

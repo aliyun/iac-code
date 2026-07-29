@@ -25,7 +25,6 @@ from iac_code.types.stream_events import (
     SubPipelineStreamEvent,
     Usage,
 )
-from iac_code.utils.public_errors import public_exception_summary
 from iac_code.web.events import WebEventTranslator, usage_payload
 from iac_code.web.session_manager import WebSession, WebSessionManager, _camelize
 
@@ -572,7 +571,7 @@ class WebSessionRuntime:
                         "error",
                         {
                             "turnId": turn_id,
-                            "message": public_exception_summary(exc, max_chars=500),
+                            "message": str(exc)[:500],
                             "retryable": False,
                         },
                     )

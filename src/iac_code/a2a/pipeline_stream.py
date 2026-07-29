@@ -20,7 +20,6 @@ from iac_code.a2a.events import (
     _extract_artifact_metadata,
 )
 from iac_code.a2a.exposure import A2AExposureType, normalize_a2a_exposure_types
-from iac_code.a2a.metadata_redaction import A2AMetadataEchoRedactor
 from iac_code.a2a.pipeline_events import (
     PIPELINE_EVENTS_EXTENSION_URI,
     PIPELINE_METADATA_SCHEMA_VERSION,
@@ -47,6 +46,7 @@ from iac_code.pipeline.constants import (
 )
 from iac_code.services.permissions.audit import is_aliyun_api_non_read_only_permission_event
 from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent, ToolResultEvent
+from iac_code.utils.public_errors import sanitize_strict_text
 
 PipelinePermissionResolver = Callable[[PermissionRequestEvent], bool | Awaitable[bool]]
 PipelineBeforeEnqueueHook = Callable[[dict[str, Any]], bool | Awaitable[bool]]
@@ -101,10 +101,6 @@ _EXTREME_DEFERRED_EVENT_TYPES = {"text_delta", "thinking_delta"}
 _EXTREME_JOURNAL_FLUSH_EVENTS = 512
 _RECOVERY_STATE_SCOPES = {"step", "candidate", "candidateStep", "candidate_step"}
 _RECOVERY_STATE_STATUSES = {"working"}
-_REMOTE_PAYLOAD_FIELDS = ("data", "input", "permission", "artifact", "error")
-_REMOTE_PAYLOAD_REDACTOR = A2AMetadataEchoRedactor()
-
-
 def backup_committed_delivery_envelope(
     ack_envelope: dict[str, Any],
     committed_envelope: dict[str, Any],
@@ -559,7 +555,7 @@ class PipelineA2AEventPublisher:
             except _SequenceHighWaterUnavailableError:
                 logger.warning("Skipping A2A pipeline event until journal high-water sequence is readable")
                 return None
-            safe_envelope = to_json_safe(_sanitize_remote_envelope(envelope))
+            safe_envelope = to_json_safe(envelope)
             if not isinstance(safe_envelope, dict):
                 logger.warning("Skipping invalid A2A pipeline envelope: %r", envelope)
                 return None
@@ -586,8 +582,8 @@ class PipelineA2AEventPublisher:
                 snapshot_persisted = self.snapshot_store.save(snapshot)
             except _SnapshotCatchUpUnavailableError:
                 logger.warning("Skipping A2A pipeline snapshot save until journal catch-up succeeds")
-            except Exception:
-                logger.warning("Failed to persist A2A pipeline snapshot", exc_info=True)
+            except Exception as exc:
+                logger.warning("Failed to persist A2A pipeline snapshot: %s", sanitize_strict_text(str(exc)))
             if snapshot_persisted:
                 _maybe_inject_test_fault("after_a2a_pipeline_snapshot_saved")
             if require_journal_metadata and not journal_persisted:
@@ -650,8 +646,8 @@ class PipelineA2AEventPublisher:
                 self._extreme_snapshot_loaded = True
                 self._extreme_pending_snapshot_events.clear()
                 _maybe_inject_test_fault("after_a2a_pipeline_snapshot_saved")
-        except Exception:
-            logger.warning("Failed to persist A2A pipeline snapshot", exc_info=True)
+        except Exception as exc:
+            logger.warning("Failed to persist A2A pipeline snapshot: %s", sanitize_strict_text(str(exc)))
 
         if require_journal_metadata and not journal_persisted:
             logger.warning("Skipping A2A pipeline status update because journal metadata was not persisted")
@@ -999,8 +995,11 @@ class PipelineA2AEventPublisher:
                 return None
             artifact_semantic_metadata = _artifact_semantic_metadata(original_artifact, envelope.get("data"))
             artifact_metadata = _extract_artifact_metadata(result, self.artifact_store)
-        except Exception:
-            logger.warning("Failed to externalize A2A pipeline tool artifact", exc_info=True)
+        except Exception as exc:
+            logger.warning(
+                "Failed to externalize A2A pipeline tool artifact: %s",
+                sanitize_strict_text(str(exc)),
+            )
             return None
         if artifact_metadata is None:
             return None
@@ -1034,13 +1033,12 @@ class PipelineA2AEventPublisher:
         return artifact_metadata
 
     async def _enqueue_artifact_update(self, envelope: dict[str, Any], artifact_metadata: dict[str, Any]) -> None:
-        await self.event_queue.enqueue_event(
-            _artifact_update_event(
+        event = _artifact_update_event(
                 task_id=self._delivery_task_id(envelope),
                 context_id=self._delivery_context_id(envelope),
                 metadata=artifact_metadata,
             )
-        )
+        await self.event_queue.enqueue_event(event)
 
     async def _apply_permission_metadata(
         self,
@@ -1143,26 +1141,6 @@ class PipelineA2AEventPublisher:
 def _permission_request_from(event: Any) -> PermissionRequestEvent | None:
     inner = _unwrap_stream_event(event)
     return inner if isinstance(inner, PermissionRequestEvent) else None
-
-
-def _sanitize_remote_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
-    sanitized = dict(envelope)
-    data = sanitized.get("data")
-    conclusion_exempt = isinstance(data, dict) and data.get("toolName") == "complete_step"
-    for field in _REMOTE_PAYLOAD_FIELDS:
-        if field not in sanitized:
-            continue
-        if field == "data" and conclusion_exempt:
-            # complete_step 的 conclusion(在 data.input)是下游必需的关键结构化数据，
-            # 所有场景(含真正远程)均不脱敏(已与用户确认，问题1=B，含 RdsMasterPassword)。
-            continue
-        # 在环境上下文里执行，使 redactor 遵守 ``all_redaction_suppressed()``。
-        # 该抑制标志只由环回 web 服务(create_app(expose_local_paths=True),protect_loopback_app
-        # 环回保护)的中间件设置；真正远程的 A2A 服务从不设置它，故其上下文里始终为 False → 路径 + 密钥
-        # 照常脱敏，远程边界不受影响。而本地 web sink 写入的 journal 会被读回展示，理应保留真实的路径与
-        # 结构化内容(含模板 YAML、结论)，故 web 上下文里 redact 整体原样。
-        sanitized[field] = _REMOTE_PAYLOAD_REDACTOR.redact(sanitized[field])
-    return sanitized
 
 
 def _tool_result_from(event: Any) -> ToolResultEvent | None:

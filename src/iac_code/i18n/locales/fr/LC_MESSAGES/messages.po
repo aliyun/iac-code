@@ -46,7 +46,8 @@ msgstr "afterSequence doit être un entier non négatif"
 msgid "Unsafe artifact filename"
 msgstr "Nom de fichier d’artefact non sûr"
 
-#: src/iac_code/a2a/artifacts.py src/iac_code/utils/public_errors.py
+#: src/iac_code/a2a/artifacts.py src/iac_code/pipeline/engine/public_errors.py
+#: src/iac_code/utils/public_errors.py
 msgid "Unknown error"
 msgstr "Erreur inconnue"
 
@@ -120,8 +121,7 @@ msgstr "Tâche annulée."
 msgid "Current model {model} does not support image input."
 msgstr "Le modèle actuel {model} ne prend pas en charge l’entrée d’image."
 
-#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
-#: src/iac_code/a2a/transports/dispatcher.py
+#: src/iac_code/a2a/executor.py src/iac_code/a2a/transports/dispatcher.py
 msgid "Authentication required. Configure credentials and retry."
 msgstr "Authentification requise. Configurez les identifiants puis réessayez."
 
@@ -160,6 +160,11 @@ msgstr "État du pipeline A2A introuvable"
 #: src/iac_code/a2a/pipeline_recovery.py
 msgid "A2A task/context mismatch"
 msgstr "La tâche et le contexte A2A ne correspondent pas"
+
+#: src/iac_code/a2a/projection.py src/iac_code/pipeline/engine/public_errors.py
+#: src/iac_code/utils/public_errors.py
+msgid "Stack trace omitted from public event; see error_id."
+msgstr "Trace de pile omise de l’événement public ; consultez error_id."
 
 #: src/iac_code/a2a/task_store.py
 msgid "A2A task expired"
@@ -214,8 +219,7 @@ msgstr "Tâche terminée."
 msgid "Task failed."
 msgstr "La tâche a échoué."
 
-#: src/iac_code/acp/convert.py src/iac_code/acp/session.py
-#: src/iac_code/ui/renderer.py
+#: src/iac_code/acp/convert.py src/iac_code/ui/renderer.py
 #, python-brace-format
 msgid "Input summary: {summary}"
 msgstr "Résumé de l'entrée : {summary}"
@@ -278,15 +282,6 @@ msgstr "Toujours refuser \"{rule}\" (cette session)"
 #: src/iac_code/acp/session.py
 msgid "Always reject this tool"
 msgstr "Toujours refuser cet outil"
-
-#: src/iac_code/acp/session.py
-#, python-brace-format
-msgid ""
-"Approve tool call: {tool}\n"
-"Input summary: {summary}"
-msgstr ""
-"Approuver l'appel d'outil : {tool}\n"
-"Résumé de l'entrée : {summary}"
 
 #: src/iac_code/acp/session.py
 #, python-brace-format
@@ -4552,6 +4547,14 @@ msgstr "Les champs ne sont pas pris en charge pour l'action '{action}' : {fields
 #, python-brace-format
 msgid "Missing required field(s) for action '{action}': {fields}"
 msgstr "Champs obligatoires manquants pour l'action '{action}' : {fields}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+msgid ""
+"Deployment parameters contain a redaction placeholder; provide the real "
+"parameter value before deployment."
+msgstr ""
+"Les paramètres de déploiement contiennent un espace réservé de masquage ;"
+" fournissez la valeur réelle du paramètre avant le déploiement."
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 #, python-brace-format
@@ -9009,7 +9012,9 @@ msgstr ""
 msgid ""
 "The encoding is valid, but the contract does not provide an environment-"
 "data schema."
-msgstr "L'encodage est valide, mais le contrat ne fournit pas de schéma de données d'environnement."
+msgstr ""
+"L'encodage est valide, mais le contrat ne fournit pas de schéma de "
+"données d'environnement."
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
 msgid ""
@@ -9250,8 +9255,8 @@ msgid ""
 "A negative or fractional counter never reaches zero; generation stops "
 "only after available positions are exhausted."
 msgstr ""
-"Un compteur négatif ou fractionnaire n'atteint jamais zéro ; la génération "
-"ne s'arrête qu'une fois les positions disponibles épuisées."
+"Un compteur négatif ou fractionnaire n'atteint jamais zéro ; la "
+"génération ne s'arrête qu'une fois les positions disponibles épuisées."
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
 msgid "a non-negative integer for predictable minimum semantics"
@@ -11454,10 +11459,6 @@ msgstr ""
 "  Option 2 - si vous ne pouvez pas accéder à github.com, exécutez ceci "
 "pour installer via npmmirror :"
 
-#: src/iac_code/utils/public_errors.py
-msgid "Stack trace omitted from public event; see error_id."
-msgstr "Trace de pile omise de l’événement public ; consultez error_id."
-
 #: src/iac_code/utils/state_io.py
 #, python-brace-format
 msgid "refusing to follow symlink or reparse point: {path}"
@@ -12670,3 +12671,10 @@ msgstr "Autoriser Bash ?"
 #~ "La clé correspond au composant {}, "
 #~ "qui n'est pas disponible dans le "
 #~ "formulaire de paramètres ROS standard."
+
+#~ msgid ""
+#~ "Approve tool call: {tool}\n"
+#~ "Input summary: {summary}"
+#~ msgstr ""
+#~ "Approuver l'appel d'outil : {tool}\n"
+#~ "Résumé de l'entrée : {summary}"

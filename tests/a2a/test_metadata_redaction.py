@@ -1,4 +1,4 @@
-"""Tests for A2AMetadataEchoRedactor sensitive-key handling and the all-redaction switch."""
+"""Tests for the canonical A2A metadata-copy compatibility wrapper."""
 
 from __future__ import annotations
 
@@ -6,10 +6,10 @@ from iac_code.a2a.metadata_redaction import A2AMetadataEchoRedactor
 from iac_code.utils.public_errors import suppress_all_redaction
 
 
-def test_redact_masks_sensitive_key_by_default() -> None:
+def test_redact_preserves_sensitive_key_by_default() -> None:
     redactor = A2AMetadataEchoRedactor()
     out = redactor.redact({"password": "p@ss", "note": "hello"})
-    assert out == {"password": "***", "note": "hello"}
+    assert out == {"password": "p@ss", "note": "hello"}
 
 
 def test_redact_keeps_everything_raw_under_suppress_all() -> None:

@@ -411,6 +411,13 @@ def test_serialize_tool_definitions():
     assert result[0]["description"] == "Run a command"
 
 
+def test_serialize_tool_definition_description_keeps_diagnostic_metadata_raw():
+    description = "Run /Users/alice/private/tool with token=tool-owned-description"
+    result = json.loads(serialize_tool_definitions([FakeToolDef(name="bash", description=description)]))
+
+    assert result[0]["description"] == description
+
+
 def test_serialize_tool_definitions_empty():
     assert serialize_tool_definitions(None) == "[]"
     assert serialize_tool_definitions([]) == "[]"
@@ -459,6 +466,61 @@ def test_serialize_tool_result_redacts_non_string_content():
     assert "ROSTemplateFormatVersion" not in result
     assert "file_content" in result
     assert "sha256-value" in result
+
+
+def test_content_serializers_strictly_sanitize_before_serialization_and_truncation(monkeypatch):
+    from iac_code.utils.public_errors import suppress_all_redaction
+
+    class SensitiveLeaf:
+        def __str__(self) -> str:
+            return "password=hunter2 /Users/alice/private.txt"
+
+    monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", "1")
+    with suppress_all_redaction():
+        arguments = serialize_tool_arguments(
+            {
+                "/Users/alice/key": SensitiveLeaf(),
+                "nested_json": '{"token":"secret-value","path":"/Users/alice/result.json"}',
+            }
+        )
+
+    parsed = json.loads(arguments)
+    assert "/Users/alice" not in arguments
+    assert "hunter2" not in arguments
+    assert "secret-value" not in arguments
+    assert parsed["[PATH]"] == "password=[REDACTED] [PATH]"
+    assert "[REDACTED]" in parsed["nested_json"]
+
+
+def test_content_serializers_redact_structured_sensitive_mapping_values():
+    payload = {
+        "password": "hunter2",
+        "apiKey": "plain-secret",
+        "config": {
+            "access_key_secret": "aliyun-secret",
+            "token": 123456,
+            "region_id": "cn-hangzhou",
+        },
+        "credentials": {"profile": "production"},
+    }
+
+    arguments = json.loads(serialize_tool_arguments(payload))
+    result = json.loads(serialize_tool_result(FakeToolResult(content=payload)))
+
+    expected = {
+        "password": "[REDACTED]",
+        "apiKey": "[REDACTED]",
+        "config": {
+            "access_key_secret": "[REDACTED]",
+            "token": "[REDACTED]",
+            "region_id": "cn-hangzhou",
+        },
+        "credentials": "[REDACTED]",
+    }
+    assert arguments == expected
+    assert result == expected
+    assert payload["password"] == "hunter2"
+    assert payload["config"]["token"] == 123456
 
 
 def test_truncation_for_large_content():

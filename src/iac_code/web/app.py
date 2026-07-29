@@ -63,16 +63,11 @@ WEB_SHUTDOWN_TASK_TIMEOUT_SECONDS = 5.0
 
 
 class _SuppressAllRedactionMiddleware:
-    """Disable all redaction (paths + secrets) for the loopback Web workbench.
+    """Keep the loopback Web request context on the existing local policy.
 
-    The web server binds to loopback only, so surfacing real local paths and
-    secrets in the transcript is safe and useful (the data only lands on local
-    disk); secrets are surfaced too. This pure-ASGI middleware wraps every
-    request in a ``suppress_all_redaction()`` scope. Because it sets the
-    ContextVar in the same task that then awaits the downstream app, the
-    endpoint — and any background pipeline turn task it spawns via
-    ``asyncio.create_task`` (which copies the current context at creation) —
-    runs with all redaction disabled for both the live write path and reloads.
+    User-visible Web data no longer calls generic redactors.  The suppression
+    context remains for unchanged consumers such as permission audit; strict
+    server-log and telemetry sanitizers explicitly ignore it.
     """
 
     def __init__(self, app: Any) -> None:
@@ -110,13 +105,12 @@ def create_app(
     pipeline_action_runner_factory: WebPipelineActionRunnerFactory | None = None,
     expose_local_paths: bool = False,
 ) -> Any:
-    """Create the local Web workbench ASGI app.
+    """Create the loopback-only Web workbench without generic user-data redaction.
 
-    ``expose_local_paths`` disables file-path ([PATH]) redaction across the app
-    (secrets stay redacted). The loopback server entry point turns this on so the
-    transcript shows real local paths; it defaults to off so other callers/tests
-    keep the remote-safe redaction behavior.
+    ``expose_local_paths`` is retained as a compatibility-only argument; all
+    local Web sessions now use the same no-redaction policy.
     """
+    del expose_local_paths
     try:
         from starlette.applications import Starlette
         from starlette.concurrency import run_in_threadpool
@@ -144,7 +138,6 @@ def create_app(
     from iac_code.ui.suggestions.shell_history_provider import ShellHistoryProvider
     from iac_code.ui.suggestions.skill_provider import SkillProvider
     from iac_code.ui.suggestions.types import CompletionToken, SuggestionItem
-    from iac_code.utils.public_errors import public_exception_summary, sanitize_public_text
     from iac_code.web import mcp_settings
     from iac_code.web.cleanup import cleanup_blocks_normal_chat, session_cleanup_summary
     from iac_code.web.commands import WebCommandDispatcher, command_metadata
@@ -521,7 +514,7 @@ def create_app(
             return response
 
     def json_error(message: str, status_code: int, *, code: str | None = None) -> JSONResponse:
-        error = {"message": sanitize_public_text(message)}
+        error = {"message": message}
         if code is not None:
             error["code"] = code
         return JSONResponse({"error": error}, status_code=status_code)
@@ -536,7 +529,7 @@ def create_app(
         )
 
     def public_exception_message(exc: BaseException) -> str:
-        return public_exception_summary(exc, max_chars=500)
+        return str(exc)[:500]
 
     def active_model_selection(session: WebSession) -> WebModelSelection:
         return model_selection_for_session(session)
@@ -2921,7 +2914,7 @@ def create_app(
             {
                 "sessionId": session.session_id,
                 "webSessionId": session.web_session_id,
-                "redacted": True,
+                "redacted": False,
                 "available": True,
                 "mode": session.mode,
                 "cwd": session.cwd,
@@ -4218,7 +4211,7 @@ def create_app(
                 "command": "skill",
                 "error": {
                     "code": "unknown_skill",
-                    "message": sanitize_public_text("unknown skill: {}".format(str(result.get("skill") or "").strip())),
+                    "message": "unknown skill: {}".format(str(result.get("skill") or "").strip()),
                 },
             }
         shell_task: asyncio.Task[Any] | None = None
@@ -4685,10 +4678,9 @@ def create_app(
             },
         )
 
-    app_middleware = [Middleware(_SuppressAllRedactionMiddleware)] if expose_local_paths else []
     return Starlette(
         lifespan=lifespan,
-        middleware=app_middleware,
+        middleware=[Middleware(_SuppressAllRedactionMiddleware)],
         routes=[
             Route("/health", health, methods=["GET"]),
             Route("/api/server/restart", restart_server, methods=["POST"]),

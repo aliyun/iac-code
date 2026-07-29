@@ -566,7 +566,7 @@ def test_session_detail_includes_pending_blocking_payloads(tmp_path) -> None:
             "payload": {
                 "action": "shell",
                 "command": "echo ok",
-                "apiKey": "[REDACTED]",
+                "apiKey": "sk-unsafe12345678",
                 "requestId": permission_id,
                 "sessionId": session.session_id,
                 "message": "Allow shell?",

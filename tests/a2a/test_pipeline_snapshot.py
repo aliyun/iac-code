@@ -44,7 +44,8 @@ def test_snapshot_load_logs_parse_failures(tmp_path, caplog) -> None:
 
     assert store.load() is None
     assert "Failed to load A2A pipeline snapshot" in caplog.text
-    assert str(store.path) in caplog.text
+    assert str(store.path) not in caplog.text
+    assert "path=[PATH]" in caplog.text
 
 
 def test_snapshot_save_cleans_temp_file_when_replace_fails(monkeypatch, tmp_path, caplog) -> None:
@@ -782,7 +783,10 @@ def test_reduce_completion_events_keep_conclusions_on_pipeline_state_nodes() -> 
     candidate = _base("evt-2", 2, "candidate_completed", scope="candidate")
     candidate["step"] = parent["step"]
     candidate["candidate"] = {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1}
-    candidate["data"] = {"conclusions": {"template": {"body": "ros"}}}
+    candidate["data"] = {
+        "conclusions": {"template": {"body": "ros"}},
+        "step_conclusions": {"template_generating": {"body": "ros", "password": "real-secret"}},
+    }
     candidate_step = _base("evt-3", 3, "candidate_step_completed", scope="candidate_step")
     candidate_step["step"] = parent["step"]
     candidate_step["candidate"] = candidate["candidate"]
@@ -805,6 +809,9 @@ def test_reduce_completion_events_keep_conclusions_on_pipeline_state_nodes() -> 
     assert step["conclusion"] == {"selected": "Plan A"}
     assert step["durationS"] == 1.5
     assert step["candidates"][0]["conclusions"] == {"template": {"body": "ros"}}
+    assert step["candidates"][0]["step_conclusions"] == {
+        "template_generating": {"body": "ros", "password": "real-secret"}
+    }
     assert step["candidates"][0]["steps"][0]["conclusionField"] == "template"
     assert step["candidates"][0]["steps"][0]["conclusion"] == {"body": "ros"}
 
@@ -869,7 +876,7 @@ def test_reduce_permission_and_tool_result_display_items() -> None:
     assert snapshot["display"]["toolResults"][0]["result"] == {"stdout": "done"}
 
 
-def test_reduce_tool_result_drops_legacy_artifact_file_uri() -> None:
+def test_reduce_tool_result_preserves_canonical_artifact_file_uri() -> None:
     tool_result = _base("evt-tool", 1, "tool_result", scope="pipeline")
     tool_result["data"] = {
         "toolName": "write_file",
@@ -903,21 +910,16 @@ def test_reduce_tool_result_drops_legacy_artifact_file_uri() -> None:
 
     artifact = snapshot["display"]["toolResults"][0]["result"]["artifact"]
     assert artifact["filename"] == "template.yaml"
-    assert artifact["metadata"] == {"byteSize": 10}
-    assert "uri" not in artifact
-    assert "publicUrl" not in artifact
-    assert "encodedOwnerUrl" not in artifact
-    assert "backupUri" not in artifact
-    assert artifact["source"] == "[PATH]"
-    assert "url" not in artifact["parts"][0]
-    assert "uri" not in artifact["parts"][0]["metadata"]
+    assert artifact["metadata"]["byteSize"] == 10
+    assert artifact["uri"] == r"file://C:\Users\alice\.iac-code\projects\demo\template.yaml"
+    assert artifact["source"] == artifact["uri"]
+    assert artifact["parts"][0]["url"] == artifact["uri"]
     rendered = str(snapshot)
-    assert "file://" not in rendered
-    assert "Users" not in rendered
-    assert ".iac-code" not in rendered
+    assert "file://" in rendered
+    assert ".iac-code" in rendered
 
 
-def test_reduce_tool_result_sanitizes_artifact_list() -> None:
+def test_reduce_tool_result_preserves_canonical_artifact_list() -> None:
     legacy_uri = r"file://C:\Users\alice\.iac-code\projects\demo\template.yaml"
     tool_result = _base("evt-tool", 1, "tool_result", scope="pipeline")
     tool_result["data"] = {
@@ -939,18 +941,17 @@ def test_reduce_tool_result_sanitizes_artifact_list() -> None:
     snapshot = reduce_pipeline_events([tool_result])
 
     artifact = snapshot["display"]["toolResults"][0]["result"]["artifact"]
-    assert artifact[0] == "[PATH]"
-    assert artifact[1]["filename"] == "template.yaml"
-    assert "uri" not in artifact[1]
-    assert artifact[1]["parts"][0] == "[PATH]"
-    assert "url" not in artifact[1]["parts"][1]
+    assert artifact[0] == legacy_uri
+    assert artifact[1]["filename"] == r"C:\Users\alice\.iac-code\projects\demo\template.yaml"
+    assert artifact[1]["uri"] == [legacy_uri]
+    assert artifact[1]["parts"][0] == legacy_uri
+    assert artifact[1]["parts"][1]["url"] == legacy_uri
     rendered = str(snapshot)
-    assert "file://" not in rendered
-    assert "Users" not in rendered
-    assert ".iac-code" not in rendered
+    assert "file://" in rendered
+    assert ".iac-code" in rendered
 
 
-def test_reduce_tool_result_sanitizes_root_list_artifact_payloads() -> None:
+def test_reduce_tool_result_preserves_canonical_root_list_artifact_payloads() -> None:
     tool_result = _base("evt-tool", 1, "tool_result", scope="pipeline")
     tool_result["data"] = {
         "toolName": "write_file",
@@ -974,16 +975,14 @@ def test_reduce_tool_result_sanitizes_root_list_artifact_payloads() -> None:
     snapshot = reduce_pipeline_events([tool_result])
 
     result = snapshot["display"]["toolResults"][0]["result"][0]
-    assert result == {
-        "artifacts": [{"filename": "template.yaml", "metadata": {"api_key": "[REDACTED]"}}],
-        "api_key": "[REDACTED]",
-    }
+    assert result["api_key"] == "secret-key"
+    assert result["artifacts"][0]["Content"] == "RAW-TEMPLATE-CONTENT"
+    assert result["artifacts"][0]["metadata"]["api_key"] == "plain-secret"
     rendered = str(snapshot)
-    assert "RAW-TEMPLATE-CONTENT" not in rendered
-    assert "plain-secret" not in rendered
-    assert "secret-key" not in rendered
-    assert "Alice and Bob" not in rendered
-    assert ".iac-code" not in rendered
+    assert "RAW-TEMPLATE-CONTENT" in rendered
+    assert "plain-secret" in rendered
+    assert "secret-key" in rendered
+    assert "Alice and Bob" in rendered
 
 
 def test_reduce_stack_current_changed_updates_snapshot_stack_state() -> None:
@@ -1081,7 +1080,7 @@ def test_reduce_artifact_created_prefers_top_level_artifact_metadata() -> None:
     assert artifacts[0]["name"] == "updated.yaml"
     assert artifacts[0]["mediaType"] == "text/yaml"
     assert artifacts[0]["metadata"] == {"byteSize": 12}
-    assert "uri" not in artifacts[0]
+    assert artifacts[0]["uri"] == "file:///tmp/top.yaml"
     assert artifacts[0]["sequence"] == 2
     assert artifacts[0]["scope"] == "step"
     assert artifacts[0]["runId"] == "step-a-1"
@@ -1397,7 +1396,7 @@ def test_store_sanitizes_non_finite_and_non_json_values(tmp_path) -> None:
     assert loaded["display"]["candidateDetails"][0]["raw"].startswith("<object object at ")
 
 
-def test_store_sanitizes_cleanup_private_fields_without_dropping_input_prompt(tmp_path) -> None:
+def test_store_preserves_canonical_cleanup_fields_and_input_prompt(tmp_path) -> None:
     store = A2APipelineSnapshotStore(tmp_path / "pipeline")
     raw_error = (
         "DeleteStack failed AccessKeySecret=super-secret token=sk-live-1234567890 "
@@ -1444,32 +1443,30 @@ def test_store_sanitizes_cleanup_private_fields_without_dropping_input_prompt(tm
     assert loaded is not None
     assert loaded["pendingInput"]["prompt"] == "choose deployment target"
     assert loaded["control"]["inputHistory"][0]["prompt"] == "choose deployment target"
-    assert "prompt" not in loaded["control"]["handoffHistory"][0]["data"]["cleanup"]
-    assert raw_error not in loaded["control"]["handoffHistory"][0]["data"]["cleanup"]["lastError"]
-    assert "ledgerPath" not in loaded["normalHandoff"]["data"]["cleanup"]
-    assert raw_error not in loaded["normalHandoff"]["data"]["cleanup"]["lastError"]
-    assert "prompt" not in loaded["cleanup"]
-    assert raw_error not in loaded["cleanup"]["last_error"]
-    assert raw_error not in loaded["cleanup"]["resources"][0]["lastError"]
-    assert "ledgerPath" not in loaded["cleanup"]["history"][0]["data"]
-    assert raw_error not in loaded["cleanup"]["history"][0]["data"]["lastError"]
+    assert loaded["control"]["handoffHistory"][0]["data"]["cleanup"]["prompt"] == "hidden cleanup prompt"
+    assert loaded["control"]["handoffHistory"][0]["data"]["cleanup"]["lastError"] == raw_error
+    assert loaded["normalHandoff"]["data"]["cleanup"]["ledgerPath"] == "/tmp/cleanup.yaml"
+    assert loaded["normalHandoff"]["data"]["cleanup"]["lastError"] == raw_error
+    assert loaded["cleanup"]["prompt"] == "hidden cleanup prompt"
+    assert loaded["cleanup"]["last_error"] == raw_error
+    assert loaded["cleanup"]["resources"][0]["lastError"] == raw_error
+    assert loaded["cleanup"]["history"][0]["data"]["ledgerPath"] == "/tmp/cleanup.yaml"
+    assert loaded["cleanup"]["history"][0]["data"]["lastError"] == raw_error
     rendered = json.dumps(loaded, ensure_ascii=False)
-    assert "super-secret" not in rendered
-    assert "sk-live-1234567890" not in rendered
-    assert "/Users/alice" not in rendered
-    assert "[REDACTED]" in rendered
-    assert "[PATH]" in rendered
+    assert "super-secret" in rendered
+    assert "sk-live-1234567890" in rendered
+    assert "/Users/alice" in rendered
 
     store.path.write_text(json.dumps(snapshot), encoding="utf-8")
     loaded = store.load()
     assert loaded is not None
     assert loaded["pendingInput"]["prompt"] == "choose deployment target"
-    assert "prompt" not in loaded["normalHandoff"]["data"]["cleanup"]
-    assert "ledgerPath" not in loaded["cleanup"]
+    assert loaded["normalHandoff"]["data"]["cleanup"]["prompt"] == "hidden cleanup prompt"
+    assert loaded["cleanup"]["ledgerPath"] == "/tmp/cleanup.yaml"
     rendered = json.dumps(loaded, ensure_ascii=False)
-    assert "super-secret" not in rendered
-    assert "sk-live-1234567890" not in rendered
-    assert "/Users/alice" not in rendered
+    assert "super-secret" in rendered
+    assert "sk-live-1234567890" in rendered
+    assert "/Users/alice" in rendered
 
 
 def test_store_returns_none_for_invalid_utf8_snapshot(tmp_path) -> None:

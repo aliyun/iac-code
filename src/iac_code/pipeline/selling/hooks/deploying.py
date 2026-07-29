@@ -12,6 +12,7 @@ from iac_code.types.stream_events import ResourceObservedEvent
 
 _DEPLOYING_STEP_ID = "deploying"
 logger = logging.getLogger(__name__)
+_REDACTION_PLACEHOLDER_TOKENS = {"***", "[redacted]", "<redacted>"}
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,23 @@ class CandidateResolution:
     candidate: dict[str, Any] | None
     result: dict[str, Any] | None
     error: str | None = None
+
+
+def contains_redaction_placeholder(value: Any, *, _seen: set[int] | None = None) -> bool:
+    """Return whether a deployment parameter tree still contains a redaction placeholder."""
+
+    if isinstance(value, str):
+        return value.strip().casefold() in _REDACTION_PLACEHOLDER_TOKENS
+    if not isinstance(value, (dict, list, tuple, set, frozenset)):
+        return False
+    seen = _seen if _seen is not None else set()
+    identity = id(value)
+    if identity in seen:
+        return False
+    seen.add(identity)
+    if isinstance(value, dict):
+        return any(contains_redaction_placeholder(item, _seen=seen) for item in value.values())
+    return any(contains_redaction_placeholder(item, _seen=seen) for item in value)
 
 
 def _candidate_from_result(result: dict[str, Any]) -> dict[str, Any]:

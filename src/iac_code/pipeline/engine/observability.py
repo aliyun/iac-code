@@ -22,7 +22,7 @@ from iac_code.services.telemetry.names import (
     Metrics,
     Spans,
 )
-from iac_code.utils.public_errors import sanitize_public_text
+from iac_code.utils.public_errors import sanitize_strict_text
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +186,7 @@ class PipelineObservability:
 
     @staticmethod
     def _redact_obvious_secrets(text: str) -> str:
-        redacted = sanitize_public_text(text)
+        redacted = sanitize_strict_text(text)
         for pattern in _SECRET_PATTERNS:
             redacted = pattern.sub("[REDACTED]", redacted)
         return redacted

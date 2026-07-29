@@ -85,7 +85,7 @@ async def _read_stream_response(
     return status, response_headers, b"".join(body_chunks).decode()
 
 
-def test_event_buffer_assigns_monotonic_sequence_and_redacts_payload() -> None:
+def test_event_buffer_assigns_monotonic_sequence_and_preserves_local_payload() -> None:
     from iac_code.web.events import WebEventBuffer
 
     buffer = WebEventBuffer("session-1")
@@ -104,9 +104,9 @@ def test_event_buffer_assigns_monotonic_sequence_and_redacts_payload() -> None:
     assert first["sequence"] == 1
     assert first["sessionId"] == "session-1"
     assert first["createdAt"]
-    assert first["payload"]["apiKey"] == "[REDACTED]"
-    assert first["payload"]["nested"]["access_key_secret"] == "[REDACTED]"
-    assert first["payload"]["items"][0]["token"] == "[REDACTED]"
+    assert first["payload"]["apiKey"] == "sk-unsafe"
+    assert first["payload"]["nested"]["access_key_secret"] == "secret-value"
+    assert first["payload"]["items"][0]["token"] == "token-value"
     assert second["sequence"] == 2
     json.dumps(first)
 
@@ -328,10 +328,10 @@ def test_make_event_preserves_pipeline_identity_fields_at_top_level() -> None:
     assert event["contextId"] == "ctx-1"
     assert event["taskId"] == "task-1"
     assert event["lastSequence"] == 42
-    assert event["payload"]["secret"] == "[REDACTED]"
+    assert event["payload"]["secret"] == "unsafe"
 
 
-def test_make_event_normalizes_payload_to_json_safe_values_and_redacts_secrets() -> None:
+def test_make_event_normalizes_payload_to_json_safe_values_without_local_redaction() -> None:
     from iac_code.web.events import encode_sse, make_event
 
     @dataclass
@@ -381,10 +381,10 @@ def test_make_event_normalizes_payload_to_json_safe_values_and_redacts_secrets()
     assert payload["blob"] == "hello �"
     assert sorted(payload["tags"]) == ["ros", "terraform"]
     assert payload["items"] == ["relative.txt", "nested"]
-    assert payload["mapping"] == {"1": "/tmp/one", "secret": "[REDACTED]"}
-    assert payload["metadata"] == {"title": "resource", "token": "[REDACTED]"}
+    assert payload["mapping"] == {"1": "/tmp/one", "secret": "unsafe"}
+    assert payload["metadata"] == {"title": "resource", "token": "unsafe"}
     assert payload["unknown"] == "unknown-object"
-    assert payload["apiKey"] == "[REDACTED]"
+    assert payload["apiKey"] == "/tmp/unsafe"
 
 
 def test_make_event_normalizes_non_finite_floats_for_browser_safe_json() -> None:

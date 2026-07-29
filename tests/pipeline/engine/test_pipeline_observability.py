@@ -947,7 +947,7 @@ def test_metrics_use_bounded_attrs_while_events_keep_debug_context():
 
     event_attrs = log_event.call_args.args[1]
     assert event_attrs["session_id"] == "sid"
-    assert event_attrs["cwd"] == "/repo"
+    assert event_attrs["cwd"] == "[PATH]"
     assert event_attrs["sub_pipeline_id"] == "evaluate_candidate_abc123"
     assert event_attrs["candidate_name"] == "customer-specific candidate"
     assert event_attrs["error_summary"] == "unique customer path failed"

@@ -13,7 +13,7 @@ import logging
 from iac_code.i18n import _
 from iac_code.services.session_metadata import normalize_session_name
 from iac_code.services.session_storage import SessionStorage
-from iac_code.utils.public_errors import sanitize_public_text
+from iac_code.utils.public_errors import sanitize_strict_text
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +74,8 @@ class ACPSlashRegistry:
         try:
             result = await agent_loop.compact()
         except Exception as exc:
-            logger.warning("ACP /compact failed: %s", exc)
-            return _("Compaction failed: {error}").format(error=sanitize_public_text(exc))
+            logger.warning("ACP /compact failed: %s", sanitize_strict_text(str(exc)))
+            return _("Compaction failed: {error}").format(error=str(exc))
 
         if result.status == "empty":
             return _("Nothing to compact: conversation is empty.")
@@ -103,8 +103,8 @@ class ACPSlashRegistry:
         try:
             agent_loop.reset()
         except Exception as exc:
-            logger.warning("ACP /clear failed: %s", exc)
-            return _("Clear failed: {error}").format(error=sanitize_public_text(exc))
+            logger.warning("ACP /clear failed: %s", sanitize_strict_text(str(exc)))
+            return _("Clear failed: {error}").format(error=str(exc))
         return _("Conversation history cleared.")
 
     def _handle_debug(self, args: str) -> str:
@@ -161,7 +161,7 @@ class ACPSlashRegistry:
             name = normalize_session_name(parts[0])
             result = SessionStorage().rename_session(cwd, session_id, name, git_branch=git_branch)
         except ValueError as exc:
-            return sanitize_public_text(exc)
+            return str(exc)
 
         if result == "unchanged":
             return _("Session is already named {name}").format(name=name)

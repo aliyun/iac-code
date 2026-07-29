@@ -343,9 +343,7 @@ class A2APipelineActionRunner:
                 pipeline_input=normalize_pipeline_user_input(pipeline_input),
             )
         except Exception as exc:
-            from iac_code.utils.public_errors import public_exception_summary
-
-            return _action_error(public_exception_summary(exc, max_chars=500), status_code=500)
+            return _action_error(str(exc)[:500], status_code=500)
         terminal_result = await self._terminal_result(session, event_queue.events)
         if terminal_result is not None:
             return terminal_result
@@ -538,12 +536,10 @@ def _string_value(value: Any) -> str | None:
 
 
 def _action_error(message: str, *, status_code: int, terminal_outcome: str | None = None) -> PipelineActionResult:
-    from iac_code.utils.public_errors import sanitize_public_text
-
     return PipelineActionResult(
         accepted=False,
         status_code=status_code,
-        response={"accepted": False, "error": {"message": sanitize_public_text(message)}},
+        response={"accepted": False, "error": {"message": message}},
         terminal_outcome=terminal_outcome,
     )
 

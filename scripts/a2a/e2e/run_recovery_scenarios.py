@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Run A2A pipeline session-recovery E2E scenarios.
+"""Run A2A pipeline recovery and redaction E2E scenarios.
 
 The scenarios in this file intentionally drive the public A2A JSON-RPC HTTP
-endpoint. They do not call pipeline internals directly. Each run starts a local
-A2A server, records raw requests/SSE/pipeline snapshots, kills the server with
-SIGKILL at a scenario-specific point, restarts it with the same persistence
-directory, then validates recovery behavior.
+endpoint. They do not call pipeline internals directly. Recovery scenarios kill
+and restart a local A2A server at scenario-specific points. The redaction
+regression scenario stops at step 4 before deployment and compares the
+canonical snapshot with the public A2A projection without persisting secrets.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 import yaml
@@ -77,13 +78,21 @@ from debugger import (  # noqa: E402
     build_task_get_payload,
 )
 
+from iac_code.a2a.pipeline_paths import existing_a2a_pipeline_dir_for_session  # noqa: E402
 from iac_code.services.session_storage import SessionStorage  # noqa: E402
 from iac_code.utils.project_paths import get_projects_dir  # noqa: E402
+from iac_code.utils.public_paths import redact_known_public_paths  # noqa: E402
 
 ASK_TRIGGER_PROMPT = "我有个产品要上线"
 ASK_FIRST_ANSWER = "我要创建云网络资源；本次只选择已有 VPC 创建一个 VSwitch，不部署 ECS、EIP、SLB 或 Nginx。"
 ASK_SECOND_ANSWER = "选择一个已有 VPC，创建一个 VSwitch；地域、可用区和网段你按低成本默认值推荐。"
 INTERVENING_ASK_ANSWER = "使用默认配置（可用区和网段自动规划），继续。"
+REDACTION_STEP4_PROMPT = (
+    "帮我在阿里云上搭个小程序后端环境，要数据库，平时访问不多，每月最好别超过 200 块。2个方案。"
+    "两个方案的 ROS 模板都要创建数据库主账号，并为主账号定义 NoEcho 密码参数；"
+    "密码由你生成满足约束的随机值，带入预览并完整保留到方案选择，不要让我提供。"
+)
+REDACTION_STEP4_ASK_ANSWER = "使用默认地域和低成本配置；数据库密码由你生成合规随机值，继续准备 2 个方案，不要部署。"
 ROLLBACK_PROMPT = "我改需求了：使用已有 VPC 创建一个安全组，不创建 VSwitch。请基于这个新需求重新规划。"
 CONTINUE_PROMPT = "继续"
 CLEANUP_RECOVERY_PROMPT = (
@@ -208,6 +217,8 @@ MAX_EVIDENCE_FILE_BYTES = 256 * 1024
 SECURITY_GROUP_MARKERS = ("ALIYUN::ECS::SecurityGroup", "SecurityGroupId", "sg-", "安全组")
 TERMINAL_STATES = {"TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED", "TASK_STATE_INPUT_REQUIRED"}
 ROS_STACK_DELETED_STATUSES = {"DELETE_COMPLETE"}
+REDACTION_PLACEHOLDERS = frozenset({"***", "[REDACTED]", "<redacted>"})
+REDACTION_STEP4_SCENARIO = "redaction-step4"
 
 
 @dataclass
@@ -502,6 +513,9 @@ class ScenarioHarness:
             model=args.model,
             api_base=args.api_base,
         )
+        if scenario == REDACTION_STEP4_SCENARIO:
+            self.server_env["IAC_CODE_A2A_SAFE_MODE"] = "true"
+            self.notes.append("forced IAC_CODE_A2A_SAFE_MODE=true for the step4 redaction regression")
         if scenario in PERFORMANCE_BACKUP_SCENARIOS:
             self.backup_root = (self.run_dir / "session-backup").resolve()
             self.backup_root.mkdir(parents=True, exist_ok=True)
@@ -823,6 +837,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--leave-server-running", action="store_true")
     parser.add_argument("--no-auto-approve-permissions", action="store_true")
     parser.add_argument("--initial-prompt", default=DEFAULT_INITIAL_PROMPT)
+    parser.add_argument(
+        "--redaction-step4-prompt",
+        default=REDACTION_STEP4_PROMPT,
+        help="Real backend/database prompt used only by the redaction-step4 scenario.",
+    )
     parser.add_argument("--selection-prompt", default=DEFAULT_SELECTION_PROMPT)
     parser.add_argument("--normal-followup-prompt", default=DEFAULT_NORMAL_FOLLOWUP_PROMPT)
     parser.add_argument("--recovery-prompt", default=DEFAULT_RECOVERY_PROMPT)
@@ -1085,6 +1104,49 @@ def run_selection_waiting(args: argparse.Namespace, scenario: str) -> int:
         _add_hydrated_task_checks(h, selection, "selection answer")
         h.checks["selection accepted and advanced past waiting step"] = _selection_advanced_past_waiting_step(selection)
         h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
+
+    return _run_with_harness(args, scenario, callback)
+
+
+def run_redaction_step4(args: argparse.Namespace, scenario: str) -> int:
+    """Reach candidate selection and audit canonical versus safe-mode A2A data."""
+
+    def callback(h: ScenarioHarness) -> None:
+        initial = h.stream(prompt=args.redaction_step4_prompt, name="01-redaction-step4", context_id="", task_id="")
+        initial = _answer_intervening_ask_inputs(
+            h,
+            initial,
+            name_prefix="01-redaction-step4",
+            answer_prompt=REDACTION_STEP4_ASK_ANSWER,
+        )
+        h.checks["initial reached step4 candidate selection"] = (
+            initial.last_input_required_step_id == "confirm_and_select"
+        )
+
+        canonical_snapshot = _load_canonical_pipeline_snapshot(h)
+        public_state = _fetch_pipeline_state_for_redaction_audit(h)
+        public_snapshot = _snapshot(public_state)
+        if public_snapshot is None:
+            raise RuntimeError("public pipeline state did not contain a snapshot")
+
+        audit = _build_step4_redaction_audit(
+            canonical_snapshot,
+            public_snapshot,
+            known_server_paths=(h.cwd, h.server_cwd, str(h.run_dir.resolve())),
+            safe_mode=h.server_env.get("IAC_CODE_A2A_SAFE_MODE", ""),
+        )
+        h.snapshots["redaction_audit"] = audit
+        _write_json(h.run_dir / "redaction-audit.json", audit)
+        h.checks.update(_step4_redaction_checks(audit))
+        h.checks["public snapshot is waiting at step4"] = (
+            public_snapshot.get("status") == "waiting_input" and _pending_step_id(public_state) == "confirm_and_select"
+        )
+        pending_input = public_snapshot.get("pendingInput")
+        options = pending_input.get("options") if isinstance(pending_input, dict) else None
+        h.checks["step4 exposes two candidate options"] = isinstance(options, list) and len(options) == 2
+        h.notes.append(
+            "stopped at step4 candidate selection; no selection input was sent and deployment was not started"
+        )
 
     return _run_with_harness(args, scenario, callback)
 
@@ -1888,6 +1950,7 @@ def _answer_intervening_ask_inputs(
     summary: StreamSummary,
     *,
     name_prefix: str,
+    answer_prompt: str = INTERVENING_ASK_ANSWER,
 ) -> StreamSummary:
     current = summary
     for idx in range(1, 5):
@@ -1899,7 +1962,7 @@ def _answer_intervening_ask_inputs(
         if kind != "ask_user_question":
             return current
         h.notes.append(f"answered intervening ask_user_question before step4 selection: {current.name}")
-        current = h.stream(prompt=INTERVENING_ASK_ANSWER, name=f"{name_prefix}-answer-ask-{idx}")
+        current = h.stream(prompt=answer_prompt, name=f"{name_prefix}-answer-ask-{idx}")
     return current
 
 
@@ -2135,6 +2198,207 @@ def fetch_tasks(
         suffix="task-list",
         redaction_env=redaction_env,
     )
+
+
+def _fetch_pipeline_state_for_redaction_audit(h: ScenarioHarness) -> dict[str, Any]:
+    """Read the public state in memory; never persist its credential values."""
+
+    query = urlencode({"contextId": h.context_id, "taskId": h.pipeline_task_id})
+    request = Request(h.server_url.rstrip("/") + f"/iac-code/pipeline/state?{query}", method="GET")
+    with urlopen(request, timeout=30) as response:
+        raw = response.read().decode("utf-8", errors="strict")
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise RuntimeError("public pipeline state was not a JSON object")
+    return value
+
+
+def _load_canonical_pipeline_snapshot(h: ScenarioHarness) -> dict[str, Any]:
+    """Load the functional snapshot in memory without copying secrets to run artifacts."""
+
+    cwd, session_id = _pipeline_session_identity(h)
+    if not cwd or not session_id:
+        raise RuntimeError("cannot locate canonical pipeline snapshot: missing cwd/session id")
+    pipeline_dir = existing_a2a_pipeline_dir_for_session(cwd=cwd, session_id=session_id)
+    snapshot_path = pipeline_dir / "a2a-snapshot.json"
+    try:
+        value = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"cannot read canonical pipeline snapshot: {type(exc).__name__}") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError("canonical pipeline snapshot was not a JSON object")
+    return value
+
+
+def _build_step4_redaction_audit(
+    canonical_snapshot: dict[str, Any],
+    public_snapshot: dict[str, Any],
+    *,
+    known_server_paths: Iterable[str],
+    safe_mode: str,
+) -> dict[str, Any]:
+    """Compare step4 data while returning only non-secret evidence."""
+
+    canonical_credentials = _credential_scalar_values(canonical_snapshot)
+    public_credentials = _credential_scalar_values(public_snapshot)
+    canonical_tokens = _token_counter_values(canonical_snapshot)
+    public_tokens = _token_counter_values(public_snapshot)
+    canonical_parameter_placeholders = _functional_parameter_placeholder_paths(canonical_snapshot)
+    public_parameter_placeholders = _functional_parameter_placeholder_paths(public_snapshot)
+    known_paths = tuple(dict.fromkeys(path for path in known_server_paths if isinstance(path, str) and path))
+    public_text = json.dumps(public_snapshot, ensure_ascii=False, default=str)
+
+    credential_paths = set(canonical_credentials)
+    public_credential_paths = set(public_credentials)
+    token_paths = set(canonical_tokens)
+    public_token_paths = set(public_tokens)
+    return {
+        "safeModeValue": safe_mode,
+        "canonicalCredentialFieldCount": len(canonical_credentials),
+        "publicCredentialFieldCount": len(public_credentials),
+        "credentialFieldPaths": sorted(credential_paths),
+        "credentialFieldsMissingFromPublic": sorted(credential_paths - public_credential_paths),
+        "unexpectedPublicCredentialFields": sorted(public_credential_paths - credential_paths),
+        "credentialFieldsChangedInPublic": sorted(
+            path
+            for path in credential_paths & public_credential_paths
+            if canonical_credentials[path] != public_credentials[path]
+        ),
+        "canonicalFunctionalParameterPlaceholderPaths": canonical_parameter_placeholders,
+        "publicFunctionalParameterPlaceholderPaths": public_parameter_placeholders,
+        "canonicalTokenCounterCount": len(canonical_tokens),
+        "publicTokenCounterCount": len(public_tokens),
+        "canonicalNonNumericTokenCounterPaths": sorted(
+            path for path, value in canonical_tokens.items() if not _is_number(value)
+        ),
+        "publicNonNumericTokenCounterPaths": sorted(
+            path for path, value in public_tokens.items() if not _is_number(value)
+        ),
+        "tokenCounterPathsMissingFromPublic": sorted(token_paths - public_token_paths),
+        "unexpectedPublicTokenCounterPaths": sorted(public_token_paths - token_paths),
+        "tokenCountersChangedInPublic": sorted(
+            path for path in token_paths & public_token_paths if canonical_tokens[path] != public_tokens[path]
+        ),
+        "canonicalKnownServerPathOccurrences": _known_server_path_occurrences(canonical_snapshot, known_paths),
+        "publicKnownServerPathOccurrences": _known_server_path_occurrences(public_snapshot, known_paths),
+        "publicPathPlaceholderOccurrences": public_text.count("[PATH]"),
+    }
+
+
+def _step4_redaction_checks(audit: dict[str, Any]) -> dict[str, bool]:
+    return {
+        "A2A safe mode is enabled": str(audit.get("safeModeValue") or "").strip().lower() in {"1", "true", "yes", "on"},
+        "canonical snapshot contains generated credential parameters": bool(audit.get("canonicalCredentialFieldCount")),
+        "canonical functional parameters contain no redaction placeholders": not bool(
+            audit.get("canonicalFunctionalParameterPlaceholderPaths")
+        ),
+        "public functional parameters contain no redaction placeholders": not bool(
+            audit.get("publicFunctionalParameterPlaceholderPaths")
+        ),
+        "public credential fields match canonical values": not any(
+            audit.get(key)
+            for key in (
+                "credentialFieldsMissingFromPublic",
+                "unexpectedPublicCredentialFields",
+                "credentialFieldsChangedInPublic",
+            )
+        ),
+        "canonical token counters are numeric when present": not bool(
+            audit.get("canonicalNonNumericTokenCounterPaths")
+        ),
+        "public token counters remain numeric and unchanged when present": not any(
+            audit.get(key)
+            for key in (
+                "publicNonNumericTokenCounterPaths",
+                "tokenCounterPathsMissingFromPublic",
+                "unexpectedPublicTokenCounterPaths",
+                "tokenCountersChangedInPublic",
+            )
+        ),
+        "canonical snapshot contains a known server path": bool(audit.get("canonicalKnownServerPathOccurrences")),
+        "safe mode hides known server paths from public state": audit.get("publicKnownServerPathOccurrences") == 0,
+        "safe mode public state contains a path placeholder": bool(audit.get("publicPathPlaceholderOccurrences")),
+    }
+
+
+def _credential_scalar_values(value: Any) -> dict[str, Any]:
+    return {path: item for path, key, item in _iter_scalar_values(value) if "password" in key.casefold()}
+
+
+def _token_counter_values(value: Any) -> dict[str, Any]:
+    return {path: item for path, key, item in _iter_scalar_values(value) if key.casefold().endswith("tokens")}
+
+
+def _functional_parameter_placeholder_paths(value: Any) -> list[str]:
+    paths: list[str] = []
+    for path, key, item in _iter_scalar_values(value):
+        if not isinstance(item, str) or item.strip().casefold() not in {
+            placeholder.casefold() for placeholder in REDACTION_PLACEHOLDERS
+        }:
+            continue
+        segments = tuple(segment.casefold() for segment in _json_path_segments(path))
+        if (
+            "password" in key.casefold()
+            or "deployment_parameters" in segments
+            or ("preview_validation" in segments and "parameters" in segments)
+        ):
+            paths.append(path)
+    return sorted(paths)
+
+
+def _known_server_path_occurrences(value: Any, known_server_paths: Iterable[str]) -> int:
+    """Count path tokens under known roots without matching sibling path prefixes."""
+
+    roots = tuple({"path": path, "label": "[PATH]"} for path in known_server_paths if path)
+    if not roots:
+        return 0
+
+    def count_text(text: str) -> int:
+        redacted = redact_known_public_paths(text, roots)
+        return max(0, redacted.count("[PATH]") - text.count("[PATH]"))
+
+    def visit(item: Any) -> int:
+        if isinstance(item, dict):
+            return sum(
+                (count_text(key) if isinstance(key, str) else 0) + visit(child) for key, child in item.items()
+            )
+        if isinstance(item, (list, tuple)):
+            return sum(visit(child) for child in item)
+        if isinstance(item, str):
+            return count_text(item)
+        return 0
+
+    return visit(value)
+
+
+def _iter_scalar_values(value: Any, path: tuple[str, ...] = ()) -> Iterable[tuple[str, str, Any]]:
+    if isinstance(value, dict):
+        for raw_key, item in value.items():
+            key = str(raw_key)
+            next_path = (*path, key)
+            if isinstance(item, (dict, list, tuple)):
+                yield from _iter_scalar_values(item, next_path)
+            else:
+                yield _json_path(next_path), key, item
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            next_path = (*path, str(index))
+            if isinstance(item, (dict, list, tuple)):
+                yield from _iter_scalar_values(item, next_path)
+            else:
+                yield _json_path(next_path), str(index), item
+
+
+def _json_path(path: tuple[str, ...]) -> str:
+    return ".".join(path)
+
+
+def _json_path_segments(path: str) -> tuple[str, ...]:
+    return tuple(path.split(".")) if path else ()
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _snapshot(response: Any) -> dict[str, Any] | None:
@@ -3206,6 +3470,7 @@ _REAL_CLOUD_SCENARIOS = {
     "scenario1-performance-backup",
     "normal-running",
     "ask-waiting",
+    REDACTION_STEP4_SCENARIO,
     "selection-waiting",
     "rollback-step5-cleanup",
     "rollback-step5-cleanup-recovery",
@@ -3225,6 +3490,7 @@ _SCENARIOS: dict[str, Callable[[argparse.Namespace, str], int]] = {
     "scenario1-performance-backup": run_scenario1_performance_backup,
     "normal-running": run_normal_running,
     "ask-waiting": run_ask_waiting,
+    REDACTION_STEP4_SCENARIO: run_redaction_step4,
     "selection-waiting": run_selection_waiting,
     "fault-after-snapshot": run_fault_after_snapshot,
     "rollback-step5-cleanup": run_rollback_step5_cleanup,

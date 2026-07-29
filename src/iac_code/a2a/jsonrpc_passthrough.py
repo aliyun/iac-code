@@ -10,6 +10,8 @@ from jsonrpc.jsonrpc2 import JSONRPC20Response
 from sse_starlette.sse import EventSourceResponse
 from starlette.responses import Response
 
+from iac_code.utils.public_errors import sanitize_strict_text
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,7 +74,10 @@ def install_v03_jsonrpc_error_data_passthrough(jsonrpc_endpoint: Callable[..., A
                 async for item in stream:
                     yield {"data": item.model_dump_json(by_alias=True, exclude_none=True)}
             except Exception as exc:
-                logger.exception("Error during stream generation in v0.3 JSONRPCAdapter")
+                logger.error(
+                    "Error during stream generation in v0.3 JSONRPCAdapter: %s",
+                    sanitize_strict_text(str(exc)),
+                )
                 if getattr(exc, "jsonrpc_error_data_passthrough", False):
                     error = types_v03.InvalidParamsError(message=str(exc), data=getattr(exc, "data", None))
                 else:

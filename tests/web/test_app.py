@@ -3058,7 +3058,7 @@ def test_suggestions_hide_thinking_enabled_command(tmp_path) -> None:
     assert all("thinking_enabled" not in value for value in values)
 
 
-def test_patch_session_redacts_secret_like_unsupported_field_names(tmp_path) -> None:
+def test_patch_session_reports_secret_like_unsupported_field_names_locally(tmp_path) -> None:
     from iac_code.web.app import create_app
     from iac_code.web.session_manager import WebSessionManager
 
@@ -3071,8 +3071,7 @@ def test_patch_session_redacts_secret_like_unsupported_field_names(tmp_path) -> 
 
     assert response.status_code == 400
     assert response.headers["content-type"].startswith("application/json")
-    assert "sk-test-secret" not in response.text
-    assert "[REDACTED]" in response.json()["error"]["message"]
+    assert "sk-test-secret" in response.text
 
 
 def test_patch_session_rejects_invalid_payload_without_partial_mutation(tmp_path) -> None:
@@ -3103,7 +3102,7 @@ def test_patch_session_rejects_invalid_payload_without_partial_mutation(tmp_path
     assert session.allow_user_escapes.shell is False
 
 
-def test_session_debug_route_returns_redacted_status_snapshot(tmp_path) -> None:
+def test_session_debug_route_returns_local_status_snapshot(tmp_path) -> None:
     from iac_code.web.app import create_app
     from iac_code.web.session_manager import WebSessionManager
 
@@ -3127,7 +3126,7 @@ def test_session_debug_route_returns_redacted_status_snapshot(tmp_path) -> None:
     assert payload["pendingPermissionCount"] == 0
     assert payload["pendingQuestionCount"] == 0
     assert payload["currentTurnActive"] is False
-    assert payload["lastError"]["message"] == "apiKey=[REDACTED]"
+    assert payload["lastError"]["message"] == "apiKey=sk-test-secret"
     assert payload["pipeline"]["pipelineRunId"] == "ctx-1"
     assert payload["pipeline"]["taskId"] == "task-1"
     assert payload["pipeline"]["contextId"] == "ctx-1"
@@ -3143,7 +3142,7 @@ def test_session_debug_route_returns_redacted_status_snapshot(tmp_path) -> None:
     assert "toolTimeline" in payload
     assert "providerSummary" in payload
     assert "cloudSummary" in payload
-    assert "sk-test-secret" not in response.text
+    assert "sk-test-secret" in response.text
 
 
 def test_session_status_route_includes_runtime_pipeline_usage_and_cleanup_sections(tmp_path) -> None:
@@ -3214,7 +3213,7 @@ def test_session_status_route_includes_estimated_context_usage(tmp_path) -> None
     assert payload["contextUsage"]["messageCount"] == 2
 
 
-def test_session_prompt_route_returns_truthful_redacted_snapshot(tmp_path) -> None:
+def test_session_prompt_route_returns_truthful_local_snapshot(tmp_path) -> None:
     from iac_code.agent.message import Message
     from iac_code.web.app import create_app
     from iac_code.web.session_manager import WebSessionManager
@@ -3232,7 +3231,7 @@ def test_session_prompt_route_returns_truthful_redacted_snapshot(tmp_path) -> No
     assert response.headers["content-type"].startswith("application/json")
     payload = response.json()
     assert payload["sessionId"] == session.session_id
-    assert payload["redacted"] is True
+    assert payload["redacted"] is False
     assert payload["available"] is True
     assert payload["mode"] == "pipeline"
     assert payload["cwd"] == str(project)
@@ -3248,10 +3247,10 @@ def test_session_prompt_route_returns_truthful_redacted_snapshot(tmp_path) -> No
     assert "toolDefinitions" in payload
     assert "memorySections" in payload
     assert "cleanupPromptSummary" in payload
-    assert "sk-test-secret" not in response.text
+    assert "sk-test-secret" in response.text
 
 
-def test_session_prompt_route_populates_available_sources_and_redacts_secrets(tmp_path, monkeypatch) -> None:
+def test_session_prompt_route_populates_available_local_sources(tmp_path, monkeypatch) -> None:
     from iac_code.web.app import create_app
     from iac_code.web.memory import save_project_instruction
     from iac_code.web.session_manager import WebSessionManager
@@ -3314,10 +3313,10 @@ def test_session_prompt_route_populates_available_sources_and_redacts_secrets(tm
     assert payload["cleanupPromptSummary"]["status"] == "pending"
     assert payload["sources"]["pipeline"]["snapshot"]["lastSequence"] == 42
     assert payload["sources"]["pipeline"]["currentStep"]["id"] == "confirm"
+    # Provider summaries intentionally expose only configuration state, not credential values.
     assert "sk-realpromptsecret" not in response.text
-    assert "sk-memorysecret" not in response.text
-    assert "super-secret" not in response.text
-    assert "[REDACTED]" in response.text
+    assert "sk-memorysecret" in response.text
+    assert "super-secret" in response.text
 
 
 def test_status_and_debug_merge_recovered_pipeline_snapshot(tmp_path, monkeypatch) -> None:
@@ -3372,11 +3371,11 @@ def test_status_and_debug_merge_recovered_pipeline_snapshot(tmp_path, monkeypatc
         assert pipeline["waitingInput"]["kind"] == "approval"
         assert pipeline["handoff"]["status"] == "pending"
         assert pipeline["cleanup"]["status"] == "pending"
-        assert pipeline["warningHistory"][0]["message"] == "warning apiKey=[REDACTED]"
+        assert pipeline["warningHistory"][0]["message"] == "warning apiKey=sk-warningsecret123456"
         assert pipeline["rollbackHistory"] == [{"from": "deploy", "to": "review", "reason": "fix"}]
         assert pipeline["candidateRestarts"] == [{"candidateName": "Plan B", "count": 1}]
         assert "sk-statussecret" not in response.text
-        assert "sk-warningsecret" not in response.text
+        assert "sk-warningsecret" in response.text
         assert response.json()["providerSummary"]["credentialConfigured"] is True
 
 

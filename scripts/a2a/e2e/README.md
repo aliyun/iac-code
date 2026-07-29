@@ -1,10 +1,10 @@
-# A2A E2E Session Recovery
+# A2A E2E Session Recovery and Redaction
 
 This directory contains headless end-to-end checks for A2A pipeline session
-recovery. The runner drives the public A2A JSON-RPC streaming endpoint, records
-SSE events and pipeline snapshots, kills the A2A server with `SIGKILL`, restarts
-it with the same persistence directory, and verifies that the session can
-continue with the expected `contextId` / `taskId` behavior.
+recovery and redaction regressions. The runner drives the public A2A JSON-RPC
+streaming endpoint and records SSE events and pipeline snapshots. Recovery
+scenarios kill and restart the A2A server. `redaction-step4` instead stops at
+candidate selection without restarting, submitting a selection, or deploying.
 
 The script is intentionally close to the manual web debugger flow in
 `scripts/a2a/debugger.py`: `contextId` identifies the conversation, and `taskId`
@@ -46,6 +46,31 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --scenario scenario1
 ```
 
+Run the real step 4 redaction regression when checking that stack parameters
+are not replaced with `***` or `[REDACTED]`:
+
+```bash
+PATH="$HOME/.local/bin:$PATH" \
+uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
+  --allow-real-cloud \
+  --provider dashscope \
+  --model qwen3.6-plus \
+  --stream-timeout 2400 \
+  --preflight-timeout 60 \
+  --scenario redaction-step4
+```
+
+This scenario uses the real mini-app backend/database regression prompt and
+explicitly requires both ROS candidates to create a database account with a
+generated NoEcho password parameter, making the original failure deterministic. It forces
+`IAC_CODE_A2A_SAFE_MODE=true`, and stops when two candidates are shown at
+`confirm_and_select`. It compares the canonical snapshot with the public A2A
+recovery response in memory: generated password parameters must retain the same
+real value, token counters must remain numeric when present, and only known server paths may
+become `[PATH]`. `redaction-audit.json` contains paths, counts, and booleans but
+never credential values. `--redaction-step4-prompt` can override the task, but a
+different task may not generate a password parameter.
+
 Run the scenario1 variant that matches the production performance/backup
 configuration and sends the step4 selection without `taskId`:
 
@@ -60,7 +85,7 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --scenario scenario1-performance-backup
 ```
 
-Run the full real recovery matrix:
+Run the full real E2E matrix:
 
 ```bash
 PATH="$HOME/.local/bin:$PATH" \
@@ -73,6 +98,7 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --preflight-timeout 60 \
   --scenario scenario1 \
   --scenario scenario1-performance-backup \
+  --scenario redaction-step4 \
   --scenario selection-waiting \
   --scenario ask-waiting \
   --scenario image-initial \
@@ -113,8 +139,9 @@ after you finish inspecting the run.
 not a separate runner or a special mode; it lives in the same scenario matrix as
 the rest of the tests.
 
-| Scenario | Cut point / special condition | Recovery input | Main assertion |
+| Scenario | Cut point / special condition | Follow-up / recovery input | Main assertion |
 | --- | --- | --- | --- |
+| `redaction-step4` | Force A2A safe mode and stop when the real mini-app backend/database task reaches step 4 candidate selection | None; no candidate selection is submitted | Canonical password parameters are not placeholders; public A2A passwords equal canonical values; token counters stay numeric when present; known server paths become `[PATH]` only in the public copy; deployment never starts. |
 | `scenario1` | After pipeline completion and one normal-chat follow-up | Ask what the previous normal-chat question was | Normal-chat history survives restart; VSwitch evidence exists. |
 | `scenario1-performance-backup` | Full `scenario1` with `IAC_CODE_A2A_EXTREME_PERFORMANCE=true` and `IAC_CODE_CONFIG_BACKUP_DIR=<run-dir>/session-backup` | After the Step4 backup is durable, stop the server, remove the matching primary session under `projects`, restart, and select without `taskId`; later normal-chat recovery also omits `taskId` | Only the backup session exists before restart; restart alone does not recreate the primary session; selection without `taskId` restores the primary session from backup and hydrates the recovered task; full scenario1 passes. |
 | `selection-waiting` | Step 4 waits for candidate selection | `你随便选一个方案。` without `taskId` | Waiting step4 task is recovered and selected; VSwitch evidence exists. |
@@ -142,6 +169,12 @@ Most scenarios use the same baseline task:
 
 ```text
 选择一个已有vpc，创建一个vswitch
+```
+
+`redaction-step4` uses the real regression task:
+
+```text
+帮我在阿里云上搭个小程序后端环境，要数据库，平时访问不多，每月最好别超过 200 块。2个方案。两个方案的 ROS 模板都要创建数据库主账号，并为主账号定义 NoEcho 密码参数；密码由你生成满足约束的随机值，带入预览并完整保留到方案选择，不要让我提供。
 ```
 
 Candidate selection uses:
@@ -179,18 +212,19 @@ Only ad-hoc or CLI-overridden text falls back to runtime image rendering.
 
 When stabilizing changes, run the smaller or more diagnostic cases first:
 
-1. `fault-after-snapshot`
-2. `scenario1`
-3. `scenario1-performance-backup`
-4. `selection-waiting`
-5. `ask-waiting`
-6. `image-initial`, `image-ask-waiting`, and `image-selection-waiting`
-7. `image-normal-handoff` and `image-interrupt`
-8. `step1-running` through `step5-running`
-9. `normal-running`
-10. `cancel-step1` through `cancel-step5`
-11. `rollback-step1` through `rollback-step5`
-12. `rollback-step5-cleanup`, then `rollback-step5-cleanup-recovery`
+1. `redaction-step4`
+2. `fault-after-snapshot`
+3. `scenario1`
+4. `scenario1-performance-backup`
+5. `selection-waiting`
+6. `ask-waiting`
+7. `image-initial`, `image-ask-waiting`, and `image-selection-waiting`
+8. `image-normal-handoff` and `image-interrupt`
+9. `step1-running` through `step5-running`
+10. `normal-running`
+11. `cancel-step1` through `cancel-step5`
+12. `rollback-step1` through `rollback-step5`
+13. `rollback-step5-cleanup`, then `rollback-step5-cleanup-recovery`
 
 ## Preflight
 
@@ -262,7 +296,8 @@ Important files:
 
 - `summary.json`: scenario result, check results, `contextId`, `taskId`, and stream summaries.
 - `requests.jsonl`: JSON-RPC requests sent by the runner.
-- `*.events.jsonl`: raw SSE payloads for each stream.
+- `*.events.jsonl`: SSE payloads after the runner's basic artifact redaction.
+- `redaction-audit.json`: non-sensitive canonical/A2A comparison evidence from `redaction-step4`; it contains no password values.
 - `before-kill.pipeline-state.json`, `after-restart.pipeline-state.json`, and similar files: pipeline recovery snapshots.
 - `*.task-get.json` and `*.task-list.json`: redacted `GetTask` / `ListTasks` artifacts when captured by the scenario.
 - `server-1.*.log` and `server-2.*.log`: server logs before and after restart.

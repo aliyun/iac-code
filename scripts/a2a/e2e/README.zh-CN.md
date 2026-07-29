@@ -1,9 +1,9 @@
-# A2A 会话恢复 E2E
+# A2A 会话恢复与脱敏 E2E
 
-本目录包含用于 A2A pipeline 会话恢复的 headless 端到端检查。Runner 会驱动公开的
-A2A JSON-RPC streaming endpoint，记录 SSE 事件和 pipeline snapshot，用 `SIGKILL`
-杀掉 A2A server，再用相同持久化目录重启，并验证会话能按预期的 `contextId` /
-`taskId` 继续。
+本目录包含用于 A2A pipeline 会话恢复和脱敏回归的 headless 端到端检查。Runner 会驱动公开的
+A2A JSON-RPC streaming endpoint 并记录 SSE 事件和 pipeline snapshot。恢复场景会用 `SIGKILL`
+杀掉 A2A server，再用相同持久化目录重启；`redaction-step4` 则在候选方案选择处停止，不重启、
+不提交选择，也不进入部署。
 
 脚本流程刻意贴近 `scripts/a2a/debugger.py` 的手工 Web debugger：`contextId` 表示
 一次会话，`taskId` 表示这个会话里的一个 A2A task。
@@ -60,6 +60,27 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --scenario scenario1
 ```
 
+如果要复现资源栈参数被错误替换为 `***` / `[REDACTED]` 的问题，运行真实的 step 4
+脱敏回归场景：
+
+```bash
+PATH="$HOME/.local/bin:$PATH" \
+uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
+  --allow-real-cloud \
+  --provider dashscope \
+  --model qwen3.6-plus \
+  --stream-timeout 2400 \
+  --preflight-timeout 60 \
+  --scenario redaction-step4
+```
+
+该场景使用真实的小程序后端 + 数据库 + 月预算 200 元 + 2 个方案需求，并明确要求两个 ROS 方案
+都创建数据库主账号、生成 NoEcho 密码参数，以稳定命中原始问题；server 强制使用
+`IAC_CODE_A2A_SAFE_MODE=true`。它只运行到 `confirm_and_select` 的两个候选方案展示，然后在内存中比较
+canonical snapshot 与 A2A recovery response：生成的密码参数必须保持同一真实值，snapshot 中存在的
+token 统计必须仍为数字，只有已知服务器路径可以变成 `[PATH]`。`redaction-audit.json` 只记录字段路径、计数和布尔结果，
+不会写入密码值。可以用 `--redaction-step4-prompt` 临时覆盖需求，但这样可能无法再保证生成密码参数。
+
 如果要验证和生产性能/backup 配置一致的 scenario1 变体，并在 step4 选择时不带
 `taskId`，运行：
 
@@ -74,7 +95,7 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --scenario scenario1-performance-backup
 ```
 
-如果要跑完整真实恢复矩阵：
+如果要跑完整真实 E2E 矩阵：
 
 ```bash
 PATH="$HOME/.local/bin:$PATH" \
@@ -87,6 +108,7 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --preflight-timeout 60 \
   --scenario scenario1 \
   --scenario scenario1-performance-backup \
+  --scenario redaction-step4 \
   --scenario selection-waiting \
   --scenario ask-waiting \
   --scenario image-initial \
@@ -124,8 +146,9 @@ provider、tool、真实云调用场景默认会被保护住。只有确认要�
 `scenario1` 是历史遗留名称，表示“pipeline 完成后恢复 normal chat”的基线场景。它不是
 单独 runner，也不是特殊模式，而是完整场景矩阵中的一个场景。
 
-| 场景 | 切点 / 特殊条件 | 恢复时输入 | 主要验收 |
+| 场景 | 切点 / 特殊条件 | 后续输入 / 恢复输入 | 主要验收 |
 | --- | --- | --- | --- |
+| `redaction-step4` | 强制 A2A safe mode，真实小程序后端/数据库需求到达 step4 候选方案选择即停止 | 无；不提交方案选择 | canonical 密码参数不是脱敏占位符；A2A 密码值与 canonical 一致；存在的 token 统计仍为数字；已知服务器路径只在 A2A 副本中变成 `[PATH]`；不进入部署。 |
 | `scenario1` | pipeline 完成并完成一轮 normal-chat follow-up 后 | 询问上一条 normal-chat 问题是什么 | normal-chat 历史重启后仍可用；存在 VSwitch 证据。 |
 | `scenario1-performance-backup` | 完整 `scenario1`，并强制 `IAC_CODE_A2A_EXTREME_PERFORMANCE=true`、`IAC_CODE_CONFIG_BACKUP_DIR=<run-dir>/session-backup` | step4 backup 落盘后停服并删除主 `projects` 下对应 session，重启后不带 `taskId` 选择；后续 normal-chat 恢复也不带 `taskId` | 重启前只有 backup session；重启本身不会重建主 session；省略 `taskId` 的选择会从 backup restore 主 session 并 hydrate 到恢复 task；完整 scenario1 通过。 |
 | `selection-waiting` | step4 等待候选方案选择时 | 不带 `taskId` 发送 `你随便选一个方案。` | 能恢复等待中的 step4 task 并完成选择；存在 VSwitch 证据。 |
@@ -153,6 +176,12 @@ provider、tool、真实云调用场景默认会被保护住。只有确认要�
 
 ```text
 选择一个已有vpc，创建一个vswitch
+```
+
+`redaction-step4` 使用原始问题对应的真实回归需求：
+
+```text
+帮我在阿里云上搭个小程序后端环境，要数据库，平时访问不多，每月最好别超过 200 块。2个方案。两个方案的 ROS 模板都要创建数据库主账号，并为主账号定义 NoEcho 密码参数；密码由你生成满足约束的随机值，带入预览并完整保留到方案选择，不要让我提供。
 ```
 
 候选方案选择使用：
@@ -189,18 +218,19 @@ CLI 覆盖后的文本，才会回退到运行时渲染图片。
 
 稳定或回归时，建议从更小、更容易定位问题的场景开始：
 
-1. `fault-after-snapshot`
-2. `scenario1`
-3. `scenario1-performance-backup`
-4. `selection-waiting`
-5. `ask-waiting`
-6. `image-initial`、`image-ask-waiting` 和 `image-selection-waiting`
-7. `image-normal-handoff` 和 `image-interrupt`
-8. `step1-running` 到 `step5-running`
-9. `normal-running`
-10. `cancel-step1` 到 `cancel-step5`
-11. `rollback-step1` 到 `rollback-step5`
-12. `rollback-step5-cleanup`，再跑 `rollback-step5-cleanup-recovery`
+1. `redaction-step4`
+2. `fault-after-snapshot`
+3. `scenario1`
+4. `scenario1-performance-backup`
+5. `selection-waiting`
+6. `ask-waiting`
+7. `image-initial`、`image-ask-waiting` 和 `image-selection-waiting`
+8. `image-normal-handoff` 和 `image-interrupt`
+9. `step1-running` 到 `step5-running`
+10. `normal-running`
+11. `cancel-step1` 到 `cancel-step5`
+12. `rollback-step1` 到 `rollback-step5`
+13. `rollback-step5-cleanup`，再跑 `rollback-step5-cleanup-recovery`
 
 ## Preflight
 
@@ -270,7 +300,8 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
 
 - `summary.json`：场景结果、检查结果、`contextId`、`taskId` 和 stream 摘要。
 - `requests.jsonl`：runner 发送的 JSON-RPC 请求。
-- `*.events.jsonl`：每个 stream 的原始 SSE payload。
+- `*.events.jsonl`：每个 stream 经过 runner 基础脱敏后落盘的 SSE payload。
+- `redaction-audit.json`：仅 `redaction-step4` 生成；记录 canonical/A2A 对比的非敏感证据，不含密码值。
 - `before-kill.pipeline-state.json`、`after-restart.pipeline-state.json` 等文件：pipeline 恢复 snapshot。
 - `*.task-get.json` 和 `*.task-list.json`：场景捕获到的、经过脱敏的 `GetTask` / `ListTasks` artifact。
 - `server-1.*.log` 和 `server-2.*.log`：重启前后的 server 日志。

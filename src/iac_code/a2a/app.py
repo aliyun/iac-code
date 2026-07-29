@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager, suppress
 from email.utils import formatdate
 from pathlib import Path
 from time import time
-from typing import Awaitable, Callable
+from typing import Any, AsyncIterator, Awaitable, Callable, cast
 
 from a2a.auth.user import User
 from a2a.server.context import ServerCallContext
@@ -29,6 +29,12 @@ from iac_code.a2a.agent_card import agent_card_to_client_dict
 from iac_code.a2a.jsonrpc_passthrough import (
     install_jsonrpc_error_data_passthrough,
     install_v03_jsonrpc_error_data_passthrough,
+)
+from iac_code.a2a.projection import (
+    project_a2a_data,
+    project_a2a_text,
+    resolve_a2a_public_path_roots,
+    resolve_a2a_public_path_roots_for_data,
 )
 from iac_code.i18n import _
 
@@ -144,6 +150,146 @@ class A2AAuthMiddleware(BaseHTTPMiddleware):
         )
 
 
+class A2AProjectionMiddleware(BaseHTTPMiddleware):
+    """Apply the current A2A delivery policy at the HTTP wire boundary."""
+
+    def __init__(self, app: Any, *, task_store: Any) -> None:
+        super().__init__(app)
+        self._task_store = task_store
+
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        request_data = await _a2a_request_data(request)
+        response = await call_next(request)
+        request_data = _with_a2a_path_parameters(request, request_data)
+        if request.url.path in {"/health", AGENT_CARD_WELL_KNOWN_PATH}:
+            return response
+
+        content_type = response.headers.get("content-type", "").lower()
+        streaming_response = cast(Any, response)
+        if content_type.startswith("text/event-stream"):
+            streaming_response.body_iterator = self._project_sse(
+                streaming_response.body_iterator,
+                request_data=request_data,
+            )
+            return response
+        if "json" not in content_type:
+            return response
+
+        body = b"".join([_response_chunk_bytes(chunk) async for chunk in streaming_response.body_iterator])
+        try:
+            data = json.loads(body)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return Response(
+                body,
+                status_code=response.status_code,
+                headers=_response_headers_without_length(response),
+                background=response.background,
+            )
+        roots = await self._resolve_roots(data, request_data)
+        projected = project_a2a_data(data, public_path_roots=roots)
+        return Response(
+            json.dumps(projected, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
+            status_code=response.status_code,
+            headers=_response_headers_without_length(response),
+            background=response.background,
+        )
+
+    async def _project_sse(self, body_iterator: Any, *, request_data: Any) -> AsyncIterator[bytes]:
+        pending = b""
+        async for chunk in body_iterator:
+            pending += _response_chunk_bytes(chunk)
+            while True:
+                frame, separator, pending = _take_sse_frame(pending)
+                if separator is None:
+                    pending = frame
+                    break
+                yield await self._project_sse_frame(frame, request_data=request_data) + separator
+        if pending:
+            yield await self._project_sse_frame(pending, request_data=request_data)
+
+    async def _project_sse_frame(self, frame: bytes, *, request_data: Any) -> bytes:
+        output: list[bytes] = []
+        for line in frame.splitlines(keepends=True):
+            stripped = line.lstrip()
+            if not stripped.startswith(b"data:"):
+                output.append(line)
+                continue
+            prefix_length = len(line) - len(stripped)
+            payload_with_ending = stripped.removeprefix(b"data:")
+            ending = b""
+            if payload_with_ending.endswith(b"\r\n"):
+                payload_with_ending, ending = payload_with_ending[:-2], b"\r\n"
+            elif payload_with_ending.endswith(b"\n"):
+                payload_with_ending, ending = payload_with_ending[:-1], b"\n"
+            try:
+                data = json.loads(payload_with_ending.strip())
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                output.append(line)
+                continue
+            roots = await self._resolve_roots(data, request_data)
+            projected = project_a2a_data(data, public_path_roots=roots)
+            encoded = json.dumps(projected, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            output.append(line[:prefix_length] + b"data: " + encoded + ending)
+        return b"".join(output)
+
+    async def _resolve_roots(self, response_data: Any, request_data: Any) -> list[dict[str, str]]:
+        return await resolve_a2a_public_path_roots_for_data(
+            self._task_store,
+            response_data=response_data,
+            request_data=request_data,
+        )
+
+
+async def _a2a_request_data(request: Request) -> Any:
+    data: dict[str, Any] = dict(request.query_params)
+    if request.method in {"POST", "PUT", "PATCH"}:
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        if isinstance(body, dict):
+            data.update(body)
+        elif body is not None:
+            data["body"] = body
+    return data
+
+
+def _with_a2a_path_parameters(request: Request, request_data: Any) -> dict[str, Any]:
+    """Add REST route identity after routing has populated ``path_params``."""
+
+    data = dict(request_data) if isinstance(request_data, dict) else {"body": request_data}
+    path_params = request.scope.get("path_params")
+    if not isinstance(path_params, dict):
+        return data
+    task_id = path_params.get("id")
+    if isinstance(task_id, str) and task_id and "/tasks/" in request.url.path:
+        data.setdefault("taskId", task_id)
+    context_id = path_params.get("context_id") or path_params.get("contextId")
+    if isinstance(context_id, str) and context_id:
+        data.setdefault("contextId", context_id)
+    return data
+
+
+def _response_chunk_bytes(chunk: Any) -> bytes:
+    if isinstance(chunk, bytes):
+        return chunk
+    if isinstance(chunk, memoryview):
+        return chunk.tobytes()
+    return str(chunk).encode("utf-8")
+
+
+def _response_headers_without_length(response: Response) -> dict[str, str]:
+    return {key: value for key, value in response.headers.items() if key.lower() != "content-length"}
+
+
+def _take_sse_frame(data: bytes) -> tuple[bytes, bytes | None, bytes]:
+    candidates = [(index, separator) for separator in (b"\r\n\r\n", b"\n\n") if (index := data.find(separator)) >= 0]
+    if not candidates:
+        return data, None, b""
+    index, separator = min(candidates, key=lambda item: item[0])
+    return data[:index], separator, data[index + len(separator) :]
+
+
 async def health(request: Request) -> JSONResponse:
     return JSONResponse({"status": "healthy"})
 
@@ -253,6 +399,13 @@ def create_app(
 
     recovery_service = A2APipelineRecoveryService(task_store=components.task_store)
 
+    async def recovery_path_roots(*, context_id: str | None, task_id: str | None) -> list[dict[str, str]]:
+        return await resolve_a2a_public_path_roots(
+            components.task_store,
+            task_id=task_id,
+            context_id=context_id,
+        )
+
     async def get_pipeline_state(request: Request) -> JSONResponse:
         context_id = request.query_params.get("contextId") or None
         task_id = request.query_params.get("taskId") or None
@@ -263,16 +416,28 @@ def create_app(
         if parse_error is not None:
             return JSONResponse({"error": parse_error}, status_code=400)
 
+        call_context = _call_context_from_request(request)
         try:
             state = await recovery_service.get_state(
                 context_id=context_id,
                 task_id=task_id,
                 after_sequence=after_sequence,
-                call_context=_call_context_from_request(request),
+                call_context=call_context,
             )
         except ValueError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=404)
-        return JSONResponse(state)
+            roots = await recovery_path_roots(
+                context_id=context_id,
+                task_id=task_id,
+            )
+            return JSONResponse(
+                {"error": project_a2a_text(str(exc), public_path_roots=roots)},
+                status_code=404,
+            )
+        roots = await recovery_path_roots(
+            context_id=context_id,
+            task_id=task_id,
+        )
+        return JSONResponse(project_a2a_data(state, public_path_roots=roots))
 
     routes: list[BaseRoute] = [
         Route("/health", health, methods=["GET"]),
@@ -290,6 +455,7 @@ def create_app(
     routes.append(Route("/", handle_jsonrpc, methods=["POST"]))
     routes.extend(create_rest_routes(components.handler, enable_v0_3_compat=True))
     app = Starlette(routes=routes, lifespan=lifespan)
+    app.add_middleware(A2AProjectionMiddleware, task_store=components.task_store)
     app.add_middleware(
         A2AAuthMiddleware,
         token=token,

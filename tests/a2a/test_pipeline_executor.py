@@ -45,7 +45,6 @@ from iac_code.types.stream_events import AskUserQuestionEvent, TextDeltaEvent
 from .fakes import FakeEventQueue, FakeRequestContext
 
 RETRY_TEXT = "A temporary error occurred. Please retry."
-AUTH_TEXT = "Authentication required. Configure credentials and retry."
 _A2A_ASYNC_TEST_TIMEOUT = 5
 
 
@@ -3097,8 +3096,8 @@ async def test_pipeline_backup_blocked_before_input_required_publishes_recoverab
     assert blocked["status"] == "input_required"
     assert blocked["data"]["reason"] == "input_required"
     assert blocked["data"]["recoverable"] is True
-    assert "tok-live" not in blocked["data"]["error"]
-    assert "/tmp/iac-code" not in blocked["data"]["error"]
+    assert "tok-live" in blocked["data"]["error"]
+    assert "/tmp/iac-code" in blocked["data"]["error"]
     assert _status_events(queue)[-1]["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
     record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
     assert record.state == "input-required"
@@ -4176,7 +4175,7 @@ async def test_executor_returns_input_required_for_retryable_runtime_creation_er
 
 
 @pytest.mark.asyncio
-async def test_executor_sanitizes_auth_looking_pipeline_error(
+async def test_executor_preserves_auth_looking_pipeline_error_without_safe_mode(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -4196,7 +4195,9 @@ async def test_executor_sanitizes_auth_looking_pipeline_error(
 
     final_status = _status_events(queue)[-1]["status"]
     assert final_status["state"] == "TASK_STATE_FAILED"
-    assert final_status["message"]["parts"][0]["text"] == AUTH_TEXT
+    assert final_status["message"]["parts"][0]["text"] == (
+        "ValueError: missing API key: secret-internal-detail"
+    )
 
 
 @pytest.mark.asyncio
@@ -4228,12 +4229,14 @@ async def test_executor_persists_pipeline_failed_event_for_nonretryable_stream_e
         if event["eventType"] == "pipeline_failed" and event.get("visibility") == "committed"
     )
     assert terminal_event["status"] == "failed"
-    assert terminal_event["data"]["errorSummary"] == "ValueError: planner crashed INTERNAL_TOKEN=[REDACTED] [PATH]"
+    assert terminal_event["data"]["errorSummary"] == (
+        "ValueError: planner crashed INTERNAL_TOKEN=tok-live /tmp/iac-code/work.py"
+    )
     assert terminal_event["data"]["errorDetails"]["type"] == "ValueError"
     assert terminal_event["data"]["errorDetails"]["errorId"]
     assert terminal_event["data"]["errorDetails"]["traceback"] == "Stack trace omitted from public event; see error_id."
-    assert "tok-live" not in json.dumps(terminal_event)
-    assert "/tmp/iac-code" not in json.dumps(terminal_event)
+    assert "tok-live" in json.dumps(terminal_event)
+    assert "/tmp/iac-code" in json.dumps(terminal_event)
     snapshot = A2APipelineSnapshotStore(session_dir).load()
     assert snapshot is not None
     assert snapshot["status"] == "failed"

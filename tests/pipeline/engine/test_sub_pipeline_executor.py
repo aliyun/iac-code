@@ -782,7 +782,9 @@ class TestSubPipelineExecutor:
         assert resumed_steps == ["cost_estimating"]
 
     @pytest.mark.asyncio
-    async def test_allocator_failure_does_not_publish_previous_attempt_for_next_sub_step(self, tmp_path, monkeypatch):
+    async def test_allocator_failure_does_not_publish_previous_attempt_for_next_sub_step(
+        self, tmp_path, monkeypatch, caplog
+    ):
         """A later allocator failure must not report the previous sub-step's attempt id."""
         (tmp_path / "prompts").mkdir(exist_ok=True)
         (tmp_path / "prompts" / "template.md").write_text("Generate template for {candidate}", encoding="utf-8")
@@ -849,8 +851,12 @@ class TestSubPipelineExecutor:
         assert terminal.data["failed"] is True
         assert terminal.data["error_details"]["type"] == "RuntimeError"
         assert "error_id" in terminal.data["error_details"]
-        assert "abc123" not in terminal.data["error_summary"]
-        assert "/Users/alice" not in terminal.data["error_summary"]
+        assert "abc123" in terminal.data["error_summary"]
+        assert "/Users/alice" in terminal.data["error_summary"]
+        assert "abc123" not in caplog.text
+        assert "/Users/alice" not in caplog.text
+        assert "token=[REDACTED]" in caplog.text
+        assert "[PATH]" in caplog.text
 
     @pytest.mark.asyncio
     async def test_rollback_persistence_drops_stale_target_and_downstream_conclusions(self, tmp_path, monkeypatch):
@@ -1224,7 +1230,7 @@ class TestSubPipelineExecutor:
         assert sub_step_failed[0].step_id == "template_generating"
         assert sub_step_failed[0].data["error_details"]["type"] == "StepFailed"
         assert sub_step_failed[0].data["error_details"]["error_id"]
-        assert "secret-value" not in str(sub_step_failed[0].data)
+        assert "secret-value" in str(sub_step_failed[0].data)
         assert terminal[0].data["failed"] is True
 
     @pytest.mark.asyncio
@@ -1578,7 +1584,7 @@ class TestSubPipelineRollbackEmitsSubStepFailed:
         assert failed_events[0].data["error_details"]["target"] == "totally_invalid_step_id"
 
     @pytest.mark.asyncio
-    async def test_invalid_rollback_target_sub_step_failed_event_redacts_public_error(self, tmp_path):
+    async def test_invalid_rollback_target_sub_step_failed_event_preserves_canonical_error(self, tmp_path):
         (tmp_path / "prompts").mkdir(exist_ok=True)
         (tmp_path / "prompts" / "template.md").write_text("Gen template", encoding="utf-8")
         (tmp_path / "prompts" / "cost.md").write_text("Cost", encoding="utf-8")
@@ -1633,9 +1639,9 @@ class TestSubPipelineRollbackEmitsSubStepFailed:
             e for e in events if isinstance(e, PipelineEvent) and e.type == PipelineEventType.SUB_STEP_FAILED
         )
         rendered = str(failed_event.data)
-        assert "abc123" not in rendered
-        assert "bad_token=[REDACTED]" in failed_event.data["error"]
-        assert failed_event.data["error_details"]["target"] == "bad_token=[REDACTED]"
+        assert "abc123" in rendered
+        assert "bad_token=abc123" in failed_event.data["error"]
+        assert failed_event.data["error_details"]["target"] == "bad_token=abc123"
 
 
 class TestBuildSubContext:
@@ -1707,7 +1713,7 @@ class TestFailedCandidateErrorPropagated:
         assert result.error_details["type"] == "ValueError"
 
     @pytest.mark.asyncio
-    async def test_execute_exception_error_details_do_not_expose_traceback(self, tmp_path, monkeypatch):
+    async def test_execute_exception_keeps_canonical_error_without_runtime_traceback(self, tmp_path, monkeypatch):
         async def failing_execute(*args, **kwargs):
             raise RuntimeError("secret stack path token=abc123 /Users/alice/project")
             if False:
@@ -1741,8 +1747,8 @@ class TestFailedCandidateErrorPropagated:
         assert result.failed is True
         assert result.error_details["type"] == "RuntimeError"
         assert "error_id" in result.error_details
-        assert "abc123" not in result.error
-        assert "/Users/alice" not in result.error
+        assert "abc123" in result.error
+        assert "/Users/alice" in result.error
         assert "Traceback" not in str(result.to_dict())
 
     def test_sub_pipeline_result_error_details_defaults_none(self):

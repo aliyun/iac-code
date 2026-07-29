@@ -145,15 +145,8 @@ def _metadata_tool_result_message(rec: "_ToolCallRecord", *, verbose: bool) -> s
 
 
 def _public_tool_result_display_text(tool_name: str, value: object) -> str:
-    text = str(value)
-    if not tool_name.startswith("mcp__"):
-        return text
-
-    from iac_code.a2a.artifacts import sanitize_public_tool_output_data
-    from iac_code.mcp.redaction import sanitize_mcp_public_data
-
-    sanitized = sanitize_public_tool_output_data(text)
-    return str(sanitize_mcp_public_data(sanitized, fallback_summary=""))
+    del tool_name
+    return str(value)
 
 
 def _permission_detail_text(tool_name: str, tool_input: dict[str, Any], tool: Any | None) -> str | None:

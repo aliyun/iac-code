@@ -41,7 +41,7 @@ from iac_code.types.stream_events import (
     ToolUseStartEvent,
 )
 from iac_code.utils.background_housekeeping import start_background_housekeeping
-from iac_code.utils.public_errors import public_error_from_exception, sanitize_public_text
+from iac_code.utils.public_errors import public_error_from_exception, sanitize_strict_text
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -142,7 +142,7 @@ class HeadlessRunner:
         self._runtime: Any | None = None
 
     def _print_provider_not_configured(self, exc: Exception) -> None:
-        logger.error("Provider not configured: {}", exc)
+        logger.error("Provider not configured: {}", sanitize_strict_text(str(exc)))
         hint = _(
             "\n"
             "  {error}\n"
@@ -150,17 +150,17 @@ class HeadlessRunner:
             "  Fix: run  iac-code  then type /auth\n"
             "   or: set  IAC_CODE_API_KEY=<your-key>\n"
             "  Docs: https://aliyun.github.io/iac-code/docs/configuration/authentication\n"
-        ).format(error=sanitize_public_text(exc))
+        ).format(error=str(exc))
         print(hint, file=sys.stderr)
 
     def _print_unexpected_error(self, exc: Exception) -> None:
-        logger.error("Headless execution failed: {}", exc)
-        print(_("Error: {error}").format(error=sanitize_public_text(exc)), file=sys.stderr)
+        logger.error("Headless execution failed: {}", sanitize_strict_text(str(exc)))
+        print(_("Error: {error}").format(error=str(exc)), file=sys.stderr)
 
     def _record_structured_error(self, writer: Any, exc: Exception) -> None:
         if self._output_format != OutputFormat.TEXT:
             failure = public_error_from_exception(exc)
-            writer.handle(ErrorEvent(error=failure.summary, is_retryable=False, error_id=failure.error_id))
+            writer.handle(ErrorEvent(error=str(exc), is_retryable=False, error_id=failure.error_id))
 
     def _create_agent_loop(self) -> Any:
         """Create and return a fully configured AgentLoop."""

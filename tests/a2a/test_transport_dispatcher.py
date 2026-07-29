@@ -421,7 +421,8 @@ async def test_message_stream_does_not_acknowledge_transport_delivery_when_close
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_stream_redacts_sensitive_message_metadata_echo(monkeypatch, tmp_path) -> None:
+async def test_dispatcher_stream_preserves_message_metadata_echo_without_safe_mode(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("IAC_CODE_A2A_SAFE_MODE", raising=False)
     loop = FakeAgentLoop([TextDeltaEvent(text="streamed")])
     runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
     monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
@@ -464,25 +465,25 @@ async def test_dispatcher_stream_redacts_sensitive_message_metadata_echo(monkeyp
 
     echoed_metadata = events[0]["result"]["history"][0]["metadata"]
     assert echoed_metadata["iac_code"] == {
-        "cwd": ".",
+        "cwd": str(tmp_path),
         "iac_code_model": "qwen3.6-plus",
-        "iac_code_api_key": "***",
-        "alibaba_cloud_access_key_id": "***",
-        "alibaba_cloud_access_key_secret": "***",
-        "alibaba_cloud_security_token": "***",
+        "iac_code_api_key": "provider-secret",
+        "alibaba_cloud_access_key_id": "ak-id-secret",
+        "alibaba_cloud_access_key_secret": "ak-secret",
+        "alibaba_cloud_security_token": "sts-token-secret",
         "alibaba_cloud_region_id": "cn-hangzhou",
     }
     assert echoed_metadata["custom"] == {
-        "apikey": "***",
-        "nested": [{"accessKeySecret": "***"}],
+        "apikey": "custom-api-key",
+        "nested": [{"accessKeySecret": "nested-ak-secret"}],
     }
     rendered = str(events[0])
-    assert "provider-secret" not in rendered
-    assert "ak-id-secret" not in rendered
-    assert "ak-secret" not in rendered
-    assert "sts-token-secret" not in rendered
-    assert "custom-api-key" not in rendered
-    assert "nested-ak-secret" not in rendered
+    assert "provider-secret" in rendered
+    assert "ak-id-secret" in rendered
+    assert "ak-secret" in rendered
+    assert "sts-token-secret" in rendered
+    assert "custom-api-key" in rendered
+    assert "nested-ak-secret" in rendered
     await components.aclose()
 
 
@@ -862,6 +863,24 @@ async def test_active_message_stream_cancellation_cancels_producer() -> None:
         await asyncio.wait_for(stream_task, timeout=_STREAM_TEST_TIMEOUT)
     assert producer_cancelled.is_set()
     assert active_task._reference_count == 0
+
+
+@pytest.mark.asyncio
+async def test_active_message_producer_failure_log_uses_strict_sanitizer(caplog, tmp_path) -> None:
+    server_path = str(tmp_path / "private" / "result.json")
+
+    async def fail() -> None:
+        raise RuntimeError(f"failed at {server_path} with password=real-secret")
+
+    producer = asyncio.create_task(fail())
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    await handler._cleanup_active_message_producer(producer, f"task-at-{server_path}")
+
+    record = next(record for record in caplog.records if record.message.startswith("Active task message producer"))
+    assert server_path not in record.message
+    assert "real-secret" not in record.message
+    assert "[PATH]" in record.message
+    assert "[REDACTED]" in record.message
 
 
 def _active_task_identity(components: A2ARuntimeComponents) -> SimpleNamespace:

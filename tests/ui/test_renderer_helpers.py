@@ -552,7 +552,7 @@ class TestRendererHelpers:
         assert "tech_stack_nodejs" not in output
         assert "not of type" not in output
 
-    def test_render_tool_result_sanitizes_mcp_public_output_without_mutating_result(self):
+    def test_render_tool_result_preserves_local_mcp_output_without_mutating_result(self):
         renderer = make_renderer()
         raw_result = (
             "command=IAC_PRIVATE_COMMAND_ARG_MARKER_56 "
@@ -565,12 +565,11 @@ class TestRendererHelpers:
         line = renderer._render_tool_result(record)
 
         assert line is not None
-        assert "IAC_PRIVATE_COMMAND_ARG_MARKER_56" not in line.plain
-        assert "IAC_PRIVATE_NESTED_METADATA_MARKER_56" not in line.plain
-        assert "IAC_PRIVATE_QUERY_MARKER_56" not in line.plain
-        assert "/Users/alice" not in line.plain
-        assert "[REDACTED]" in line.plain
-        assert "[PATH]" in line.plain
+        assert "IAC_PRIVATE_COMMAND_ARG_MARKER_56" in line.plain
+        assert "IAC_PRIVATE_NESTED_METADATA_MARKER_56" in line.plain
+        assert "IAC_PRIVATE_QUERY_MARKER_56" in line.plain
+        assert "/Users/alice" in line.plain
+        assert "[REDACTED]" not in line.plain
         assert record.result == raw_result
 
     def test_render_progress_groups_include_resource_rows(self):

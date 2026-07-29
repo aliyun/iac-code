@@ -301,7 +301,9 @@ async def test_mcp_permission_request_wire_includes_safe_metadata() -> None:
     assert tool_call.title == "MCP yuque/search-docs"
     wire = tool_call.model_dump(by_alias=True, exclude_none=True, exclude_defaults=True)
     wire_text = json.dumps(wire, sort_keys=True)
-    assert "IAC_PRIVATE_PERMISSION_TOKEN_37" not in wire_text
+    permission = wire["_meta"]["iac_code"]["permission"]
+    assert "IAC_PRIVATE_PERMISSION_TOKEN_37" in json.dumps(wire["content"], sort_keys=True)
+    assert "IAC_PRIVATE_PERMISSION_TOKEN_37" not in json.dumps(permission, sort_keys=True)
     for internal_value in (
         "internal-session-id-37",
         "secret-rule-source",
@@ -311,7 +313,6 @@ async def test_mcp_permission_request_wire_includes_safe_metadata() -> None:
         "max_file_bytes",
     ):
         assert internal_value not in wire_text
-    permission = wire["_meta"]["iac_code"]["permission"]
     assert permission["permissionId"] == "perm-mcp_tool1"
     assert permission["toolName"] == "mcp__yuque__search_docs"
     assert permission["toolUseId"] == "mcp_tool1"

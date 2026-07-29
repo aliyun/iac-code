@@ -18,12 +18,11 @@ from iac_code.pipeline.constants import (
     PIPELINE_EVENT_CLEANUP_PROGRESS,
     PIPELINE_EVENT_CLEANUP_STARTED,
 )
-from iac_code.utils.public_errors import sanitize_public_text
+from iac_code.utils.public_errors import sanitize_strict_text
 from iac_code.utils.state_io import atomic_write_json, atomic_write_text
 
 SNAPSHOT_SCHEMA_VERSION = "1.1"
 logger = logging.getLogger(__name__)
-_PUBLIC_TEXT_MAX_CHARS = 1000
 
 _TERMINAL_STATUS_BY_EVENT_TYPE = {
     "pipeline_completed": "completed",
@@ -37,16 +36,6 @@ _CLEANUP_STATUS_BY_EVENT_TYPE = {
     PIPELINE_EVENT_CLEANUP_FAILED: "failed",
 }
 _KNOWN_CLEANUP_STATUSES = {"pending", "started", "in_progress", "completed", "failed", "skipped"}
-_CLEANUP_ERROR_KEYS = {
-    "error",
-    "errorMessage",
-    "errorSummary",
-    "error_message",
-    "error_summary",
-    "lastError",
-    "last_error",
-}
-_PIPELINE_WARNING_PRIVATE_DATA_KEYS = {"ledger_path", "ledgerPath", "load_error", "loadError"}
 _PENDING_BACKUP_VISIBILITY = "pending_backup"
 _COMMITTED_BACKUP_VISIBILITY = "committed"
 _BACKUP_COMMITTED_EVENT_TYPE = "backup_committed"
@@ -59,11 +48,14 @@ class A2APipelineSnapshotStore:
 
     def save(self, snapshot: dict[str, Any], *, durable: bool = True, compact: bool = False) -> bool:
         previous = self.load()
-        next_snapshot = _sanitize_public_snapshot_private_cleanup_fields(snapshot)
+        next_snapshot = copy.deepcopy(snapshot)
         next_snapshot["snapshotVersion"] = _snapshot_version(previous) + 1
         next_snapshot = to_json_safe(next_snapshot)
         if not isinstance(next_snapshot, dict):
-            logger.warning("Skipping invalid A2A pipeline snapshot for %s", self.path)
+            logger.warning(
+                "Skipping invalid A2A pipeline snapshot for %s",
+                sanitize_strict_text(self.path, fallback_summary="[PATH]"),
+            )
             return False
 
         try:
@@ -79,8 +71,12 @@ class A2APipelineSnapshotStore:
             else:
                 atomic_write_json(self.path, next_snapshot, durable=durable)
             return True
-        except (OSError, TypeError, ValueError):
-            logger.warning("Failed to persist A2A pipeline snapshot to %s", self.path, exc_info=True)
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning(
+                "Failed to persist A2A pipeline snapshot path=%s error=%s",
+                sanitize_strict_text(self.path, fallback_summary="[PATH]"),
+                sanitize_strict_text(exc),
+            )
             return False
 
     def load(self) -> dict[str, Any] | None:
@@ -88,17 +84,21 @@ class A2APipelineSnapshotStore:
             value = json.loads(self.path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             return None
-        except (UnicodeDecodeError, json.JSONDecodeError, OSError):
-            logger.warning("Failed to load A2A pipeline snapshot from %s", self.path, exc_info=True)
+        except (UnicodeDecodeError, json.JSONDecodeError, OSError) as exc:
+            logger.warning(
+                "Failed to load A2A pipeline snapshot path=%s error=%s",
+                sanitize_strict_text(self.path, fallback_summary="[PATH]"),
+                sanitize_strict_text(exc),
+            )
             return None
         if not isinstance(value, dict):
             logger.warning(
                 "Invalid A2A pipeline snapshot in %s: expected object, got %s",
-                self.path,
+                sanitize_strict_text(self.path, fallback_summary="[PATH]"),
                 type(value).__name__,
             )
             return None
-        return _sanitize_public_snapshot_private_cleanup_fields(value)
+        return value
 
 
 def reduce_pipeline_events(
@@ -814,7 +814,6 @@ class _PipelineSnapshotReducer:
         item_id = _artifact_item_id(artifact, data, event)
         item["artifactId"] = item_id
         item["id"] = item_id
-        _drop_legacy_artifact_uri(item)
         item["scope"] = _string_or_none(event.get("scope")) or "pipeline"
         item["runId"] = _scope_run_id(event)
         item["sequence"] = _sequence_value(event)
@@ -848,7 +847,6 @@ class _PipelineSnapshotReducer:
 
     def _upsert_tool_result_item(self, event: dict[str, Any]) -> None:
         item = copy.deepcopy(_dict_or_empty(event.get("data")))
-        _drop_legacy_tool_result_artifact_uri(item)
         self._upsert_display_record("toolResults", self._tool_result_indexes, event, item, "toolUseId")
 
     def _apply_stack_current_changed(self, event: dict[str, Any]) -> None:
@@ -892,6 +890,9 @@ class _PipelineSnapshotReducer:
 
     def _apply_cleanup_data(self, data: dict[str, Any], event: dict[str, Any]) -> None:
         cleanup = self._snapshot["cleanup"]
+        for key, value in data.items():
+            if key not in {"status", "resources", "history"}:
+                cleanup[key] = copy.deepcopy(value)
         status = _string_or_none(data.get("status"))
         if status is not None:
             cleanup["status"] = status
@@ -1226,9 +1227,7 @@ def _warning_history_entry(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def _pipeline_warning_public_data(data: dict[str, Any]) -> dict[str, Any]:
-    return copy.deepcopy(
-        {key: value for key, value in data.items() if str(key) not in _PIPELINE_WARNING_PRIVATE_DATA_KEYS}
-    )
+    return copy.deepcopy(data)
 
 
 def _interaction_history_entry(event: dict[str, Any]) -> dict[str, Any]:
@@ -1406,15 +1405,15 @@ def _snapshot_from_existing(existing_snapshot: dict[str, Any] | None) -> dict[st
     cleanup_count = _int_or_none(cleanup.get("resourceCount"))
     if cleanup_count is None:
         cleanup_count = len(cleanup_resources)
-    snapshot["cleanup"] = {
-        "status": _string_or_none(cleanup.get("status")) or "none",
-        "resourceCount": cleanup_count,
-        "resources": cleanup_resources,
-        "history": _dict_list(cleanup.get("history")),
-    }
-    for key in ("statusMessage",):
-        if key in cleanup:
-            snapshot["cleanup"][key] = copy.deepcopy(cleanup[key])
+    snapshot["cleanup"] = copy.deepcopy(cleanup)
+    snapshot["cleanup"].update(
+        {
+            "status": _string_or_none(cleanup.get("status")) or "none",
+            "resourceCount": cleanup_count,
+            "resources": cleanup_resources,
+            "history": _dict_list(cleanup.get("history")),
+        }
+    )
 
     control = snapshot.get("control")
     if not isinstance(control, dict):
@@ -1480,37 +1479,10 @@ def _sanitize_pipeline_warning_history(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _sanitize_cleanup_private_fields(value: dict[str, Any], *, root_is_cleanup: bool = False) -> dict[str, Any]:
-    sanitized = copy.deepcopy(value)
-    _drop_cleanup_private_fields(sanitized, inside_cleanup=root_is_cleanup)
-    return sanitized
-
-
-def _drop_cleanup_private_fields(value: Any, *, inside_cleanup: bool) -> None:
-    if isinstance(value, dict):
-        if inside_cleanup:
-            for key in ("prompt", "ledgerPath", "ledger_path"):
-                value.pop(key, None)
-            for key in _CLEANUP_ERROR_KEYS & value.keys():
-                value[key] = _sanitize_cleanup_error_value(value[key])
-        for item in value.values():
-            _drop_cleanup_private_fields(item, inside_cleanup=inside_cleanup)
-        cleanup = value.get("cleanup")
-        if cleanup is not None:
-            _drop_cleanup_private_fields(cleanup, inside_cleanup=True)
-    elif isinstance(value, list):
-        for item in value:
-            _drop_cleanup_private_fields(item, inside_cleanup=inside_cleanup)
-
-
-def _sanitize_cleanup_error_value(value: Any) -> Any:
-    if isinstance(value, str):
-        text = sanitize_public_text(value)
-        return text[:_PUBLIC_TEXT_MAX_CHARS] + "..." if len(text) > _PUBLIC_TEXT_MAX_CHARS else text
-    if isinstance(value, dict):
-        return {key: _sanitize_cleanup_error_value(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_sanitize_cleanup_error_value(item) for item in value]
-    return value
+    # Snapshot state is canonical recovery data.  The legacy helper name is
+    # retained for compatibility, but cleanup fields and errors stay intact.
+    del root_is_cleanup
+    return copy.deepcopy(value)
 
 
 def _merge_coordinate(target: dict[str, Any], coordinate: dict[str, Any]) -> None:
@@ -1775,6 +1747,7 @@ def _merge_completion_data(target: dict[str, Any], event: dict[str, Any]) -> Non
         "conclusionField",
         "conclusion",
         "conclusions",
+        "step_conclusions",
         "durationS",
         "earlyExit",
         "failed",

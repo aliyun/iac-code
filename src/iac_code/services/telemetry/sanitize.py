@@ -18,6 +18,7 @@ from iac_code.services.telemetry.constants import (
     ROS_ALLOWED_PREFIXES,
     TERRAFORM_OFFICIAL_PROVIDERS,
 )
+from iac_code.utils.public_errors import sanitize_strict_text
 
 _CONTROL_CHARS_RE = re.compile(r"[\n\r\t\x00-\x1f]+")
 _MAX_ERROR_MSG_BYTES = 512
@@ -26,12 +27,13 @@ _DEV_VERSION_SUFFIX_RE = re.compile(r"-\d{8}$")
 
 
 def sanitize_error_message(raw: str | None) -> str | None:
-    """Clean and truncate an error message. None under essential-traffic mode."""
+    """Strictly redact, clean, and truncate an explicit telemetry error field."""
     if raw is None:
         return None
     if is_essential_traffic_only():
         return None
-    cleaned = _CONTROL_CHARS_RE.sub(" ", raw).strip()
+    strict = sanitize_strict_text(raw, fallback_summary="")
+    cleaned = _CONTROL_CHARS_RE.sub(" ", strict).strip()
     encoded = cleaned.encode("utf-8")
     if len(encoded) > _MAX_ERROR_MSG_BYTES:
         keep = _MAX_ERROR_MSG_BYTES - len(_TRUNCATION_MARKER.encode("utf-8"))

@@ -554,6 +554,88 @@ async def test_delete_and_create_validates_replacement_before_delete(monkeypatch
     assert fake_stack.calls == []
 
 
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        {"Password": "***"},
+        {"Nested": [{"Password": " [REDACTED] "}]},
+        {"Password": "<ReDaCtEd>"},
+    ],
+)
+def test_deployment_actions_reject_recursive_redaction_placeholders(parameters):
+    from iac_code.pipeline.selling.tools.ros_deploy_tool import RosDeployTool
+
+    valid, error = RosDeployTool().validate_input(
+        {
+            "action": "create",
+            "stack_name": "demo",
+            "template_url": "templates/demo.yml",
+            "parameters": parameters,
+        }
+    )
+
+    assert valid is False
+    assert "redaction placeholder" in error
+    assert "Password" not in error
+
+
+@pytest.mark.parametrize("value", ["business***suffix", "prefix [REDACTED] suffix", "<redacted>-label"])
+def test_deployment_actions_allow_strings_that_only_contain_placeholder_text(value):
+    from iac_code.pipeline.selling.tools.ros_deploy_tool import RosDeployTool
+
+    valid, error = RosDeployTool().validate_input(
+        {
+            "action": "create",
+            "stack_name": "demo",
+            "template_url": "templates/demo.yml",
+            "parameters": {"Banner": value},
+        }
+    )
+
+    assert valid is True
+    assert error == ""
+
+
+def test_deployment_actions_do_not_treat_parameter_names_as_values():
+    from iac_code.pipeline.selling.tools.ros_deploy_tool import RosDeployTool
+
+    valid, error = RosDeployTool().validate_input(
+        {
+            "action": "create",
+            "stack_name": "demo",
+            "template_url": "templates/demo.yml",
+            "parameters": {"<ReDaCtEd>": "real-value"},
+        }
+    )
+
+    assert valid is True
+    assert error == ""
+
+
+@pytest.mark.asyncio
+async def test_delete_and_create_rejects_placeholder_before_deleting_owned_stack(monkeypatch, tmp_path):
+    guard_state = {"ros_deploy_owned_stack_ids": {"stack-old": {"action": "create"}}}
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    (templates_dir / "demo.yml").write_text("ROSTemplateFormatVersion: '2015-09-01'\n", encoding="utf-8")
+    tool, fake_stack = _deploy_tool(monkeypatch, guard_state=guard_state, results=[])
+
+    result = await tool.execute(
+        tool_input={
+            "action": "delete_and_create",
+            "stack_id": "stack-old",
+            "stack_name": "demo",
+            "template_url": "templates/demo.yml",
+            "parameters": {"Database": {"Password": "[REDACTED]"}},
+        },
+        context=ToolContext(cwd=str(tmp_path), pipeline_mode=True),
+    )
+
+    assert result.is_error is True
+    assert "redaction placeholder" in result.content
+    assert fake_stack.calls == []
+
+
 @pytest.mark.asyncio
 async def test_delete_and_create_rejects_missing_local_template_before_delete(monkeypatch, tmp_path):
     guard_state = {"ros_deploy_owned_stack_ids": {"stack-old": {"action": "create"}}}

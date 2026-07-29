@@ -14,7 +14,6 @@ from iac_code.tools.base import ToolContext, ToolRegistry, ToolResult
 from iac_code.tools.tool_executor import ToolCallRequest, ToolExecutor
 from iac_code.types.permissions import PermissionResult, ToolPermissionContext
 from iac_code.types.stream_events import PermissionRequestEvent
-from iac_code.utils.public_errors import public_exception_summary, sanitize_public_text
 from iac_code.web.session_manager import WebSession, WebSessionManager
 
 SHELL_ESCAPE_TOOL_USE_ID = "shell-escape"
@@ -204,7 +203,7 @@ class WebShellEscapeRunner:
             if permission.behavior == "deny":
                 return await publish_end(
                     exit_code=1,
-                    stderr=sanitize_public_text(permission.message) if permission.message else "Permission denied.",
+                    stderr=permission.message if permission.message else "Permission denied.",
                 )
             if permission.behavior == "ask":
                 allowed = await self._ask_permission(session, permission, tool=tool, tool_input=tool_input)
@@ -222,7 +221,7 @@ class WebShellEscapeRunner:
                 )
                 result = results[0] if results else ToolResult.error("Shell command did not return a result.")
             except Exception as exc:
-                result = ToolResult.error(public_exception_summary(exc, max_chars=500))
+                result = ToolResult.error(str(exc)[:500])
             exit_code, stdout, stderr = _parse_tool_result(result)
             return await publish_end(exit_code=exit_code, stdout=stdout, stderr=stderr)
         except asyncio.CancelledError:
@@ -236,7 +235,7 @@ class WebShellEscapeRunner:
             raise
         except Exception as exc:
             if not end_published:
-                return await publish_end(exit_code=1, stderr=public_exception_summary(exc, max_chars=500))
+                return await publish_end(exit_code=1, stderr=str(exc)[:500])
             raise
 
     async def _ask_permission(

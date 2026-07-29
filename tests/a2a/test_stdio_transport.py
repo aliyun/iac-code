@@ -104,7 +104,9 @@ async def test_stdio_server_handles_unary_request() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stdio_server_sanitizes_outer_dispatch_errors() -> None:
+async def test_stdio_server_returns_raw_outer_dispatch_errors_without_safe_mode(monkeypatch) -> None:
+    monkeypatch.delenv("IAC_CODE_A2A_SAFE_MODE", raising=False)
+
     client_to_server, client_writer = make_stream_pair()
     server_to_client, server_writer = make_stream_pair()
     components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
@@ -126,11 +128,39 @@ async def test_stdio_server_sanitizes_outer_dispatch_errors() -> None:
     error = response["error"]
     assert error["code"] == -32603
     assert "dispatch failed" in error["message"]
-    assert "sk-stdiosecret123" not in error["message"]
-    assert "Authorization: Bearer" not in error["message"]
-    assert "/Users/alice" not in error["message"]
-    assert "[REDACTED]" in error["message"]
-    assert "[PATH]" in error["message"]
+    assert "sk-stdiosecret123" in error["message"]
+    assert "Authorization: Bearer" in error["message"]
+    assert "/Users/alice" in error["message"]
+
+
+@pytest.mark.asyncio
+async def test_stdio_server_projects_error_from_new_request_cwd_in_safe_mode(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", "1")
+    client_to_server, client_writer = make_stream_pair()
+    server_to_client, server_writer = make_stream_pair()
+    components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
+    server = StdioA2AServer(components=components, reader=client_to_server, writer=server_writer)
+    server_path = tmp_path / "private" / "stdio.sock"
+    server._dispatcher.dispatch = AsyncMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError(f"dispatch failed at {server_path}; token=real-secret")
+    )
+    task = asyncio.create_task(server.serve())
+    request = {
+        "jsonrpc": "2.0",
+        "id": "1",
+        "method": "ping",
+        "params": {"message": {"metadata": {"iac_code": {"cwd": str(tmp_path)}}}},
+    }
+
+    try:
+        client_writer.write(encode_frame(request))
+        response = decode_frame(await asyncio.wait_for(server_to_client.readline(), timeout=1))
+    finally:
+        await close_stdio_server(client_writer, task, components)
+
+    assert "[PATH]" in response["error"]["message"]
+    assert str(tmp_path) not in response["error"]["message"]
+    assert "real-secret" in response["error"]["message"]
 
 
 @pytest.mark.asyncio

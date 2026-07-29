@@ -998,8 +998,8 @@ async def test_backup_blocked_after_step_yields_recoverable_event_without_failed
     assert blocked_events[0].step_id == "a"
     assert blocked_events[0].data["reason"] == BackupReason.PIPELINE_STEP_COMPLETED.value
     assert blocked_events[0].data["recoverable"] is True
-    assert "/Users/alice" not in blocked_events[0].data["error"]
-    assert "abc123" not in blocked_events[0].data["error"]
+    assert "/Users/alice" in blocked_events[0].data["error"]
+    assert "abc123" in blocked_events[0].data["error"]
     assert not any(isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_FAILED for event in events)
     assert not any(
         isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
@@ -2687,23 +2687,24 @@ class TestParallelSubPipelineStep:
         assert failed_event.data["candidate_index"] == 0
         assert failed_event.data["candidate_name"] == "Plan A"
         assert failed_event.data["sub_pipeline_name"] == "evaluate_candidate"
-        assert failed_event.data["error_summary"] == "lost worker token=[REDACTED] [PATH]"
+        raw_error = "lost worker token=abc123 /Users/alice/project"
+        assert failed_event.data["error_summary"] == raw_error
         assert failed_event.data["error_details"]["type"] == "RuntimeError"
         assert "error_id" in failed_event.data["error_details"]
-        assert "abc123" not in str(failed_event.data)
-        assert "/Users/alice" not in str(failed_event.data)
+        assert "abc123" in str(failed_event.data)
+        assert "/Users/alice" in str(failed_event.data)
         evaluated = runner.context.get_conclusion("evaluated")
         assert evaluated == [
             {
                 "candidate": {"name": "Plan A"},
                 "failed": True,
-                "error": "lost worker token=[REDACTED] [PATH]",
+                "error": raw_error,
                 "error_details": failed_event.data["error_details"],
             }
         ]
         failed_save = next(save for save in reversed(runner.session.saved) if save[2] == "parallel candidate failed")
         failed_state = failed_save[3]["execution"]["candidates"]["0"]
-        assert failed_state["error"] == "lost worker token=[REDACTED] [PATH]"
+        assert failed_state["error"] == raw_error
         assert failed_state["error_details"] == failed_event.data["error_details"]
         runner._observability.sub_pipeline_completed.assert_called_once_with(
             duration_ms=33.0,
@@ -2714,7 +2715,7 @@ class TestParallelSubPipelineStep:
             candidate_index=0,
             candidate_name="Plan A",
             total_steps=1,
-            error_summary="lost worker token=[REDACTED] [PATH]",
+            error_summary=raw_error,
             error_type="RuntimeError",
             error_id=failed_event.data["error_details"]["error_id"],
         )
@@ -3258,15 +3259,15 @@ class TestParallelSubPipelineStep:
             and event.data.get("failed") is True
         )
         rendered_event = str(failed_event.data)
-        assert "secret-value" not in rendered_event
-        assert "/Users/alice" not in rendered_event
+        assert "secret-value" in rendered_event
+        assert "/Users/alice" in rendered_event
         assert failed_event.data["error"] == failed_event.data["error_summary"]
         assert failed_event.data["error_details"]["type"] == "SubPipelineFailed"
         assert failed_event.data["error_details"]["error_id"]
 
         evaluated = runner.context.get_conclusion("evaluated")
-        assert "secret-value" not in str(evaluated)
-        assert "/Users/alice" not in str(evaluated)
+        assert "secret-value" in str(evaluated)
+        assert "/Users/alice" in str(evaluated)
         assert evaluated[0]["error"] == failed_event.data["error_summary"]
         assert evaluated[0]["error_details"]["error_id"] == failed_event.data["error_details"]["error_id"]
 
@@ -3861,6 +3862,11 @@ class TestParallelCleanupOnClose:
     async def test_aclose_cancels_candidates_and_resets_state(self, tmp_path, caplog):
         caplog.set_level(logging.INFO, logger="iac_code.pipeline.engine.pipeline_runner")
         runner = self._build_runner(tmp_path)
+        candidate_names = [str(tmp_path / "Plan A"), str(tmp_path / "Plan B")]
+        runner.context.set_conclusion(
+            "architecture",
+            {"candidates": [{"name": candidate_names[0]}, {"name": candidate_names[1]}]},
+        )
         runner._observability.candidate_cancelled = MagicMock()
         released = asyncio.Event()  # never set → candidates hang after first event
 
@@ -3916,13 +3922,13 @@ class TestParallelCleanupOnClose:
             call(
                 parent_step_id="eval",
                 candidate_index=0,
-                candidate_name="Plan A",
+                candidate_name=candidate_names[0],
                 reason="parallel_cleanup",
             ),
             call(
                 parent_step_id="eval",
                 candidate_index=1,
-                candidate_name="Plan B",
+                candidate_name=candidate_names[1],
                 reason="parallel_cleanup",
             ),
         ]
@@ -3933,6 +3939,8 @@ class TestParallelCleanupOnClose:
         assert {record.candidate_index for record in log_records} == {0, 1}
         assert {record.parent_step_id for record in log_records} == {"eval"}
         assert {record.reason for record in log_records} == {"parallel_cleanup"}
+        assert {record.candidate_name for record in log_records} == {"[PATH]"}
+        assert all(candidate_name not in record.message for record in log_records for candidate_name in candidate_names)
 
 
 class TestClearSidecar:
@@ -4281,7 +4289,7 @@ class TestInvalidRollbackTarget:
         assert seen_targets_by_step["c"] == ["a", "b"]
 
     @pytest.mark.asyncio
-    async def test_failed_step_event_uses_public_error_payload(self, tmp_path):
+    async def test_failed_step_event_uses_canonical_error_payload(self, tmp_path):
         runner = _build_two_step_runner(tmp_path)
         runner._observability.step_failed = MagicMock()
 
@@ -4304,9 +4312,9 @@ class TestInvalidRollbackTarget:
         assert len(failed) == 1
         payload = failed[0].data
         rendered = str(payload)
-        assert "session-secret" not in rendered
-        assert "/tmp/iac-code" not in rendered
-        assert payload["error"] == "provider failed [REDACTED]"
+        assert "session-secret" in rendered
+        assert "/tmp/iac-code" in rendered
+        assert payload["error"] == "provider failed Cookie=session-secret /tmp/iac-code/config.yml"
         assert payload["error_summary"] == payload["error"]
         assert runner._observability.step_failed.call_args.kwargs["error_id"]
         assert payload["error_details"]["type"] == "StepFailed"
@@ -4460,7 +4468,7 @@ class TestInvalidRollbackTarget:
         runner._observability.step_failed.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_invalid_rollback_target_step_failed_redacts_public_payload(self, tmp_path):
+    async def test_invalid_rollback_target_step_failed_preserves_canonical_payload(self, tmp_path):
         runner = _build_two_step_runner(tmp_path)
         runner._observability.step_completed = MagicMock()
         runner._observability.step_failed = MagicMock()
@@ -4482,13 +4490,12 @@ class TestInvalidRollbackTarget:
         assert len(failed) == 1
         payload = failed[0].data
         rendered = str(payload)
-        assert "secret-one" not in rendered
-        assert "LTAIabc123456789" not in rendered
-        assert "/Users/alice" not in rendered
+        assert "secret-one" in rendered
+        assert "LTAIabc123456789" in rendered
         assert payload["error"] == payload["error_summary"]
         assert payload["error_details"]["type"] == "StepFailed"
         assert payload["error_details"]["step_id"] == "a"
-        assert "secret-one" not in runner._observability.step_failed.call_args.kwargs["error_summary"]
+        assert "secret-one" in runner._observability.step_failed.call_args.kwargs["error_summary"]
         assert runner._observability.step_failed.call_args.kwargs["error_id"]
 
     @pytest.mark.asyncio

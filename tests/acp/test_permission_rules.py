@@ -477,8 +477,8 @@ async def test_mcp_permission_content_uses_concise_registered_tool_name():
 
 
 @pytest.mark.asyncio
-async def test_content_uses_safe_input_summary_for_aliyun_api():
-    """ToolCallUpdate content does not expose raw Aliyun request input."""
+async def test_content_preserves_local_aliyun_api_tool_input():
+    """ACP is local, so permission content keeps the actual Aliyun input."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
     session = _make_session(_FakeLoop(), conn)
     event = _make_event(
@@ -498,10 +498,11 @@ async def test_content_uses_safe_input_summary_for_aliyun_api():
 
     await session._request_permission(event)
 
-    assert "Input summary:" in conn.last_content
-    assert "product" in conn.last_content
-    assert "action" in conn.last_content
-    for forbidden in (
+    assert "Input:" in conn.last_content
+    assert "Input summary:" not in conn.last_content
+    for expected in (
+        "product",
+        "action",
         "secret-value",
         "signature-secret",
         "bearer-secret",
@@ -511,11 +512,11 @@ async def test_content_uses_safe_input_summary_for_aliyun_api():
         "Authorization",
         "PrivateKey",
     ):
-        assert forbidden not in conn.last_content
+        assert expected in conn.last_content
 
 
 @pytest.mark.asyncio
-async def test_content_preserves_redacted_non_aliyun_tool_input():
+async def test_content_preserves_raw_non_aliyun_tool_input():
     """Non-Aliyun permission prompts keep decision-critical input visible."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
     session = _make_session(_FakeLoop(), conn)
@@ -529,13 +530,13 @@ async def test_content_preserves_redacted_non_aliyun_tool_input():
     assert "Input:" in conn.last_content
     assert "Input summary:" not in conn.last_content
     assert "git status --short" in conn.last_content
-    assert "secret-value" not in conn.last_content
-    assert "apiKey" not in conn.last_content
+    assert "secret-value" in conn.last_content
+    assert "apiKey" in conn.last_content
 
 
 @pytest.mark.asyncio
-async def test_content_fingerprints_business_fields_in_non_aliyun_tool_input():
-    """Non-Aliyun permission prompts hide business field names and values."""
+async def test_content_preserves_business_fields_in_non_aliyun_tool_input():
+    """Local ACP permission prompts keep business field names and values."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
     session = _make_session(_FakeLoop(), conn)
     event = _make_event(
@@ -550,13 +551,13 @@ async def test_content_fingerprints_business_fields_in_non_aliyun_tool_input():
     await session._request_permission(event)
 
     assert "git status --short" in conn.last_content
-    for forbidden in ("customerEmail", "customer-prod-123", "alice@example.com", "tenant-id"):
-        assert forbidden not in conn.last_content
+    for expected in ("customerEmail", "customer-prod-123", "alice@example.com", "tenant-id"):
+        assert expected in conn.last_content
 
 
 @pytest.mark.asyncio
-async def test_content_redacts_space_separated_secret_flags_and_preserves_paths():
-    """Non-Aliyun permission prompts redact CLI secret flags without hiding paths."""
+async def test_content_preserves_space_separated_secret_flags_and_paths():
+    """Local ACP permission prompts preserve command flags and paths."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
     session = _make_session(_FakeLoop(), conn)
     event = _make_event(
@@ -572,16 +573,15 @@ async def test_content_redacts_space_separated_secret_flags_and_preserves_paths(
     await session._request_permission(event)
 
     assert "/Users/alice/project/main.tf" in conn.last_content
-    assert "--token [REDACTED]" in conn.last_content
-    assert "--password [REDACTED]" in conn.last_content
-    assert "--api-key [REDACTED]" in conn.last_content
-    for forbidden in ("abc123value", "hunter2", "sk-live-secret", "[PATH]"):
-        assert forbidden not in conn.last_content
+    for expected in ("abc123value", "hunter2", "sk-live-secret"):
+        assert expected in conn.last_content
+    assert "[REDACTED]" not in conn.last_content
+    assert "[PATH]" not in conn.last_content
 
 
 @pytest.mark.asyncio
-async def test_content_redacts_env_secret_assignments_without_false_flag_matches():
-    """Non-Aliyun permission prompts redact env-style secrets without hiding paths."""
+async def test_content_preserves_env_secret_assignments_and_paths():
+    """Local ACP permission prompts preserve env assignments and paths."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
     session = _make_session(_FakeLoop(), conn)
     event = _make_event(
@@ -598,18 +598,17 @@ async def test_content_redacts_env_secret_assignments_without_false_flag_matches
 
     await session._request_permission(event)
 
-    assert "OPENAI_API_KEY=[REDACTED]" in conn.last_content
-    assert "AWS_SECRET_ACCESS_KEY=[REDACTED]" in conn.last_content
-    assert "ALIBABA_CLOUD_ACCESS_KEY_SECRET=[REDACTED]" in conn.last_content
+    assert "OPENAI_API_KEY=sk-openai" in conn.last_content
+    assert "AWS_SECRET_ACCESS_KEY='aws-secret'" in conn.last_content
+    assert "ALIBABA_CLOUD_ACCESS_KEY_SECRET=aliyun-secret" in conn.last_content
     assert "my-secret value" in conn.last_content
     assert "/Users/alice/project/main.tf" in conn.last_content
-    for forbidden in ("sk-openai", "aws-secret", "aliyun-secret", "[PATH]"):
-        assert forbidden not in conn.last_content
+    assert "[PATH]" not in conn.last_content
 
 
 @pytest.mark.asyncio
-async def test_content_redacts_long_json_and_escaped_quote_secret_values():
-    """Non-Aliyun permission prompts redact secrets before long-string slicing."""
+async def test_content_preserves_long_json_and_escaped_quote_secret_values():
+    """Local ACP permission prompts preserve long command input."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
     session = _make_session(_FakeLoop(), conn)
     long_secret = "sk-" + ("x" * 260) + "tail-secret"
@@ -628,16 +627,17 @@ async def test_content_redacts_long_json_and_escaped_quote_secret_values():
 
     await session._request_permission(event)
 
-    assert "OPENAI_API_KEY=[REDACTED]" in conn.last_content
+    assert f"OPENAI_API_KEY={long_secret}" in conn.last_content
     assert "apiKey" in conn.last_content
     assert "/Users/alice/project/main.tf" in conn.last_content
-    for forbidden in (long_secret, "tail-secret", "sk-json-secret", "escaped-tail-secret", "[PATH]"):
-        assert forbidden not in conn.last_content
+    for expected in (long_secret, "tail-secret", "sk-json-secret", "escaped-tail-secret"):
+        assert expected in conn.last_content
+    assert "[PATH]" not in conn.last_content
 
 
 @pytest.mark.asyncio
-async def test_content_marks_truncated_long_non_aliyun_tool_input():
-    """Non-Aliyun permission prompts make long decision input truncation explicit."""
+async def test_content_preserves_long_non_aliyun_tool_input():
+    """Local ACP permission prompts keep the complete decision input."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
     session = _make_session(_FakeLoop(), conn)
     command = ("echo safe && " * 40) + "rm -rf /"
@@ -645,13 +645,13 @@ async def test_content_marks_truncated_long_non_aliyun_tool_input():
 
     await session._request_permission(event)
 
-    assert '"truncated": true' in conn.last_content
+    assert '"truncated": true' not in conn.last_content
     assert "rm -rf /" in conn.last_content
 
 
 @pytest.mark.asyncio
-async def test_content_preserves_priority_fields_in_wide_non_aliyun_tool_input():
-    """Non-Aliyun permission prompts do not let low-value fields hide command/path."""
+async def test_content_preserves_all_fields_in_wide_non_aliyun_tool_input():
+    """Local ACP permission prompts keep all supplied fields."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
     session = _make_session(_FakeLoop(), conn)
     tool_input: dict[str, object] = {f"field_{index}": index for index in range(100)}
@@ -661,8 +661,8 @@ async def test_content_preserves_priority_fields_in_wide_non_aliyun_tool_input()
     await session._request_permission(event)
 
     assert "rm -rf /" in conn.last_content
-    assert '"_truncated"' in conn.last_content
-    assert "field_99" not in conn.last_content
+    assert '"_truncated"' not in conn.last_content
+    assert "field_99" in conn.last_content
 
 
 @pytest.mark.asyncio

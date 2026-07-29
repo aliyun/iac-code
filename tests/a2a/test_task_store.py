@@ -273,6 +273,38 @@ async def test_cleanup_preserves_context_during_reconciliation_and_execution_sta
 
 
 @pytest.mark.asyncio
+async def test_context_runtime_path_directories_include_permission_and_tool_context_roots(tmp_path) -> None:
+    permission_context = SimpleNamespace(
+        additional_directories=[str(tmp_path / "additional")],
+        trusted_read_directories=[str(tmp_path / "trusted")],
+        relative_read_directories=[str(tmp_path / "relative")],
+        strict_read_directories=[str(tmp_path / "application-root")],
+    )
+    agent_loop = SimpleNamespace(
+        _permission_context_getter=None,
+        _permission_context=permission_context,
+        _tool_context_trusted_read_directories=[str(tmp_path / "tool-trusted")],
+        _tool_context_relative_read_directories=[str(tmp_path / "tool-relative")],
+    )
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    context = await store.get_or_create_context(
+        context_id="ctx-runtime-roots",
+        cwd=str(tmp_path),
+        runtime_factory=lambda _session_id: SimpleNamespace(agent_loop=agent_loop),
+    )
+
+    assert await store.get_context_runtime_path_directories(context.context_id) == (
+        [str(tmp_path / "additional")],
+        [
+            str(tmp_path / "trusted"),
+            str(tmp_path / "application-root"),
+            str(tmp_path / "tool-trusted"),
+        ],
+        [str(tmp_path / "relative"), str(tmp_path / "tool-relative")],
+    )
+
+
+@pytest.mark.asyncio
 async def test_refresh_context_from_session_closes_runtime_and_applies_proven_handoff(monkeypatch, tmp_path) -> None:
     config_dir = tmp_path / "config"
     cwd = tmp_path / "workspace"

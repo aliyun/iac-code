@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 import math
-import re
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -46,23 +45,9 @@ from iac_code.types.stream_events import (
     ToolUseStartEvent,
     Usage,
 )
-from iac_code.web.security import redact_secrets
 
 logger = logging.getLogger(__name__)
 PIPELINE_IDENTITY_FIELDS = ("contextId", "taskId", "lastSequence")
-_SECRET_KEY_PATTERN = (
-    r"x[_-]?api[_-]?key|api[_-]?key|apikey|access[_-]?key[_-]?secret|authorization|cookie|credential[_-]?uri|"
-    r"private[_-]?key|secret|token"
-)
-_SECRET_ASSIGNMENT_RE = re.compile(
-    r"(?P<key_quote>['\"]?)\b(?P<key>" + _SECRET_KEY_PATTERN + r")\b(?P=key_quote)"
-    r"(?P<separator>\s*[:=]\s*)(?P<value_quote>['\"]?)"
-    r"(?P<value>(?:Bearer\s+)?[^\s,;'\"}]+)(?P=value_quote)",
-    re.IGNORECASE,
-)
-_BEARER_TOKEN_RE = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE)
-_COOKIE_HEADER_RE = re.compile(r"\bCookie\s*:\s*[^\r\n]+", re.IGNORECASE)
-_NAKED_SECRET_RE = re.compile(r"\b(?:sk-[A-Za-z0-9][A-Za-z0-9_-]{7,}|LTAI[A-Za-z0-9]{12,})\b")
 _EVENT_OBSERVER: ContextVar[Callable[[dict[str, Any]], None] | None] = ContextVar(
     "iac_code_web_event_observer",
     default=None,
@@ -107,37 +92,21 @@ def _is_dataclass_instance(value: Any) -> bool:
     return is_dataclass(value) and not isinstance(value, type)
 
 
-def _coerce_for_redaction(value: Any) -> Any:
+def _coerce_for_json(value: Any) -> Any:
     if _is_dataclass_instance(value):
-        return {field.name: _coerce_for_redaction(getattr(value, field.name)) for field in fields(value)}
+        return {field.name: _coerce_for_json(getattr(value, field.name)) for field in fields(value)}
     if isinstance(value, Mapping):
-        return {str(key): _coerce_for_redaction(item) for key, item in value.items()}
+        return {str(key): _coerce_for_json(item) for key, item in value.items()}
     if isinstance(value, (list, tuple, set, frozenset)):
-        return [_coerce_for_redaction(item) for item in value]
+        return [_coerce_for_json(item) for item in value]
     return value
-
-
-def _redact_secret_assignment(match: re.Match[str]) -> str:
-    return "{key_quote}{key}{key_quote}{separator}{value_quote}[REDACTED]{value_quote}".format(
-        key_quote=match.group("key_quote"),
-        key=match.group("key"),
-        separator=match.group("separator"),
-        value_quote=match.group("value_quote"),
-    )
-
-
-def _redact_secret_text(value: str) -> str:
-    redacted = _COOKIE_HEADER_RE.sub("Cookie: [REDACTED]", value)
-    redacted = _SECRET_ASSIGNMENT_RE.sub(_redact_secret_assignment, redacted)
-    redacted = _BEARER_TOKEN_RE.sub("Bearer [REDACTED]", redacted)
-    return _NAKED_SECRET_RE.sub("[REDACTED]", redacted)
 
 
 def _normalize_event_value(value: Any) -> Any:
     if value is None or isinstance(value, (int, bool)):
         return value
     if isinstance(value, str):
-        return _redact_secret_text(value)
+        return value
     if isinstance(value, float):
         if math.isfinite(value):
             return value
@@ -151,28 +120,21 @@ def _normalize_event_value(value: Any) -> Any:
     if isinstance(value, PurePath):
         # POSIX separators keep the serialized path stable across platforms
         # (str() on a Windows path would emit backslashes).
-        return _redact_secret_text(value.as_posix())
+        return value.as_posix()
     if isinstance(value, PathLike):
-        return _redact_secret_text(str(value))
+        return str(value)
     if isinstance(value, (bytes, bytearray, memoryview)):
-        return _redact_secret_text(bytes(value).decode("utf-8", errors="replace"))
+        return bytes(value).decode("utf-8", errors="replace")
     if isinstance(value, Mapping):
         return {str(key): _normalize_event_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple, set, frozenset)):
         return [_normalize_event_value(item) for item in value]
-    return _redact_secret_text(str(value))
+    return str(value)
 
 
 def normalize_event_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Return a redacted JSON-safe payload copy."""
-    usage = payload.get("usage")
-    context_usage = payload.get("contextUsage")
-    redacted_payload = redact_secrets(_coerce_for_redaction(payload))
-    if isinstance(usage, Mapping) and isinstance(redacted_payload, dict):
-        redacted_payload["usage"] = _coerce_for_redaction(usage)
-    if isinstance(context_usage, Mapping) and isinstance(redacted_payload, dict):
-        redacted_payload["contextUsage"] = _coerce_for_redaction(context_usage)
-    return _normalize_event_value(redacted_payload)
+    """Return a JSON-safe local Web payload copy without generic redaction."""
+    return _normalize_event_value(_coerce_for_json(payload))
 
 
 def _first_region_id(items: list[dict[str, Any]]) -> str | None:
@@ -191,7 +153,7 @@ def _stack_deployment_succeeded(status: str) -> bool:
 
 
 def make_event(session_id: str, sequence: int, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Create a browser-safe event dictionary with redacted payload contents."""
+    """Create a browser-safe event dictionary with JSON-safe payload contents."""
     normalized_payload = normalize_event_payload(payload)
     event = {
         "type": event_type,

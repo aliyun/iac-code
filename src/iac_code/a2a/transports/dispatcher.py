@@ -71,6 +71,11 @@ from iac_code.a2a.pipeline_transport_delivery import (
     create_pipeline_transport_delivery_tracker,
     mark_pipeline_transport_delivery_dequeued,
 )
+from iac_code.a2a.projection import (
+    project_a2a_data,
+    resolve_a2a_public_path_roots,
+    resolve_a2a_public_path_roots_for_data,
+)
 from iac_code.a2a.push import (
     A2APushConfigStore,
     A2APushSender,
@@ -86,7 +91,7 @@ from iac_code.i18n import _
 from iac_code.pipeline.config import RunMode, get_run_mode
 from iac_code.services.session_backup import SessionBackupService
 from iac_code.services.session_storage import SessionStorage
-from iac_code.utils.public_errors import public_exception_summary
+from iac_code.utils.public_errors import sanitize_strict_text
 
 logger = logging.getLogger(__name__)
 _ACTIVE_MESSAGE_STREAM_COMPLETED = object()
@@ -335,11 +340,13 @@ def create_runtime_components(
     push_worker = None
     push_queue_instance = None
     push_secret_keyring = None
-    if push_notifications:
-        if persistence is None:
-            from iac_code.config import get_config_dir
+    if push_notifications and persistence is None:
+        from iac_code.config import get_config_dir
 
-            persistence = A2APersistenceStore(get_config_dir() / "a2a")
+        persistence = A2APersistenceStore(get_config_dir() / "a2a")
+    task_store = A2ATaskStore(metrics=metrics, persistence=persistence)
+    if push_notifications:
+        assert persistence is not None
         push_secret_keyring = A2APushSecretKeyring(Path(persistence.root) / "push_keys.json")
         push_config_store = A2APushConfigStore(persistence=persistence, secret_keyring=push_secret_keyring)
         if push_queue == "redis-streams":
@@ -370,8 +377,8 @@ def create_runtime_components(
             queue=push_queue_instance,
             metrics=metrics,
             header_resolver=push_config_store.resolve_headers_for_dispatch,
+            path_roots_resolver=lambda task_id: resolve_a2a_public_path_roots(task_store, task_id=task_id),
         )
-    task_store = A2ATaskStore(metrics=metrics, persistence=persistence)
     executor = IacCodeA2AExecutor(
         task_store=task_store,
         model=model,
@@ -645,8 +652,12 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             await producer_task
         except asyncio.CancelledError:
             return
-        except Exception:
-            logger.exception("Active task message producer %s failed", task_id)
+        except Exception as exc:
+            logger.error(
+                "Active task message producer task_id=%s failed: %s",
+                sanitize_strict_text(task_id),
+                sanitize_strict_text(str(exc)),
+            )
 
     async def on_cancel_task(self, params: CancelTaskRequest, context) -> Task | None:
         self._validate_extensions(context)
@@ -773,8 +784,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                 logger.warning(
                     "Failed to enqueue A2A push notification for terminal task %s: %s",
                     task.id,
-                    public_exception_summary(exc, max_chars=500),
-                    exc_info=True,
+                    sanitize_strict_text(str(exc))[:500],
                 )
         return task
 
@@ -937,14 +947,25 @@ class A2AJsonRpcDispatcher:
         data = response.json()
         if not isinstance(data, dict):
             raise ValueError("A2A dispatcher response must be a JSON object")
-        return data
+        roots = await resolve_a2a_public_path_roots_for_data(
+            getattr(self._components, "task_store", None),
+            response_data=data,
+            request_data=payload,
+        )
+        return project_a2a_data(data, public_path_roots=roots)
 
     async def dispatch_stream(self, payload: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
         async with self._http_client.stream("POST", "/", json=payload, headers={"A2A-Version": "1.0"}) as response:
             response.raise_for_status()
             async for line in response.aiter_lines():
                 if line.startswith("data:"):
-                    yield json.loads(line.removeprefix("data:").strip())
+                    data = json.loads(line.removeprefix("data:").strip())
+                    roots = await resolve_a2a_public_path_roots_for_data(
+                        getattr(self._components, "task_store", None),
+                        response_data=data,
+                        request_data=payload,
+                    )
+                    yield project_a2a_data(data, public_path_roots=roots)
 
     async def aclose(self) -> None:
         await self._http_client.aclose()

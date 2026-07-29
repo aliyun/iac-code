@@ -77,7 +77,7 @@ conclusion_schema:
 参数补全流程：
 1. 先从 `selected_plan.effective_deployment_parameters`、`selected_plan.selected_candidate_result.cost.deployment_parameters`、用户 `parameter_overrides`、模板 Default 和上下文已有值合并当前参数。
 2. 仍缺少模板必填参数时，调用 `ros_get_template_parameter_constraints`，传当前 `parameters` 字典继续求解可用候选。
-3. 对可推断配置（名称、CIDR、布尔值、小整数、非敏感字符串、模板安全默认值）直接给出合规值；对普通密码（ECS/RDS/Redis/RocketMQ/WordPress 等密码，或参数名、`NoEcho`、AssociationProperty、描述/约束表明是密码）生成合规随机值，必须满足长度、复杂度、`AllowedPattern`、`ConstraintDescription`，并在输出、日志和摘要中脱敏。
+3. 对可推断配置（名称、CIDR、布尔值、小整数、非敏感字符串、模板安全默认值）直接给出合规值；对普通密码（ECS/RDS/Redis/RocketMQ/WordPress 等密码，或参数名、`NoEcho`、AssociationProperty、描述/约束表明是密码）生成合规随机值，必须满足长度、复杂度、`AllowedPattern`、`ConstraintDescription`。同一个真实值必须贯穿参数补全、`parameters`、结构化结论和部署，不得替换为 `***`、`[REDACTED]` 或 `<redacted>`；服务端日志由运行时单独脱敏。
 4. 对库存相关参数只在工具/API 返回的合法候选内筛选或排序，不得编造库存值；对 LicenseKey、Token、证书、真实域名、已有资源 ID、VpcId、VSwitchId、SecurityGroupId、KeyPairName 等外部或账号特定输入，不得编造。
 5. 补齐后的参数不再调用预览工具；直接进入 `ros_deploy` 创建类动作，由部署调用做最终参数校验。部署错误指向可调整参数时，继续更换非用户指定参数并按 `ros_deploy` 恢复策略重试；错误指向模板时按模板校验/修复流程处理。
 

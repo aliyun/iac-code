@@ -71,7 +71,9 @@ async def test_websocket_app_reports_invalid_json_frame() -> None:
 
 
 @pytest.mark.asyncio
-async def test_websocket_app_returns_public_error_for_unary_dispatch_failure(monkeypatch) -> None:
+async def test_websocket_app_returns_raw_error_for_unary_dispatch_failure_without_safe_mode(monkeypatch) -> None:
+    monkeypatch.delenv("IAC_CODE_A2A_SAFE_MODE", raising=False)
+
     class FailingDispatcher:
         async def dispatch(self, payload: dict[str, Any]) -> dict[str, Any]:
             raise RuntimeError("boom with DB_PASSWORD=hunter2 at /Users/alice/.iac-code/settings.yml")
@@ -95,14 +97,54 @@ async def test_websocket_app_returns_public_error_for_unary_dispatch_failure(mon
     assert response["final"] is True
     assert response["payload"]["id"] == "err-1"
     assert response["payload"]["error"]["code"] == -32603
-    assert "hunter2" not in response["payload"]["error"]["message"]
-    assert "/Users/alice" not in response["payload"]["error"]["message"]
+    assert "hunter2" in response["payload"]["error"]["message"]
+    assert "/Users/alice" in response["payload"]["error"]["message"]
     assert response["payload"]["error"]["data"]["error_id"]
     await components.aclose()
 
 
 @pytest.mark.asyncio
-async def test_websocket_app_returns_final_public_error_for_stream_dispatch_failure(monkeypatch) -> None:
+async def test_websocket_app_projects_error_from_new_request_cwd_in_safe_mode(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", "true")
+    server_path = tmp_path / "private" / "settings.yml"
+
+    class FailingDispatcher:
+        async def dispatch(self, payload: dict[str, Any]) -> dict[str, Any]:
+            raise RuntimeError(f"boom token=real-secret at {server_path}")
+
+        async def aclose(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        "iac_code.a2a.transports.websocket.A2AJsonRpcDispatcher", lambda components: FailingDispatcher()
+    )
+    components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
+    app = WebSocketA2AServerApp(components=components, path="/a2a").create_app()
+
+    from starlette.testclient import TestClient
+
+    request = {
+        "jsonrpc": "2.0",
+        "id": "err-1",
+        "method": "message/send",
+        "params": {"message": {"metadata": {"iac_code": {"cwd": str(tmp_path)}}}},
+    }
+    with TestClient(app) as client:
+        with client.websocket_connect("/a2a") as websocket:
+            websocket.send_text(json.dumps(request))
+            response = websocket.receive_json()
+
+    message = response["payload"]["error"]["message"]
+    assert "[PATH]" in message
+    assert str(tmp_path) not in message
+    assert "real-secret" in message
+    await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_websocket_app_returns_raw_final_error_for_stream_dispatch_failure_without_safe_mode(monkeypatch) -> None:
+    monkeypatch.delenv("IAC_CODE_A2A_SAFE_MODE", raising=False)
+
     class FailingStreamDispatcher:
         async def dispatch_stream(self, payload: dict[str, Any]):
             yield {"jsonrpc": "2.0", "id": payload["id"], "result": {"state": "working"}}
@@ -130,7 +172,7 @@ async def test_websocket_app_returns_final_public_error_for_stream_dispatch_fail
     assert response["final"] is True
     assert response["payload"]["id"] == "stream-1"
     assert response["payload"]["error"]["code"] == -32603
-    assert "sk-live" not in response["payload"]["error"]["message"]
-    assert "/Users/alice" not in response["payload"]["error"]["message"]
+    assert "sk-live" in response["payload"]["error"]["message"]
+    assert "/Users/alice" in response["payload"]["error"]["message"]
     assert response["payload"]["error"]["data"]["error_id"]
     await components.aclose()

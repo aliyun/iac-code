@@ -138,7 +138,7 @@ def test_error_event_to_message_chunk() -> None:
     assert "Rate limit exceeded" in updates[0].content.text
 
 
-def test_error_event_to_message_chunk_redacts_public_error() -> None:
+def test_error_event_to_message_chunk_preserves_local_error() -> None:
     converter = ACPEventConverter(turn_id="turn-1")
     updates = converter.event_to_updates(
         ErrorEvent(
@@ -149,11 +149,11 @@ def test_error_event_to_message_chunk_redacts_public_error() -> None:
 
     text = updates[0].content.text
     assert "[Error]" in text
-    assert "session-secret" not in text
-    assert "refresh-secret" not in text
+    assert "session-secret" in text
+    assert "refresh-secret" in text
 
 
-def test_error_event_to_message_chunk_handles_artifact_aware_public_text() -> None:
+def test_error_event_to_message_chunk_preserves_artifact_aware_text() -> None:
     converter = ACPEventConverter(turn_id="turn-1")
     encoded_path = "file%3A%2F%2F%2FUsers%2Falice%2F.iac-code%2Fprojects%2Fdemo%2Ftemplate.yaml"
     uri = "iac-code-artifact://artifact-1/template.yaml"
@@ -161,7 +161,7 @@ def test_error_event_to_message_chunk_handles_artifact_aware_public_text() -> No
     updates = converter.event_to_updates(ErrorEvent(error=f"failed at {encoded_path}; see {uri}.", is_retryable=False))
 
     text = updates[0].content.text
-    assert text == f"[Error] failed at [PATH]; see {uri}."
+    assert text == f"[Error] failed at {encoded_path}; see {uri}."
 
 
 # ---------------------------------------------------------------------------
@@ -635,8 +635,7 @@ def test_aliyun_tool_result_exposes_business_content_but_not_internal_http_metad
     assert "aliyun_body_v1" not in str(updates)
 
 
-def test_failed_tool_result_content_is_sanitized() -> None:
-    """Failed tool result payloads must not expose raw exception details to ACP clients."""
+def test_failed_tool_result_content_is_preserved_for_local_acp() -> None:
     converter = ACPEventConverter(turn_id="turn-1")
     converter.event_to_updates(ToolUseStartEvent(tool_use_id="t1", name="bash"))
     encoded_uri = (
@@ -653,15 +652,14 @@ def test_failed_tool_result_content_is_sanitized() -> None:
     )
 
     rendered = str(updates[0].content[0].content.text)
-    assert "hunter2" not in rendered
-    assert "/Users/alice" not in rendered
-    assert "%5CUsers" not in rendered
-    assert ".iac-code" not in rendered
+    assert "hunter2" in rendered
+    assert "/Users/alice" in rendered
+    assert "%5CUsers" in rendered
+    assert ".iac-code" in rendered
     assert updates[1].status == "failed"
 
 
-def test_successful_tool_result_content_is_sanitized() -> None:
-    """Successful tool results can still contain local paths and must be public-safe."""
+def test_successful_tool_result_content_is_preserved_for_local_acp() -> None:
     converter = ACPEventConverter(turn_id="turn-1")
     converter.event_to_updates(ToolUseStartEvent(tool_use_id="t1", name="bash"))
     encoded_path = "file%3A%2F%2F%2FUsers%2FAlice%20Smith%2F.iac-code%2Fprojects%2Fdemo%2Ftemplate.yaml"
@@ -677,13 +675,13 @@ def test_successful_tool_result_content_is_sanitized() -> None:
     )
 
     rendered = str(updates[0].content[0].content.text)
-    assert rendered == f"ok [PATH]; see {uri}"
-    assert "Alice" not in rendered
-    assert ".iac-code" not in rendered
+    assert rendered == f"ok {encoded_path}; see {uri}"
+    assert "Alice" in rendered
+    assert ".iac-code" in rendered
     assert updates[1].status == "completed"
 
 
-def test_successful_tool_result_relativizes_public_paths() -> None:
+def test_successful_tool_result_preserves_public_paths() -> None:
     converter = ACPEventConverter(turn_id="turn-1")
     converter.event_to_updates(ToolUseStartEvent(tool_use_id="t1", name="bash"))
 
@@ -698,12 +696,12 @@ def test_successful_tool_result_relativizes_public_paths() -> None:
     )
 
     rendered = str(updates[0].content[0].content.text)
-    assert rendered == "./src/app.py\n[PATH]"
-    assert "/Users/alice" not in rendered
+    assert rendered == "/Users/alice/project/src/app.py\n/Users/alice/private/secret.txt"
+    assert "/Users/alice" in rendered
     assert updates[1].status == "completed"
 
 
-def test_successful_tool_result_dict_is_sanitized_and_serialized() -> None:
+def test_successful_tool_result_dict_is_preserved_and_serialized() -> None:
     converter = ACPEventConverter(turn_id="turn-1")
     converter.event_to_updates(ToolUseStartEvent(tool_use_id="t1", name="write_file"))
 
@@ -723,10 +721,10 @@ def test_successful_tool_result_dict_is_sanitized_and_serialized() -> None:
     )
 
     rendered = str(updates[0].content[0].content.text)
-    assert '"filename": "template.yaml"' in rendered
-    assert "secret content" not in rendered
-    assert "Alice Smith" not in rendered
-    assert ".iac-code" not in rendered
+    assert '"filename": "C:\\\\Users\\\\Alice Smith\\\\.iac-code\\\\projects\\\\demo\\\\template.yaml"' in rendered
+    assert "secret content" in rendered
+    assert "Alice Smith" in rendered
+    assert ".iac-code" in rendered
     assert updates[1].status == "completed"
 
 

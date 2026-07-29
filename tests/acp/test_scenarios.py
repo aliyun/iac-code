@@ -384,8 +384,8 @@ def test_a4_history_message_to_updates_all_types() -> None:
     updates = _history_message_to_updates(asst_business_tool)
     rendered = json.dumps([update.model_dump(mode="json") for update in updates], ensure_ascii=False)
     assert "git status --short" in rendered
-    for forbidden in ("customerEmail", "customer-prod-123", "alice@example.com", "tenant-id"):
-        assert forbidden not in rendered
+    for expected in ("customerEmail", "customer-prod-123", "alice@example.com", "tenant-id"):
+        assert expected in rendered
 
     asst_secret_flag_tool = Message(
         role="assistant",
@@ -406,11 +406,8 @@ def test_a4_history_message_to_updates_all_types() -> None:
     updates = _history_message_to_updates(asst_secret_flag_tool)
     rendered = json.dumps([update.model_dump(mode="json") for update in updates], ensure_ascii=False)
     assert "/Users/alice/project/main.tf" in rendered
-    assert "--token [REDACTED]" in rendered
-    assert "--password [REDACTED]" in rendered
-    assert "--api-key [REDACTED]" in rendered
-    for forbidden in ("abc123value", "hunter2", "sk-live-secret", "[PATH]"):
-        assert forbidden not in rendered
+    for expected in ("abc123value", "hunter2", "sk-live-secret"):
+        assert expected in rendered
 
     asst_env_secret_tool = Message(
         role="assistant",
@@ -431,13 +428,11 @@ def test_a4_history_message_to_updates_all_types() -> None:
     )
     updates = _history_message_to_updates(asst_env_secret_tool)
     rendered = json.dumps([update.model_dump(mode="json") for update in updates], ensure_ascii=False)
-    assert "OPENAI_API_KEY=[REDACTED]" in rendered
-    assert "AWS_SECRET_ACCESS_KEY=[REDACTED]" in rendered
-    assert "ALIBABA_CLOUD_ACCESS_KEY_SECRET=[REDACTED]" in rendered
+    assert "OPENAI_API_KEY=sk-openai" in rendered
+    assert "AWS_SECRET_ACCESS_KEY='aws-secret'" in rendered
+    assert "ALIBABA_CLOUD_ACCESS_KEY_SECRET=aliyun-secret" in rendered
     assert "my-secret value" in rendered
     assert "/Users/alice/project/main.tf" in rendered
-    for forbidden in ("sk-openai", "aws-secret", "aliyun-secret", "[PATH]"):
-        assert forbidden not in rendered
 
     long_env_secret = "sk-" + ("x" * 260) + "tail-secret"
     asst_long_secret_tool = Message(
@@ -460,11 +455,11 @@ def test_a4_history_message_to_updates_all_types() -> None:
     )
     updates = _history_message_to_updates(asst_long_secret_tool)
     rendered = json.dumps([update.model_dump(mode="json") for update in updates], ensure_ascii=False)
-    assert "OPENAI_API_KEY=[REDACTED]" in rendered
+    assert long_env_secret in rendered
     assert "apiKey" in rendered
     assert "/Users/alice/project/main.tf" in rendered
-    for forbidden in (long_env_secret, "tail-secret", "sk-json-secret", "escaped-tail-secret", "[PATH]"):
-        assert forbidden not in rendered
+    for expected in ("tail-secret", "sk-json-secret", "escaped-tail-secret"):
+        assert expected in rendered
 
     asst_aliyun_tool = Message(
         role="assistant",
@@ -487,13 +482,12 @@ def test_a4_history_message_to_updates_all_types() -> None:
     )
     updates = _history_message_to_updates(asst_aliyun_tool)
     rendered = json.dumps([update.model_dump(mode="json") for update in updates], ensure_ascii=False)
-    assert "Input summary:" in rendered
-    assert "secret-value" not in rendered
-    assert "signature-secret" not in rendered
-    assert "bearer-secret" not in rendered
-    assert "AccessKeySecret" not in rendered
-    assert "Signature" not in rendered
-    assert "Authorization" not in rendered
+    assert "secret-value" in rendered
+    assert "signature-secret" in rendered
+    assert "bearer-secret" in rendered
+    assert "AccessKeySecret" in rendered
+    assert "Signature" in rendered
+    assert "Authorization" in rendered
 
     user_result = Message(
         role="user",
@@ -520,9 +514,8 @@ def test_a4_history_message_to_updates_all_types() -> None:
     )
     updates = _history_message_to_updates(user_success_with_path)
     rendered = str(updates[0].content[0].content.text)
-    assert rendered == "wrote [PATH]"
-    assert "Alice" not in rendered
-    assert ".iac-code" not in rendered
+    assert "file%3A%2F%2F%2FUsers%2FAlice" in rendered
+    assert ".iac-code" in rendered
 
     user_err = Message(
         role="user",
@@ -541,12 +534,10 @@ def test_a4_history_message_to_updates_all_types() -> None:
     assert len(updates) == 2
     assert updates[0].status == "in_progress"
     rendered = updates[0].content[0].content.text
-    assert "hunter2" not in rendered
-    assert "/Users/alice" not in rendered
-    assert "%2FUsers" not in rendered
-    assert ".iac-code" not in rendered
-    assert "DB_PASSWORD=[REDACTED]" in rendered
-    assert "[PATH]" in rendered
+    assert "hunter2" in rendered
+    assert "/Users/alice" in rendered
+    assert "%2FUsers" in rendered
+    assert ".iac-code" in rendered
     assert updates[1].status == "failed"
 
     asst_str = Message(role="assistant", content="plain text assistant")
@@ -1972,7 +1963,7 @@ async def test_acp_mcp_prompt_command_persists_expanded_prompt(tmp_path) -> None
 
 
 @pytest.mark.asyncio
-async def test_acp_mcp_prompt_server_error_raises_request_error_without_leaking_secret() -> None:
+async def test_acp_mcp_prompt_server_error_returns_local_details() -> None:
     registry = CommandRegistry()
     registry.register(
         PromptCommand(
@@ -2000,7 +1991,7 @@ async def test_acp_mcp_prompt_server_error_raises_request_error_without_leaking_
 
     payload = getattr(exc_info.value, "data", {}) or {}
     assert payload["error"].startswith("RuntimeError: MCP prompt server failed with access_token=")
-    assert "super-secret-token" not in payload["error"]
+    assert "super-secret-token" in payload["error"]
     assert loop.continued is False
     assert conn.updates == []
 

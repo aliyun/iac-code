@@ -12,7 +12,6 @@ from typing import Any
 
 import acp
 
-from iac_code.a2a.artifacts import sanitize_public_tool_output_data
 from iac_code.acp.convert import ACPEventConverter, _tool_kind, acp_blocks_to_prompt_text
 from iac_code.acp.metrics import ACPMetrics
 from iac_code.acp.slash_registry import ACPSlashRegistry
@@ -30,10 +29,8 @@ from iac_code.agent.message import (
 from iac_code.commands.registry import PromptCommand
 from iac_code.i18n import _
 from iac_code.mcp.errors import MCPConnectionError
-from iac_code.mcp.redaction import sanitize_mcp_public_text
 from iac_code.services.permissions.audit import (
     build_input_summary,
-    build_prompt_tool_input,
     emit_permission_boundary_audit,
     is_permission_audit_non_read_only,
     permission_audit_operation,
@@ -44,7 +41,7 @@ from iac_code.services.telemetry import use_session_id
 from iac_code.state.app_state import lookup_permission, record_permission
 from iac_code.types.permissions import PermissionDecision, PermissionRuleValue
 from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent
-from iac_code.utils.public_errors import public_error
+from iac_code.utils.public_errors import public_error, sanitize_strict_text
 
 logger = logging.getLogger(__name__)
 
@@ -89,29 +86,25 @@ def _history_tool_content(text: str) -> acp.schema.ContentToolCallContent:
 
 
 def _history_tool_result_text(value: Any) -> str:
-    sanitized = sanitize_public_tool_output_data(value)
-    if isinstance(sanitized, str):
-        return sanitized
-    return json.dumps(sanitized, ensure_ascii=False, default=str)
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, default=str)
 
 
 def _history_tool_input_text(tool_name: str, tool_input: dict[str, Any]) -> str:
+    del tool_name
     if not tool_input:
         return ""
-    return _display_tool_input_text(tool_name, tool_input)
+    return _("Input: {input}").format(
+        input=json.dumps(tool_input, ensure_ascii=False, sort_keys=True, default=str)
+    )
 
 
 def _display_tool_input_text(tool_name: str, tool_input: dict[str, Any]) -> str:
-    if tool_name != "aliyun_api":
-        tool_input_redacted = json.dumps(
-            build_prompt_tool_input(tool_input),
-            ensure_ascii=False,
-            sort_keys=True,
-            default=str,
-        )
-        return _("Input: {input}").format(input=tool_input_redacted)
-    summary = json.dumps(build_input_summary(tool_name, tool_input), ensure_ascii=False, sort_keys=True)
-    return _("Input summary: {summary}").format(summary=summary)
+    del tool_name
+    return _("Input: {input}").format(
+        input=json.dumps(tool_input, ensure_ascii=False, sort_keys=True, default=str)
+    )
 
 
 def _permission_request_event(event: Any) -> PermissionRequestEvent | None:
@@ -270,7 +263,7 @@ def _permission_tool_title(agent_loop, tool_name: str, tool_input: dict[str, Any
 
 
 def _permission_meta_text(value: Any) -> str:
-    text = sanitize_mcp_public_text(value, fallback_summary="")
+    text = str(value)
     if len(text) <= _PERMISSION_META_STRING_MAX_CHARS:
         return text
     marker = _("[truncated]")
@@ -576,7 +569,7 @@ class ACPSession:
             if _is_auth_error(exc):
                 logger.warning("ACP session %s: authentication error: %s", self.id, exc)
                 raise self._request_error_from_prompt_exception(exc, log=False, record_metrics=False) from exc
-            logger.error("ACP session %s: unhandled error: %s", self.id, exc, exc_info=True)
+            logger.error("ACP session %s: unhandled error: %s", self.id, sanitize_strict_text(str(exc)))
             raise self._request_error_from_prompt_exception(exc, log=False, record_metrics=False) from exc
         finally:
             self._current_task = None
@@ -662,11 +655,11 @@ class ACPSession:
                 }
             )
         if log:
-            logger.error("ACP session %s: unhandled error: %s", self.id, exc, exc_info=True)
+            logger.error("ACP session %s: unhandled error: %s", self.id, sanitize_strict_text(str(exc)))
         failure = public_error(message=f"{type(exc).__name__}: {exc}", error_type=type(exc).__name__)
         return acp.RequestError.internal_error(
             {
-                "error": failure.summary,
+                "error": f"{type(exc).__name__}: {exc}",
                 "error_id": failure.error_id,
             }
         )
@@ -900,27 +893,10 @@ class ACPSession:
 
         # Build content with command details and suggested rule.
         tool_title = _permission_tool_title(self.agent_loop, tool_name, event.tool_input)
-        if tool_name == "aliyun_api":
-            input_summary = json.dumps(
-                build_input_summary(tool_name, event.tool_input),
-                ensure_ascii=False,
-                sort_keys=True,
-            )
-            content_text = _("Approve tool call: {tool}\nInput summary: {summary}").format(
-                tool=tool_title,
-                summary=input_summary,
-            )
-        else:
-            tool_input_redacted = json.dumps(
-                build_prompt_tool_input(event.tool_input),
-                ensure_ascii=False,
-                sort_keys=True,
-                default=str,
-            )
-            content_text = _("Approve tool call: {tool}\nInput: {input}").format(
-                tool=tool_title,
-                input=tool_input_redacted,
-            )
+        content_text = _("Approve tool call: {tool}\nInput: {input}").format(
+            tool=tool_title,
+            input=json.dumps(event.tool_input, ensure_ascii=False, sort_keys=True, default=str),
+        )
         if suggestions:
             content_text += "\n" + _("Suggested rule: {rule}").format(rule=_suggestion_display())
 

@@ -1,11 +1,14 @@
 import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
+from a2a.types import a2a_pb2
+from google.protobuf.json_format import MessageToDict, ParseDict
 
 from iac_code.a2a.transports.base import A2ATransportDependencyError
 from iac_code.a2a.transports.dispatcher import create_runtime_components
-from iac_code.a2a.transports.grpc import GrpcA2AServer, require_grpc
+from iac_code.a2a.transports.grpc import _GRPC_REQUEST_DATA, GrpcA2AServer, _projecting_grpc_handler, require_grpc
 from iac_code.a2a.transports.grpc_jsonrpc import GrpcA2AClient, JsonRpcEnvelope, _from_envelope, _JsonRpcServicer
 
 
@@ -126,9 +129,116 @@ async def test_grpc_jsonrpc_send_returns_public_error_for_dispatch_failure() -> 
 
     assert payload["id"] == "send-1"
     assert payload["error"]["code"] == -32603
-    assert "hunter2" not in payload["error"]["message"]
-    assert "/Users/alice" not in payload["error"]["message"]
+    assert "hunter2" in payload["error"]["message"]
+    assert "/Users/alice" in payload["error"]["message"]
     assert payload["error"]["data"]["error_id"]
+
+
+@pytest.mark.asyncio
+async def test_grpc_jsonrpc_projects_error_from_new_request_cwd_in_safe_mode(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", "yes")
+    server_path = tmp_path / "private" / "grpc.sock"
+
+    class FailingDispatcher:
+        async def dispatch(self, payload):
+            raise RuntimeError(f"boom token=real-secret at {server_path}")
+
+    servicer = _JsonRpcServicer.__new__(_JsonRpcServicer)
+    servicer._dispatcher = FailingDispatcher()
+    request = {
+        "jsonrpc": "2.0",
+        "id": "send-1",
+        "params": {"message": {"metadata": {"iac_code": {"cwd": str(tmp_path)}}}},
+    }
+
+    response = await servicer.Send(JsonRpcEnvelope(payload=json.dumps(request).encode()), object())
+    message = _from_envelope(response)["error"]["message"]
+
+    assert "[PATH]" in message
+    assert str(tmp_path) not in message
+    assert "real-secret" in message
+
+
+@pytest.mark.asyncio
+async def test_official_grpc_projects_success_and_error_from_new_request_cwd(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", "1")
+    server_path = str(tmp_path / "private" / "result.json")
+
+    class BaseHandler:
+        def __init__(self, handler) -> None:
+            self.handler = handler
+            self.aborted_error = None
+            self.error_to_abort = None
+
+        async def _handle_unary(self, request, context, handler_func, default_response):
+            if self.error_to_abort is not None:
+                await self.abort_context(self.error_to_abort, context)
+            return default_response
+
+        async def abort_context(self, error, context) -> None:
+            self.aborted_error = error
+
+    class WireError:
+        def __init__(self, *, message, data=None) -> None:
+            self.message = message
+            self.data = data
+
+    components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
+    handler = _projecting_grpc_handler(BaseHandler, components)
+    request = a2a_pb2.SendMessageRequest()
+    ParseDict({"iac_code": {"cwd": str(tmp_path)}}, request.metadata)
+    response = a2a_pb2.SendMessageResponse()
+    ParseDict({"path": server_path, "password": "real-secret"}, response.message.metadata)
+
+    projected = await handler._handle_unary(request, object(), None, response)
+    handler.error_to_abort = WireError(
+        message=f"failed token=real-secret at {server_path}", data={"path": server_path}
+    )
+    await handler._handle_unary(request, object(), None, a2a_pb2.SendMessageResponse())
+
+    assert MessageToDict(projected.message.metadata) == {"path": "[PATH]", "password": "real-secret"}
+    assert handler.aborted_error.message == "failed token=real-secret at [PATH]"
+    assert handler.aborted_error.data == {"path": "[PATH]"}
+    await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_official_grpc_task_scoped_error_uses_bare_request_id_roots(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", "true")
+    workspace = tmp_path / "task-workspace"
+    server_path = str(workspace / "private" / "result.json")
+
+    class TaskStore:
+        async def get_task_record(self, task_id):
+            assert task_id == "task-1"
+            return SimpleNamespace(context_id="context-1")
+
+        async def get_context_record(self, context_id):
+            assert context_id == "context-1"
+            return SimpleNamespace(cwd=str(workspace), session_id="session-1")
+
+    class BaseHandler:
+        def __init__(self, handler) -> None:
+            self.aborted_error = None
+
+        async def abort_context(self, error, context) -> None:
+            self.aborted_error = error
+
+    class WireError:
+        def __init__(self, *, message, data=None) -> None:
+            self.message = message
+            self.data = data
+
+    components = SimpleNamespace(task_store=TaskStore(), handler=object())
+    handler = _projecting_grpc_handler(BaseHandler, components)
+    request = a2a_pb2.GetTaskRequest(id="task-1")
+    token = _GRPC_REQUEST_DATA.set(MessageToDict(request))
+    try:
+        await handler.abort_context(WireError(message=f"failed at {server_path}"), object())
+    finally:
+        _GRPC_REQUEST_DATA.reset(token)
+
+    assert handler.aborted_error.message == "failed at [PATH]"
 
 
 @pytest.mark.asyncio
@@ -158,8 +268,8 @@ async def test_grpc_jsonrpc_stream_returns_final_public_error_for_dispatch_failu
     assert envelopes[1].final is True
     assert payloads[1]["id"] == "stream-1"
     assert payloads[1]["error"]["code"] == -32603
-    assert "sk-live" not in payloads[1]["error"]["message"]
-    assert "/Users/alice" not in payloads[1]["error"]["message"]
+    assert "sk-live" in payloads[1]["error"]["message"]
+    assert "/Users/alice" in payloads[1]["error"]["message"]
     assert payloads[1]["error"]["data"]["error_id"]
 
 
@@ -208,6 +318,6 @@ async def test_official_grpc_server_registers_a2a_service(monkeypatch, tmp_path)
     await server.aclose()
 
     assert registered["address"] == "127.0.0.1:41243"
-    assert registered["servicer_type"] == "GrpcHandler"
+    assert registered["servicer_type"] == "ProjectingGrpcHandler"
     assert registered["started"] is True
     assert registered["waited"] is True
