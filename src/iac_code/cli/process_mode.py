@@ -962,12 +962,15 @@ class ProcessQuery:
             )
             return
         request_id = frame.request_id or self._next_turn_request_id()
-        task = asyncio.create_task(self._run_turn(frame, request_id))
+        turn_started = asyncio.Event()
+        task = asyncio.create_task(self._run_turn(frame, request_id, turn_started))
         self._active_turn = ProcessTurnHandle(request_id=request_id, session_id=frame.session_id, task=task)
+        await turn_started.wait()
 
-    async def _run_turn(self, frame: SDKUserMessage, request_id: str) -> None:
+    async def _run_turn(self, frame: SDKUserMessage, request_id: str, turn_started: asyncio.Event) -> None:
         started = time.monotonic()
         result = ProcessTurnResult()
+        turn_started.set()
         try:
             async for event in self._runtime_controller.run_turn(frame):
                 result.observe(event, self._error_mapper)

@@ -67,7 +67,9 @@ _CURRENT_STEP_USER_INPUT_CONTENT_KEY = "current_step_user_input_content"
 _CURRENT_STEP_RESUME_MESSAGES_KEY = "current_step_resume_messages"
 _CURRENT_STEP_PRECOMPLETED_TOOLS_KEY = "current_step_precompleted_tools"
 _PENDING_ASK_USER_QUESTION_RESUME_KEY = "pending_ask_user_question_resume"
+_PENDING_ASK_USER_QUESTION_INPUT_KEY = "pending_ask_user_question_input"
 _PENDING_INPUT_KIND_KEY = "pending_input_kind"
+_ASK_USER_QUESTION_KIND = "ask_user_question"
 _PIPELINE_PAUSE_CONFIRMATION_KIND = "pipeline_pause_confirmation"
 _CANDIDATE_SELECTION_PAYLOAD_FIELDS = frozenset(
     {
@@ -183,6 +185,79 @@ class PipelineStatePersistenceError(RuntimeError):
     def __init__(self, message: str, *, step_id: str | None = None) -> None:
         super().__init__(message)
         self.step_id = step_id
+
+
+@dataclass(frozen=True)
+class PendingAskUserQuestion:
+    """Recovery-critical representation of an unanswered pipeline question."""
+
+    tool_use_id: str
+    question: str
+    options: list[dict[str, Any]]
+    allow_free_text: bool = True
+    free_text_prompt: str = ""
+    answer: dict[str, str] | None = None
+
+    @classmethod
+    def from_event(cls, event: AskUserQuestionEvent) -> PendingAskUserQuestion:
+        return cls(
+            tool_use_id=str(event.tool_use_id),
+            question=str(event.question),
+            options=[dict(option) for option in event.options if isinstance(option, dict)],
+            allow_free_text=bool(event.allow_free_text),
+            free_text_prompt=str(event.free_text_prompt or ""),
+        )
+
+    @classmethod
+    def from_dict(cls, value: Any) -> PendingAskUserQuestion | None:
+        if not isinstance(value, dict):
+            return None
+        tool_use_id = value.get("toolUseId") or value.get("tool_use_id")
+        question = value.get("question")
+        options = value.get("options")
+        if not isinstance(tool_use_id, str) or not tool_use_id:
+            return None
+        if not isinstance(question, str) or not isinstance(options, list):
+            return None
+        raw_answer = value.get("answer")
+        answer = None
+        if isinstance(raw_answer, dict):
+            answer = {
+                "selected_id": _string_answer_value(raw_answer.get("selected_id")),
+                "selected_label": _string_answer_value(raw_answer.get("selected_label")),
+                "free_text": _string_answer_value(raw_answer.get("free_text")),
+            }
+        return cls(
+            tool_use_id=tool_use_id,
+            question=question,
+            options=[dict(option) for option in options if isinstance(option, dict)],
+            allow_free_text=bool(value.get("allowFreeText", value.get("allow_free_text", True))),
+            free_text_prompt=str(value.get("freeTextPrompt") or value.get("free_text_prompt") or ""),
+            answer=answer,
+        )
+
+    def with_answer(self, answer: dict[str, str]) -> PendingAskUserQuestion:
+        return replace(
+            self,
+            answer={
+                "selected_id": _string_answer_value(answer.get("selected_id")),
+                "selected_label": _string_answer_value(answer.get("selected_label")),
+                "free_text": _string_answer_value(answer.get("free_text")),
+            },
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        value: dict[str, Any] = {
+            "kind": _ASK_USER_QUESTION_KIND,
+            "toolUseId": self.tool_use_id,
+            "question": self.question,
+            "options": [dict(option) for option in self.options],
+            "allowFreeText": self.allow_free_text,
+            "freeTextPrompt": self.free_text_prompt,
+        }
+        if self.answer is not None:
+            value["answer"] = dict(self.answer)
+        return value
 
 
 def _string_answer_value(value: Any) -> str:
@@ -1011,6 +1086,52 @@ class PipelineRunner:
     def pending_input_kind(self) -> str | None:
         kind = self._execution.get(_PENDING_INPUT_KIND_KEY) if isinstance(self._execution, dict) else None
         return kind if isinstance(kind, str) else None
+
+    def pending_ask_user_question(self) -> dict[str, Any] | None:
+        pending = PendingAskUserQuestion.from_dict(self._execution.get(_PENDING_ASK_USER_QUESTION_INPUT_KEY))
+        return pending.to_dict() if pending is not None else None
+
+    async def persist_pending_ask_user_question(self, event: AskUserQuestionEvent) -> None:
+        pending = PendingAskUserQuestion.from_event(event)
+        previous_pending = self._execution.get(_PENDING_ASK_USER_QUESTION_INPUT_KEY)
+        previous_kind = self.pending_input_kind()
+        self._execution[_PENDING_ASK_USER_QUESTION_INPUT_KEY] = pending.to_dict()
+        self._set_pending_input_kind(_ASK_USER_QUESTION_KIND)
+        try:
+            await self._save_waiting_input(self._terminal_current_step_id())
+        except BaseException:
+            if previous_pending is None:
+                self._execution.pop(_PENDING_ASK_USER_QUESTION_INPUT_KEY, None)
+            else:
+                self._execution[_PENDING_ASK_USER_QUESTION_INPUT_KEY] = previous_pending
+            self._set_pending_input_kind(previous_kind)
+            raise
+
+    async def persist_pending_ask_user_question_answer(
+        self,
+        tool_use_id: str,
+        answer: dict[str, str],
+    ) -> None:
+        pending = PendingAskUserQuestion.from_dict(self._execution.get(_PENDING_ASK_USER_QUESTION_INPUT_KEY))
+        if pending is None or pending.tool_use_id != tool_use_id:
+            raise ValueError("pending ask_user_question tool_use_id mismatch")
+        previous = pending.to_dict()
+        self._execution[_PENDING_ASK_USER_QUESTION_INPUT_KEY] = pending.with_answer(answer).to_dict()
+        try:
+            await self._save_waiting_input(self._terminal_current_step_id())
+        except BaseException:
+            self._execution[_PENDING_ASK_USER_QUESTION_INPUT_KEY] = previous
+            raise
+
+    def acknowledge_pending_ask_user_question(self, tool_use_id: str) -> None:
+        pending = PendingAskUserQuestion.from_dict(self._execution.get(_PENDING_ASK_USER_QUESTION_INPUT_KEY))
+        if pending is None:
+            return
+        if pending.tool_use_id != tool_use_id:
+            raise ValueError("pending ask_user_question tool_use_id mismatch")
+        self._execution.pop(_PENDING_ASK_USER_QUESTION_INPUT_KEY, None)
+        if self.pending_input_kind() == _ASK_USER_QUESTION_KIND:
+            self._set_pending_input_kind(None)
 
     def has_pending_pipeline_pause_confirmation(self) -> bool:
         return self.pending_input_kind() == _PIPELINE_PAUSE_CONFIRMATION_KIND
@@ -2601,6 +2722,7 @@ class PipelineRunner:
             raise ValueError(
                 f"ask_user_question tool_use_id mismatch: expected {expected_tool_use_id!r}, got {tool_use_id!r}"
             )
+        self.acknowledge_pending_ask_user_question(tool_use_id)
         answer_text = payload["free_text"] or payload["selected_label"] or payload["selected_id"]
         if payload["selected_id"] and payload["free_text"]:
             answer_type = "option_and_free_text"

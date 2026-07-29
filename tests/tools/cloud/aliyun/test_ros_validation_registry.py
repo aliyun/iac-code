@@ -382,12 +382,15 @@ def test_committed_resource_catalog_and_ref_types() -> None:
     assert random_string["official_evidence"]
     assert random_string["official_evidence"][0]["status"] == "NOT_FOUND"
     raw_ref_types = {item["resource_type"]: item["ref_type"] for item in records}
-    assert {name: raw_ref_types[name] for name in {
-        "ALIYUN::RandomString",
-        "ALIYUN::ROS::Stack",
-        "ALIYUN::ECS::PrepayInstance",
-        "ALIYUN::RDS::PrepayDBInstance",
-    }} == {
+    assert {
+        name: raw_ref_types[name]
+        for name in {
+            "ALIYUN::RandomString",
+            "ALIYUN::ROS::Stack",
+            "ALIYUN::ECS::PrepayInstance",
+            "ALIYUN::RDS::PrepayDBInstance",
+        }
+    } == {
         "ALIYUN::RandomString": "String | Null",
         "ALIYUN::ROS::Stack": "String | Null",
         "ALIYUN::ECS::PrepayInstance": "List[String] | Null",

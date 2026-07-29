@@ -593,14 +593,23 @@ async def test_process_runner_reports_turn_active_and_close_cancels_turn(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_process_runner_interrupt_cancels_active_turn(tmp_path) -> None:
+async def test_process_runner_interrupt_cancels_active_turn_before_first_task_step(monkeypatch, tmp_path) -> None:
+    async def run_inline(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", run_inline)
     controller = FakeRuntimeController(block_turn=True)
     stdin = io.StringIO(
         "\n".join(
             [
                 json.dumps({"type": "control_request", "request_id": "req-init", "request": {"subtype": "initialize"}}),
                 json.dumps(
-                    {"type": "user", "session_id": "session-1", "message": {"role": "user", "content": "first"}}
+                    {
+                        "type": "user",
+                        "request_id": "req-turn",
+                        "session_id": "session-1",
+                        "message": {"role": "user", "content": "first"},
+                    }
                 ),
                 json.dumps(
                     {
@@ -624,13 +633,24 @@ async def test_process_runner_interrupt_cancels_active_turn(tmp_path) -> None:
 
     assert exit_code == 0
     lines = _load_output(stdout)
-    assert any(
-        line["type"] == "control_response"
+    interrupt_index = next(
+        index
+        for index, line in enumerate(lines)
+        if line["type"] == "control_response"
         and line["response"]["request_id"] == "req-interrupt"
         and line["response"]["subtype"] == "success"
-        for line in lines
     )
-    assert any(line["type"] == "result" and line["subtype"] == "error_during_execution" for line in lines)
+    cancelled_results = [
+        (index, line)
+        for index, line in enumerate(lines)
+        if line["type"] == "result" and line["request_id"] == "req-turn"
+    ]
+    assert len(cancelled_results) == 1
+    result_index, cancelled_result = cancelled_results[0]
+    assert cancelled_result["subtype"] == "error_during_execution"
+    assert cancelled_result["is_error"] is True
+    assert cancelled_result["stop_reason"] == "cancelled"
+    assert interrupt_index < result_index
 
 
 @pytest.mark.asyncio

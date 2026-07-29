@@ -506,6 +506,9 @@ class TestPipelineAskUserQuestion:
         mock_repl._pipeline_completed_indices = set()
         mock_repl._pipeline.pause_agent_loops = MagicMock()
         mock_repl._pipeline.resume_agent_loops = MagicMock()
+        mock_repl._pipeline.persist_pending_ask_user_question = AsyncMock()
+        mock_repl._pipeline.persist_pending_ask_user_question_answer = AsyncMock()
+        mock_repl._pipeline.acknowledge_pending_ask_user_question = MagicMock()
 
         fut: asyncio.Future[dict[str, str] | None] = asyncio.get_running_loop().create_future()
         question = AskUserQuestionEvent(
@@ -543,6 +546,9 @@ class TestPipelineAskUserQuestion:
         assert fut.result() == answer
         assert result is terminal_event
         mock_repl.renderer.prompt_user_question.assert_awaited_once_with(question)
+        mock_repl._pipeline.persist_pending_ask_user_question.assert_awaited_once_with(question)
+        mock_repl._pipeline.persist_pending_ask_user_question_answer.assert_awaited_once_with("tu_1", answer)
+        mock_repl._pipeline.acknowledge_pending_ask_user_question.assert_called_once_with("tu_1")
 
     @pytest.mark.asyncio
     async def test_resumed_pipeline_stream_without_pipeline_started_initializes_progress_state(self, mock_repl):

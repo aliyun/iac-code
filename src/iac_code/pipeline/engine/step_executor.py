@@ -913,6 +913,7 @@ class StepExecutor:
                 tool_cls = engine_tools.get(name)
             if tool_cls is not None:
                 if name == "ask_user_question":
+
                     def observe_question_answered(
                         tool_call_id: str | None, option_count: int, answer_type: str
                     ) -> None:

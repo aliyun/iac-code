@@ -14,6 +14,7 @@ from iac_code.pipeline.engine.session import PipelineSession
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
 from iac_code.services.session_storage import SessionStorage
+from iac_code.types.stream_events import AskUserQuestionEvent
 from iac_code.utils import project_paths
 
 
@@ -1500,6 +1501,50 @@ async def test_resume_ask_user_question_rejects_transcript_tool_use_id_mismatch(
             pass
 
     runner._step_executor.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pending_ask_user_question_survives_sidecar_restore(tmp_path):
+    runner = _build_two_step_runner(tmp_path)
+    pending = AskUserQuestionEvent(
+        tool_use_id="ask-1",
+        question="请选择部署目标",
+        options=[{"id": "nginx", "label": "Nginx 网站"}],
+        allow_free_text=True,
+        free_text_prompt="也可以直接描述你的目标",
+    )
+
+    await runner.persist_pending_ask_user_question(pending)
+
+    restored = _build_two_step_runner(tmp_path, resume_from_sidecar=True)
+
+    assert restored.sidecar_status == "waiting_input"
+    assert restored.pending_ask_user_question() == {
+        "kind": "ask_user_question",
+        "toolUseId": "ask-1",
+        "question": "请选择部署目标",
+        "options": [{"id": "nginx", "label": "Nginx 网站"}],
+        "allowFreeText": True,
+        "freeTextPrompt": "也可以直接描述你的目标",
+    }
+
+
+@pytest.mark.asyncio
+async def test_pending_ask_user_question_answer_is_durable_until_resume_stream_starts(tmp_path):
+    runner = _build_two_step_runner(tmp_path)
+    pending = AskUserQuestionEvent(
+        tool_use_id="ask-1",
+        question="请选择部署目标",
+        options=[{"id": "nginx", "label": "Nginx 网站"}],
+    )
+    answer = {"selected_id": "nginx", "selected_label": "Nginx 网站", "free_text": ""}
+
+    await runner.persist_pending_ask_user_question(pending)
+    await runner.persist_pending_ask_user_question_answer("ask-1", answer)
+
+    restored = _build_two_step_runner(tmp_path, resume_from_sidecar=True)
+
+    assert restored.pending_ask_user_question()["answer"] == answer
 
 
 def test_resume_from_sidecar_accepts_list_valued_context_fields(tmp_path):

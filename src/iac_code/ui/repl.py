@@ -13,6 +13,7 @@ InlineREPL wires together:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 import re
 import signal
@@ -3721,16 +3722,22 @@ class InlineREPL:
         if not restored:
             return False
         self._render_pipeline_display_replay_on_startup()
-        if (
-            self._pipeline_restored_status != "waiting_input"
-            or self._pipeline_current_step_is_candidate_selection() is not True
-        ):
+        pending_ask = self._pending_ask_user_question_from_pipeline()
+        resume_candidate_selection = (
+            pending_ask is None
+            and self._pipeline_restored_status == "waiting_input"
+            and self._pipeline_current_step_is_candidate_selection() is True
+        )
+        if pending_ask is None and not resume_candidate_selection:
             return False
 
         terminal_event = None
         try:
             self.store.set_state(is_busy=True)
-            terminal_event = await self._resume_waiting_candidate_selection_from_sidecar()
+            if pending_ask is not None:
+                terminal_event = await self._resume_pending_ask_user_question_from_sidecar(pending_ask)
+            else:
+                terminal_event = await self._resume_waiting_candidate_selection_from_sidecar()
             if terminal_event is None:
                 self._pipeline_waiting_input = True
         finally:
@@ -3741,6 +3748,91 @@ class InlineREPL:
                 await self._flush_pipeline_telemetry()
                 await self._maybe_start_pipeline_cleanup(pipeline_for_flush)
         return True
+
+    def _pending_ask_user_question_from_pipeline(self) -> dict[str, Any] | None:
+        pipeline = getattr(self, "_pipeline", None)
+        getter = getattr(pipeline, "pending_ask_user_question", None)
+        if not callable(getter):
+            return None
+        pending = getter()
+        if not isinstance(pending, dict) or pending.get("kind") != "ask_user_question":
+            return None
+        tool_use_id = pending.get("toolUseId") or pending.get("tool_use_id")
+        question = pending.get("question")
+        options = pending.get("options")
+        if not isinstance(tool_use_id, str) or not tool_use_id:
+            return None
+        if not isinstance(question, str) or not isinstance(options, list):
+            return None
+        return dict(pending)
+
+    async def _resume_pending_ask_user_question_from_sidecar(
+        self,
+        pending: dict[str, Any],
+    ) -> PipelineEvent | None:
+        pipeline = getattr(self, "_pipeline", None)
+        resume = getattr(pipeline, "resume_ask_user_question", None)
+        if pipeline is None or not callable(resume):
+            return None
+
+        tool_use_id = str(pending.get("toolUseId") or pending.get("tool_use_id") or "")
+        raw_answer = pending.get("answer")
+        answer = (
+            {
+                "selected_id": str(raw_answer.get("selected_id") or ""),
+                "selected_label": str(raw_answer.get("selected_label") or ""),
+                "free_text": str(raw_answer.get("free_text") or ""),
+            }
+            if isinstance(raw_answer, dict)
+            else None
+        )
+        if answer is None:
+            event = AskUserQuestionEvent(
+                tool_use_id=tool_use_id,
+                question=str(pending.get("question") or ""),
+                options=[dict(option) for option in pending.get("options", []) if isinstance(option, dict)],
+                allow_free_text=bool(pending.get("allowFreeText", pending.get("allow_free_text", True))),
+                free_text_prompt=str(pending.get("freeTextPrompt") or pending.get("free_text_prompt") or ""),
+            )
+            answer = await self.renderer.prompt_user_question(event)
+            if answer is None:
+                return None
+            await self._persist_pending_ask_user_question_answer(tool_use_id, answer)
+
+        event_stream = resume(
+            answer,
+            tool_use_id=tool_use_id,
+            pending_input=pending,
+        )
+        return await self._render_pipeline_stream(event_stream)
+
+    async def _persist_pending_ask_user_question(self, event: AskUserQuestionEvent) -> None:
+        pipeline = getattr(self, "_pipeline", None)
+        persist = getattr(pipeline, "persist_pending_ask_user_question", None)
+        if not callable(persist):
+            return
+        result = persist(event)
+        if inspect.isawaitable(result):
+            await result
+
+    async def _persist_pending_ask_user_question_answer(
+        self,
+        tool_use_id: str,
+        answer: dict[str, str],
+    ) -> None:
+        pipeline = getattr(self, "_pipeline", None)
+        persist = getattr(pipeline, "persist_pending_ask_user_question_answer", None)
+        if not callable(persist):
+            return
+        result = persist(tool_use_id, answer)
+        if inspect.isawaitable(result):
+            await result
+
+    def _acknowledge_pending_ask_user_question(self, tool_use_id: str) -> None:
+        pipeline = getattr(self, "_pipeline", None)
+        acknowledge = getattr(pipeline, "acknowledge_pending_ask_user_question", None)
+        if callable(acknowledge):
+            acknowledge(tool_use_id)
 
     def _render_pipeline_display_replay_on_startup(self) -> None:
         model = self._load_pipeline_display_replay_model(include_nonterminal=True)
@@ -4499,17 +4591,37 @@ class InlineREPL:
                     elif isinstance(event, AskUserQuestionEvent):
                         had_renderer = await _stop_renderer()
                         try:
+                            await self._persist_pending_ask_user_question(event)
+                        except Exception as exc:
+                            if event.response_future is not None and not event.response_future.done():
+                                event.response_future.set_result(None)
+                            self._handle_pipeline_state_persistence_failure(exc)
+                            return None
+                        try:
                             answer = await self.renderer.prompt_user_question(event)
                         except (asyncio.CancelledError, KeyboardInterrupt):
+                            self._acknowledge_pending_ask_user_question(event.tool_use_id)
                             if event.response_future is not None and not event.response_future.done():
                                 event.response_future.set_result(None)
                             raise
                         except Exception as exc:
+                            self._acknowledge_pending_ask_user_question(event.tool_use_id)
                             if event.response_future is not None and not event.response_future.done():
                                 event.response_future.set_result(None)
                             msg = _("Error: {error}").format(error=str(exc))
                             self.renderer.print_system_message(msg, style="red")
                         else:
+                            if answer is not None:
+                                try:
+                                    await self._persist_pending_ask_user_question_answer(event.tool_use_id, answer)
+                                    self._acknowledge_pending_ask_user_question(event.tool_use_id)
+                                except Exception as exc:
+                                    if event.response_future is not None and not event.response_future.done():
+                                        event.response_future.set_result(None)
+                                    self._handle_pipeline_state_persistence_failure(exc)
+                                    return None
+                            else:
+                                self._acknowledge_pending_ask_user_question(event.tool_use_id)
                             if event.response_future is not None and not event.response_future.done():
                                 event.response_future.set_result(answer)
 

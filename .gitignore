@@ -174,3 +174,4 @@ src/iac_code/pipeline/engine/architecture_rules.json.backup-*
 .superpowers/
 .worktrees/
 .agents/
+spec/
