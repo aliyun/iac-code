@@ -261,6 +261,6 @@ def run_web_server(
     _start_update_check()
     if open_browser:
         _schedule_browser_open(url, safe_host, port)
-    # 该服务只绑定 loopback，转录里展示真实本地路径既安全又有用，故关闭文件路径脱敏
-    # (密钥等敏感值仍会脱敏)。见 create_app(expose_local_paths=...)。
+    # 该服务只绑定 loopback，所有本地用户数据均不执行通用路径或凭据脱敏。
+    # 参数保留用于兼容旧调用方；所有 Web app 实例使用相同本地策略。
     uvicorn.run(protect_loopback_app(create_app(expose_local_paths=True)), host=safe_host, port=port)

@@ -36,7 +36,7 @@ from iac_code.utils.project_paths import (
     format_resume_command,
     same_project_path,
 )
-from iac_code.utils.public_errors import public_error_from_exception
+from iac_code.utils.public_errors import public_error_from_exception, sanitize_strict_text
 
 SESSION_IDLE_TIMEOUT = 3600  # 1 hour
 CLEANUP_INTERVAL = 300  # 5 minutes
@@ -655,14 +655,14 @@ class ACPServer:
 
         resolved_session_id = entry.session_id
         if entry.cwd and not same_project_path(entry.cwd, cwd):
-            hint = _public_resume_command(resolved_session_id)
+            hint = _resume_command(entry.cwd, resolved_session_id)
             message = _("Session belongs to another project. Run: {hint}").format(hint=hint)
             raise _invalid_params(
                 message,
                 {
                     "session_id": session_id,
                     "resolved_session_id": resolved_session_id,
-                    "cwd": _PUBLIC_CWD,
+                    "cwd": entry.cwd,
                     "hint": hint,
                 },
             )
@@ -814,11 +814,11 @@ class ACPServer:
                         "code": "auth_required",
                     }
                 ) from exc
-            logger.exception("ACP runtime creation failed")
+            logger.error("ACP runtime creation failed: %s", sanitize_strict_text(str(exc)))
             failure = public_error_from_exception(exc)
             raise acp.RequestError.internal_error(
                 {
-                    "error": failure.summary,
+                    "error": str(exc),
                     "error_id": failure.error_id,
                 }
             ) from exc
@@ -1067,15 +1067,8 @@ def _reject_pipeline_mode_for_acp() -> None:
         raise _invalid_params(_ACP_PIPELINE_MODE_UNSUPPORTED_TEXT)
 
 
-_PUBLIC_CWD = "[PATH]"
-
-
 def _resume_command(cwd: str, session_id: str) -> str:
     return format_resume_command(cwd, session_id)
-
-
-def _public_resume_command(session_id: str) -> str:
-    return format_resume_command(_PUBLIC_CWD, session_id)
 
 
 def _active_session_cwd(session: ACPSession) -> str | None:
@@ -1089,14 +1082,14 @@ def _active_session_project_error(
     active_cwd = _active_session_cwd(session)
     if not active_cwd or same_project_path(active_cwd, cwd):
         return None
-    hint = _public_resume_command(resolved_session_id)
+    hint = _resume_command(active_cwd, resolved_session_id)
     message = _("Session belongs to another project. Run: {hint}").format(hint=hint)
     return _invalid_params(
         message,
         {
             "session_id": session_id,
             "resolved_session_id": resolved_session_id,
-            "cwd": _PUBLIC_CWD,
+            "cwd": active_cwd,
             "hint": hint,
         },
     )
@@ -1106,8 +1099,8 @@ def _resume_candidate_data(entry: SessionEntry) -> dict[str, str | None]:
     return {
         "session_id": entry.session_id,
         "name": entry.name,
-        "cwd": _PUBLIC_CWD,
-        "command": _public_resume_command(entry.session_id),
+        "cwd": entry.cwd,
+        "command": _resume_command(entry.cwd, entry.session_id),
     }
 
 

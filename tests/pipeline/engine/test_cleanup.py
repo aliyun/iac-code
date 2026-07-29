@@ -241,7 +241,7 @@ def test_observer_marks_ros_stack_delete_failed(tmp_path) -> None:
     assert updated.last_error
 
 
-def test_update_resource_sanitizes_durable_last_error(tmp_path) -> None:
+def test_update_resource_preserves_durable_canonical_last_error(tmp_path) -> None:
     ledger = CleanupLedger(tmp_path / "cleanup.yaml")
     resource = CleanupResource.from_observed(_observed_stack(), reason="rollback requested")
     ledger.mark_cleanup_required([resource], source_step_id="deploying", reason="rollback requested")
@@ -263,11 +263,12 @@ def test_update_resource_sanitizes_durable_last_error(tmp_path) -> None:
     resource_error = data["cleanup_resources"][0]["last_error"]
     history_error = data["history"][-1]["last_error"]
     for value in (resource_error, history_error):
-        assert "super-secret" not in value
-        assert "sk-live" not in value
-        assert "bearer-secret" not in value
-        assert "/Users/alice" not in value
-        assert "[REDACTED]" in value or "[PATH]" in value
+        assert "super-secret" in value
+        assert "sk-live" in value
+        assert "bearer-secret" in value
+        assert "/Users/alice" in value
+        assert "[REDACTED]" not in value
+        assert "[PATH]" not in value
 
 
 def test_observer_tracks_aliyun_api_delete_then_get_stack_polling(tmp_path) -> None:
@@ -637,11 +638,7 @@ def test_observer_rejects_persisted_mapping_result_stack_id_mismatch(tmp_path, c
     assert history[-1]["type"] == "cleanup_tool_result_mismatch"
     assert history[-1]["tool_use_id"] == "toolu-delete-a"
     assert history[-1]["mapped_resource_id"] == "stack-a"
-    assert history[-1]["result_resource_id"] != unsafe_stack_id
-    assert "super-secret" not in history[-1]["result_resource_id"]
-    assert "/Users/alice" not in history[-1]["result_resource_id"]
-    assert "[REDACTED]" in history[-1]["result_resource_id"]
-    assert "[PATH]" in history[-1]["result_resource_id"]
+    assert history[-1]["result_resource_id"] == unsafe_stack_id
     assert history[-1]["tool_name"] == "ros_stack"
     assert "Mismatched cleanup tool result" in caplog.text
     assert "super-secret" not in caplog.text

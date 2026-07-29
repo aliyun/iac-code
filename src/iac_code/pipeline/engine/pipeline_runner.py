@@ -57,7 +57,7 @@ from iac_code.types.stream_events import (
     TextDeltaEvent,
     ThinkingDeltaEvent,
 )
-from iac_code.utils.public_errors import sanitize_public_text
+from iac_code.utils.public_errors import sanitize_strict_text
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +98,12 @@ _SIDECAR_ROOT_FILES = {
     ".usage.jsonl.lock",
     "usage.jsonl",
 }
+
+
+def _strict_log_value(value: Any) -> Any:
+    if isinstance(value, str | Path):
+        return sanitize_strict_text(str(value))
+    return value
 
 
 def _entry_exists_no_follow(path: Path) -> bool:
@@ -379,9 +385,9 @@ def _normalize_failed_sub_pipeline_completed_event(event: PipelineEvent) -> None
 
     error = event.data.get("error")
     if error is not None:
-        event.data["error"] = sanitize_public_text(str(error))
+        event.data["error"] = str(error)
     if "error_summary" in event.data:
-        event.data["error_summary"] = sanitize_public_text(str(event.data["error_summary"]))
+        event.data["error_summary"] = str(event.data["error_summary"])
     else:
         event.data["error_summary"] = event.data.get("error") or "Unknown error"
 
@@ -878,10 +884,10 @@ class PipelineRunner:
             data["resource_count"] = resource_count
         logger.warning(
             "Pipeline cleanup tracking unavailable: step_id=%s operation=%s ledger_path=%s error=%s",
-            step_id,
-            operation,
-            ledger.path,
-            status.load_error,
+            _strict_log_value(step_id),
+            _strict_log_value(operation),
+            _strict_log_value(ledger.path),
+            _strict_log_value(status.load_error),
         )
         return PipelineEvent(
             type=PipelineEventType.PIPELINE_WARNING,
@@ -3193,6 +3199,7 @@ class PipelineRunner:
                 candidate_name=candidate_name,
                 reason=reason,
             )
+            log_candidate_name = _strict_log_value(candidate_name)
             logger.info(
                 (
                     "Pipeline candidate cancelled: pipeline=%s session_id=%s parent_step_id=%s "
@@ -3202,14 +3209,14 @@ class PipelineRunner:
                 self._session_id,
                 parent_step_id,
                 idx,
-                candidate_name,
+                log_candidate_name,
                 reason,
                 extra={
                     "pipeline": self._loaded.name,
                     "session_id": self._session_id,
                     "parent_step_id": parent_step_id,
                     "candidate_index": idx,
-                    "candidate_name": candidate_name,
+                    "candidate_name": log_candidate_name,
                     "reason": reason,
                 },
             )
@@ -4305,7 +4312,7 @@ class PipelineRunner:
                     data={
                         "from_step": step.step_id,
                         "to_step": target,
-                        "reason": sanitize_public_text(reason),
+                        "reason": reason,
                         "stale_fields": stale,
                     },
                 )
@@ -4820,9 +4827,12 @@ class PipelineRunner:
                     **failed_attrs,
                 )
                 log_extra = {
-                    "pipeline": self._loaded.name,
-                    "session_id": self._session_id,
-                    **failed_attrs,
+                    key: _strict_log_value(value)
+                    for key, value in {
+                        "pipeline": self._loaded.name,
+                        "session_id": self._session_id,
+                        **failed_attrs,
+                    }.items()
                 }
                 logger.warning(
                     (
@@ -4830,16 +4840,15 @@ class PipelineRunner:
                         "sub_pipeline_name=%s sub_pipeline_id=%s candidate_index=%d "
                         "candidate_name=%s error_type=%s error_summary=%s"
                     ),
-                    self._loaded.name,
-                    self._session_id,
-                    step.step_id,
-                    sub_spec.name,
-                    sub_pipeline_id,
+                    log_extra["pipeline"],
+                    log_extra["session_id"],
+                    log_extra["parent_step_id"],
+                    log_extra["sub_pipeline_name"],
+                    log_extra["sub_pipeline_id"],
                     i,
-                    candidate_name,
-                    error_type,
-                    error_summary,
-                    exc_info=True,
+                    log_extra["candidate_name"],
+                    log_extra["error_type"],
+                    log_extra["error_summary"],
                     extra=log_extra,
                 )
                 state["error"] = error_summary

@@ -269,6 +269,103 @@ async def test_push_worker_delivers_and_acks_success(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_push_retry_reloads_safe_mode_and_keeps_queued_payload_canonical(monkeypatch) -> None:
+    raw_path = "/srv/iac-code/private/result.json"
+
+    class RetryQueue:
+        def __init__(self) -> None:
+            self.current = A2APushJob(
+                job_id="job-1",
+                task_id="task-1",
+                config_id="cfg-1",
+                url="https://callback.example/a2a",
+                payload={"path": raw_path, "password": "real-secret"},
+                headers={},
+            )
+
+        async def claim(self, *, now=None):
+            job, self.current = self.current, None
+            return job
+
+        async def retry(self, job):
+            self.current = job
+
+        async def ack(self, job_id):
+            assert job_id == "job-1"
+
+        async def dead_letter(self, job):
+            raise AssertionError(f"unexpected dead letter: {job}")
+
+    class SequencedConnector:
+        def __init__(self) -> None:
+            self.statuses = [503, 204]
+            self.payloads = []
+
+        async def post(self, url, *, json, headers, timeout):
+            self.payloads.append(json)
+            return FakeResponse(self.statuses.pop(0))
+
+    queue = RetryQueue()
+    connector = SequencedConnector()
+    worker = A2APushDeliveryWorker(
+        queue=queue,
+        connector=connector,
+        metrics=NoOpA2AMetrics(),
+        retry_policy=A2APushRetryPolicy(initial_delay_seconds=0.0, jitter_ratio=0.0, max_attempts=2),
+        path_roots_resolver=lambda _task_id: [{"path": "/srv/iac-code", "label": "."}],
+        clock=lambda: 100.0,
+    )
+
+    monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", "false")
+    assert await worker.run_once() is False
+    assert connector.payloads[0] == {"path": raw_path, "password": "real-secret"}
+    assert queue.current.payload == {"path": raw_path, "password": "real-secret"}
+
+    monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", "true")
+    assert await worker.run_once() is True
+    assert connector.payloads[1] == {"path": "[PATH]", "password": "real-secret"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("enqueue_safe_mode", "send_safe_mode", "expected_path"),
+    [("false", "true", "[PATH]"), ("true", "false", "/srv/iac-code/private/result.json")],
+)
+async def test_push_first_send_uses_current_safe_mode_without_mutating_canonical_job(
+    monkeypatch,
+    tmp_path,
+    enqueue_safe_mode,
+    send_safe_mode,
+    expected_path,
+) -> None:
+    raw_path = "/srv/iac-code/private/result.json"
+    queue = LocalFileA2APushQueue(tmp_path)
+    connector = RecordingConnector()
+    worker = A2APushDeliveryWorker(
+        queue=queue,
+        connector=connector,
+        metrics=NoOpA2AMetrics(),
+        path_roots_resolver=lambda _task_id: [{"path": "/srv/iac-code", "label": "."}],
+    )
+    job = A2APushJob(
+        job_id="job-first-send",
+        task_id="task-1",
+        config_id="cfg-1",
+        url="https://callback.example/a2a",
+        payload={"path": raw_path, "password": "real-secret"},
+        headers={},
+    )
+    monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", enqueue_safe_mode)
+    await queue.enqueue(job)
+
+    monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", send_safe_mode)
+    assert await worker.run_once() is True
+
+    assert connector.posts[0]["json"] == {"path": expected_path, "password": "real-secret"}
+    assert job.payload == {"path": raw_path, "password": "real-secret"}
+
+
+@pytest.mark.asyncio
 async def test_push_worker_does_not_retry_or_dead_letter_when_ack_fails_after_callback_success() -> None:
     class AckFailingQueue:
         def __init__(self) -> None:

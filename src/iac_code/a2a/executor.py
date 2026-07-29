@@ -45,6 +45,7 @@ from iac_code.a2a.pipeline_snapshot import (
     snapshot_needs_backup_commit_repair,
 )
 from iac_code.a2a.pipeline_stream import BACKUP_COMMITTED_EVENT_TYPE, PipelineA2AEventPublisher
+from iac_code.a2a.projection import a2a_safe_mode_enabled
 from iac_code.a2a.runtime_overrides import (
     a2a_request_context,
     configure_runtime_model,
@@ -101,7 +102,7 @@ from iac_code.services.session_backup_state import (
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import TextDeltaEvent
 from iac_code.utils.file_security import atomic_write_text, ensure_private_dir, ensure_private_file
-from iac_code.utils.public_errors import public_exception_summary, sanitize_public_text
+from iac_code.utils.public_errors import sanitize_strict_text
 from iac_code.utils.public_paths import build_public_path_roots
 
 logger = logging.getLogger(__name__)
@@ -109,16 +110,14 @@ _CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS = 1
 _CANCEL_ACTIVE_TASK_DRAIN_TIMEOUT_SECONDS = 30
 _ERROR_TEXT_MAX_CHARS = 1000
 _DEFERRED_CLEANUP_PROMPTS_FILENAME = "cleanup-deferred-prompts.json"
-_A2A_SAFE_MODE_ENV = "IAC_CODE_A2A_SAFE_MODE"
-_TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
-
-
 def _format_exception(exc: BaseException) -> str:
-    return public_exception_summary(exc, max_chars=_ERROR_TEXT_MAX_CHARS)
+    message = str(exc)
+    raw = type(exc).__name__ if not message else f"{type(exc).__name__}: {message}"
+    return raw[:_ERROR_TEXT_MAX_CHARS]
 
 
 def _a2a_safe_mode_enabled() -> bool:
-    return os.environ.get(_A2A_SAFE_MODE_ENV, "").strip().lower() in _TRUTHY_ENV_VALUES
+    return a2a_safe_mode_enabled()
 
 
 A2APermissionResolver: TypeAlias = Callable[[Any], "bool | Awaitable[bool]"]
@@ -741,7 +740,7 @@ def _cleanup_resource_event_data(resource: Any, *, resource_count: int) -> dict[
 def _public_cleanup_error(value: Any) -> str | None:
     if not value:
         return None
-    text = sanitize_public_text(str(value))
+    text = str(value)
     return text[:_ERROR_TEXT_MAX_CHARS] + "..." if len(text) > _ERROR_TEXT_MAX_CHARS else text
 
 
@@ -1020,13 +1019,13 @@ class IacCodeA2AExecutor(AgentExecutor):
                 try:
                     pipeline_input = self._pipeline_input_from_context(context, cwd=cwd)
                 except ValueError as exc:
-                    raise InvalidParamsError(sanitize_public_text(str(exc))) from exc
+                    raise InvalidParamsError(str(exc)) from exc
                 self._validate_pipeline_request_input(pipeline_input, model=model)
             else:
                 try:
                     normal_input = self._normal_input_from_context(context, cwd=cwd)
                 except ValueError as exc:
-                    raise InvalidParamsError(sanitize_public_text(str(exc))) from exc
+                    raise InvalidParamsError(str(exc)) from exc
                 if normal_input.has_images:
                     self._validate_pipeline_request_input(normal_input, model=model)
             if pipeline_mode and requested_task_id is None:
@@ -1068,7 +1067,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 task_id=task_id,
                 context_id=context_id,
                 state=TaskState.TASK_STATE_FAILED,
-                text=sanitize_public_text(str(exc)),
+                text=str(exc),
             )
             if task is not None:
                 task.state = TASK_STATE_FAILED
@@ -1672,7 +1671,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             cwd = self._resolve_cwd(metadata)
             pipeline_input = parts_to_user_input(message.parts, cwd=cwd)
         except ValueError as exc:
-            raise InvalidParamsError(sanitize_public_text(str(exc))) from exc
+            raise InvalidParamsError(str(exc)) from exc
         model = self._resolve_model(metadata) or self._model
         self._validate_pipeline_request_input(pipeline_input, model=model)
 
@@ -1736,7 +1735,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 "A2A terminal session backup blocked task publication reason=%s retry_count=%s error=%s",
                 reason.value,
                 getattr(exc, "retry_count", 0),
-                public_exception_summary(exc, max_chars=_ERROR_TEXT_MAX_CHARS),
+                sanitize_strict_text(str(exc))[:_ERROR_TEXT_MAX_CHARS],
             )
             record_backup_blocked = getattr(self._metrics, "record_backup_blocked", None)
             if callable(record_backup_blocked):
@@ -1761,7 +1760,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                         "backupBlocked": {
                             "reason": reason.value,
                             "blockedTerminalState": blocked_terminal_state,
-                            "error": public_exception_summary(exc, max_chars=_ERROR_TEXT_MAX_CHARS),
+                            "error": _format_exception(exc),
                             "recoverable": True,
                         }
                     }
@@ -1993,7 +1992,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             return None
 
     def _log_executor_exception(self, stage: str, *, task_id: str, context_id: str) -> None:
-        logger.exception("A2A executor %s failed (task_id=%s, context_id=%s)", stage, task_id, context_id)
+        logger.error("A2A executor %s failed (task_id=%s, context_id=%s)", stage, task_id, context_id)
 
     async def _publish_mcp_status(
         self,
@@ -2121,8 +2120,8 @@ class IacCodeA2AExecutor(AgentExecutor):
             return
         try:
             await self._push_notifier.notify_task_state(task_id=task_id, context_id=context_id, state=state)
-        except Exception:
-            logger.warning("A2A push notification failed", exc_info=True)
+        except Exception as exc:
+            logger.warning("A2A push notification failed: %s", sanitize_strict_text(str(exc)))
 
 
 def _normal_handoff_has_backup_ack(handoff: dict[str, Any], journal_events: list[dict[str, Any]]) -> bool:

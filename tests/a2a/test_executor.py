@@ -1024,7 +1024,7 @@ async def test_executor_mcp_prompt_missing_required_argument_fails_before_llm(
 
 
 @pytest.mark.asyncio
-async def test_executor_mcp_prompt_server_error_fails_before_llm_and_redacts(
+async def test_executor_mcp_prompt_server_error_fails_before_llm_and_preserves_user_error(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
@@ -1057,7 +1057,7 @@ async def test_executor_mcp_prompt_server_error_fails_before_llm_and_redacts(
     assert dumped["status"]["state"] == "TASK_STATE_FAILED"
     text = dumped["status"]["message"]["parts"][0]["text"]
     assert text.startswith("RuntimeError: MCP prompt server failed with access_token=")
-    assert "super-secret-token" not in text
+    assert "super-secret-token" in text
 
 
 @pytest.mark.asyncio
@@ -1486,7 +1486,7 @@ async def test_executor_canceled_terminal_backup_blocked_records_cancel_intent(
 
 
 @pytest.mark.asyncio
-async def test_executor_sanitizes_initial_task_echo_paths_without_changing_runtime_prompt(
+async def test_executor_keeps_initial_task_echo_canonical_without_changing_runtime_prompt(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from a2a.types import Message, Part, Role
@@ -1517,13 +1517,11 @@ async def test_executor_sanitizes_initial_task_echo_paths_without_changing_runti
     initial_task = next(event for event in queue.events if isinstance(event, Task))
     rendered = dump(initial_task)
     history = rendered["history"][0]
-    assert history["parts"][0]["text"] == (
-        "paths: ./src/app.py $IAC_CODE_CONFIG_DIR/tool-results/session-1/result.txt [PATH]"
-    )
-    assert history["metadata"]["iac_code"]["cwd"] == "."
-    assert str(cwd) not in json.dumps(rendered)
-    assert str(config_dir) not in json.dumps(rendered)
-    assert "/opt/iac-code-outside/config.yaml" not in json.dumps(rendered)
+    assert history["parts"][0]["text"] == prompt
+    assert history["metadata"]["iac_code"]["cwd"] == str(cwd)
+    assert str(cwd) in history["parts"][0]["text"]
+    assert str(config_dir) in history["parts"][0]["text"]
+    assert "/opt/iac-code-outside/config.yaml" in history["parts"][0]["text"]
     assert loop.prompts == [prompt]
 
 
@@ -3397,7 +3395,7 @@ async def test_retryable_setup_error_returns_input_required(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
-async def test_setup_failure_logs_traceback_with_task_context(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+async def test_setup_failure_logs_stage_without_raw_traceback(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     class FailingTaskStore(A2ATaskStore):
         async def ensure_task_not_expired(self, task_id: str) -> None:
             raise FileNotFoundError(2, "No such file or directory")
@@ -3417,12 +3415,12 @@ async def test_setup_failure_logs_traceback_with_task_context(tmp_path: Path, ca
     assert "A2A executor setup failed" in caplog.text
     assert "task_id=task-1" in caplog.text
     assert "context_id=ctx-1" in caplog.text
-    assert "Traceback (most recent call last)" in caplog.text
-    assert "FileNotFoundError: [Errno 2] No such file or directory" in caplog.text
+    assert "Traceback (most recent call last)" not in caplog.text
+    assert "FileNotFoundError: [Errno 2] No such file or directory" not in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_runtime_creation_failure_logs_traceback_with_task_context(
+async def test_runtime_creation_failure_logs_stage_without_raw_traceback(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     def raise_missing_dependency(options):
@@ -3444,12 +3442,12 @@ async def test_runtime_creation_failure_logs_traceback_with_task_context(
     assert "A2A executor runtime setup failed" in caplog.text
     assert "task_id=task-1" in caplog.text
     assert "context_id=ctx-1" in caplog.text
-    assert "Traceback (most recent call last)" in caplog.text
-    assert "FileNotFoundError: [Errno 2] No such file or directory" in caplog.text
+    assert "Traceback (most recent call last)" not in caplog.text
+    assert "FileNotFoundError: [Errno 2] No such file or directory" not in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_streaming_failure_logs_traceback_with_task_context(
+async def test_streaming_failure_logs_stage_without_raw_traceback(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     class ExplodingLoop:
@@ -3474,8 +3472,8 @@ async def test_streaming_failure_logs_traceback_with_task_context(
     assert "A2A executor streaming failed" in caplog.text
     assert "task_id=task-1" in caplog.text
     assert "context_id=ctx-1" in caplog.text
-    assert "Traceback (most recent call last)" in caplog.text
-    assert "FileNotFoundError: [Errno 2] No such file or directory" in caplog.text
+    assert "Traceback (most recent call last)" not in caplog.text
+    assert "FileNotFoundError: [Errno 2] No such file or directory" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -3499,8 +3497,8 @@ async def test_unexpected_error_surfaces_type_and_message(monkeypatch: pytest.Mo
     assert dumped["status"]["state"] == "TASK_STATE_FAILED"
     text = dumped["status"]["message"]["parts"][0]["text"]
     assert text.startswith("RuntimeError:")
-    assert "sk-live" not in text
-    assert "/Users/alice" not in text
+    assert "sk-live" in text
+    assert "/Users/alice" in text
 
 
 @pytest.mark.asyncio

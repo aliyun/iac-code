@@ -417,7 +417,7 @@ async def test_json_output():
 
 
 @pytest.mark.asyncio
-async def test_json_output_reports_sanitized_runtime_creation_error():
+async def test_json_output_reports_local_runtime_creation_error():
     """Creation-time failures should be represented in the machine-readable JSON output."""
     buf = io.StringIO()
     runner = _make_runner(OutputFormat.JSON, buf)
@@ -433,12 +433,12 @@ async def test_json_output_reports_sanitized_runtime_creation_error():
     parsed = json.loads(buf.getvalue())
     assert "error" in parsed
     assert parsed["error_id"]
-    assert "hunter2" not in parsed["error"]
-    assert "/Users/alice" not in parsed["error"]
+    assert "hunter2" in parsed["error"]
+    assert "/Users/alice" in parsed["error"]
 
 
 @pytest.mark.asyncio
-async def test_stream_json_output_reports_sanitized_runtime_creation_error():
+async def test_stream_json_output_reports_local_runtime_creation_error():
     """Creation-time failures should be represented in the machine-readable stream-json output."""
     buf = io.StringIO()
     runner = _make_runner(OutputFormat.STREAM_JSON, buf)
@@ -454,8 +454,8 @@ async def test_stream_json_output_reports_sanitized_runtime_creation_error():
     parsed = json.loads(buf.getvalue())
     assert parsed["type"] == "error"
     assert parsed["error_id"]
-    assert "hunter2" not in parsed["error"]
-    assert "/Users/alice" not in parsed["error"]
+    assert "hunter2" in parsed["error"]
+    assert "/Users/alice" in parsed["error"]
 
 
 @pytest.mark.asyncio
@@ -1522,8 +1522,7 @@ async def test_no_api_key_prints_friendly_error():
 
 
 @pytest.mark.asyncio
-async def test_provider_not_configured_sanitizes_public_stderr():
-    """Provider setup errors may include paths or secrets; stderr must keep only public details."""
+async def test_provider_not_configured_preserves_local_stderr_details():
     buf = io.StringIO()
     err_buf = io.StringIO()
     runner = _make_runner(OutputFormat.TEXT, buf)
@@ -1545,16 +1544,14 @@ async def test_provider_not_configured_sanitizes_public_stderr():
     assert exit_code == EXIT_ERROR
     err_output = err_buf.getvalue()
     assert "Cannot load provider" in err_output
-    assert "sk-headlesssecret123" not in err_output
-    assert "Authorization: Bearer" not in err_output
-    assert "/Users/alice" not in err_output
-    assert "[REDACTED]" in err_output
-    assert "[PATH]" in err_output
+    assert "sk-headlesssecret123" in err_output
+    assert "Authorization: Bearer" in err_output
+    assert "/Users/alice" in err_output
     assert "/auth" in err_output
 
 
 @pytest.mark.asyncio
-async def test_provider_not_configured_during_runtime_creation_sanitizes_public_stderr():
+async def test_provider_not_configured_during_runtime_creation_preserves_local_stderr():
     buf = io.StringIO()
     err_buf = io.StringIO()
     runner = _make_runner(OutputFormat.TEXT, buf)
@@ -1573,16 +1570,14 @@ async def test_provider_not_configured_during_runtime_creation_sanitizes_public_
     assert exit_code == EXIT_ERROR
     err_output = err_buf.getvalue()
     assert "Cannot load provider" in err_output
-    assert "sk-createagentsecret123" not in err_output
-    assert r"C:\Users" not in err_output
-    assert r"Alice Smith\.iac-code" not in err_output
-    assert "[REDACTED]" in err_output
-    assert "[PATH]" in err_output
+    assert "sk-createagentsecret123" in err_output
+    assert r"C:\Users" in err_output
+    assert r"Alice Smith\.iac-code" in err_output
     assert "/auth" in err_output
 
 
 @pytest.mark.asyncio
-async def test_unexpected_error_during_runtime_creation_sanitizes_public_stderr():
+async def test_unexpected_error_during_runtime_creation_preserves_local_stderr():
     buf = io.StringIO()
     err_buf = io.StringIO()
     runner = _make_runner(OutputFormat.TEXT, buf)
@@ -1601,8 +1596,6 @@ async def test_unexpected_error_during_runtime_creation_sanitizes_public_stderr(
     assert exit_code == EXIT_ERROR
     err_output = err_buf.getvalue()
     assert "runtime failed" in err_output
-    assert "plain-secret" not in err_output
-    assert r"C:\Users" not in err_output
-    assert r"Alice Smith\.iac-code" not in err_output
-    assert "[REDACTED]" in err_output
-    assert "[PATH]" in err_output
+    assert "plain-secret" in err_output
+    assert r"C:\Users" in err_output
+    assert r"Alice Smith\.iac-code" in err_output

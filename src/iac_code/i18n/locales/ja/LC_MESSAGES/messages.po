@@ -41,7 +41,8 @@ msgstr "afterSequence は非負整数である必要があります"
 msgid "Unsafe artifact filename"
 msgstr "安全でないアーティファクトファイル名"
 
-#: src/iac_code/a2a/artifacts.py src/iac_code/utils/public_errors.py
+#: src/iac_code/a2a/artifacts.py src/iac_code/pipeline/engine/public_errors.py
+#: src/iac_code/utils/public_errors.py
 msgid "Unknown error"
 msgstr "不明なエラー"
 
@@ -105,8 +106,7 @@ msgstr "タスクがキャンセルされました。"
 msgid "Current model {model} does not support image input."
 msgstr "現在のモデル {model} は画像入力をサポートしていません。"
 
-#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
-#: src/iac_code/a2a/transports/dispatcher.py
+#: src/iac_code/a2a/executor.py src/iac_code/a2a/transports/dispatcher.py
 msgid "Authentication required. Configure credentials and retry."
 msgstr "認証が必要です。認証情報を設定して再試行してください。"
 
@@ -143,6 +143,11 @@ msgstr "A2A パイプライン状態が見つかりません"
 #: src/iac_code/a2a/pipeline_recovery.py
 msgid "A2A task/context mismatch"
 msgstr "A2A タスクとコンテキストが一致しません"
+
+#: src/iac_code/a2a/projection.py src/iac_code/pipeline/engine/public_errors.py
+#: src/iac_code/utils/public_errors.py
+msgid "Stack trace omitted from public event; see error_id."
+msgstr "公開イベントではスタックトレースを省略しました。error_id を確認してください。"
 
 #: src/iac_code/a2a/task_store.py
 msgid "A2A task expired"
@@ -197,8 +202,7 @@ msgstr "タスクが完了しました。"
 msgid "Task failed."
 msgstr "タスクが失敗しました。"
 
-#: src/iac_code/acp/convert.py src/iac_code/acp/session.py
-#: src/iac_code/ui/renderer.py
+#: src/iac_code/acp/convert.py src/iac_code/ui/renderer.py
 #, python-brace-format
 msgid "Input summary: {summary}"
 msgstr "入力サマリー: {summary}"
@@ -261,15 +265,6 @@ msgstr "\"{rule}\" を常に拒否（このセッション）"
 #: src/iac_code/acp/session.py
 msgid "Always reject this tool"
 msgstr "このツールを常に拒否"
-
-#: src/iac_code/acp/session.py
-#, python-brace-format
-msgid ""
-"Approve tool call: {tool}\n"
-"Input summary: {summary}"
-msgstr ""
-"ツール呼び出しを承認: {tool}\n"
-"入力サマリー: {summary}"
 
 #: src/iac_code/acp/session.py
 #, python-brace-format
@@ -4312,6 +4307,12 @@ msgstr "アクション '{action}' ではサポートされていないフィー
 #, python-brace-format
 msgid "Missing required field(s) for action '{action}': {fields}"
 msgstr "アクション '{action}' に必須フィールドがありません: {fields}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+msgid ""
+"Deployment parameters contain a redaction placeholder; provide the real "
+"parameter value before deployment."
+msgstr "デプロイパラメーターにマスキング用プレースホルダーが含まれています。デプロイ前に実際のパラメーター値を指定してください。"
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 #, python-brace-format
@@ -10615,10 +10616,6 @@ msgid ""
 "npmmirror:"
 msgstr "  オプション 2 - github.com にアクセスできない場合は、npmmirror 経由でインストールするために以下を実行してください："
 
-#: src/iac_code/utils/public_errors.py
-msgid "Stack trace omitted from public event; see error_id."
-msgstr "公開イベントではスタックトレースを省略しました。error_id を確認してください。"
-
 #: src/iac_code/utils/state_io.py
 #, python-brace-format
 msgid "refusing to follow symlink or reparse point: {path}"
@@ -11702,3 +11699,10 @@ msgstr "Bash を許可しますか？"
 #~ "which is unavailable in the stock "
 #~ "ROS parameter form."
 #~ msgstr "このキーは、標準 ROS パラメータフォームでは利用できないコンポーネント {} に対応します。"
+
+#~ msgid ""
+#~ "Approve tool call: {tool}\n"
+#~ "Input summary: {summary}"
+#~ msgstr ""
+#~ "ツール呼び出しを承認: {tool}\n"
+#~ "入力サマリー: {summary}"

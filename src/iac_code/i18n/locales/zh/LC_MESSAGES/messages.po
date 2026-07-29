@@ -41,7 +41,8 @@ msgstr "afterSequence 必须是非负整数"
 msgid "Unsafe artifact filename"
 msgstr "不安全的工件文件名"
 
-#: src/iac_code/a2a/artifacts.py src/iac_code/utils/public_errors.py
+#: src/iac_code/a2a/artifacts.py src/iac_code/pipeline/engine/public_errors.py
+#: src/iac_code/utils/public_errors.py
 msgid "Unknown error"
 msgstr "未知错误"
 
@@ -105,8 +106,7 @@ msgstr "任务已取消。"
 msgid "Current model {model} does not support image input."
 msgstr "当前模型 {model} 不支持图片输入。"
 
-#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
-#: src/iac_code/a2a/transports/dispatcher.py
+#: src/iac_code/a2a/executor.py src/iac_code/a2a/transports/dispatcher.py
 msgid "Authentication required. Configure credentials and retry."
 msgstr "需要身份验证。请配置凭据后重试。"
 
@@ -143,6 +143,11 @@ msgstr "未找到 A2A pipeline 状态"
 #: src/iac_code/a2a/pipeline_recovery.py
 msgid "A2A task/context mismatch"
 msgstr "A2A 任务与上下文不匹配"
+
+#: src/iac_code/a2a/projection.py src/iac_code/pipeline/engine/public_errors.py
+#: src/iac_code/utils/public_errors.py
+msgid "Stack trace omitted from public event; see error_id."
+msgstr "公开事件中已省略堆栈跟踪；请查看 error_id。"
 
 #: src/iac_code/a2a/task_store.py
 msgid "A2A task expired"
@@ -195,8 +200,7 @@ msgstr "任务已完成。"
 msgid "Task failed."
 msgstr "任务失败。"
 
-#: src/iac_code/acp/convert.py src/iac_code/acp/session.py
-#: src/iac_code/ui/renderer.py
+#: src/iac_code/acp/convert.py src/iac_code/ui/renderer.py
 #, python-brace-format
 msgid "Input summary: {summary}"
 msgstr "输入摘要：{summary}"
@@ -259,15 +263,6 @@ msgstr "始终拒绝 “{rule}”（本会话）"
 #: src/iac_code/acp/session.py
 msgid "Always reject this tool"
 msgstr "始终拒绝此工具"
-
-#: src/iac_code/acp/session.py
-#, python-brace-format
-msgid ""
-"Approve tool call: {tool}\n"
-"Input summary: {summary}"
-msgstr ""
-"批准工具调用：{tool}\n"
-"输入摘要：{summary}"
 
 #: src/iac_code/acp/session.py
 #, python-brace-format
@@ -4257,6 +4252,12 @@ msgstr "操作 '{action}' 不支持这些字段：{fields}"
 #, python-brace-format
 msgid "Missing required field(s) for action '{action}': {fields}"
 msgstr "操作 '{action}' 缺少必填字段：{fields}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+msgid ""
+"Deployment parameters contain a redaction placeholder; provide the real "
+"parameter value before deployment."
+msgstr "部署参数包含脱敏占位符；请在部署前提供真实参数值。"
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 #, python-brace-format
@@ -10440,10 +10441,6 @@ msgid ""
 "npmmirror:"
 msgstr "  方式 2 - 如果无法访问 github.com，运行以下命令通过 npmmirror 安装："
 
-#: src/iac_code/utils/public_errors.py
-msgid "Stack trace omitted from public event; see error_id."
-msgstr "公开事件中已省略堆栈跟踪；请查看 error_id。"
-
 #: src/iac_code/utils/state_io.py
 #, python-brace-format
 msgid "refusing to follow symlink or reparse point: {path}"
@@ -11489,3 +11486,10 @@ msgstr "允许 Bash?"
 #~ "which is unavailable in the stock "
 #~ "ROS parameter form."
 #~ msgstr "该键映射到组件 {}，此组件在原生 ROS 参数表单中不可用。"
+
+#~ msgid ""
+#~ "Approve tool call: {tool}\n"
+#~ "Input summary: {summary}"
+#~ msgstr ""
+#~ "批准工具调用：{tool}\n"
+#~ "输入摘要：{summary}"

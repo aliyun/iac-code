@@ -1174,7 +1174,7 @@ def test_web_session_runtime_publishes_error_when_input_conversion_fails(tmp_pat
     assert _event_types(events) == ["error", "turn.done"]
     assert events[0]["payload"] == {
         "turnId": result["turnId"],
-        "message": "ValueError: file reference escapes the workspace",
+        "message": "file reference escapes the workspace",
         "retryable": False,
     }
     assert events[1]["payload"]["failed"] is True
@@ -1221,7 +1221,7 @@ def test_normal_interrupt_with_attachments_preserves_draft_instead_of_dropping_r
     assert session.events.replay_after(0) == []
 
 
-def test_web_session_runtime_redacts_internal_exception_messages(tmp_path, monkeypatch) -> None:
+def test_web_session_runtime_preserves_local_exception_messages(tmp_path, monkeypatch) -> None:
     from iac_code.web.runtime import WebSessionRuntime, WebTurnRequest
     from iac_code.web.session_manager import WebSessionManager
 
@@ -1241,8 +1241,7 @@ def test_web_session_runtime_redacts_internal_exception_messages(tmp_path, monke
 
     assert result["accepted"] is False
     assert _event_types(events) == ["error", "turn.done"]
-    assert "sk-runtimesecret" not in events[0]["payload"]["message"]
-    assert "[REDACTED]" in events[0]["payload"]["message"]
+    assert "sk-runtimesecret" in events[0]["payload"]["message"]
 
 
 def test_web_session_runtime_requires_injected_manager(tmp_path) -> None:

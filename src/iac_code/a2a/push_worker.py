@@ -5,7 +5,7 @@ import inspect
 import logging
 import socket
 import time
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Iterable, Mapping
 from ipaddress import ip_address
 from typing import Any, Callable, Protocol, TypeAlias, cast
 from urllib.parse import urlparse, urlunparse
@@ -13,9 +13,10 @@ from urllib.parse import urlparse, urlunparse
 import httpx
 
 from iac_code.a2a.metrics import A2AMetrics, NoOpA2AMetrics
+from iac_code.a2a.projection import project_a2a_data
 from iac_code.a2a.push import InvalidPushNotificationConfigError, validate_push_callback_url
 from iac_code.a2a.push_queue import A2APushJob, A2APushQueue, A2APushRetryPolicy, redact_push_headers
-from iac_code.utils.public_errors import public_exception_summary, sanitize_public_text
+from iac_code.utils.public_errors import sanitize_strict_text
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,10 @@ class A2APushCallbackConnector(Protocol):
 
 
 A2APushHeaderResolver: TypeAlias = Callable[[str, str], "dict[str, str] | Awaitable[dict[str, str]]"]
+A2APushPathRootsResolver: TypeAlias = Callable[
+    [str],
+    "Iterable[Mapping[str, str]] | Awaitable[Iterable[Mapping[str, str]]]",
+]
 
 
 class LoggingA2APushAlertSink:
@@ -40,7 +45,7 @@ class LoggingA2APushAlertSink:
                 "config_id": job.config_id,
                 "url": _safe_callback_url_for_log(job.url),
                 "attempt": job.attempt,
-                "last_error": sanitize_public_text(job.last_error),
+                "last_error": sanitize_strict_text(job.last_error),
                 "headers": redact_push_headers(job.headers),
             },
         )
@@ -80,6 +85,7 @@ class A2APushDeliveryWorker:
         retry_policy: A2APushRetryPolicy | None = None,
         alert_sink: A2APushAlertSink | None = None,
         header_resolver: A2APushHeaderResolver | None = None,
+        path_roots_resolver: A2APushPathRootsResolver | None = None,
         clock: Callable[[], float] = time.time,
         timeout_seconds: float = 5.0,
     ) -> None:
@@ -91,6 +97,7 @@ class A2APushDeliveryWorker:
         self._retry_policy = retry_policy or A2APushRetryPolicy()
         self._alert_sink = alert_sink or LoggingA2APushAlertSink()
         self._header_resolver = header_resolver
+        self._path_roots_resolver = path_roots_resolver
         self._clock = clock
         self._timeout_seconds = timeout_seconds
 
@@ -102,9 +109,10 @@ class A2APushDeliveryWorker:
         started = self._clock()
         try:
             headers = await self._resolve_headers(job)
+            public_path_roots = await self._resolve_path_roots(job)
             response = await self._connector.post(
                 job.url,
-                json=job.payload,
+                json=project_a2a_data(job.payload, public_path_roots=public_path_roots),
                 headers=headers,
                 timeout=self._timeout_seconds,
             )
@@ -112,7 +120,7 @@ class A2APushDeliveryWorker:
                 try:
                     await self._queue.ack(job.job_id)
                 except Exception:
-                    logger.exception(
+                    logger.error(
                         "A2A push notification delivered but queue ack failed; lease recovery will retry ownership",
                         extra={"task_id": job.task_id, "config_id": job.config_id, "job_id": job.job_id},
                     )
@@ -171,6 +179,14 @@ class A2APushDeliveryWorker:
         resolved = cast(dict[str, str], resolved)
         return dict(resolved)
 
+    async def _resolve_path_roots(self, job: A2APushJob) -> Iterable[Mapping[str, str]] | None:
+        if self._path_roots_resolver is None:
+            return None
+        resolved = self._path_roots_resolver(job.task_id)
+        if inspect.isawaitable(resolved):
+            resolved = await resolved
+        return cast(Iterable[Mapping[str, str]], resolved)
+
 
 def _is_transient_delivery_error(exc: Exception) -> bool:
     text = str(exc)
@@ -180,13 +196,13 @@ def _is_transient_delivery_error(exc: Exception) -> bool:
 
 
 def _public_push_error(exc: Exception) -> str:
-    return public_exception_summary(exc, max_chars=1000)
+    return sanitize_strict_text(f"{type(exc).__name__}: {exc}")[:1000]
 
 
 def _safe_callback_url_for_log(url: str) -> str:
     parsed = urlparse(url)
     if not parsed.scheme or parsed.hostname is None:
-        return sanitize_public_text(url)
+        return sanitize_strict_text(url)
     host = parsed.hostname
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"
@@ -194,7 +210,7 @@ def _safe_callback_url_for_log(url: str) -> str:
     try:
         port = parsed.port
     except ValueError:
-        return sanitize_public_text(url)
+        return sanitize_strict_text(url)
     if port is not None:
         netloc = f"{netloc}:{port}"
     return urlunparse((parsed.scheme, netloc, parsed.path or "", "", "", ""))

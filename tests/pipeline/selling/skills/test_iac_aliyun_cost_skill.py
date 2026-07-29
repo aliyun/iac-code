@@ -406,7 +406,8 @@ class TestCostPrompt:
     def test_prompt_is_not_duplicate_output_reference(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")
         assert "Preview-Validated Pricing Parameter Set" in body
-        assert "deployment_parameters" not in body
+        assert "`deployment_parameters`" in body
+        assert "不得写入 `***`、`[REDACTED]` 或 `<redacted>`" in body
         assert "询价失败但 PreviewStack 已成功" not in body
         assert "字段为字符串" not in body
 

@@ -45,7 +45,8 @@ msgstr "afterSequence muss eine nicht negative Ganzzahl sein"
 msgid "Unsafe artifact filename"
 msgstr "Unsicherer Artefaktdateiname"
 
-#: src/iac_code/a2a/artifacts.py src/iac_code/utils/public_errors.py
+#: src/iac_code/a2a/artifacts.py src/iac_code/pipeline/engine/public_errors.py
+#: src/iac_code/utils/public_errors.py
 msgid "Unknown error"
 msgstr "Unbekannter Fehler"
 
@@ -119,8 +120,7 @@ msgstr "Aufgabe abgebrochen."
 msgid "Current model {model} does not support image input."
 msgstr "Aktuelles Modell {model} unterstützt keine Bildeingabe."
 
-#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
-#: src/iac_code/a2a/transports/dispatcher.py
+#: src/iac_code/a2a/executor.py src/iac_code/a2a/transports/dispatcher.py
 msgid "Authentication required. Configure credentials and retry."
 msgstr ""
 "Authentifizierung erforderlich. Anmeldedaten konfigurieren und erneut "
@@ -161,6 +161,11 @@ msgstr "A2A-Pipeline-Zustand nicht gefunden"
 #: src/iac_code/a2a/pipeline_recovery.py
 msgid "A2A task/context mismatch"
 msgstr "A2A-Aufgabe und Kontext passen nicht zusammen"
+
+#: src/iac_code/a2a/projection.py src/iac_code/pipeline/engine/public_errors.py
+#: src/iac_code/utils/public_errors.py
+msgid "Stack trace omitted from public event; see error_id."
+msgstr "Stacktrace im öffentlichen Ereignis ausgelassen; siehe error_id."
 
 #: src/iac_code/a2a/task_store.py
 msgid "A2A task expired"
@@ -215,8 +220,7 @@ msgstr "Aufgabe abgeschlossen."
 msgid "Task failed."
 msgstr "Aufgabe fehlgeschlagen."
 
-#: src/iac_code/acp/convert.py src/iac_code/acp/session.py
-#: src/iac_code/ui/renderer.py
+#: src/iac_code/acp/convert.py src/iac_code/ui/renderer.py
 #, python-brace-format
 msgid "Input summary: {summary}"
 msgstr "Eingabezusammenfassung: {summary}"
@@ -284,15 +288,6 @@ msgstr "Immer \"{rule}\" ablehnen (diese Sitzung)"
 #: src/iac_code/acp/session.py
 msgid "Always reject this tool"
 msgstr "Dieses Tool immer ablehnen"
-
-#: src/iac_code/acp/session.py
-#, python-brace-format
-msgid ""
-"Approve tool call: {tool}\n"
-"Input summary: {summary}"
-msgstr ""
-"Tool-Aufruf genehmigen: {tool}\n"
-"Eingabezusammenfassung: {summary}"
 
 #: src/iac_code/acp/session.py
 #, python-brace-format
@@ -4567,6 +4562,15 @@ msgstr "Felder werden für Aktion '{action}' nicht unterstützt: {fields}"
 #, python-brace-format
 msgid "Missing required field(s) for action '{action}': {fields}"
 msgstr "Erforderliche Felder für Aktion '{action}' fehlen: {fields}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+msgid ""
+"Deployment parameters contain a redaction placeholder; provide the real "
+"parameter value before deployment."
+msgstr ""
+"Die Bereitstellungsparameter enthalten einen Platzhalter für die "
+"Schwärzung; geben Sie vor der Bereitstellung den tatsächlichen "
+"Parameterwert an."
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 #, python-brace-format
@@ -11466,10 +11470,6 @@ msgstr ""
 "  Option 2 - falls Sie github.com nicht erreichen können, führen Sie dies"
 " aus, um über npmmirror zu installieren:"
 
-#: src/iac_code/utils/public_errors.py
-msgid "Stack trace omitted from public event; see error_id."
-msgstr "Stacktrace im öffentlichen Ereignis ausgelassen; siehe error_id."
-
 #: src/iac_code/utils/state_io.py
 #, python-brace-format
 msgid "refusing to follow symlink or reparse point: {path}"
@@ -12688,3 +12688,10 @@ msgstr "Bash zulassen?"
 #~ "Der Schlüssel verweist auf die "
 #~ "Komponente {}, die im Standard-ROS-"
 #~ "Parameterformular nicht verfügbar ist."
+
+#~ msgid ""
+#~ "Approve tool call: {tool}\n"
+#~ "Input summary: {summary}"
+#~ msgstr ""
+#~ "Tool-Aufruf genehmigen: {tool}\n"
+#~ "Eingabezusammenfassung: {summary}"

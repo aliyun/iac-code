@@ -11,9 +11,7 @@ import sys
 from enum import Enum
 from typing import IO, Any
 
-from iac_code.a2a.artifacts import sanitize_public_tool_output_data
 from iac_code.mcp.progress import mcp_progress_metadata
-from iac_code.mcp.redaction import sanitize_mcp_public_data
 from iac_code.services.permissions.audit import build_input_summary
 from iac_code.tools.cloud.aliyun.result_contract import ALIYUN_HTTP_METADATA_KEY
 from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY
@@ -33,7 +31,6 @@ from iac_code.types.stream_events import (
     ToolUseEndEvent,
     ToolUseStartEvent,
 )
-from iac_code.utils.public_errors import sanitize_public_text
 
 
 class OutputFormat(str, Enum):
@@ -45,19 +42,12 @@ class OutputFormat(str, Enum):
 
 
 def _public_tool_result(event: ToolResultEvent) -> Any:
-    result = sanitize_public_tool_output_data(event.result, public_path_roots=event.public_path_roots)
-    return sanitize_mcp_public_data(result, fallback_summary="") if event.tool_name.startswith("mcp__") else result
+    return event.result
 
 
 def _public_tool_metadata(event: ToolResultEvent, metadata: Any) -> Any:
     public_metadata = _strip_internal_tool_metadata(metadata)
-    if event.is_error:
-        public_metadata = _sanitize_public_value(public_metadata, public_path_roots=event.public_path_roots)
-    result = sanitize_public_tool_output_data(
-        public_metadata,
-        public_path_roots=event.public_path_roots,
-    )
-    return sanitize_mcp_public_data(result, fallback_summary="") if event.tool_name.startswith("mcp__") else result
+    return public_metadata
 
 
 def _strip_internal_tool_metadata(metadata: Any) -> Any:
@@ -77,20 +67,6 @@ def _strip_internal_tool_metadata(metadata: Any) -> Any:
     if isinstance(metadata, tuple):
         return [_strip_internal_tool_metadata(item) for item in metadata]
     return metadata
-
-
-def _sanitize_public_value(value: Any, *, public_path_roots: list[dict[str, str]] | None = None) -> Any:
-    if isinstance(value, str):
-        return sanitize_public_text(value, public_path_roots=public_path_roots)
-    if isinstance(value, list):
-        return [_sanitize_public_value(item, public_path_roots=public_path_roots) for item in value]
-    if isinstance(value, tuple):
-        return [_sanitize_public_value(item, public_path_roots=public_path_roots) for item in value]
-    if isinstance(value, dict):
-        return {
-            str(key): _sanitize_public_value(item, public_path_roots=public_path_roots) for key, item in value.items()
-        }
-    return value
 
 
 def stream_json_event_data(event: StreamEvent) -> dict[str, Any]:
@@ -152,9 +128,7 @@ def stream_json_event_data(event: StreamEvent) -> dict[str, Any]:
         return data
 
     data = dataclasses.asdict(event)
-    if isinstance(event, ErrorEvent):
-        data["error"] = sanitize_public_text(event.error)
-    elif isinstance(event, ToolResultEvent):
+    if isinstance(event, ToolResultEvent):
         data.pop("public_path_roots", None)
         if data.get("metadata") is None:
             data.pop("metadata", None)
@@ -186,7 +160,7 @@ class TextWriter:
             self._stream.flush()
             self._has_output = True
         elif isinstance(event, ErrorEvent):
-            sys.stderr.write(f"Error: {sanitize_public_text(event.error)}\n")
+            sys.stderr.write(f"Error: {event.error}\n")
             sys.stderr.flush()
 
     def finalize(self) -> None:
@@ -236,7 +210,7 @@ class JsonWriter:
             if not is_empty_synthetic_max_turns:
                 self._usage = usage
         elif isinstance(event, ErrorEvent):
-            self._error = sanitize_public_text(event.error)
+            self._error = event.error
             self._error_id = event.error_id
 
     def finalize(self) -> None:

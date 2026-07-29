@@ -25,6 +25,7 @@ from iac_code.pipeline.engine.step_spec import LoadedPipeline, SubPipelineSpec
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.services.session_backup import SessionBackupBlocked
 from iac_code.types.stream_events import SubPipelineStreamEvent
+from iac_code.utils.public_errors import sanitize_strict_text
 
 logger = logging.getLogger(__name__)
 
@@ -559,33 +560,33 @@ class SubPipelineExecutor:
                 **attrs,
             )
             log_extra = {
-                "pipeline": self._pipeline.name,
-                "session_id": session_id,
-                "parent_step_id": parent_step_id,
-                "sub_pipeline_name": sub_spec.name,
-                "sub_pipeline_id": sub_pipeline_id,
+                "pipeline": sanitize_strict_text(self._pipeline.name),
+                "session_id": sanitize_strict_text(session_id),
+                "parent_step_id": sanitize_strict_text(parent_step_id or ""),
+                "sub_pipeline_name": sanitize_strict_text(sub_spec.name),
+                "sub_pipeline_id": sanitize_strict_text(sub_pipeline_id),
                 "candidate_index": candidate_index,
-                "candidate_name": candidate_name,
-                "error_summary": error_summary,
-                "error_type": error_type,
+                "candidate_name": sanitize_strict_text(candidate_name),
+                "error_summary": sanitize_strict_text(error_summary),
+                "error_type": sanitize_strict_text(error_type),
             }
             if extra_attrs:
-                log_extra.update(extra_attrs)
+                log_extra.update({key: sanitize_strict_text(value) for key, value in extra_attrs.items()})
             logger.warning(
                 (
                     "Sub-pipeline failed: pipeline=%s session_id=%s parent_step_id=%s "
                     "sub_pipeline_name=%s sub_pipeline_id=%s candidate_index=%d "
                     "candidate_name=%s error_type=%s error_summary=%s"
                 ),
-                self._pipeline.name,
-                session_id,
-                parent_step_id,
-                sub_spec.name,
-                sub_pipeline_id,
+                log_extra["pipeline"],
+                log_extra["session_id"],
+                log_extra["parent_step_id"],
+                log_extra["sub_pipeline_name"],
+                log_extra["sub_pipeline_id"],
                 candidate_index,
-                candidate_name,
-                error_type,
-                error_summary,
+                log_extra["candidate_name"],
+                log_extra["error_type"],
+                log_extra["error_summary"],
                 extra=log_extra,
             )
 
@@ -937,32 +938,32 @@ class SubPipelineExecutor:
                         **sub_pipeline_attrs,
                     )
                     log_extra = {
-                        "pipeline": self._pipeline.name,
-                        "session_id": session_id,
-                        "parent_step_id": parent_step_id,
-                        "sub_pipeline_name": sub_spec.name,
-                        "sub_pipeline_id": sub_pipeline_id,
+                        "pipeline": sanitize_strict_text(self._pipeline.name),
+                        "session_id": sanitize_strict_text(session_id),
+                        "parent_step_id": sanitize_strict_text(parent_step_id or ""),
+                        "sub_pipeline_name": sanitize_strict_text(sub_spec.name),
+                        "sub_pipeline_id": sanitize_strict_text(sub_pipeline_id),
                         "candidate_index": candidate_index,
-                        "candidate_name": candidate_name,
-                        "error_summary": error_summary,
-                        "error_type": error_type,
+                        "candidate_name": sanitize_strict_text(candidate_name),
+                        "error_summary": sanitize_strict_text(error_summary),
+                        "error_type": sanitize_strict_text(error_type),
                         "error_id": failure.error_id,
                     }
-                    logger.exception(
+                    logger.warning(
                         (
                             "Sub-pipeline failed: pipeline=%s session_id=%s parent_step_id=%s "
                             "sub_pipeline_name=%s sub_pipeline_id=%s candidate_index=%d "
                             "candidate_name=%s error_type=%s error_summary=%s"
                         ),
-                        self._pipeline.name,
-                        session_id,
-                        parent_step_id,
-                        sub_spec.name,
-                        sub_pipeline_id,
+                        log_extra["pipeline"],
+                        log_extra["session_id"],
+                        log_extra["parent_step_id"],
+                        log_extra["sub_pipeline_name"],
+                        log_extra["sub_pipeline_id"],
                         candidate_index,
-                        candidate_name,
-                        error_type,
-                        error_summary,
+                        log_extra["candidate_name"],
+                        log_extra["error_type"],
+                        log_extra["error_summary"],
                         extra=log_extra,
                     )
         finally:

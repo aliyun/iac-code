@@ -23,11 +23,12 @@ from google.protobuf.json_format import MessageToDict, ParseDict
 
 from iac_code.a2a.metrics import A2AMetrics, NoOpA2AMetrics
 from iac_code.a2a.persistence import A2APersistenceStore, _protocol_id_file_stem
+from iac_code.a2a.projection import build_a2a_public_path_roots, project_a2a_data
 from iac_code.a2a.push_queue import A2APushJob, A2APushQueue, LocalFileA2APushQueue
 from iac_code.a2a.push_secrets import A2APushSecretKeyring
 from iac_code.a2a.types import validate_protocol_id
 from iac_code.utils.file_security import restrict_file_permissions, safe_replace
-from iac_code.utils.public_errors import public_exception_summary
+from iac_code.utils.public_errors import sanitize_strict_text
 
 logger = logging.getLogger(__name__)
 
@@ -270,8 +271,7 @@ class A2APushSender(PushNotificationSender):
             logger.warning(
                 "Failed to load A2A push configs for task %s: %s",
                 task_id,
-                public_exception_summary(exc, max_chars=500),
-                exc_info=True,
+                sanitize_strict_text(str(exc))[:500],
             )
             return
         payload = MessageToDict(to_stream_response(event), preserving_proto_field_name=False)
@@ -291,8 +291,7 @@ class A2APushSender(PushNotificationSender):
                     "Failed to enqueue A2A push notification for task %s config %s: %s",
                     task_id,
                     config_id,
-                    public_exception_summary(exc, max_chars=500),
-                    exc_info=True,
+                    sanitize_strict_text(str(exc))[:500],
                 )
                 continue
             self._metrics.record_push_enqueued()
@@ -342,7 +341,11 @@ class A2APushNotifier:
         payload = {"taskId": task_id, "contextId": context_id, "state": state}
         for attempt in range(self._max_attempts):
             try:
-                response = await self._http_client.post(config.callback_url, json=payload, timeout=5.0)
+                response = await self._http_client.post(
+                    config.callback_url,
+                    json=project_a2a_data(payload, public_path_roots=self._path_roots(task_id, context_id)),
+                    timeout=5.0,
+                )
                 response.raise_for_status()
                 return True
             except Exception:
@@ -351,6 +354,14 @@ class A2APushNotifier:
                 if self._retry_delay_seconds:
                     await asyncio.sleep(self._retry_delay_seconds)
         return False
+
+    def _path_roots(self, task_id: str, context_id: str) -> list[dict[str, str]]:
+        task = self._persistence.load_task(task_id)
+        resolved_context_id = task.context_id if task is not None else context_id
+        context = self._persistence.load_context(resolved_context_id)
+        if context is None:
+            return build_a2a_public_path_roots(cwd=str(Path.cwd()))
+        return build_a2a_public_path_roots(cwd=context.cwd, session_id=context.session_id)
 
     async def aclose(self) -> None:
         if not self._owns_http_client:

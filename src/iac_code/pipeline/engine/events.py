@@ -6,8 +6,6 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 
-from iac_code.utils.public_errors import sanitize_public_text
-
 
 class PipelineEventType(str, Enum):
     PIPELINE_STARTED = "pipeline_started"
@@ -56,8 +54,8 @@ def backup_blocked_event(step_id: str | None, reason: object, error: object) -> 
         step_id=step_id,
         timestamp=time.time(),
         data={
-            "reason": sanitize_public_text(str(reason_text)),
-            "error": sanitize_public_text(str(error)),
+            "reason": str(reason_text),
+            "error": str(error),
             "recoverable": True,
         },
     )

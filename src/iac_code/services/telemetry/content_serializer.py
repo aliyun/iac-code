@@ -8,6 +8,7 @@ gen_ai.tool.call.arguments, and gen_ai.tool.call.result.
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any
@@ -21,9 +22,17 @@ from iac_code.tools.cloud.registry import (
     ANONYMOUS_ALIYUN_TOOL_NAMES,
     CREDENTIAL_GATED_ALIYUN_TOOL_NAMES,
 )
+from iac_code.utils.public_errors import sanitize_strict_text
 from iac_code.utils.tool_result_redaction import redact_tool_result_file_content
 
 _MAX_CONTENT_BYTES = 4096
+_REDACTED_VALUE = "[REDACTED]"
+_SENSITIVE_MAPPING_KEY_PATTERN = re.compile(
+    r"(?:auth|authorization|cookie|credential|credentials|passphrase|password|passwd|"
+    r"private[_-]?key|pwd|secret|session|signature|token|api[_-]?key|"
+    r"access[_-]?key(?:[_-]?(?:id|secret))?)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -55,26 +64,62 @@ def _truncate(s: str, max_bytes: int = _MAX_CONTENT_BYTES) -> str:
 
 
 def _json_dumps(obj: Any) -> str:
-    return json.dumps(obj, ensure_ascii=False, default=str)
+    return json.dumps(obj, ensure_ascii=False)
+
+
+def _strict_text(value: Any) -> str:
+    return sanitize_strict_text("" if value is None else str(value), fallback_summary="")
+
+
+def _is_sensitive_mapping_key(value: str) -> bool:
+    return _SENSITIVE_MAPPING_KEY_PATTERN.search(value) is not None
+
+
+def _strict_json_value(value: Any) -> Any:
+    """Normalize unknown leaves and strict-sanitize before JSON serialization."""
+
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return _strict_text(value)
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for raw_key, item in value.items():
+            raw_key_text = "" if raw_key is None else str(raw_key)
+            key = _strict_text(raw_key_text)
+            if key in result:
+                index = 2
+                while f"{key}#{index}" in result:
+                    index += 1
+                key = f"{key}#{index}"
+            result[key] = _REDACTED_VALUE if _is_sensitive_mapping_key(raw_key_text) else _strict_json_value(item)
+        return result
+    if isinstance(value, (list, tuple)):
+        return [_strict_json_value(item) for item in value]
+    return _strict_text(value)
+
+
+def _strict_json_dumps(obj: Any) -> str:
+    return _json_dumps(_strict_json_value(obj))
 
 
 def _redacted_tool_result_string(value: Any) -> str:
     redacted = redact_tool_result_file_content(value)
     if isinstance(redacted, str):
-        return redacted
-    return _json_dumps(redacted)
+        return _strict_text(redacted)
+    return _strict_json_dumps(redacted)
 
 
 def serialize_user_input(user_input: str) -> str:
     """Serialize a plain user input string to gen_ai.input.messages JSON."""
-    return _json_dumps([{"role": "user", "parts": [{"type": "text", "content": _truncate(user_input)}]}])
+    return _json_dumps([{"role": "user", "parts": [{"type": "text", "content": _truncate(_strict_text(user_input))}]}])
 
 
 def _tool_call_id(block: Any) -> str:
     for attribute in ("tool_use_id", "id"):
         value = getattr(block, attribute, None)
         if isinstance(value, str) and value:
-            return value
+            return _strict_text(value)
     return ""
 
 
@@ -89,16 +134,18 @@ def serialize_input_messages(messages: list) -> str:
         role = getattr(msg, "role", "unknown")
         content = getattr(msg, "content", "")
         if isinstance(content, str):
-            parts = [{"type": "text", "content": _truncate(content)}]
+            parts = [{"type": "text", "content": _truncate(_strict_text(content))}]
         elif isinstance(content, list):
             parts = []
             for block in content:
                 btype = getattr(block, "type", "text")
                 if btype == "text":
-                    parts.append({"type": "text", "content": _truncate(getattr(block, "text", "") or "")})
+                    parts.append(
+                        {"type": "text", "content": _truncate(_strict_text(getattr(block, "text", "") or ""))}
+                    )
                 elif btype == "tool_use":
                     tool_use_id = _tool_call_id(block)
-                    tool_name = getattr(block, "name", "")
+                    tool_name = _strict_text(getattr(block, "name", ""))
                     if tool_use_id and isinstance(tool_name, str):
                         unmatched_tool_names[tool_use_id].append(tool_name)
                     parts.append(
@@ -136,8 +183,8 @@ def serialize_input_messages(messages: list) -> str:
                 else:
                     parts.append({"type": btype})
         else:
-            parts = [{"type": "text", "content": _truncate(str(content))}]
-        result.append({"role": role, "parts": parts})
+            parts = [{"type": "text", "content": _truncate(_strict_text(content))}]
+        result.append({"role": _strict_text(role), "parts": parts})
     return _json_dumps(result)
 
 
@@ -150,7 +197,7 @@ def serialize_output_messages(text: str, finish_reason: str) -> str:
         [
             {
                 "role": "assistant",
-                "parts": [{"type": "text", "content": _truncate(text)}],
+                "parts": [{"type": "text", "content": _truncate(_strict_text(text))}],
                 "finish_reason": finish_reason,
             }
         ]
@@ -159,7 +206,7 @@ def serialize_output_messages(text: str, finish_reason: str) -> str:
 
 def serialize_system_instructions(system: str) -> str:
     """Serialize system prompt to gen_ai.system_instructions JSON string."""
-    return _json_dumps([{"type": "text", "content": _truncate(system)}])
+    return _json_dumps([{"type": "text", "content": _truncate(_strict_text(system))}])
 
 
 def serialize_tool_definitions(tools: list | None) -> str:
@@ -238,8 +285,8 @@ def serialize_tool_arguments(arguments: dict | Any, *, tool_name: str | None = N
     if tool_name in _ALIYUN_TOOL_NAMES:
         return _aliyun_tool_arguments(arguments, tool_name)
     if isinstance(arguments, str):
-        return _truncate(arguments)
-    return _truncate(_json_dumps(arguments))
+        return _truncate(_strict_text(arguments))
+    return _truncate(_strict_json_dumps(arguments))
 
 
 def _aliyun_tool_result(

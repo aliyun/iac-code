@@ -23,7 +23,7 @@ def test_process_event_serializer_hides_partial_tool_input() -> None:
     }
 
 
-def test_process_event_serializer_sanitizes_tool_result() -> None:
+def test_process_event_serializer_preserves_local_tool_result() -> None:
     serializer = ProcessEventSerializer()
 
     event = ToolResultEvent(
@@ -34,9 +34,9 @@ def test_process_event_serializer_sanitizes_tool_result() -> None:
     )
 
     rendered = json.dumps(serializer.serialize(event), ensure_ascii=False)
-    assert "sk-live12345" not in rendered
-    assert "/Users/alice" not in rendered
-    assert "settings.yml" not in rendered
+    assert "sk-live12345" in rendered
+    assert "/Users/alice" in rendered
+    assert "settings.yml" in rendered
 
 
 def test_process_event_serializer_normal_aliyun_result_reuses_stream_json_projection() -> None:

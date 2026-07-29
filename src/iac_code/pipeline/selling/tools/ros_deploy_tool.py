@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from iac_code.i18n import _
+from iac_code.pipeline.selling.hooks.deploying import contains_redaction_placeholder
 from iac_code.services.permissions.rule_scope import scope_for_rule_source
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.tools.cloud.aliyun.ros_stack import RosStack
@@ -263,6 +264,12 @@ class RosDeployTool(Tool):
             return _("Missing required field(s) for action '{action}': {fields}").format(
                 action=action,
                 fields=", ".join(missing_fields),
+            )
+
+        if contains_redaction_placeholder(input.get("parameters")):
+            return _(
+                "Deployment parameters contain a redaction placeholder; "
+                "provide the real parameter value before deployment."
             )
 
         return None

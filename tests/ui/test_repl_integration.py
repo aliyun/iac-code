@@ -916,7 +916,7 @@ async def test_handle_command_reports_disabled_skill():
 
 
 @pytest.mark.asyncio
-async def test_handle_mcp_prompt_command_error_is_redacted():
+async def test_handle_mcp_prompt_command_error_is_raw_for_local_repl():
     from iac_code.commands.registry import CommandRegistry, PromptCommand
     from iac_code.skills.frontmatter import SkillFrontmatter
     from iac_code.skills.skill_definition import SkillDefinition
@@ -955,9 +955,8 @@ async def test_handle_mcp_prompt_command_error_is_redacted():
     await repl._handle_command("/mcp__ros__review template=vpc")
 
     message = repl.renderer.print_system_message.call_args.args[0]
-    assert "IAC_PRIVATE_COMMAND_ARG_MARKER_56" not in message
-    assert "user:pass" not in message
-    assert "[REDACTED]" in message
+    assert "IAC_PRIVATE_COMMAND_ARG_MARKER_56" in message
+    assert "https://user:pass@example.test/mcp" in message
 
 
 @patch("iac_code.ui.repl.ProviderManager")

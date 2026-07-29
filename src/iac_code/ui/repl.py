@@ -104,7 +104,6 @@ from iac_code.utils.image.clipboard import ClipboardImage, get_image_from_clipbo
 from iac_code.utils.image.format_detect import IMAGE_EXTENSION_REGEX
 from iac_code.utils.json_utils import extract_json_int_value, extract_json_string_value
 from iac_code.utils.project_paths import format_resume_command, same_project_path
-from iac_code.utils.public_errors import sanitize_public_text
 
 if TYPE_CHECKING:
     from iac_code.pipeline import PipelineRunner
@@ -464,11 +463,10 @@ def _safe_mcp_elicitation_display_text(value: Any) -> str:
     raw = str(value or "").strip()
     if not raw:
         return ""
-    sanitized = sanitize_public_text(raw, fallback_summary="")
-    if len(sanitized) <= _MCP_ELICITATION_DISPLAY_MAX_CHARS:
-        return sanitized
+    if len(raw) <= _MCP_ELICITATION_DISPLAY_MAX_CHARS:
+        return raw
     marker = _("[truncated]")
-    return sanitized[: _MCP_ELICITATION_DISPLAY_MAX_CHARS - len(marker)].rstrip() + marker
+    return raw[: _MCP_ELICITATION_DISPLAY_MAX_CHARS - len(marker)].rstrip() + marker
 
 
 _MCP_ELICITATION_INVALID = object()
@@ -2004,12 +2002,6 @@ class InlineREPL:
                     return await self._handle_chat_continue()
             except Exception as exc:
                 error_text = str(exc)
-                from iac_code.mcp.prompt_dispatch import is_mcp_prompt_command
-
-                if is_mcp_prompt_command(cmd):
-                    from iac_code.mcp.redaction import sanitize_mcp_public_text
-
-                    error_text = sanitize_mcp_public_text(error_text, fallback_summary="")
                 self.renderer.print_system_message(
                     _("Command error: {error}").format(error=error_text),
                     style="red",
@@ -2664,10 +2656,7 @@ class InlineREPL:
 
     @staticmethod
     def _safe_cleanup_error(error: str) -> str:
-        from iac_code.utils.public_errors import sanitize_public_text
-
-        sanitized = sanitize_public_text(error)
-        return sanitized[:1000] + "..." if len(sanitized) > 1000 else sanitized
+        return error[:1000] + "..." if len(error) > 1000 else error
 
     def _remove_cleanup_prompts_from_context(self) -> int:
         context_manager = getattr(getattr(self, "_agent_loop", None), "context_manager", None)

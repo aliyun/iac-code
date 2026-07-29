@@ -668,13 +668,11 @@ async def test_resume_active_session_from_other_cwd_raises_hint(monkeypatch: pyt
 
     assert isinstance(exc_info.value.data, dict)
     expected_hint = format_resume_command("/source project;unsafe", "test-session")
-    assert exc_info.value.data["cwd"] == "[PATH]"
-    assert exc_info.value.data["hint"] != expected_hint
-    assert "/source project" not in exc_info.value.data["hint"]
+    assert exc_info.value.data["cwd"] == "/source project;unsafe"
+    assert exc_info.value.data["hint"] == expected_hint
     assert sid in str(exc_info.value)
-    assert expected_hint not in str(exc_info.value)
-    assert "/source project" not in str(exc_info.value)
-    assert "[PATH]" in str(exc_info.value)
+    assert expected_hint in str(exc_info.value)
+    assert "/source project" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -703,12 +701,10 @@ async def test_resume_resolved_name_rejects_active_session_from_other_cwd(
 
     assert isinstance(exc_info.value.data, dict)
     expected_hint = format_resume_command("/other project;unsafe", "same-id")
-    assert exc_info.value.data["cwd"] == "[PATH]"
-    assert exc_info.value.data["hint"] != expected_hint
-    assert "/other project" not in exc_info.value.data["hint"]
-    assert expected_hint not in str(exc_info.value)
-    assert "/other project" not in str(exc_info.value)
-    assert "[PATH]" in str(exc_info.value)
+    assert exc_info.value.data["cwd"] == "/other project;unsafe"
+    assert exc_info.value.data["hint"] == expected_hint
+    assert expected_hint in str(exc_info.value)
+    assert "/other project" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -850,11 +846,11 @@ async def test_resume_session_single_cross_project_match_raises_hint(monkeypatch
 
     assert isinstance(exc_info.value.data, dict)
     expected_hint = format_resume_command("/other project;unsafe", "foreign-session-123")
-    assert exc_info.value.data["hint"] != expected_hint
-    assert "/other project" not in exc_info.value.data["hint"]
+    assert exc_info.value.data["hint"] == expected_hint
+    assert exc_info.value.data["cwd"] == foreign_cwd
     assert "foreign-session-123" in str(exc_info.value)
-    assert expected_hint not in str(exc_info.value)
-    assert "/other project" not in str(exc_info.value)
+    assert expected_hint in str(exc_info.value)
+    assert "/other project" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -882,10 +878,9 @@ async def test_resume_session_ambiguous_name_raises_candidates(monkeypatch: pyte
     assert isinstance(exc_info.value.data, dict)
     candidates = exc_info.value.data["candidates"]
     commands_by_id = {candidate["session_id"]: candidate["command"] for candidate in candidates}
-    assert commands_by_id["candidate-a"] != format_resume_command("/project a;bad", "candidate-a")
-    assert commands_by_id["candidate-b"] != format_resume_command("/project-b", "candidate-b")
-    assert "/project a" not in commands_by_id["candidate-a"]
-    assert "/project-b" not in commands_by_id["candidate-b"]
+    assert commands_by_id["candidate-a"] == format_resume_command("/project a;bad", "candidate-a")
+    assert commands_by_id["candidate-b"] == format_resume_command("/project-b", "candidate-b")
+    assert {candidate["cwd"] for candidate in candidates} == {"/project a;bad", "/project-b"}
 
 
 @pytest.mark.asyncio

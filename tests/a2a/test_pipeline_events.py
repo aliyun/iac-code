@@ -266,7 +266,7 @@ def test_stack_progress_inner_sub_pipeline_event_translated() -> None:
     assert envelope["scope"] in {"candidate", "candidate_step"}
 
 
-def test_tool_result_redacts_embedded_infraguard_file_content() -> None:
+def test_tool_result_preserves_embedded_infraguard_file_content() -> None:
     translator = PipelineEventTranslator(_ctx())
     raw_template = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n"
     result = json.dumps(
@@ -289,7 +289,7 @@ def test_tool_result_redacts_embedded_infraguard_file_content() -> None:
     )
 
     rendered = json.dumps(envelope, ensure_ascii=False)
-    assert "ROSTemplateFormatVersion" not in rendered
+    assert "ROSTemplateFormatVersion" in rendered
     assert "file_content" in rendered
     assert "sha256-value" in rendered
 
@@ -314,7 +314,7 @@ def test_aliyun_tool_result_translation_exposes_business_content_but_not_interna
 
 
 @pytest.mark.parametrize("diagnostics", ["", "\nDelegated diagnostics: preflight passed"])
-def test_pipeline_result_storage_precedes_public_4000_projection_for_aliyun_results(tmp_path, diagnostics) -> None:
+def test_pipeline_result_storage_content_is_preserved_for_aliyun_results(tmp_path, diagnostics) -> None:
     new_content, old_content = _aliyun_threshold_pair(50_000, diagnostics)
     storage = ResultStorage(
         storage_dir=str(tmp_path / "tool-results"),
@@ -341,14 +341,13 @@ def test_pipeline_result_storage_precedes_public_4000_projection_for_aliyun_resu
     )
 
     assert new_result.is_externalized is False
-    assert len(new_envelope["data"]["result"]) == 4_000
+    assert new_envelope["data"]["result"] == new_result.content
     assert old_result.is_externalized is True
-    assert old_result.file_path not in old_envelope["data"]["result"]
-    assert "saved to [PATH]" in old_envelope["data"]["result"]
-    assert len(old_envelope["data"]["result"]) < 4_000
+    assert old_envelope["data"]["result"] == old_result.content
+    assert old_result.file_path in old_envelope["data"]["result"]
 
 
-def test_tool_result_redacts_externalized_infraguard_file_content_preview(tmp_path) -> None:
+def test_tool_result_preserves_externalized_infraguard_file_content_preview(tmp_path) -> None:
     translator = PipelineEventTranslator(_ctx())
     raw_template = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n" + ("X" * 500)
     raw_result = json.dumps(
@@ -381,7 +380,7 @@ def test_tool_result_redacts_externalized_infraguard_file_content_preview(tmp_pa
     )
 
     rendered = json.dumps(envelope, ensure_ascii=False)
-    assert "ROSTemplateFormatVersion" not in rendered
+    assert "ROSTemplateFormatVersion" in rendered
     assert "file_content" in rendered
     assert "sha256-value" in rendered
 
@@ -407,8 +406,8 @@ def test_pipeline_warning_translates_to_non_terminal_envelope() -> None:
     assert envelope["scope"] == "pipeline"
     assert envelope["status"] == "working"
     assert envelope["data"]["reason"] == "cleanup_tracking_unavailable"
-    assert "ledger_path" not in envelope["data"]
-    assert "load_error" not in envelope["data"]
+    assert envelope["data"]["ledger_path"].endswith("/cleanup.yaml")
+    assert envelope["data"]["load_error"].startswith("while parsing ")
 
 
 def test_mcp_status_translates_to_metadata_envelope() -> None:
@@ -547,7 +546,7 @@ def test_parent_step_attempt_increments_after_rollback() -> None:
     assert envelopes[0]["step"]["attempt"] == 2
 
 
-def test_rollback_event_sanitizes_reason_before_a2a_metadata() -> None:
+def test_rollback_event_preserves_canonical_reason_before_a2a_boundary() -> None:
     translator = PipelineEventTranslator(_ctx())
     malformed_uri = r"iac-code-artifact://artifact-1/C:\Users\alice\.iac-code\projects\demo\template.yaml"
 
@@ -568,14 +567,12 @@ def test_rollback_event_sanitizes_reason_before_a2a_metadata() -> None:
     )
 
     rendered = json.dumps(envelope, ensure_ascii=False)
-    assert "sk-live-secret" not in rendered
-    assert "/Users/alice" not in rendered
-    assert "iac-code-artifac[PATH]" not in rendered
-    assert "Users" not in rendered
-    assert ".iac-code" not in rendered
+    assert "sk-live-secret" in rendered
+    assert "/Users/alice" in rendered
+    assert malformed_uri in envelope["data"]["reason"]
 
 
-def test_failure_event_sanitizes_nested_error_details_and_normalizes_error_id() -> None:
+def test_failure_event_preserves_details_and_normalizes_error_id() -> None:
     translator = PipelineEventTranslator(_ctx())
     malformed_uri = r"iac-code-artifact://artifact-1/C:\Users\alice\.iac-code\projects\demo\template.yaml"
 
@@ -599,12 +596,11 @@ def test_failure_event_sanitizes_nested_error_details_and_normalizes_error_id() 
     )
 
     rendered = json.dumps(envelope, ensure_ascii=False)
-    assert "/Users/alice" not in rendered
-    assert "tok-secret" not in rendered
+    assert "/Users/alice" in rendered
+    assert "tok-secret" in rendered
     assert envelope["data"]["errorDetails"]["errorId"] == "err-abc123"
     assert "error_id" not in envelope["data"]["errorDetails"]
-    assert "[PATH]" in envelope["data"]["errorDetails"]["traceback"]
-    assert "iac-code-artifac[PATH]" not in rendered
+    assert malformed_uri in envelope["data"]["errorDetails"]["traceback"]
 
 
 def test_parent_step_coordinate_respects_explicit_attempt_from_pipeline_event() -> None:
@@ -1096,7 +1092,7 @@ def test_step_completed_data_keeps_conclusion_and_conclusion_field() -> None:
     assert envelope["data"]["conclusion"] == {"is_infra_intent": True}
 
 
-def test_completion_artifact_windows_path_does_not_leak_in_filename() -> None:
+def test_completion_artifact_keeps_basename_and_canonical_supersedes_path() -> None:
     context = _ctx()
     context.a2a_artifacts_by_step_id = {
         "reviewing": [{"path": "conclusion.file_path", "content": "conclusion.content"}]
@@ -1121,9 +1117,10 @@ def test_completion_artifact_windows_path_does_not_leak_in_filename() -> None:
     artifact = envelopes[1]["artifact"]
     rendered = str(artifact)
     assert artifact["filename"] == "template.yaml"
-    assert r"C:\\" not in rendered
+    assert artifact["supersedesPath"] == r"C:\Users\alice\.iac-code\projects\demo\template.yaml"
+    assert r"C:\\" in rendered
     assert "%5CUsers" not in rendered
-    assert ".iac-code" not in rendered
+    assert ".iac-code" in rendered
 
 
 def test_completion_artifact_includes_role_and_resolved_supersedes_path_from_spec() -> None:
@@ -1535,7 +1532,7 @@ def test_observed_stack_current_changed_is_disabled_by_default() -> None:
     assert envelopes == []
 
 
-def test_failed_tool_result_payload_is_sanitized() -> None:
+def test_failed_tool_result_payload_is_canonical_before_a2a_boundary() -> None:
     translator = PipelineEventTranslator(_ctx())
 
     envelopes = translator.translate(
@@ -1549,11 +1546,11 @@ def test_failed_tool_result_payload_is_sanitized() -> None:
 
     assert [envelope["eventType"] for envelope in envelopes] == ["tool_result"]
     rendered = str(envelopes[0]["data"]["result"])
-    assert "hunter2" not in rendered
-    assert "/Users/alice" not in rendered
+    assert "hunter2" in rendered
+    assert "/Users/alice" in rendered
 
 
-def test_tool_result_payload_relativizes_paths_under_public_roots() -> None:
+def test_tool_result_payload_keeps_paths_and_omits_projection_roots() -> None:
     translator = PipelineEventTranslator(_ctx())
 
     envelopes = translator.translate(
@@ -1574,13 +1571,11 @@ def test_tool_result_payload_relativizes_paths_under_public_roots() -> None:
         )
     )
 
-    assert envelopes[0]["data"]["result"] == (
-        "STDOUT:\n./src/app.py:12\n$IAC_CODE_CONFIG_DIR/tool-results/session-1/result.txt\n[PATH]\nExit code: 0"
-    )
+    assert envelopes[0]["data"]["result"].startswith("STDOUT:\n/Users/alice/project/src/app.py:12")
     rendered = json.dumps(envelopes[0], ensure_ascii=False)
     assert "public_path_roots" not in rendered
     assert "publicPathRoots" not in rendered
-    assert "/Users/alice" not in rendered
+    assert "/Users/alice" in rendered
 
 
 def test_tool_result_keeps_valid_opaque_artifact_uri() -> None:
@@ -1603,7 +1598,7 @@ def test_tool_result_keeps_valid_opaque_artifact_uri() -> None:
     assert "iac-code-artifac[PATH]" not in json.dumps(envelopes[0])
 
 
-def test_tool_result_redacts_malformed_opaque_uri_outside_artifact_field() -> None:
+def test_tool_result_preserves_malformed_opaque_uri_before_a2a_boundary() -> None:
     translator = PipelineEventTranslator(_ctx())
     malformed_uri = r"iac-code-artifact://artifact-1/C:\Users\alice\.iac-code\projects\demo\template.yaml"
 
@@ -1617,13 +1612,12 @@ def test_tool_result_redacts_malformed_opaque_uri_outside_artifact_field() -> No
     )
 
     rendered = json.dumps(envelopes[0], ensure_ascii=False)
-    assert "[PATH]" in rendered
-    assert "iac-code-artifac[PATH]" not in rendered
-    assert "Users" not in rendered
-    assert ".iac-code" not in rendered
+    assert malformed_uri in envelopes[0]["data"]["result"]["note"]
+    assert "Users" in rendered
+    assert ".iac-code" in rendered
 
 
-def test_tool_result_sanitizes_root_artifact_list_payloads() -> None:
+def test_tool_result_preserves_root_artifact_list_payloads() -> None:
     translator = PipelineEventTranslator(_ctx())
 
     envelopes = translator.translate(
@@ -1646,14 +1640,13 @@ def test_tool_result_sanitizes_root_artifact_list_payloads() -> None:
 
     rendered = json.dumps(envelopes[0], ensure_ascii=False)
     artifact = envelopes[0]["data"]["result"][0]["artifact"]
-    assert artifact == {"filename": "template.yaml", "metadata": {"token": "[REDACTED]"}}
-    assert "RAW-TEMPLATE-CONTENT" not in rendered
-    assert "plain-token" not in rendered
-    assert "Alice and Bob" not in rendered
-    assert ".iac-code" not in rendered
+    assert artifact["filename"] == "template.yaml"
+    assert artifact["metadata"]["token"] == "plain-token"
+    assert "RAW-TEMPLATE-CONTENT" in rendered
+    assert "Alice and Bob" in rendered
 
 
-def test_failed_tool_result_dict_artifact_payload_is_sanitized() -> None:
+def test_failed_tool_result_dict_artifact_payload_is_preserved() -> None:
     translator = PipelineEventTranslator(_ctx())
 
     envelopes = translator.translate(
@@ -1674,13 +1667,10 @@ def test_failed_tool_result_dict_artifact_payload_is_sanitized() -> None:
     )
 
     rendered = json.dumps(envelopes[0], ensure_ascii=False)
-    assert envelopes[0]["data"]["result"] == {
-        "Artifact": {"filename": "template.yaml", "metadata": {"api_key": "[REDACTED]"}},
-        "api_key": "[REDACTED]",
-    }
-    assert "RAW-TEMPLATE-CONTENT" not in rendered
-    assert "plain-secret" not in rendered
-    assert "secret-key" not in rendered
+    assert envelopes[0]["data"]["result"]["api_key"] == "secret-key"
+    assert envelopes[0]["data"]["result"]["Artifact"]["metadata"]["api_key"] == "plain-secret"
+    assert "RAW-TEMPLATE-CONTENT" in rendered
+    assert "plain-secret" in rendered
 
 
 def test_stack_current_changed_emits_after_successful_ros_create_stack() -> None:

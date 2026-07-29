@@ -863,7 +863,7 @@ async def test_tool_use_input_summary_fingerprints_business_field_names() -> Non
 
 
 @pytest.mark.asyncio
-async def test_failed_tool_result_metadata_is_sanitized() -> None:
+async def test_failed_tool_result_metadata_preserves_values_before_wire_projection() -> None:
     queue = FakeEventQueue()
 
     await publish_stream_event(
@@ -881,12 +881,12 @@ async def test_failed_tool_result_metadata_is_sanitized() -> None:
     dumped = dump(queue.events[0])
     tool = dumped["metadata"]["iac_code"]["tool"]
     assert tool["status"] == "failed"
-    assert "hunter2" not in str(tool["result"])
-    assert "/Users/alice" not in str(tool["result"])
+    assert "hunter2" in str(tool["result"])
+    assert "/Users/alice" in str(tool["result"])
 
 
 @pytest.mark.asyncio
-async def test_mcp_tool_result_metadata_redacts_private_markers() -> None:
+async def test_mcp_tool_result_metadata_remains_an_ordinary_raw_tool_result() -> None:
     queue = FakeEventQueue()
 
     await publish_stream_event(
@@ -908,17 +908,16 @@ async def test_mcp_tool_result_metadata_redacts_private_markers() -> None:
 
     dumped = dump(queue.events[0])
     rendered = str(dumped["metadata"]["iac_code"]["tool"]["result"])
-    assert "IAC_PRIVATE_COMMAND_ARG_MARKER_56" not in rendered
-    assert "IAC_PRIVATE_NESTED_METADATA_MARKER_56" not in rendered
-    assert "IAC_PRIVATE_QUERY_MARKER_56" not in rendered
-    assert "user:pass" not in rendered
-    assert "/Users/alice" not in rendered
-    assert "[REDACTED]" in rendered
-    assert "[PATH]" in rendered
+    assert "IAC_PRIVATE_COMMAND_ARG_MARKER_56" in rendered
+    assert "IAC_PRIVATE_NESTED_METADATA_MARKER_56" in rendered
+    assert "IAC_PRIVATE_QUERY_MARKER_56" in rendered
+    assert "user:pass" in rendered
+    assert "/Users/alice" in rendered
+    assert "[REDACTED]" not in rendered
 
 
 @pytest.mark.asyncio
-async def test_tool_result_metadata_relativizes_paths_under_public_roots() -> None:
+async def test_tool_result_metadata_keeps_paths_canonical_before_wire_projection() -> None:
     queue = FakeEventQueue()
 
     await publish_stream_event(
@@ -945,16 +944,20 @@ async def test_tool_result_metadata_relativizes_paths_under_public_roots() -> No
     dumped = dump(queue.events[0])
     tool = dumped["metadata"]["iac_code"]["tool"]
     assert tool["result"] == (
-        "STDOUT:\n./src/app.py:12\n$IAC_CODE_CONFIG_DIR/tool-results/session-1/result.txt\n[PATH]\nExit code: 0"
+        "STDOUT:\n"
+        "/Users/alice/project/src/app.py:12\n"
+        "/Users/alice/.iac-code/tool-results/session-1/result.txt\n"
+        "/Users/alice/private/secret.txt\n"
+        "Exit code: 0"
     )
     rendered = str(dumped)
     assert "public_path_roots" not in rendered
     assert "publicPathRoots" not in rendered
-    assert "/Users/alice" not in rendered
+    assert "/Users/alice" in rendered
 
 
 @pytest.mark.asyncio
-async def test_failed_tool_result_metadata_redacts_malformed_opaque_artifact_uri() -> None:
+async def test_failed_tool_result_metadata_preserves_malformed_opaque_artifact_uri() -> None:
     queue = FakeEventQueue()
     malformed_uri = r"iac-code-artifact://artifact-1/C:\Users\alice\.iac-code\projects\demo\template.yaml"
 
@@ -972,10 +975,7 @@ async def test_failed_tool_result_metadata_redacts_malformed_opaque_artifact_uri
 
     dumped = dump(queue.events[0])
     rendered = str(dumped["metadata"]["iac_code"]["tool"]["result"])
-    assert "[PATH]" in rendered
-    assert "iac-code-artifac[PATH]" not in rendered
-    assert "Users" not in rendered
-    assert ".iac-code" not in rendered
+    assert rendered == f"Tool failed: {malformed_uri}"
 
 
 @pytest.mark.asyncio
@@ -1052,7 +1052,7 @@ async def test_tool_result_artifact_windows_filename_does_not_leak_path(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_tool_result_uri_only_artifact_drops_legacy_file_uri() -> None:
+async def test_tool_result_uri_only_artifact_preserves_existing_fields_before_wire_projection() -> None:
     queue = FakeEventQueue()
     result = {
         "artifact": {
@@ -1088,19 +1088,10 @@ async def test_tool_result_uri_only_artifact_drops_legacy_file_uri() -> None:
     artifact = dumped["metadata"]["iac_code"]["tool"]["result"]["artifact"]
     rendered = str(dumped)
     assert artifact["filename"] == "template.yaml"
-    assert artifact["metadata"] == {"byteSize": 10}
-    assert "uri" not in artifact
-    assert "downloadUrl" not in artifact
-    assert "publicUrl" not in artifact
-    assert "encodedOwnerUrl" not in artifact
-    assert "backupUri" not in artifact
-    assert "sourceUri" not in artifact
-    assert artifact["source"] == "[PATH]"
-    assert "url" not in artifact["parts"][0]
-    assert "uri" not in artifact["parts"][0]["metadata"]
-    assert "file://" not in rendered
-    assert "Users" not in rendered
-    assert ".iac-code" not in rendered
+    assert artifact == result["artifact"]
+    assert "file://" in rendered
+    assert "Users" in rendered
+    assert ".iac-code" in rendered
 
 
 @pytest.mark.asyncio
@@ -1134,7 +1125,7 @@ async def test_tool_result_uri_only_artifact_keeps_valid_opaque_uri() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tool_result_artifact_list_is_sanitized() -> None:
+async def test_tool_result_artifact_list_preserves_values_before_wire_projection() -> None:
     queue = FakeEventQueue()
     legacy_uri = r"file://C:\Users\alice\.iac-code\projects\demo\template.yaml"
     result = {
@@ -1157,19 +1148,15 @@ async def test_tool_result_artifact_list_is_sanitized() -> None:
 
     dumped = dump(queue.events[0])
     artifact = dumped["metadata"]["iac_code"]["tool"]["result"]["artifact"]
-    assert artifact[0] == "[PATH]"
-    assert artifact[1]["filename"] == "template.yaml"
-    assert "uri" not in artifact[1]
-    assert artifact[1]["parts"][0] == "[PATH]"
-    assert "url" not in artifact[1]["parts"][1]
+    assert artifact == result["artifact"]
     rendered = str(dumped)
-    assert "file://" not in rendered
-    assert "Users" not in rendered
-    assert ".iac-code" not in rendered
+    assert "file://" in rendered
+    assert "Users" in rendered
+    assert ".iac-code" in rendered
 
 
 @pytest.mark.asyncio
-async def test_tool_result_artifact_scalar_is_sanitized() -> None:
+async def test_tool_result_artifact_scalar_is_preserved_before_wire_projection() -> None:
     queue = FakeEventQueue()
     result = {"artifact": r"file://C:\Users\alice\.iac-code\projects\demo\template.yaml"}
 
@@ -1182,15 +1169,15 @@ async def test_tool_result_artifact_scalar_is_sanitized() -> None:
 
     dumped = dump(queue.events[0])
     artifact = dumped["metadata"]["iac_code"]["tool"]["result"]["artifact"]
-    assert artifact == "[PATH]"
+    assert artifact == result["artifact"]
     rendered = str(dumped)
-    assert "file://" not in rendered
-    assert "Users" not in rendered
-    assert ".iac-code" not in rendered
+    assert "file://" in rendered
+    assert "Users" in rendered
+    assert ".iac-code" in rendered
 
 
 @pytest.mark.asyncio
-async def test_tool_result_artifact_payload_keys_are_sanitized_case_insensitively() -> None:
+async def test_tool_result_artifact_payload_is_externalized_without_redacting_metadata() -> None:
     queue = FakeEventQueue()
     result = {
         "artifact": {
@@ -1212,18 +1199,16 @@ async def test_tool_result_artifact_payload_keys_are_sanitized_case_insensitivel
 
     dumped = dump(queue.events[0])
     artifact = dumped["metadata"]["iac_code"]["tool"]["result"]["artifact"]
-    assert artifact == {"filename": "result.txt", "metadata": {"label": "safe", "api_key": "[REDACTED]"}}
+    assert artifact == {"filename": "result.txt", "metadata": {"label": "safe", "api_key": "plain-secret"}}
     rendered = str(dumped)
     assert "secret content" not in rendered
     assert "secret raw" not in rendered
     assert "c2VjcmV0" not in rendered
-    assert "plain-secret" not in rendered
-    assert "Users" not in rendered
-    assert ".iac-code" not in rendered
+    assert "plain-secret" in rendered
 
 
 @pytest.mark.asyncio
-async def test_tool_result_metadata_sanitizes_root_artifact_list() -> None:
+async def test_tool_result_metadata_externalizes_root_artifact_list_without_redaction() -> None:
     queue = FakeEventQueue()
     result = [
         {
@@ -1246,15 +1231,19 @@ async def test_tool_result_metadata_sanitizes_root_artifact_list() -> None:
     dumped = dump(queue.events[0])
     rendered = str(dumped)
     artifact = dumped["metadata"]["iac_code"]["tool"]["result"][0]["artifact"]
-    assert artifact == {"filename": "template.yaml", "metadata": {"token": "[REDACTED]"}}
+    assert artifact == {
+        "filename": "template.yaml",
+        "metadata": {"token": "plain-token"},
+        "uri": r"file:///Users/Alice and Bob/.iac-code/projects/demo/template.yaml",
+    }
     assert "RAW-TEMPLATE-CONTENT" not in rendered
-    assert "plain-token" not in rendered
-    assert "Alice and Bob" not in rendered
-    assert ".iac-code" not in rendered
+    assert "plain-token" in rendered
+    assert "Alice and Bob" in rendered
+    assert ".iac-code" in rendered
 
 
 @pytest.mark.asyncio
-async def test_tool_result_metadata_sanitizes_case_variant_artifact_key() -> None:
+async def test_tool_result_metadata_externalizes_case_variant_artifact_key_without_redaction() -> None:
     queue = FakeEventQueue()
     result = {
         "Artifact": {
@@ -1274,14 +1263,17 @@ async def test_tool_result_metadata_sanitizes_case_variant_artifact_key() -> Non
     dumped = dump(queue.events[0])
     rendered = str(dumped)
     artifact = dumped["metadata"]["iac_code"]["tool"]["result"]["Artifact"]
-    assert artifact == {"filename": "template.yaml"}
+    assert artifact == {
+        "filename": "template.yaml",
+        "uri": r"file:///Users/Alice and Bob/.iac-code/projects/demo/template.yaml",
+    }
     assert "RAW-TEMPLATE-CONTENT" not in rendered
-    assert "Alice and Bob" not in rendered
-    assert ".iac-code" not in rendered
+    assert "Alice and Bob" in rendered
+    assert ".iac-code" in rendered
 
 
 @pytest.mark.asyncio
-async def test_failed_tool_result_dict_artifact_payload_is_sanitized() -> None:
+async def test_failed_tool_result_dict_externalizes_artifact_payload_without_redacting_values() -> None:
     queue = FakeEventQueue()
     result = {
         "artifact": {
@@ -1305,12 +1297,12 @@ async def test_failed_tool_result_dict_artifact_payload_is_sanitized() -> None:
     rendered = str(dumped)
     result_metadata = dumped["metadata"]["iac_code"]["tool"]["result"]
     assert result_metadata == {
-        "artifact": {"filename": "template.yaml", "metadata": {"Authorization": "[REDACTED]"}},
-        "api_key": "[REDACTED]",
+        "artifact": {"filename": "template.yaml", "metadata": {"Authorization": "Bearer plain-auth-value"}},
+        "api_key": "secret-key",
     }
     assert "RAW-TEMPLATE-CONTENT" not in rendered
-    assert "plain-auth-value" not in rendered
-    assert "secret-key" not in rendered
+    assert "plain-auth-value" in rendered
+    assert "secret-key" in rendered
 
 
 @pytest.mark.asyncio

@@ -26,7 +26,7 @@ def _web_metadata_path(manager: WebSessionManager, cwd: str, session_id: str):
     return manager.storage.session_dir(cwd, session_id) / "web-session.json"
 
 
-def test_status_command_returns_redacted_session_status(tmp_path) -> None:
+def test_status_command_returns_local_session_status(tmp_path) -> None:
     manager, dispatcher = _dispatcher(tmp_path)
     session = manager.create_session(session_id="session-1")
     manager.add_permission_request(
@@ -45,9 +45,9 @@ def test_status_command_returns_redacted_session_status(tmp_path) -> None:
     assert response["status"]["sessionId"] == session.session_id
     assert response["status"]["mode"] == "normal"
     assert response["status"]["pendingPermissionCount"] == 1
-    assert response["status"]["pendingPermissions"][0]["payload"]["apiKey"] == "[REDACTED]"
-    assert "super-secret-value" not in str(response)
-    assert "sk-unsafe" not in str(response)
+    assert response["status"]["pendingPermissions"][0]["payload"]["apiKey"] == "sk-unsafe12345678"
+    assert "super-secret-value" in str(response)
+    assert "sk-unsafe" in str(response)
 
 
 def test_mcp_command_returns_server_listing(tmp_path) -> None:
@@ -1056,8 +1056,7 @@ async def test_shell_escape_runner_turns_permission_setup_error_into_terminal_ev
 
     assert result["exitCode"] == 1
     assert result["stdout"] == ""
-    assert "sk-shellsecret" not in result["stderr"]
-    assert "[REDACTED]" in result["stderr"]
+    assert "sk-shellsecret" in result["stderr"]
     assert [event["type"] for event in session.events.replay_after(0)] == [
         "local.shell.start",
         "local.shell.end",
@@ -1065,7 +1064,7 @@ async def test_shell_escape_runner_turns_permission_setup_error_into_terminal_ev
 
 
 @pytest.mark.asyncio
-async def test_shell_escape_runner_redacts_executor_exception(tmp_path) -> None:
+async def test_shell_escape_runner_preserves_local_executor_exception(tmp_path) -> None:
     from iac_code.types.permissions import PermissionResult, ToolPermissionContext
     from iac_code.web.shell import WebShellEscapeRunner
 
@@ -1086,8 +1085,7 @@ async def test_shell_escape_runner_redacts_executor_exception(tmp_path) -> None:
     result = await runner.run(session, "echo hi")
 
     assert result["exitCode"] == 1
-    assert "sk-executorsecret" not in result["stderr"]
-    assert "[REDACTED]" in result["stderr"]
+    assert "sk-executorsecret" in result["stderr"]
     assert [event["type"] for event in session.events.replay_after(0)] == ["local.shell.start", "local.shell.end"]
 
 
@@ -1308,8 +1306,8 @@ async def test_command_route_publishes_finished_when_shell_runner_raises(tmp_pat
     assert [event["type"] for event in events] == ["local.shell.start", "local.shell.end", "command.finished"]
     assert events[1]["payload"]["shellUseId"] == events[0]["payload"]["shellUseId"]
     assert events[1]["payload"]["toolUseId"] == events[0]["payload"]["toolUseId"]
-    assert events[1]["payload"]["stderr"] == "RuntimeError: runner boom"
-    assert events[-1]["payload"]["result"]["error"]["message"] == "RuntimeError: runner boom"
+    assert events[1]["payload"]["stderr"] == "runner boom"
+    assert events[-1]["payload"]["result"]["error"]["message"] == "runner boom"
 
 
 @pytest.mark.asyncio
@@ -1384,7 +1382,7 @@ async def test_command_route_fallback_end_matches_concurrent_shell_escape_start(
     ]
     assert [payload["shellUseId"] for payload in shell_end_payloads] == ["second-shell", "first-shell"]
     assert shell_end_payloads[1]["toolUseId"] == "first-shell"
-    assert shell_end_payloads[1]["stderr"] == "RuntimeError: first boom"
+    assert shell_end_payloads[1]["stderr"] == "first boom"
 
 
 @pytest.mark.asyncio
@@ -1448,7 +1446,7 @@ async def test_command_route_fallback_end_does_not_borrow_concurrent_shell_id_wi
         event["payload"] for event in session.events.replay_after(0) if event["type"] == "local.shell.end"
     ]
     assert [payload["command"] for payload in shell_end_payloads] == ["second", "first"]
-    assert shell_end_payloads[1]["stderr"] == "RuntimeError: first boom"
+    assert shell_end_payloads[1]["stderr"] == "first boom"
     assert shell_end_payloads[1]["shellUseId"] != "second-shell"
     assert shell_end_payloads[1]["toolUseId"] == shell_end_payloads[1]["shellUseId"]
 
@@ -1598,7 +1596,7 @@ async def test_command_route_fallback_end_matches_same_command_concurrent_start(
         event["payload"] for event in session.events.replay_after(0) if event["type"] == "local.shell.end"
     ]
     assert [payload["shellUseId"] for payload in shell_end_payloads] == ["second-shell", "first-shell"]
-    assert shell_end_payloads[1]["stderr"] == "RuntimeError: first boom"
+    assert shell_end_payloads[1]["stderr"] == "first boom"
 
 
 @pytest.mark.asyncio
@@ -1681,7 +1679,7 @@ async def test_command_route_fallback_end_does_not_borrow_running_same_command_s
         event["payload"] for event in session.events.replay_after(0) if event["type"] == "local.shell.end"
     ]
     assert [payload["shellUseId"] for payload in shell_end_payloads] == ["first-shell", "second-shell"]
-    assert shell_end_payloads[0]["stderr"] == "RuntimeError: first boom"
+    assert shell_end_payloads[0]["stderr"] == "first boom"
     assert shell_end_payloads[1]["stderr"] == ""
 
 
@@ -1820,7 +1818,7 @@ async def test_command_route_does_not_duplicate_mixed_legacy_shell_end_when_runn
 
 
 @pytest.mark.asyncio
-async def test_command_route_matches_redacted_shell_command_when_runner_raises_after_legacy_end(tmp_path) -> None:
+async def test_command_route_matches_raw_shell_command_when_runner_raises_after_legacy_end(tmp_path) -> None:
     from iac_code.web.app import create_app
 
     manager = _manager(tmp_path)
@@ -1863,8 +1861,8 @@ async def test_command_route_matches_redacted_shell_command_when_runner_raises_a
     events = session.events.replay_after(0)
     assert [event["type"] for event in events].count("local.shell.end") == 1
     assert [event["type"] for event in events] == ["local.shell.start", "local.shell.end", "command.finished"]
-    assert events[0]["payload"]["command"] == "echo API_KEY=[REDACTED]"
-    assert events[1]["payload"]["command"] == "echo API_KEY=[REDACTED]"
+    assert events[0]["payload"]["command"] == "echo API_KEY=abcd1234"
+    assert events[1]["payload"]["command"] == "echo API_KEY=abcd1234"
     assert events[1]["payload"]["stderr"] == "legacy end"
 
 

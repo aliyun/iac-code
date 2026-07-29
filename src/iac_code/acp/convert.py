@@ -6,7 +6,6 @@ from typing import Any, Literal
 
 import acp
 
-from iac_code.a2a.artifacts import sanitize_public_tool_output_data
 from iac_code.acp.state import TurnState, display_tool_title
 from iac_code.acp.types import ACPContentBlock
 from iac_code.i18n import _
@@ -31,7 +30,6 @@ from iac_code.types.stream_events import (
     ToolUseStartEvent,
     Usage,
 )
-from iac_code.utils.public_errors import sanitize_public_text
 
 # ``acp.schema`` exposes individual session-update message classes
 # (``AgentMessageChunk``, ``ToolCallStart``, ...) but not a single
@@ -302,7 +300,7 @@ class ACPEventConverter:
                 return [
                     acp.schema.AgentMessageChunk(
                         session_update="agent_message_chunk",
-                        content=acp.schema.TextContentBlock(type="text", text=f"[Error] {sanitize_public_text(error)}"),
+                        content=acp.schema.TextContentBlock(type="text", text=f"[Error] {error}"),
                     )
                 ]
             case PlanEvent(steps=steps):
@@ -366,10 +364,10 @@ def _input_delta_summary_text(accumulated_input: str) -> str:
 
 
 def _public_tool_result_text(value: Any, *, public_path_roots: list[dict[str, str]] | None = None) -> str:
-    sanitized = sanitize_public_tool_output_data(value, public_path_roots=public_path_roots)
-    if isinstance(sanitized, str):
-        return sanitized
-    return json.dumps(sanitized, ensure_ascii=False, default=str)
+    del public_path_roots
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, default=str)
 
 
 # ---------------------------------------------------------------------------

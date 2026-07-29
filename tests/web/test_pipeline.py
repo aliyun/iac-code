@@ -1694,7 +1694,7 @@ async def test_pipeline_action_runner_rejects_executor_failed_status_without_suc
     assert result.terminal_outcome == "failed"
     message = result.response["error"]["message"]
     assert "Pipeline failed" in message
-    assert "/Users/alice" not in message
+    assert "/Users/alice" in message
 
 
 def test_pipeline_interrupt_route_rejects_persisted_task_without_live_active_pipeline(monkeypatch, tmp_path) -> None:

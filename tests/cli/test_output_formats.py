@@ -138,7 +138,7 @@ class TestJsonWriter:
         assert result["error"] == "something went wrong"
         assert result["error_id"] == "err-abc123"
 
-    def test_error_event_is_sanitized(self) -> None:
+    def test_error_event_is_preserved_for_local_json(self) -> None:
         stream = io.StringIO()
         writer = JsonWriter(stream)
         writer.handle(
@@ -150,10 +150,10 @@ class TestJsonWriter:
         writer.finalize()
 
         result = json.loads(stream.getvalue())
-        assert "sk-live" not in result["error"]
-        assert "/Users/alice" not in result["error"]
+        assert "sk-live" in result["error"]
+        assert "/Users/alice" in result["error"]
 
-    def test_error_event_redacts_encoded_paths_and_preserves_valid_artifact_uri(self) -> None:
+    def test_error_event_preserves_encoded_path_and_artifact_uri(self) -> None:
         stream = io.StringIO()
         writer = JsonWriter(stream)
         encoded_path = "file%3A%2F%2F%2FUsers%2Falice%2F.iac-code%2Fprojects%2Fdemo%2Ftemplate.yaml"
@@ -162,9 +162,9 @@ class TestJsonWriter:
         writer.finalize()
 
         result = json.loads(stream.getvalue())
-        assert result["error"] == f"failed at [PATH]; see {uri}."
+        assert result["error"] == f"failed at {encoded_path}; see {uri}."
 
-    def test_failed_tool_result_is_sanitized(self) -> None:
+    def test_failed_tool_result_is_preserved_for_local_json(self) -> None:
         stream = io.StringIO()
         writer = JsonWriter(stream)
         writer.handle(
@@ -180,10 +180,10 @@ class TestJsonWriter:
         result = json.loads(stream.getvalue())
         tool = result["tool_uses"][0]
         assert tool["is_error"] is True
-        assert "hunter2" not in tool["result"]
-        assert "/Users/alice" not in tool["result"]
+        assert "hunter2" in tool["result"]
+        assert "/Users/alice" in tool["result"]
 
-    def test_successful_tool_result_is_sanitized_without_losing_valid_artifact_uri(self) -> None:
+    def test_successful_tool_result_preserves_path_and_artifact_uri(self) -> None:
         stream = io.StringIO()
         writer = JsonWriter(stream)
         encoded_path = "file%3A%2F%2F%2FUsers%2Falice%2F.iac-code%2Fprojects%2Fdemo%2Ftemplate.yaml"
@@ -202,10 +202,10 @@ class TestJsonWriter:
         result = json.loads(stream.getvalue())
         tool = result["tool_uses"][0]
         rendered = json.dumps(tool, ensure_ascii=False)
-        assert tool["result"]["message"] == "wrote [PATH]"
+        assert tool["result"]["message"] == f"wrote {encoded_path}"
         assert tool["result"]["artifact"]["uri"] == uri
-        assert "%2FUsers" not in rendered
-        assert ".iac-code" not in rendered
+        assert "%2FUsers" in rendered
+        assert ".iac-code" in rendered
 
     def test_synthetic_max_turns_does_not_overwrite_previous_usage(self) -> None:
         stream = io.StringIO()
@@ -325,7 +325,7 @@ class TestStreamJsonWriter:
         assert data["type"] == "tool_result"
         assert "metadata" not in data
 
-    def test_tool_result_relativizes_public_paths_without_emitting_roots(self) -> None:
+    def test_tool_result_preserves_paths_without_emitting_projection_roots(self) -> None:
         stream = io.StringIO()
         writer = StreamJsonWriter(stream)
         writer.handle(
@@ -340,12 +340,12 @@ class TestStreamJsonWriter:
         data = json.loads(stream.getvalue())
         rendered = json.dumps(data, ensure_ascii=False)
         assert data["type"] == "tool_result"
-        assert data["result"] == "./src/app.py\n[PATH]"
+        assert data["result"] == "/Users/alice/project/src/app.py\n/Users/alice/private/secret.txt"
         assert "public_path_roots" not in data
         assert "publicPathRoots" not in rendered
-        assert "/Users/alice" not in rendered
+        assert "/Users/alice" in rendered
 
-    def test_tool_result_redacts_embedded_file_content_json_string(self) -> None:
+    def test_tool_result_preserves_embedded_file_content_json_string(self) -> None:
         stream = io.StringIO()
         writer = StreamJsonWriter(stream)
         writer.handle(
@@ -365,11 +365,11 @@ class TestStreamJsonWriter:
 
         data = json.loads(stream.getvalue())
         rendered = json.dumps(data, ensure_ascii=False)
-        assert "ROSTemplateFormatVersion" not in rendered
+        assert "ROSTemplateFormatVersion" in rendered
         assert "file_content" in rendered
         assert "sha256-value" in rendered
 
-    def test_tool_result_redacts_externalized_file_content_preview(self, tmp_path) -> None:
+    def test_tool_result_preserves_externalized_file_content_preview(self, tmp_path) -> None:
         stream = io.StringIO()
         writer = StreamJsonWriter(stream)
         raw_result = json.dumps(
@@ -394,7 +394,7 @@ class TestStreamJsonWriter:
 
         data = json.loads(stream.getvalue())
         rendered = json.dumps(data, ensure_ascii=False)
-        assert "ROSTemplateFormatVersion" not in rendered
+        assert "ROSTemplateFormatVersion" in rendered
         assert "file_content" in rendered
         assert "sha256-value" in rendered
 
@@ -594,7 +594,7 @@ class TestStreamJsonWriter:
         assert "passed · 0 findings" not in rendered
         assert "metadata" not in data
 
-    def test_failed_tool_result_redacts_encoded_malformed_artifact_uri(self) -> None:
+    def test_failed_tool_result_preserves_encoded_malformed_artifact_uri(self) -> None:
         stream = io.StringIO()
         writer = StreamJsonWriter(stream)
         encoded_uri = (
@@ -613,12 +613,11 @@ class TestStreamJsonWriter:
 
         data = json.loads(stream.getvalue())
         rendered = json.dumps(data, ensure_ascii=False)
-        assert "[PATH]" in rendered
-        assert "%5CUsers" not in rendered
-        assert "Users" not in rendered
-        assert ".iac-code" not in rendered
+        assert encoded_uri in rendered
+        assert "%5CUsers" in rendered
+        assert ".iac-code" in rendered
 
-    def test_successful_tool_result_and_metadata_are_sanitized(self) -> None:
+    def test_successful_tool_result_and_metadata_are_preserved(self) -> None:
         stream = io.StringIO()
         writer = StreamJsonWriter(stream)
         encoded_uri = (
@@ -645,13 +644,13 @@ class TestStreamJsonWriter:
 
         data = json.loads(stream.getvalue())
         rendered = json.dumps(data, ensure_ascii=False)
-        assert "[PATH]" in rendered
-        assert "secret content" not in rendered
-        assert "Alice Smith" not in rendered
-        assert "%5CAlice" not in rendered
-        assert ".iac-code" not in rendered
+        assert encoded_uri in rendered
+        assert "secret content" in rendered
+        assert "Alice Smith" in rendered
+        assert "%5CAlice" in rendered
+        assert ".iac-code" in rendered
 
-    def test_error_event_is_sanitized(self) -> None:
+    def test_error_event_is_preserved_for_local_stream_json(self) -> None:
         stream = io.StringIO()
         writer = StreamJsonWriter(stream)
         writer.handle(
@@ -663,8 +662,8 @@ class TestStreamJsonWriter:
 
         data = json.loads(stream.getvalue())
         assert data["type"] == "error"
-        assert "session-secret" not in data["error"]
-        assert "refresh-secret" not in data["error"]
+        assert "session-secret" in data["error"]
+        assert "refresh-secret" in data["error"]
 
     def test_error_event_preserves_error_id(self) -> None:
         stream = io.StringIO()
@@ -777,7 +776,7 @@ class TestStreamJsonWriter:
         ):
             assert forbidden not in rendered
 
-    def test_failed_tool_result_is_sanitized(self) -> None:
+    def test_failed_tool_result_is_preserved(self) -> None:
         stream = io.StringIO()
         writer = StreamJsonWriter(stream)
         writer.handle(
@@ -791,10 +790,10 @@ class TestStreamJsonWriter:
 
         data = json.loads(stream.getvalue())
         assert data["is_error"] is True
-        assert "hunter2" not in data["result"]
-        assert "/Users/alice" not in data["result"]
+        assert "hunter2" in data["result"]
+        assert "/Users/alice" in data["result"]
 
-    def test_failed_tool_result_metadata_is_sanitized(self) -> None:
+    def test_failed_tool_result_metadata_is_preserved(self) -> None:
         stream = io.StringIO()
         writer = StreamJsonWriter(stream)
         writer.handle(
@@ -814,11 +813,11 @@ class TestStreamJsonWriter:
 
         data = json.loads(stream.getvalue())
         rendered = json.dumps(data, ensure_ascii=False)
-        assert "hunter2" not in rendered
-        assert "/Users/alice" not in rendered
-        assert data["metadata"]["step_result"]["error"] == "Schema failed DB_PASSWORD=[REDACTED] at [PATH]"
+        assert "hunter2" in rendered
+        assert "/Users/alice" in rendered
+        assert data["metadata"]["step_result"]["error"].endswith("/Users/alice/.iac-code/settings.yml")
 
-    def test_failed_tool_result_metadata_relativizes_public_paths(self) -> None:
+    def test_failed_tool_result_metadata_preserves_public_paths(self) -> None:
         stream = io.StringIO()
         writer = StreamJsonWriter(stream)
         writer.handle(
@@ -839,10 +838,10 @@ class TestStreamJsonWriter:
 
         data = json.loads(stream.getvalue())
         rendered = json.dumps(data, ensure_ascii=False)
-        assert "/Users/alice" not in rendered
-        assert data["metadata"]["step_result"]["error"] == "Schema failed at ./logs/result.txt"
+        assert "/Users/alice" in rendered
+        assert data["metadata"]["step_result"]["error"] == "Schema failed at /Users/alice/project/logs/result.txt"
 
-    def test_mcp_tool_result_redacts_private_markers_in_result_and_metadata(self) -> None:
+    def test_ordinary_mcp_tool_result_is_preserved_for_local_stream(self) -> None:
         stream = io.StringIO()
         writer = StreamJsonWriter(stream)
         writer.handle(
@@ -868,13 +867,11 @@ class TestStreamJsonWriter:
 
         data = json.loads(stream.getvalue())
         rendered = json.dumps(data, ensure_ascii=False)
-        assert "IAC_PRIVATE_COMMAND_ARG_MARKER_56" not in rendered
-        assert "IAC_PRIVATE_NESTED_METADATA_MARKER_56" not in rendered
-        assert "IAC_PRIVATE_QUERY_MARKER_56" not in rendered
-        assert "/Users/alice" not in rendered
-        assert "user:pass" not in rendered
-        assert "[REDACTED]" in rendered
-        assert "[PATH]" in rendered
+        assert "IAC_PRIVATE_COMMAND_ARG_MARKER_56" in rendered
+        assert "IAC_PRIVATE_NESTED_METADATA_MARKER_56" in rendered
+        assert "IAC_PRIVATE_QUERY_MARKER_56" in rendered
+        assert "/Users/alice" in rendered
+        assert "user:pass" in rendered
 
     def test_mcp_progress_includes_canonical_public_metadata(self) -> None:
         stream = io.StringIO()

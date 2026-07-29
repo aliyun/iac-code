@@ -37,6 +37,23 @@ def test_error_message_newlines_replaced_with_space():
     assert sanitize_error_message("line1\nline2\rline3\tend") == "line1 line2 line3 end"
 
 
+def test_error_message_strictly_redacts_credentials_and_paths():
+    assert sanitize_error_message("password=hunter2 at /Users/alice/private.txt") == "password=[REDACTED] at [PATH]"
+
+
+def test_error_message_strict_redaction_ignores_local_suppression_and_a2a_safe_mode(monkeypatch):
+    from iac_code.utils.public_errors import suppress_all_redaction
+
+    monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", "1")
+    with suppress_all_redaction():
+        assert sanitize_error_message("token=secret-value /tmp/private.txt") == "token=[REDACTED] [PATH]"
+
+
+def test_error_message_strictly_redacts_arbitrary_server_layouts():
+    assert sanitize_error_message("failed at /srv/iac-code/private/x.txt") == "failed at [PATH]"
+    assert sanitize_error_message("failed at /opt/iac-code/private/x.txt") == "failed at [PATH]"
+
+
 def test_error_message_truncated_at_512_bytes():
     raw = "x" * 1000
     out = sanitize_error_message(raw)

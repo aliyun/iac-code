@@ -11,10 +11,10 @@
 
 - 仅推荐 `CreateStack` 前的新建栈参数，由 skill 编排专用 ROS 模板工具和必要的只读资源查询。
 - `PreviewStack` 是预览验证门槛，不是部署成功保证。通过的参数集称为 **Preview-Validated Parameter Set**：表示指定模板来源在当时参数集下可预览。
-- 原始约束快照与 API 响应只在 agent 上下文持有，不写文件；用户要求保存时只能保存脱敏后的摘要。
-- 密码类参数可在用户要求时生成合规随机值，报告与日志中只显示 `***` / `<redacted>`。
+- 原始约束快照与 API 响应只在 agent 上下文持有，不写额外文件；结构化步骤交接和用户结果保留完成任务所需的真实值。
+- 密码类参数可在用户要求时生成合规随机值；同一个真实值必须贯穿预览、询价、结构化步骤交接和部署，不得用脱敏占位符替换。
 - 不编造外部资源、账号资源、AccessKey/Secret/Token/Webhook/LicenseKey/证书/真实域名/已有资源 ID。
-- 敏感值、资源 ID、公网地址、账号 ID、控制台 URL 必须脱敏。
+- 服务端日志由运行时执行严格脱敏；不得为了日志策略改写功能状态或用户结果。
 
 ## 流程
 
@@ -66,7 +66,7 @@ ROS Terraform 类型模板若返回 `TerraformStackNotSupported` / `QueryErrors`
 
 ### 5. 保留原始约束快照（仅上下文）
 
-字段：参数名、原始 `AllowedValues`、`AssociationParameterNames`、`Behavior` / `BehaviorReason`、`IllegalValueByParameterConstraints`、`IllegalValueByRules`、`NotSupportResources`、`QueryErrors`，以及本地模板中的引用证据。展示前必须脱敏。
+字段：参数名、原始 `AllowedValues`、`AssociationParameterNames`、`Behavior` / `BehaviorReason`、`IllegalValueByParameterConstraints`、`IllegalValueByRules`、`NotSupportResources`、`QueryErrors`，以及本地模板中的引用证据。不要向结构化结果注入 `***`、`[REDACTED]` 或 `<redacted>`。
 
 ### 6. 对 AllowedValues 做偏好预筛选
 
@@ -96,7 +96,7 @@ ROS Terraform 类型模板若返回 `TerraformStackNotSupported` / `QueryErrors`
 | 可生成测试输入 | ECS/RDS/Redis/RocketMQ/WordPress 等普通密码（参数名/`NoEcho`/AssociationProperty/描述/资源属性表明是密码，且用户要求代理准备） |
 | 外部 / 账号特定 ❌ 不得编造 | `VpcId`、`VSwitchId`、`SecurityGroupId`、`KeyPairName`、已有 `InstanceId`；真实域名/ICP/DNS/证书；Token/Webhook/AK/SK/LicenseKey/ARMS/MSE 等凭证 |
 
-生成的密码必须满足模板长度、复杂度、`AllowedPattern`、`ConstraintDescription`，日志或临时配置含明文时测试后必须脱敏或删除。
+生成的密码必须满足模板长度、复杂度、`AllowedPattern`、`ConstraintDescription`，并以同一个真实值用于 Preview、询价与后续部署；服务端日志脱敏由运行时负责。
 
 已有资源参数：只读查询可在用户确认后校验；模板会修改资源、DNS、安全组或 RunCommand 的，必须显式确认资源与影响，不自动选择账号内资源。
 
@@ -126,7 +126,7 @@ ros_preview_template(
 ### 11. 展示结果
 
 - 模板来源、地域、最终 `StackName`、共享操作参数（如 `DisableRollback`）。
-- 推荐参数值（敏感值脱敏）；每个参数的来源（API `AllowedValues` / 可推断 / 生成的测试密码 / 用户提供 / 外部未提供）与理由。
+- 推荐参数值；每个参数的来源（API `AllowedValues` / 可推断 / 生成的测试密码 / 用户提供 / 外部未提供）与理由。结构化参数必须保留真实值。
 - `PreviewStack` 状态、资源摘要。
 - 外部输入缺口与用户需提供内容。
 - 是否执行 `CreateStack` 的确认问题。
@@ -141,7 +141,7 @@ ros_preview_template(
 
 部署后注意：
 
-- 报告中的 NoEcho/密码、公网地址、资源 ID、控制台 URL 必须脱敏。
+- 报告和结构化结果保留授权用户完成使用所需的真实参数；不得把 NoEcho/密码替换成脱敏占位符。服务端日志仍由运行时严格脱敏。
 - 不要把 `CREATE_COMPLETE` 当作任务结束信号；按用户意图判断是否需要清理或后续验证。
 
 ## 失败分类

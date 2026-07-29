@@ -11,9 +11,9 @@ from starlette.endpoints import WebSocketEndpoint
 from starlette.routing import WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from iac_code.a2a.projection import project_a2a_exception
 from iac_code.a2a.transports.dispatcher import A2AJsonRpcDispatcher, A2ARuntimeComponents
 from iac_code.a2a.transports.stdio import is_streaming_request
-from iac_code.utils.public_errors import public_error_from_exception
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,11 @@ class WebSocketA2AServerApp:
                             if not await _send_json(websocket, websocket_event_frame(event, final=False)):
                                 return
                     except Exception as exc:
-                        failure = public_error_from_exception(exc)
+                        failure = await project_a2a_exception(
+                            exc,
+                            task_store=components.task_store,
+                            request_data=payload,
+                        )
                         logger.warning("A2A WebSocket streaming dispatch failed: error_id=%s", failure.error_id)
                         await _send_json(
                             websocket,
@@ -91,7 +95,11 @@ class WebSocketA2AServerApp:
                 try:
                     response = await self.dispatcher.dispatch(payload)
                 except Exception as exc:
-                    failure = public_error_from_exception(exc)
+                    failure = await project_a2a_exception(
+                        exc,
+                        task_store=components.task_store,
+                        request_data=payload,
+                    )
                     logger.warning("A2A WebSocket dispatch failed: error_id=%s", failure.error_id)
                     await _send_json(
                         websocket,

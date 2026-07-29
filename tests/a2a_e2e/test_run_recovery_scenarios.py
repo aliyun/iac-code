@@ -258,6 +258,184 @@ def test_scenario1_performance_backup_is_registered_and_requires_real_cloud() ->
         raise AssertionError("scenario1-performance-backup should require --allow-real-cloud")
 
 
+def test_redaction_step4_is_registered_requires_real_cloud_and_forces_safe_mode(tmp_path: Path) -> None:
+    runner = _load_runner()
+
+    assert runner._SCENARIOS[runner.REDACTION_STEP4_SCENARIO] is runner.run_redaction_step4
+    args = SimpleNamespace(allow_real_cloud=False, deterministic=False)
+    try:
+        runner._validate_scenario_execution(args, runner.REDACTION_STEP4_SCENARIO)
+    except SystemExit as exc:
+        assert "--allow-real-cloud" in str(exc)
+    else:
+        raise AssertionError("redaction-step4 should require --allow-real-cloud")
+
+    harness_args = SimpleNamespace(
+        server_cwd=str(tmp_path),
+        run_dir=str(tmp_path / "run"),
+        run_root=str(tmp_path),
+        cwd="",
+        host="127.0.0.1",
+        port=0,
+        no_auto_approve_permissions=False,
+        provider="",
+        model="",
+        api_base="",
+        deterministic=False,
+        fault_at="",
+    )
+    harness = runner.ScenarioHarness(harness_args, scenario=runner.REDACTION_STEP4_SCENARIO)
+
+    assert harness.server_env["IAC_CODE_A2A_SAFE_MODE"] == "true"
+
+
+def test_step4_redaction_audit_preserves_credentials_tokens_and_only_hides_paths() -> None:
+    runner = _load_runner()
+    server_root = "/srv/iac-code-e2e"
+    canonical = {
+        "status": "waiting_input",
+        "pendingInput": {
+            "step": {"id": "confirm_and_select"},
+            "options": [{"name": "economy"}, {"name": "balanced"}],
+        },
+        "steps": [
+            {
+                "conclusion": {
+                    "deployment_parameters": {"RdsMasterUserPassword": "real-generated-value"},
+                    "preview_validation": {"parameters": {"RdsMasterUserPassword": "real-generated-value"}},
+                    "template_url": f"{server_root}/workspace/backend.yml",
+                }
+            }
+        ],
+        "display": {"usage": {"totalTokens": 1234}},
+        "failedToolCall": {
+            "path": f"{server_root}-rerun/src/iac_code/a2a/app.py",
+            "result": f"File not found: {server_root}-rerun/src/iac_code/a2a/app.py",
+        },
+    }
+    public = json.loads(json.dumps(canonical))
+    public["steps"][0]["conclusion"]["template_url"] = "[PATH]"
+
+    audit = runner._build_step4_redaction_audit(
+        canonical,
+        public,
+        known_server_paths=(server_root,),
+        safe_mode="true",
+    )
+
+    assert all(runner._step4_redaction_checks(audit).values())
+    assert "real-generated-value" not in json.dumps(audit)
+    assert audit["canonicalKnownServerPathOccurrences"] == 1
+    assert audit["publicKnownServerPathOccurrences"] == 0
+
+    leaked_public = json.loads(json.dumps(public))
+    leaked_public["steps"][0]["conclusion"]["template_url"] = f"{server_root}/workspace/backend.yml"
+    leaked_audit = runner._build_step4_redaction_audit(
+        canonical,
+        leaked_public,
+        known_server_paths=(server_root,),
+        safe_mode="true",
+    )
+
+    assert leaked_audit["publicKnownServerPathOccurrences"] == 1
+    assert runner._step4_redaction_checks(leaked_audit)["safe mode hides known server paths from public state"] is False
+
+    public["steps"][0]["conclusion"]["deployment_parameters"]["RdsMasterUserPassword"] = "***"
+    broken_audit = runner._build_step4_redaction_audit(
+        canonical,
+        public,
+        known_server_paths=(server_root,),
+        safe_mode="true",
+    )
+    broken_checks = runner._step4_redaction_checks(broken_audit)
+
+    assert broken_checks["public functional parameters contain no redaction placeholders"] is False
+    assert broken_checks["public credential fields match canonical values"] is False
+
+    broken_canonical = json.loads(json.dumps(canonical))
+    broken_canonical["steps"][0]["conclusion"]["deployment_parameters"]["RdsMasterUserPassword"] = "***"
+    broken_canonical["display"]["usage"]["totalTokens"] = "***"
+    canonical_audit = runner._build_step4_redaction_audit(
+        broken_canonical,
+        public,
+        known_server_paths=(server_root,),
+        safe_mode="true",
+    )
+    canonical_checks = runner._step4_redaction_checks(canonical_audit)
+
+    assert canonical_checks["canonical functional parameters contain no redaction placeholders"] is False
+    assert canonical_checks["canonical token counters are numeric when present"] is False
+
+
+def test_redaction_step4_stops_before_selection_and_writes_only_audit(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    prompts: list[str] = []
+    server_root = str(tmp_path / "server")
+    canonical = {
+        "status": "waiting_input",
+        "pendingInput": {
+            "step": {"id": "confirm_and_select"},
+            "options": [{"name": "economy"}, {"name": "balanced"}],
+        },
+        "steps": [
+            {
+                "conclusion": {
+                    "deployment_parameters": {"RdsMasterUserPassword": "real-generated-value"},
+                    "template_url": f"{server_root}/backend.yml",
+                }
+            }
+        ],
+        "display": {"usage": {"totalTokens": 1234}},
+    }
+    public = {"snapshot": json.loads(json.dumps(canonical))}
+    public["snapshot"]["steps"][0]["conclusion"]["template_url"] = "[PATH]"
+
+    class FakeHarness:
+        def __init__(self) -> None:
+            self.context_id = "ctx-1"
+            self.pipeline_task_id = "task-1"
+            self.cwd = server_root
+            self.server_cwd = server_root
+            self.server_url = "http://127.0.0.1:1"
+            self.run_dir = tmp_path
+            self.server_env = {"IAC_CODE_A2A_SAFE_MODE": "true"}
+            self.checks = {}
+            self.snapshots = {}
+            self.notes = []
+
+        def stream(self, *, prompt: str, name: str, context_id: str, task_id: str):
+            prompts.append(prompt)
+            assert name == "01-redaction-step4"
+            assert context_id == ""
+            assert task_id == ""
+            return runner.StreamSummary(
+                name=name,
+                prompt=prompt,
+                task_id=self.pipeline_task_id,
+                context_id=self.context_id,
+                status_states=["TASK_STATE_INPUT_REQUIRED"],
+                pipeline_event_types=["input_required"],
+                last_input_required_step_id="confirm_and_select",
+            )
+
+    harness = FakeHarness()
+
+    def fake_run_with_harness(_args, _scenario, callback):
+        callback(harness)
+        return 0 if all(harness.checks.values()) else 1
+
+    monkeypatch.setattr(runner, "_run_with_harness", fake_run_with_harness)
+    monkeypatch.setattr(runner, "_load_canonical_pipeline_snapshot", lambda _h: canonical)
+    monkeypatch.setattr(runner, "_fetch_pipeline_state_for_redaction_audit", lambda _h: public)
+    args = SimpleNamespace(redaction_step4_prompt=runner.REDACTION_STEP4_PROMPT)
+
+    assert runner.run_redaction_step4(args, runner.REDACTION_STEP4_SCENARIO) == 0
+    assert prompts == [runner.REDACTION_STEP4_PROMPT]
+    audit = json.loads((tmp_path / "redaction-audit.json").read_text(encoding="utf-8"))
+    assert "real-generated-value" not in json.dumps(audit)
+    assert any("no selection input was sent" in note for note in harness.notes)
+
+
 def test_answer_intervening_ask_inputs_reaches_selection(tmp_path: Path) -> None:
     runner = _load_runner()
     initial = runner.StreamSummary(

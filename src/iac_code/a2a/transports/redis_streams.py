@@ -9,10 +9,10 @@ from dataclasses import dataclass
 from importlib import import_module
 from typing import Any
 
+from iac_code.a2a.projection import project_a2a_exception
 from iac_code.a2a.transports.base import A2ATransportDependencyError
 from iac_code.a2a.transports.dispatcher import A2AJsonRpcDispatcher, A2ARuntimeComponents
 from iac_code.a2a.transports.stdio import is_streaming_request
-from iac_code.utils.public_errors import public_error_from_exception
 
 
 @dataclass(frozen=True)
@@ -234,6 +234,7 @@ class RedisStreamsA2AServer:
                         reply_stream,
                         correlation_id=message.correlation_id,
                         request_id=request_id,
+                        request_data=message.payload,
                         exc=exc,
                     )
             else:
@@ -250,6 +251,7 @@ class RedisStreamsA2AServer:
                         reply_stream,
                         correlation_id=message.correlation_id,
                         request_id=request_id,
+                        request_data=message.payload,
                         exc=exc,
                     )
         finally:
@@ -282,9 +284,14 @@ class RedisStreamsA2AServer:
         *,
         correlation_id: str,
         request_id: Any,
+        request_data: dict[str, Any],
         exc: BaseException,
     ) -> None:
-        failure = public_error_from_exception(exc)
+        failure = await project_a2a_exception(
+            exc,
+            task_store=self._components.task_store,
+            request_data=request_data,
+        )
         await self._write_response(
             stream,
             correlation_id=correlation_id,

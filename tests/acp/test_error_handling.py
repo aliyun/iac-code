@@ -109,7 +109,7 @@ async def test_prompt_agent_loop_exception_becomes_request_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_prompt_agent_loop_exception_redacts_public_error() -> None:
+async def test_prompt_agent_loop_exception_preserves_local_error() -> None:
     class LeakyLoop:
         async def run_streaming(self, prompt: str):
             raise RuntimeError("DB_PASSWORD=hunter2 /Users/alice/.iac-code/settings.yml")
@@ -122,8 +122,8 @@ async def test_prompt_agent_loop_exception_redacts_public_error() -> None:
         await session.prompt([acp.schema.TextContentBlock(type="text", text="boom")])
 
     rendered = str(exc_info.value.data)
-    assert "hunter2" not in rendered
-    assert "/Users/alice" not in rendered
+    assert "hunter2" in rendered
+    assert "/Users/alice" in rendered
     assert exc_info.value.data["error_id"]
 
 

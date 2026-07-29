@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import quote, unquote, urlsplit
 
 from iac_code.i18n import _
-from iac_code.utils.public_paths import relativize_public_file_uri, sanitize_public_paths
+from iac_code.utils.public_paths import redact_known_public_paths, relativize_public_file_uri, sanitize_public_paths
 
 # 本地 Web workbench 绑定 loopback，转录里出现真实文件路径与密钥既安全又有用（数据只落本地磁盘），
 # 因此需要一个开关关闭「全部脱敏」——路径 [PATH] 与密钥 [REDACTED]/*** 都不再处理。默认 False：
@@ -192,6 +192,34 @@ def sanitize_public_text(
         fallback_summary = _("Unknown error")
     raw_summary = str(value) if value is not None else ""
     return _sanitize_public_summary(raw_summary, public_path_roots=public_path_roots) or fallback_summary
+
+
+def sanitize_strict_text(
+    value: Any,
+    *,
+    fallback_summary: str | None = None,
+    public_path_roots: Iterable[Mapping[str, str]] | None = None,
+) -> str:
+    """Sanitize log/telemetry user data regardless of display suppression.
+
+    This entry point deliberately ignores the local Web no-redaction context and
+    the A2A delivery policy. It is only for service logs and telemetry fields.
+    """
+
+    token = _ALL_REDACTION_SUPPRESSED.set(False)
+    try:
+        sanitized = sanitize_public_text(
+            value,
+            fallback_summary=fallback_summary,
+            public_path_roots=public_path_roots,
+        )
+        # Strict observability sinks must also cover server layouts such as
+        # /srv and /opt when no request-scoped roots are available.  This is
+        # intentionally broader than A2A path-only projection and does not
+        # alter Provider ErrorEvent or other existing public-error behavior.
+        return redact_known_public_paths(sanitized, ({"path": "/", "label": "[PATH]"},))
+    finally:
+        _ALL_REDACTION_SUPPRESSED.reset(token)
 
 
 def _error_id(*, error_type: str, summary: str) -> str:

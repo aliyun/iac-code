@@ -8,9 +8,9 @@ from dataclasses import dataclass
 from importlib import import_module
 from typing import Any
 
+from iac_code.a2a.projection import project_a2a_exception
 from iac_code.a2a.transports.base import A2ATransportDependencyError
 from iac_code.a2a.transports.dispatcher import A2ARuntimeComponents
-from iac_code.utils.public_errors import public_error_from_exception
 
 
 @dataclass(frozen=True)
@@ -73,13 +73,14 @@ class _JsonRpcServicer:
         from iac_code.a2a.transports.dispatcher import A2AJsonRpcDispatcher
 
         self._dispatcher = A2AJsonRpcDispatcher(components)
+        self._task_store = components.task_store
 
     async def Send(self, request: JsonRpcEnvelope, context: Any) -> JsonRpcEnvelope:  # noqa: N802
         payload = _from_envelope(request)
         try:
             response = await self._dispatcher.dispatch(payload)
         except Exception as exc:
-            return _to_envelope(_jsonrpc_public_error(payload.get("id"), exc))
+            return _to_envelope(await self._jsonrpc_error(payload, exc))
         return _to_envelope(response)
 
     async def Stream(  # noqa: N802
@@ -97,10 +98,18 @@ class _JsonRpcServicer:
                 return
             raise
         except Exception as exc:
-            yield _to_envelope(_jsonrpc_public_error(payload.get("id"), exc), final=True)
+            yield _to_envelope(await self._jsonrpc_error(payload, exc), final=True)
 
     async def aclose(self) -> None:
         await self._dispatcher.aclose()
+
+    async def _jsonrpc_error(self, payload: dict[str, Any], exc: BaseException) -> dict[str, Any]:
+        failure = await project_a2a_exception(
+            exc,
+            task_store=getattr(self, "_task_store", None),
+            request_data=payload,
+        )
+        return _jsonrpc_error(payload.get("id"), failure.summary, error_id=failure.error_id)
 
 
 class GrpcA2AClient:
@@ -137,15 +146,14 @@ def _to_envelope(payload: dict[str, Any], *, final: bool = False, envelope_cls: 
     )
 
 
-def _jsonrpc_public_error(request_id: Any, exc: BaseException) -> dict[str, Any]:
-    failure = public_error_from_exception(exc)
+def _jsonrpc_error(request_id: Any, message: str, *, error_id: str) -> dict[str, Any]:
     return {
         "jsonrpc": "2.0",
         "id": request_id,
         "error": {
             "code": -32603,
-            "message": failure.summary,
-            "data": {"error_id": failure.error_id},
+            "message": message,
+            "data": {"error_id": error_id},
         },
     }
 
