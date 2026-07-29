@@ -392,6 +392,10 @@ class ValidationReport:
     def has_errors(self) -> bool:
         return self.error_count > 0
 
+    @property
+    def limitation_count(self) -> int:
+        return sum(item.severity == Severity.LIMITATION for item in self.diagnostics)
+
     def to_dict(self) -> dict[str, Any]:
         def span_dict(span: SourceSpan | None) -> dict[str, Any] | None:
             if span is None:
@@ -416,6 +420,7 @@ class ValidationReport:
         return {
             "error_count": self.error_count,
             "warning_count": self.warning_count,
+            "limitation_count": self.limitation_count,
             "analysis_incomplete": self.analysis_incomplete,
             "counts_by_code": dict(self.counts_by_code),
             "diagnostics": [

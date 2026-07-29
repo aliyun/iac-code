@@ -260,3 +260,91 @@ class TestCheckTemplate:
         assert outcome.report.diagnostics[0].code == "ROS1202"
         assert outcome.blocking_result.metadata is not None
         assert outcome.blocking_result.metadata["ros_validation"]["error_count"] == 1
+
+    def test_association_property_error_blocks_validate_template_with_structured_detail(self) -> None:
+        body = {
+            "ROSTemplateFormatVersion": "2015-09-01",
+            "Parameters": {
+                "GeneratedSuffix": {
+                    "Type": "String",
+                    "AssociationProperty": "AutoCompleteInput",
+                    "AssociationPropertyMetadata": {
+                        "Length": 8,
+                        "CharacterClasses": [{"Class": "digit", "Min": 1}],
+                    },
+                }
+            },
+            "Resources": {},
+        }
+
+        result = check_template("ros", "ValidateTemplate", {"TemplateBody": body})
+
+        assert result is not None and result.blocking_result is not None
+        assert result.template_analyzed
+        assert "ROS1305" in result.blocking_result.content
+        assert "Use number instead" in result.blocking_result.content
+        metadata = result.blocking_result.metadata["ros_validation"]
+        assert metadata["error_count"] == 1
+        assert metadata["diagnostics"][0]["path"] == (
+            "$.Parameters.GeneratedSuffix.AssociationPropertyMetadata.CharacterClasses[0].Class"
+        )
+
+    def test_association_property_rule_is_shared_with_create_stack(self) -> None:
+        body = {
+            "ROSTemplateFormatVersion": "2015-09-01",
+            "Parameters": {
+                "P": {
+                    "Type": "String",
+                    "AssociationProperty": "AutoCompleteInput",
+                    "AssociationPropertyMetadata": {"CharacterClasses": [{"Class": "digit", "Min": 1}]},
+                }
+            },
+            "Resources": {},
+        }
+
+        result = check_template(
+            "ros",
+            "CreateStack",
+            {"StackName": "stack", "TemplateBody": body},
+        )
+
+        assert result is not None and result.blocking_result is not None
+        assert result.report.counts_by_code["ROS1305"] == 1
+
+    def test_association_property_warning_does_not_block_and_is_attached_once(self) -> None:
+        body = {
+            "ROSTemplateFormatVersion": "2015-09-01",
+            "Parameters": {
+                "P": {
+                    "Type": "String",
+                    "AssociationProperty": "ALIYUN::Future::Selector",
+                }
+            },
+            "Resources": {},
+        }
+
+        result = check_template("ros", "ValidateTemplate", {"TemplateBody": body})
+
+        assert result is not None and result.blocking_result is None
+        assert result.report.warning_count == 1
+        assert result.report.counts_by_code["ROS5303"] == 1
+        assert len([item for item in result.report.diagnostics if item.code == "ROS5303"]) == 1
+
+    def test_valid_auto_complete_metadata_continues_and_input_is_not_mutated(self) -> None:
+        body = {
+            "ROSTemplateFormatVersion": "2015-09-01",
+            "Parameters": {
+                "P": {
+                    "Type": "String",
+                    "AssociationProperty": "AutoCompleteInput",
+                    "AssociationPropertyMetadata": {"CharacterClasses": [{"Class": "number", "Min": 1}]},
+                }
+            },
+            "Resources": {},
+        }
+        params = {"TemplateBody": body}
+
+        result = check_template("ros", "ValidateTemplate", params)
+
+        assert result is not None and result.blocking_result is None
+        assert params == {"TemplateBody": body}

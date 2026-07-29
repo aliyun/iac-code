@@ -7801,6 +7801,11 @@ msgid "Analysis did not complete; this call was blocked to avoid missed errors."
 msgstr "分析未完整完成；为避免漏检，本次调用已阻断。"
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+#, python-brace-format
+msgid "{} local-analysis limitations; details condensed."
+msgstr "{} 项本地分析限制；详情已折叠。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
 msgid "generated JSON "
 msgstr "生成 JSON "
 
@@ -7812,6 +7817,21 @@ msgstr "{}第 {} 行："
 #: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
 msgid "Details:"
 msgstr "详情："
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+#, python-brace-format
+msgid "{} occurrences; showing {} examples."
+msgstr "{} 次出现；显示 {} 个示例。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+#, python-brace-format
+msgid "   example path: {} — {}"
+msgstr "   示例路径：{} — {}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
+#, python-brace-format
+msgid "   {} additional occurrences are available in structured diagnostics."
+msgstr "   结构化诊断中还提供了 {} 条记录。"
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/renderer.py
 #, python-brace-format
@@ -7868,6 +7888,686 @@ msgstr "当前解析结果不能包含 ROS sections。"
 #, python-brace-format
 msgid "The known value of Parameter {} cannot be parsed as its declared type."
 msgstr "参数 {} 的已知值无法按声明类型解析。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "Embedded Terraform variable metadata is not analyzed locally."
+msgstr "未在本地分析内嵌 Terraform 变量元数据。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"Top-level Parameters are validated; metadata inside Workspace files "
+"remains outside local analysis."
+msgstr "已校验顶层 Parameters；Workspace 文件中的元数据不在本地分析范围内。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AssociationPropertyMetadata nesting is too deep."
+msgstr "AssociationPropertyMetadata 嵌套过深。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "Nested Parameter/Parameters validation stops after {} levels."
+msgstr "嵌套 Parameter/Parameters 校验在 {} 层后停止。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "at most {} nested levels"
+msgstr "最多 {} 层嵌套"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AssociationProperty must be a non-empty String."
+msgstr "AssociationProperty 必须是非空 String。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"The target parameter form resolves AssociationProperty keys only from "
+"non-empty strings."
+msgstr "目标参数表单仅从非空字符串解析 AssociationProperty 键。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "non-empty String"
+msgstr "非空 String"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "Use {} instead."
+msgstr "请改用 {}。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "AssociationProperty value is deprecated: {}."
+msgstr "AssociationProperty 的值已弃用：{}。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"The stock ROS form still recognizes this value, so this warning does not "
+"block the template."
+msgstr "原生 ROS 表单目前仍能识别该值，因此此警告不会阻断模板。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "AssociationProperty value is absent from the local frontend contract: {}."
+msgstr "本地前端契约未收录 AssociationProperty 的值：{}。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"A newer target frontend may support this value. Local validation uses the"
+" stock fallback component and does not mark the value invalid."
+msgstr "较新的目标前端可能支持该值。本地校验会使用原生回退组件，不会将该值判为无效。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AssociationProperty is bypassed by a later stock form component selection."
+msgstr "AssociationProperty 被后续的原生表单组件选择绕过。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "No resolved form branch selects the unavailable AssociationProperty value."
+msgstr "没有任何已解析的表单分支会选择这个不可用的 AssociationProperty 值。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"AssociationProperty availability depends on the stock form read-only "
+"state."
+msgstr "AssociationProperty 的可用性取决于原生表单的只读状态。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"The editable form path does not support this value, while the read-only "
+"path may bypass it."
+msgstr "可编辑表单路径不支持该值，而只读路径可能会绕过此限制。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AssociationProperty is unavailable in the stock ROS parameter form."
+msgstr "AssociationProperty 在原生 ROS 参数表单中不可用。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "a stock ROS AssociationProperty"
+msgstr "原生 ROS 的 AssociationProperty"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AssociationPropertyMetadata must be a Mapping."
+msgstr "AssociationPropertyMetadata 必须是 Mapping。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "The target form reads named metadata fields from an object."
+msgstr "目标表单从对象中读取具名元数据字段。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "Mapping"
+msgstr "映射"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AssociationPropertyMetadata field names must be Strings."
+msgstr "AssociationPropertyMetadata 字段名必须是 String。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"The target form performs named property access and cannot consume this "
+"key."
+msgstr "目标表单通过名称访问属性，无法使用此键。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "String field name"
+msgstr "String 类型的字段名"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"AssociationPropertyMetadata field is shadowed by a higher-precedence "
+"alias."
+msgstr "AssociationPropertyMetadata 字段被优先级更高的别名遮蔽。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "The target form reads {} first, so this value is ignored by that consumer."
+msgstr "目标表单会先读取 {}，因此该消费方会忽略此值。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"AssociationPropertyMetadata field is not supported by the effective form "
+"component."
+msgstr "实际生效的表单组件不支持此 AssociationPropertyMetadata 字段。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"AssociationPropertyMetadata field is outside the audited contract "
+"coverage."
+msgstr "AssociationPropertyMetadata 字段超出已审计的契约覆盖范围。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"The common schema or at least one possible component is partial/runtime-"
+"dependent; the field cannot be rejected deterministically."
+msgstr "通用 schema 或至少一个候选组件的契约覆盖不完整或依赖运行时，因此无法确定性地拒绝该字段。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "The complete common and possible-component schemas all reject this field."
+msgstr "完整的公共 schema 和可能的组件 schema 都拒绝此字段。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "a field consumed by the common or possible component schema"
+msgstr "通用 schema 或候选组件 schema 会使用的字段"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid ""
+"Metadata field {} is used by some possible form components and ignored by"
+" others."
+msgstr "Metadata 字段 {} 只会被部分候选表单组件使用，其他组件会忽略它。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"The runtime component cannot be determined locally, so this field is left"
+" unchecked."
+msgstr "本地无法确定运行时最终选择的组件，因此不会校验该字段。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"Do not change the template based on this limitation alone; verify whether"
+" the field takes effect in the target ROS form if needed."
+msgstr "不要仅根据此限制修改模板；如需确认，请在目标 ROS 表单中检查该字段是否生效。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AssociationPropertyMetadata value is nested too deeply."
+msgstr "AssociationPropertyMetadata 值嵌套过深。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "Schema traversal stops after {} levels."
+msgstr "Schema 遍历在 {} 层后停止。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AssociationPropertyMetadata value is not in the local contract enum."
+msgstr "AssociationPropertyMetadata 值不在本地契约枚举中。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "The effective component only implements the exported enum values."
+msgstr "生效的组件仅实现已导出的枚举值。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AssociationPropertyMetadata object is missing a required field."
+msgstr "AssociationPropertyMetadata 对象缺少必填字段。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "The effective form schema requires this nested field."
+msgstr "实际生效的表单模式要求此嵌套字段。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "required field {}"
+msgstr "必填字段 {}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "missing"
+msgstr "缺失"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AssociationPropertyMetadata field uses the wrong letter case."
+msgstr "AssociationPropertyMetadata 字段的字母大小写不正确。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AssociationPropertyMetadata object contains an unsupported nested field."
+msgstr "AssociationPropertyMetadata 对象包含不支持的嵌套字段。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "Field names are case-sensitive; use {} instead."
+msgstr "字段名区分大小写；请改用 {}。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "This nested schema is closed."
+msgstr "此嵌套模式不允许额外字段。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "one of: {}"
+msgstr "以下之一：{}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "Rename {} to {}."
+msgstr "将 {} 重命名为 {}。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AssociationPropertyMetadata value does not match the local form schema."
+msgstr "AssociationPropertyMetadata 值与本地表单模式不匹配。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "The literal value failed the exported {} constraint."
+msgstr "该字面量值未通过已导出的 {} 约束。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AssociationPropertyMetadata reference has inconsistent frontend consumers."
+msgstr "AssociationPropertyMetadata 引用的前端消费方行为不一致。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"One consumer parses this value, but the template-default initializer may "
+"use the raw text. Host values and effect timing are unavailable locally."
+msgstr "一个消费方会解析该值，但模板默认值初始化器可能直接使用原始文本。本地无法获知宿主值及生效时机。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "Environment metadata reference cannot be resolved locally."
+msgstr "环境元数据引用无法在本地解析。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"The encoding is valid, but the contract does not provide an environment-"
+"data schema."
+msgstr "编码有效，但契约未提供环境数据 schema。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"Mapping selector segment is interpreted as a literal key by the target "
+"form."
+msgstr "目标表单会将 Mapping 选择器片段解释为字面量键。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid ""
+"No Parameter named {} exists; the current mapping hook falls back to the "
+"segment text."
+msgstr "不存在名为 {} 的参数；当前 Mapping hook 会回退使用片段文本。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "Metadata reference {} has more than one possible lookup scope."
+msgstr "Metadata 引用 {} 存在多个可能的查找范围。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"It may resolve from template Parameters or component-local data. The "
+"runtime component is unknown, so local validation leaves the reference "
+"unchecked."
+msgstr "该引用可能从模板 Parameters 或组件内部数据中解析。本地无法确定运行时组件，因此不会校验该引用。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"Do not change the template based on this limitation alone; verify the "
+"reference behavior in the target ROS form if needed."
+msgstr "不要仅根据此限制修改模板；如需确认，请在目标 ROS 表单中检查该引用的实际行为。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"AssociationPropertyMetadata field-path reference cannot be resolved "
+"completely."
+msgstr "AssociationPropertyMetadata 字段路径引用无法完整解析。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "The reference depends on a nested form or MetaList row context."
+msgstr "该引用依赖嵌套表单或 MetaList 行上下文。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AssociationPropertyMetadata reference cannot be proven valid locally."
+msgstr "AssociationPropertyMetadata 引用无法在本地证明有效。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AssociationPropertyMetadata reference is invalid."
+msgstr "AssociationPropertyMetadata 引用无效。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "Consumer reachability is unknown; the possible encoding problem is: {}."
+msgstr "消费方可达性未知;可能的编码问题为:{}。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "The target consumer cannot resolve this encoding: {}."
+msgstr "目标消费方无法解析此编码：{}。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "a valid reference in the declared consumer context"
+msgstr "在声明的消费方上下文中有效的引用"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "referenced Parameter declaration"
+msgstr "被引用的 Parameter 声明"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AssociationPropertyMetadata reference type is suspicious."
+msgstr "AssociationPropertyMetadata 引用类型可疑。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "The referenced Parameter resolves as {}, while this consumer expects {}."
+msgstr "被引用的 Parameter 解析为 {}，而此消费方期望 {}。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "Condition contains a function key that the target form ignores."
+msgstr "Condition 包含一个被目标表单忽略的函数键。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "The target form evaluates only the first object key, {}."
+msgstr "目标表单仅计算第一个对象键 {}。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "Fn::Select contains an argument that the target form ignores."
+msgstr "Fn::Select 包含一个被目标表单忽略的参数。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "Only the first two arguments are destructured by the current runtime."
+msgstr "当前运行时仅解构前两个参数。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AssociationPropertyMetadata Condition is invalid."
+msgstr "AssociationPropertyMetadata 的 Condition 无效。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "The condition AST is incompatible with the target form: {}."
+msgstr "该条件 AST 与目标表单不兼容：{}。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "a supported ParameterMetadataCondition"
+msgstr "受支持的 ParameterMetadataCondition"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "Condition Definitions path cannot be resolved locally."
+msgstr "Condition 的 Definitions 路径无法在本地解析。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"The template does not provide a statically inspectable ROS Interface "
+"Definitions object."
+msgstr "模板未提供可静态检查的 ROS Interface Definitions 对象。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "The ALIYUN and APSARA environment profiles resolve this path differently."
+msgstr "ALIYUN 与 APSARA 环境配置对此路径的解析结果不同。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"AssociationPropertyMetadata nested container has runtime-dependent "
+"reachability."
+msgstr "AssociationPropertyMetadata 嵌套容器的可达性取决于运行时。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"Only some possible form components consume this Parameter/Parameters "
+"field; its nested declarations are not rejected locally."
+msgstr "只有部分可能的表单组件会使用此 Parameter/Parameters 字段；本地不会拒绝其嵌套声明。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AutoCompleteInput Pattern syntax is not checked locally."
+msgstr "AutoCompleteInput 的 Pattern 语法未在本地检查。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"The target form compiles Pattern as ECMAScript RegExp; Python regular "
+"expressions are not equivalent."
+msgstr "目标表单会将 Pattern 编译为 ECMAScript RegExp；Python 正则表达式与其并不等价。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "unsliced generated identifier (Length is falsy in JavaScript)"
+msgstr "未切片的生成标识符（Length 在 JavaScript 中为假值）"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "generated identifier truncated at position {}"
+msgstr "生成标识符在位置 {} 处截断"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AutoCompleteInput Length is normalized non-intuitively by JavaScript."
+msgstr "AutoCompleteInput 的 Length 会被 JavaScript 以非直观的方式规范化。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "Effective generated Length is {} after JavaScript array/slice conversion."
+msgstr "经过 JavaScript 数组/切片转换后,实际生成的 Length 为 {}。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "a positive integer for predictable output"
+msgstr "为获得可预测的输出,应为正整数"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AutoCompleteInput ignores Pattern when CharacterClasses is non-empty."
+msgstr "当 CharacterClasses 非空时,AutoCompleteInput 会忽略 Pattern。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "The character-class generation branch does not compile Pattern."
+msgstr "字符类生成分支不会编译 Pattern。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AutoCompleteInput ignores a special-character-only field."
+msgstr "AutoCompleteInput 会忽略仅用于特殊字符的字段。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "{} is read only when Class is specialCharacter."
+msgstr "仅当 Class 为 specialCharacter 时才会读取 {}。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AutoCompleteInput CharacterClass does not guarantee a minimum count."
+msgstr "AutoCompleteInput 的 CharacterClass 不保证最小数量。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"With multiple character classes, missing Min does not reserve characters "
+"for this class."
+msgstr "存在多个字符类时，缺少 Min 不会为此类预留字符。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AutoCompleteInput Min fills every available position."
+msgstr "AutoCompleteInput 的 Min 会填满每一个可用位置。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"A negative or fractional counter never reaches zero; generation stops "
+"only after available positions are exhausted."
+msgstr "负数或小数计数器永远无法归零；生成过程只有在可用位置耗尽后才会停止。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "a non-negative integer for predictable minimum semantics"
+msgstr "为获得可预测的最小值语义,应为非负整数"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"AutoCompleteInput minimum cannot be satisfied after earlier "
+"CharacterClasses."
+msgstr "在先前的 CharacterClasses 之后,AutoCompleteInput 的最小值无法满足。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "Earlier fills require at least {} of this entry's {} available positions."
+msgstr "先前的填充至少需要 {} 个位置,而此条目共有 {} 个可用位置。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "a minimum satisfiable after earlier fills"
+msgstr "在先前填充之后可满足的最小值"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AutoCompleteInput minimum character counts exceed Length."
+msgstr "AutoCompleteInput 的最小字符数超过 Length。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "The sum of CharacterClasses.Min is {}, but the effective Length is {}."
+msgstr "CharacterClasses.Min 之和为 {},但实际 Length 为 {}。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "sum of Min no greater than {}"
+msgstr "Min 之和不大于 {}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AutoCompleteInput ignores a special-character boundary flag."
+msgstr "AutoCompleteInput 会忽略特殊字符边界标志。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"The runtime does not retain specialCharacter configuration when "
+"SpecialCharacters is empty."
+msgstr "当 SpecialCharacters 为空时,运行时不会保留 specialCharacter 配置。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AutoCompleteInput requires non-empty SpecialCharacters."
+msgstr "AutoCompleteInput 要求 SpecialCharacters 非空。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "This specialCharacter branch must fill at least one generated position."
+msgstr "此 specialCharacter 分支必须至少填充一个生成的位置。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AutoCompleteInput special-character minimum exceeds available positions."
+msgstr "AutoCompleteInput 的特殊字符最小值超过可用位置。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid ""
+"Start/End restrictions leave {} positions for {} required special "
+"characters."
+msgstr "Start/End 限制留下 {} 个位置,而需要 {} 个特殊字符。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "Min no greater than {}"
+msgstr "Min 不大于 {}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"join() can produce a string shorter than Length because the remaining-"
+"character pool becomes empty at the restricted boundary and stays empty."
+msgstr "join() 可能生成比 Length 更短的字符串,因为剩余字符池在受限边界处变空并保持为空。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"The mutable remaining-character pool narrows to ordinary classes at the "
+"restricted boundary and does not restore special characters later."
+msgstr "可变的剩余字符池在受限边界处收窄为普通字符类,之后不会恢复特殊字符。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "AutoCompleteInput boundary restriction persists for later positions."
+msgstr "AutoCompleteInput 的边界限制会持续影响后续位置。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "All statically reachable generation consumers are skipped. {} "
+msgstr "所有静态可达的生成消费方都被跳过。{} "
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "Generation consumer reachability is unknown. {} "
+msgstr "生成消费方的可达性未知。{} "
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "any value"
+msgstr "任意值"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"This AssociationProperty value is available only in the OOS parameter "
+"form."
+msgstr "该 AssociationProperty 值仅适用于 OOS 参数表单。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"This AssociationProperty value is unavailable in the stock ROS parameter "
+"form."
+msgstr "该 AssociationProperty 值在原生 ROS 参数表单中不可用。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "the reference is empty"
+msgstr "引用为空"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "environment references are not allowed by this consumer"
+msgstr "此消费方不允许环境引用"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "Parameter references are not allowed by this consumer"
+msgstr "此消费方不允许 Parameter 引用"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "field-path references are not allowed by this consumer"
+msgstr "此消费方不允许字段路径引用"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "the field path is malformed"
+msgstr "字段路径格式错误"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid ""
+"field paths support one top-level array projection followed by a child "
+"path"
+msgstr "字段路径仅支持一个顶层数组投影，后接一个子路径"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "the Parameter does not exist"
+msgstr "Parameter 不存在"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "the nested Parameter does not exist"
+msgstr "嵌套 Parameter 不存在"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "the MetaList row field does not exist"
+msgstr "MetaList 行字段不存在"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "the referenced Parameter declaration is invalid"
+msgstr "被引用的 Parameter 声明无效"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "the field path traverses a scalar Parameter"
+msgstr "字段路径穿过了标量 Parameter"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "the nested Parameter field does not exist"
+msgstr "嵌套 Parameter 字段不存在"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "the referenced nested Parameter declaration is invalid"
+msgstr "被引用的嵌套 Parameter 声明无效"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "the Definitions path does not exist"
+msgstr "Definitions 路径不存在"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "{} references are not allowed by this consumer"
+msgstr "此消费方不允许 {} 引用"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "the reference is invalid"
+msgstr "引用无效"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "nested And/Or/Not operands must be condition objects"
+msgstr "嵌套的 And/Or/Not 操作数必须是条件对象"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "the condition must be a non-empty String or object"
+msgstr "条件必须是非空 String 或对象"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "the first function key is unsupported"
+msgstr "不支持第一个函数键"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "Fn::Not requires one condition object containing a single key"
+msgstr "Fn::Not 需要一个仅包含单个键的条件对象"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "Fn::Select requires its first two arguments to be Strings"
+msgstr "Fn::Select 的前两个参数必须是 String"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "the Definitions path must resolve to a condition object"
+msgstr "Definitions 路径必须解析为条件对象"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "{} requires exactly two arguments"
+msgstr "{} 恰好需要两个参数"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#, python-brace-format
+msgid "{} requires an array"
+msgstr "{} 需要一个数组"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+msgid "the condition is invalid"
+msgstr "条件无效"
 
 #: src/iac_code/ui/banner.py
 #, python-brace-format
@@ -10709,3 +11409,83 @@ msgstr "允许 Bash?"
 #~ msgid "由外部登录管理"
 #~ msgstr "由外部登录管理"
 
+#~ msgid "The key maps to component {} with scope {}: {}."
+#~ msgstr "该键映射到组件 {},作用域为 {}:{}。"
+
+#~ msgid "AssociationProperty is deprecated by the local frontend contract."
+#~ msgstr "本地前端契约已将 AssociationProperty 标记为弃用。"
+
+#~ msgid ""
+#~ "The current stock ROS form still "
+#~ "resolves this key, but the contract "
+#~ "marks it as deprecated."
+#~ msgstr "当前原生 ROS 表单仍能解析此键，但本地契约已将其标记为弃用。"
+
+#~ msgid ""
+#~ "The local validator cannot prove that"
+#~ " a newer target frontend does not "
+#~ "support this key; stock fallback rules"
+#~ " are used."
+#~ msgstr "本地校验器无法证明较新的目标前端不支持此键；将使用原生回退规则。"
+
+#~ msgid ""
+#~ "Only some possible components consume "
+#~ "this field; its component-specific "
+#~ "schema cannot be enforced deterministically."
+#~ msgstr "只有部分候选组件会使用此字段，因此无法确定性地执行组件专属 schema 校验。"
+
+#~ msgid ""
+#~ "AssociationPropertyMetadata Parameter reference has"
+#~ " a runtime-dependent scope."
+#~ msgstr "AssociationPropertyMetadata 的 Parameter 引用作用域取决于运行时。"
+
+#~ msgid ""
+#~ "The nested consumer does not use "
+#~ "an unambiguous template-root symbol "
+#~ "table."
+#~ msgstr "嵌套消费方未使用明确的模板根符号表。"
+
+#~ msgid ""
+#~ "Metadata field {} may or may not"
+#~ " take effect, depending on the "
+#~ "runtime-selected form component."
+#~ msgstr "Metadata 字段 {} 是否生效，取决于运行时选择的表单组件。"
+
+#~ msgid ""
+#~ "Possible form components: {}. Only some"
+#~ " read field {}, so local validation"
+#~ " leaves the field unchecked."
+#~ msgstr "可能使用的表单组件：{}。只有部分组件会读取字段 {}，因此本地校验不会判断该字段是否有效。"
+
+#~ msgid ""
+#~ "Metadata reference {} may use different"
+#~ " lookup scopes, depending on the "
+#~ "runtime-selected form component."
+#~ msgstr "Metadata 引用 {} 的查找范围可能不同，具体取决于运行时选择的表单组件。"
+
+#~ msgid "All resolved components bypass the unavailable {} mapping."
+#~ msgstr "所有已解析组件都会绕过不可用的 {} 映射。"
+
+#~ msgid ""
+#~ "The editable path cannot use component"
+#~ " {}, but the earlier read-only "
+#~ "branch can select {}."
+#~ msgstr "可编辑路径无法使用组件 {}，但更早的只读分支可以选择 {}。"
+
+#~ msgid ""
+#~ "The key maps to component {}, "
+#~ "which is available only in the OOS"
+#~ " parameter form."
+#~ msgstr "该键映射到组件 {}，此组件仅在 OOS 参数表单中可用。"
+
+#~ msgid ""
+#~ "The key maps to component {}, "
+#~ "which is not registered in the "
+#~ "stock ROS parameter form."
+#~ msgstr "该键映射到组件 {}，此组件未在原生 ROS 参数表单中注册。"
+
+#~ msgid ""
+#~ "The key maps to component {}, "
+#~ "which is unavailable in the stock "
+#~ "ROS parameter form."
+#~ msgstr "该键映射到组件 {}，此组件在原生 ROS 参数表单中不可用。"

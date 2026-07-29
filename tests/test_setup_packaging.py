@@ -135,6 +135,7 @@ def test_web_static_assets_are_included_in_package_data():
     assert "**/*.html" in package_data
     assert "**/*.css" in package_data
     assert "**/*.js" in package_data
+    assert "**/*.json" in package_data
     assert "**/*.svg" in package_data
     assert "**/*.LICENSE" in package_data
 
@@ -147,6 +148,7 @@ def test_web_static_assets_are_included_in_legacy_setup_package_data(monkeypatch
         assert "**/*.html" in package_data
         assert "**/*.css" in package_data
         assert "**/*.js" in package_data
+        assert "**/*.json" in package_data
         assert "**/*.svg" in package_data
         assert "**/*.LICENSE" in package_data
 

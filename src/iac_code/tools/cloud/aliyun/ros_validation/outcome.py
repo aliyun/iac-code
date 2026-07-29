@@ -76,6 +76,7 @@ def _merge_report_payload(existing: dict, current: dict) -> dict:
             "diagnostics": diagnostics,
             "error_count": sum(item.get("severity") == "ERROR" for item in diagnostics),
             "warning_count": sum(item.get("severity") == "WARNING" for item in diagnostics),
+            "limitation_count": sum(item.get("severity") == "LIMITATION" for item in diagnostics),
             "counts_by_code": counts_by_code,
             "analysis_incomplete": bool(existing.get("analysis_incomplete"))
             or bool(current.get("analysis_incomplete")),

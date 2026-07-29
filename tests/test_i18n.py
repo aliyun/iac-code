@@ -760,6 +760,82 @@ def test_ros_validation_uses_runtime_language(monkeypatch: pytest.MonkeyPatch) -
         setup_i18n()
 
 
+def test_association_property_diagnostics_render_in_all_seven_languages() -> None:
+    from iac_code.i18n import set_language
+    from iac_code.tools.cloud.aliyun.ros_validation.model import (
+        MaterializedTemplateSource,
+        RequestValidationContext,
+    )
+    from iac_code.tools.cloud.aliyun.ros_validation.renderer import render_validation_report
+    from iac_code.tools.cloud.aliyun.ros_validation.validator import validate_ros_template
+
+    template = """ROSTemplateFormatVersion: '2015-09-01'
+Parameters:
+  InvalidEnum:
+    Type: String
+    AssociationProperty: AutoCompleteInput
+    AssociationPropertyMetadata:
+      CharacterClasses:
+        - Class: digit
+          Min: 1
+  MissingReference:
+    Type: String
+    AssociationPropertyMetadata:
+      Visible:
+        Condition:
+          Fn::Equals:
+            - ${Missing}
+            - expected
+  InvalidCondition:
+    Type: String
+    AssociationPropertyMetadata:
+      Visible:
+        Condition:
+          Fn::Equals:
+            - only-one
+  NormalizedLength:
+    Type: String
+    AssociationProperty: AutoCompleteInput
+    AssociationPropertyMetadata:
+      Length: 0
+  DeprecatedAssociation:
+    Type: String
+    AssociationProperty: ALIYUN::ECS::Instance:ZoneId
+  UnknownAssociation:
+    Type: String
+    AssociationProperty: ALIYUN::Future::Selector
+  UnavailableAssociation:
+    Type: String
+    AssociationProperty: ALIYUN::OOS::Component::ActionChoice
+Resources: {}
+"""
+    rendered_by_language: dict[str, str] = {}
+    diagnostic_ids_by_language: dict[str, tuple[str, ...]] = {}
+    try:
+        for language in SUPPORTED_LANGUAGES:
+            set_language(language)
+            report = validate_ros_template(
+                MaterializedTemplateSource(template, origin="association-i18n.yaml"),
+                RequestValidationContext(action="ValidateTemplate"),
+            )
+            rendered = render_validation_report(report)
+            rendered_by_language[language] = rendered
+            diagnostic_ids_by_language[language] = tuple(item.diagnostic_id for item in report.diagnostics)
+
+            assert "not_registered_in_stock_ros_component_map" not in rendered
+            assert "OOS-only" not in rendered
+            if language != DEFAULT_LANGUAGE:
+                assert "Parameter does not exist" not in rendered
+                assert "Fn::Equals requires exactly two arguments" not in rendered
+                assert "unsliced generated identifier (Length is falsy in JavaScript)" not in rendered
+    finally:
+        set_language(DEFAULT_LANGUAGE)
+
+    assert set(rendered_by_language) == set(SUPPORTED_LANGUAGES)
+    assert len(set(rendered_by_language.values())) == len(SUPPORTED_LANGUAGES)
+    assert len(set(diagnostic_ids_by_language.values())) == 1
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
 def test_memory_command_translations_are_complete():
     """Verify /memory-specific strings are translated, not copied as placeholders."""
