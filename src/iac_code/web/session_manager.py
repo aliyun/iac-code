@@ -705,6 +705,9 @@ class WebSession:
     # Local shell commands do not enter agent context and may run concurrently with
     # each other, but they still keep the session alive for archive/delete safety.
     active_local_tasks: set[asyncio.Task[Any]] = field(default_factory=set, repr=False)
+    # 仅内存的触发标志:全新会话置 True,供后续 LLM 生成会话标题的路径消费；
+    # 重开/外来会话为 False(标题已存在或不归 Web 生成)。
+    pending_llm_title: bool = False
     # 运行中 turn 的 agent_loop 与 turn id，供“引导/立即插队”端点即时注入使用；
     # 由 runtime.start_turn 在 turn 期间设置、finally 清空。
     active_agent_loop: Any | None = field(default=None, repr=False)
@@ -999,6 +1002,7 @@ class WebSessionManager:
             pinned_at=restored_pinned_at,
             archived=restored_archived,
         )
+        session.pending_llm_title = not storage_existed
         self._sessions[session_key] = session
         if not storage_existed:
             self._record_session_lifecycle_mutation(actual_cwd, actual_session_id)

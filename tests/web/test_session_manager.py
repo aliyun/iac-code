@@ -1778,3 +1778,19 @@ def test_context_usage_payload_without_overhead_matches_defaults() -> None:
     assert _context_usage_payload(messages, model="qwen") == _context_usage_payload(
         messages, model="qwen", system_prompt_tokens=0, tool_definition_tokens=0
     )
+
+
+def test_new_session_marks_pending_llm_title(tmp_path) -> None:
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=str(tmp_path / "project"), session_id="new-1")
+    assert session.pending_llm_title is True
+
+
+def test_reopened_existing_session_does_not_mark_pending_llm_title(tmp_path) -> None:
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    cwd = str(tmp_path / "project")
+    manager.create_session(cwd=cwd, session_id="reopen-1")
+    # 从 _sessions 缓存移除，强制走「storage 已存在」重开路径
+    manager._sessions.pop(next(iter(manager._sessions)), None)
+    reopened = manager.create_session(cwd=cwd, session_id="reopen-1")
+    assert reopened.pending_llm_title is False
