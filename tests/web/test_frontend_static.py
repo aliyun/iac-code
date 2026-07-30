@@ -1113,8 +1113,8 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-308" in html
-    assert "/static/js/app.js?v=web-repl-ui-306" in html
+    assert "/static/styles.css?v=web-repl-ui-310" in html
+    assert "/static/js/app.js?v=web-repl-ui-308" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1146,7 +1146,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-306" in index_html
+    assert "web-repl-ui-308" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-304" in app_source
     assert "./components/workspace.js?v=cloud-creds-v49" in app_source
@@ -6446,6 +6446,37 @@ def test_sidebar_uses_codex_project_thread_navigation() -> None:
     assert "transform: rotate(-10deg)" not in styles
     assert "M3 8.4C3 5.9 4.9 4 7.4 4h9" not in styles
 
+    # 项目选择弹层向上展开(bottom:100%)贴触发器上方;CSS 里的 max-height 只作 JS 未跑时的兜底,
+    # 真正封顶由 app.js 的 clampDraftMenuToViewport 按触发器 rect 计算,故 CSS 仍保留合理上限 + 可滚动。
+    # 三段式:菜单自身 flex 列 + overflow:hidden 不滚,只有中间 .draft-session-menu-list 滚动;
+    # 搜索头与底栏 flex:none 固定。CSS max-height 仅作 JS 未跑时的兜底上限。
+    draft_menu_block = _css_block(styles, ".draft-session-menu")
+    assert "display: flex;" in draft_menu_block
+    assert "flex-direction: column;" in draft_menu_block
+    assert "max-height: min(25rem, calc(100vh - 6rem));" in draft_menu_block
+    assert "overflow: hidden;" in draft_menu_block
+
+    list_block = _css_block(styles, ".draft-session-menu-list")
+    assert "flex: 1 1 auto;" in list_block
+    assert "min-height: 0;" in list_block
+    assert "overflow-y: auto;" in list_block
+    footer_block = _css_block(styles, ".draft-session-menu-footer")
+    assert "flex: none;" in footer_block
+
+    # 关键:固定 rem 引用不到触发器到视口顶的真实距离(composer 多行/断点/窗口高度都会变),
+    # 矮窗口里顶端仍越界。app.js 在打开各草稿菜单时按 picker 的 getBoundingClientRect 收紧 max-height,
+    # 顶端恒不越界;四个 composer 弹层(项目/新建项目/模式/流水线)都要调用。
+    app_source = _source(APP_JS)
+    assert "function clampDraftMenuToViewport(menu)" in app_source
+    assert 'menu.closest(".draft-session-picker")' in app_source
+    assert "picker.getBoundingClientRect()" in app_source
+    assert 'window.getComputedStyle(menu).bottom === "auto"' in app_source
+    assert "menu.style.maxHeight = `min(25rem, ${Math.max(120, Math.round(available))}px)`;" in app_source
+    assert app_source.count("clampDraftMenuToViewport(menu);") == 4
+    # 项目菜单三段:搜索头直挂 menu,项目项进 .draft-session-menu-list,底栏进 .draft-session-menu-footer。
+    assert 'list.className = "draft-session-menu-list";' in app_source
+    assert 'footer.className = "draft-session-menu-footer";' in app_source
+
 
 def test_mobile_sidebar_uses_drawer_instead_of_horizontal_session_strip() -> None:
     html = _source(INDEX_HTML)
@@ -9445,7 +9476,7 @@ def test_styles_has_compaction_boundary_rule() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-306" in html
+    assert "web-repl-ui-308" in html
     assert "web-repl-ui-304" not in html
 
 

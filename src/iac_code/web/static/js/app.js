@@ -4024,6 +4024,29 @@ function makeDraftMenuItem({ iconClass = "", label = "", detail = "", active = f
   return button;
 }
 
+// 草稿会话弹出菜单(项目/模式/子菜单)绝对定位在 .draft-session-picker 上,composer 内向上展开
+// (CSS bottom:100%)。触发器到视口顶的距离随 composer 高度(输入框多行)、断点、窗口高度而变,
+// 纯 CSS 的固定 rem 封顶引用不到这个真实距离,矮窗口里顶端(搜索框)仍会顶出视口。这里在打开时按
+// 触发器的实际 rect 把 max-height 收到「上方可用空间」以内,顶端恒不越界,超出的项在盒内滚动;
+// 窗口宽裕时 min(25rem, …) 仍取 25rem,常态体验不变。祖先链(controls/composer/transcript-panel)
+// 无 overflow:hidden,故只需约束菜单自身高度即可。
+function clampDraftMenuToViewport(menu) {
+  if (!menu || menu.hidden) {
+    return;
+  }
+  const picker = menu.closest(".draft-session-picker");
+  const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0;
+  if (!picker || !viewportHeight) {
+    return;
+  }
+  const rect = picker.getBoundingClientRect();
+  const edgeGap = 12; // 视口边缘留白
+  // .workspace-mode-picker 里复用同一样式但向下展开(top:100%);其余(composer)向上展开。
+  const opensDownward = window.getComputedStyle(menu).bottom === "auto";
+  const available = opensDownward ? viewportHeight - rect.bottom - edgeGap : rect.top - edgeGap;
+  menu.style.maxHeight = `min(25rem, ${Math.max(120, Math.round(available))}px)`;
+}
+
 function renderDraftProjectMenu(draft) {
   const menu = byShell("draft-project-menu");
   if (!menu) {
@@ -4053,6 +4076,12 @@ function renderDraftProjectMenu(draft) {
   searchWrap.append(searchIcon, search);
   menu.append(searchWrap);
 
+  // 三段式:搜索头(上)固定、项目列表(中)独立滚动、底栏(下)固定。只有项目列表溢出时才滚动,
+  // 搜索框与「新建项目/不使用项目」始终可见。列表容器承担滚动;菜单自身 overflow:hidden 不滚。
+  const list = document.createElement("div");
+  list.className = "draft-session-menu-list";
+  menu.append(list);
+
   const normalizedQuery = draftProjectQuery.trim().toLowerCase();
   const groups = groupSessionsByProject(state.sessions || [], state).filter((group) => {
     if (!normalizedQuery) {
@@ -4063,7 +4092,7 @@ function renderDraftProjectMenu(draft) {
   const customPath = draftProjectQuery.trim();
   const customPathLooksUsable = Boolean(customPath) && (customPath.startsWith("/") || customPath.startsWith("~") || customPath.includes("\\"));
   if (customPathLooksUsable) {
-    menu.append(
+    list.append(
       makeDraftMenuItem({
         iconClass: "is-project",
         label: t("Use directory"),
@@ -4079,7 +4108,7 @@ function renderDraftProjectMenu(draft) {
   }
   for (const group of groups.slice(0, 30)) {
     const key = projectKeyFromGroup(group);
-    menu.append(
+    list.append(
       makeDraftMenuItem({
         iconClass: "is-project",
         label: group.label || basenamePath(key),
@@ -4097,12 +4126,14 @@ function renderDraftProjectMenu(draft) {
     const empty = document.createElement("div");
     empty.className = "draft-session-menu-empty";
     empty.textContent = t("No matching projects");
-    menu.append(empty);
+    list.append(empty);
   }
 
+  const footer = document.createElement("div");
+  footer.className = "draft-session-menu-footer";
   const divider = document.createElement("div");
   divider.className = "draft-session-menu-divider";
-  menu.append(
+  footer.append(
     divider,
     makeDraftMenuItem({
       iconClass: "is-new-project",
@@ -4131,6 +4162,8 @@ function renderDraftProjectMenu(draft) {
       },
     }),
   );
+  menu.append(footer);
+  clampDraftMenuToViewport(menu);
 }
 
 function renderDraftProjectNewMenu(draft) {
@@ -4164,6 +4197,7 @@ function renderDraftProjectNewMenu(draft) {
       },
     }),
   );
+  clampDraftMenuToViewport(menu);
 }
 
 function renderDraftModeMenu(draft) {
@@ -4206,6 +4240,7 @@ function renderDraftModeMenu(draft) {
       },
     }),
   );
+  clampDraftMenuToViewport(menu);
 }
 
 function renderDraftPipelineSubmenu(draft) {
@@ -4233,6 +4268,7 @@ function renderDraftPipelineSubmenu(draft) {
       }),
     );
   }
+  clampDraftMenuToViewport(menu);
 }
 
 function renderDraftSessionControls(currentState) {

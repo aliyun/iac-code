@@ -8684,10 +8684,16 @@ body.is-resizing-sidebar {
   left: 0;
   bottom: calc(100% + 0.42rem);
   z-index: 70;
-  display: grid;
+  /* 三段式布局:搜索头 / 可滚动列表(.draft-session-menu-list)/ 底栏,菜单自身用 flex 列并 overflow:hidden
+     不滚动,仅中间列表滚。短子菜单(模式/流水线/新建项目)无中间列表,内容不超高,布局不受影响。 */
+  display: flex;
+  flex-direction: column;
   width: min(28rem, calc(100vw - 2rem));
-  max-height: min(25rem, 72vh);
-  overflow-y: auto;
+  /* 向上展开(bottom:100%)贴在触发器上方,固定 rem 引用不到触发器到视口顶的真实距离,矮窗口里
+     顶端(搜索框)会顶出视口。真正的「按上方空间封顶」由 JS 的 clampDraftMenuToViewport 在打开时按
+     触发器 rect 计算并写 inline max-height;这里仅作 JS 未跑时的兜底上限。窗口高时都取 25rem。 */
+  max-height: min(25rem, calc(100vh - 6rem));
+  overflow: hidden;
   gap: 0.12rem;
   padding: 0.5rem;
   border: 1px solid color-mix(in srgb, var(--codex-ink) 8%, transparent);
@@ -8696,6 +8702,33 @@ body.is-resizing-sidebar {
   box-shadow: 0 22px 70px rgba(0, 0, 0, 0.46);
   backdrop-filter: blur(24px);
   scrollbar-width: none;
+}
+
+/* 中间项目列表:唯一的滚动区。flex 里必须 min-height:0 才能收缩并触发滚动,否则会撑高整个菜单。 */
+.draft-session-menu-list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.draft-session-menu-list::-webkit-scrollbar {
+  display: none;
+}
+
+/* 搜索头与底栏固定,不随列表滚动。 */
+.draft-session-menu-search-wrap,
+.draft-session-menu-footer {
+  flex: none;
+}
+
+.draft-session-menu-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
 }
 
 .draft-session-submenu {
