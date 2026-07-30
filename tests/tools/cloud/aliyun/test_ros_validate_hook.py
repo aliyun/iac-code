@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from iac_code.tools.cloud.aliyun import template_source
 from iac_code.tools.cloud.aliyun.hooks.ros_validate import (
     _format_json_error,
     _format_yaml_error,
@@ -9,6 +10,10 @@ from iac_code.tools.cloud.aliyun.hooks.ros_validate import (
     _validate_structure,
     check_template,
     local_template_source_error,
+)
+from iac_code.tools.cloud.aliyun.template_source import (
+    check_local_template_url_source,
+    classify_local_template_source,
 )
 
 
@@ -348,3 +353,50 @@ class TestCheckTemplate:
 
         assert result is not None and result.blocking_result is None
         assert params == {"TemplateBody": body}
+
+
+class TestLocalTemplateSourceClassification:
+    """Every unusable local template must name its cause and its fix.
+
+    Regression guard: a generic report gives the model nothing to correct, which
+    is what previously drove repeated retries of the same template input.
+    """
+
+    def test_missing_file_is_classified_and_actionable(self, tmp_path) -> None:
+        assert classify_local_template_source(tmp_path / "absent.yml") == "MISSING"
+        diagnostic = local_template_source_error("MISSING").report.diagnostics[0]
+        assert diagnostic.code == "ROS1202"
+        assert "does not exist" in diagnostic.summary
+        assert diagnostic.suggestion
+
+    def test_directory_is_not_a_usable_template_source(self, tmp_path) -> None:
+        assert classify_local_template_source(tmp_path) == "NOT_REGULAR"
+        diagnostic = local_template_source_error("NOT_REGULAR").report.diagnostics[0]
+        assert "not a regular file" in diagnostic.summary
+
+    def test_oversized_template_is_rejected_before_the_wire_limit(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setattr(template_source, "MAX_LOCAL_TEMPLATE_BYTES", 4)
+        template = tmp_path / "big.yml"
+        template.write_text("Resources: {}\n", encoding="utf-8")
+        assert classify_local_template_source(template) == "TOO_LARGE"
+        diagnostic = local_template_source_error("TOO_LARGE").report.diagnostics[0]
+        assert "32 MiB" in diagnostic.summary
+
+    def test_readable_template_has_no_problem(self, tmp_path) -> None:
+        template = tmp_path / "ok.yml"
+        template.write_text("Resources: {}\n", encoding="utf-8")
+        assert classify_local_template_source(template) is None
+
+    def test_remote_template_url_is_never_classified_locally(self) -> None:
+        assert check_local_template_url_source("oss://bucket/template.yml", None, cwd=".") is None
+        assert check_local_template_url_source("https://example.com/template.yml", None, cwd=".") is None
+
+    def test_each_problem_maps_to_a_distinct_actionable_diagnostic(self) -> None:
+        summaries = {
+            problem: local_template_source_error(problem).report.diagnostics[0].summary
+            for problem in ("MISSING", "NOT_REGULAR", "UNREADABLE", "TOO_LARGE", "UTF-8")
+        }
+        assert len(set(summaries.values())) == len(summaries)
+        for problem, summary in summaries.items():
+            # The caller supplies a template path, never a body_file.
+            assert "body_file" not in summary, problem

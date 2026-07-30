@@ -6405,12 +6405,56 @@ msgstr ""
 "OSS/HTTP."
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "The local ROS template file does not exist."
+msgstr "Le fichier de modèle ROS local n'existe pas."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "The local ROS template path is not a regular file."
+msgstr "Le chemin du modèle ROS local n'est pas un fichier régulier."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid "The local ROS template file cannot be read."
 msgstr "Le fichier modèle local ROS ne peut pas être lu."
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "The local ROS template file exceeds the 32 MiB limit."
+msgstr "Le fichier de modèle ROS local dépasse la limite de 32 Mio."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid "The local ROS template file is not valid UTF-8."
 msgstr "Le fichier modèle local ROS n'est pas valide UTF-8."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid ""
+"Check the template path for typos and write the template to that path "
+"before validating it again."
+msgstr ""
+"Vérifiez les fautes de frappe dans le chemin du modèle et écrivez le "
+"modèle à ce chemin avant de le valider à nouveau."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid ""
+"Point TemplateURL at the template file itself rather than a directory or "
+"device."
+msgstr ""
+"Faites pointer TemplateURL vers le fichier de modèle lui-même plutôt que "
+"vers un répertoire ou un périphérique."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "Confirm that the file exists, is readable, and is saved as UTF-8."
+msgstr "Confirmer que le fichier existe, est lisible et est enregistré sous UTF-8."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid ""
+"Reduce the template size, or upload it and pass an OSS/HTTP TemplateURL "
+"instead."
+msgstr ""
+"Réduisez la taille du modèle, ou téléversez-le et passez plutôt une "
+"TemplateURL OSS/HTTP."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "Save the template as UTF-8 text before validating it again."
+msgstr "Enregistrez le modèle en texte UTF-8 avant de le valider à nouveau."
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid ""
@@ -6419,10 +6463,6 @@ msgid ""
 msgstr ""
 "TemplateURL/local TemplateBody a échoué avant d'entrer dans l'analyseur; "
 "le ROS API n'a pas été appelé."
-
-#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
-msgid "Confirm that the file exists, is readable, and is saved as UTF-8."
-msgstr "Confirmer que le fichier existe, est lisible et est enregistré sous UTF-8."
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 #, python-brace-format
@@ -12678,3 +12718,4 @@ msgstr "Autoriser Bash ?"
 #~ msgstr ""
 #~ "Approuver l'appel d'outil : {tool}\n"
 #~ "Résumé de l'entrée : {summary}"
+

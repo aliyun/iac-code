@@ -5901,8 +5901,20 @@ msgstr ""
 "params.TemplateURL，例如本地文件路径或 OSS/HTTP URL。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "The local ROS template file does not exist."
+msgstr "本地 ROS 模板文件不存在。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "The local ROS template path is not a regular file."
+msgstr "本地 ROS 模板路径不是常规文件。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid "The local ROS template file cannot be read."
 msgstr "本地 ROS 模板文件无法读取。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "The local ROS template file exceeds the 32 MiB limit."
+msgstr "本地 ROS 模板文件超过 32 MiB 限制。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid "The local ROS template file is not valid UTF-8."
@@ -5910,13 +5922,35 @@ msgstr "本地 ROS 模板文件不是有效 UTF-8。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid ""
-"TemplateURL/local TemplateBody failed before entering the Parser; the ROS"
-" API was not called."
-msgstr "TemplateURL/本地 TemplateBody 在进入 Parser 前失败；未调用 ROS API。"
+"Check the template path for typos and write the template to that path "
+"before validating it again."
+msgstr "请检查模板路径是否有拼写错误，并先把模板写入该路径，然后重新校验。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid ""
+"Point TemplateURL at the template file itself rather than a directory or "
+"device."
+msgstr "请把 TemplateURL 指向模板文件本身，而不是目录或设备。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid "Confirm that the file exists, is readable, and is saved as UTF-8."
 msgstr "确认文件存在、可读，并使用 UTF-8 编码保存。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid ""
+"Reduce the template size, or upload it and pass an OSS/HTTP TemplateURL "
+"instead."
+msgstr "请减小模板体积，或先上传模板并改用 OSS/HTTP 的 TemplateURL。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "Save the template as UTF-8 text before validating it again."
+msgstr "请先将模板保存为 UTF-8 文本，然后重新校验。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid ""
+"TemplateURL/local TemplateBody failed before entering the Parser; the ROS"
+" API was not called."
+msgstr "TemplateURL/本地 TemplateBody 在进入 Parser 前失败；未调用 ROS API。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 #, python-brace-format
@@ -11493,3 +11527,4 @@ msgstr "允许 Bash?"
 #~ msgstr ""
 #~ "批准工具调用：{tool}\n"
 #~ "输入摘要：{summary}"
+
