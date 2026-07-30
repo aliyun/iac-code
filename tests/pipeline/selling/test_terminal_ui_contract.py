@@ -180,4 +180,5 @@ def test_deploying_success_requires_create_stack_complete_guard():
         "is_success": True,
         "status_in": ["CREATE_COMPLETE"],
         "match_conclusion_field": "stack_id",
+        "latest_record_must_match": True,
     }

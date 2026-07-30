@@ -146,6 +146,14 @@ conclusion_schema:
 - 工具会先确认替代创建参数和模板可用，再删除旧失败 Stack 后创建新的 Stack
 - 成功后最终结果使用新 Stack 的 `stack_id`，不要把旧 `stack_id` 当成部署成功结果
 
+## 结论必须对齐最终部署结果
+
+`stack_id` 和 `status` 必须来自本步骤**最后一次** `ros_deploy` 部署动作（`create` / `continue_create` / `delete_and_create` / `wait`）的结果：
+
+- 早期 `create` 失败后经 `continue_create` 或 `delete_and_create` 恢复时，结论只能记录最终那次调用返回的 `stack_id` 和状态。
+- 禁止把已被取代的 CREATE_FAILED 栈的 `stack_id` 与 `status: success` 配对提交。
+- 最后一次部署动作未达到 `CREATE_COMPLETE` 时，结论必须是 `status: failed` 并在 `error` 中说明原因，不得沿用更早一次成功结果。
+
 ## 资源和文档搜索
 
 - 不确定的 ROS 资源属性或 Schema → aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<类型>"})
