@@ -793,8 +793,9 @@ def test_transcript_chat_flow_uses_codex_unboxed_message_layout() -> None:
     assert "font-family:" in tool_icon_block
     assert "padding-left: 0;" in group_list_block
     assert "display: grid;" in thinking_summary_block
-    assert "grid-template-columns: 0.92rem minmax(0, 1fr) auto;" in thinking_summary_block
-    assert "gap: 0.18rem;" in thinking_summary_block
+    # 图标列宽/间距与工具行一致,灯泡才不会比下方工具图标多缩进一截。
+    assert "grid-template-columns: 0.68rem minmax(0, 1fr) auto;" in thinking_summary_block
+    assert "gap: 0.14rem;" in thinking_summary_block
     assert "list-style: none;" in thinking_summary_block
     # 思考图标为灯泡(mask 描边式,跟随 currentColor),取代旧的圆圈+box-shadow 图形。
     assert "mask:" in thinking_icon_block
@@ -1108,7 +1109,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-305" in html
+    assert "/static/styles.css?v=web-repl-ui-306" in html
     assert "/static/js/app.js?v=web-repl-ui-305" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
