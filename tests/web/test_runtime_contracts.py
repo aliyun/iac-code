@@ -1,6 +1,5 @@
 import asyncio
 import threading
-import time
 from contextlib import contextmanager
 
 import pytest
@@ -28,34 +27,43 @@ async def test_web_turn_runtime_creation_does_not_block_event_loop(tmp_path, mon
         async def run_streaming(self, _user_input):
             yield MessageEndEvent(stop_reason="stop", usage=Usage())
 
+    runtime_started = threading.Event()
+    event_loop_progressed = threading.Event()
     release = threading.Event()
+    progressed_before_release: list[bool] = []
     agent_runtime = _ClosableRuntime(FakeAgentLoop())
 
     def create_runtime(_session, _manager, **_kwargs):
-        release.wait(timeout=1)
+        runtime_started.set()
+        release.wait(timeout=15)
         return agent_runtime
+
+    def release_after_event_loop_progress() -> None:
+        runtime_started.wait(timeout=5)
+        progressed_before_release.append(event_loop_progressed.wait(timeout=5))
+        release.set()
 
     monkeypatch.setattr(runtime_module, "create_session_agent_runtime", create_runtime)
     monkeypatch.setattr(runtime_module, "flush_telemetry", lambda: None)
     manager = WebSessionManager(projects_dir=tmp_path / "projects")
     session = manager.create_session(session_id="session-nonblocking-runtime")
-    timer = threading.Timer(0.3, release.set)
-    timer.start()
+    watcher = threading.Thread(target=release_after_event_loop_progress, daemon=True)
+    watcher.start()
     try:
-        started_at = time.monotonic()
         turn_task = asyncio.create_task(
             WebSessionRuntime(session, manager=manager).start_turn(
                 WebTurnRequest(text="hello", image_ids=[], file_refs=[])
             )
         )
-        await asyncio.sleep(0.01)
-        event_loop_delay = time.monotonic() - started_at
+        assert await asyncio.to_thread(runtime_started.wait, 5)
+        event_loop_progressed.set()
         result = await turn_task
     finally:
+        event_loop_progressed.set()
         release.set()
-        timer.cancel()
+        watcher.join(timeout=1)
 
-    assert event_loop_delay < 0.15
+    assert progressed_before_release == [True]
     assert result["accepted"] is True
     assert agent_runtime.closed is True
 

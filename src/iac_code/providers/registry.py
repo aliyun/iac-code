@@ -66,6 +66,7 @@ PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
             ModelEntry("kimi-k2.5", support_multimodal=True),
             ModelEntry("deepseek-v4-pro"),
             ModelEntry("deepseek-v4-flash"),
+            ModelEntry("glm-5.2-fast-preview"),
             ModelEntry("glm-5.2"),
             ModelEntry("glm-5.1"),
             ModelEntry("MiniMax/MiniMax-M3", support_multimodal=True),

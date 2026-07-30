@@ -498,7 +498,7 @@ class PipelineA2AFlowMonitor:
         self._write_queue.put_nowait(_WRITER_STOP)
         try:
             await asyncio.wait_for(self._writer_task, timeout=FLOW_LOG_CLOSE_TIMEOUT_SECONDS)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             self._writer_task.cancel()
             with suppress(asyncio.CancelledError):
                 await self._writer_task

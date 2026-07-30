@@ -38,6 +38,7 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
         "kimi-k2.7-code",
         "kimi-k2.6",
         "kimi-k2.5",
+        "glm-5.2-fast-preview",
         "glm-5.2",
         "glm-5.1",
         "MiniMax/MiniMax-M3",
@@ -51,6 +52,8 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
         assert not _model_entry("dashscope", model_id).is_default
 
     assert PROVIDER_REGISTRY["dashscope"].default_model == "qwen3.7-max"
+    assert not _model_entry("dashscope", "glm-5.2-fast-preview").support_multimodal
+    assert "glm-5.2-fast-preview" not in _model_ids("dashscope_token_plan")
     assert not _model_entry("dashscope", "qwen3.7-max").support_multimodal
     for model_id in (
         "qwen3.7-plus",

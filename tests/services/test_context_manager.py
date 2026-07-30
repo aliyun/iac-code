@@ -117,6 +117,11 @@ class TestContextWindowConfig:
         assert config.context_window == 1_000_000
         assert config.max_output_tokens == 128_000
 
+    def test_dashscope_glm52_fast_preview_uses_documented_capacity(self):
+        config = get_context_window_config("glm-5.2-fast-preview")
+        assert config.context_window == 1_048_576
+        assert config.max_output_tokens == 131_072
+
     def test_direct_kimi_k3_uses_documented_context_window(self):
         config = get_context_window_config("kimi-k3")
         assert config.context_window == 1_000_000

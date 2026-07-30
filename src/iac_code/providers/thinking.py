@@ -309,6 +309,7 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "kimi-k2.5": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "kimi-k2.7-code": _DASHSCOPE_KIMI_K27_CODE_SPEC,
         "kimi/kimi-k3": _DASHSCOPE_KIMI_K3_SPEC,
+        "glm-5.2-fast-preview": _DASHSCOPE_GLM52_SPEC,
         "glm-5.2": _DASHSCOPE_GLM52_SPEC,
         "glm-5.1": _DASHSCOPE_GLM51_SPEC,
         "MiniMax-M2.5": ThinkingSpec(ThinkingFamily.DASHSCOPE),

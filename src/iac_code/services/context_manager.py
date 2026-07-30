@@ -92,6 +92,7 @@ _MODEL_EXACT_CONFIGS: dict[str, ContextWindowConfig] = {
     "qwen3-coder-next": _context_config(262_144),
     "deepseek-v4-pro": _context_config(1_000_000),
     "deepseek-v4-flash": _context_config(1_000_000),
+    "glm-5.2-fast-preview": _context_config(1_048_576, 131_072),
     "glm-5.2": _context_config(1_000_000, 128_000),
     "glm-5.1": _context_config(202_752),
     "glm-5": _context_config(202_752),
