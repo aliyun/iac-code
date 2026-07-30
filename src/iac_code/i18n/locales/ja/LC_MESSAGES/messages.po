@@ -3706,6 +3706,37 @@ msgstr "現在のステップの構造化された結論。必須で、空には
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
+msgid "Schema validation failed after {attempts} attempts: {error}"
+msgstr "{attempts} 回の試行後にスキーマ検証が失敗しました: {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"conclusion validation failed after exceeding the maximum retry count "
+"({max_retries}): {error}"
+msgstr "最大再試行回数 ({max_retries}) を超えた後、conclusion の検証に失敗しました: {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"conclusion validation failed (attempt {attempts}/{max_attempts}); fix it "
+"and call complete_step again: {error}{repeat_warning}"
+msgstr ""
+"conclusion の検証に失敗しました（{attempts}/{max_attempts} 回目）。修正して "
+"complete_step を再度呼び出してください: {error}{repeat_warning}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"These arguments are byte-identical to the previous rejected call. Do not "
+"retry unchanged — rebuild the conclusion from the schema above before "
+"calling complete_step."
+msgstr ""
+"これらの引数は前回拒否された呼び出しとバイト単位で同一です。そのまま再試行せず、"
+"上記のスキーマに従って conclusion を作り直してから complete_step を呼び出して"
+"ください。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
 msgid ""
 "{error}\n"
 "Current step: {step_id}\n"
@@ -3921,23 +3952,6 @@ msgid ""
 msgstr ""
 "ロールバック対象数は {limit} を超えられません。現在 {count} 件あります。complete_step "
 "を呼ぶ前にユーザーに支援を求めるか、対象を絞ってください。"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid "Schema validation failed after {attempts} attempts: {error}"
-msgstr "{attempts} 回の試行後にスキーマ検証が失敗しました: {error}"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid ""
-"conclusion validation failed after exceeding the maximum retry count "
-"({max_retries}): {error}"
-msgstr "最大再試行回数 ({max_retries}) を超えた後、conclusion の検証に失敗しました: {error}"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid "conclusion validation failed; fix it and call complete_step again: {error}"
-msgstr "conclusion の検証に失敗しました。修正して complete_step を再度呼び出してください: {error}"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -11706,3 +11720,4 @@ msgstr "Bash を許可しますか？"
 #~ msgstr ""
 #~ "ツール呼び出しを承認: {tool}\n"
 #~ "入力サマリー: {summary}"
+

@@ -3898,6 +3898,39 @@ msgstr "Conclusion structurée pour l’étape actuelle. Obligatoire et non vide
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
+msgid "Schema validation failed after {attempts} attempts: {error}"
+msgstr "La validation du schéma a échoué après {attempts} tentatives : {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"conclusion validation failed after exceeding the maximum retry count "
+"({max_retries}): {error}"
+msgstr ""
+"La validation de conclusion a échoué après dépassement du nombre maximal "
+"de tentatives ({max_retries}) : {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"conclusion validation failed (attempt {attempts}/{max_attempts}); fix it "
+"and call complete_step again: {error}{repeat_warning}"
+msgstr ""
+"La validation de conclusion a échoué (tentative {attempts}/{max_attempts}) ; "
+"corrigez-la puis appelez de nouveau complete_step : {error}{repeat_warning}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"These arguments are byte-identical to the previous rejected call. Do not "
+"retry unchanged — rebuild the conclusion from the schema above before "
+"calling complete_step."
+msgstr ""
+"Ces arguments sont identiques octet pour octet à l’appel précédent rejeté. "
+"Ne réessayez pas sans modification : reconstruisez conclusion selon le schéma "
+"ci-dessus avant d’appeler complete_step."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
 msgid ""
 "{error}\n"
 "Current step: {step_id}\n"
@@ -4138,27 +4171,6 @@ msgstr ""
 "Le nombre de cibles de retour arrière ne peut pas dépasser {limit} ; il y"
 " en a {count}. Demandez l’aide de l’utilisateur ou réduisez les cibles "
 "avant d’appeler complete_step."
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid "Schema validation failed after {attempts} attempts: {error}"
-msgstr "La validation du schéma a échoué après {attempts} tentatives : {error}"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid ""
-"conclusion validation failed after exceeding the maximum retry count "
-"({max_retries}): {error}"
-msgstr ""
-"La validation de conclusion a échoué après dépassement du nombre maximal "
-"de tentatives ({max_retries}) : {error}"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid "conclusion validation failed; fix it and call complete_step again: {error}"
-msgstr ""
-"La validation de conclusion a échoué ; corrigez-la puis appelez de "
-"nouveau complete_step : {error}"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -12678,3 +12690,4 @@ msgstr "Autoriser Bash ?"
 #~ msgstr ""
 #~ "Approuver l'appel d'outil : {tool}\n"
 #~ "Résumé de l'entrée : {summary}"
+

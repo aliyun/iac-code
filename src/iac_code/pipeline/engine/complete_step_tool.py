@@ -119,6 +119,7 @@ class CompleteStepTool(Tool):
         # P-I17: _validation_attempts resets each new step (see class docstring) —
         # max_conclusion_retries is a per-step budget, not a pipeline-wide one.
         self._validation_attempts = 0
+        self._last_invalid_input_digest: str | None = None
 
     @property
     def name(self) -> str:
@@ -165,11 +166,63 @@ class CompleteStepTool(Tool):
 
     def normalize_input(self, tool_input: dict[str, Any]) -> None:
         """Normalize conclusion before input/schema validation."""
+        self._fill_conclusion_for_rollback_only_input(tool_input)
         conclusion = tool_input.get("conclusion")
         if isinstance(conclusion, dict):
             for key in [k for k, v in conclusion.items() if v is None]:
                 del conclusion[key]
             self._copy_guard_tool_results_to_conclusion(conclusion)
+
+    def _fill_conclusion_for_rollback_only_input(self, tool_input: dict[str, Any]) -> None:
+        """Accept a rollback-only submission by deriving the required conclusion.
+
+        ``conclusion`` is required by the schema, so a submission that carries only a
+        valid ``rollback_request`` used to be rejected outright and the rollback was
+        never handed to the pipeline. Derive a minimal conclusion from the rollback
+        request instead so the rollback path is actually processed.
+        """
+        if tool_input.get("conclusion") is not None:
+            return
+        rollback = tool_input.get("rollback_request")
+        if not isinstance(rollback, dict):
+            return
+        target_step = rollback.get("target_step")
+        reason = rollback.get("reason")
+        if not isinstance(target_step, str) or not target_step:
+            return
+        if not isinstance(reason, str) or not reason:
+            return
+        if target_step not in self._step_config.rollback_targets:
+            return
+        conclusion = self._rollback_conclusion(target_step, reason)
+        if self._validate_conclusion_silently(conclusion) is not None:
+            return
+        tool_input["conclusion"] = conclusion
+
+    def _rollback_conclusion(self, target_step: str, reason: str) -> dict[str, Any]:
+        """Build the minimal conclusion that records why the step is rolling back."""
+        conclusion: dict[str, Any] = {
+            "status": "rollback_requested",
+            "rollback_target_step": target_step,
+            "rollback_reason": reason,
+        }
+        schema = self._step_config.conclusion_schema
+        if not isinstance(schema, dict) or schema.get("additionalProperties") is not False:
+            return conclusion
+        properties = schema.get("properties")
+        properties = properties if isinstance(properties, dict) else {}
+        return {key: value for key, value in conclusion.items() if key in properties}
+
+    def _validate_conclusion_silently(self, conclusion: dict[str, Any]) -> str | None:
+        """Validate a conclusion against the step schema without logging or side effects."""
+        schema = self._step_config.conclusion_schema
+        if not schema:
+            return None
+        try:
+            jsonschema.validate(conclusion, schema)
+        except jsonschema.ValidationError as e:
+            return self._public_validation_error(e)
+        return None
 
     def _copy_guard_tool_results_to_conclusion(self, conclusion: dict[str, Any]) -> None:
         tool_results = self._completion_guard_state.get("tool_results", {})
@@ -199,6 +252,76 @@ class CompleteStepTool(Tool):
             return True, ""
         except jsonschema.ValidationError as e:
             return False, self._format_input_validation_error(self._public_validation_error(e), tool_input)
+
+    def validation_error_result(self, tool_input: dict[str, Any]) -> ToolResult | None:
+        """Charge schema-level rejections to the same per-step retry budget as execute().
+
+        Without this the executor short-circuits before ``execute`` runs, so a call that
+        omits ``conclusion`` never increments ``_validation_attempts``; the model could
+        resubmit the identical arguments indefinitely and receive a byte-identical error.
+        """
+        valid, error = self.validate_input(tool_input)
+        if valid:
+            return None
+        return self._validation_failure_result(error, tool_input=tool_input)
+
+    def _validation_failure_result(
+        self,
+        validation_error: str,
+        *,
+        tool_input: dict[str, Any] | None = None,
+    ) -> ToolResult:
+        """Count one failed attempt and build the retry (or terminal) tool result."""
+        self._validation_attempts += 1
+        attempts = self._validation_attempts
+        max_retries = self._step_config.max_conclusion_retries
+        if attempts > max_retries:
+            step_result = StepResult(
+                step_id=self._step_config.step_id,
+                status=StepStatus.FAILED,
+                error=_("Schema validation failed after {attempts} attempts: {error}").format(
+                    attempts=attempts,
+                    error=validation_error,
+                ),
+            )
+            return ToolResult(
+                content=_(
+                    "conclusion validation failed after exceeding the maximum retry count ({max_retries}): {error}"
+                ).format(max_retries=max_retries, error=validation_error),
+                is_error=True,
+                metadata={"step_result": step_result},
+            )
+        return ToolResult(
+            content=_(
+                "conclusion validation failed (attempt {attempts}/{max_attempts}); "
+                "fix it and call complete_step again: {error}{repeat_warning}"
+            ).format(
+                attempts=attempts,
+                max_attempts=max_retries + 1,
+                error=validation_error,
+                repeat_warning=self._repeat_warning(tool_input),
+            ),
+            is_error=True,
+        )
+
+    def _repeat_warning(self, tool_input: dict[str, Any] | None) -> str:
+        """Make a byte-identical resubmission produce a distinguishable error result."""
+        digest = self._input_digest(tool_input)
+        previous = self._last_invalid_input_digest
+        self._last_invalid_input_digest = digest
+        if digest is None or previous != digest:
+            return ""
+        return "\n" + _(
+            "These arguments are byte-identical to the previous rejected call. "
+            "Do not retry unchanged — rebuild the conclusion from the schema above before calling complete_step."
+        )
+
+    @staticmethod
+    def _input_digest(tool_input: dict[str, Any] | None) -> str | None:
+        if tool_input is None:
+            return None
+        serialized = json.dumps(tool_input, ensure_ascii=False, sort_keys=True, default=repr)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
     def _format_input_validation_error(self, error: str, tool_input: dict[str, Any]) -> str:
         invalid_json = json.dumps(tool_input or {}, ensure_ascii=False)
@@ -1079,30 +1202,7 @@ class CompleteStepTool(Tool):
         if validation_error is None:
             validation_error = self._validate_candidate_limit(conclusion)
         if validation_error:
-            self._validation_attempts += 1
-            if self._validation_attempts > self._step_config.max_conclusion_retries:
-                step_result = StepResult(
-                    step_id=self._step_config.step_id,
-                    status=StepStatus.FAILED,
-                    error=_("Schema validation failed after {attempts} attempts: {error}").format(
-                        attempts=self._validation_attempts,
-                        error=validation_error,
-                    ),
-                )
-                max_retries = self._step_config.max_conclusion_retries
-                return ToolResult(
-                    content=_(
-                        "conclusion validation failed after exceeding the maximum retry count ({max_retries}): {error}"
-                    ).format(max_retries=max_retries, error=validation_error),
-                    is_error=True,
-                    metadata={"step_result": step_result},
-                )
-            return ToolResult(
-                content=_("conclusion validation failed; fix it and call complete_step again: {error}").format(
-                    error=validation_error
-                ),
-                is_error=True,
-            )
+            return self._validation_failure_result(validation_error, tool_input=tool_input)
 
         step_result = StepResult(
             step_id=self._step_config.step_id,

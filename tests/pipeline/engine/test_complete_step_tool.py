@@ -1537,3 +1537,182 @@ class TestNullNormalization:
         valid, error = tool.validate_input(tool_input)
         assert not valid
         assert "name" in error
+
+
+class TestMissingConclusionRetryBudget:
+    def test_schema_rejection_counts_toward_retry_budget(self):
+        config = StepConfig(
+            step_id="architecture_planning",
+            conclusion_field="architecture",
+            forward=None,
+            conclusion_schema={
+                "type": "object",
+                "required": ["candidates"],
+                "properties": {"candidates": {"type": "array"}},
+            },
+            max_conclusion_retries=1,
+        )
+        tool = CompleteStepTool(config)
+
+        first = tool.validation_error_result({})
+        second = tool.validation_error_result({})
+
+        assert first is not None and first.is_error
+        assert first.metadata is None
+        assert second is not None and second.is_error
+        assert second.metadata is not None
+        assert second.metadata["step_result"].status == StepStatus.FAILED
+
+    def test_valid_input_has_no_validation_error_result(self):
+        config = StepConfig(
+            step_id="test",
+            conclusion_field="out",
+            forward=None,
+            conclusion_schema={
+                "type": "object",
+                "required": ["name"],
+                "properties": {"name": {"type": "string"}},
+            },
+        )
+        tool = CompleteStepTool(config)
+
+        assert tool.validation_error_result({"conclusion": {"name": "ok"}}) is None
+
+    def test_identical_resubmission_gets_distinguishable_error(self):
+        config = StepConfig(
+            step_id="architecture_planning",
+            conclusion_field="architecture",
+            forward=None,
+            conclusion_schema={
+                "type": "object",
+                "required": ["candidates"],
+                "properties": {"candidates": {"type": "array"}},
+            },
+            max_conclusion_retries=3,
+        )
+        tool = CompleteStepTool(config)
+
+        first = tool.validation_error_result({})
+        second = tool.validation_error_result({})
+
+        assert first is not None and second is not None
+        assert first.content != second.content
+        assert "byte-identical" in second.content
+        assert "byte-identical" not in first.content
+
+    def test_changed_invalid_input_does_not_warn_about_repeat(self):
+        config = StepConfig(
+            step_id="architecture_planning",
+            conclusion_field="architecture",
+            forward=None,
+            conclusion_schema={
+                "type": "object",
+                "required": ["candidates"],
+                "properties": {"candidates": {"type": "array"}},
+            },
+            max_conclusion_retries=3,
+        )
+        tool = CompleteStepTool(config)
+
+        tool.validation_error_result({})
+        changed = tool.validation_error_result({"candidates": []})
+
+        assert changed is not None
+        assert "byte-identical" not in changed.content
+
+    @pytest.mark.asyncio
+    async def test_schema_rejection_and_execute_share_one_budget(self):
+        config = StepConfig(
+            step_id="test",
+            conclusion_field="out",
+            forward=None,
+            conclusion_schema={
+                "type": "object",
+                "required": ["count"],
+                "properties": {"count": {"type": "integer"}},
+            },
+            max_conclusion_retries=1,
+        )
+        tool = CompleteStepTool(config)
+
+        rejected = tool.validation_error_result({})
+        executed = await tool.execute(tool_input={"conclusion": {"count": "nope"}}, context=ToolContext())
+
+        assert rejected is not None and rejected.metadata is None
+        assert executed.is_error
+        assert executed.metadata is not None
+        assert executed.metadata["step_result"].status == StepStatus.FAILED
+
+
+class TestRollbackOnlySubmission:
+    def test_rollback_only_input_is_accepted(self):
+        config = StepConfig(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            rollback_targets=["architecture_planning"],
+        )
+        tool = CompleteStepTool(config)
+        tool_input = {"rollback_request": {"target_step": "architecture_planning", "reason": "template broken"}}
+
+        valid, error = tool.validate_input(tool_input)
+
+        assert valid, error
+        assert tool_input["conclusion"]["status"] == "rollback_requested"
+        assert tool_input["conclusion"]["rollback_target_step"] == "architecture_planning"
+        assert tool_input["conclusion"]["rollback_reason"] == "template broken"
+
+    @pytest.mark.asyncio
+    async def test_rollback_only_input_yields_rollback_request(self):
+        config = StepConfig(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            rollback_targets=["architecture_planning"],
+        )
+        tool = CompleteStepTool(config)
+
+        result = await tool.execute(
+            tool_input={"rollback_request": {"target_step": "architecture_planning", "reason": "quota exceeded"}},
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+        step_result = result.metadata["step_result"]
+        assert step_result.status == StepStatus.COMPLETED
+        assert step_result.rollback_request == ("architecture_planning", "quota exceeded")
+
+    def test_rollback_only_input_kept_invalid_when_schema_needs_more(self):
+        config = StepConfig(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            rollback_targets=["architecture_planning"],
+            conclusion_schema={
+                "type": "object",
+                "required": ["stack_id"],
+                "properties": {"stack_id": {"type": "string"}},
+            },
+        )
+        tool = CompleteStepTool(config)
+        tool_input = {"rollback_request": {"target_step": "architecture_planning", "reason": "template broken"}}
+
+        valid, error = tool.validate_input(tool_input)
+
+        assert not valid
+        assert "conclusion" in error
+
+    def test_unknown_rollback_target_is_not_auto_filled(self):
+        config = StepConfig(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            rollback_targets=["architecture_planning"],
+        )
+        tool = CompleteStepTool(config)
+        tool_input = {"rollback_request": {"target_step": "nowhere", "reason": "typo"}}
+
+        valid, _ = tool.validate_input(tool_input)
+
+        assert not valid
+        assert "conclusion" not in tool_input

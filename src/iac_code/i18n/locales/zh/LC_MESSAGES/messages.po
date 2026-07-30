@@ -3668,6 +3668,36 @@ msgstr "当前步骤的结构化结论。必填且不能为空。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
+msgid "Schema validation failed after {attempts} attempts: {error}"
+msgstr "Schema 校验在 {attempts} 次尝试后失败: {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"conclusion validation failed after exceeding the maximum retry count "
+"({max_retries}): {error}"
+msgstr "conclusion 校验失败，已超过最大重试次数 ({max_retries}): {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"conclusion validation failed (attempt {attempts}/{max_attempts}); fix it "
+"and call complete_step again: {error}{repeat_warning}"
+msgstr ""
+"conclusion 校验失败（第 {attempts}/{max_attempts} 次尝试）；请修正后重新调用 "
+"complete_step: {error}{repeat_warning}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"These arguments are byte-identical to the previous rejected call. Do not "
+"retry unchanged — rebuild the conclusion from the schema above before "
+"calling complete_step."
+msgstr ""
+"这些参数与上一次被拒绝的调用逐字节相同。不要原样重试——请先按上面的 schema "
+"重新构造 conclusion，再调用 complete_step。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
 msgid ""
 "{error}\n"
 "Current step: {step_id}\n"
@@ -3872,23 +3902,6 @@ msgid ""
 "user for help or narrow the rollback targets before calling "
 "complete_step."
 msgstr "可回滚目标数量不能超过 {limit} 个，当前有 {count} 个。请请求用户介入或收窄回滚目标后再调用 complete_step。"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid "Schema validation failed after {attempts} attempts: {error}"
-msgstr "Schema 校验在 {attempts} 次尝试后失败: {error}"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid ""
-"conclusion validation failed after exceeding the maximum retry count "
-"({max_retries}): {error}"
-msgstr "conclusion 校验失败，已超过最大重试次数 ({max_retries}): {error}"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid "conclusion validation failed; fix it and call complete_step again: {error}"
-msgstr "conclusion 校验失败；请修正后重新调用 complete_step: {error}"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -11493,3 +11506,4 @@ msgstr "允许 Bash?"
 #~ msgstr ""
 #~ "批准工具调用：{tool}\n"
 #~ "输入摘要：{summary}"
+
