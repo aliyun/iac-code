@@ -590,10 +590,12 @@ msgid "View diagram"
 msgstr "Ver diagrama"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/output_panel.js
 msgid "Optimizing"
 msgstr "Otimizando"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/output_panel.js
 msgid "Pending optimization"
 msgstr "Otimização pendente"
 
@@ -1160,6 +1162,32 @@ msgstr "Sucesso"
 msgid "In progress / failed"
 msgstr "Em andamento / falhou"
 
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "File no longer exists"
+msgstr "O arquivo não existe mais"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Close preview"
+msgstr "Fechar prévia"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading…"
+msgstr "Carregando…"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Resource stacks"
+msgstr "Pilhas de recursos"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Template files"
+msgstr "Arquivos de modelo"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Architecture diagram"
+msgstr "Diagrama de arquitetura"
+
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Recovered State"
 msgstr "Estado recuperado"
@@ -1203,10 +1231,6 @@ msgstr "Selecionar candidato"
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Submitting..."
 msgstr "Enviando..."
-
-#: src/iac_code/web/static/js/components/pipeline.js
-msgid "Architecture diagram"
-msgstr "Diagrama de arquitetura"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No architecture diagram"
@@ -2951,10 +2975,6 @@ msgid "{label} (current)"
 msgstr "{label} (atual)"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Loading…"
-msgstr "Carregando…"
-
-#: src/iac_code/web/static/js/components/workspace.js
 #, python-brace-format
 msgid "File: {path}"
 msgstr "Arquivo: {path}"
@@ -3745,10 +3765,4 @@ msgstr ""
 
 #~ msgid "Completed step: {step}"
 #~ msgstr "Etapa concluída: {step}"
-
-#~ msgid "Resource stacks"
-#~ msgstr "Pilhas de recursos"
-
-#~ msgid "Template files"
-#~ msgstr "Arquivos de modelo"
 

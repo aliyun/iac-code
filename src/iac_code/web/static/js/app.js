@@ -4,7 +4,7 @@ import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v
 import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v7";
 import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v23";
 import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v49";
-import { createOutputController } from "./components/output_panel.js?v=output-panel-v16";
+import { createOutputController } from "./components/output_panel.js?v=output-panel-v17";
 import { reduceEvent } from "./events.js?v=web-repl-ui-304";
 import { applyDomI18n, t } from "./i18n.js?v=web-repl-ui-277";
 

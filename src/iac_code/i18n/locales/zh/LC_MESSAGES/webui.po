@@ -588,10 +588,12 @@ msgid "View diagram"
 msgstr "查看架构图"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/output_panel.js
 msgid "Optimizing"
 msgstr "优化中"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/output_panel.js
 msgid "Pending optimization"
 msgstr "待优化"
 
@@ -1148,6 +1150,32 @@ msgstr "成功"
 msgid "In progress / failed"
 msgstr "进行中/失败"
 
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "File no longer exists"
+msgstr "文件已不存在"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Close preview"
+msgstr "关闭预览"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading…"
+msgstr "加载中…"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Resource stacks"
+msgstr "资源栈"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Template files"
+msgstr "模板文件"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Architecture diagram"
+msgstr "架构图"
+
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Recovered State"
 msgstr "已恢复状态"
@@ -1191,10 +1219,6 @@ msgstr "选择候选方案"
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Submitting..."
 msgstr "提交中..."
-
-#: src/iac_code/web/static/js/components/pipeline.js
-msgid "Architecture diagram"
-msgstr "架构图"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No architecture diagram"
@@ -2899,10 +2923,6 @@ msgid "{label} (current)"
 msgstr "{label}(当前)"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Loading…"
-msgstr "加载中…"
-
-#: src/iac_code/web/static/js/components/workspace.js
 #, python-brace-format
 msgid "File: {path}"
 msgstr "文件:{path}"
@@ -3652,10 +3672,4 @@ msgstr "重启中,服务恢复后会自动刷新…"
 
 #~ msgid "Completed step: {step}"
 #~ msgstr "已完成步骤：{step}"
-
-#~ msgid "Resource stacks"
-#~ msgstr "资源栈"
-
-#~ msgid "Template files"
-#~ msgstr "模板文件"
 

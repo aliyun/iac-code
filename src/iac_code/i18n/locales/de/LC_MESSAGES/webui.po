@@ -592,10 +592,12 @@ msgid "View diagram"
 msgstr "Diagramm anzeigen"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/output_panel.js
 msgid "Optimizing"
 msgstr "Wird optimiert"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/output_panel.js
 msgid "Pending optimization"
 msgstr "Optimierung ausstehend"
 
@@ -1167,6 +1169,32 @@ msgstr "Erfolg"
 msgid "In progress / failed"
 msgstr "In Bearbeitung / fehlgeschlagen"
 
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "File no longer exists"
+msgstr "Datei existiert nicht mehr"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Close preview"
+msgstr "Vorschau schließen"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading…"
+msgstr "Wird geladen…"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Resource stacks"
+msgstr "Ressourcen-Stacks"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Template files"
+msgstr "Vorlagendateien"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Architecture diagram"
+msgstr "Architekturdiagramm"
+
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Recovered State"
 msgstr "Wiederhergestellter Zustand"
@@ -1210,10 +1238,6 @@ msgstr "Kandidat auswählen"
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Submitting..."
 msgstr "Wird gesendet..."
-
-#: src/iac_code/web/static/js/components/pipeline.js
-msgid "Architecture diagram"
-msgstr "Architekturdiagramm"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No architecture diagram"
@@ -2964,10 +2988,6 @@ msgid "{label} (current)"
 msgstr "{label} (aktuell)"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Loading…"
-msgstr "Wird geladen…"
-
-#: src/iac_code/web/static/js/components/workspace.js
 #, python-brace-format
 msgid "File: {path}"
 msgstr "Datei: {path}"
@@ -3768,10 +3788,4 @@ msgstr ""
 
 #~ msgid "Completed step: {step}"
 #~ msgstr "Schritt abgeschlossen: {step}"
-
-#~ msgid "Resource stacks"
-#~ msgstr "Ressourcen-Stacks"
-
-#~ msgid "Template files"
-#~ msgstr "Vorlagendateien"
 

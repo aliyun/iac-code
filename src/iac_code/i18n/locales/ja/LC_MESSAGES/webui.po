@@ -588,10 +588,12 @@ msgid "View diagram"
 msgstr "アーキテクチャ図を表示"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/output_panel.js
 msgid "Optimizing"
 msgstr "最適化中"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/output_panel.js
 msgid "Pending optimization"
 msgstr "最適化待ち"
 
@@ -1148,6 +1150,32 @@ msgstr "成功"
 msgid "In progress / failed"
 msgstr "進行中／失敗"
 
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "File no longer exists"
+msgstr "ファイルは存在しません"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Close preview"
+msgstr "プレビューを閉じる"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading…"
+msgstr "読み込み中…"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Resource stacks"
+msgstr "リソーススタック"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Template files"
+msgstr "テンプレートファイル"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Architecture diagram"
+msgstr "アーキテクチャ図"
+
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Recovered State"
 msgstr "復元された状態"
@@ -1191,10 +1219,6 @@ msgstr "候補を選択"
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Submitting..."
 msgstr "送信中..."
-
-#: src/iac_code/web/static/js/components/pipeline.js
-msgid "Architecture diagram"
-msgstr "アーキテクチャ図"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No architecture diagram"
@@ -2901,10 +2925,6 @@ msgid "{label} (current)"
 msgstr "{label}（現在）"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Loading…"
-msgstr "読み込み中…"
-
-#: src/iac_code/web/static/js/components/workspace.js
 #, python-brace-format
 msgid "File: {path}"
 msgstr "ファイル: {path}"
@@ -3658,10 +3678,4 @@ msgstr "再起動しています。サービスが復旧するとページが自
 
 #~ msgid "Completed step: {step}"
 #~ msgstr "ステップ完了: {step}"
-
-#~ msgid "Resource stacks"
-#~ msgstr "リソーススタック"
-
-#~ msgid "Template files"
-#~ msgstr "テンプレートファイル"
 

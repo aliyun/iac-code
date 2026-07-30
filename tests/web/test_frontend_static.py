@@ -1114,7 +1114,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-310" in html
-    assert "/static/js/app.js?v=web-repl-ui-312" in html
+    assert "/static/js/app.js?v=web-repl-ui-313" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1146,7 +1146,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-312" in index_html
+    assert "web-repl-ui-313" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-304" in app_source
     assert "./components/workspace.js?v=cloud-creds-v49" in app_source
@@ -9490,8 +9490,8 @@ def test_styles_has_compaction_boundary_rule() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-312" in html
-    assert "web-repl-ui-304" not in html
+    assert "web-repl-ui-313" in html
+    assert "web-repl-ui-312" not in html
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:
@@ -9732,7 +9732,7 @@ def test_output_panel_module_exists_and_wired() -> None:
     assert "getOutputs" in source
     app_source = _source(APP_JS)
     assert "createOutputController" in app_source
-    assert "output_panel.js?v=output-panel-v16" in app_source
+    assert "output_panel.js?v=output-panel-v17" in app_source
 
 
 def test_output_panel_resets_on_new_session_draft() -> None:
@@ -9790,8 +9790,8 @@ def test_output_preview_and_highlight() -> None:
     assert "File no longer exists" in source
     assert "tok-" in source
     app_source = _source(APP_JS)
-    assert "output_panel.js?v=output-panel-v16" in app_source
-    assert "output_panel.js?v=output-panel-v7" not in app_source
+    assert "output_panel.js?v=output-panel-v17" in app_source
+    assert "output_panel.js?v=output-panel-v16" not in app_source
 
 
 def test_output_preview_tok_css() -> None:
@@ -10052,8 +10052,8 @@ def test_app_regroups_pipeline_messages_before_render() -> None:
 
 def test_app_output_panel_import_bumped_to_v11() -> None:
     js = _source(APP_JS)
-    assert "output-panel-v16" in js
-    assert "output-panel-v14" not in js
+    assert "output-panel-v17" in js
+    assert "output-panel-v16" not in js
 
 
 def test_appearance_theme_css_blocks_present() -> None:

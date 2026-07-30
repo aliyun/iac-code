@@ -28,12 +28,15 @@ function rowIcon(kind) {
 }
 
 function escapeHtml(text) {
+  // 引号匹配用 "(") / '(') 而非字面量正则:Babel 的 webui 提取器(jslexer)会把
+  // 正则里的裸引号误判为 JS 字符串起始,导致本文件此行之后的所有 t() 词条抽取失败(表现为
+  // 「资源栈 / 模板文件」等永远回退英文)。unicode 转义匹配的字符完全一致,勿改回裸引号。
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+    .replace(/\u0022/g, "&quot;")
+    .replace(/\u0027/g, "&#39;");
 }
 
 // 轻量正则高亮(无第三方依赖):先整体转义,再按 token 包裹。
