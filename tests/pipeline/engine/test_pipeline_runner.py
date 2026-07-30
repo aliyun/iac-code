@@ -4717,3 +4717,126 @@ class TestResolveIterateField:
         runner.context.snapshot = MagicMock(return_value={"plan": {"options": [{"x": 1}]}})
         result = runner._resolve_iterate_field("plan.options")
         assert result == [{"x": 1}]
+
+
+class TestStartCompleteEventPairing:
+    """run 事件 start/complete 计数必须对称 (step_completed <= step_started,
+    pipeline_completed <= pipeline_started)。"""
+
+    @staticmethod
+    def _event_types(events):
+        return [event.type for event in events if isinstance(event, PipelineEvent)]
+
+    @pytest.mark.asyncio
+    async def test_resume_waiting_step_reemits_paired_step_started(self, tmp_path):
+        runner = _build_two_step_runner(tmp_path, auto_advance_first=False)
+
+        async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+            conclusion = {"value": step.step_id, "user_prompt": "pick", "options": []}
+            context.set_conclusion(step.conclusion_field, conclusion)
+            yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+        runner._step_executor.execute = fake_execute
+
+        run_events = [event async for event in runner.run("start")]
+        resume_events = [event async for event in runner.resume("continue")]
+
+        all_events = run_events + resume_events
+        started = [e for e in all_events if isinstance(e, PipelineEvent) and e.type == PipelineEventType.STEP_STARTED]
+        completed = [
+            e for e in all_events if isinstance(e, PipelineEvent) and e.type == PipelineEventType.STEP_COMPLETED
+        ]
+        assert len(completed) <= len(started)
+        started_a = [e for e in started if e.step_id == "a"]
+        completed_a = [e for e in completed if e.step_id == "a"]
+        assert len(started_a) == len(completed_a) == 2
+        # 恢复补发的 step_started 标记为 resumed 且 attempt 不递增
+        assert started_a[1].data.get("resumed") is True
+        assert started_a[1].data.get("attempt") == started_a[0].data.get("attempt")
+
+    @pytest.mark.asyncio
+    async def test_restart_recovery_does_not_duplicate_step_started(self, tmp_path):
+        runner = _build_two_step_runner(tmp_path)
+
+        async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+            conclusion = {"value": step.step_id}
+            context.set_conclusion(step.conclusion_field, conclusion)
+            yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+        runner._step_executor.execute = fake_execute
+
+        events = [event async for event in runner._continue_from_current(resume_running_step=True)]
+        started = [e for e in events if isinstance(e, PipelineEvent) and e.type == PipelineEventType.STEP_STARTED]
+        # 无 resume transcript → 走正常路径; restart 恢复不额外补发 resumed start
+        assert all(e.data.get("resumed") is not True for e in started)
+
+    @pytest.mark.asyncio
+    async def test_rollback_target_after_resume_emits_new_step_started(self, tmp_path):
+        runner = _build_two_step_runner(tmp_path, auto_advance_first=False)
+        requested_rollback = False
+
+        async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+            nonlocal requested_rollback
+            conclusion = {"value": step.step_id, "user_prompt": "pick", "options": []}
+            context.set_conclusion(step.conclusion_field, conclusion)
+            rollback_request = None
+            if step.step_id == "b" and not requested_rollback:
+                requested_rollback = True
+                rollback_request = ("a", "validation failed; retry")
+            yield StepResult(
+                step_id=step.step_id,
+                status=StepStatus.COMPLETED,
+                conclusion=conclusion,
+                rollback_request=rollback_request,
+            )
+
+        runner._step_executor.execute = fake_execute
+
+        run_events = [event async for event in runner.run("start")]
+        resume_events = [event async for event in runner.resume("continue")]
+
+        all_events = run_events + resume_events
+        started = [e for e in all_events if isinstance(e, PipelineEvent) and e.type == PipelineEventType.STEP_STARTED]
+        completed = [
+            e for e in all_events if isinstance(e, PipelineEvent) and e.type == PipelineEventType.STEP_COMPLETED
+        ]
+        # rollback 目标步骤重跑必须有配对的 step_started, 完成数不得超过开始数
+        assert len(completed) <= len(started)
+        rollback_events = [
+            e for e in all_events if isinstance(e, PipelineEvent) and e.type == PipelineEventType.ROLLBACK_TRIGGERED
+        ]
+        assert len(rollback_events) == 1
+        rollback_index = all_events.index(rollback_events[0])
+        post_rollback_started_a = [
+            e for e in all_events[rollback_index:]
+            if isinstance(e, PipelineEvent) and e.type == PipelineEventType.STEP_STARTED and e.step_id == "a"
+        ]
+        assert post_rollback_started_a, "rollback 后目标步骤必须补发 step_started"
+        # rollback 重跑是新 attempt, 不是 resumed 重放
+        assert post_rollback_started_a[0].data.get("resumed") is not True
+
+    @pytest.mark.asyncio
+    async def test_completed_pipeline_does_not_reemit_pipeline_completed(self, tmp_path):
+        runner = _build_two_step_runner(tmp_path)
+
+        async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+            conclusion = {"value": step.step_id}
+            context.set_conclusion(step.conclusion_field, conclusion)
+            yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+        runner._step_executor.execute = fake_execute
+
+        first_events = [event async for event in runner._continue_from_current()]
+        assert (
+            sum(
+                1
+                for e in first_events
+                if isinstance(e, PipelineEvent) and e.type == PipelineEventType.PIPELINE_COMPLETED
+            )
+            == 1
+        )
+
+        second_events = [event async for event in runner._continue_from_current(resume_waiting_step=True)]
+        assert not any(
+            isinstance(e, PipelineEvent) and e.type == PipelineEventType.PIPELINE_COMPLETED for e in second_events
+        )

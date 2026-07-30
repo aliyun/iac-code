@@ -2669,6 +2669,9 @@ class PipelineRunner:
         async for event in self._continue_from_current(
             **self._continue_input_kwargs(pipeline_input),
             resume_waiting_step=True,
+            # The waiting-input pause already emitted STEP_COMPLETED; the re-run
+            # will emit another one, so a paired STEP_STARTED must be re-emitted.
+            reemit_resumed_step_started=True,
         ):
             if (
                 not selection_observed
@@ -3698,10 +3701,16 @@ class PipelineRunner:
         precompleted_tools: dict[str, dict[str, Any]] | None = None,
         resume_waiting_step: bool = False,
         resume_running_step: bool = False,
+        reemit_resumed_step_started: bool = False,
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         is_first_step = True
         terminal_pipeline_telemetry_emitted = False
         terminal_backup_completed = False
+        # When the pipeline is already complete on entry (e.g. a resume request
+        # arrives after the terminal PIPELINE_COMPLETED was published), no step
+        # runs and the trailing completion block must not re-publish a second
+        # PIPELINE_COMPLETED: pipeline_started is only emitted once by run().
+        was_complete_on_entry = self.state_machine.is_complete
         step_result: StepResult | None = None
         restored_step_user_input = self._consume_restored_current_step_user_input() if user_input is None else None
         restored_resume_messages, restored_precompleted_tools = (
@@ -3766,6 +3775,30 @@ class PipelineRunner:
                 except PipelineStatePersistenceError as exc:
                     yield self._persistence_failure_event(exc)
                     return
+                if resume_waiting_step and reemit_resumed_step_started:
+                    # A waiting-input step already emitted STEP_COMPLETED (with the
+                    # user prompt) before pausing. Re-running it after user input
+                    # emits a second STEP_COMPLETED, so re-emit a paired
+                    # STEP_STARTED (same attempt, marked ``resumed``) to keep
+                    # start/complete counts symmetric in the a2a event journal.
+                    # Restart recovery (resume_running_step) keeps the original
+                    # STEP_STARTED in the journal and must not duplicate it.
+                    yield PipelineEvent(
+                        type=PipelineEventType.STEP_STARTED,
+                        step_id=step.step_id,
+                        timestamp=step_start,
+                        data={
+                            "index": step_index,
+                            "attempt": step_attempt,
+                            "total": self.state_machine.total_steps,
+                            "name": step.step_id,
+                            "step_type": step.step_type,
+                            "ui_mode": step.ui_mode,
+                            "active_attempt_id": attempt["attempt_id"],
+                            "transcript_id": attempt["transcript_id"],
+                            "resumed": True,
+                        },
+                    )
             else:
                 step_attempt = self._next_step_attempt(step.step_id)
                 try:
@@ -4268,6 +4301,13 @@ class PipelineRunner:
                 first_step_resume_messages = None
                 first_step_precompleted_tools = None
                 is_first_step = True
+                # The rollback target is a fresh execution, not a resumption of the
+                # step that requested the rollback. Clear the resume flags so the
+                # target step emits STEP_STARTED (with a new attempt) instead of
+                # silently re-completing, which would leave step_completed >
+                # step_started in the a2a event journal.
+                resume_waiting_step = False
+                resume_running_step = False
                 try:
                     for warning_event in self._mark_rollback_cleanup_required(
                         step,
@@ -4430,6 +4470,12 @@ class PipelineRunner:
                 return
 
         if self.state_machine.is_complete:
+            if was_complete_on_entry:
+                # Already terminal before this call: the terminal save and
+                # PIPELINE_COMPLETED were published by the run that completed the
+                # pipeline. Re-emitting here would make pipeline_completed exceed
+                # pipeline_started in the a2a event journal.
+                return
             completed_step = locals().get("step")
             completed_step_id = getattr(completed_step, "step_id", None)
             if not isinstance(completed_step_id, str) and self._loaded.steps:

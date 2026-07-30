@@ -1581,7 +1581,7 @@ async def test_runner_resume_emits_user_input_received_and_selection_telemetry(r
     runner._observability.selection_made = MagicMock()
 
     async def fake_continue(user_input=None, **kwargs):
-        assert kwargs == {"resume_waiting_step": True}
+        assert kwargs == {"resume_waiting_step": True, "reemit_resumed_step_started": True}
         if False:
             yield
 
@@ -1744,7 +1744,7 @@ async def test_runner_does_not_emit_selection_made_for_unmatched_or_ambiguous_ca
     runner._observability.selection_made = MagicMock()
 
     async def fake_continue(user_input=None, **kwargs):
-        assert kwargs == {"resume_waiting_step": True}
+        assert kwargs == {"resume_waiting_step": True, "reemit_resumed_step_started": True}
         if False:
             yield
 
