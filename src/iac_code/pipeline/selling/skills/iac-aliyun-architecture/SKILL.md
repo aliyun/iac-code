@@ -69,6 +69,8 @@ conclusion_schema:
 
 判断标准：如果你需要添加用户完全没提到的产品来"制造"差异，那就不该有多个方案。
 
+「简单明确」指的是**资源清单和生命周期都已确定**。如果意图里的资源本身很少，但某个依赖资源是新建还是复用尚未确认，那它不属于简单明确需求，必须按下面「依赖资源生命周期未确认时的候选覆盖」给出多个候选，不能因为资源数量少就收敛成单候选。
+
 ## 差异化维度
 
 当需求确实存在设计取舍时，根据场景从以下维度中选择最相关的来构建差异方案：
@@ -105,6 +107,27 @@ conclusion_schema:
 
 示例：intent 表示“已有 VPC 中创建安全组”时，candidate 应包含 `resource_intents: [{"product": "VPC", "action": "use_existing"}, {"product": "SecurityGroup", "action": "create"}]`。不得生成 VSwitch，也不得设计成“创建 VPC + VSwitch + SecurityGroup”。
 
+### 未声明的资源默认是新建
+
+`use_existing` / `reference` 只能来自 intent 的显式声明，不能由你推断：
+
+- intent 的 `resource_intents` 没有把某个 product 标成 `use_existing` 或 `reference` 时，该资源默认按 `action=create` 处理。
+- intent 完全没有 `resource_intents` 字段时，`core_requirements` 里的每个 product 都默认按 `action=create` 处理。
+- 不得因为某个资源“通常已经存在”“一般由用户提前准备好”就预设已有资源。没有显式声明就当作本次新建。
+
+反例：intent 只解析出 `VPC`、`VSwitch` 且没有任何 `use_existing` 声明时，把 VPC 预设成已有 VPC、只产出「已有 VPC 下新建 VSwitch」单候选是错误的——这会让候选集完全遗漏用户的 VPC 创建需求。
+
+### 依赖资源生命周期未确认时的候选覆盖
+
+当意图里存在承载关系（如 VSwitch 依赖 VPC、ECS 依赖 VSwitch、安全组依赖 VPC），而**被依赖资源到底是新建还是复用已有还没有确认**时，必须给出至少两个候选，分别覆盖两种语义：
+
+- 候选 A：被依赖资源 `action=create`，与目标资源一起新建（如「新建 VPC + 新建 VSwitch」）。
+- 候选 B：被依赖资源 `action=use_existing`，只新建目标资源（如「复用已有 VPC + 新建 VSwitch」）。
+
+「已确认」只有两种来源：intent 的 `resource_intents` 已显式给出该资源的 `use_existing` / `reference` / `create`，或 `non_functional.network_constraints` 已给出具体的已有资源标识（如 VPC ID、VSwitch ID、既有网段）。任一来源确认后，按确认的语义收敛为单候选，不要再为了凑数保留另一种。
+
+每个候选的 `resource_intents` 必须与该候选自身的语义一致：候选 A 里的 VPC 是 `create`，候选 B 里的 VPC 是 `use_existing`。不要让两个候选共用同一份继承自 intent 的 `resource_intents`。
+
 ## 输出
 调用 `complete_step` 提交结论。字段定义见 tool schema。
 
@@ -114,7 +137,7 @@ conclusion_schema:
 - 名称为方案名的英文 kebab-case 简写
 - 示例：`templates/1-simple-nginx.yml`、`templates/2-high-availability-slb.yml`
 
-当只有 1 个方案时，`candidates` 只有 1 个元素。
+当只有 1 个方案时，`candidates` 只有 1 个元素。只有资源清单和生命周期都已确定时才允许收敛到 1 个方案。
 
 ## 约束
 

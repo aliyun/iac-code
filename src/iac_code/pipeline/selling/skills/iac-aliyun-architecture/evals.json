@@ -172,6 +172,57 @@
         {"name": "within_budget", "check": "所有方案的monthly_cost_range上限不超过500 CNY"},
         {"name": "no_overengineering", "check": "不包含SLB集群、多可用区等超出预算的高可用配置"}
       ]
+    },
+    {
+      "id": 9,
+      "name": "vpc-vswitch-lifecycle-unconfirmed",
+      "prompt": "创建一个VPC和一个VSwitch",
+      "intent_context": {
+        "is_infra_intent": true,
+        "confidence": "high",
+        "cloud_platform": "aliyun",
+        "business_type": "网络基础设施",
+        "core_requirements": ["VPC", "VSwitch"],
+        "resource_intents": [
+          {"product": "VPC", "action": "create", "source": "user"},
+          {"product": "VSwitch", "action": "create", "source": "user"}
+        ],
+        "non_functional": {"high_availability": false, "security_level": "basic"},
+        "scale_hint": null,
+        "budget_constraint": null,
+        "additional_notes": "用户未声明 VPC 已存在"
+      },
+      "expected_behavior": "意图未声明 VPC 已存在，必须覆盖新建 VPC 的需求；不得只产出「已有 VPC 下新建 VSwitch」单候选",
+      "assertions": [
+        {"name": "covers_vpc_creation", "check": "至少一个方案的resource_intents中VPC的action为create"},
+        {"name": "no_presumed_existing_vpc", "check": "不存在只有「已有VPC下新建VSwitch」这一个候选的情况；候选数量至少为2"},
+        {"name": "per_candidate_lifecycle", "check": "每个方案的resource_intents与该方案自身语义一致，不共用同一份继承值"}
+      ]
+    },
+    {
+      "id": 10,
+      "name": "vswitch-in-confirmed-existing-vpc",
+      "prompt": "在已有的 vpc-bp1abc 下创建一个VSwitch",
+      "intent_context": {
+        "is_infra_intent": true,
+        "confidence": "high",
+        "cloud_platform": "aliyun",
+        "business_type": "网络基础设施",
+        "core_requirements": ["VPC", "VSwitch"],
+        "resource_intents": [
+          {"product": "VPC", "action": "use_existing", "role": "network_container", "source": "user"},
+          {"product": "VSwitch", "action": "create", "source": "user"}
+        ],
+        "non_functional": {"network_constraints": {"vpc_id": "vpc-bp1abc"}},
+        "scale_hint": null,
+        "budget_constraint": null,
+        "additional_notes": "用户已明确给出已有 VPC ID"
+      },
+      "expected_behavior": "已有 VPC 上下文已确认，收敛为单候选「已有 VPC 下新建 VSwitch」",
+      "assertions": [
+        {"name": "single_candidate", "check": "candidates数组长度为1"},
+        {"name": "vpc_use_existing", "check": "方案的resource_intents中VPC的action为use_existing，不生成新建VPC"}
+      ]
     }
   ]
 }
