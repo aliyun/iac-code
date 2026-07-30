@@ -28,7 +28,11 @@ from iac_code.pipeline.engine.cleanup import (
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.display_replay import DISPLAY_TRANSCRIPT_FILENAME
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType, backup_blocked_event
-from iac_code.pipeline.engine.handoff import build_handoff_summary, terminal_outcome_from_completed_event
+from iac_code.pipeline.engine.handoff import (
+    build_handoff_summary,
+    terminal_outcome_from_completed_event,
+    terminal_outcome_from_final_conclusion,
+)
 from iac_code.pipeline.engine.interrupt import InterruptController, InterruptVerdict
 from iac_code.pipeline.engine.loader import load_pipeline_dir
 from iac_code.pipeline.engine.observability import PipelineObservability
@@ -1036,6 +1040,40 @@ class PipelineRunner:
             )
 
         self._try_save_sidecar_sync("completed", "save_normal_handoff", save)
+
+    def _terminal_conclusion_outcome_data(self, completed_step_id: str | None = None) -> dict[str, Any]:
+        """Derive PIPELINE_COMPLETED failure/cancel flags from the final step's conclusion.
+
+        A terminal step (e.g. the deploying step) can finish its agent turn yet
+        conclude with ``status: failed`` / ``cancelled`` (WAF blocked CreateStack,
+        ``statuses.failed>0``, user cancel, ...). Without reflecting that in the
+        terminal event payload, ``terminal_outcome_from_completed_event`` would
+        report a false ``completed`` outcome and mask the real failure.
+
+        Returns an empty dict when the final conclusion carries no failure/cancel
+        signal, so callers keep the existing default ``completed`` behavior.
+        """
+        step_id = completed_step_id or self._terminal_current_step_id()
+        if not step_id:
+            return {}
+        conclusion_field = next(
+            (s.conclusion_field for s in self._loaded.steps if s.step_id == step_id),
+            None,
+        )
+        if conclusion_field is None:
+            return {}
+        conclusion = self.context.get_conclusion(conclusion_field)
+        if not isinstance(conclusion, dict):
+            return {}
+        outcome = terminal_outcome_from_final_conclusion(conclusion)
+        if outcome is None:
+            return {}
+        data: dict[str, Any] = {"terminal_conclusion_status": conclusion.get("status")}
+        if outcome == "failed":
+            data["failed"] = True
+        elif outcome == "canceled":
+            data["canceled"] = True
+        return data
 
     def _terminal_current_step_id(self) -> str:
         try:
@@ -4346,12 +4384,15 @@ class PipelineRunner:
                         yield blocked_event
                         return
                     emit_step_success_observability()
-                    emit_pipeline_completed(failed=False, early_exit=False)
+                    terminal_conclusion_data = self._terminal_conclusion_outcome_data(completed_step_id)
+                    emit_pipeline_completed(
+                        failed=bool(terminal_conclusion_data.get("failed")), early_exit=False
+                    )
                     pipeline_completed_event = PipelineEvent(
                         type=PipelineEventType.PIPELINE_COMPLETED,
                         step_id=None,
                         timestamp=time.time(),
-                        data={"total_steps": self.state_machine.total_steps},
+                        data={"total_steps": self.state_machine.total_steps, **terminal_conclusion_data},
                     )
                 else:
                     emit_step_success_observability()
@@ -4444,12 +4485,15 @@ class PipelineRunner:
             if blocked_event is not None:
                 yield blocked_event
                 return
-            emit_pipeline_completed(failed=False, early_exit=False)
+            terminal_conclusion_data = self._terminal_conclusion_outcome_data(
+                completed_step_id if isinstance(completed_step_id, str) else None
+            )
+            emit_pipeline_completed(failed=bool(terminal_conclusion_data.get("failed")), early_exit=False)
             yield PipelineEvent(
                 type=PipelineEventType.PIPELINE_COMPLETED,
                 step_id=None,
                 timestamp=time.time(),
-                data={"total_steps": self.state_machine.total_steps},
+                data={"total_steps": self.state_machine.total_steps, **terminal_conclusion_data},
             )
         elif step_result is None or step_result.status == StepStatus.FAILED:
             if not terminal_backup_completed:

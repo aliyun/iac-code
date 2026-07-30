@@ -4,7 +4,11 @@ from unittest.mock import MagicMock
 
 import yaml
 
-from iac_code.pipeline.engine.handoff import build_handoff_summary, terminal_outcome_from_completed_event
+from iac_code.pipeline.engine.handoff import (
+    build_handoff_summary,
+    terminal_outcome_from_completed_event,
+    terminal_outcome_from_final_conclusion,
+)
 from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
 
 
@@ -67,6 +71,59 @@ def test_terminal_outcome_from_completed_event_canceled():
 
 def test_terminal_outcome_failed_wins_over_early_exit():
     assert terminal_outcome_from_completed_event({"failed": True, "early_exit": True}) == "failed"
+
+
+def test_terminal_outcome_from_final_conclusion_failed():
+    assert terminal_outcome_from_final_conclusion({"status": "failed"}) == "failed"
+
+
+def test_terminal_outcome_from_final_conclusion_cancelled_variants():
+    assert terminal_outcome_from_final_conclusion({"status": "cancelled"}) == "canceled"
+    assert terminal_outcome_from_final_conclusion({"status": "canceled"}) == "canceled"
+
+
+def test_terminal_outcome_from_final_conclusion_success_is_none():
+    # Success must not force any override; callers keep the default completed outcome.
+    assert terminal_outcome_from_final_conclusion({"status": "success"}) is None
+
+
+def test_terminal_outcome_from_final_conclusion_missing_or_invalid():
+    assert terminal_outcome_from_final_conclusion(None) is None
+    assert terminal_outcome_from_final_conclusion({}) is None
+    assert terminal_outcome_from_final_conclusion({"status": 123}) is None
+
+
+def test_terminal_conclusion_outcome_data_failed(tmp_path):
+    runner = _make_runner(tmp_path)
+    runner.context.set_conclusion("intent", {"status": "failed", "error": "WAF blocked"})
+
+    data = runner._terminal_conclusion_outcome_data("step")
+
+    assert data.get("failed") is True
+    assert "canceled" not in data
+    assert data.get("terminal_conclusion_status") == "failed"
+    assert terminal_outcome_from_completed_event(data) == "failed"
+
+
+def test_terminal_conclusion_outcome_data_cancelled(tmp_path):
+    runner = _make_runner(tmp_path)
+    runner.context.set_conclusion("intent", {"status": "cancelled"})
+
+    data = runner._terminal_conclusion_outcome_data("step")
+
+    assert data.get("canceled") is True
+    assert "failed" not in data
+    assert terminal_outcome_from_completed_event(data) == "canceled"
+
+
+def test_terminal_conclusion_outcome_data_success_is_empty(tmp_path):
+    runner = _make_runner(tmp_path)
+    runner.context.set_conclusion("intent", {"status": "success", "stack_id": "stack-1"})
+
+    data = runner._terminal_conclusion_outcome_data("step")
+
+    assert data == {}
+    assert terminal_outcome_from_completed_event({"total_steps": 1, **data}) == "completed"
 
 
 def test_build_handoff_summary_includes_only_configured_fields_and_deterministic_metadata():
