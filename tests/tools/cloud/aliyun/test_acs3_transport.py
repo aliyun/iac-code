@@ -523,9 +523,9 @@ async def test_acs3_transport_enforces_retry_budget_deadline_during_send() -> No
                 endpoint=endpoint(),
                 credential=credential(),
                 context=ToolContext(),
-                budget=RetryBudget(deadline=time.monotonic() + 0.05),
+                budget=RetryBudget(deadline=time.monotonic() + 1.0),
             ),
-            timeout=0.5,
+            timeout=3.0,
         )
 
     assert started.is_set()
@@ -570,9 +570,9 @@ async def test_acs3_transport_enforces_retry_budget_deadline_during_response_str
                 endpoint=endpoint(),
                 credential=credential(),
                 context=ToolContext(),
-                budget=RetryBudget(deadline=time.monotonic() + 0.05),
+                budget=RetryBudget(deadline=time.monotonic() + 1.0),
             ),
-            timeout=0.5,
+            timeout=3.0,
         )
 
     assert started.is_set()

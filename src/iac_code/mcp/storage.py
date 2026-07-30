@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import sys
+import threading
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -18,6 +19,7 @@ from iac_code.utils.state_io import atomic_write_bytes
 _FALLBACK_STORE_LOCK = "__fallback_store__"
 _LOCK_NAME_SALT = b"iac-code-mcp-lock-name-v2"
 _LOCK_NAME_DERIVATION_ITERATIONS = 10_000
+_PROCESS_LOCK_STRIPES = tuple(threading.RLock() for _ in range(64))
 
 
 class MCPSecretStorage:
@@ -60,8 +62,10 @@ class MCPSecretStorage:
         ensure_private_dir(_fallback_dir())
         path = _fallback_dir() / "locks" / "{}.lock".format(_safe_lock_name(key))
         ensure_private_dir(path.parent)
-        with _locked_file(path):
-            yield
+        process_lock = _PROCESS_LOCK_STRIPES[hash(key) % len(_PROCESS_LOCK_STRIPES)]
+        with process_lock:
+            with _locked_file(path):
+                yield
 
     def _try_keyring_set(self, key: str, value: str) -> bool:
         if self._keyring is None:
