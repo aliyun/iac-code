@@ -3873,6 +3873,29 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"monthly_estimate must not be a bare zero amount. For pay-as-you-go "
+"resources (such as OSS storage or CDN traffic), report a usage-based "
+"range estimate labeled as pay-as-you-go, or report the pricing failure as"
+" \"询价失败\"; never present ¥0/月 as a comparable monthly cost."
+msgstr ""
+"monthly_estimate ne doit pas être un montant nul brut. Pour les "
+"ressources facturées à l'usage (stockage OSS, trafic CDN), fournissez une"
+" estimation par fourchette basée sur l'usage et étiquetée comme "
+"facturation à l'usage, ou signalez l'échec de tarification par \"询价失败\" ;"
+" ne présentez jamais ¥0/月 comme un coût mensuel comparable."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"preview_validation.succeeded is false, so the conclusion must declare the"
+" parameter gaps in missing_deployment_parameters or explain the failure "
+"in error before completing this step."
+msgstr ""
+"preview_validation.succeeded est false ; la conclusion doit déclarer les "
+"paramètres manquants dans missing_deployment_parameters ou expliquer "
+"l'échec dans error avant de terminer cette étape."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -3936,6 +3959,14 @@ msgstr "<renseigner selon les exigences de l’étape actuelle>"
 #: src/iac_code/ui/renderer.py
 msgid "complete_step validation failed."
 msgstr "La validation de complete_step a échoué."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"The current conclusion is not allowed to complete this step; fix it and "
+"retry."
+msgstr ""
+"La conclusion actuelle ne permet pas de terminer cette étape ; corrigez-"
+"la et réessayez."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "Clarification is required before completing the current step."
@@ -12678,3 +12709,4 @@ msgstr "Autoriser Bash ?"
 #~ msgstr ""
 #~ "Approuver l'appel d'outil : {tool}\n"
 #~ "Résumé de l'entrée : {summary}"
+

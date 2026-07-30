@@ -10,7 +10,7 @@ conclusion_schema:
   properties:
     monthly_estimate:
       type: string
-      description: 月度费用估算；询价同时返回 OriginalAmount 与 TradeAmount 时，必须同时包含列表价和合同优惠后价格（如 ¥96.80/月（列表价，合同优惠后约¥13.76/月））；询价失败时填 "询价失败"
+      description: 月度费用估算；询价同时返回 OriginalAmount 与 TradeAmount 时，必须同时包含列表价和合同优惠后价格（如 ¥96.80/月（列表价，合同优惠后约¥13.76/月））；询价失败时填 "询价失败"；按量付费资源询价为 0 或不支持询价时填基于假设用量的区间估算并标注按量计费口径，禁止输出裸 ¥0/月
     currency:
       type: string
       enum: [CNY]
@@ -140,6 +140,15 @@ PreviewStack 不是硬门禁。它要求完整部署参数，常比询价工具�
 - `PreviewStack` 因候选组合不可行失败时，按 reference 的回溯规则更换候选；因外部输入缺失失败时，记录缺口，不用占位值伪造，并按上方软门禁规则决定是否继续询价。
 - 最终得到的参数集不写入模板 `Default`；将当前已选、已验证或已用于询价的参数作为结构化数据放入 `complete_step.conclusion.deployment_parameters`，传递给 deploying。`ros_preview_template` 成功时，还必须把 `succeeded: true`、同一个 `template_url` 和预览时使用的 `parameters` 写入 `complete_step.conclusion.preview_validation`；deploying 用它判断同一模板是否已完成预览验证，实际部署参数由 `ros_deploy` 做最终校验。模板 Default 只是参数求解的输入来源之一，不是跨步骤传参介质。
 - PreviewStack 成功但询价失败时，不要丢弃 Preview-Validated Pricing Parameter Set；仍在 `deployment_parameters` 输出该参数集，同时如实报告询价失败原因。
+- PreviewStack 失败（如外部输入缺失导致 `CdnDomainName` 等参数无法补齐）时，`preview_validation` 必须填 `{"succeeded": false, "error": "<原因>"}`，并把仍缺的参数写入 `missing_deployment_parameters`；不得在预览失败、缺口未声明的情况下直接定稿。
+
+## 按量付费资源的成本口径
+
+OSS 存储、CDN 流量、日志服务等按量付费资源没有固定包月价，`ros_estimate_template_cost` 常返回 0 元或不支持询价。此时**禁止把 ¥0/月作为月成本输出**——零金额会在方案对比中严重误导用户：
+
+- 询价返回 0 元或资源不支持询价时，基于典型用量假设给出**区间估算**并标注口径，例如：`约¥10~¥60/月（按量计费，按 50GB 存储 + 100GB CDN 流量估算）`；对应 `resources[].cost` 也写区间与假设，不写 `¥0`。
+- 无法形成合理用量假设时，`monthly_estimate` 填 `"询价失败"` 并在 `error` 说明原因；不要用 ¥0 兜底。
+- 固定计费资源与按量付费资源混合时，汇总口径需说明哪部分是列表价、哪部分是按量估算区间。
 
 ## 调用询价 API
 
@@ -194,10 +203,11 @@ aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<�
 调用 `complete_step` 提交结论。字段定义见 tool schema。
 
 补充说明：
-- `cost` 字段为字符串，包含金额和计费周期（如 "¥800/月"、"¥0.5/小时"、"¥0"）
+- `cost` 字段为字符串，包含金额和计费周期（如 "¥800/月"、"¥0.5/小时"）；按量付费资源填区间估算并标注假设用量，不填 "¥0"
 - 若修复了模板，设置 `template_fixed: true` 并在 `fix_summary` 中说明修复内容；仅形成或输出 `deployment_parameters` 不算模板修复
 - `deployment_parameters` 填当前已选、已验证或已用于 `ros_estimate_template_cost` 的参数字典；PreviewStack 成功但询价失败时仍填该参数集；没有任何可用参数时填 `{}`
 - `preview_validation` 填 `ros_preview_template` 的结构化状态：成功时填 `{"succeeded": true, "template_url": "<当前模板文件路径>", "parameters": <预览通过的同一参数字典>}`；失败或未执行时填 `{"succeeded": false, "error": "<原因>"}`
 - `missing_deployment_parameters` 填完整部署或 PreviewStack 仍缺少的参数及原因；没有缺口时可省略或填 `[]`
 - `parameter_set_summary` 可简要说明参数来源、可用性筛选、PreviewStack 验证结果以及是否使用软门禁继续询价
 - 询价失败时 `monthly_estimate` 填 "询价失败"，`resources` 为空数组，`error` 说明原因
+- `monthly_estimate` 不得为裸零金额（如 "¥0/月"、"¥0"）；按量付费资源按「按量付费资源的成本口径」输出区间估算，否则填 "询价失败"

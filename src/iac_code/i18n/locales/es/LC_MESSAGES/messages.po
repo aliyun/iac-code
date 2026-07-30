@@ -3859,6 +3859,29 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"monthly_estimate must not be a bare zero amount. For pay-as-you-go "
+"resources (such as OSS storage or CDN traffic), report a usage-based "
+"range estimate labeled as pay-as-you-go, or report the pricing failure as"
+" \"询价失败\"; never present ¥0/月 as a comparable monthly cost."
+msgstr ""
+"monthly_estimate no debe ser un importe cero sin más. Para recursos de "
+"pago por uso (como almacenamiento OSS o tráfico CDN), informe una "
+"estimación por rangos basada en el uso etiquetada como pago por uso, o "
+"informe el fallo de tarificación como \"询价失败\"; nunca presente ¥0/月 como "
+"un coste mensual comparable."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"preview_validation.succeeded is false, so the conclusion must declare the"
+" parameter gaps in missing_deployment_parameters or explain the failure "
+"in error before completing this step."
+msgstr ""
+"preview_validation.succeeded es false, por lo que la conclusión debe "
+"declarar las brechas de parámetros en missing_deployment_parameters o "
+"explicar el fallo en error antes de completar este paso."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -3924,6 +3947,14 @@ msgstr "<rellenar según los requisitos del paso actual>"
 #: src/iac_code/ui/renderer.py
 msgid "complete_step validation failed."
 msgstr "La validación de complete_step falló."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"The current conclusion is not allowed to complete this step; fix it and "
+"retry."
+msgstr ""
+"La conclusión actual no permite completar este paso; corríjala y vuelva a"
+" intentarlo."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "Clarification is required before completing the current step."
@@ -12612,3 +12643,4 @@ msgstr "¿Permitir Bash?"
 #~ msgstr ""
 #~ "Aprobar llamada de herramienta: {tool}\n"
 #~ "Resumen de entrada: {summary}"
+

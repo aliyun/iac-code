@@ -338,6 +338,17 @@ sub_pipelines:
         skill: iac-aliyun-cost
         prompt: prompts/cost_estimating.md
         context_fields: [template]
+        completion_guards:
+          # 零金额不得作为月成本对比口径：按量付费资源须给区间估算或如实报告询价失败。
+          - when_conclusion_field_matches:
+              monthly_estimate: '^[^0-9]*0(?:[.,]0+)?(?![0-9])[^1-9]*$'
+            forbid_completion: true
+            message_key: cost_zero_monthly_estimate_forbidden
+          # PreviewStack 保持软门禁，但失败时必须在结论中显式声明参数缺口或失败原因。
+          - when_conclusion_field_equals:
+              preview_validation.succeeded: false
+            required_conclusion_any_of: [missing_deployment_parameters, error]
+            message_key: cost_preview_failed_requires_gap_declaration
         tools:
           include: []
           exclude: [bash, write_memory, ros_stack, ros_stack_instances]
