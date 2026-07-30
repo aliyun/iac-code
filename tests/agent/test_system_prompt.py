@@ -11,6 +11,7 @@ from iac_code.agent.system_prompt import (
     SystemPromptBuilder,
     _build_cloud_config_section,
     _build_environment_section,
+    _build_tools_section,
     build_base_sections,
     build_system_prompt,
     split_by_dynamic_boundary,
@@ -437,3 +438,15 @@ class TestBuildBaseSections:
     def test_unknown_section_key_ignored(self):
         result = build_base_sections(["identity", "nonexistent_section"], cwd="/tmp")
         assert "Infrastructure as Code" in result
+
+
+class TestBuildToolsSection:
+    def test_file_inspection_prefers_basic_commands(self):
+        result = _build_tools_section()
+        assert "`ls -l`, `stat` or `head`" in result
+        assert "such as `file`" in result
+
+    def test_missing_command_exit_code_guidance(self):
+        result = _build_tools_section()
+        assert "exits with 127" in result
+
