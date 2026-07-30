@@ -21,6 +21,17 @@ Vérifiez la commande :
 iac-code --help
 ```
 
+## Fonctionnalités optionnelles
+
+La CLI interactive fonctionne avec le paquet de base. Certains modes d'exécution dépendent d'extras optionnels que vous installez avec la syntaxe `iac-code[<extra>]` :
+
+| Extra | Active | Commande |
+|---|---|---|
+| `http` | L'[application web](../web-app.md) locale (`iac-code web`) | `pip install 'iac-code[http]'` |
+| `a2a` | Le [serveur A2A](../a2a/getting-started.md) (`iac-code a2a`) | `pip install 'iac-code[a2a]'` |
+
+Si vous lancez un mode d'exécution sans son extra, la commande échoue avec un message indiquant l'extra à installer. Lorsque vous travaillez à partir d'un clone du dépôt, utilisez plutôt `uv sync --extra <extra>`.
+
 ## Configuration requise pour Windows
 
 Sous Windows, [Git for Windows](https://gitforwindows.org/) doit être installé pour fournir l'environnement shell bash utilisé par l'exécution des outils.
