@@ -21,6 +21,17 @@ pip install iac-code
 iac-code --help
 ```
 
+## オプション機能
+
+対話型 CLI は基本パッケージだけで動作します。一部の実行モードは、`iac-code[<extra>]` の構文でインストールするオプションのエクストラに依存します：
+
+| エクストラ | 有効になる機能 | コマンド |
+|---|---|---|
+| `http` | ローカルの [Web アプリ](../web-app.md)（`iac-code web`） | `pip install 'iac-code[http]'` |
+| `a2a` | [A2A サーバー](../a2a/getting-started.md)（`iac-code a2a`） | `pip install 'iac-code[a2a]'` |
+
+エクストラを入れずに実行モードを起動すると、インストールすべきエクストラを示すメッセージが表示されて失敗します。リポジトリをチェックアウトして開発する場合は、代わりに `uv sync --extra <extra>` を使用してください。
+
 ## Windows の要件
 
 Windows では、ツール実行環境として使用する bash シェルを提供するために [Git for Windows](https://gitforwindows.org/) のインストールが必要です。

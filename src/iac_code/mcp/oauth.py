@@ -1045,7 +1045,7 @@ class _MCPOAuthTokenStorage:
     async def get_tokens(self):
         from mcp.shared.auth import OAuthToken
 
-        access_key = oauth_storage_key(self._config, "access_token", scope=self._scope)
+        access_key = oauth_storage_key(self._config, scope=self._scope)
         access_token, refresh_token, refresh_marker, expires_at = self._read_token_state(access_key)
         if not access_token:
             self._token_snapshot = None
@@ -1091,7 +1091,7 @@ class _MCPOAuthTokenStorage:
 
     async def set_tokens(self, tokens: Any) -> None:
         access_token = str(tokens.access_token)
-        access_key = oauth_storage_key(self._config, "access_token", scope=self._scope)
+        access_key = oauth_storage_key(self._config, scope=self._scope)
         expires_in = getattr(tokens, "expires_in", None)
         refresh_token = getattr(tokens, "refresh_token", None)
         with self._storage.lock(access_key):
@@ -1121,7 +1121,7 @@ class _MCPOAuthTokenStorage:
         return get_oauth_client_information(self._config, self._storage, self._scope)
 
     async def set_client_info(self, client_info: Any) -> None:
-        access_key = oauth_storage_key(self._config, "access_token", scope=self._scope)
+        access_key = oauth_storage_key(self._config, scope=self._scope)
         client_id = getattr(client_info, "client_id", None)
         with self._storage.lock(access_key):
             if not self._captured_token_state_is_current():
@@ -1499,7 +1499,7 @@ async def _run_sdk_oauth_flow(
             client_metadata=client_metadata,
         )
     scope = getattr(token_storage, "_scope", None)
-    refresh_key = oauth_storage_key(config, "refresh_token", scope=scope)
+    refresh_key = oauth_storage_key(config, scope=scope)
     secret_storage = getattr(token_storage, "_storage", None)
     if secret_storage is not None and not get_oauth_storage_secret(
         config, secret_storage, "refresh_token", scope=scope
@@ -1507,7 +1507,7 @@ async def _run_sdk_oauth_flow(
         refresh_key = None
     return OAuthFlowResult(
         authorization_url="",
-        access_token_key=oauth_storage_key(config, "access_token", scope=scope),
+        access_token_key=oauth_storage_key(config, scope=scope),
         refresh_token_key=refresh_key,
     )
 
@@ -1640,12 +1640,12 @@ def _exchange_authorization_code(
             )
         )
 
-    access_key = oauth_storage_key(config, "access_token", scope=scope)
+    access_key = oauth_storage_key(config, scope=scope)
     refresh_key = None
     refresh_token_to_store = None
     refresh_token = token_response.get("refresh_token")
     if isinstance(refresh_token, str) and refresh_token:
-        refresh_key = oauth_storage_key(config, "refresh_token", scope=scope)
+        refresh_key = oauth_storage_key(config, scope=scope)
         refresh_token_to_store = refresh_token
     expires_in = token_response.get("expires_in")
     with storage.lock(access_key):
@@ -1721,7 +1721,7 @@ async def get_oauth_access_token_async(
     refresh_margin_seconds: float = 60.0,
     refresh_coordinator: TokenRefreshCoordinator | None = None,
 ) -> str | None:
-    access_key = oauth_storage_key(config, "access_token", scope=scope)
+    access_key = oauth_storage_key(config, scope=scope)
     access_token = get_oauth_storage_secret(config, storage, "access_token", scope=scope)
     if not access_token:
         return None
@@ -1760,7 +1760,7 @@ def _refresh_oauth_access_token_with_lock(
     now: Callable[[], float],
     refresh_margin_seconds: float,
 ) -> str | None:
-    access_key = oauth_storage_key(config, "access_token", scope=scope)
+    access_key = oauth_storage_key(config, scope=scope)
     with storage.lock(access_key):
         access_token = get_oauth_storage_secret(config, storage, "access_token", scope=scope)
         stored_refresh_token = get_oauth_storage_secret(config, storage, "refresh_token", scope=scope)
@@ -1856,7 +1856,7 @@ def refresh_oauth_access_token(
             expires_in=token_response.get("expires_in"),
         )
         return access_token
-    access_key = oauth_storage_key(config, "access_token", scope=scope)
+    access_key = oauth_storage_key(config, scope=scope)
     with storage.lock(access_key):
         stored_refresh_token = get_oauth_storage_secret(config, storage, "refresh_token", scope=scope)
         if stored_refresh_token != token:
@@ -1899,7 +1899,7 @@ def _begin_oauth_auth_flow_marker(
     storage: MCPSecretStorage,
     scope: MCPConfigScope | str | None,
 ) -> str:
-    access_key = oauth_storage_key(config, "access_token", scope=scope)
+    access_key = oauth_storage_key(config, scope=scope)
     marker = secrets.token_urlsafe(16)
     with storage.lock(access_key):
         remember_oauth_storage_signature(config, storage=storage, scope=scope)
@@ -1916,17 +1916,10 @@ def _oauth_auth_flow_marker_is_current(
     return get_oauth_storage_secret(config, storage, "auth_flow_marker", scope=scope) == marker
 
 
-def oauth_storage_key(config: MCPServerConfig, kind: str, *, scope: MCPConfigScope | str | None = None) -> str:
-    return _oauth_storage_key_for_signature(config.name, config.content_signature(), kind, scope=scope)
-
-
-def oauth_storage_keys(
-    config: MCPServerConfig,
-    kind: str,
-    *,
-    scope: MCPConfigScope | str | None = None,
-) -> tuple[str, ...]:
-    return (oauth_storage_key(config, kind, scope=scope),)
+def oauth_storage_key(config: MCPServerConfig, *, scope: MCPConfigScope | str | None = None) -> str:
+    # 一个 MCP 的完整 OAuth 状态存进单个钥匙串条目(JSON blob),而不是按字段拆成多条。
+    # 这样 macOS「始终允许」只需授权一次即可覆盖 access_token / refresh_token / client_* 等全部字段。
+    return _oauth_storage_key_for_signature(config.name, config.content_signature(), scope=scope)
 
 
 def get_oauth_storage_secret(
@@ -1936,11 +1929,9 @@ def get_oauth_storage_secret(
     *,
     scope: MCPConfigScope | str | None = None,
 ) -> str | None:
-    for key in oauth_storage_keys(config, kind, scope=scope):
-        value = storage.get_secret(key)
-        if value is not None:
-            return value
-    return None
+    # 读路径无锁:keyring 单次读取返回的是完整 blob,要么是旧的完整值要么是新的完整值,不会读到半写状态。
+    blob = _read_oauth_blob(storage, oauth_storage_key(config, scope=scope))
+    return blob.get(kind)
 
 
 def set_oauth_storage_secret(
@@ -1951,10 +1942,11 @@ def set_oauth_storage_secret(
     *,
     scope: MCPConfigScope | str | None = None,
 ) -> None:
-    keys = oauth_storage_keys(config, kind, scope=scope)
-    storage.set_secret(keys[0], value)
-    for legacy_key in keys[1:]:
-        storage.delete_secret(legacy_key)
+    blob_key = oauth_storage_key(config, scope=scope)
+    with storage.lock(_oauth_blob_rmw_lock_key(blob_key)):
+        blob = _read_oauth_blob(storage, blob_key)
+        blob[kind] = value
+        _write_oauth_blob(storage, blob_key, blob)
 
 
 def delete_oauth_storage_secret(
@@ -1964,20 +1956,49 @@ def delete_oauth_storage_secret(
     *,
     scope: MCPConfigScope | str | None = None,
 ) -> None:
-    for key in oauth_storage_keys(config, kind, scope=scope):
-        storage.delete_secret(key)
+    blob_key = oauth_storage_key(config, scope=scope)
+    with storage.lock(_oauth_blob_rmw_lock_key(blob_key)):
+        blob = _read_oauth_blob(storage, blob_key)
+        if kind in blob:
+            del blob[kind]
+            _write_oauth_blob(storage, blob_key, blob)
+
+
+def _read_oauth_blob(storage: MCPSecretStorage, blob_key: str) -> dict[str, str]:
+    raw = storage.get_secret(blob_key)
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {str(key): str(value) for key, value in parsed.items() if isinstance(key, str) and isinstance(value, str)}
+
+
+def _write_oauth_blob(storage: MCPSecretStorage, blob_key: str, blob: dict[str, str]) -> None:
+    if not blob:
+        storage.delete_secret(blob_key)
+        return
+    storage.set_secret(blob_key, json.dumps(blob, ensure_ascii=False, sort_keys=True))
+
+
+def _oauth_blob_rmw_lock_key(blob_key: str) -> str:
+    # 读改写用独立锁名(与粗粒度 storage.lock(blob_key) 区分),保证单字段写入原子、不丢更新,
+    # 且不会与调用方持有的 CAS 粗粒度锁在同进程内自锁(文件锁不可重入)。
+    return "{}:rmw".format(blob_key)
 
 
 def _oauth_storage_key_for_signature(
     name: str,
     content_signature: str,
-    kind: str,
     *,
     scope: MCPConfigScope | str | None = None,
 ) -> str:
-    material = "\0".join([_normalized_server_name(name), _scope_value(scope), content_signature, kind])
+    material = "\0".join([_normalized_server_name(name), _scope_value(scope), content_signature])
     digest = _derive_oauth_storage_digest(material, salt=_OAUTH_STORAGE_KEY_SALT)
-    return "mcp:{}:{}".format(kind, digest)
+    return "mcp:oauth:{}".format(digest)
 
 
 def remember_oauth_storage_signature(
@@ -2027,8 +2048,9 @@ def clear_oauth_state_for_signatures(
     scope: MCPConfigScope | str | None = None,
 ) -> None:
     for signature in dict.fromkeys(signatures):
-        for kind in _OAUTH_STORAGE_KINDS:
-            storage.delete_secret(_oauth_storage_key_for_signature(name, signature, kind, scope=scope))
+        blob_key = _oauth_storage_key_for_signature(name, signature, scope=scope)
+        with storage.lock(_oauth_blob_rmw_lock_key(blob_key)):
+            storage.delete_secret(blob_key)
 
 
 def clear_oauth_storage_signature_index(
@@ -2170,7 +2192,7 @@ def clear_scoped_oauth_storage(
     storage: MCPSecretStorage,
     scope: MCPConfigScope | str | None = None,
 ) -> None:
-    access_key = oauth_storage_key(config, "access_token", scope=scope)
+    access_key = oauth_storage_key(config, scope=scope)
     with storage.lock(access_key):
         _delete_scoped_oauth_storage(config, storage=storage, scope=scope)
 
@@ -2191,7 +2213,7 @@ def _clear_oauth_tokens(
     storage: MCPSecretStorage,
     scope: MCPConfigScope | str | None = None,
 ) -> None:
-    access_key = oauth_storage_key(config, "access_token", scope=scope)
+    access_key = oauth_storage_key(config, scope=scope)
     with storage.lock(access_key):
         _delete_oauth_tokens(config, storage=storage, scope=scope)
 

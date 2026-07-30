@@ -40,12 +40,15 @@ from iac_code.mcp.oauth import (
     build_oauth_discovery_urls,
     build_oauth_token_storage,
     clear_oauth_state,
+    delete_oauth_storage_secret,
     get_oauth_access_token_async,
     get_oauth_client_information,
+    get_oauth_storage_secret,
     oauth_scope_identity,
     oauth_storage_key,
     refresh_oauth_access_token,
     run_oauth_loopback_flow,
+    set_oauth_storage_secret,
 )
 from iac_code.mcp.storage import MCPSecretStorage
 from iac_code.mcp.types import MCPConfigScope, MCPServerConfig
@@ -750,7 +753,7 @@ async def test_transport_auth_provider_is_httpx_auth_and_sends_bearer_token() ->
             },
         )
         storage = MCPSecretStorage(keyring_backend=FakeKeyring())
-        storage.set_secret(oauth_storage_key(config, "access_token", scope=MCPConfigScope.USER), "access-token")
+        set_oauth_storage_secret(config, storage, "access_token", "access-token", scope=MCPConfigScope.USER)
 
         provider = oauth_module.build_oauth_transport_auth_provider(config, storage, MCPConfigScope.USER)
 
@@ -1093,9 +1096,9 @@ async def test_get_oauth_access_token_async_refreshes_once_for_concurrent_caller
         },
     )
     storage = MCPSecretStorage(keyring_backend=FakeKeyring())
-    storage.set_secret(oauth_storage_key(config, "access_token", scope="user"), "old-token")
-    storage.set_secret(oauth_storage_key(config, "refresh_token", scope="user"), "refresh-token")
-    storage.set_secret(oauth_storage_key(config, "expires_at", scope="user"), "100")
+    set_oauth_storage_secret(config, storage, "access_token", "old-token", scope="user")
+    set_oauth_storage_secret(config, storage, "refresh_token", "refresh-token", scope="user")
+    set_oauth_storage_secret(config, storage, "expires_at", "100", scope="user")
     calls = 0
 
     monkeypatch.setattr(
@@ -1156,9 +1159,9 @@ async def test_get_oauth_access_token_async_refreshes_once_across_storage_instan
     )
     first_storage = MCPSecretStorage()
     second_storage = MCPSecretStorage()
-    first_storage.set_secret(oauth_storage_key(config, "access_token", scope="user"), "old-token")
-    first_storage.set_secret(oauth_storage_key(config, "refresh_token", scope="user"), "refresh-token")
-    first_storage.set_secret(oauth_storage_key(config, "expires_at", scope="user"), "100")
+    set_oauth_storage_secret(config, first_storage, "access_token", "old-token", scope="user")
+    set_oauth_storage_secret(config, first_storage, "refresh_token", "refresh-token", scope="user")
+    set_oauth_storage_secret(config, first_storage, "expires_at", "100", scope="user")
     calls = 0
 
     monkeypatch.setattr(
@@ -1216,9 +1219,9 @@ async def test_transport_token_storage_refreshes_once_across_storage_instances(m
     )
     first_storage = MCPSecretStorage()
     second_storage = MCPSecretStorage()
-    first_storage.set_secret(oauth_storage_key(config, "access_token", scope="user"), "old-token")
-    first_storage.set_secret(oauth_storage_key(config, "refresh_token", scope="user"), "refresh-token")
-    first_storage.set_secret(oauth_storage_key(config, "expires_at", scope="user"), "100")
+    set_oauth_storage_secret(config, first_storage, "access_token", "old-token", scope="user")
+    set_oauth_storage_secret(config, first_storage, "refresh_token", "refresh-token", scope="user")
+    set_oauth_storage_secret(config, first_storage, "expires_at", "100", scope="user")
     calls = 0
 
     monkeypatch.setattr(
@@ -1271,9 +1274,9 @@ async def test_get_oauth_access_token_async_refreshes_once_across_storage_instan
     )
     first_storage = MCPSecretStorage()
     second_storage = MCPSecretStorage()
-    first_storage.set_secret(oauth_storage_key(config, "access_token", scope="user"), "old-token")
-    first_storage.set_secret(oauth_storage_key(config, "refresh_token", scope="user"), "refresh-token")
-    first_storage.set_secret(oauth_storage_key(config, "expires_at", scope="user"), "100")
+    set_oauth_storage_secret(config, first_storage, "access_token", "old-token", scope="user")
+    set_oauth_storage_secret(config, first_storage, "refresh_token", "refresh-token", scope="user")
+    set_oauth_storage_secret(config, first_storage, "expires_at", "100", scope="user")
     calls = 0
 
     monkeypatch.setattr(
@@ -1315,7 +1318,7 @@ async def test_get_oauth_access_token_async_refreshes_once_across_storage_instan
     assert first == "new-token"
     assert second == "new-token"
     assert calls == 1
-    assert first_storage.get_secret(oauth_storage_key(config, "expires_at", scope="user")) is None
+    assert get_oauth_storage_secret(config, first_storage, "expires_at", scope="user") is None
 
 
 @pytest.mark.timeout(60)
@@ -1360,12 +1363,17 @@ def test_sync_expired_oauth_refresh_without_expires_in_deduplicates_across_proce
                     time.sleep(0.01)
 
             class BarrierStorage(MCPSecretStorage):
+                _blob_barrier_fired = False
+
                 def get_secret(self, key: str) -> str | None:
                     value = super().get_secret(key)
-                    if key == oauth_module.oauth_storage_key(config, "refresh_token", scope=MCPConfigScope.USER):
-                        wait_for_barrier("refresh-token-read")
-                    if key == oauth_module.oauth_storage_key(config, "refresh_marker", scope=MCPConfigScope.USER):
-                        wait_for_barrier("refresh-marker-read")
+                    # 所有 OAuth 字段现在合并进单个 blob 条目;两个进程都读到过期旧状态后,
+                    # 用一次性栅栏让它们同时进入刷新竞争,验证粗粒度 CAS 锁只放行一次网络刷新。
+                    if not self._blob_barrier_fired and key == oauth_module.oauth_storage_key(
+                        config, scope=MCPConfigScope.USER
+                    ):
+                        self._blob_barrier_fired = True
+                        wait_for_barrier("oauth-blob-read")
                     return value
 
             oauth_module.discover_oauth_metadata = lambda _config: oauth_module.OAuthMetadata(
@@ -1403,10 +1411,10 @@ def test_sync_expired_oauth_refresh_without_expires_in_deduplicates_across_proce
         {"type": "http", "url": "https://example.com/mcp", "oauth": {"clientId": "client-id"}},
     )
     storage = MCPSecretStorage()
-    storage.set_secret(oauth_storage_key(config, "access_token", scope="user"), "old-token")
-    storage.set_secret(oauth_storage_key(config, "refresh_token", scope="user"), "refresh-token")
-    storage.set_secret(oauth_storage_key(config, "expires_at", scope="user"), "100")
-    storage.set_secret(oauth_storage_key(config, "refresh_marker", scope="user"), "old-marker")
+    set_oauth_storage_secret(config, storage, "access_token", "old-token", scope="user")
+    set_oauth_storage_secret(config, storage, "refresh_token", "refresh-token", scope="user")
+    set_oauth_storage_secret(config, storage, "expires_at", "100", scope="user")
+    set_oauth_storage_secret(config, storage, "refresh_marker", "old-marker", scope="user")
     env = os.environ.copy()
     barrier_dir = tmp_path / "barriers"
 
@@ -1438,8 +1446,8 @@ def test_sync_expired_oauth_refresh_without_expires_in_deduplicates_across_proce
         assert stdout.strip() == "new-token"
     refresh_count = counter_path.read_text(encoding="utf-8").count("refresh") if counter_path.exists() else 0
     assert refresh_count == 1
-    assert storage.get_secret(oauth_storage_key(config, "expires_at", scope="user")) is None
-    assert storage.get_secret(oauth_storage_key(config, "refresh_marker", scope="user")) != "old-marker"
+    assert get_oauth_storage_secret(config, storage, "expires_at", scope="user") is None
+    assert get_oauth_storage_secret(config, storage, "refresh_marker", scope="user") != "old-marker"
 
 
 def test_refresh_with_lock_does_not_use_captured_refresh_token_after_cleanup(monkeypatch) -> None:
@@ -1461,9 +1469,9 @@ def test_refresh_with_lock_does_not_use_captured_refresh_token_after_cleanup(mon
         "client_secret": "registered-secret",
         "client_auth_method": "client_secret_post",
     }.items():
-        storage.set_secret(oauth_storage_key(config, kind, scope="user"), value)
-    captured_refresh_token = storage.get_secret(oauth_storage_key(config, "refresh_token", scope="user"))
-    captured_refresh_marker = storage.get_secret(oauth_storage_key(config, "refresh_marker", scope="user"))
+        set_oauth_storage_secret(config, storage, kind, value, scope="user")
+    captured_refresh_token = get_oauth_storage_secret(config, storage, "refresh_token", scope="user")
+    captured_refresh_marker = get_oauth_storage_secret(config, storage, "refresh_marker", scope="user")
     assert captured_refresh_token == "old-refresh"
     assert captured_refresh_marker == "old-marker"
     calls = 0
@@ -1509,7 +1517,7 @@ def test_refresh_with_lock_does_not_use_captured_refresh_token_after_cleanup(mon
         "client_secret",
         "client_auth_method",
     ):
-        assert storage.get_secret(oauth_storage_key(config, kind, scope="user")) is None
+        assert get_oauth_storage_secret(config, storage, kind, scope="user") is None
 
 
 def test_direct_refresh_after_cleanup_does_not_resurrect_tokens(monkeypatch) -> None:
@@ -1531,7 +1539,7 @@ def test_direct_refresh_after_cleanup_does_not_resurrect_tokens(monkeypatch) -> 
         "client_secret": "registered-secret",
         "client_auth_method": "client_secret_post",
     }.items():
-        storage.set_secret(oauth_storage_key(config, kind, scope="user"), value)
+        set_oauth_storage_secret(config, storage, kind, value, scope="user")
     monkeypatch.setattr(
         oauth_module,
         "discover_oauth_metadata",
@@ -1561,42 +1569,54 @@ def test_direct_refresh_after_cleanup_does_not_resurrect_tokens(monkeypatch) -> 
         "client_secret",
         "client_auth_method",
     ):
-        assert storage.get_secret(oauth_storage_key(config, kind, scope="user")) is None
+        assert get_oauth_storage_secret(config, storage, kind, scope="user") is None
 
 
 def test_oauth_storage_keys_are_isolated_by_scope() -> None:
     config = MCPServerConfig.from_mapping("remote", {"type": "http", "url": "https://example.com/mcp"})
 
-    assert oauth_storage_key(config, "access_token", scope="user") != oauth_storage_key(
-        config,
-        "access_token",
-        scope="local",
-    )
+    assert oauth_storage_key(config, scope="user") != oauth_storage_key(config, scope="local")
 
 
 def test_oauth_storage_keys_are_isolated_by_scope_identity() -> None:
     config = MCPServerConfig.from_mapping("remote", {"type": "http", "url": "https://example.com/mcp"})
 
-    assert oauth_storage_key(config, "access_token", scope="session:one") != oauth_storage_key(
-        config,
-        "access_token",
-        scope="session:two",
-    )
-    assert oauth_storage_key(config, "access_token", scope="project:/repo/one/.mcp.json") != oauth_storage_key(
-        config,
-        "access_token",
-        scope="project:/repo/two/.mcp.json",
+    assert oauth_storage_key(config, scope="session:one") != oauth_storage_key(config, scope="session:two")
+    assert oauth_storage_key(config, scope="project:/repo/one/.mcp.json") != oauth_storage_key(
+        config, scope="project:/repo/two/.mcp.json"
     )
 
 
 def test_oauth_storage_keys_do_not_use_legacy_plain_sha256() -> None:
     config = MCPServerConfig.from_mapping("remote", {"type": "http", "url": "https://example.com/mcp"})
 
-    assert oauth_storage_key(config, "client_secret", scope="user") != _legacy_oauth_storage_key(
+    assert oauth_storage_key(config, scope="user") != _legacy_oauth_storage_key(
         config,
         "client_secret",
         scope="user",
     )
+
+
+def test_oauth_storage_consolidates_all_fields_into_single_keychain_item() -> None:
+    # 一个 MCP 的全部 OAuth 字段(access/refresh/client_* 等)只落到单个钥匙串 account key。
+    # 这样 macOS「始终允许」只需授权一次即可覆盖所有字段,避免每字段一次弹窗。
+    keyring = FakeKeyring()
+    storage = MCPSecretStorage(keyring_backend=keyring)
+    config = MCPServerConfig.from_mapping("remote", {"type": "http", "url": "https://example.com/mcp"})
+
+    for kind in oauth_module._OAUTH_STORAGE_KINDS:
+        set_oauth_storage_secret(config, storage, kind, "value-{}".format(kind), scope="user")
+
+    accounts = {account for (_service, account) in keyring.values}
+    assert accounts == {oauth_storage_key(config, scope="user")}
+
+    for kind in oauth_module._OAUTH_STORAGE_KINDS:
+        assert get_oauth_storage_secret(config, storage, kind, scope="user") == "value-{}".format(kind)
+
+    # 删除单个字段是对 blob 的读改写,不影响同一条目内的其它字段。
+    delete_oauth_storage_secret(config, storage, "access_token", scope="user")
+    assert get_oauth_storage_secret(config, storage, "access_token", scope="user") is None
+    assert get_oauth_storage_secret(config, storage, "refresh_token", scope="user") == "value-refresh_token"
 
 
 def test_oauth_scope_identity_preserves_user_and_isolates_session_and_project() -> None:
@@ -1633,11 +1653,11 @@ def test_oauth_token_storage_stores_registered_client_information_by_scope() -> 
     )
 
     assert (
-        storage.get_secret(oauth_storage_key(config, "client_id", scope="project:/repo/.mcp.json"))
+        get_oauth_storage_secret(config, storage, "client_id", scope="project:/repo/.mcp.json")
         == "registered-client"
     )
     assert (
-        storage.get_secret(oauth_storage_key(config, "client_secret", scope="project:/repo/.mcp.json"))
+        get_oauth_storage_secret(config, storage, "client_secret", scope="project:/repo/.mcp.json")
         == "registered-client-secret"
     )
     client_info = get_oauth_client_information(config, storage, "project:/repo/.mcp.json")
@@ -1663,8 +1683,8 @@ def test_oauth_token_storage_allows_public_registered_client_without_secret() ->
         )
     )
 
-    assert storage.get_secret(oauth_storage_key(config, "client_id", scope="user")) == "registered-client"
-    assert storage.get_secret(oauth_storage_key(config, "client_secret", scope="user")) is None
+    assert get_oauth_storage_secret(config, storage, "client_id", scope="user") == "registered-client"
+    assert get_oauth_storage_secret(config, storage, "client_secret", scope="user") is None
 
 
 def test_oauth_token_storage_fresh_auth_after_cleanup_does_not_resurrect_state() -> None:
@@ -1700,7 +1720,7 @@ def test_oauth_token_storage_fresh_auth_after_cleanup_does_not_resurrect_state()
         "client_secret",
         "client_auth_method",
     ):
-        assert storage.get_secret(oauth_storage_key(config, kind, scope="user")) is None
+        assert get_oauth_storage_secret(config, storage, kind, scope="user") is None
 
 
 def test_static_oauth_pending_flow_after_cleanup_does_not_resurrect_state(monkeypatch) -> None:
@@ -1751,7 +1771,7 @@ def test_static_oauth_pending_flow_after_cleanup_does_not_resurrect_state(monkey
         "client_secret",
         "client_auth_method",
     ):
-        assert storage.get_secret(oauth_storage_key(config, kind, scope="user")) is None
+        assert get_oauth_storage_secret(config, storage, kind, scope="user") is None
 
 
 def test_oauth_token_storage_fresh_auth_persists_client_tokens_and_marker() -> None:
@@ -1774,15 +1794,15 @@ def test_oauth_token_storage_fresh_auth_persists_client_tokens_and_marker() -> N
     )
     asyncio.run(token_storage.set_tokens(OAuthToken(access_token="new-access", refresh_token="new-refresh")))
 
-    assert storage.get_secret(oauth_storage_key(config, "access_token", scope="user")) == "new-access"
-    assert storage.get_secret(oauth_storage_key(config, "refresh_token", scope="user")) == "new-refresh"
-    assert storage.get_secret(oauth_storage_key(config, "expires_at", scope="user")) is None
-    refresh_marker = storage.get_secret(oauth_storage_key(config, "refresh_marker", scope="user"))
+    assert get_oauth_storage_secret(config, storage, "access_token", scope="user") == "new-access"
+    assert get_oauth_storage_secret(config, storage, "refresh_token", scope="user") == "new-refresh"
+    assert get_oauth_storage_secret(config, storage, "expires_at", scope="user") is None
+    refresh_marker = get_oauth_storage_secret(config, storage, "refresh_marker", scope="user")
     assert refresh_marker is not None
-    assert storage.get_secret(oauth_storage_key(config, "auth_flow_marker", scope="user")) is None
-    assert storage.get_secret(oauth_storage_key(config, "client_id", scope="user")) == "registered-client"
-    assert storage.get_secret(oauth_storage_key(config, "client_secret", scope="user")) == "registered-secret"
-    assert storage.get_secret(oauth_storage_key(config, "client_auth_method", scope="user")) == "client_secret_post"
+    assert get_oauth_storage_secret(config, storage, "auth_flow_marker", scope="user") is None
+    assert get_oauth_storage_secret(config, storage, "client_id", scope="user") == "registered-client"
+    assert get_oauth_storage_secret(config, storage, "client_secret", scope="user") == "registered-secret"
+    assert get_oauth_storage_secret(config, storage, "client_auth_method", scope="user") == "client_secret_post"
 
 
 def test_oauth_token_storage_refresh_after_cleanup_does_not_resurrect_state() -> None:
@@ -1799,7 +1819,7 @@ def test_oauth_token_storage_refresh_after_cleanup_does_not_resurrect_state() ->
         "client_secret": "registered-secret",
         "client_auth_method": "client_secret_post",
     }.items():
-        storage.set_secret(oauth_storage_key(config, kind, scope="user"), value)
+        set_oauth_storage_secret(config, storage, kind, value, scope="user")
     token_storage = build_oauth_token_storage(config, storage, "user")
 
     captured = asyncio.run(token_storage.get_tokens())
@@ -1819,7 +1839,7 @@ def test_oauth_token_storage_refresh_after_cleanup_does_not_resurrect_state() ->
         "client_secret",
         "client_auth_method",
     ):
-        assert storage.get_secret(oauth_storage_key(config, kind, scope="user")) is None
+        assert get_oauth_storage_secret(config, storage, kind, scope="user") is None
 
 
 def test_oauth_token_storage_refresh_without_expires_in_deletes_stale_expiry_and_updates_marker() -> None:
@@ -1827,10 +1847,10 @@ def test_oauth_token_storage_refresh_without_expires_in_deletes_stale_expiry_and
 
     config = MCPServerConfig.from_mapping("remote", {"type": "http", "url": "https://example.com/mcp"})
     storage = MCPSecretStorage(keyring_backend=FakeKeyring())
-    storage.set_secret(oauth_storage_key(config, "access_token", scope="user"), "old-access")
-    storage.set_secret(oauth_storage_key(config, "refresh_token", scope="user"), "old-refresh")
-    storage.set_secret(oauth_storage_key(config, "expires_at", scope="user"), "9999999999")
-    storage.set_secret(oauth_storage_key(config, "refresh_marker", scope="user"), "old-marker")
+    set_oauth_storage_secret(config, storage, "access_token", "old-access", scope="user")
+    set_oauth_storage_secret(config, storage, "refresh_token", "old-refresh", scope="user")
+    set_oauth_storage_secret(config, storage, "expires_at", "9999999999", scope="user")
+    set_oauth_storage_secret(config, storage, "refresh_marker", "old-marker", scope="user")
     token_storage = build_oauth_token_storage(config, storage, "user")
 
     captured = asyncio.run(token_storage.get_tokens())
@@ -1838,10 +1858,10 @@ def test_oauth_token_storage_refresh_without_expires_in_deletes_stale_expiry_and
     assert captured.refresh_token == "old-refresh"
     asyncio.run(token_storage.set_tokens(OAuthToken(access_token="new-access", refresh_token="new-refresh")))
 
-    assert storage.get_secret(oauth_storage_key(config, "access_token", scope="user")) == "new-access"
-    assert storage.get_secret(oauth_storage_key(config, "refresh_token", scope="user")) == "new-refresh"
-    assert storage.get_secret(oauth_storage_key(config, "expires_at", scope="user")) is None
-    refresh_marker = storage.get_secret(oauth_storage_key(config, "refresh_marker", scope="user"))
+    assert get_oauth_storage_secret(config, storage, "access_token", scope="user") == "new-access"
+    assert get_oauth_storage_secret(config, storage, "refresh_token", scope="user") == "new-refresh"
+    assert get_oauth_storage_secret(config, storage, "expires_at", scope="user") is None
+    refresh_marker = get_oauth_storage_secret(config, storage, "refresh_marker", scope="user")
     assert refresh_marker is not None
     assert refresh_marker != "old-marker"
 
@@ -1860,7 +1880,7 @@ def test_oauth_token_storage_client_info_after_refresh_cleanup_does_not_resurrec
         "client_secret": "registered-secret",
         "client_auth_method": "client_secret_post",
     }.items():
-        storage.set_secret(oauth_storage_key(config, kind, scope="user"), value)
+        set_oauth_storage_secret(config, storage, kind, value, scope="user")
     token_storage = build_oauth_token_storage(config, storage, "user")
 
     captured = asyncio.run(token_storage.get_tokens())
@@ -1887,15 +1907,15 @@ def test_oauth_token_storage_client_info_after_refresh_cleanup_does_not_resurrec
         "client_secret",
         "client_auth_method",
     ):
-        assert storage.get_secret(oauth_storage_key(config, kind, scope="user")) is None
+        assert get_oauth_storage_secret(config, storage, kind, scope="user") is None
 
 
 def test_refresh_uses_basic_auth_for_registered_client_secret_basic(monkeypatch) -> None:
     config = MCPServerConfig.from_mapping("remote", {"type": "http", "url": "https://example.com/mcp"})
     storage = MCPSecretStorage(keyring_backend=FakeKeyring())
-    storage.set_secret(oauth_storage_key(config, "client_id", scope="user"), "registered-client")
-    storage.set_secret(oauth_storage_key(config, "client_secret", scope="user"), "registered-secret")
-    storage.set_secret(oauth_storage_key(config, "client_auth_method", scope="user"), "client_secret_basic")
+    set_oauth_storage_secret(config, storage, "client_id", "registered-client", scope="user")
+    set_oauth_storage_secret(config, storage, "client_secret", "registered-secret", scope="user")
+    set_oauth_storage_secret(config, storage, "client_auth_method", "client_secret_basic", scope="user")
     captured_body: dict[str, list[str]] = {}
     captured_headers: dict[str, str] = {}
 
@@ -1991,13 +2011,13 @@ def test_invalid_grant_refresh_clears_tokens_and_requests_reauth(monkeypatch) ->
         {"type": "http", "url": "https://example.com/mcp", "oauth": {"clientId": "client-id"}},
     )
     storage = MCPSecretStorage(keyring_backend=FakeKeyring())
-    storage.set_secret(oauth_storage_key(config, "access_token", scope="user"), "old-access")
-    storage.set_secret(oauth_storage_key(config, "refresh_token", scope="user"), "old-refresh")
-    storage.set_secret(oauth_storage_key(config, "expires_at", scope="user"), "100")
-    storage.set_secret(oauth_storage_key(config, "refresh_marker", scope="user"), "marker")
-    storage.set_secret(oauth_storage_key(config, "client_id", scope="user"), "registered-client")
-    storage.set_secret(oauth_storage_key(config, "client_secret", scope="user"), "registered-secret")
-    storage.set_secret(oauth_storage_key(config, "client_auth_method", scope="user"), "client_secret_post")
+    set_oauth_storage_secret(config, storage, "access_token", "old-access", scope="user")
+    set_oauth_storage_secret(config, storage, "refresh_token", "old-refresh", scope="user")
+    set_oauth_storage_secret(config, storage, "expires_at", "100", scope="user")
+    set_oauth_storage_secret(config, storage, "refresh_marker", "marker", scope="user")
+    set_oauth_storage_secret(config, storage, "client_id", "registered-client", scope="user")
+    set_oauth_storage_secret(config, storage, "client_secret", "registered-secret", scope="user")
+    set_oauth_storage_secret(config, storage, "client_auth_method", "client_secret_post", scope="user")
     monkeypatch.setattr(
         oauth_module,
         "discover_oauth_metadata",
@@ -2019,10 +2039,10 @@ def test_invalid_grant_refresh_clears_tokens_and_requests_reauth(monkeypatch) ->
 
     assert getattr(raised.value, "auth_error", None) == "invalid_grant"
     for kind in ("access_token", "refresh_token", "expires_at", "refresh_marker", "auth_flow_marker"):
-        assert storage.get_secret(oauth_storage_key(config, kind, scope="user")) is None
-    assert storage.get_secret(oauth_storage_key(config, "client_id", scope="user")) == "registered-client"
-    assert storage.get_secret(oauth_storage_key(config, "client_secret", scope="user")) == "registered-secret"
-    assert storage.get_secret(oauth_storage_key(config, "client_auth_method", scope="user")) == "client_secret_post"
+        assert get_oauth_storage_secret(config, storage, kind, scope="user") is None
+    assert get_oauth_storage_secret(config, storage, "client_id", scope="user") == "registered-client"
+    assert get_oauth_storage_secret(config, storage, "client_secret", scope="user") == "registered-secret"
+    assert get_oauth_storage_secret(config, storage, "client_auth_method", scope="user") == "client_secret_post"
 
 
 def test_invalid_token_refresh_clears_tokens_but_preserves_dynamic_client_state(monkeypatch) -> None:
@@ -2041,7 +2061,7 @@ def test_invalid_token_refresh_clears_tokens_but_preserves_dynamic_client_state(
         "client_secret": "registered-secret",
         "client_auth_method": "client_secret_post",
     }.items():
-        storage.set_secret(oauth_storage_key(config, kind, scope="user"), value)
+        set_oauth_storage_secret(config, storage, kind, value, scope="user")
     monkeypatch.setattr(
         oauth_module,
         "discover_oauth_metadata",
@@ -2064,10 +2084,10 @@ def test_invalid_token_refresh_clears_tokens_but_preserves_dynamic_client_state(
     assert getattr(raised.value, "auth_error", None) == "invalid_token"
     assert getattr(raised.value, "auth_status_code", None) == 400
     for kind in ("access_token", "refresh_token", "expires_at", "refresh_marker", "auth_flow_marker"):
-        assert storage.get_secret(oauth_storage_key(config, kind, scope="user")) is None
-    assert storage.get_secret(oauth_storage_key(config, "client_id", scope="user")) == "registered-client"
-    assert storage.get_secret(oauth_storage_key(config, "client_secret", scope="user")) == "registered-secret"
-    assert storage.get_secret(oauth_storage_key(config, "client_auth_method", scope="user")) == "client_secret_post"
+        assert get_oauth_storage_secret(config, storage, kind, scope="user") is None
+    assert get_oauth_storage_secret(config, storage, "client_id", scope="user") == "registered-client"
+    assert get_oauth_storage_secret(config, storage, "client_secret", scope="user") == "registered-secret"
+    assert get_oauth_storage_secret(config, storage, "client_auth_method", scope="user") == "client_secret_post"
 
 
 def test_sdk_mcp_error_auth_challenge_extracts_insufficient_scope() -> None:
@@ -2402,7 +2422,7 @@ def test_sdk_mcp_error_invalid_client_clears_dynamic_client_state() -> None:
         "client_secret": "registered-secret",
         "client_auth_method": "client_secret_post",
     }.items():
-        storage.set_secret(oauth_storage_key(config, kind, scope="user"), value)
+        set_oauth_storage_secret(config, storage, kind, value, scope="user")
     exc = McpError(
         ErrorData(
             code=400,
@@ -2424,7 +2444,7 @@ def test_sdk_mcp_error_invalid_client_clears_dynamic_client_state() -> None:
         "client_secret",
         "client_auth_method",
     ):
-        assert storage.get_secret(oauth_storage_key(config, kind, scope="user")) is None
+        assert get_oauth_storage_secret(config, storage, kind, scope="user") is None
 
 
 @pytest.mark.parametrize("challenge_error,status_code", [("invalid_token", 401), ("insufficient_scope", 403)])
@@ -2447,7 +2467,7 @@ def test_auth_challenge_token_errors_preserve_registered_client_state(
         "client_secret": "registered-secret",
         "client_auth_method": "client_secret_post",
     }.items():
-        storage.set_secret(oauth_storage_key(config, kind, scope="user"), value)
+        set_oauth_storage_secret(config, storage, kind, value, scope="user")
     exc = McpError(
         ErrorData(
             code=status_code,
@@ -2460,10 +2480,10 @@ def test_auth_challenge_token_errors_preserve_registered_client_state(
 
     assert isinstance(error, MCPNeedsAuthError)
     for kind in ("access_token", "refresh_token", "expires_at", "refresh_marker", "auth_flow_marker"):
-        assert storage.get_secret(oauth_storage_key(config, kind, scope="user")) is None
-    assert storage.get_secret(oauth_storage_key(config, "client_id", scope="user")) == "registered-client"
-    assert storage.get_secret(oauth_storage_key(config, "client_secret", scope="user")) == "registered-secret"
-    assert storage.get_secret(oauth_storage_key(config, "client_auth_method", scope="user")) == "client_secret_post"
+        assert get_oauth_storage_secret(config, storage, kind, scope="user") is None
+    assert get_oauth_storage_secret(config, storage, "client_id", scope="user") == "registered-client"
+    assert get_oauth_storage_secret(config, storage, "client_secret", scope="user") == "registered-secret"
+    assert get_oauth_storage_secret(config, storage, "client_auth_method", scope="user") == "client_secret_post"
 
 
 def test_locked_invalid_token_refresh_preserves_dynamic_client_state(monkeypatch) -> None:
@@ -2481,7 +2501,7 @@ def test_locked_invalid_token_refresh_preserves_dynamic_client_state(monkeypatch
         "client_secret": "registered-secret",
         "client_auth_method": "client_secret_post",
     }.items():
-        storage.set_secret(oauth_storage_key(config, kind, scope="user"), value)
+        set_oauth_storage_secret(config, storage, kind, value, scope="user")
     monkeypatch.setattr(
         oauth_module,
         "discover_oauth_metadata",
@@ -2503,10 +2523,10 @@ def test_locked_invalid_token_refresh_preserves_dynamic_client_state(monkeypatch
 
     assert getattr(raised.value, "auth_error", None) == "invalid_token"
     for kind in ("access_token", "refresh_token", "expires_at", "refresh_marker", "auth_flow_marker"):
-        assert storage.get_secret(oauth_storage_key(config, kind, scope="user")) is None
-    assert storage.get_secret(oauth_storage_key(config, "client_id", scope="user")) == "registered-client"
-    assert storage.get_secret(oauth_storage_key(config, "client_secret", scope="user")) == "registered-secret"
-    assert storage.get_secret(oauth_storage_key(config, "client_auth_method", scope="user")) == "client_secret_post"
+        assert get_oauth_storage_secret(config, storage, kind, scope="user") is None
+    assert get_oauth_storage_secret(config, storage, "client_id", scope="user") == "registered-client"
+    assert get_oauth_storage_secret(config, storage, "client_secret", scope="user") == "registered-secret"
+    assert get_oauth_storage_secret(config, storage, "client_auth_method", scope="user") == "client_secret_post"
 
 
 def test_invalid_client_refresh_clears_dynamic_client_state_and_requests_reauth(monkeypatch) -> None:
@@ -2515,13 +2535,13 @@ def test_invalid_client_refresh_clears_dynamic_client_state_and_requests_reauth(
         {"type": "http", "url": "https://example.com/mcp", "oauth": {}},
     )
     storage = MCPSecretStorage(keyring_backend=FakeKeyring())
-    storage.set_secret(oauth_storage_key(config, "access_token", scope="user"), "old-access")
-    storage.set_secret(oauth_storage_key(config, "refresh_token", scope="user"), "old-refresh")
-    storage.set_secret(oauth_storage_key(config, "expires_at", scope="user"), "100")
-    storage.set_secret(oauth_storage_key(config, "refresh_marker", scope="user"), "marker")
-    storage.set_secret(oauth_storage_key(config, "client_id", scope="user"), "registered-client")
-    storage.set_secret(oauth_storage_key(config, "client_secret", scope="user"), "registered-secret")
-    storage.set_secret(oauth_storage_key(config, "client_auth_method", scope="user"), "client_secret_post")
+    set_oauth_storage_secret(config, storage, "access_token", "old-access", scope="user")
+    set_oauth_storage_secret(config, storage, "refresh_token", "old-refresh", scope="user")
+    set_oauth_storage_secret(config, storage, "expires_at", "100", scope="user")
+    set_oauth_storage_secret(config, storage, "refresh_marker", "marker", scope="user")
+    set_oauth_storage_secret(config, storage, "client_id", "registered-client", scope="user")
+    set_oauth_storage_secret(config, storage, "client_secret", "registered-secret", scope="user")
+    set_oauth_storage_secret(config, storage, "client_auth_method", "client_secret_post", scope="user")
     monkeypatch.setattr(
         oauth_module,
         "discover_oauth_metadata",
@@ -2550,7 +2570,7 @@ def test_invalid_client_refresh_clears_dynamic_client_state_and_requests_reauth(
         "client_secret",
         "client_auth_method",
     ):
-        assert storage.get_secret(oauth_storage_key(config, kind, scope="user")) is None
+        assert get_oauth_storage_secret(config, storage, kind, scope="user") is None
 
 
 def test_refresh_reauth_error_sanitizes_token_endpoint_description(monkeypatch) -> None:
@@ -2559,9 +2579,9 @@ def test_refresh_reauth_error_sanitizes_token_endpoint_description(monkeypatch) 
         {"type": "http", "url": "https://example.com/mcp", "oauth": {"clientId": "client-id"}},
     )
     storage = MCPSecretStorage(keyring_backend=FakeKeyring())
-    storage.set_secret(oauth_storage_key(config, "access_token", scope="user"), "old-access")
-    storage.set_secret(oauth_storage_key(config, "refresh_token", scope="user"), "old-refresh")
-    storage.set_secret(oauth_storage_key(config, "expires_at", scope="user"), "100")
+    set_oauth_storage_secret(config, storage, "access_token", "old-access", scope="user")
+    set_oauth_storage_secret(config, storage, "refresh_token", "old-refresh", scope="user")
+    set_oauth_storage_secret(config, storage, "expires_at", "100", scope="user")
     monkeypatch.setattr(
         oauth_module,
         "discover_oauth_metadata",
@@ -2593,9 +2613,9 @@ def test_refresh_reauth_error_omits_raw_token_endpoint_description(monkeypatch) 
         {"type": "http", "url": "https://example.com/mcp", "oauth": {"clientId": "client-id"}},
     )
     storage = MCPSecretStorage(keyring_backend=FakeKeyring())
-    storage.set_secret(oauth_storage_key(config, "access_token", scope="user"), "old-access")
-    storage.set_secret(oauth_storage_key(config, "refresh_token", scope="user"), "old-refresh")
-    storage.set_secret(oauth_storage_key(config, "expires_at", scope="user"), "100")
+    set_oauth_storage_secret(config, storage, "access_token", "old-access", scope="user")
+    set_oauth_storage_secret(config, storage, "refresh_token", "old-refresh", scope="user")
+    set_oauth_storage_secret(config, storage, "expires_at", "100", scope="user")
     monkeypatch.setattr(
         oauth_module,
         "discover_oauth_metadata",
@@ -2756,7 +2776,7 @@ def test_oauth_loopback_flow_registers_client_when_no_client_id(monkeypatch: pyt
         timeout_seconds=5,
     )
 
-    assert result.access_token_key == oauth_storage_key(config, "access_token", scope="user")
+    assert result.access_token_key == oauth_storage_key(config, scope="user")
     assert oauth_server.last_registration_request is not None
     redirect_uri = oauth_server.last_authorize_query["redirect_uri"][0]
     assert oauth_server.last_registration_request == {
@@ -2771,9 +2791,9 @@ def test_oauth_loopback_flow_registers_client_when_no_client_id(monkeypatch: pyt
     expected_resource = resource_url_from_server_url(config.url)
     assert oauth_server.last_authorize_query["resource"] == [expected_resource]
     assert oauth_server.last_token_request["resource"] == [expected_resource]
-    assert storage.get_secret(oauth_storage_key(config, "client_id", scope="user")) == "registered-client"
-    assert storage.get_secret(oauth_storage_key(config, "client_secret", scope="user")) == "registered-client-secret"
-    assert storage.get_secret(oauth_storage_key(config, "access_token", scope="user")) == "access-token"
+    assert get_oauth_storage_secret(config, storage, "client_id", scope="user") == "registered-client"
+    assert get_oauth_storage_secret(config, storage, "client_secret", scope="user") == "registered-client-secret"
+    assert get_oauth_storage_secret(config, storage, "access_token", scope="user") == "access-token"
 
 
 def test_client_metadata_url_loopback_flow_falls_back_to_dcr_when_metadata_does_not_support_cimd(
@@ -3122,7 +3142,7 @@ def test_clear_oauth_state_deletes_local_state_even_when_revocation_fails() -> N
         "client_secret": "registered-secret",
         "client_auth_method": "client_secret_post",
     }.items():
-        storage.set_secret(oauth_storage_key(config, kind, scope="user"), value)
+        set_oauth_storage_secret(config, storage, kind, value, scope="user")
 
     def revoke(_token: str) -> None:
         raise RuntimeError("revocation failed")
@@ -3138,7 +3158,7 @@ def test_clear_oauth_state_deletes_local_state_even_when_revocation_fails() -> N
         "client_secret",
         "client_auth_method",
     ):
-        assert storage.get_secret(oauth_storage_key(config, kind, scope="user")) is None
+        assert get_oauth_storage_secret(config, storage, kind, scope="user") is None
 
 
 def test_revoke_oauth_stored_tokens_posts_access_and_refresh_tokens(monkeypatch) -> None:
@@ -3151,7 +3171,7 @@ def test_revoke_oauth_stored_tokens_posts_access_and_refresh_tokens(monkeypatch)
         "client_secret": "registered-secret",
         "client_auth_method": "client_secret_post",
     }.items():
-        storage.set_secret(oauth_storage_key(config, kind, scope="user"), value)
+        set_oauth_storage_secret(config, storage, kind, value, scope="user")
     monkeypatch.setattr(
         oauth_module,
         "discover_oauth_metadata",
@@ -3208,7 +3228,7 @@ def test_revoke_oauth_stored_tokens_posts_access_and_refresh_tokens(monkeypatch)
 def test_revoke_oauth_stored_tokens_returns_sanitized_warning_on_failure(monkeypatch) -> None:
     config = MCPServerConfig.from_mapping("remote", {"type": "http", "url": "https://example.com/mcp"})
     storage = MCPSecretStorage(keyring_backend=FakeKeyring())
-    storage.set_secret(oauth_storage_key(config, "access_token", scope="user"), "stored-access")
+    set_oauth_storage_secret(config, storage, "access_token", "stored-access", scope="user")
     monkeypatch.setattr(
         oauth_module,
         "discover_oauth_metadata",

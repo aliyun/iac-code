@@ -692,6 +692,20 @@ async function closeModal(page) {
   }
 }
 
+// 遗留的 pipeline 工作区模态入口已从产品中下线(标题栏「View pipeline」按钮恒隐藏、
+// 候选选择不再自动弹出),但底层渲染代码保留。审计仍需覆盖该工作区的视觉回归,故临时
+// 揭开这个隐藏按钮并复用其真实点击处理(openWorkspaceModal("pipeline"))把模态打开。
+async function openLegacyPipelineWorkspace(page) {
+  await page.evaluate(() => {
+    const btn = document.querySelector('[data-app-shell="pipeline-workspace-open"]');
+    if (btn) {
+      btn.hidden = false;
+    }
+  });
+  await page.locator('[data-app-shell="pipeline-workspace-open"]').click();
+  await page.locator('[data-workspace-panel="pipeline"]').waitFor({ state: "visible", timeout: 10000 });
+}
+
 async function openWorkspaceTab(page, tabName) {
   const modal = page.locator('[data-app-shell="workspace-modal"]');
   if (!(await modal.isVisible())) {
@@ -1235,7 +1249,7 @@ async function captureCurrentMatrix({ page, outputDir, captured }) {
     null,
     { timeout: 10000 },
   );
-  await page.locator('[data-workspace-panel="pipeline"]').waitFor({ state: "visible", timeout: 10000 });
+  await openLegacyPipelineWorkspace(page);
   await expectText(page, "Smoke balanced VPC");
   await capture(page, outputDir, matrixEntry("pipeline-modal"), captured);
   await page.locator(".pipeline-candidate-select").first().click();
@@ -1253,8 +1267,7 @@ async function captureCurrentMatrix({ page, outputDir, captured }) {
     { timeout: 15000 },
   );
   await capture(page, outputDir, matrixEntry("pipeline-session-entry"), captured);
-  await page.locator('[data-app-shell="pipeline-workspace-open"]').click();
-  await page.locator('[data-workspace-panel="pipeline"]').waitFor({ state: "visible", timeout: 10000 });
+  await openLegacyPipelineWorkspace(page);
   await expectText(page, "Rollback to template generation");
   await expectText(page, "handoff blocked until rollback cleanup completes");
   await capture(page, outputDir, matrixEntry("pipeline-rollback"), captured);

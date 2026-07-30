@@ -11,7 +11,7 @@ from unittest.mock import Mock
 import pytest
 from rich.console import Console
 
-from iac_code.mcp.oauth import oauth_storage_key
+from iac_code.mcp.oauth import get_oauth_storage_secret, set_oauth_storage_secret
 from iac_code.mcp.storage import MCPSecretStorage
 from iac_code.mcp.types import MCPConfigScope, MCPServerConfig
 from iac_code.ui.core.key_event import KeyEvent
@@ -2280,16 +2280,15 @@ mcpServers:
     )
     config = MCPServerConfig.from_mapping("remote", {"type": "http", "url": "https://example.com/mcp"})
     storage = MCPSecretStorage()
-    access_key = oauth_storage_key(config, "access_token", scope=MCPConfigScope.USER)
-    storage.set_secret(access_key, "live-token")
+    set_oauth_storage_secret(config, storage, "access_token", "live-token", scope=MCPConfigScope.USER)
     events: list[str] = []
 
     async def close_mcp_manager() -> None:
-        assert storage.get_secret(access_key) == "live-token"
+        assert get_oauth_storage_secret(config, storage, "access_token", scope=MCPConfigScope.USER) == "live-token"
         events.append("close")
 
     async def refresh_mcp_integrations() -> None:
-        assert storage.get_secret(access_key) is None
+        assert get_oauth_storage_secret(config, storage, "access_token", scope=MCPConfigScope.USER) is None
         events.append("refresh")
 
     repl = SimpleNamespace(
@@ -2320,7 +2319,7 @@ mcpServers:
     dialog.handle_key(KeyEvent("enter", "\n"))
 
     assert events == ["close", "refresh"]
-    assert storage.get_secret(access_key) is None
+    assert get_oauth_storage_secret(config, storage, "access_token", scope=MCPConfigScope.USER) is None
     assert str(dialog.result_message).startswith("Reset stored MCP auth state for 'remote'.")
     assert dialog._done is True
 
@@ -2657,16 +2656,15 @@ mcpServers:
     )
     config = MCPServerConfig.from_mapping("remote", {"type": "http", "url": "https://example.com/mcp"})
     storage = MCPSecretStorage()
-    access_key = oauth_storage_key(config, "access_token", scope=MCPConfigScope.USER)
-    storage.set_secret(access_key, "live-token")
+    set_oauth_storage_secret(config, storage, "access_token", "live-token", scope=MCPConfigScope.USER)
     events: list[str] = []
 
     async def close_mcp_manager() -> None:
-        assert storage.get_secret(access_key) == "live-token"
+        assert get_oauth_storage_secret(config, storage, "access_token", scope=MCPConfigScope.USER) == "live-token"
         events.append("close")
 
     async def refresh_mcp_integrations() -> None:
-        assert storage.get_secret(access_key) is None
+        assert get_oauth_storage_secret(config, storage, "access_token", scope=MCPConfigScope.USER) is None
         events.append("refresh")
 
     repl = SimpleNamespace(
@@ -2698,7 +2696,7 @@ mcpServers:
     dialog.handle_key(KeyEvent("enter", "\n"))
 
     assert events == ["close", "refresh"]
-    assert storage.get_secret(access_key) is None
+    assert get_oauth_storage_secret(config, storage, "access_token", scope=MCPConfigScope.USER) is None
     assert "remote" not in settings_path.read_text(encoding="utf-8")
     assert dialog._done is True
 

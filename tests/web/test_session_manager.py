@@ -22,6 +22,7 @@ from iac_code.web.session_manager import (
     QueuedInputActionError,
     WebSessionManager,
     _context_usage_payload,
+    _is_listable_session,
     _read_web_session_metadata,
     reorder_compaction_markers,
 )
@@ -1778,3 +1779,168 @@ def test_context_usage_payload_without_overhead_matches_defaults() -> None:
     assert _context_usage_payload(messages, model="qwen") == _context_usage_payload(
         messages, model="qwen", system_prompt_tokens=0, tool_definition_tokens=0
     )
+
+
+def test_new_session_marks_pending_llm_title(tmp_path) -> None:
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=str(tmp_path / "project"), session_id="new-1")
+    assert session.pending_llm_title is True
+
+
+def test_reopened_existing_session_does_not_mark_pending_llm_title(tmp_path) -> None:
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    cwd = str(tmp_path / "project")
+    manager.create_session(cwd=cwd, session_id="reopen-1")
+    # 从 _sessions 缓存移除，强制走「storage 已存在」重开路径
+    manager._sessions.pop(next(iter(manager._sessions)), None)
+    reopened = manager.create_session(cwd=cwd, session_id="reopen-1")
+    assert reopened.pending_llm_title is False
+
+
+def test_apply_llm_auto_title_sets_title_persists_and_emits(tmp_path) -> None:
+    cwd = str(tmp_path / "project")
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=cwd, session_id="llm-1")
+
+    changed = manager.apply_llm_auto_title(session, "创建 OSS 存储桶")
+
+    assert changed is True
+    assert session.title == "创建 OSS 存储桶"
+    sidecar = _read_web_session_metadata(manager.storage, cwd, session.session_id)
+    assert sidecar["autoTitle"] == "创建 OSS 存储桶"
+
+
+def test_apply_llm_auto_title_noop_when_already_titled(tmp_path) -> None:
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=str(tmp_path / "project"), session_id="llm-2")
+    session.title = "用户已重命名"
+    changed = manager.apply_llm_auto_title(session, "LLM 想覆盖的标题")
+    assert changed is False
+    assert session.title == "用户已重命名"
+
+
+@pytest.mark.asyncio
+async def test_schedule_llm_title_applies_generated_title(tmp_path, monkeypatch) -> None:
+    from iac_code.web import session_manager as sm
+
+    async def fake_generate(**_kwargs):
+        return "生成的标题"
+
+    monkeypatch.setattr(sm.session_titler, "generate_session_title", fake_generate)
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=str(tmp_path / "project"), session_id="llm-3")
+    assert session.pending_llm_title is True
+
+    manager.schedule_llm_title(session, text="帮我建个桶", image_ids=[])
+    assert session.pending_llm_title is False  # 立即消费,避免重触发
+    # 等待在途标题任务完成
+    for task in list(session.active_local_tasks):
+        await task
+    assert session.title == "生成的标题"
+
+
+@pytest.mark.asyncio
+async def test_schedule_llm_title_falls_back_to_image_name(tmp_path, monkeypatch) -> None:
+    from iac_code.web import session_manager as sm
+
+    async def fake_generate(**_kwargs):
+        return None  # 两次都失败
+
+    monkeypatch.setattr(sm.session_titler, "generate_session_title", fake_generate)
+    monkeypatch.setattr(
+        sm, "load_cached_image", lambda image_id, *, cwd, session_id: _FakeImg()
+    )
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=str(tmp_path / "project"), session_id="llm-4")
+
+    manager.schedule_llm_title(session, text="", image_ids=["img-1"])
+    for task in list(session.active_local_tasks):
+        await task
+    # 纯图片失败 → 非空通用名,不再是 (empty),可被侧栏列出
+    assert session.title and session.title != "(empty)"
+    assert _is_listable_session(session)
+
+
+class _FakeImg:
+    media_type = "image/png"
+    base64_data = "AAAA"
+
+
+def test_apply_pipeline_auto_title_marks_title_provisional(tmp_path) -> None:
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(
+        cwd=str(tmp_path / "project"), mode="pipeline", pipeline_name="selling", session_id="pipe-prov-1"
+    )
+    assert session.title_provisional is False
+
+    manager.apply_pipeline_auto_title(session, "帮我搭一条售卖流水线")
+
+    # 流水线首个回合设的是「即时占位」标题,标记为临时,允许随后 LLM 结果覆盖。
+    assert session.title_provisional is True
+
+
+def test_apply_llm_auto_title_overwrites_provisional_pipeline_title(tmp_path) -> None:
+    cwd = str(tmp_path / "project")
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(
+        cwd=cwd, mode="pipeline", pipeline_name="selling", session_id="pipe-prov-2"
+    )
+    manager.apply_pipeline_auto_title(session, "帮我搭一条售卖流水线")
+
+    changed = manager.apply_llm_auto_title(session, "售卖流水线搭建")
+
+    # LLM 结果应覆盖临时占位标题,并清除临时标记(冻结为正式标题)。
+    assert changed is True
+    assert session.title == "售卖流水线搭建"
+    assert session.title_provisional is False
+    sidecar = _read_web_session_metadata(manager.storage, cwd, session.session_id)
+    assert sidecar["autoTitle"] == "售卖流水线搭建"
+    # 覆盖后不再是临时标题,第二次 LLM 结果不得再覆盖。
+    assert manager.apply_llm_auto_title(session, "又一个标题") is False
+    assert session.title == "售卖流水线搭建"
+
+
+def test_apply_llm_auto_title_does_not_overwrite_rename_over_provisional(tmp_path) -> None:
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(
+        cwd=str(tmp_path / "project"), mode="pipeline", pipeline_name="selling", session_id="pipe-prov-3"
+    )
+    manager.apply_pipeline_auto_title(session, "帮我搭一条售卖流水线")
+    # 用户在 LLM 结果回来之前手动重命名 → 重命名必须胜出,不被在途 LLM 结果覆盖。
+    manager.rename_session(session, "my-project")
+
+    changed = manager.apply_llm_auto_title(session, "LLM 想覆盖的标题")
+
+    assert changed is False
+    assert session.title == "my-project"
+
+
+def test_rename_session_clears_title_provisional(tmp_path) -> None:
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(
+        cwd=str(tmp_path / "project"), mode="pipeline", pipeline_name="selling", session_id="pipe-prov-4"
+    )
+    manager.apply_pipeline_auto_title(session, "帮我搭一条售卖流水线")
+    assert session.title_provisional is True
+
+    manager.rename_session(session, "my-project")
+
+    assert session.title_provisional is False
+
+
+def test_schedule_llm_title_noop_when_not_pending(tmp_path, monkeypatch) -> None:
+    from iac_code.web import session_manager as sm
+
+    called = {"n": 0}
+
+    async def fake_generate(**_kwargs):
+        called["n"] += 1
+        return "x"
+
+    monkeypatch.setattr(sm.session_titler, "generate_session_title", fake_generate)
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=str(tmp_path / "project"), session_id="llm-5")
+    session.pending_llm_title = False
+    manager.schedule_llm_title(session, text="hi", image_ids=[])
+    assert not session.active_local_tasks
+    assert called["n"] == 0

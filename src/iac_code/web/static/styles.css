@@ -761,6 +761,18 @@ h3 {
   object-fit: cover;
 }
 
+/* 图片缩略图的预览按钮:铺满方块容器,点击开灯箱(删除交给独立的 ×)。 */
+.attachment-chip-preview-btn {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
 .attachment-chip-remove {
   position: absolute;
   top: 0.32rem;
@@ -769,6 +781,8 @@ h3 {
   place-items: center;
   width: 1.42rem;
   height: 1.42rem;
+  padding: 0;
+  border: 0;
   border-radius: 999px;
   background: rgba(255, 255, 252, 0.96);
   color: #20201d;
@@ -776,6 +790,7 @@ h3 {
   font-weight: 400;
   line-height: 1;
   box-shadow: 0 1px 5px rgba(32, 32, 29, 0.2);
+  cursor: pointer;
 }
 
 .composer-row {
@@ -6130,6 +6145,56 @@ body.is-resizing-sidebar {
   display: none;
 }
 
+/* 全屏图片灯箱:composer 缩略图与消息内图片共用;点遮罩/×/Esc 关闭。 */
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2.5rem;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.image-lightbox[hidden] {
+  display: none;
+}
+
+.image-lightbox-figure {
+  margin: 0;
+  max-width: 100%;
+  max-height: 100%;
+  display: flex;
+}
+
+.image-lightbox-img {
+  max-width: min(92vw, 1200px);
+  max-height: 88vh;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
+.image-lightbox-close {
+  position: fixed;
+  top: 1.15rem;
+  right: 1.35rem;
+  display: grid;
+  place-items: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 252, 0.94);
+  color: #20201d;
+  font-size: 1.5rem;
+  line-height: 1;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+
 .app-modal {
   position: relative;
   width: min(34rem, calc(100vw - 3rem));
@@ -6674,14 +6739,14 @@ body.is-resizing-sidebar {
 .session-status-row dd {
   min-width: 0;
   margin: 0;
-  overflow: hidden;
   color: var(--codex-text);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, monospace;
   font-size: 0.92rem;
   font-weight: 430;
   line-height: 1.38;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* 背景信息等长行改为在值列内换行,完整展示,不再单行截断成省略号。 */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* 带复制按钮的会话行:dd 改为 flex 容器,值文本单独承担省略号,按钮不被裁切。 */
@@ -6914,6 +6979,11 @@ body.is-resizing-sidebar {
 
 .message-agent:has(.message-tool-cards) {
   display: grid;
+  /* 单列 minmax(0, 1fr):不写显式列时隐式列按 max-content 撑开,子项(.message-tool-cards /
+     .message-body 各自 width: min(40rem, 100%))的 100% 会据此撑到 ~40rem,在被缩进的流水线
+     步骤体里(agent 盒宽随嵌套收窄到 <40rem)整列右缘就溢出到步骤边界之外。约束成 1fr 让列恒等
+     于 agent 内容宽,子项 100% 据此收窄,各层右缘齐平。 */
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.56rem;
   width: 100%;
   max-width: 100%;
@@ -6928,6 +6998,7 @@ body.is-resizing-sidebar {
 
 .message-agent:has(.message-tool-cards) > .message-body {
   width: max-content;
+  min-width: 0;
   max-width: min(40rem, 100%);
   padding: 0;
   border: 0;
@@ -7342,14 +7413,15 @@ body.is-resizing-sidebar {
   white-space: nowrap;
 }
 
-/* 工具失败：标题标红，让"运行失败/读取失败…"一眼可辨，不再和成功混淆（Issue 4）。 */
-.message-tool-cards .tool-card.is-error > .tool-card-row .tool-card-title {
+/* 工具失败：标题标红，让"运行失败/读取失败…"一眼可辨（Issue 4）。仅开发者模式下的
+   「失败工具标红」开关开启(body.dev-highlight-tool-errors)时生效；关闭时失败工具与其它工具一视同仁。 */
+body.dev-highlight-tool-errors .message-tool-cards .tool-card.is-error > .tool-card-row .tool-card-title {
   color: var(--danger);
   font-weight: 600;
 }
 
-.message-tool-cards .tool-card.is-error > .tool-card-row .tool-card-icon::before,
-.message-tool-cards .tool-card.is-error > .tool-card-row .tool-card-icon::after {
+body.dev-highlight-tool-errors .message-tool-cards .tool-card.is-error > .tool-card-row .tool-card-icon::before,
+body.dev-highlight-tool-errors .message-tool-cards .tool-card.is-error > .tool-card-row .tool-card-icon::after {
   background: var(--danger);
 }
 
@@ -7486,7 +7558,7 @@ body.is-resizing-sidebar {
   color: color-mix(in srgb, #2fae66 88%, var(--codex-text));
 }
 
-.message-tool-cards .tool-stack-progress-status.is-error {
+body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-status.is-error {
   background: color-mix(in srgb, #e5484d 22%, transparent);
   color: color-mix(in srgb, #e5484d 88%, var(--codex-text));
 }
@@ -7518,7 +7590,7 @@ body.is-resizing-sidebar {
   background: color-mix(in srgb, #2fae66 82%, transparent);
 }
 
-.message-tool-cards .tool-stack-progress-bar-fill.is-error {
+body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-bar-fill.is-error {
   background: color-mix(in srgb, #e5484d 82%, transparent);
 }
 
@@ -7561,7 +7633,7 @@ body.is-resizing-sidebar {
   color: color-mix(in srgb, #2fae66 88%, var(--codex-text));
 }
 
-.message-tool-cards .tool-stack-progress-cell-status.is-error {
+body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-cell-status.is-error {
   color: color-mix(in srgb, #e5484d 88%, var(--codex-text));
 }
 
@@ -7688,9 +7760,11 @@ body.is-resizing-sidebar {
 
 .message-thinking summary {
   display: grid;
-  grid-template-columns: 0.92rem minmax(0, 1fr) auto;
+  /* 图标列宽/间距与工具行(.tool-group-summary / .tool-card-row)对齐,否则灯泡列比下方
+     工具图标列宽一截、整行看起来多缩进。 */
+  grid-template-columns: 0.68rem minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.18rem;
+  gap: 0.14rem;
   min-height: 1.42rem;
   padding: 0.06rem 0;
   border-radius: 6px;
@@ -7892,7 +7966,11 @@ body.is-resizing-sidebar {
    之前是「小圆圈 + 两个偏移小点」的抽象图形,用户反馈观感怪;换成一眼可读的灯泡。 */
 .message-thinking summary::before {
   content: "";
-  justify-self: center;
+  justify-self: start;
+  /* 灯泡是描边字形,viewBox 内左右各约 21% 是内边距;若只是把 0.82rem 图标盒左对齐,可见笔画仍
+     比下方工具图标(紧贴盒左的方框)缩进约 0.17rem。用负 margin 把字形内边距抵掉,让灯泡可见左缘
+     与工具图标左缘对齐。 */
+  margin-left: -0.17rem;
   width: 0.82rem;
   height: 0.82rem;
   opacity: 0.68;
@@ -8672,10 +8750,16 @@ body.is-resizing-sidebar {
   left: 0;
   bottom: calc(100% + 0.42rem);
   z-index: 70;
-  display: grid;
+  /* 三段式布局:搜索头 / 可滚动列表(.draft-session-menu-list)/ 底栏,菜单自身用 flex 列并 overflow:hidden
+     不滚动,仅中间列表滚。短子菜单(模式/流水线/新建项目)无中间列表,内容不超高,布局不受影响。 */
+  display: flex;
+  flex-direction: column;
   width: min(28rem, calc(100vw - 2rem));
-  max-height: min(25rem, 72vh);
-  overflow-y: auto;
+  /* 向上展开(bottom:100%)贴在触发器上方,固定 rem 引用不到触发器到视口顶的真实距离,矮窗口里
+     顶端(搜索框)会顶出视口。真正的「按上方空间封顶」由 JS 的 clampDraftMenuToViewport 在打开时按
+     触发器 rect 计算并写 inline max-height;这里仅作 JS 未跑时的兜底上限。窗口高时都取 25rem。 */
+  max-height: min(25rem, calc(100vh - 6rem));
+  overflow: hidden;
   gap: 0.12rem;
   padding: 0.5rem;
   border: 1px solid color-mix(in srgb, var(--codex-ink) 8%, transparent);
@@ -8684,6 +8768,33 @@ body.is-resizing-sidebar {
   box-shadow: 0 22px 70px rgba(0, 0, 0, 0.46);
   backdrop-filter: blur(24px);
   scrollbar-width: none;
+}
+
+/* 中间项目列表:唯一的滚动区。flex 里必须 min-height:0 才能收缩并触发滚动,否则会撑高整个菜单。 */
+.draft-session-menu-list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.draft-session-menu-list::-webkit-scrollbar {
+  display: none;
+}
+
+/* 搜索头与底栏固定,不随列表滚动。 */
+.draft-session-menu-search-wrap,
+.draft-session-menu-footer {
+  flex: none;
+}
+
+.draft-session-menu-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
 }
 
 .draft-session-submenu {
@@ -9401,6 +9512,10 @@ body.is-resizing-sidebar {
 
 .workspace-tab-icon-other {
   --wtab-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3Cpath d='M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+.workspace-tab-icon-developer {
+  --wtab-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 9l-4 3 4 3'/%3E%3Cpath d='M16 9l4 3-4 3'/%3E%3Cpath d='M13 6l-2 12'/%3E%3C/g%3E%3C/svg%3E");
 }
 
 .workspace-content {

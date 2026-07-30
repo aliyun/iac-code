@@ -588,10 +588,12 @@ msgid "View diagram"
 msgstr "アーキテクチャ図を表示"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/output_panel.js
 msgid "Optimizing"
 msgstr "最適化中"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/output_panel.js
 msgid "Pending optimization"
 msgstr "最適化待ち"
 
@@ -639,6 +641,11 @@ msgstr "思考中…"
 #: src/iac_code/web/static/js/app.js
 msgid "Thinking done"
 msgstr "思考完了"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Preview image"
+msgstr "画像をプレビュー"
 
 #: src/iac_code/web/static/js/app.js
 msgid "Attached image"
@@ -1140,6 +1147,11 @@ msgstr "停止"
 msgid "Stop the current reply"
 msgstr "現在の返信を停止"
 
+#: src/iac_code/web/static/js/components/image_lightbox.js
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Close preview"
+msgstr "プレビューを閉じる"
+
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "Success"
 msgstr "成功"
@@ -1147,6 +1159,28 @@ msgstr "成功"
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "In progress / failed"
 msgstr "進行中／失敗"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "File no longer exists"
+msgstr "ファイルは存在しません"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading…"
+msgstr "読み込み中…"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Resource stacks"
+msgstr "リソーススタック"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Template files"
+msgstr "テンプレートファイル"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Architecture diagram"
+msgstr "アーキテクチャ図"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Recovered State"
@@ -1191,10 +1225,6 @@ msgstr "候補を選択"
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Submitting..."
 msgstr "送信中..."
-
-#: src/iac_code/web/static/js/components/pipeline.js
-msgid "Architecture diagram"
-msgstr "アーキテクチャ図"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No architecture diagram"
@@ -2187,6 +2217,10 @@ msgid "Account"
 msgstr "アカウント"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Developer"
+msgstr "開発者"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Alibaba Cloud"
 msgstr "Alibaba Cloud"
 
@@ -2901,10 +2935,6 @@ msgid "{label} (current)"
 msgstr "{label}（現在）"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Loading…"
-msgstr "読み込み中…"
-
-#: src/iac_code/web/static/js/components/workspace.js
 #, python-brace-format
 msgid "File: {path}"
 msgstr "ファイル: {path}"
@@ -3506,6 +3536,22 @@ msgid ""
 msgstr "有効にすると、web 以外のエントリーポイントで作成された通常セッションがリストに表示され、web で再開して引き継げます。"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Developer mode"
+msgstr "開発者モード"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "When enabled, a Developer settings tab appears with additional tools."
+msgstr "有効にすると、追加ツールを備えた「開発」設定タブが表示されます。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enable developer mode"
+msgstr "開発者モードを有効化"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Reveals the Developer settings tab. Turning it off hides that tab again."
+msgstr "「開発」設定タブを表示します。オフにすると、そのタブは再び非表示になります。"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid ""
 "Control optional steps of the sales pipeline; affects only newly started "
 "pipeline runs. Running pipelines keep their original configuration."
@@ -3621,6 +3667,24 @@ msgid "Install failed: {error}"
 msgstr "インストールに失敗しました: {error}"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Failed tool calls"
+msgstr "失敗したツール呼び出し"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Control how failed tool calls are shown in the transcript."
+msgstr "失敗したツール呼び出しをトランスクリプトでどう表示するかを制御します。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Highlight failed tool calls in red"
+msgstr "失敗したツール呼び出しを赤で強調表示"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, failed tool calls are painted red. When disabled, they look"
+" like any other tool call."
+msgstr "有効にすると、失敗したツール呼び出しが赤で表示されます。無効にすると、他のツール呼び出しと同じ見た目になります。"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"
 msgstr "サービスを再起動"
 
@@ -3658,10 +3722,4 @@ msgstr "再起動しています。サービスが復旧するとページが自
 
 #~ msgid "Completed step: {step}"
 #~ msgstr "ステップ完了: {step}"
-
-#~ msgid "Resource stacks"
-#~ msgstr "リソーススタック"
-
-#~ msgid "Template files"
-#~ msgstr "テンプレートファイル"
 

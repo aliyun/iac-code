@@ -759,6 +759,7 @@ def test_transcript_chat_flow_uses_codex_unboxed_message_layout() -> None:
     label_block = _css_block(styles, ".transcript-panel .message-label")
     user_block = _css_block(styles, ".transcript-panel .message-user")
     agent_block = _css_block(styles, ".transcript-panel .message-agent")
+    agent_toolcards_block = _css_block(styles, ".message-agent:has(.message-tool-cards)")
     agent_body_block = _css_block(styles, ".message-agent:has(.message-tool-cards) > .message-body")
     tool_container_block = _css_block(styles, ".message-tool-cards .tool-group,\n.message-tool-cards .tool-card")
     tool_row_block = _css_block(styles, ".message-tool-cards .tool-group-summary,\n.message-tool-cards .tool-card-row")
@@ -783,6 +784,9 @@ def test_transcript_chat_flow_uses_codex_unboxed_message_layout() -> None:
     assert "border: 0;" in agent_body_block
     assert "border-radius: 0;" in agent_body_block
     assert "background: transparent;" in agent_body_block
+    # 带工具卡的 agent 网格必须约束单列为 minmax(0, 1fr),否则隐式 max-content 列会把子项撑到 ~40rem,
+    # 在被缩进的流水线步骤体里整列右缘溢出到步骤边界外。
+    assert "grid-template-columns: minmax(0, 1fr);" in agent_toolcards_block
     assert "padding: 0;" in tool_container_block
     assert "margin: 0;" in tool_container_block
     assert "padding: 0.06rem 0;" in tool_row_block
@@ -793,8 +797,9 @@ def test_transcript_chat_flow_uses_codex_unboxed_message_layout() -> None:
     assert "font-family:" in tool_icon_block
     assert "padding-left: 0;" in group_list_block
     assert "display: grid;" in thinking_summary_block
-    assert "grid-template-columns: 0.92rem minmax(0, 1fr) auto;" in thinking_summary_block
-    assert "gap: 0.18rem;" in thinking_summary_block
+    # 图标列宽/间距与工具行一致,灯泡才不会比下方工具图标多缩进一截。
+    assert "grid-template-columns: 0.68rem minmax(0, 1fr) auto;" in thinking_summary_block
+    assert "gap: 0.14rem;" in thinking_summary_block
     assert "list-style: none;" in thinking_summary_block
     # 思考图标为灯泡(mask 描边式,跟随 currentColor),取代旧的圆圈+box-shadow 图形。
     assert "mask:" in thinking_icon_block
@@ -1108,15 +1113,17 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-305" in html
-    assert "/static/js/app.js?v=web-repl-ui-305" in html
+    assert "/static/styles.css?v=web-repl-ui-312" in html
+    assert "/static/js/app.js?v=web-repl-ui-317" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
     # 已归档面板复刻(archived tab)新增 listArchivedSessions/deleteArchivedSessions,
     # 同样需 bump api.js 版本位,否则回访浏览器拿不到新导出。
-    assert "./api.js?v=web-repl-ui-303" in app_source
-    assert "./components/composer.js?v=session-model-v17" in app_source
+    assert "./api.js?v=web-repl-ui-305" in app_source
+    assert "./components/composer.js?v=session-model-v18" in app_source
+    # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
+    assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
     assert "./components/tool_cards.js?v=live-inline-tools-v23" in app_source
     assert "./components/blocking.js?v=blocking-keys-v5" in app_source
     # events.js 承载队列/消息 reducer,历次修复都在此;它的 import 必须带版本位,
@@ -1141,10 +1148,10 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-305" in index_html
+    assert "web-repl-ui-317" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-304" in app_source
-    assert "./components/workspace.js?v=cloud-creds-v49" in app_source
+    assert "./components/workspace.js?v=cloud-creds-v50" in app_source
     assert "workspace-cloud-vendors" in workspace_source
     assert "Alibaba Cloud" in workspace_source
     assert "workspace-cloud-mode-fields" in workspace_source
@@ -1350,6 +1357,39 @@ def test_sidebar_running_state_stays_fresh_after_switch_and_polling() -> None:
     assert "setTimeout(runSessionsRefreshTick" in app_source
     # 后台标签页重新可见时立即补刷一次,切回原页面无需再等一个周期。
     assert 'addEventListener("visibilitychange"' in app_source
+
+
+def test_sidebar_defers_repaint_while_pointer_inside() -> None:
+    app_source = _source(APP_JS)
+
+    # 运行中侧栏(流式逐帧 render + 后台 2.5s 轮询)高频整栏 replaceChildren 重建,销毁光标下的行,
+    # 令 :hover 背景与 hover 才显形的操作按钮反复通断——用户反馈的「一闪闪」。指针在侧栏内时挂起
+    # 这类自动重绘(只记账不重建),pointerleave 追平一次。
+    assert "let sidebarPointerInside = false;" in app_source
+    assert "let sidebarRepaintPending = false;" in app_source
+
+    assert "function renderSessionsAuto(state)" in app_source
+    auto_body = app_source.split("function renderSessionsAuto(state)", 1)[1].split("\n}", 1)[0]
+    assert "if (sidebarPointerInside)" in auto_body
+    assert "sidebarRepaintPending = true;" in auto_body
+    assert "renderSessions(state);" in auto_body
+
+    # 流式 render 与后台刷新都改走节流包装,不再直接 renderSessions。
+    assert "renderSessionsAuto(state);" in app_source
+    render_body = app_source.split("function render(state)", 1)[1].split("\n}", 1)[0]
+    assert "renderSessionsAuto(state);" in render_body
+    refresh_body = app_source.split("async function refreshSessionsSidebar()", 1)[1].split("\n}", 1)[0]
+    assert "renderSessionsAuto(state);" in refresh_body
+
+    # 稳定容器 .session-rail 绑定进出边界探测(只一次);容器不被 replaceChildren 重建,监听长期有效。
+    assert "function ensureSidebarHoverGuard()" in app_source
+    guard_body = app_source.split("function ensureSidebarHoverGuard()", 1)[1].split("\n}\n", 1)[0]
+    assert '.session-rail' in guard_body
+    assert 'addEventListener("pointerenter"' in guard_body
+    assert 'addEventListener("pointerleave"' in guard_body
+    # pointerleave 时若有挂起重绘则追平一次。
+    assert "sidebarRepaintPending" in guard_body
+    assert "ensureSidebarHoverGuard();" in app_source
 
 
 def test_complete_step_tool_renders_conclusion_card() -> None:
@@ -2786,6 +2826,19 @@ def test_user_message_attachments_render_in_transcript() -> None:
     assert 'className = "message-attachments"' in app_source
     assert "/api/images/" in app_source
     assert ".message-attachments" in styles
+
+
+def test_stored_message_normalizer_carries_attachment_ids() -> None:
+    # 会话恢复路径:load_visible_transcript 会把用户图片/文件附件以 imageIds/fileRefs
+    # (camelCase,与实时 user.message 事件同名)挂在转录行上,normalizeStoredMessage 必须把它们
+    # 透传到规整后的消息对象,否则 buildMessageAttachmentsElement 读到 undefined→不渲染图片,
+    # 表现为「会话恢复图片不显示」。实时路径(events.js 的 user.message)一直设置这两个字段,
+    # 故 live 正常、reload 丢图,是 reload-vs-live 不一致。
+    app_source = _source(APP_JS)
+    normalizer = app_source.split("function normalizeStoredMessage(", 1)[1].split("\nfunction ", 1)[0]
+
+    assert "message.imageIds" in normalizer
+    assert "message.fileRefs" in normalizer
 
 
 def test_composer_uses_contextual_placeholder_without_visible_label(tmp_path: Path) -> None:
@@ -4528,6 +4581,7 @@ def test_composer_keeps_image_thumbnail_when_upload_fails(tmp_path: Path) -> Non
             }
 
             const revoked = [];
+            const previews = [];
             globalThis.URL = {
               createObjectURL(file) {
                 return `blob:preview-${file.name}`;
@@ -4572,6 +4626,11 @@ def test_composer_keeps_image_thumbnail_when_upload_fails(tmp_path: Path) -> Non
                   return Promise.reject(new Error("Current model qwen does not support image input."));
                 },
               },
+              {
+                onPreviewImage(payload) {
+                  previews.push(payload);
+                },
+              },
             );
             controller.setSession("S");
 
@@ -4586,23 +4645,31 @@ def test_composer_keeps_image_thumbnail_when_upload_fails(tmp_path: Path) -> Non
             ]);
 
             const chip = chips.children[0];
-            const image = chip.querySelector(".attachment-chip-preview");
+            const previewBtn = chip.querySelector(".attachment-chip-preview-btn");
+            const image = previewBtn?.children[0] || null;
             const remove = chip.querySelector(".attachment-chip-remove");
             const beforeRemove = {
+              chipTagName: chip.tagName,
               chipClassName: chip.className,
-              chipTextContent: chip.textContent,
               chipTitle: chip.title,
               imageSrc: image?.src || "",
               imageAlt: image?.alt || "",
+              removeTagName: remove?.tagName || "",
               removeText: remove?.textContent || "",
               errorText: errorTarget.textContent,
               formClassName: form.className,
               sendDisabled: sendButton.disabled,
             };
+            // 点缩略图应预览(不删除),点整块容器也不应删除;只有右上角 × 删除。
+            previewBtn.click();
             chip.click();
+            const chipCountAfterPreview = chips.children.length;
+            remove.click();
 
             console.log(JSON.stringify({
               beforeRemove,
+              previews,
+              chipCountAfterPreview,
               chipCountAfterRemove: chips.children.length,
               revoked,
             }));
@@ -4612,16 +4679,19 @@ def test_composer_keeps_image_thumbnail_when_upload_fails(tmp_path: Path) -> Non
 
     assert output == {
         "beforeRemove": {
+            "chipTagName": "DIV",
             "chipClassName": "attachment-chip attachment-chip-image is-failed",
-            "chipTextContent": "",
             "chipTitle": "x.jpg · failed",
             "imageSrc": "blob:preview-x.jpg",
             "imageAlt": "x.jpg",
+            "removeTagName": "BUTTON",
             "removeText": "×",
             "errorText": "Current model qwen does not support image input.",
             "formClassName": "has-attachments",
             "sendDisabled": False,
         },
+        "previews": [{"src": "blob:preview-x.jpg", "alt": "x.jpg"}],
+        "chipCountAfterPreview": 1,
         "chipCountAfterRemove": 0,
         "revoked": ["blob:preview-x.jpg"],
     }
@@ -6408,6 +6478,37 @@ def test_sidebar_uses_codex_project_thread_navigation() -> None:
     assert "transform: rotate(-10deg)" not in styles
     assert "M3 8.4C3 5.9 4.9 4 7.4 4h9" not in styles
 
+    # 项目选择弹层向上展开(bottom:100%)贴触发器上方;CSS 里的 max-height 只作 JS 未跑时的兜底,
+    # 真正封顶由 app.js 的 clampDraftMenuToViewport 按触发器 rect 计算,故 CSS 仍保留合理上限 + 可滚动。
+    # 三段式:菜单自身 flex 列 + overflow:hidden 不滚,只有中间 .draft-session-menu-list 滚动;
+    # 搜索头与底栏 flex:none 固定。CSS max-height 仅作 JS 未跑时的兜底上限。
+    draft_menu_block = _css_block(styles, ".draft-session-menu")
+    assert "display: flex;" in draft_menu_block
+    assert "flex-direction: column;" in draft_menu_block
+    assert "max-height: min(25rem, calc(100vh - 6rem));" in draft_menu_block
+    assert "overflow: hidden;" in draft_menu_block
+
+    list_block = _css_block(styles, ".draft-session-menu-list")
+    assert "flex: 1 1 auto;" in list_block
+    assert "min-height: 0;" in list_block
+    assert "overflow-y: auto;" in list_block
+    footer_block = _css_block(styles, ".draft-session-menu-footer")
+    assert "flex: none;" in footer_block
+
+    # 关键:固定 rem 引用不到触发器到视口顶的真实距离(composer 多行/断点/窗口高度都会变),
+    # 矮窗口里顶端仍越界。app.js 在打开各草稿菜单时按 picker 的 getBoundingClientRect 收紧 max-height,
+    # 顶端恒不越界;四个 composer 弹层(项目/新建项目/模式/流水线)都要调用。
+    app_source = _source(APP_JS)
+    assert "function clampDraftMenuToViewport(menu)" in app_source
+    assert 'menu.closest(".draft-session-picker")' in app_source
+    assert "picker.getBoundingClientRect()" in app_source
+    assert 'window.getComputedStyle(menu).bottom === "auto"' in app_source
+    assert "menu.style.maxHeight = `min(25rem, ${Math.max(120, Math.round(available))}px)`;" in app_source
+    assert app_source.count("clampDraftMenuToViewport(menu);") == 4
+    # 项目菜单三段:搜索头直挂 menu,项目项进 .draft-session-menu-list,底栏进 .draft-session-menu-footer。
+    assert 'list.className = "draft-session-menu-list";' in app_source
+    assert 'footer.className = "draft-session-menu-footer";' in app_source
+
 
 def test_mobile_sidebar_uses_drawer_instead_of_horizontal_session_strip() -> None:
     html = _source(INDEX_HTML)
@@ -6533,8 +6634,12 @@ def test_plugins_panel_hosts_skills_and_mcp_subtabs() -> None:
     assert "workspace-tab-icon-mcp" not in html
     assert 'data-workspace-panel="mcp"' not in html
     # NAV_GROUPS 不再含独立 MCP 项(改用逐字段核对,避免与 PLUGINS_SUBTABS 里同样的
-    # `{ id: "mcp", label: "MCP" }` 字面量冲突)。
-    assert '{ id: "memory", label: t("Memory") },\n      { id: "skills", label: t("Plugins") },\n    ],' in source
+    # `{ id: "mcp", label: "MCP" }` 字面量冲突)。skills 之后是 devOnly 的 developer 项。
+    assert (
+        '{ id: "memory", label: t("Memory") },\n'
+        '      { id: "skills", label: t("Plugins") },\n'
+    ) in source
+    assert '{ id: "mcp", label: "MCP" },\n    ],' not in source
 
     # 「插件」容器包住两个子面板,并注册为唯一的 skills 面板控制器。
     assert "function createPluginsPanel(api, context)" in source
@@ -6615,8 +6720,9 @@ def test_general_panel_sections_have_chapter_spacing() -> None:
 
 
 def test_general_panel_section_order() -> None:
-    # 章节顺序:新会话默认 → 配色方案(含界面语言)→ 售卖流水线 → 外来会话可见性 → 重启服务。
-    # languageField 紧随 themeGrid,保证 field→head 相邻关系仍命中现有章节间距选择器。
+    # 章节顺序:新会话默认 → 配色方案(含界面语言)→ 售卖流水线 → 外来会话可见性 → 开发者模式。
+    # 重启服务已从常规面板移至「开发」分页;languageField 紧随 themeGrid,保证 field→head
+    # 相邻关系仍命中现有章节间距选择器。
     workspace_source = _source(WORKSPACE_JS)
     assert (
         "panel.append(\n"
@@ -6630,8 +6736,8 @@ def test_general_panel_section_order() -> None:
         "    reviewStepCard,\n"
         "    groupHead,\n"
         "    card,\n"
-        "    restartGroupHead,\n"
-        "    restartCard,\n"
+        "    devModeGroupHead,\n"
+        "    devModeCard,\n"
         "    status,\n"
         "  );"
     ) in workspace_source
@@ -6843,13 +6949,19 @@ def test_index_exposes_live_frontend_mount_points() -> None:
         assert hook in source
 
 
-def test_pipeline_workspace_has_a_real_product_entry_and_mobile_visual_coverage() -> None:
+def test_pipeline_workspace_entry_removed_but_code_retained_with_audit_coverage() -> None:
+    # 遗留的 pipeline 工作区模态入口已从产品中下线(用户从未开放该功能):
+    #   1. 标题栏「View pipeline」按钮恒隐藏 —— pipelineWorkspaceEntryVisible 恒返回 false;
+    #   2. 候选选择不再自动弹出工作区 —— maybeOpenPipelineSelectionWorkspace 不再被调用。
+    # 但底层渲染代码(隐藏 tab、components/pipeline.js、按钮 markup 与点击处理)保留、可回滚,
+    # 且视觉审计仍通过临时揭开隐藏按钮覆盖该工作区的回归。
     html = _source(INDEX_HTML)
     app_source = _source(APP_JS)
     styles = _source(STYLES_CSS)
     audit_source = _source(VISUAL_AUDIT_SCRIPT)
     workspace_source = _source(WORKSPACE_JS)
 
+    # 底层代码保留:按钮 markup / 点击处理 / 隐藏态 CSS / 渲染函数都还在。
     assert 'data-app-shell="pipeline-workspace-open"' in html
     assert 'aria-label="View pipeline"' in html
     assert (
@@ -6861,10 +6973,18 @@ def test_pipeline_workspace_has_a_real_product_entry_and_mobile_visual_coverage(
     assert "export function pipelineWorkspaceEntryVisible" in app_source
     assert ".pipeline-workspace-open[hidden]" in styles
 
+    # 入口已关闭:可见性判定恒 false,自动弹出调用已移除。
+    entry_fn = app_source.split("export function pipelineWorkspaceEntryVisible", 1)[1][:200]
+    assert "return false;" in entry_fn
+    assert '=== "pipeline"' not in entry_fn
+    assert "maybeOpenPipelineSelectionWorkspace(state)" not in app_source
+
     assert 'name: "mobile-pipeline-workspace"' in audit_source
     assert 'name: "pipeline-session-entry"' in audit_source
     assert 'await setViewport(page, "tablet");' in audit_source
     assert "showProgrammaticWorkspacePanelForVisualFixture" not in audit_source
+    # 审计临时揭开隐藏入口后仍复用其真实点击处理打开工作区。
+    assert "async function openLegacyPipelineWorkspace(page)" in audit_source
     assert "page.locator('[data-app-shell=\"pipeline-workspace-open\"]').click()" in audit_source
     assert "Exact /status command with suggestion list open." in audit_source
     assert "Exact /auth command with suggestion list open." not in audit_source
@@ -7170,7 +7290,7 @@ def test_workspace_cloud_panel_prefills_secrets_and_resets_on_mode_switch() -> N
 def test_app_wires_workspace_controls_to_current_session() -> None:
     source = _source(APP_JS)
 
-    assert 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v49";' in source
+    assert 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v50";' in source
     assert "workspace = createWorkspaceController" in source
     assert 'tabs: byShell("workspace-tabs")' in source
     assert 'content: byShell("workspace-content")' in source
@@ -9405,10 +9525,26 @@ def test_styles_has_compaction_boundary_rule() -> None:
     assert "border-top" not in boundary_block
 
 
+def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
+    # LLM 生成/重命名标题经 session.updated 到达时,reducer 只更新 currentSession(主区标题),
+    # 侧栏行读 state.sessions[i].title。若不把 currentSession 折进侧栏各数组,侧栏要等 ~2.5s
+    # 后台轮询才追平,表现为「主区标题已变、侧栏行仍旧」。handleStreamEvent 收到 session.updated/
+    # session.started 时必须调用 replaceUpdatedSessionInState,让侧栏与主区同帧刷新。
+    app_source = _source(APP_JS)
+    guard = 'event.type === "session.updated" || event.type === "session.started"'
+    assert guard in app_source
+    fold_call = "replaceUpdatedSessionInState(state, state.currentSession)"
+    assert fold_call in app_source
+    # 折叠必须发生在 handleStreamEvent 的 reduceAndDedupe 之后(拿到已合并的 currentSession)。
+    handler = app_source.split("state = reduceAndDedupe(state, event);", 1)[1]
+    assert guard in handler
+    assert fold_call in handler
+
+
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-305" in html
-    assert "web-repl-ui-304" not in html
+    assert "web-repl-ui-317" in html
+    assert "web-repl-ui-316" not in html
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:
@@ -9630,7 +9766,7 @@ def test_styles_define_review_step_prerequisite_progress() -> None:
 
 def test_app_uses_bumped_api_version_for_outputs() -> None:
     source = _source(APP_JS)
-    assert "./api.js?v=web-repl-ui-303" in source
+    assert "./api.js?v=web-repl-ui-305" in source
     assert "./api.js?v=web-repl-ui-159" not in source
 
 
@@ -9649,7 +9785,7 @@ def test_output_panel_module_exists_and_wired() -> None:
     assert "getOutputs" in source
     app_source = _source(APP_JS)
     assert "createOutputController" in app_source
-    assert "output_panel.js?v=output-panel-v16" in app_source
+    assert "output_panel.js?v=output-panel-v17" in app_source
 
 
 def test_output_panel_resets_on_new_session_draft() -> None:
@@ -9660,6 +9796,25 @@ def test_output_panel_resets_on_new_session_draft() -> None:
     assert "outputController?.reset();" in draft_body
     submit_body = app_source.split("async function createSessionForSubmit(", 1)[1].split("\n}", 1)[0]
     assert "outputController?.reset();" in submit_body
+
+
+def test_output_panel_reset_only_on_session_switch_in_load_session() -> None:
+    # loadSession 会在真正切换会话时复位输出面板，但同会话的 resync/重载（流水线运行中权限确认、
+    # input_required 等反复触发）绝不能复位：reset() 会强制关闭再由 refresh 自动展开 → 面板「一闪一闪」，
+    # 并把用户手动 X 关掉的面板重新弹开。故 loadSession 里的 reset() 必须被 switchedSession 守卫，
+    # 而 refresh() 每次都执行（切换与同会话都要拉取最新产物）。
+    app_source = _source(APP_JS)
+    load_body = app_source.split("async function loadSession(", 1)[1].split("\nasync function ", 1)[0]
+    # 引入一次性判定，且 clearDetailsOpenOverrides 与 reset 共用它。
+    assert "const switchedSession = previousSessionId && previousSessionId !== state.currentSessionId;" in load_body
+    reset_idx = load_body.index("outputController?.reset();")
+    guard_idx = load_body.rindex("if (switchedSession) {", 0, reset_idx)
+    # reset 之前最近的 if 必须是 switchedSession 守卫（同会话 resync 不复位）。
+    assert 0 <= guard_idx < reset_idx
+    # refresh 不受守卫限制：紧随其后无条件执行。
+    assert "outputController?.refresh(sessionId);" in load_body
+    refresh_idx = load_body.index("outputController?.refresh(sessionId);")
+    assert refresh_idx > reset_idx
 
 
 def test_output_panel_hidden_css_guard() -> None:
@@ -9688,8 +9843,8 @@ def test_output_preview_and_highlight() -> None:
     assert "File no longer exists" in source
     assert "tok-" in source
     app_source = _source(APP_JS)
-    assert "output_panel.js?v=output-panel-v16" in app_source
-    assert "output_panel.js?v=output-panel-v7" not in app_source
+    assert "output_panel.js?v=output-panel-v17" in app_source
+    assert "output_panel.js?v=output-panel-v16" not in app_source
 
 
 def test_output_preview_tok_css() -> None:
@@ -9950,8 +10105,8 @@ def test_app_regroups_pipeline_messages_before_render() -> None:
 
 def test_app_output_panel_import_bumped_to_v11() -> None:
     js = _source(APP_JS)
-    assert "output-panel-v16" in js
-    assert "output-panel-v14" not in js
+    assert "output-panel-v17" in js
+    assert "output-panel-v16" not in js
 
 
 def test_appearance_theme_css_blocks_present() -> None:
@@ -10352,3 +10507,41 @@ def test_index_html_uses_data_i18n_markers() -> None:
     html = _source(INDEX_HTML)
     assert 'data-i18n="New chat"' in html
     assert html.count("data-i18n") >= 30
+
+
+def test_developer_mode_wiring_present() -> None:
+    # 开发者模式:常规分页放总开关(workspace-developer-mode),开启后 NAV_GROUPS 里
+    # devOnly 的「开发」分页才出现;api.js 暴露读写端点;失败工具标红门控于 body class。
+    workspace = _source(WORKSPACE_JS)
+    api = _source(API_JS)
+    app = _source(APP_JS)
+
+    # 总开关 + devOnly 分页 + 专属面板
+    assert 'makeForeignSwitch("workspace-developer-mode")' in workspace
+    assert "devOnly: true" in workspace
+    assert "function createDeveloperPanel" in workspace
+    # 「失败工具标红」开关(功能1)与其 body class 切换
+    assert 'makeForeignSwitch("workspace-highlight-failed-tools")' in workspace
+    assert 'classList.toggle("dev-highlight-tool-errors"' in workspace
+
+    # api.js 客户端读写端点(功能持久化)
+    assert "export function getDeveloperSettings" in api
+    assert "export function saveDeveloperSettings" in api
+    assert "/api/settings/developer" in api
+
+    # app.js 启动时按已保存设置应用标红 body class
+    assert "applyDeveloperHighlightFromSettings" in app
+    assert "api.getDeveloperSettings()" in app
+
+
+def test_failed_tool_highlight_gated_under_body_class() -> None:
+    # 功能1:失败工具标红规则必须门控在 body.dev-highlight-tool-errors 下,
+    # 开关关闭(默认)时失败工具卡与其它工具一视同仁。
+    css = _source(STYLES_CSS)
+    for rule in (
+        "body.dev-highlight-tool-errors .message-tool-cards .tool-card.is-error",
+        "body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-status.is-error",
+        "body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-bar-fill.is-error",
+        "body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-cell-status.is-error",
+    ):
+        assert rule in css

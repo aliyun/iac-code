@@ -77,6 +77,39 @@ def save_selling_review_step(enabled: bool) -> dict[str, bool]:
     return {"enabled": save_selling_review_step_enabled(enabled)}
 
 
+_DEVELOPER_SETTINGS_KEY = "developer"
+
+
+def developer_settings() -> dict[str, bool]:
+    """Return the developer-mode flags for the settings API (both default ``False``).
+
+    ``mode`` gates the Developer settings tab; ``highlightFailedTools`` controls
+    whether failed tool calls are painted red (off = rendered like any other tool).
+    """
+    settings = _load_yaml(get_settings_path())
+    section = settings.get(_DEVELOPER_SETTINGS_KEY)
+    if not isinstance(section, dict):
+        section = {}
+    return {
+        "mode": bool(section.get("mode", False)),
+        "highlightFailedTools": bool(section.get("highlightFailedTools", False)),
+    }
+
+
+def save_developer_settings(mode: bool, highlight_failed_tools: bool) -> dict[str, bool]:
+    """Persist the developer-mode flags, preserving other section keys."""
+    settings_path = get_settings_path()
+    settings = _load_yaml(settings_path)
+    section = settings.get(_DEVELOPER_SETTINGS_KEY)
+    if not isinstance(section, dict):
+        section = {}
+    section["mode"] = bool(mode)
+    section["highlightFailedTools"] = bool(highlight_failed_tools)
+    settings[_DEVELOPER_SETTINGS_KEY] = section
+    _save_yaml(settings_path, settings)
+    return {"mode": bool(mode), "highlightFailedTools": bool(highlight_failed_tools)}
+
+
 _APPEARANCE_SETTINGS_KEY = "appearance"
 VALID_THEMES = ("graphite", "midnight", "evergreen", "sepia", "ivory")
 DEFAULT_THEME = "graphite"

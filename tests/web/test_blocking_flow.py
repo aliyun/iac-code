@@ -126,6 +126,9 @@ async def test_permission_answer_resolves_agent_loop_future(
 
     manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=tmp_path / "project")
     session = manager.create_session(session_id="session-1")
+    # 本用例断言本轮完整事件序列以 turn.done 收尾;关闭新会话首轮的异步 LLM 标题副作用(session.updated),
+    # 避免尾随的 session.updated 污染事件序列断言。
+    session.pending_llm_title = False
     runtime = WebSessionRuntime(session, manager=manager)
     app = create_app(session_manager=manager)
 

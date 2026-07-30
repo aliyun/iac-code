@@ -26,6 +26,9 @@ class AgentFactoryOptions:
     mcp_manager_factory: Any = None
     mcp_interactive_project_approval: bool = False
     a2a_safe_mode: bool = False
+    # 离线上下文核算契约:仅为算系统提示 + 本地工具定义开销构造 runtime 时置真。
+    # 显式禁止连接 MCP / 读取 MCP 钥匙串等外部副作用,但保留完整本地工具注册以保证 token 口径准确。
+    disable_external_services: bool = False
     mcp_elicitation_handler: Any = None
     provider_key_override: str | None = None
     provider_api_key_override: str | None = field(default=None, repr=False)
@@ -309,7 +312,7 @@ def _create_agent_runtime(options: AgentFactoryOptions, aliyun_services: Any) ->
     mcp_load_result = None
     setup_complete = False
     try:
-        if not options.a2a_safe_mode:
+        if not options.a2a_safe_mode and not options.disable_external_services:
             from iac_code.mcp.config import load_mcp_configs, resolve_mcp_workspace_root
             from iac_code.mcp.manager import MCPManager
 

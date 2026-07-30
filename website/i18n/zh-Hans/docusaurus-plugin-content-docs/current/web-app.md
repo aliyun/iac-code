@@ -9,6 +9,16 @@ IaC Code 内置了一个本地 Web 应用，它运行与终端完全相同的智
 
 Web 应用读写与 CLI 相同的会话存储，因此在一端开始的对话可以在另一端恢复。
 
+## 安装
+
+Web 应用是一项可选功能，依赖 `http` 扩展（Starlette 与 Uvicorn）。请与基础包一并安装：
+
+```bash
+pip install 'iac-code[http]'
+```
+
+如果在未安装该扩展的情况下运行 `iac-code web`，命令会失败并提示你安装 `iac-code[http]`。在仓库检出环境中开发时，`uv sync --extra http` 会安装相同的依赖。
+
 ## 启动 Web 应用
 
 在终端中启动服务：

@@ -592,10 +592,12 @@ msgid "View diagram"
 msgstr "Diagramm anzeigen"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/output_panel.js
 msgid "Optimizing"
 msgstr "Wird optimiert"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/output_panel.js
 msgid "Pending optimization"
 msgstr "Optimierung ausstehend"
 
@@ -643,6 +645,11 @@ msgstr "Denkt nach…"
 #: src/iac_code/web/static/js/app.js
 msgid "Thinking done"
 msgstr "Nachdenken abgeschlossen"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Preview image"
+msgstr "Bildvorschau"
 
 #: src/iac_code/web/static/js/app.js
 msgid "Attached image"
@@ -1159,6 +1166,11 @@ msgstr "Stoppen"
 msgid "Stop the current reply"
 msgstr "Aktuelle Antwort stoppen"
 
+#: src/iac_code/web/static/js/components/image_lightbox.js
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Close preview"
+msgstr "Vorschau schließen"
+
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "Success"
 msgstr "Erfolg"
@@ -1166,6 +1178,28 @@ msgstr "Erfolg"
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "In progress / failed"
 msgstr "In Bearbeitung / fehlgeschlagen"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "File no longer exists"
+msgstr "Datei existiert nicht mehr"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading…"
+msgstr "Wird geladen…"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Resource stacks"
+msgstr "Ressourcen-Stacks"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Template files"
+msgstr "Vorlagendateien"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Architecture diagram"
+msgstr "Architekturdiagramm"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Recovered State"
@@ -1210,10 +1244,6 @@ msgstr "Kandidat auswählen"
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Submitting..."
 msgstr "Wird gesendet..."
-
-#: src/iac_code/web/static/js/components/pipeline.js
-msgid "Architecture diagram"
-msgstr "Architekturdiagramm"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No architecture diagram"
@@ -2206,6 +2236,10 @@ msgid "Account"
 msgstr "Konto"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Developer"
+msgstr "Entwickler"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Alibaba Cloud"
 msgstr "Alibaba Cloud"
 
@@ -2964,10 +2998,6 @@ msgid "{label} (current)"
 msgstr "{label} (aktuell)"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Loading…"
-msgstr "Wird geladen…"
-
-#: src/iac_code/web/static/js/components/workspace.js
 #, python-brace-format
 msgid "File: {path}"
 msgstr "Datei: {path}"
@@ -3594,6 +3624,22 @@ msgstr ""
 "fortgesetzt und übernommen werden."
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Developer mode"
+msgstr "Entwicklermodus"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "When enabled, a Developer settings tab appears with additional tools."
+msgstr "Wenn aktiviert, erscheint ein Entwickler-Einstellungstab mit zusätzlichen Werkzeugen."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enable developer mode"
+msgstr "Entwicklermodus aktivieren"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Reveals the Developer settings tab. Turning it off hides that tab again."
+msgstr "Zeigt den Entwickler-Einstellungstab an. Beim Deaktivieren wird dieser Tab wieder ausgeblendet."
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid ""
 "Control optional steps of the sales pipeline; affects only newly started "
 "pipeline runs. Running pipelines keep their original configuration."
@@ -3727,6 +3773,24 @@ msgid "Install failed: {error}"
 msgstr "Installation fehlgeschlagen: {error}"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Failed tool calls"
+msgstr "Fehlgeschlagene Tool-Aufrufe"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Control how failed tool calls are shown in the transcript."
+msgstr "Steuert, wie fehlgeschlagene Tool-Aufrufe im Transkript angezeigt werden."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Highlight failed tool calls in red"
+msgstr "Fehlgeschlagene Tool-Aufrufe rot hervorheben"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, failed tool calls are painted red. When disabled, they look"
+" like any other tool call."
+msgstr "Wenn aktiviert, werden fehlgeschlagene Tool-Aufrufe rot dargestellt. Wenn deaktiviert, sehen sie aus wie jeder andere Tool-Aufruf."
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"
 msgstr "Dienst neu starten"
 
@@ -3768,10 +3832,4 @@ msgstr ""
 
 #~ msgid "Completed step: {step}"
 #~ msgstr "Schritt abgeschlossen: {step}"
-
-#~ msgid "Resource stacks"
-#~ msgstr "Ressourcen-Stacks"
-
-#~ msgid "Template files"
-#~ msgstr "Vorlagendateien"
 

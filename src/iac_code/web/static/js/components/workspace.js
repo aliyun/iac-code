@@ -11,6 +11,8 @@ const NAV_GROUPS = [
       { id: "cloud", label: t("Cloud credentials") },
       { id: "memory", label: t("Memory") },
       { id: "skills", label: t("Plugins") },
+      // 「开发」分页:仅在开发者模式开启时出现(devOnly)。承载失败工具标红开关与重启入口。
+      { id: "developer", label: t("Developer"), devOnly: true },
     ],
   },
   {
@@ -3793,6 +3795,7 @@ function createOtherPanel(api, context) {
   const pipelineToggle = makeForeignSwitch("workspace-foreign-pipeline");
   const normalToggle = makeForeignSwitch("workspace-foreign-normal");
   const reviewStepToggle = makeForeignSwitch("workspace-pipeline-review-step");
+  const devModeToggle = makeForeignSwitch("workspace-developer-mode");
   const status = makeElement("span", { className: "workspace-memory-status workspace-foreign-status" });
   // 「已保存」是瞬时反馈:安排一个自动淡出定时器,避免它永久驻留在面板里。
   // 任何新的 stamp / clearStatus 都先取消挂起的定时器,防止旧定时器抹掉更新后的状态。
@@ -3838,6 +3841,26 @@ function createOtherPanel(api, context) {
       t("Show foreign normal sessions (resumable)"),
       normalToggle.control,
       t("When enabled, normal sessions created outside the web entry point appear in the list and can be resumed and taken over in the web."),
+    ),
+  );
+
+  // 开发者模式:打开后露出「开发」分页(承载失败工具标红开关与重启入口)。默认关闭。
+  const devModeGroupHead = makeElement("div", { className: "workspace-settings-group-head" });
+  devModeGroupHead.append(
+    makeElement("h4", { className: "workspace-settings-group-title", textContent: t("Developer mode") }),
+    makeElement("p", {
+      className: "workspace-settings-group-desc",
+      textContent: t("When enabled, a Developer settings tab appears with additional tools."),
+    }),
+  );
+  const devModeCard = makeElement("section", {
+    className: "workspace-settings-group workspace-settings-provider",
+  });
+  devModeCard.append(
+    makeField(
+      t("Enable developer mode"),
+      devModeToggle.control,
+      t("Reveals the Developer settings tab. Turning it off hides that tab again."),
     ),
   );
 
@@ -4362,6 +4385,230 @@ function createOtherPanel(api, context) {
   prereqInstallButton.addEventListener("click", installReviewPrereq);
   permissionSelect.addEventListener("change", persistSessionDefaults);
 
+  // 开发者模式开关:保存(并入共享缓存,不覆盖 highlightFailedTools)后即时增删「开发」分页。
+  async function persistDeveloperMode() {
+    const token = ++requestToken;
+    stamp(t("Saving…"));
+    try {
+      const saved = await context.saveDeveloperState?.({ mode: devModeToggle.input.checked });
+      if (token !== requestToken) {
+        return;
+      }
+      context.onDeveloperModeChanged?.(saved ? saved.mode : devModeToggle.input.checked);
+      stampSaved(token);
+    } catch (error) {
+      if (token !== requestToken) {
+        return;
+      }
+      stamp(t("Save failed: {error}", { error: error instanceof Error ? error.message : String(error) }), true);
+    }
+  }
+  devModeToggle.input.addEventListener("change", persistDeveloperMode);
+
+  // 章节顺序:新会话默认 → 配色方案(含界面语言)→ 售卖流水线 → 外来会话可见性 → 开发者模式。
+  // 界面语言(languageField)紧随配色方案,既保持外观类设置成组,也让所有分区标题的相邻关系
+  // (h3→head、settings-group→head、field→head)仍被现有章节间距选择器覆盖,无需改 CSS。
+  panel.append(
+    heading,
+    sessionDefaultsGroupHead,
+    sessionDefaultsCard,
+    themeGroupHead,
+    themeGrid,
+    languageField,
+    reviewStepGroupHead,
+    reviewStepCard,
+    groupHead,
+    card,
+    devModeGroupHead,
+    devModeCard,
+    status,
+  );
+
+  return {
+    panel,
+    async activate() {
+      const token = ++requestToken;
+      try {
+        const value = await api.getForeignSessionsVisibility();
+        if (token !== requestToken) {
+          return;
+        }
+        pipelineToggle.input.checked = Boolean(value?.showPipeline);
+        normalToggle.input.checked = Boolean(value?.showNormal);
+      } catch (error) {
+        if (token !== requestToken) {
+          return;
+        }
+        stamp(t("Load failed: {error}", { error: error instanceof Error ? error.message : String(error) }), true);
+      }
+      try {
+        const reviewStep = await api.getSellingReviewStep();
+        if (token === requestToken) {
+          reviewStepToggle.input.checked = Boolean(reviewStep?.enabled);
+        }
+      } catch (error) {
+        /* 审查步骤开关加载失败保持默认关闭,不覆盖其它已加载状态 */
+      }
+      // 前置依赖探测独立于开关状态(不受 token 竞态影响,内部自行处理失败)。
+      await refreshReviewPrereq();
+      try {
+        const appearance = await api.getAppearance();
+        if (token === requestToken) {
+          setActiveTheme(appearance?.theme || "graphite");
+        }
+      } catch (error) {
+        /* 主题加载失败保持首屏注入值,不覆盖 */
+      }
+      try {
+        const uiLang = await api.getUiLanguage();
+        if (token === requestToken) {
+          languageSelect.replaceChildren();
+          for (const { code, name } of uiLang.availableLanguages ?? []) {
+            const option = makeElement("option");
+            option.value = code;
+            option.textContent = name;
+            languageSelect.append(option);
+          }
+          languageSelect.value = uiLang.uiLanguage ?? currentLang();
+        }
+      } catch (error) {
+        /* 界面语言加载失败保持首屏注入值,不覆盖 */
+      }
+      try {
+        const defaults = await api.getSessionDefaults();
+        if (token === requestToken && defaults) {
+          if (typeof defaults.permissionMode === "string") {
+            permissionSelect.value = defaults.permissionMode;
+          }
+          // {mode, pipelineName} 校正后驱动二级选择器;不存在的流水线回落普通/首条(见 normalizeModeSelection)。
+          modeSelection = normalizeModeSelection(defaults.mode, defaults.pipelineName);
+          renderModeSelector();
+        }
+      } catch (error) {
+        if (token === requestToken) {
+          stamp(t("Load failed: {error}", { error: error instanceof Error ? error.message : String(error) }), true);
+        }
+      }
+      try {
+        const developer = await api.getDeveloperSettings();
+        if (token === requestToken) {
+          // 并入共享缓存,保留 highlightFailedTools,仅据此回显开发者模式开关。
+          const state = context.cacheDeveloperState
+            ? context.cacheDeveloperState(developer)
+            : { mode: Boolean(developer?.mode) };
+          devModeToggle.input.checked = Boolean(state.mode);
+        }
+      } catch (error) {
+        /* 开发者模式加载失败保持默认关闭,不覆盖其它已加载状态 */
+      }
+    },
+    reset() {
+      requestToken += 1;
+      pipelineToggle.input.checked = false;
+      normalToggle.input.checked = false;
+      devModeToggle.input.checked = false;
+      reviewStepToggle.input.checked = false;
+      prereqNotice.hidden = true;
+      prereqNotice.classList.remove("is-installed", "is-missing");
+      prereqInstallButton.hidden = false;
+      setPrereqInstalling(false);
+      permissionSelect.value = "default";
+      modeSelection = { mode: "normal", pipelineName: fallbackPipelineName };
+      modeMenuOpen = false;
+      pipelineSubmenuOpen = false;
+      renderModeSelector();
+      clearStatus();
+    },
+  };
+}
+
+// 「开发」面板:仅开发者模式开启时出现。功能1=失败工具标红开关(改 body 类即时生效);
+// 功能2=从「常规」面板移来的重启入口。
+function createDeveloperPanel(api, context) {
+  const panel = makeElement("section", {
+    className: "workspace-tab-panel workspace-developer-panel",
+    attributes: { "data-workspace-panel": "developer" },
+  });
+  const heading = makeElement("h3", { textContent: t("Developer") });
+
+  let requestToken = 0;
+  const status = makeElement("span", { className: "workspace-memory-status workspace-developer-status" });
+  let clearTimer = null;
+  const cancelClear = () => {
+    if (clearTimer !== null) {
+      clearTimeout(clearTimer);
+      clearTimer = null;
+    }
+  };
+  const stamp = (message, isError = false) => {
+    cancelClear();
+    status.textContent = text(message);
+    status.classList.toggle("is-error", Boolean(isError));
+  };
+  const stampSaved = (token) => {
+    stamp(t("Saved"));
+    clearTimer = setTimeout(() => {
+      clearTimer = null;
+      if (token === requestToken) {
+        status.textContent = "";
+        status.classList.remove("is-error");
+      }
+    }, 2200);
+  };
+  const clearStatus = () => {
+    cancelClear();
+    status.textContent = "";
+    status.classList.remove("is-error");
+  };
+
+  // 失败工具标红:切换 body.dev-highlight-tool-errors,让整段转录里失败工具卡的标红规则
+  // 即时生效/失效(样式在 styles.css 门控于该类,无需重渲染工具卡)。
+  const applyHighlightClass = (enabled) => {
+    if (typeof document !== "undefined" && document.body) {
+      document.body.classList.toggle("dev-highlight-tool-errors", Boolean(enabled));
+    }
+  };
+
+  const highlightToggle = makeForeignSwitch("workspace-highlight-failed-tools");
+  const highlightGroupHead = makeElement("div", { className: "workspace-settings-group-head" });
+  highlightGroupHead.append(
+    makeElement("h4", { className: "workspace-settings-group-title", textContent: t("Failed tool calls") }),
+    makeElement("p", {
+      className: "workspace-settings-group-desc",
+      textContent: t("Control how failed tool calls are shown in the transcript."),
+    }),
+  );
+  const highlightCard = makeElement("section", {
+    className: "workspace-settings-group workspace-settings-provider",
+  });
+  highlightCard.append(
+    makeField(
+      t("Highlight failed tool calls in red"),
+      highlightToggle.control,
+      t("When enabled, failed tool calls are painted red. When disabled, they look like any other tool call."),
+    ),
+  );
+
+  async function persistHighlight() {
+    const token = ++requestToken;
+    const enabled = highlightToggle.input.checked;
+    applyHighlightClass(enabled); // 即时反馈,不等待网络。
+    stamp(t("Saving…"));
+    try {
+      await context.saveDeveloperState?.({ highlightFailedTools: enabled });
+      if (token !== requestToken) {
+        return;
+      }
+      stampSaved(token);
+    } catch (error) {
+      if (token !== requestToken) {
+        return;
+      }
+      stamp(t("Save failed: {error}", { error: error instanceof Error ? error.message : String(error) }), true);
+    }
+  }
+  highlightToggle.input.addEventListener("change", persistHighlight);
+
   // 重启服务:通用重启入口。点击 → 全屏遮罩确认 → POST → 轮询 /health → 恢复后自动刷新。
   const restartGroupHead = makeElement("div", { className: "workspace-settings-group-head" });
   restartGroupHead.append(
@@ -4434,105 +4681,31 @@ function createOtherPanel(api, context) {
   };
   restartButton.addEventListener("click", runRestartFlow);
 
-  // 章节顺序:新会话默认 → 配色方案(含界面语言)→ 售卖流水线 → 外来会话可见性 → 重启服务。
-  // 界面语言(languageField)紧随配色方案,既保持外观类设置成组,也让所有分区标题的相邻关系
-  // (h3→head、settings-group→head、field→head)仍被现有章节间距选择器覆盖,无需改 CSS。
-  panel.append(
-    heading,
-    sessionDefaultsGroupHead,
-    sessionDefaultsCard,
-    themeGroupHead,
-    themeGrid,
-    languageField,
-    reviewStepGroupHead,
-    reviewStepCard,
-    groupHead,
-    card,
-    restartGroupHead,
-    restartCard,
-    status,
-  );
+  panel.append(heading, highlightGroupHead, highlightCard, restartGroupHead, restartCard, status);
 
   return {
     panel,
     async activate() {
       const token = ++requestToken;
       try {
-        const value = await api.getForeignSessionsVisibility();
+        const developer = await api.getDeveloperSettings();
         if (token !== requestToken) {
           return;
         }
-        pipelineToggle.input.checked = Boolean(value?.showPipeline);
-        normalToggle.input.checked = Boolean(value?.showNormal);
+        const state = context.cacheDeveloperState
+          ? context.cacheDeveloperState(developer)
+          : { highlightFailedTools: Boolean(developer?.highlightFailedTools) };
+        highlightToggle.input.checked = Boolean(state.highlightFailedTools);
+        applyHighlightClass(state.highlightFailedTools);
       } catch (error) {
         if (token !== requestToken) {
           return;
         }
         stamp(t("Load failed: {error}", { error: error instanceof Error ? error.message : String(error) }), true);
       }
-      try {
-        const reviewStep = await api.getSellingReviewStep();
-        if (token === requestToken) {
-          reviewStepToggle.input.checked = Boolean(reviewStep?.enabled);
-        }
-      } catch (error) {
-        /* 审查步骤开关加载失败保持默认关闭,不覆盖其它已加载状态 */
-      }
-      // 前置依赖探测独立于开关状态(不受 token 竞态影响,内部自行处理失败)。
-      await refreshReviewPrereq();
-      try {
-        const appearance = await api.getAppearance();
-        if (token === requestToken) {
-          setActiveTheme(appearance?.theme || "graphite");
-        }
-      } catch (error) {
-        /* 主题加载失败保持首屏注入值,不覆盖 */
-      }
-      try {
-        const uiLang = await api.getUiLanguage();
-        if (token === requestToken) {
-          languageSelect.replaceChildren();
-          for (const { code, name } of uiLang.availableLanguages ?? []) {
-            const option = makeElement("option");
-            option.value = code;
-            option.textContent = name;
-            languageSelect.append(option);
-          }
-          languageSelect.value = uiLang.uiLanguage ?? currentLang();
-        }
-      } catch (error) {
-        /* 界面语言加载失败保持首屏注入值,不覆盖 */
-      }
-      try {
-        const defaults = await api.getSessionDefaults();
-        if (token === requestToken && defaults) {
-          if (typeof defaults.permissionMode === "string") {
-            permissionSelect.value = defaults.permissionMode;
-          }
-          // {mode, pipelineName} 校正后驱动二级选择器;不存在的流水线回落普通/首条(见 normalizeModeSelection)。
-          modeSelection = normalizeModeSelection(defaults.mode, defaults.pipelineName);
-          renderModeSelector();
-        }
-      } catch (error) {
-        if (token === requestToken) {
-          stamp(t("Load failed: {error}", { error: error instanceof Error ? error.message : String(error) }), true);
-        }
-      }
     },
     reset() {
       requestToken += 1;
-      pipelineToggle.input.checked = false;
-      normalToggle.input.checked = false;
-      reviewStepToggle.input.checked = false;
-      prereqNotice.hidden = true;
-      prereqNotice.classList.remove("is-installed", "is-missing");
-      prereqInstallButton.hidden = false;
-      setPrereqInstalling(false);
-      permissionSelect.value = "default";
-      modeSelection = { mode: "normal", pipelineName: fallbackPipelineName };
-      modeMenuOpen = false;
-      pipelineSubmenuOpen = false;
-      renderModeSelector();
       clearStatus();
     },
   };
@@ -4557,6 +4730,11 @@ export function createWorkspaceController({ tabs, content }, api, options = {}) 
   let currentSessionId = "";
   let currentSession = null;
   const panelControllers = new Map();
+  // 开发者模式:developerMode 决定「开发」分页是否出现在导航;developerState 是 {mode,
+  // highlightFailedTools} 的单一缓存,让「常规」面板的开发者开关与「开发」面板的标红开关
+  // 各自改一个字段而不覆盖另一个(保存前先并入缓存)。
+  let developerMode = false;
+  const developerState = { mode: false, highlightFailedTools: false };
 
   const context = {
     sessionId: () => currentSessionId,
@@ -4574,6 +4752,21 @@ export function createWorkspaceController({ tabs, content }, api, options = {}) 
     onSessionDefaultsSaved: (payload) => options.onSessionDefaultsSaved?.(payload),
   };
 
+  // 开发者状态的读改写入口,供两个面板共享,保证互不覆盖对方字段。
+  context.getDeveloperState = () => ({ ...developerState });
+  context.cacheDeveloperState = (value) => {
+    developerState.mode = Boolean(value?.mode);
+    developerState.highlightFailedTools = Boolean(value?.highlightFailedTools);
+    return context.getDeveloperState();
+  };
+  context.saveDeveloperState = async (partial) => {
+    const next = { ...developerState, ...partial };
+    const saved = await api.saveDeveloperSettings(next);
+    return context.cacheDeveloperState(saved);
+  };
+  // 用户在「常规」面板切换开发者模式后调用:即时增删「开发」分页。
+  context.onDeveloperModeChanged = (mode) => applyDeveloperMode(Boolean(mode));
+
   function setActiveTab(tabId) {
     // 以「已注册的面板」而非导航列表校验:状态/流水线/搜索虽已移出导航,仍可编程式打开;
     // 未知标签(如 openWorkspaceModal("settings"))回落到「常规」——进入配置默认选中常规。
@@ -4589,32 +4782,64 @@ export function createWorkspaceController({ tabs, content }, api, options = {}) 
     panelControllers.get(activeTab)?.activate?.();
   }
 
+  // 每次调用都从 NAV_GROUPS 全量重建(替换 index.html 里的静态按钮),据 developerMode
+  // 过滤 devOnly 分页——这样开关开发者模式即可增删「开发」分页,无需刷新页面。
   function buildTabs() {
     if (!tabs) {
       return;
     }
-    if (tabs.querySelectorAll("[data-workspace-tab]").length === 0) {
-      const nodes = [];
-      for (const group of NAV_GROUPS) {
-        nodes.push(makeElement("p", { className: "workspace-tab-group-title", textContent: group.title }));
-        for (const tab of group.tabs) {
-          const button = makeElement("button", {
-            attributes: { type: "button", role: "tab" },
-            dataset: { workspaceTab: tab.id },
-          });
-          const icon = makeElement("span", {
-            className: `workspace-tab-icon workspace-tab-icon-${tab.id}`,
-            attributes: { "aria-hidden": "true" },
-          });
-          const label = makeElement("span", { textContent: tab.label });
-          button.append(icon, label);
-          nodes.push(button);
-        }
+    const nodes = [];
+    for (const group of NAV_GROUPS) {
+      const groupTabs = group.tabs.filter((tab) => !tab.devOnly || developerMode);
+      if (!groupTabs.length) {
+        continue;
       }
-      tabs.replaceChildren(...nodes);
+      nodes.push(makeElement("p", { className: "workspace-tab-group-title", textContent: group.title }));
+      for (const tab of groupTabs) {
+        const button = makeElement("button", {
+          attributes: { type: "button", role: "tab" },
+          dataset: { workspaceTab: tab.id },
+        });
+        const icon = makeElement("span", {
+          className: `workspace-tab-icon workspace-tab-icon-${tab.id}`,
+          attributes: { "aria-hidden": "true" },
+        });
+        const label = makeElement("span", { textContent: tab.label });
+        button.append(icon, label);
+        nodes.push(button);
+      }
     }
+    tabs.replaceChildren(...nodes);
+    // 重建产生的是全新按钮,旧监听随旧节点丢弃;顺带按 activeTab 复位高亮态。
     for (const button of tabs.querySelectorAll("[data-workspace-tab]")) {
       button.addEventListener("click", () => setActiveTab(button.dataset.workspaceTab || "other"));
+      const isActive = button.dataset.workspaceTab === activeTab;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-selected", isActive ? "true" : "false");
+    }
+  }
+
+  // 增删「开发」分页;关闭时若正停在该分页,回落到「常规」。
+  function applyDeveloperMode(enabled) {
+    const next = Boolean(enabled);
+    if (developerMode === next) {
+      return;
+    }
+    developerMode = next;
+    buildTabs();
+    if (!developerMode && activeTab === "developer") {
+      setActiveTab("other");
+    }
+  }
+
+  // 构造时读取一次开发者模式:开启则露出「开发」分页(默认关闭 → 首次构建不含该分页)。
+  async function refreshDeveloperMode() {
+    try {
+      const value = await api.getDeveloperSettings();
+      context.cacheDeveloperState(value);
+      applyDeveloperMode(Boolean(value?.mode));
+    } catch (_error) {
+      /* 读取失败 → 开发者模式保持关闭,「开发」分页不出现 */
     }
   }
 
@@ -4629,6 +4854,7 @@ export function createWorkspaceController({ tabs, content }, api, options = {}) 
     panelControllers.set("skills", createPluginsPanel(api, context));
     panelControllers.set("archived", createArchivedPanel(api, context));
     panelControllers.set("other", createOtherPanel(api, context));
+    panelControllers.set("developer", createDeveloperPanel(api, context));
     panelControllers.set("pipeline", createPipelinePanel());
     content.replaceChildren(...[...panelControllers.values()].map((controller) => controller.panel));
     setActiveTab(activeTab);
@@ -4636,6 +4862,7 @@ export function createWorkspaceController({ tabs, content }, api, options = {}) 
 
   buildTabs();
   buildPanels();
+  void refreshDeveloperMode();
 
   return {
     setSession(sessionId, session = null) {

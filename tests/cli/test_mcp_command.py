@@ -23,7 +23,7 @@ from iac_code.mcp.config import (
     load_mcp_configs,
 )
 from iac_code.mcp.manager import MCPConnectionRecord
-from iac_code.mcp.oauth import oauth_storage_key, remember_oauth_storage_signature
+from iac_code.mcp.oauth import get_oauth_storage_secret, remember_oauth_storage_signature, set_oauth_storage_secret
 from iac_code.mcp.storage import MCPSecretStorage
 from iac_code.mcp.types import (
     MCPConfigScope,
@@ -1660,17 +1660,14 @@ def test_mcp_get_check_prints_redacted_config_and_connection_diagnostics(monkeyp
     monkeypatch.setattr(mcp_cli, "_create_health_check_manager", lambda checked, *, roots: manager)
     diagnostic_mcp_config = MCPServerConfig.from_mapping("yuque", diagnostic_config)
     storage = MCPSecretStorage()
-    storage.set_secret(
-        oauth_storage_key(diagnostic_mcp_config, "client_id", scope=MCPConfigScope.USER),
-        "registered-client",
+    set_oauth_storage_secret(
+        diagnostic_mcp_config, storage, "client_id", "registered-client", scope=MCPConfigScope.USER
     )
-    storage.set_secret(
-        oauth_storage_key(diagnostic_mcp_config, "client_secret", scope=MCPConfigScope.USER),
-        "registered-secret",
+    set_oauth_storage_secret(
+        diagnostic_mcp_config, storage, "client_secret", "registered-secret", scope=MCPConfigScope.USER
     )
-    storage.set_secret(
-        oauth_storage_key(diagnostic_mcp_config, "client_auth_method", scope=MCPConfigScope.USER),
-        "client_secret_post",
+    set_oauth_storage_secret(
+        diagnostic_mcp_config, storage, "client_auth_method", "client_secret_post", scope=MCPConfigScope.USER
     )
 
     result = CliRunner().invoke(app, ["mcp", "get", "yuque", "--scope", "user", "--check"])
@@ -2024,7 +2021,7 @@ def test_mcp_persisted_commands_explicit_source_path_can_target_sibling_project_
     config = MCPServerConfig.from_mapping("shared", child_raw_config)
     storage = MCPSecretStorage()
     oauth_scope = "project:{}".format(service_project_file.as_posix())
-    storage.set_secret(oauth_storage_key(config, "access_token", scope=oauth_scope), "service-access")
+    set_oauth_storage_secret(config, storage, "access_token", "service-access", scope=oauth_scope)
 
     reset = runner.invoke(
         app,
@@ -2032,7 +2029,7 @@ def test_mcp_persisted_commands_explicit_source_path_can_target_sibling_project_
     )
 
     assert reset.exit_code == 0, reset.output
-    assert storage.get_secret(oauth_storage_key(config, "access_token", scope=oauth_scope)) is None
+    assert get_oauth_storage_secret(config, storage, "access_token", scope=oauth_scope) is None
 
     removed = runner.invoke(
         app,
@@ -2507,7 +2504,7 @@ def test_mcp_persisted_commands_resolve_unique_user_scope_when_omitted(monkeypat
     ) -> None:
         _ = server_name
         auth_scopes.append(scope)
-        storage.set_secret(oauth_storage_key(config, "access_token", scope=scope), "access")
+        set_oauth_storage_secret(config, storage, "access_token", "access", scope=scope)
 
     monkeypatch.setattr(mcp_cli, "_run_cli_oauth_flow", fake_auth)
 
@@ -2518,12 +2515,12 @@ def test_mcp_persisted_commands_resolve_unique_user_scope_when_omitted(monkeypat
     settings = yaml.safe_load((tmp_path / "config" / "settings.yml").read_text(encoding="utf-8"))
     config = MCPServerConfig.from_mapping("remote", settings["mcpServers"]["remote"])
     storage = MCPSecretStorage()
-    assert storage.get_secret(oauth_storage_key(config, "access_token", scope=MCPConfigScope.USER)) == "access"
+    assert get_oauth_storage_secret(config, storage, "access_token", scope=MCPConfigScope.USER) == "access"
 
     reset = runner.invoke(app, ["mcp", "reset-auth", "remote"])
 
     assert reset.exit_code == 0, reset.output
-    assert storage.get_secret(oauth_storage_key(config, "access_token", scope=MCPConfigScope.USER)) is None
+    assert get_oauth_storage_secret(config, storage, "access_token", scope=MCPConfigScope.USER) is None
 
     removed = runner.invoke(app, ["mcp", "remove", "remote"])
 
@@ -2752,7 +2749,7 @@ def test_mcp_project_auth_uses_nearest_project_scope_when_child_project_has_same
     ) -> None:
         _ = server_name
         auth_calls.append((config.url or "", scope))
-        storage.set_secret(oauth_storage_key(config, "access_token", scope=scope), "auth-access")
+        set_oauth_storage_secret(config, storage, "access_token", "auth-access", scope=scope)
 
     monkeypatch.setattr(mcp_cli, "_run_cli_oauth_flow", fake_auth)
 
@@ -2762,12 +2759,12 @@ def test_mcp_project_auth_uses_nearest_project_scope_when_child_project_has_same
     expected_scope = "project:{}".format(child_project_file.as_posix())
     child_config = MCPServerConfig.from_mapping("remote", child_raw_config)
     storage = MCPSecretStorage()
-    storage.set_secret(oauth_storage_key(child_config, "access_token", scope=expected_scope), "child-access")
+    set_oauth_storage_secret(child_config, storage, "access_token", "child-access", scope=expected_scope)
     reset = runner.invoke(app, ["mcp", "reset-auth", "remote"])
 
     assert reset.exit_code == 0, reset.output
     assert auth_calls == [("https://child.example/mcp", expected_scope)]
-    assert storage.get_secret(oauth_storage_key(child_config, "access_token", scope=expected_scope)) is None
+    assert get_oauth_storage_secret(child_config, storage, "access_token", scope=expected_scope) is None
 
 
 def test_mcp_project_auth_relative_source_path_uses_canonical_scope_and_reset_matches(
@@ -2798,7 +2795,7 @@ def test_mcp_project_auth_relative_source_path_uses_canonical_scope_and_reset_ma
     ) -> None:
         _ = server_name
         auth_scopes.append(scope)
-        storage.set_secret(oauth_storage_key(config, "access_token", scope=scope), "access")
+        set_oauth_storage_secret(config, storage, "access_token", "access", scope=scope)
 
     monkeypatch.setattr(mcp_cli, "_run_cli_oauth_flow", fake_auth)
 
@@ -2813,7 +2810,7 @@ def test_mcp_project_auth_relative_source_path_uses_canonical_scope_and_reset_ma
     assert auth_scopes == [expected_scope]
     config = MCPServerConfig.from_mapping("remote", raw_config)
     storage = MCPSecretStorage()
-    assert storage.get_secret(oauth_storage_key(config, "access_token", scope=expected_scope)) == "access"
+    assert get_oauth_storage_secret(config, storage, "access_token", scope=expected_scope) == "access"
 
     reset = runner.invoke(
         app,
@@ -2821,7 +2818,7 @@ def test_mcp_project_auth_relative_source_path_uses_canonical_scope_and_reset_ma
     )
 
     assert reset.exit_code == 0, reset.output
-    assert storage.get_secret(oauth_storage_key(config, "access_token", scope=expected_scope)) is None
+    assert get_oauth_storage_secret(config, storage, "access_token", scope=expected_scope) is None
 
 
 def test_mcp_add_rejects_plaintext_secret_headers_and_env(monkeypatch, tmp_path: Path) -> None:
@@ -2966,7 +2963,7 @@ def test_mcp_add_stores_direct_client_secret_outside_config(monkeypatch, tmp_pat
         yaml.safe_load(settings_text)["mcpServers"]["remote"],
     )
     assert (
-        MCPSecretStorage().get_secret(oauth_storage_key(config, "client_secret", scope=MCPConfigScope.USER))
+        get_oauth_storage_secret(config, MCPSecretStorage(), "client_secret", scope=MCPConfigScope.USER)
         == "super-secret"
     )
 
@@ -3003,7 +3000,7 @@ def test_mcp_add_direct_client_secret_is_available_to_env_expanded_auth(monkeypa
     expanded_config = load_result.servers[0].config
     storage = MCPSecretStorage()
     assert (
-        storage.get_secret(oauth_storage_key(expanded_config, "client_secret", scope=MCPConfigScope.USER))
+        get_oauth_storage_secret(expanded_config, storage, "client_secret", scope=MCPConfigScope.USER)
         == "super-secret"
     )
     captured: list[str | None] = []
@@ -3017,7 +3014,7 @@ def test_mcp_add_direct_client_secret_is_available_to_env_expanded_auth(monkeypa
         **kwargs: object,
     ) -> None:
         _ = server_name, kwargs
-        captured.append(storage.get_secret(oauth_storage_key(config, "client_secret", scope=scope)))
+        captured.append(get_oauth_storage_secret(config, storage, "client_secret", scope=scope))
 
     monkeypatch.setattr(mcp_cli, "_run_cli_oauth_flow", run_flow)
 
@@ -3060,7 +3057,7 @@ def test_mcp_add_prompts_for_client_secret_when_option_has_no_value(monkeypatch,
         yaml.safe_load(settings_text)["mcpServers"]["remote"],
     )
     assert (
-        MCPSecretStorage().get_secret(oauth_storage_key(config, "client_secret", scope=MCPConfigScope.USER))
+        get_oauth_storage_secret(config, MCPSecretStorage(), "client_secret", scope=MCPConfigScope.USER)
         == "prompted-secret"
     )
 
@@ -3208,8 +3205,8 @@ def test_mcp_auth_exchanges_loopback_code_and_stores_token(monkeypatch, tmp_path
     settings = yaml.safe_load((tmp_path / "config" / "settings.yml").read_text(encoding="utf-8"))
     config = MCPServerConfig.from_mapping("remote", settings["mcpServers"]["remote"])
     storage = MCPSecretStorage()
-    assert storage.get_secret(oauth_storage_key(config, "access_token", scope=MCPConfigScope.USER)) == "access-token"
-    assert storage.get_secret(oauth_storage_key(config, "refresh_token", scope=MCPConfigScope.USER)) == "refresh-token"
+    assert get_oauth_storage_secret(config, storage, "access_token", scope=MCPConfigScope.USER) == "access-token"
+    assert get_oauth_storage_secret(config, storage, "refresh_token", scope=MCPConfigScope.USER) == "refresh-token"
     assert oauth_server.last_token_request["code"] == ["code-1"]
     assert oauth_server.last_token_request["client_id"] == ["client-id"]
 
@@ -3246,7 +3243,7 @@ def test_mcp_auth_helper_passes_required_step_up_scopes(monkeypatch, tmp_path: P
     ) -> None:
         _ = server_name
         required_scope_calls.append(list(required_scopes or []))
-        storage.set_secret(oauth_storage_key(config, "access_token", scope=scope), "access")
+        set_oauth_storage_secret(config, storage, "access_token", "access", scope=scope)
 
     monkeypatch.setattr(mcp_cli, "_run_cli_oauth_flow", fake_flow)
 
@@ -3466,8 +3463,8 @@ def test_mcp_pending_oauth_cancel_restores_existing_oauth_state(monkeypatch, tmp
         storage: MCPSecretStorage,
         scope: MCPConfigScope | str | None = None,
     ):
-        storage.set_secret(oauth_storage_key(config, "access_token", scope=scope), "partial-access")
-        storage.set_secret(oauth_storage_key(config, "client_secret", scope=scope), "partial-client-secret")
+        set_oauth_storage_secret(config, storage, "access_token", "partial-access", scope=scope)
+        set_oauth_storage_secret(config, storage, "client_secret", "partial-client-secret", scope=scope)
         return Pending(config, storage, scope)
 
     monkeypatch.setattr(mcp_cli, "start_oauth_loopback_flow", start_flow)
@@ -3476,9 +3473,9 @@ def test_mcp_pending_oauth_cancel_restores_existing_oauth_state(monkeypatch, tmp
     mcp_cli.cancel_pending_mcp_oauth_flow(pending)
 
     assert pending.closed is True
-    assert storage.get_secret(oauth_storage_key(config, "access_token", scope=MCPConfigScope.USER)) == "stored-access"
+    assert get_oauth_storage_secret(config, storage, "access_token", scope=MCPConfigScope.USER) == "stored-access"
     assert (
-        storage.get_secret(oauth_storage_key(config, "client_secret", scope=MCPConfigScope.USER))
+        get_oauth_storage_secret(config, storage, "client_secret", scope=MCPConfigScope.USER)
         == "registered-client-secret"
     )
 
@@ -3573,9 +3570,9 @@ def test_mcp_auth_registers_dynamic_client_and_stores_client_secret(monkeypatch,
     settings = yaml.safe_load(settings_text)
     config = MCPServerConfig.from_mapping("remote", settings["mcpServers"]["remote"])
     storage = MCPSecretStorage()
-    assert storage.get_secret(oauth_storage_key(config, "client_id", scope=MCPConfigScope.USER)) == "registered-client"
+    assert get_oauth_storage_secret(config, storage, "client_id", scope=MCPConfigScope.USER) == "registered-client"
     assert (
-        storage.get_secret(oauth_storage_key(config, "client_secret", scope=MCPConfigScope.USER))
+        get_oauth_storage_secret(config, storage, "client_secret", scope=MCPConfigScope.USER)
         == "registered-client-secret"
     )
     assert oauth_server.last_registration_request is not None
@@ -3960,8 +3957,8 @@ def test_mcp_manual_auth_accepts_authorization_code_when_browser_cannot_open(
     assert oauth_server.last_token_request["code"] == ["manual-code"]
     config = _user_mcp_config(tmp_path, "yuque")
     storage = MCPSecretStorage()
-    assert storage.get_secret(oauth_storage_key(config, "access_token", scope=MCPConfigScope.USER)) == "access-token"
-    assert storage.get_secret(oauth_storage_key(config, "refresh_token", scope=MCPConfigScope.USER)) == "refresh-token"
+    assert get_oauth_storage_secret(config, storage, "access_token", scope=MCPConfigScope.USER) == "access-token"
+    assert get_oauth_storage_secret(config, storage, "refresh_token", scope=MCPConfigScope.USER) == "refresh-token"
 
 
 def test_mcp_manual_auth_accepts_authorization_code_for_dynamic_client(
@@ -4013,8 +4010,8 @@ def test_mcp_manual_auth_accepts_authorization_code_for_dynamic_client(
     assert oauth_server.last_token_request["client_id"] == ["registered-client"]
     config = _user_mcp_config(tmp_path, "yuque")
     storage = MCPSecretStorage()
-    assert storage.get_secret(oauth_storage_key(config, "access_token", scope=MCPConfigScope.USER)) == "access-token"
-    assert storage.get_secret(oauth_storage_key(config, "client_id", scope=MCPConfigScope.USER)) == "registered-client"
+    assert get_oauth_storage_secret(config, storage, "access_token", scope=MCPConfigScope.USER) == "access-token"
+    assert get_oauth_storage_secret(config, storage, "client_id", scope=MCPConfigScope.USER) == "registered-client"
 
 
 def test_mcp_manual_auth_timeout_clears_partial_dynamic_client_state(monkeypatch, tmp_path: Path) -> None:
@@ -4105,8 +4102,8 @@ def test_mcp_auth_keyboard_interrupt_during_browser_wait_clears_partial_state(
         storage: MCPSecretStorage,
         scope: MCPConfigScope | str | None = None,
     ):
-        storage.set_secret(oauth_storage_key(config, "access_token", scope=scope), "partial-access")
-        storage.set_secret(oauth_storage_key(config, "client_id", scope=scope), "partial-client")
+        set_oauth_storage_secret(config, storage, "access_token", "partial-access", scope=scope)
+        set_oauth_storage_secret(config, storage, "client_id", "partial-client", scope=scope)
         return Pending()
 
     monkeypatch.setattr(mcp_cli, "start_oauth_loopback_flow", start_flow)
@@ -4158,8 +4155,8 @@ def test_mcp_manual_auth_keyboard_interrupt_after_empty_input_clears_partial_sta
         storage: MCPSecretStorage,
         scope: MCPConfigScope | str | None = None,
     ):
-        storage.set_secret(oauth_storage_key(config, "access_token", scope=scope), "partial-access")
-        storage.set_secret(oauth_storage_key(config, "client_id", scope=scope), "partial-client")
+        set_oauth_storage_secret(config, storage, "access_token", "partial-access", scope=scope)
+        set_oauth_storage_secret(config, storage, "client_id", "partial-client", scope=scope)
         return Pending()
 
     monkeypatch.setattr(mcp_cli, "start_oauth_loopback_flow", start_flow)
@@ -4213,8 +4210,8 @@ def test_mcp_manual_auth_input_interrupt_closes_pending_flow_and_clears_partial_
         storage: MCPSecretStorage,
         scope: MCPConfigScope | str | None = None,
     ):
-        storage.set_secret(oauth_storage_key(config, "access_token", scope=scope), "partial-access")
-        storage.set_secret(oauth_storage_key(config, "client_id", scope=scope), "partial-client")
+        set_oauth_storage_secret(config, storage, "access_token", "partial-access", scope=scope)
+        set_oauth_storage_secret(config, storage, "client_id", "partial-client", scope=scope)
         return Pending()
 
     def interrupted_input() -> str:
@@ -4275,8 +4272,8 @@ def test_mcp_manual_auth_completion_error_closes_pending_flow_and_clears_partial
         storage: MCPSecretStorage,
         scope: MCPConfigScope | str | None = None,
     ):
-        storage.set_secret(oauth_storage_key(config, "access_token", scope=scope), "partial-access")
-        storage.set_secret(oauth_storage_key(config, "client_id", scope=scope), "partial-client")
+        set_oauth_storage_secret(config, storage, "access_token", "partial-access", scope=scope)
+        set_oauth_storage_secret(config, storage, "client_id", "partial-client", scope=scope)
         return Pending()
 
     monkeypatch.setattr(mcp_cli, "start_oauth_loopback_flow", start_flow)
@@ -4336,7 +4333,7 @@ def test_mcp_manual_auth_completion_error_sanitizes_token_like_message(
         storage: MCPSecretStorage,
         scope: MCPConfigScope | str | None = None,
     ):
-        storage.set_secret(oauth_storage_key(config, "access_token", scope=scope), "partial-access")
+        set_oauth_storage_secret(config, storage, "access_token", "partial-access", scope=scope)
         return Pending()
 
     monkeypatch.setattr(mcp_cli, "start_oauth_loopback_flow", start_flow)
@@ -4373,7 +4370,7 @@ def _store_oauth_state(
         "client_secret": "registered-client-secret",
         "client_auth_method": "client_secret_post",
     }.items():
-        storage.set_secret(oauth_storage_key(config, kind, scope=scope), value)
+        set_oauth_storage_secret(config, storage, kind, value, scope=scope)
 
 
 def _assert_no_oauth_state(
@@ -4392,7 +4389,7 @@ def _assert_no_oauth_state(
         "client_secret",
         "client_auth_method",
     ):
-        assert storage.get_secret(oauth_storage_key(config, kind, scope=scope)) is None
+        assert get_oauth_storage_secret(config, storage, kind, scope=scope) is None
 
 
 def _scoped_mcp_config(

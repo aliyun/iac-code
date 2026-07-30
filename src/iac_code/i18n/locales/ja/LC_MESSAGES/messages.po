@@ -11092,6 +11092,10 @@ msgstr "Web サーバーの依存関係が不足しています。次でイン�
 msgid "sessionId is invalid"
 msgstr "sessionId が無効です"
 
+#: src/iac_code/web/session_manager.py
+msgid "New image chat"
+msgstr "新しい画像チャット"
+
 #: src/iac_code/web/session_manager.py src/iac_code/web/settings.py
 msgid "unknown provider"
 msgstr "不明なプロバイダー"

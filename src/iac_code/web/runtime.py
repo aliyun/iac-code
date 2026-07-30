@@ -235,8 +235,13 @@ def agent_factory_options_for_session(
     manager: WebSessionManager,
     *,
     model_selection: WebModelSelection | None = None,
+    disable_external_services: bool = False,
 ) -> AgentFactoryOptions:
-    """Build the same AgentFactory options for every Web operation."""
+    """Build the same AgentFactory options for every Web operation.
+
+    disable_external_services=True 用于会话切换时的离线上下文核算:不连接 MCP、不读钥匙串,
+    只算系统提示 + 本地工具定义开销(见 prime_session_context_overhead)。
+    """
     selection = model_selection or model_selection_for_session(session)
     provider_config_override = selection.provider_config_override
     if session.thinking_enabled is not None:
@@ -256,6 +261,7 @@ def agent_factory_options_for_session(
         provider_config_override=provider_config_override,
         effort_override=selection.effort,
         mcp_elicitation_handler=_make_web_mcp_elicitation_handler(session, manager),
+        disable_external_services=disable_external_services,
     )
 
 
@@ -273,8 +279,16 @@ def create_session_agent_runtime(
     manager: WebSessionManager,
     *,
     model_selection: WebModelSelection | None = None,
+    disable_external_services: bool = False,
 ) -> Any:
-    return create_agent_runtime(agent_factory_options_for_session(session, manager, model_selection=model_selection))
+    return create_agent_runtime(
+        agent_factory_options_for_session(
+            session,
+            manager,
+            model_selection=model_selection,
+            disable_external_services=disable_external_services,
+        )
+    )
 
 
 async def create_session_agent_runtime_in_thread(
@@ -282,6 +296,7 @@ async def create_session_agent_runtime_in_thread(
     manager: WebSessionManager,
     *,
     model_selection: WebModelSelection | None = None,
+    disable_external_services: bool = False,
 ) -> Any:
     """Create a session runtime off-loop and retain cleanup ownership across cancellation."""
     creation_task = asyncio.create_task(
@@ -290,6 +305,7 @@ async def create_session_agent_runtime_in_thread(
             session,
             manager,
             model_selection=model_selection,
+            disable_external_services=disable_external_services,
         )
     )
     try:
@@ -455,6 +471,9 @@ class WebSessionRuntime:
                         "user.message", _user_message_payload(request, turn_id=turn_id)
                     )
                     input_consumed = True
+                    self.manager.schedule_llm_title(
+                        self.session, text=request.text, image_ids=request.image_ids
+                    )
                     # 记录本轮“回放下界”:重载进行中会话时只回放本轮事件(尚未持久化),已完成
                     # 轮次由存储转录提供,避免完成轮次被回放而重复渲染。
                     self.session.active_turn_floor_sequence = int(user_event["sequence"]) - 1
@@ -762,6 +781,10 @@ async def prime_session_context_overhead(session: WebSession, manager: WebSessio
     (AgentLoop.__init__ 已在构造时同步系统提示与工具定义,直接读 get_usage 即含两项),之后的实时回合
     继续自动纠正。仅在开销未知(两项皆 0)时计算——建过一次或已有实时数据即跳过;失败安全降级为 0,
     维持既有行为,绝不阻断会话切换。
+
+    会话切换只读展示历史会话,不应产生外部副作用,因此这里用 disable_external_services 的离线核算
+    runtime:不连接 MCP、不读取 MCP 钥匙串(避免 macOS 反复弹出 iac-code:mcp 授权窗)、不发起 Provider/
+    云请求。代价是动态 MCP 工具定义暂不计入本地基线,待首个真实回合启动正常 runtime 后用精确值自动纠正。
     """
     if session is None:
         return
@@ -769,7 +792,7 @@ async def prime_session_context_overhead(session: WebSession, manager: WebSessio
         return
     runtime: Any = None
     try:
-        runtime = await create_session_agent_runtime_in_thread(session, manager)
+        runtime = await create_session_agent_runtime_in_thread(session, manager, disable_external_services=True)
         _cache_session_context_overhead(session, _live_context_usage(runtime))
     except asyncio.CancelledError:
         raise

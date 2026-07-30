@@ -20,7 +20,7 @@ import iac_code.mcp.client as client_module
 import iac_code.mcp.oauth as oauth_module
 from iac_code.mcp.client import MCPClientAdapter
 from iac_code.mcp.errors import MCPConnectionError, MCPNeedsAuthError
-from iac_code.mcp.oauth import OAuthMetadata, oauth_storage_key
+from iac_code.mcp.oauth import OAuthMetadata, get_oauth_storage_secret, set_oauth_storage_secret
 from iac_code.mcp.storage import MCPSecretStorage
 from iac_code.mcp.types import (
     MCPConfigScope,
@@ -2079,12 +2079,12 @@ async def test_http_invalid_client_auth_challenge_clears_registered_client_state
         },
     )
     storage = FakeSecretStorage()
-    storage.set_secret(oauth_storage_key(config, "access_token", scope=MCPConfigScope.USER), "access-token")
-    storage.set_secret(oauth_storage_key(config, "refresh_token", scope=MCPConfigScope.USER), "refresh-token")
-    storage.set_secret(oauth_storage_key(config, "expires_at", scope=MCPConfigScope.USER), "9999999999")
-    storage.set_secret(oauth_storage_key(config, "client_id", scope=MCPConfigScope.USER), "registered-client")
-    storage.set_secret(oauth_storage_key(config, "client_secret", scope=MCPConfigScope.USER), "registered-secret")
-    storage.set_secret(oauth_storage_key(config, "client_auth_method", scope=MCPConfigScope.USER), "client_secret_post")
+    set_oauth_storage_secret(config, storage, "access_token", "access-token", scope=MCPConfigScope.USER)
+    set_oauth_storage_secret(config, storage, "refresh_token", "refresh-token", scope=MCPConfigScope.USER)
+    set_oauth_storage_secret(config, storage, "expires_at", "9999999999", scope=MCPConfigScope.USER)
+    set_oauth_storage_secret(config, storage, "client_id", "registered-client", scope=MCPConfigScope.USER)
+    set_oauth_storage_secret(config, storage, "client_secret", "registered-secret", scope=MCPConfigScope.USER)
+    set_oauth_storage_secret(config, storage, "client_auth_method", "client_secret_post", scope=MCPConfigScope.USER)
 
     @asynccontextmanager
     async def fake_streamablehttp_client(url, headers=None, auth=None):
@@ -2107,7 +2107,7 @@ async def test_http_invalid_client_auth_challenge_clears_registered_client_state
         await adapter.connect()
 
     for kind in ("access_token", "refresh_token", "expires_at", "client_id", "client_secret", "client_auth_method"):
-        assert storage.get_secret(oauth_storage_key(config, kind, scope=MCPConfigScope.USER)) is None
+        assert get_oauth_storage_secret(config, storage, kind, scope=MCPConfigScope.USER) is None
 
 
 @pytest.mark.asyncio
@@ -2127,8 +2127,8 @@ async def test_remote_transport_auth_provider_uses_valid_cached_token_without_di
         },
     )
     storage = FakeSecretStorage()
-    storage.set_secret(oauth_storage_key(config, "access_token", scope=MCPConfigScope.USER), "cached-token")
-    storage.set_secret(oauth_storage_key(config, "expires_at", scope=MCPConfigScope.USER), "9999999999")
+    set_oauth_storage_secret(config, storage, "access_token", "cached-token", scope=MCPConfigScope.USER)
+    set_oauth_storage_secret(config, storage, "expires_at", "9999999999", scope=MCPConfigScope.USER)
 
     def discover_oauth_metadata(config: MCPServerConfig) -> OAuthMetadata:
         raise AssertionError("metadata discovery should be deferred for valid cached tokens")
@@ -2214,8 +2214,8 @@ async def test_remote_transport_client_metadata_uses_valid_cached_token_without_
         },
     )
     storage = FakeSecretStorage()
-    storage.set_secret(oauth_storage_key(config, "access_token", scope=MCPConfigScope.USER), "cached-token")
-    storage.set_secret(oauth_storage_key(config, "expires_at", scope=MCPConfigScope.USER), "9999999999")
+    set_oauth_storage_secret(config, storage, "access_token", "cached-token", scope=MCPConfigScope.USER)
+    set_oauth_storage_secret(config, storage, "expires_at", "9999999999", scope=MCPConfigScope.USER)
 
     def discover_oauth_metadata(config: MCPServerConfig) -> OAuthMetadata:
         raise AssertionError("metadata discovery should be deferred for valid cached tokens")
@@ -2295,9 +2295,9 @@ async def test_remote_transport_auth_provider_refreshes_expired_token_with_resou
         },
     )
     storage = FakeSecretStorage()
-    storage.set_secret(oauth_storage_key(config, "access_token", scope=MCPConfigScope.USER), "expired-token")
-    storage.set_secret(oauth_storage_key(config, "refresh_token", scope=MCPConfigScope.USER), "refresh-token")
-    storage.set_secret(oauth_storage_key(config, "expires_at", scope=MCPConfigScope.USER), "100")
+    set_oauth_storage_secret(config, storage, "access_token", "expired-token", scope=MCPConfigScope.USER)
+    set_oauth_storage_secret(config, storage, "refresh_token", "refresh-token", scope=MCPConfigScope.USER)
+    set_oauth_storage_secret(config, storage, "expires_at", "100", scope=MCPConfigScope.USER)
 
     monkeypatch.setattr(
         oauth_module,
@@ -2388,7 +2388,7 @@ async def test_remote_transport_auth_provider_refreshes_expired_token_with_resou
         )
     ]
     assert seen["authorization"] == "Bearer refreshed-token"
-    assert storage.get_secret(oauth_storage_key(config, "access_token", scope=MCPConfigScope.USER)) == "refreshed-token"
+    assert get_oauth_storage_secret(config, storage, "access_token", scope=MCPConfigScope.USER) == "refreshed-token"
 
     await adapter.close()
 
@@ -2409,8 +2409,8 @@ async def test_remote_transport_cached_token_auth_challenge_propagates_original_
         },
     )
     storage = FakeSecretStorage()
-    storage.set_secret(oauth_storage_key(config, "access_token", scope=MCPConfigScope.USER), "cached-token")
-    storage.set_secret(oauth_storage_key(config, "expires_at", scope=MCPConfigScope.USER), "9999999999")
+    set_oauth_storage_secret(config, storage, "access_token", "cached-token", scope=MCPConfigScope.USER)
+    set_oauth_storage_secret(config, storage, "expires_at", "9999999999", scope=MCPConfigScope.USER)
 
     def discover_oauth_metadata(config: MCPServerConfig) -> OAuthMetadata:
         raise AssertionError("transport auth must not start interactive discovery from a 403 challenge")

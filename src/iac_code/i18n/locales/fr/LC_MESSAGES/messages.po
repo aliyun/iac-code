@@ -11943,6 +11943,10 @@ msgstr ""
 msgid "sessionId is invalid"
 msgstr "sessionId est invalide"
 
+#: src/iac_code/web/session_manager.py
+msgid "New image chat"
+msgstr "Nouvelle conversation d'image"
+
 #: src/iac_code/web/session_manager.py src/iac_code/web/settings.py
 msgid "unknown provider"
 msgstr "fournisseur inconnu"

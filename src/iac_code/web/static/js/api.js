@@ -369,6 +369,21 @@ export function saveForeignSessionsVisibility({ showPipeline = false, showNormal
   });
 }
 
+// 开发者模式:mode 控制「开发」设置分页是否出现;highlightFailedTools 控制失败工具是否标红。
+export function getDeveloperSettings() {
+  return jsonFetch("/api/settings/developer");
+}
+
+export function saveDeveloperSettings({ mode = false, highlightFailedTools = false } = {}) {
+  return jsonFetch("/api/settings/developer", {
+    method: "PUT",
+    body: JSON.stringify({
+      mode: Boolean(mode),
+      highlightFailedTools: Boolean(highlightFailedTools),
+    }),
+  });
+}
+
 // 售卖流水线审查步骤:读取/保存是否开启 review step(enable_reviewing 特性开关)。
 export function getSellingReviewStep() {
   return jsonFetch("/api/settings/pipeline-review-step");

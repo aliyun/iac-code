@@ -9,6 +9,16 @@ IaC Code bringt eine lokale Web-App mit, die dieselbe Agenten-Engine wie das Ter
 
 Die Web-App liest und schreibt denselben Sitzungsspeicher wie die CLI, sodass eine an einer Stelle begonnene Konversation an der anderen fortgesetzt werden kann.
 
+## Installation
+
+Die Web-App ist eine optionale Funktion, die vom Extra `http` (Starlette und Uvicorn) abhängt. Installieren Sie es zusammen mit dem Basispaket:
+
+```bash
+pip install 'iac-code[http]'
+```
+
+Wenn Sie `iac-code web` ohne das Extra ausführen, schlägt der Befehl mit einer Meldung fehl, die Sie zur Installation von `iac-code[http]` auffordert. Bei der Arbeit mit einem Checkout des Repositorys installiert `uv sync --extra http` dieselben Abhängigkeiten.
+
 ## Web-App starten
 
 Starten Sie den Server im Terminal:

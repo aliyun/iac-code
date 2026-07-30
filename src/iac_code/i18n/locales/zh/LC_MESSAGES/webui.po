@@ -588,10 +588,12 @@ msgid "View diagram"
 msgstr "查看架构图"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/output_panel.js
 msgid "Optimizing"
 msgstr "优化中"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/output_panel.js
 msgid "Pending optimization"
 msgstr "待优化"
 
@@ -639,6 +641,11 @@ msgstr "正在思考"
 #: src/iac_code/web/static/js/app.js
 msgid "Thinking done"
 msgstr "思考完成"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Preview image"
+msgstr "预览图片"
 
 #: src/iac_code/web/static/js/app.js
 msgid "Attached image"
@@ -1140,6 +1147,11 @@ msgstr "停止"
 msgid "Stop the current reply"
 msgstr "停止当前回复"
 
+#: src/iac_code/web/static/js/components/image_lightbox.js
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Close preview"
+msgstr "关闭预览"
+
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "Success"
 msgstr "成功"
@@ -1147,6 +1159,28 @@ msgstr "成功"
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "In progress / failed"
 msgstr "进行中/失败"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "File no longer exists"
+msgstr "文件已不存在"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading…"
+msgstr "加载中…"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Resource stacks"
+msgstr "资源栈"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Template files"
+msgstr "模板文件"
+
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Architecture diagram"
+msgstr "架构图"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Recovered State"
@@ -1191,10 +1225,6 @@ msgstr "选择候选方案"
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Submitting..."
 msgstr "提交中..."
-
-#: src/iac_code/web/static/js/components/pipeline.js
-msgid "Architecture diagram"
-msgstr "架构图"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No architecture diagram"
@@ -2187,6 +2217,10 @@ msgid "Account"
 msgstr "账号"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Developer"
+msgstr "开发者"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Alibaba Cloud"
 msgstr "阿里云"
 
@@ -2899,10 +2933,6 @@ msgid "{label} (current)"
 msgstr "{label}(当前)"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Loading…"
-msgstr "加载中…"
-
-#: src/iac_code/web/static/js/components/workspace.js
 #, python-brace-format
 msgid "File: {path}"
 msgstr "文件:{path}"
@@ -3502,6 +3532,22 @@ msgid ""
 msgstr "打开后,非 web 入口产生的普通会话在列表出现,并可在 web 中续聊接手。"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Developer mode"
+msgstr "开发者模式"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "When enabled, a Developer settings tab appears with additional tools."
+msgstr "开启后，会出现「开发」设置分页，提供额外的工具。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enable developer mode"
+msgstr "开启开发者模式"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Reveals the Developer settings tab. Turning it off hides that tab again."
+msgstr "显示「开发」设置分页；关闭后该分页会再次隐藏。"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid ""
 "Control optional steps of the sales pipeline; affects only newly started "
 "pipeline runs. Running pipelines keep their original configuration."
@@ -3615,6 +3661,24 @@ msgid "Install failed: {error}"
 msgstr "安装失败:{error}"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Failed tool calls"
+msgstr "失败的工具调用"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Control how failed tool calls are shown in the transcript."
+msgstr "控制失败的工具调用在转录中的显示方式。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Highlight failed tool calls in red"
+msgstr "用红色高亮失败的工具调用"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, failed tool calls are painted red. When disabled, they look"
+" like any other tool call."
+msgstr "开启后，失败的工具调用会标红；关闭后，它们与其它工具调用外观一致。"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"
 msgstr "重启服务"
 
@@ -3652,10 +3716,4 @@ msgstr "重启中,服务恢复后会自动刷新…"
 
 #~ msgid "Completed step: {step}"
 #~ msgstr "已完成步骤：{step}"
-
-#~ msgid "Resource stacks"
-#~ msgstr "资源栈"
-
-#~ msgid "Template files"
-#~ msgstr "模板文件"
 

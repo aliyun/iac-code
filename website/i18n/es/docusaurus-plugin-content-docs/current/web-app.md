@@ -9,6 +9,16 @@ IaC Code incluye una aplicación web local que ejecuta el mismo motor de agente 
 
 La aplicación web lee y escribe en el mismo almacén de sesiones que la CLI, de modo que una conversación iniciada en un lado puede reanudarse en el otro.
 
+## Instalación
+
+La aplicación web es una función opcional que depende del extra `http` (Starlette y Uvicorn). Instálalo junto con el paquete base:
+
+```bash
+pip install 'iac-code[http]'
+```
+
+Si ejecutas `iac-code web` sin el extra, el comando falla con un mensaje que te pide instalar `iac-code[http]`. Cuando trabajas desde un clon del repositorio, `uv sync --extra http` instala las mismas dependencias.
+
 ## Iniciar la aplicación web
 
 Inicia el servidor desde la terminal:

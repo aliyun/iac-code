@@ -1,10 +1,11 @@
-import * as api from "./api.js?v=web-repl-ui-303";
-import { createComposerController } from "./components/composer.js?v=session-model-v17";
+import * as api from "./api.js?v=web-repl-ui-305";
+import { createComposerController } from "./components/composer.js?v=session-model-v18";
 import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v5";
 import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v7";
 import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v23";
-import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v49";
-import { createOutputController } from "./components/output_panel.js?v=output-panel-v16";
+import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v50";
+import { createOutputController } from "./components/output_panel.js?v=output-panel-v17";
+import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
 import { reduceEvent } from "./events.js?v=web-repl-ui-304";
 import { applyDomI18n, t } from "./i18n.js?v=web-repl-ui-277";
 
@@ -279,6 +280,10 @@ function normalizeStoredMessage(message, index) {
     thinking: typeof message.thinking === "string" ? message.thinking : "",
     toolUseIds: Array.isArray(message.toolUseIds) ? message.toolUseIds.map(text).filter(Boolean) : [],
     blocks: Array.isArray(message.blocks) ? message.blocks : [],
+    // 会话恢复:把转录行上的图片/文件附件透传到规整消息,否则 buildMessageAttachmentsElement
+    // 读到 undefined→不渲染,重开会话时图片消失(实时 user.message 事件一直设置这两个字段)。
+    imageIds: Array.isArray(message.imageIds) ? message.imageIds.map(text).filter(Boolean) : [],
+    fileRefs: Array.isArray(message.fileRefs) ? message.fileRefs.map(text).filter(Boolean) : [],
     status: "completed",
     sequence: index + 1,
     stored: true,
@@ -2541,15 +2546,20 @@ function buildMessageAttachmentsElement(message, state) {
   attachments.className = "message-attachments";
   const sessionId = text(state?.currentSessionId || state?.currentSession?.webSessionId || "");
   for (const imageId of imageIds) {
-    const chip = document.createElement("span");
+    // 消息内图片:整块是按钮,点击打开全屏灯箱预览(此前是不可点的静态 span)。
+    const chip = document.createElement("button");
+    chip.type = "button";
     chip.className = "attachment-chip attachment-chip-image message-attachment-image";
     chip.title = imageId;
+    chip.setAttribute("aria-label", t("Preview image"));
+    const src = `/api/images/${encodeURIComponent(imageId)}?sessionId=${encodeURIComponent(sessionId)}`;
     const image = document.createElement("img");
     image.className = "attachment-chip-preview";
-    image.src = `/api/images/${encodeURIComponent(imageId)}?sessionId=${encodeURIComponent(sessionId)}`;
+    image.src = src;
     image.alt = t("Attached image");
     image.draggable = false;
     chip.append(image);
+    chip.addEventListener("click", () => openImageLightbox({ src, alt: t("Attached image") }));
     attachments.append(chip);
   }
   for (const fileRef of fileRefs) {
@@ -3889,8 +3899,11 @@ function renderPipeline(state) {
   workspace.replaceChildren(renderPipelineWorkspace(state, { onSelectCandidate: handleSelectPipelineCandidate }));
 }
 
-export function pipelineWorkspaceEntryVisible(candidateState = {}) {
-  return text(candidateState.currentSession?.mode) === "pipeline" && !candidateState.newSessionDraft?.active;
+// 遗留的 pipeline 工作区模态入口已从产品中移除:主区内联体验已完整覆盖流水线，
+// 标题栏「View pipeline」按钮不再向用户暴露。底层的隐藏 tab 与 components/pipeline.js
+// 仍保留(可逆),故此判定恒为 false —— 保留函数与调用点，仅关闭入口。
+export function pipelineWorkspaceEntryVisible(_candidateState = {}) {
+  return false;
 }
 
 function renderStatus(state) {
@@ -4024,6 +4037,29 @@ function makeDraftMenuItem({ iconClass = "", label = "", detail = "", active = f
   return button;
 }
 
+// 草稿会话弹出菜单(项目/模式/子菜单)绝对定位在 .draft-session-picker 上,composer 内向上展开
+// (CSS bottom:100%)。触发器到视口顶的距离随 composer 高度(输入框多行)、断点、窗口高度而变,
+// 纯 CSS 的固定 rem 封顶引用不到这个真实距离,矮窗口里顶端(搜索框)仍会顶出视口。这里在打开时按
+// 触发器的实际 rect 把 max-height 收到「上方可用空间」以内,顶端恒不越界,超出的项在盒内滚动;
+// 窗口宽裕时 min(25rem, …) 仍取 25rem,常态体验不变。祖先链(controls/composer/transcript-panel)
+// 无 overflow:hidden,故只需约束菜单自身高度即可。
+function clampDraftMenuToViewport(menu) {
+  if (!menu || menu.hidden) {
+    return;
+  }
+  const picker = menu.closest(".draft-session-picker");
+  const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0;
+  if (!picker || !viewportHeight) {
+    return;
+  }
+  const rect = picker.getBoundingClientRect();
+  const edgeGap = 12; // 视口边缘留白
+  // .workspace-mode-picker 里复用同一样式但向下展开(top:100%);其余(composer)向上展开。
+  const opensDownward = window.getComputedStyle(menu).bottom === "auto";
+  const available = opensDownward ? viewportHeight - rect.bottom - edgeGap : rect.top - edgeGap;
+  menu.style.maxHeight = `min(25rem, ${Math.max(120, Math.round(available))}px)`;
+}
+
 function renderDraftProjectMenu(draft) {
   const menu = byShell("draft-project-menu");
   if (!menu) {
@@ -4053,6 +4089,12 @@ function renderDraftProjectMenu(draft) {
   searchWrap.append(searchIcon, search);
   menu.append(searchWrap);
 
+  // 三段式:搜索头(上)固定、项目列表(中)独立滚动、底栏(下)固定。只有项目列表溢出时才滚动,
+  // 搜索框与「新建项目/不使用项目」始终可见。列表容器承担滚动;菜单自身 overflow:hidden 不滚。
+  const list = document.createElement("div");
+  list.className = "draft-session-menu-list";
+  menu.append(list);
+
   const normalizedQuery = draftProjectQuery.trim().toLowerCase();
   const groups = groupSessionsByProject(state.sessions || [], state).filter((group) => {
     if (!normalizedQuery) {
@@ -4063,7 +4105,7 @@ function renderDraftProjectMenu(draft) {
   const customPath = draftProjectQuery.trim();
   const customPathLooksUsable = Boolean(customPath) && (customPath.startsWith("/") || customPath.startsWith("~") || customPath.includes("\\"));
   if (customPathLooksUsable) {
-    menu.append(
+    list.append(
       makeDraftMenuItem({
         iconClass: "is-project",
         label: t("Use directory"),
@@ -4079,7 +4121,7 @@ function renderDraftProjectMenu(draft) {
   }
   for (const group of groups.slice(0, 30)) {
     const key = projectKeyFromGroup(group);
-    menu.append(
+    list.append(
       makeDraftMenuItem({
         iconClass: "is-project",
         label: group.label || basenamePath(key),
@@ -4097,12 +4139,14 @@ function renderDraftProjectMenu(draft) {
     const empty = document.createElement("div");
     empty.className = "draft-session-menu-empty";
     empty.textContent = t("No matching projects");
-    menu.append(empty);
+    list.append(empty);
   }
 
+  const footer = document.createElement("div");
+  footer.className = "draft-session-menu-footer";
   const divider = document.createElement("div");
   divider.className = "draft-session-menu-divider";
-  menu.append(
+  footer.append(
     divider,
     makeDraftMenuItem({
       iconClass: "is-new-project",
@@ -4131,6 +4175,8 @@ function renderDraftProjectMenu(draft) {
       },
     }),
   );
+  menu.append(footer);
+  clampDraftMenuToViewport(menu);
 }
 
 function renderDraftProjectNewMenu(draft) {
@@ -4164,6 +4210,7 @@ function renderDraftProjectNewMenu(draft) {
       },
     }),
   );
+  clampDraftMenuToViewport(menu);
 }
 
 function renderDraftModeMenu(draft) {
@@ -4206,6 +4253,7 @@ function renderDraftModeMenu(draft) {
       },
     }),
   );
+  clampDraftMenuToViewport(menu);
 }
 
 function renderDraftPipelineSubmenu(draft) {
@@ -4233,6 +4281,7 @@ function renderDraftPipelineSubmenu(draft) {
       }),
     );
   }
+  clampDraftMenuToViewport(menu);
 }
 
 function renderDraftSessionControls(currentState) {
@@ -4396,7 +4445,7 @@ function render(state) {
   }
   root.dataset.ready = "true";
   persistCurrentSessionActivity(state);
-  renderSessions(state);
+  renderSessionsAuto(state);
   renderMessages(state);
   renderQueuedInputs(state);
   renderBlocking(state);
@@ -4638,6 +4687,8 @@ export function pipelineSelectionRequiresWorkspace(candidateState = {}) {
   return pendingKind === "candidate_selection" || waitingCandidateStep || selectionRequiredEvent;
 }
 
+// 保留(当前无调用):遗留 pipeline 模态入口已下线，候选选择不再自动弹出工作区。
+// 底层判定 pipelineSelectionRequiresWorkspace 与该辅助函数一并保留，便于将来复用/回滚。
 function maybeOpenPipelineSelectionWorkspace(candidateState = state) {
   if (pipelineSelectionRequiresWorkspace(candidateState)) {
     openWorkspaceModal("pipeline");
@@ -4936,13 +4987,19 @@ async function loadSession(sessionId, options = {}) {
   pendingScrollToBottom = true;
   // 展开态是按 markerId/toolUseId 记的，跨会话可能撞键，切换到别的会话时清空避免串台；
   // 同会话的 resync（如权限确认触发）保留用户展开态，不打断正在查看的过程。
-  if (previousSessionId && previousSessionId !== state.currentSessionId) {
+  const switchedSession = previousSessionId && previousSessionId !== state.currentSessionId;
+  if (switchedSession) {
     clearDetailsOpenOverrides();
   }
   render(state);
-  outputController?.reset();
+  // 仅在真正切换到别的会话时复位输出面板（清空上个会话的资源栈/模板并重新武装「首次自动展开」）。
+  // 同会话的 resync/重载（流水线运行中权限确认、input_required 等会反复触发）绝不复位——否则每次
+  // resync 都强制关闭再由 refresh 自动展开，表现为输出面板「一闪一闪」，还会把用户手动 X 关掉的面板
+  // 重新弹开。跳过 reset 后 refresh 保留 isOpen 与 autoOpenedOnce，用户的开/关意图得以延续。
+  if (switchedSession) {
+    outputController?.reset();
+  }
   outputController?.refresh(sessionId);
-  maybeOpenPipelineSelectionWorkspace(state);
   return true;
 }
 
@@ -4985,17 +5042,17 @@ async function handleStreamEvent(event, generation = sessionLoadGeneration) {
     }
   }
   state = reduceAndDedupe(state, event);
+  // session.updated / session.started 在 reducer 里只更新了 currentSession(驱动主区标题),
+  // 侧栏行读的是 state.sessions[i].title——LLM 生成/重命名的新标题原本要等下一次后台列表轮询
+  // (~2.5s)才追平,表现为「主区标题已变、侧栏行仍是旧标题」。把 currentSession 最新元数据折进
+  // 侧栏各数组(复用重命名/置顶同一条合并逻辑),让侧栏行与主区标题同帧刷新。
+  if ((event.type === "session.updated" || event.type === "session.started") && state.currentSession) {
+    state = replaceUpdatedSessionInState(state, state.currentSession);
+  }
   // 记录最近一次可见流式进度，供流水线事件间隙占位判定「正在流式 vs 陈旧标记」
   // （见 stepBodyHasLiveActivity）。仅文本/思考 delta 算进度；工具活动另由工具卡自述。
   if (event.type === "assistant.text.delta" || event.type === "assistant.thinking.delta") {
     lastStreamDeltaAt = Date.now();
-  }
-  if (
-    event.type === "candidate.detail" ||
-    event.type === "pipeline.snapshot" ||
-    (event.type === "pipeline.event" && pipelineEventKind(event.payload) === "candidate.selection.required")
-  ) {
-    maybeOpenPipelineSelectionWorkspace(state);
   }
   // 本轮进行中的实时上下文用量:后端把 contextUsage 附在 assistant.message.end / turn.done 上
   // (每个模型往返一次)。收到即写回当前会话,下一帧 renderStatus 会驱动 composer 圆环刷新,
@@ -5048,13 +5105,51 @@ function connectCurrentStream(generation = sessionLoadGeneration) {
   );
 }
 
+// 侧栏行由整栏 replaceChildren 全量重建。运行中(流式回合逐帧 render + 后台 2.5s 轮询)会高频重建，
+// 销毁光标下的会话/项目行——:hover 背景与「hover 才显形」的操作按钮(.thread-actions/.project-actions)
+// 随之反复通断，即用户反馈的「一闪闪」。指针在侧栏内时把这类自动重绘挂起(只记账,不重建 DOM)，
+// 指针移开(pointerleave)追平一次;用户主动的展开/收起/置顶/切换走 renderProjectThreadNavigation /
+// renderSessions 直连，不经此挂起，照常即时重绘。
+let sidebarPointerInside = false;
+let sidebarRepaintPending = false;
+
+// 流式 / 后台刷新触发的侧栏重绘经此:指针在侧栏内则挂起(待 pointerleave 追平)，否则立即重绘。
+function renderSessionsAuto(state) {
+  if (sidebarPointerInside) {
+    sidebarRepaintPending = true;
+    return;
+  }
+  sidebarRepaintPending = false;
+  renderSessions(state);
+}
+
+// 给稳定的 .session-rail 容器绑定进出边界的悬停探测(只一次)。pointerenter/leave 不随子节点冒泡，
+// 容器本身不被 replaceChildren 重建,故监听长期有效。
+function ensureSidebarHoverGuard() {
+  const rail = root?.querySelector(".session-rail");
+  if (!rail || rail.dataset.hoverGuardBound === "1") {
+    return;
+  }
+  rail.dataset.hoverGuardBound = "1";
+  rail.addEventListener("pointerenter", () => {
+    sidebarPointerInside = true;
+  });
+  rail.addEventListener("pointerleave", () => {
+    sidebarPointerInside = false;
+    if (sidebarRepaintPending) {
+      sidebarRepaintPending = false;
+      renderSessions(state);
+    }
+  });
+}
+
 // 后台刷新侧边栏快照:非当前会话的「进行中」转圈与相对时间只来自列表快照,靠这里定期/切换时
 // 重新拉取，才能在切走后仍看到正在运行的会话转圈、并让时间反映真实活动。只重绘侧边栏，不动当前
 // 会话的正文，避免打断阅读或滚动。
 async function refreshSessionsSidebar() {
   try {
     await loadSessions();
-    renderSessions(state);
+    renderSessionsAuto(state);
     // 搜索面板对「非当前会话」同样只靠这条轮询刷新:会话从「进行中」变「未读」后,若不重刷
     // 面板,它会一直停在进行中转圈(与侧栏矛盾)。面板打开时用当前输入重刷一遍会话行。
     if (isCommandPaletteOpen()) {
@@ -5115,6 +5210,8 @@ function startSessionsAutoRefresh() {
   if (sessionsRefreshTimer) {
     return;
   }
+  // 运行中侧栏会高频全量重建,指针停在其上会「一闪闪」;绑定悬停探测,悬停期间挂起自动重绘。
+  ensureSidebarHoverGuard();
   // 后台标签页不轮询;重新可见时立即补刷一次,避免切回原页面还要再等一个周期才追上真实状态。
   if (typeof document !== "undefined" && document.addEventListener) {
     document.addEventListener("visibilitychange", () => {
@@ -5639,6 +5736,8 @@ async function start() {
           setDraftSessionPatch({ providerSelection: selection });
         }
       },
+      // 点 composer 缩略图打开全屏灯箱预览(而非删除;删除只走右上角 ×)。
+      onPreviewImage: ({ src, alt } = {}) => openImageLightbox({ src, alt }),
     },
   );
   workspace = createWorkspaceController(
@@ -5805,6 +5904,10 @@ async function start() {
     }
   });
   await loadSessions();
+  // 开发者设置:失败工具标红开关持久化于服务端。页面加载即读取并落到 body 类,
+  // 让整段转录的失败工具标红规则(styles.css 门控于 body.dev-highlight-tool-errors)
+  // 从首屏起即反映用户选择——无需打开设置面板。读取失败静默(保持不标红)。
+  void applyDeveloperHighlightFromSettings();
   // 打开 Web 页面时默认进入新会话界面，而非自动选中最近的已有会话。
   startNewSessionDraft();
   // 定时后台刷新侧边栏,让其它会话的运行转圈与相对时间保持新鲜。
@@ -5812,6 +5915,15 @@ async function start() {
   // 顶部更新提醒(fire-and-forget,检查失败静默);随后周期轮询,让运行中发布的新版自动弹出。
   void checkForUpdateBanner();
   startUpdateAutoCheck();
+}
+
+async function applyDeveloperHighlightFromSettings() {
+  try {
+    const developer = await api.getDeveloperSettings();
+    document.body.classList.toggle("dev-highlight-tool-errors", Boolean(developer?.highlightFailedTools));
+  } catch (_error) {
+    /* 读取失败保持默认:不标红 */
+  }
 }
 
 start().catch((error) => {

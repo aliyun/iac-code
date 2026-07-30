@@ -320,6 +320,8 @@ def test_web_session_runtime_rejects_overlapping_start_without_queueing(tmp_path
     async def run_overlapping_turns() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
         manager = WebSessionManager(projects_dir=tmp_path / "projects")
         session = manager.create_session(session_id="session-1")
+        # 本用例只验证 turn 消息序列;关闭新会话首轮的异步 LLM 标题副作用(session.updated),避免污染事件序列断言。
+        session.pending_llm_title = False
         runtime = WebSessionRuntime(session, manager=manager)
         original_publish = session.events.publish
         first_turn_started = asyncio.Event()
@@ -393,6 +395,7 @@ def test_web_session_runtime_publishes_turn_done_when_agent_loop_fails_after_use
     async def run_turn() -> tuple[dict[str, object], list[dict[str, object]]]:
         manager = WebSessionManager(projects_dir=tmp_path / "projects")
         session = manager.create_session(session_id="session-1")
+        session.pending_llm_title = False
         runtime = WebSessionRuntime(session, manager=manager)
 
         result = await runtime.start_turn(WebTurnRequest(text="Deploy", image_ids=[], file_refs=[]))
@@ -461,6 +464,7 @@ def test_web_session_runtime_uses_agent_factory_and_translates_stream_events(tmp
     async def run_turn() -> tuple[dict[str, object], list[dict[str, object]], str, str]:
         manager = WebSessionManager(projects_dir=tmp_path / "projects")
         session = manager.create_session(session_id="session-1")
+        session.pending_llm_title = False
         hidden_memory = create_recalled_memory_message(
             "# Recalled Memory\nhidden but needed by agent",
             ["memory.md"],
@@ -992,6 +996,7 @@ def test_web_session_runtime_accumulates_usage_across_message_end_events(tmp_pat
     async def run_turn() -> tuple[dict[str, object], list[dict[str, object]]]:
         manager = WebSessionManager(projects_dir=tmp_path / "projects")
         session = manager.create_session(session_id="session-1")
+        session.pending_llm_title = False
         runtime = WebSessionRuntime(session, manager=manager)
 
         result = await runtime.start_turn(WebTurnRequest(text="Deploy", image_ids=[], file_refs=[]))
@@ -1045,6 +1050,7 @@ def test_web_session_runtime_builds_image_blocks_from_real_temp_cache_and_file_r
     async def run_turn() -> tuple[dict[str, object], list[dict[str, object]]]:
         manager = WebSessionManager(projects_dir=tmp_path / "projects")
         session = manager.create_session(session_id="session-1")
+        session.pending_llm_title = False
         store_cached_image(
             "image-1",
             VALID_PNG,
@@ -1925,6 +1931,7 @@ def test_default_runtime_route_uses_agent_runtime_factory(tmp_path, monkeypatch)
 
     manager = WebSessionManager(projects_dir=tmp_path / "projects")
     session = manager.create_session(session_id="session-1")
+    session.pending_llm_title = False
     app = create_app(session_manager=manager)
 
     with TestClient(app) as client:
@@ -1992,6 +1999,7 @@ def test_web_session_runtime_stamps_turn_elapsed_when_turn_takes_time(tmp_path, 
     async def run_turn() -> list[dict[str, object]]:
         manager = WebSessionManager(projects_dir=tmp_path / "projects")
         session = manager.create_session(session_id="session-elapsed")
+        session.pending_llm_title = False
         runtime = WebSessionRuntime(session, manager=manager)
         await runtime.start_turn(WebTurnRequest(text="deploy", image_ids=[], file_refs=[]))
         return session.events.replay_after(0)
