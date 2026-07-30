@@ -97,7 +97,13 @@ class TestSkillContentRosOnly:
         assert "预览工具" in body
         assert "ros_preview_template" not in body
         assert "ros_estimate_template_cost" not in body
-        assert "ask_user_question" not in body
+        # The parameter-completion flow itself must not ask the user; the "回滚预算与人工介入"
+        # section is a separate rollback-budget handoff, so restrict this check to the
+        # parameter-completion section.
+        param_section_start = body.index("## 部署前参数补全")
+        param_section_end = body.index("## 可用性查询", param_section_start)
+        param_section = body[param_section_start:param_section_end]
+        assert "ask_user_question" not in param_section
 
     def test_missing_parameters_are_not_a_direct_failure_reason(self, body):
         assert "仍缺少模板必填参数" in body

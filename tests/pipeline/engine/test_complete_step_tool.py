@@ -234,6 +234,59 @@ class TestCompleteStepToolExecute:
         assert "5" in result.content
 
     @pytest.mark.asyncio
+    async def test_rollback_exhausted_message_guides_handoff_or_failure(self):
+        config = StepConfig(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            rollback_targets=["architecture_planning"],
+        )
+        config.rollback_count = 3
+        config.max_rollbacks = 3
+        tool = CompleteStepTool(config)
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {"status": "failed", "error": "CREATE_FAILED"},
+                "rollback_request": {"target_step": "architecture_planning", "reason": "retry"},
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert result.metadata is None
+        assert "Rollback count cannot exceed" in result.content
+        assert "Do not re-issue rollback_request" in result.content
+        assert "ask_user_question" in result.content
+        assert "status='failed'" in result.content
+        assert "conclusion.error" in result.content
+
+    def test_validate_completion_input_rollback_exhausted_message_matches_execute(self):
+        config = StepConfig(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            rollback_targets=["architecture_planning"],
+        )
+        config.rollback_count = 3
+        config.max_rollbacks = 3
+        tool = CompleteStepTool(config)
+
+        error = tool.validate_completion_input(
+            {
+                "conclusion": {"status": "failed", "error": "CREATE_FAILED"},
+                "rollback_request": {"target_step": "architecture_planning", "reason": "retry"},
+            }
+        )
+
+        assert error is not None
+        assert "Rollback count cannot exceed" in error
+        assert "Do not re-issue rollback_request" in error
+        assert "ask_user_question" in error
+        assert "status='failed'" in error
+        assert "conclusion.error" in error
+
+    @pytest.mark.asyncio
     async def test_rejects_when_rollback_target_count_exceeds_limit(self):
         config = StepConfig(
             step_id="reviewing",

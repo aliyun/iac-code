@@ -889,7 +889,9 @@ class CompleteStepTool(Tool):
         if rollback_tuple and self._step_config.rollback_count >= self._step_config.max_rollbacks:
             max_rollbacks = self._step_config.max_rollbacks
             return _(
-                "Rollback count cannot exceed {max_rollbacks}. Complete the current step or ask the user for help."
+                "Rollback count cannot exceed {max_rollbacks}. Do not re-issue rollback_request; "
+                "either call ask_user_question to hand off to the user, or resubmit complete_step "
+                "with status='failed' and record the root cause in conclusion.error."
             ).format(max_rollbacks=max_rollbacks)
 
         validation_error = self._validate_conclusion(conclusion)
@@ -1068,7 +1070,9 @@ class CompleteStepTool(Tool):
             max_rollbacks = self._step_config.max_rollbacks
             return ToolResult(
                 content=_(
-                    "Rollback count cannot exceed {max_rollbacks}. Complete the current step or ask the user for help."
+                    "Rollback count cannot exceed {max_rollbacks}. Do not re-issue rollback_request; "
+                    "either call ask_user_question to hand off to the user, or resubmit complete_step "
+                    "with status='failed' and record the root cause in conclusion.error."
                 ).format(max_rollbacks=max_rollbacks),
                 is_error=True,
             )

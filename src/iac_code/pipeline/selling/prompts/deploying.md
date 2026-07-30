@@ -54,5 +54,12 @@
 - 部署失败或等待超时 → 按技能的参数补全与 `ros_deploy` 恢复策略处理
 - 架构层面必须变更（如产品组合不可行）→ rollback_request 到 `architecture_planning`
 
+## 回滚预算与人工介入
+本步骤 `rollback_request` 有硬性预算（`max_rollbacks`，默认为 3），触顶后会被 `complete_step` 明确拒绝，禁止循环回滚。请按以下约束执行：
+- 发起 `rollback_request` 之前，必须先在同一次 `complete_step` 调用的 `conclusion.error` 中记录本次部署失败的结构化根因（错误码 + 阶段 + 失败资源 + StackName/StackId），不要"空 error 上抛回滚"。
+- 对同一个部署失败根因（相同错误码 + 相同 Stack），一次工作流内最多发起一次向上游步骤的 `rollback_request`；重复出现的相同根因优先走本步骤内的恢复路径（`wait` / `continue_create` / `delete_and_create`）或调用 `ask_user_question` 交给用户决策，不要再回滚。
+- 当 `rollback_count` 已达 `max_rollbacks - 1` 时，禁止再次发起 `rollback_request`；改为完成本步骤（`complete_step` 提交 `status: success` 或 `status: failed` + `conclusion.error`），或调用 `ask_user_question` 请求用户介入。
+- 若 `complete_step` 返回 `Rollback count cannot exceed ...`，不要复述同一 `rollback_request`。立即调用 `ask_user_question` 让用户在"直接部署 / 修复模板后重试 / 放弃"之间选择，或直接以 `complete_step` 提交 `status: failed` 并在 `conclusion.error` 中列出剩余可选恢复路径。
+
 ## 注意事项
 - 不要读取项目文件或记忆，所需的上下文已在上方提供。

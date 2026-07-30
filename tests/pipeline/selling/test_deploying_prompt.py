@@ -75,3 +75,25 @@ def test_deploying_prompt_renders_concrete_template_url() -> None:
     assert 'params.TemplateURL = "templates/vswitch.yml"' not in prompt
     assert "<选中方案模板文件路径>" not in prompt
     assert "{selected_plan.template_url}" not in prompt
+
+
+def test_deploying_prompt_documents_rollback_budget_and_handoff() -> None:
+    selling_dir = _selling_dir()
+    prompt = (selling_dir / "prompts" / "deploying.md").read_text(encoding="utf-8")
+
+    assert "回滚预算与人工介入" in prompt
+    assert "conclusion.error" in prompt
+    assert "max_rollbacks" in prompt
+    assert "ask_user_question" in prompt
+    assert "Rollback count cannot exceed" in prompt
+
+
+def test_deploying_skill_documents_rollback_budget_and_handoff() -> None:
+    selling_dir = _selling_dir()
+    skill = (selling_dir / "skills" / "iac-aliyun-deploying" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "回滚预算与人工介入" in skill
+    assert "max_rollbacks" in skill
+    assert "conclusion.error" in skill
+    assert "ask_user_question" in skill
+    assert "Rollback count cannot exceed" in skill

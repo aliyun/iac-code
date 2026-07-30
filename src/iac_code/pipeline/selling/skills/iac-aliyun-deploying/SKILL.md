@@ -139,6 +139,14 @@ conclusion_schema:
 - 模板/参数 → 修复后调用 `ros_deploy` 的 `continue_create`
 - `continue_create` 返回 `ContinueCreateStackValidationFailed` → 告知用户需要重建本步骤创建的失败 Stack，再调用 `ros_deploy` 的 `delete_and_create`
 
+每次 `ros_deploy` 失败后，都必须先记录结构化根因（错误码 + 阶段 + 失败资源 + `stack_id`/`stack_name`）到即将提交的 `complete_step.conclusion.error`，再决定是发起上游 `rollback_request`、走本步骤内的恢复路径，还是提交 `status: failed`。禁止在 `conclusion.error` 为空时发起 `rollback_request`。
+
+### 回滚预算与人工介入
+`complete_step` 的 `rollback_request` 受硬性回滚预算（`max_rollbacks`，默认为 3）保护。请按以下顺序处理：
+1. 对同一个部署失败根因（相同错误码 + 相同 Stack），一次工作流内最多发起一次上游 `rollback_request`。重复出现的相同根因不再回滚，改走 `wait` / `continue_create` / `delete_and_create` 中仍可用的恢复路径，或调用 `ask_user_question` 让用户决策；若确实无路可走，用 `complete_step` 提交 `status: failed`。
+2. 当已知 `rollback_count` 达到 `max_rollbacks - 1` 时，不要再发起 `rollback_request`；直接进入 `ask_user_question` 交由用户决定，或提交 `status: failed` + `conclusion.error`。
+3. 若 `complete_step` 返回 `Rollback count cannot exceed ...`，立即停止发起相同 `rollback_request`。改为调用 `ask_user_question`（选项建议包括"直接部署"、"修复模板后重试"、"放弃部署"），或以 `complete_step` 提交 `status: failed` 并把剩余可选路径写入 `conclusion.error`。
+
 ### 删除并重建
 仅在 `continue_create` 返回 `ContinueCreateStackValidationFailed` 后使用 `delete_and_create`。调用时：
 - `stack_id` 指向本步骤创建的旧失败 Stack，不得使用通过查询发现的其他 Stack
