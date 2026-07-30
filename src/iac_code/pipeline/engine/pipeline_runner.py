@@ -1818,6 +1818,38 @@ class PipelineRunner:
             exc_info=True,
         )
 
+    def _session_has_pipeline_init_meta(self) -> bool:
+        """Best-effort check whether this session already recorded a ``pipeline_init`` meta row.
+
+        Used to keep pipeline startup idempotent per session: a second ``run()``
+        against the same session (contextId) must not append a duplicate
+        ``pipeline_init``; it records an explicit ``pipeline_restarted`` instead.
+        Any read failure is treated as "not present" so startup never breaks.
+        """
+        try:
+            path = self._session_storage.session_path(self._cwd, self._session_id)
+            if not isinstance(path, Path) or not _is_regular_file_entry(path):
+                return False
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        value = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(value, dict) and "role" not in value and value.get("type") == "pipeline_init":
+                        return True
+        except Exception:
+            logger.debug(
+                "Failed to check existing pipeline_init meta (pipeline=%s, session_id=%s)",
+                getattr(getattr(self, "_loaded", None), "name", ""),
+                getattr(self, "_session_id", ""),
+                exc_info=True,
+            )
+        return False
+
     def _append_pipeline_session_meta_best_effort(self, meta: dict[str, Any], *, operation: str) -> None:
         try:
             self._session_storage.append_meta(self._cwd, self._session_id, meta)
@@ -2540,10 +2572,20 @@ class PipelineRunner:
         except PipelineStatePersistenceError as exc:
             yield self._persistence_failure_event(exc)
             return
-        self._append_pipeline_session_meta_best_effort(
-            {"type": "pipeline_init", "pipeline_type": self._loaded.name},
-            operation="pipeline_init",
-        )
+        if self._session_has_pipeline_init_meta():
+            self._append_pipeline_session_meta_best_effort(
+                {
+                    "type": "pipeline_restarted",
+                    "pipeline_type": self._loaded.name,
+                    "reason": "duplicate_pipeline_init_suppressed",
+                },
+                operation="pipeline_restarted",
+            )
+        else:
+            self._append_pipeline_session_meta_best_effort(
+                {"type": "pipeline_init", "pipeline_type": self._loaded.name},
+                operation="pipeline_init",
+            )
         self._observability.pipeline_started(
             total_steps=self.state_machine.total_steps,
             step_names=list(self.state_machine._order),
