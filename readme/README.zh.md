@@ -56,9 +56,10 @@ echo "创建一个 OSS Bucket" | iac-code --prompt -
 
 ### Web 应用
 
-更喜欢图形界面？可以启动本地 Web 应用，它运行与 CLI 相同的引擎，并共享同一份会话：
+更喜欢图形界面？可以启动本地 Web 应用，它运行与 CLI 相同的引擎，并共享同一份会话。Web 应用需要 `http` 扩展，请先安装：
 
 ```bash
+pip install 'iac-code[http]'
 iac-code web
 ```
 

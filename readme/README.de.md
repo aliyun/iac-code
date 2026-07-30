@@ -56,9 +56,10 @@ echo "Erstelle einen OSS-Bucket" | iac-code --prompt -
 
 ### Web-App
 
-Sie bevorzugen eine grafische Oberfläche? Starten Sie die lokale Web-App, die dieselbe Engine wie die CLI ausführt und dieselben Sitzungen teilt:
+Sie bevorzugen eine grafische Oberfläche? Starten Sie die lokale Web-App, die dieselbe Engine wie die CLI ausführt und dieselben Sitzungen teilt. Die Web-App benötigt das `http`-Extra, installieren Sie es daher zuerst:
 
 ```bash
+pip install 'iac-code[http]'
 iac-code web
 ```
 
