@@ -121,6 +121,7 @@ _LEGACY_KEY_NAME_ALIASES: dict[str, str] = {
 # model string when no explicit provider is configured.
 _MODEL_EXACT_TO_PROVIDER: dict[str, str] = {
     "qwen3.8-max-preview": "dashscope_token_plan",
+    "glm-5.2-fast-preview": "dashscope",
     "kimi/kimi-k3": "dashscope",
     "minimax/minimax-m3": "dashscope",
 }

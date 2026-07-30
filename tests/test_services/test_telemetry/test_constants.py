@@ -33,6 +33,7 @@ def test_known_models_contains_researched_provider_updates():
         "gpt-5.6-sol",
         "qwen3.8-max-preview",
         "kimi-k3",
+        "glm-5.2-fast-preview",
         "glm-5.2",
         "gemini-3.6-flash",
         "gemini-3.5-flash",

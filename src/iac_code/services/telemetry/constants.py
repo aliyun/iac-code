@@ -104,6 +104,7 @@ KNOWN_MODELS: frozenset[str] = frozenset(
         "kimi-k2.6",
         "kimi-k2.7-code",
         "kimi-k2.7-code-highspeed",
+        "glm-5.2-fast-preview",
         "glm-5.2",
         "glm-5.1",
         "glm-5",

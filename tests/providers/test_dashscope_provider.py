@@ -171,7 +171,8 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         assert "reasoning_effort" not in call_kwargs
         assert "enable_thinking" not in call_kwargs["extra_body"]
 
-    async def test_glm52_uses_total_output_limit_without_qwen_thinking_budget(self):
+    @pytest.mark.parametrize("model", ["glm-5.2", "glm-5.2-fast-preview"])
+    async def test_glm52_models_use_total_output_limit_without_qwen_thinking_budget(self, model):
         chunks = [
             ns(
                 usage=ns(prompt_tokens=1, completion_tokens=1),
@@ -179,7 +180,7 @@ class TestDashScopeThinkingBudgetRequestPolicy:
             ),
         ]
         client = FakeOpenAIClient(stream_chunks=chunks)
-        provider = DashScopeProvider(model="glm-5.2", api_key="k")
+        provider = DashScopeProvider(model=model, api_key="k")
         provider._client = client
 
         _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
@@ -268,7 +269,8 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         assert "max_tokens" not in call_kwargs
         assert call_kwargs["extra_body"] == {"enable_thinking": True}
 
-    async def test_glm52_uses_user_configured_reasoning_effort(self):
+    @pytest.mark.parametrize("model", ["glm-5.2", "glm-5.2-fast-preview"])
+    async def test_glm52_models_use_user_configured_reasoning_effort(self, model):
         chunks = [
             ns(
                 usage=ns(prompt_tokens=1, completion_tokens=1),
@@ -276,13 +278,14 @@ class TestDashScopeThinkingBudgetRequestPolicy:
             ),
         ]
         client = FakeOpenAIClient(stream_chunks=chunks)
-        provider = DashScopeProvider(model="glm-5.2", api_key="k", effort="low")
+        provider = DashScopeProvider(model=model, api_key="k", effort="low")
         provider._client = client
 
         _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
 
         call_kwargs = client.chat.completions.calls[0]
         assert call_kwargs["reasoning_effort"] == "low"
+        assert call_kwargs["extra_body"] == {"enable_thinking": True}
 
     @pytest.mark.parametrize(
         ("provider_key", "model"),

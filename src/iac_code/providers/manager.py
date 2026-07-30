@@ -319,6 +319,7 @@ MODEL_FALLBACK_MAP = {
     "qwen3.7-max": "qwen3.7-plus",
     "kimi/kimi-k3": "kimi-k2.7-code",
     "kimi-k3": "kimi-k2.7-code",
+    "glm-5.2-fast-preview": "glm-5.2",
     "glm-5.2": "glm-5.1",
     "deepseek-v4-pro": "deepseek-v4-flash",
 }

@@ -81,22 +81,23 @@ class TestGetThinkingSpec:
         )
         assert spec.uses_reasoning_effort_param is True
 
-    def test_dashscope_glm52_uses_effort_and_total_output_limit_without_thinking_budget(self):
-        spec = get_thinking_spec("dashscope", "glm-5.2")
-        assert spec.family is ThinkingFamily.DASHSCOPE
-        assert spec.allowed_efforts == (
-            EffortLevel.NONE,
-            EffortLevel.MINIMAL,
-            EffortLevel.LOW,
-            EffortLevel.MEDIUM,
-            EffortLevel.HIGH,
-            EffortLevel.XHIGH,
-            EffortLevel.MAX,
-        )
-        assert spec.default_thinking_budget is None
-        assert spec.supports_thinking_budget is False
-        assert spec.use_max_completion_tokens is True
-        assert spec.uses_reasoning_effort_param is True
+    def test_dashscope_glm52_models_use_effort_and_total_output_limit_without_thinking_budget(self):
+        for model in ("glm-5.2", "glm-5.2-fast-preview"):
+            spec = get_thinking_spec("dashscope", model)
+            assert spec.family is ThinkingFamily.DASHSCOPE
+            assert spec.allowed_efforts == (
+                EffortLevel.NONE,
+                EffortLevel.MINIMAL,
+                EffortLevel.LOW,
+                EffortLevel.MEDIUM,
+                EffortLevel.HIGH,
+                EffortLevel.XHIGH,
+                EffortLevel.MAX,
+            )
+            assert spec.default_thinking_budget is None
+            assert spec.supports_thinking_budget is False
+            assert spec.use_max_completion_tokens is True
+            assert spec.uses_reasoning_effort_param is True
 
     def test_token_plan_qwen38_is_visual_always_thinking_with_three_efforts(self):
         spec = get_thinking_spec("dashscope_token_plan", "qwen3.8-max-preview")

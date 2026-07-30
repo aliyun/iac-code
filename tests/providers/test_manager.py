@@ -2240,6 +2240,7 @@ class TestModelPrefixAutoMapping:
         "model, expected_provider",
         [
             ("qwen3.8-max-preview", "dashscope_token_plan"),
+            ("glm-5.2-fast-preview", "dashscope"),
             ("kimi/kimi-k3", "dashscope"),
             ("MiniMax/MiniMax-M3", "dashscope"),
         ],
