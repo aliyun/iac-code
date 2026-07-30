@@ -2088,10 +2088,107 @@ async def test_delegated_local_template_rejects_parent_symlink_swap_at_materiali
     runtime.execution_stage_observer = swap_parent
     result = await delegated.execute(outer_input, _execution_context(permission_context, permission))
 
-    assert result == ToolResult.error(
-        _expected_public_error("invalid_body_file", {"region_id": "cn-hangzhou"}, contract=contract)
-    )
+    # ROS template callers pass template_url and must not receive a body_file error.
+    assert result.is_error is True
+    assert "body_file" not in result.content
+    assert "ROS1202" in result.content
     assert runtime.request_builder.inputs == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_name", "action"),
+    [
+        ("ros_validate_template", "ValidateTemplate"),
+        ("ros_get_template_parameter_constraints", "GetTemplateParameterConstraints"),
+        ("ros_preview_template", "PreviewStack"),
+        ("ros_estimate_template_cost", "GetTemplateEstimateCost"),
+    ],
+)
+async def test_delegated_unreadable_local_template_reports_template_diagnostic(
+    tmp_path,
+    tool_name: str,
+    action: str,
+) -> None:
+    from iac_code.tools.cloud.aliyun.runtime import AliyunDelegatedExecutor
+
+    template = tmp_path / "template.yml"
+    template.write_text("Resources: {}\n", encoding="utf-8")
+    contract = _canonical_contract(product="ROS", version="2019-09-10", action=action)
+    tool, runtime = _execution_runtime(contract)
+    delegated = AliyunDelegatedExecutor(tool, action=action)
+    outer_input: dict[str, Any] = {"template_url": str(template), "region_id": "cn-hangzhou"}
+    if action in {"PreviewStack", "GetTemplateEstimateCost"}:
+        outer_input["parameters"] = {"Key": "value"}
+    if action == "PreviewStack":
+        outer_input["stack_name"] = "preview-stack"
+    permission_context = _bound_context(
+        outer_input,
+        tool_name=tool_name,
+        cwd=str(tmp_path),
+        pipeline_mode=True,
+    )
+    permission = await delegated.check_permissions(outer_input, permission_context)
+    assert permission.behavior == "allow"
+
+    def remove_template(stage: str) -> None:
+        if stage == "materialize":
+            template.unlink()
+
+    runtime.execution_stage_observer = remove_template
+    result = await delegated.execute(outer_input, _execution_context(permission_context, permission))
+
+    assert result.is_error is True
+    assert "ROS1202" in result.content
+    assert "body_file" not in result.content
+    assert "template_url" in result.content
+    assert runtime.request_builder.inputs == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_name", "action", "outer_input", "missing"),
+    [
+        (
+            "ros_preview_template",
+            "PreviewStack",
+            {"template_url": "https://example.com/template.yml", "stack_name": "preview-stack"},
+            "parameters",
+        ),
+        (
+            "ros_preview_template",
+            "PreviewStack",
+            {"template_url": "https://example.com/template.yml", "parameters": {"Key": "value"}},
+            "stack_name",
+        ),
+        (
+            "ros_estimate_template_cost",
+            "GetTemplateEstimateCost",
+            {"template_url": "https://example.com/template.yml"},
+            "parameters",
+        ),
+    ],
+)
+async def test_delegated_missing_required_input_names_the_field(
+    tool_name: str,
+    action: str,
+    outer_input: dict[str, Any],
+    missing: str,
+) -> None:
+    from iac_code.tools.cloud.aliyun.runtime import AliyunDelegatedExecutor
+
+    contract = _canonical_contract(product="ROS", version="2019-09-10", action=action)
+    tool, runtime = _execution_runtime(contract)
+    delegated = AliyunDelegatedExecutor(tool, action=action)
+    permission_context = _bound_context(outer_input, tool_name=tool_name, pipeline_mode=True)
+
+    permission = await delegated.check_permissions(outer_input, permission_context)
+
+    assert permission.behavior == "deny"
+    assert permission.message is not None
+    assert missing in permission.message
+    assert "repeating the same call" in permission.message
+    assert runtime.contract_store.size == 0
 
 
 @pytest.mark.asyncio

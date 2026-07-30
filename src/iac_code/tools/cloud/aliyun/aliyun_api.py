@@ -2042,13 +2042,13 @@ class AliyunApi(BaseCloudApi):
                     region_id=shape.get("region_id"),
                 )
             )
-        from iac_code.tools.cloud.aliyun.ros_template_tools import validate_delegated_tool_input
+        from iac_code.tools.cloud.aliyun.ros_template_tools import delegated_tool_input_error
 
-        if not validate_delegated_tool_input(tool_input, action=action):
+        if input_error := delegated_tool_input_error(tool_input, action=action):
             self._invalidate_runtime_handoff(context)
             return ToolResult.error(
                 public_aliyun_error(
-                    "invalid_tool_input",
+                    input_error,
                     product=shape.get("product"),
                     version=shape.get("version"),
                     action=shape.get("action"),
@@ -2281,7 +2281,10 @@ class AliyunApi(BaseCloudApi):
                 try:
                     template_bytes = await asyncio.to_thread(_read_body_file, resolved_template)
                     params["TemplateBody"] = template_bytes.decode("utf-8")
-                except (OSError, UnicodeError) as error:
+                except (OSError, UnicodeError, ApiContractError) as error:
+                    # _read_body_file reports unreadable, non-regular, or oversized
+                    # files as ApiContractError; ROS template callers pass template_url
+                    # and must not receive a body_file error they cannot act on.
                     from iac_code.tools.cloud.aliyun.hooks.ros_validate import local_template_source_error
 
                     outcome = local_template_source_error(error)

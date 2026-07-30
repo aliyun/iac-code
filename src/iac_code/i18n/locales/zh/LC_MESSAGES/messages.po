@@ -5850,6 +5850,28 @@ msgid ""
 "request and try again."
 msgstr "无法安全准备阿里云 API {operation}。请检查请求后重试。"
 
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid ""
+" Provide parameters as a key/value object; use "
+"ros_get_template_parameter_constraints to resolve allowed values first."
+msgstr " 请以键值对象形式提供 parameters；可先用 ros_get_template_parameter_constraints 求解合法取值。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid ""
+" Provide a unique stack_name; it is a tool argument, not a template "
+"parameter."
+msgstr " 请提供唯一的 stack_name；它是工具参数，不是模板参数。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid ""
+" Provide template_url as a readable local template file path, OSS URL, or"
+" HTTP(S) URL."
+msgstr " 请将 template_url 设为可读的本地模板文件路径、OSS URL 或 HTTP(S) URL。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid " Fix the input before calling again instead of repeating the same call."
+msgstr " 请先修复输入再重新调用，不要重复相同调用。"
+
 #: src/iac_code/tools/cloud/aliyun/ros_stack.py
 msgid "ROS Stack"
 msgstr "ROS 资源栈"
@@ -5901,22 +5923,36 @@ msgstr ""
 "params.TemplateURL，例如本地文件路径或 OSS/HTTP URL。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "The local ROS template file is not valid UTF-8."
+msgstr "本地 ROS 模板文件不是有效 UTF-8。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "Confirm that the file exists, is readable, and is saved as UTF-8."
+msgstr "确认文件存在、可读，并使用 UTF-8 编码保存。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "The local ROS template file exceeds the maximum supported size."
+msgstr "本地 ROS 模板文件超过支持的最大大小。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "Use a smaller regular template file within the 32 MiB limit."
+msgstr "请使用 32 MiB 限制内更小的常规模板文件。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid "The local ROS template file cannot be read."
 msgstr "本地 ROS 模板文件无法读取。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
-msgid "The local ROS template file is not valid UTF-8."
-msgstr "本地 ROS 模板文件不是有效 UTF-8。"
+msgid ""
+"Confirm that template_url points to an existing, readable regular file, "
+"then retry with the fixed path."
+msgstr "确认 template_url 指向存在且可读的常规文件，修正路径后重试。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid ""
 "TemplateURL/local TemplateBody failed before entering the Parser; the ROS"
 " API was not called."
 msgstr "TemplateURL/本地 TemplateBody 在进入 Parser 前失败；未调用 ROS API。"
-
-#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
-msgid "Confirm that the file exists, is readable, and is saved as UTF-8."
-msgstr "确认文件存在、可读，并使用 UTF-8 编码保存。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 #, python-brace-format
@@ -11493,3 +11529,4 @@ msgstr "允许 Bash?"
 #~ msgstr ""
 #~ "批准工具调用：{tool}\n"
 #~ "输入摘要：{summary}"
+

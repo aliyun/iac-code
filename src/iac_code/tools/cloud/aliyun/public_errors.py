@@ -158,15 +158,22 @@ def public_aliyun_error(
             return _("Alibaba Cloud API {operation} requires body_file for its binary request body.").format(
                 operation=operation
             )
+        guidance = _ros_template_input_guidance(parameter)
         if parameter is not None and "," not in parameter:
-            return _("Alibaba Cloud API {operation} requires parameter {parameter}.").format(
-                operation=operation,
-                parameter=parameter,
+            return (
+                _("Alibaba Cloud API {operation} requires parameter {parameter}.").format(
+                    operation=operation,
+                    parameter=parameter,
+                )
+                + guidance
             )
         if parameter is not None:
-            return _("Alibaba Cloud API {operation} requires parameters {parameters}.").format(
-                operation=operation,
-                parameters=parameter,
+            return (
+                _("Alibaba Cloud API {operation} requires parameters {parameters}.").format(
+                    operation=operation,
+                    parameters=parameter,
+                )
+                + guidance
             )
         return _("Alibaba Cloud API {operation} is missing required parameters.").format(operation=operation)
     if code.startswith("invalid_parameter_type:"):
@@ -455,6 +462,27 @@ def public_aliyun_unsupported_reasons(
 
     messages = [public_aliyun_error(reason, product=product, action=action) for reason in reasons]
     return list(dict.fromkeys(messages))
+
+
+def _ros_template_input_guidance(parameter: str | None) -> str:
+    """Return actionable guidance for missing ROS template tool inputs."""
+
+    if parameter is None:
+        return ""
+    names = set(parameter.split(","))
+    guidance = ""
+    if "parameters" in names:
+        guidance += _(
+            " Provide parameters as a key/value object; use ros_get_template_parameter_constraints to resolve"
+            " allowed values first."
+        )
+    if "stack_name" in names:
+        guidance += _(" Provide a unique stack_name; it is a tool argument, not a template parameter.")
+    if "template_url" in names:
+        guidance += _(" Provide template_url as a readable local template file path, OSS URL, or HTTP(S) URL.")
+    if guidance:
+        guidance += _(" Fix the input before calling again instead of repeating the same call.")
+    return guidance
 
 
 def _is_oss_unsupported_reason(code: str) -> bool:
