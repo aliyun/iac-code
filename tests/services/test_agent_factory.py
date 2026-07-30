@@ -363,6 +363,52 @@ def test_create_agent_runtime_a2a_safe_mode_filters_tools_and_skips_mcp(tmp_path
     assert str(session_dir) in permission_context.strict_read_directories
 
 
+def test_create_agent_runtime_disable_external_services_skips_mcp_and_keyring(tmp_path, monkeypatch) -> None:
+    """离线核算契约:置 disable_external_services 后不构造/连接 MCP、不读 MCP 钥匙串,
+
+    但保留完整本地工具集(区别于 a2a_safe_mode 的裁剪),以保证系统提示 + 工具定义 token 口径准确。
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr(
+        "iac_code.services.cloud_credentials.CloudCredentials.has_provider",
+        lambda self, provider: provider == "aliyun",
+    )
+
+    def mcp_manager_factory(configs, roots):
+        raise AssertionError("offline accounting must not construct or connect MCP servers")
+
+    keyring_reads: list[str] = []
+    monkeypatch.setattr(
+        "iac_code.mcp.storage.MCPSecretStorage.get_secret",
+        lambda self, key: keyring_reads.append(key),
+    )
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(
+            model="qwen3.7-max",
+            session_id="accounting-session",
+            cwd=str(tmp_path),
+            mcp_configs=[{"name": "ros", "command": "uvx"}],
+            mcp_manager_factory=mcp_manager_factory,
+            disable_external_services=True,
+        )
+    )
+
+    # 没有任何 MCP 副作用。
+    assert runtime.mcp_manager is None
+    assert keyring_reads == []
+
+    # 完整本地工具集仍在(a2a_safe_mode 会裁掉这些),token 口径才准确。
+    names = {tool.name for tool in runtime.tool_registry.list_tools()}
+    assert {"read_file", "bash", "write_file", "edit_file", "agent", "task_list"}.issubset(names)
+    assert not any(name.startswith("mcp__") for name in names)
+
+    # 不复用 a2a 的严格读目录/拒绝行为——离线核算只关闭外部连接,不改权限语义。
+    permission_context = runtime.agent_loop._permission_context
+    assert permission_context.read_path_violation_behavior != "deny"
+
+
 def test_a2a_safe_mode_keeps_cloud_tool_refresh_filtered(tmp_path, monkeypatch) -> None:
     from iac_code.a2a.runtime_overrides import refresh_runtime_cloud_tools
 

@@ -881,7 +881,7 @@ def _snapshot_oauth_state(
     storage: MCPSecretStorage,
     scope: MCPConfigScope | str | None,
 ) -> dict[str, str | None]:
-    access_key = oauth_storage_key(config, "access_token", scope=scope)
+    access_key = oauth_storage_key(config, scope=scope)
     with storage.lock(access_key):
         return {kind: get_oauth_storage_secret(config, storage, kind, scope=scope) for kind in _OAUTH_STATE_KINDS}
 
@@ -893,7 +893,7 @@ def _restore_oauth_state(
     scope: MCPConfigScope | str | None,
     snapshot: dict[str, str | None],
 ) -> None:
-    access_key = oauth_storage_key(config, "access_token", scope=scope)
+    access_key = oauth_storage_key(config, scope=scope)
     with storage.lock(access_key):
         for kind in _OAUTH_STATE_KINDS:
             value = snapshot.get(kind)

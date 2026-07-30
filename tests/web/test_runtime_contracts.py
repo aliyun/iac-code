@@ -417,6 +417,39 @@ async def test_prime_session_context_overhead_caches_from_built_runtime(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_prime_session_context_overhead_uses_offline_runtime(tmp_path, monkeypatch) -> None:
+    """会话切换核算必须请求离线 runtime(disable_external_services=True),不连接 MCP/不读钥匙串。"""
+    from iac_code.web import runtime as runtime_module
+    from iac_code.web.runtime import prime_session_context_overhead
+    from iac_code.web.session_manager import WebSessionManager
+
+    class FakeContextManager:
+        def get_usage(self):
+            return {"system_prompt_tokens": 9000, "tool_definition_tokens": 4000}
+
+    class FakeAgentLoop:
+        context_manager = FakeContextManager()
+
+    runtime = _ClosableRuntime(FakeAgentLoop())
+    captured: dict[str, object] = {}
+
+    async def fake_create(session, manager, **kwargs):
+        captured.update(kwargs)
+        return runtime
+
+    monkeypatch.setattr(runtime_module, "create_session_agent_runtime_in_thread", fake_create)
+
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(session_id="session-prime-offline")
+
+    await prime_session_context_overhead(session, manager)
+
+    assert captured.get("disable_external_services") is True
+    assert runtime.closed is True
+    assert session.context_system_prompt_tokens == 9000
+
+
+@pytest.mark.asyncio
 async def test_prime_session_context_overhead_skips_when_already_known(tmp_path, monkeypatch) -> None:
     """已有开销(实时回合已算或此前已建过一次)时不再建 runtime。"""
     from iac_code.web import runtime as runtime_module

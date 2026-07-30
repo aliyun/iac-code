@@ -22,7 +22,7 @@ import iac_code.mcp.oauth as oauth_module
 from iac_code.cli.main import app
 from iac_code.commands.registry import CommandRegistry, PromptCommand
 from iac_code.mcp.manager import MCPManager
-from iac_code.mcp.oauth import get_oauth_access_token_async, oauth_storage_key
+from iac_code.mcp.oauth import get_oauth_access_token_async, get_oauth_storage_secret, set_oauth_storage_secret
 from iac_code.mcp.skills import register_mcp_skill_commands
 from iac_code.mcp.storage import MCPSecretStorage
 from iac_code.mcp.tools import MCPTool, ReadMCPResourceTool
@@ -94,13 +94,13 @@ def test_yuque_like_release_candidate_gate(monkeypatch: pytest.MonkeyPatch, tmp_
 
         yuque_config = MCPServerConfig.from_mapping("yuque", {"type": "http", "url": server.mcp_url})
         storage = MCPSecretStorage()
-        assert storage.get_secret(oauth_storage_key(yuque_config, "access_token", scope=MCPConfigScope.USER)) == (
+        assert get_oauth_storage_secret(yuque_config, storage, "access_token", scope=MCPConfigScope.USER) == (
             "yuque-access-1"
         )
-        assert storage.get_secret(oauth_storage_key(yuque_config, "refresh_token", scope=MCPConfigScope.USER)) == (
+        assert get_oauth_storage_secret(yuque_config, storage, "refresh_token", scope=MCPConfigScope.USER) == (
             "yuque-refresh-1"
         )
-        assert storage.get_secret(oauth_storage_key(yuque_config, "client_secret", scope=MCPConfigScope.USER)) == (
+        assert get_oauth_storage_secret(yuque_config, storage, "client_secret", scope=MCPConfigScope.USER) == (
             "yuque-dcr-secret"
         )
 
@@ -154,8 +154,7 @@ def test_yuque_like_release_candidate_gate(monkeypatch: pytest.MonkeyPatch, tmp_
         cancel_config = MCPServerConfig.from_mapping("yuque-cancel", {"type": "http", "url": server.mcp_url})
         _assert_oauth_state_cleared(cancel_config)
 
-        expires_key = oauth_storage_key(yuque_config, "expires_at", scope=MCPConfigScope.USER)
-        storage.set_secret(expires_key, "100")
+        set_oauth_storage_secret(yuque_config, storage, "expires_at", "100", scope=MCPConfigScope.USER)
         before_refresh_count = len(server.oauth_state.refresh_requests)
         first, second = asyncio.run(_concurrent_expired_token_access(yuque_config))
         assert first == "yuque-access-refreshed"
@@ -168,7 +167,7 @@ def test_yuque_like_release_candidate_gate(monkeypatch: pytest.MonkeyPatch, tmp_
         _assert_oauth_state_cleared(yuque_config)
 
         for kind in _OAUTH_TEST_STORAGE_KINDS:
-            storage.set_secret(oauth_storage_key(yuque_config, kind, scope=MCPConfigScope.USER), f"leftover-{kind}")
+            set_oauth_storage_secret(yuque_config, storage, kind, f"leftover-{kind}", scope=MCPConfigScope.USER)
         removed = runner.invoke(app, ["mcp", "remove", "yuque", "--scope", "user"])
         assert removed.exit_code == 0, removed.output
         _assert_oauth_state_cleared(yuque_config)
@@ -334,9 +333,8 @@ async def test_remote_mcp_server_e2e_oauth_bearer_token_connect(monkeypatch, tmp
             },
         )
         storage = MCPSecretStorage()
-        storage.set_secret(
-            oauth_storage_key(scoped.config, "access_token", scope=MCPConfigScope.SESSION),
-            "access-token",
+        set_oauth_storage_secret(
+            scoped.config, storage, "access_token", "access-token", scope=MCPConfigScope.SESSION
         )
         manager = MCPManager([scoped], roots=[tmp_path])
 
@@ -785,7 +783,7 @@ async def _concurrent_expired_token_access(config: MCPServerConfig) -> tuple[str
 def _assert_oauth_state_cleared(config: MCPServerConfig) -> None:
     storage = MCPSecretStorage()
     for kind in _OAUTH_TEST_STORAGE_KINDS:
-        assert storage.get_secret(oauth_storage_key(config, kind, scope=MCPConfigScope.USER)) is None, kind
+        assert get_oauth_storage_secret(config, storage, kind, scope=MCPConfigScope.USER) is None, kind
 
 
 def _authorization_url_from_output(output: str) -> str:
