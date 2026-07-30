@@ -6,6 +6,7 @@ import asyncio
 import base64
 import binascii
 import json
+import logging
 import os
 import re
 import uuid
@@ -33,6 +34,7 @@ from iac_code.pipeline.constants import CLEANUP_PROMPT_METADATA_TYPE
 from iac_code.pipeline.display_names import display_step_name
 from iac_code.pipeline.engine.display_replay import DISPLAY_TRANSCRIPT_FILENAME
 from iac_code.pipeline.engine.step_spec import AllowUserEscapes
+from iac_code.providers.base import ContentBlock
 from iac_code.services.permissions.storage import apply_session_rule
 from iac_code.services.permissions.trusted_roots import build_session_trusted_read_directories
 from iac_code.services.session_index import SessionEntry, SessionIndex, _trim_title
@@ -41,6 +43,7 @@ from iac_code.services.session_storage import SessionStorage
 from iac_code.types.permissions import PermissionMode, PermissionRuleValue, ToolPermissionContext
 from iac_code.utils.state_io import atomic_write_text
 from iac_code.web.events import WebEventBuffer, normalize_event_payload
+from iac_code.web.images import load_cached_image
 from iac_code.web.permissions import (
     PERMISSION_ALWAYS_ALLOW,
     PERMISSION_ALWAYS_DENY,
@@ -56,6 +59,8 @@ from iac_code.web.permissions import (
     question_answer_from_body,
 )
 from iac_code.web.settings import is_foreign_normal_visible, is_foreign_pipeline_visible
+
+logger = logging.getLogger(__name__)
 
 WebMode = Literal["normal", "pipeline"]
 SESSION_ID_PATTERN_TEXT = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
@@ -2409,6 +2414,60 @@ class WebSessionManager:
         self.persist_web_metadata(session)
         return True
 
+    def apply_llm_auto_title(self, session: WebSession | str, title: str) -> bool:
+        """把 LLM 生成/回退得到的标题落到内存 + web sidecar,并发 session.updated。
+
+        仅当当前无有效标题(仍为空或「(empty)」)时生效,避免覆盖用户重命名或
+        运行中已设置的标题。返回是否发生变更(供调用方判断是否已刷新侧栏)。
+        """
+        session = self._resolve_session_arg(session)
+        title = (title or "").strip()
+        if not title:
+            return False
+        if session.title and session.title != "(empty)":
+            return False
+        session.title = title
+        self.persist_web_metadata(session)
+        session.events.append("session.updated", {"title": session.title})
+        return True
+
+    def schedule_llm_title(self, session: WebSession | str, *, text: str, image_ids: list[str]) -> None:
+        """新会话首个 turn:后台一次性生成标题(不阻塞本轮)。once-only,失败回退非空标题。"""
+        session = self._resolve_session_arg(session)
+        if not session.pending_llm_title:
+            return
+        session.pending_llm_title = False  # 立即消费,永不重触发
+
+        async def _run() -> None:
+            try:
+                from iac_code.web import session_titler
+                from iac_code.web.runtime import model_selection_for_session
+
+                image_blocks: list[ContentBlock] = []
+                for image_id in image_ids:
+                    try:
+                        img = load_cached_image(image_id, cwd=session.cwd, session_id=session.session_id)
+                    except Exception:  # noqa: BLE001 - 图片缺失不应中断标题生成
+                        continue
+                    image_blocks.append(
+                        ContentBlock(type="image", media_type=img.media_type, data=img.base64_data)
+                    )
+                title = await session_titler.generate_session_title(
+                    text=text,
+                    image_blocks=image_blocks,
+                    selection=model_selection_for_session(session),
+                )
+                if not title:
+                    stripped = (text or "").strip()
+                    title = _trim_title(stripped) if stripped else _("New image chat")
+                self.apply_llm_auto_title(session, title)
+            except Exception:  # noqa: BLE001 - 标题为 best-effort,任何异常都不得影响会话
+                logger.debug("schedule_llm_title failed", exc_info=True)
+
+        task = asyncio.create_task(_run())
+        session.active_local_tasks.add(task)
+        task.add_done_callback(session.active_local_tasks.discard)
+
     def persist_pipeline_user_prompt(
         self,
         session: WebSession | str,
@@ -3391,3 +3450,19 @@ class WebSessionManager:
         session.read_only = is_foreign and session.mode == "pipeline"
         self._sessions[session_key] = session
         return session
+
+
+def __getattr__(name: str) -> Any:
+    """惰性暴露 ``session_titler`` 子模块。
+
+    顶层导入会触发 session_manager → session_titler → runtime/diagram_optimizer →
+    session_manager 的导入循环(冷启动 ``iac_code.web.app`` 时 runtime 尚未定义
+    ``WebModelSelection``),故延迟到首次属性访问——此时各模块均已加载。
+    ``schedule_llm_title`` 内部走同名函数级导入拿到同一模块对象,测试对该模块
+    ``generate_session_title`` 的 patch 因此可见。
+    """
+    if name == "session_titler":
+        from iac_code.web import session_titler
+
+        return session_titler
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

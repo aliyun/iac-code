@@ -22,6 +22,7 @@ from iac_code.web.session_manager import (
     QueuedInputActionError,
     WebSessionManager,
     _context_usage_payload,
+    _is_listable_session,
     _read_web_session_metadata,
     reorder_compaction_markers,
 )
@@ -1794,3 +1795,90 @@ def test_reopened_existing_session_does_not_mark_pending_llm_title(tmp_path) -> 
     manager._sessions.pop(next(iter(manager._sessions)), None)
     reopened = manager.create_session(cwd=cwd, session_id="reopen-1")
     assert reopened.pending_llm_title is False
+
+
+def test_apply_llm_auto_title_sets_title_persists_and_emits(tmp_path) -> None:
+    cwd = str(tmp_path / "project")
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=cwd, session_id="llm-1")
+
+    changed = manager.apply_llm_auto_title(session, "创建 OSS 存储桶")
+
+    assert changed is True
+    assert session.title == "创建 OSS 存储桶"
+    sidecar = _read_web_session_metadata(manager.storage, cwd, session.session_id)
+    assert sidecar["autoTitle"] == "创建 OSS 存储桶"
+
+
+def test_apply_llm_auto_title_noop_when_already_titled(tmp_path) -> None:
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=str(tmp_path / "project"), session_id="llm-2")
+    session.title = "用户已重命名"
+    changed = manager.apply_llm_auto_title(session, "LLM 想覆盖的标题")
+    assert changed is False
+    assert session.title == "用户已重命名"
+
+
+@pytest.mark.asyncio
+async def test_schedule_llm_title_applies_generated_title(tmp_path, monkeypatch) -> None:
+    from iac_code.web import session_manager as sm
+
+    async def fake_generate(**_kwargs):
+        return "生成的标题"
+
+    monkeypatch.setattr(sm.session_titler, "generate_session_title", fake_generate)
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=str(tmp_path / "project"), session_id="llm-3")
+    assert session.pending_llm_title is True
+
+    manager.schedule_llm_title(session, text="帮我建个桶", image_ids=[])
+    assert session.pending_llm_title is False  # 立即消费,避免重触发
+    # 等待在途标题任务完成
+    for task in list(session.active_local_tasks):
+        await task
+    assert session.title == "生成的标题"
+
+
+@pytest.mark.asyncio
+async def test_schedule_llm_title_falls_back_to_image_name(tmp_path, monkeypatch) -> None:
+    from iac_code.web import session_manager as sm
+
+    async def fake_generate(**_kwargs):
+        return None  # 两次都失败
+
+    monkeypatch.setattr(sm.session_titler, "generate_session_title", fake_generate)
+    monkeypatch.setattr(
+        sm, "load_cached_image", lambda image_id, *, cwd, session_id: _FakeImg()
+    )
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=str(tmp_path / "project"), session_id="llm-4")
+
+    manager.schedule_llm_title(session, text="", image_ids=["img-1"])
+    for task in list(session.active_local_tasks):
+        await task
+    # 纯图片失败 → 非空通用名,不再是 (empty),可被侧栏列出
+    assert session.title and session.title != "(empty)"
+    assert _is_listable_session(session)
+
+
+class _FakeImg:
+    media_type = "image/png"
+    base64_data = "AAAA"
+
+
+def test_schedule_llm_title_noop_when_not_pending(tmp_path, monkeypatch) -> None:
+    from iac_code.web import session_manager as sm
+
+    called = {"n": 0}
+
+    async def fake_generate(**_kwargs):
+        called["n"] += 1
+        return "x"
+
+    monkeypatch.setattr(sm.session_titler, "generate_session_title", fake_generate)
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=str(tmp_path / "project"), session_id="llm-5")
+    session.pending_llm_title = False
+    manager.schedule_llm_title(session, text="hi", image_ids=[])
+    assert not session.active_local_tasks
+    assert called["n"] == 0
