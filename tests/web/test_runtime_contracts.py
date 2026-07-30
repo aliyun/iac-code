@@ -381,6 +381,49 @@ def test_web_turn_bounds_runtime_close_and_always_clears_active_state(tmp_path, 
 
 
 @pytest.mark.asyncio
+async def test_start_turn_triggers_llm_title_once_for_new_session(tmp_path, monkeypatch) -> None:
+    from iac_code.types.stream_events import MessageEndEvent, Usage
+    from iac_code.web import runtime as runtime_module
+    from iac_code.web.runtime import WebSessionRuntime, WebTurnRequest
+    from iac_code.web.session_manager import WebSessionManager
+
+    class FakeAgentLoop:
+        async def run_streaming(self, _user_input):
+            yield MessageEndEvent(stop_reason="stop", usage=Usage())
+
+    agent_runtime = _ClosableRuntime(FakeAgentLoop())
+    # Patch the sync factory only; the real async ``create_session_agent_runtime_in_thread``
+    # wraps it, so ``await`` in ``start_turn`` still resolves and the turn reaches the wiring.
+    monkeypatch.setattr(runtime_module, "create_session_agent_runtime", lambda *a, **k: agent_runtime)
+    monkeypatch.setattr(runtime_module, "flush_telemetry", lambda: None)
+
+    # ``_build_user_input`` loads referenced images; stub it so the image-carrying turn resolves
+    # without a real cached image on disk.
+    from iac_code.web import images as images_module
+
+    monkeypatch.setattr(
+        images_module,
+        "load_cached_image",
+        lambda *a, **k: images_module.CachedWebImage(image_id="img-1", media_type="image/png", data=b"\x89PNG"),
+    )
+
+    calls: list[dict] = []
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    monkeypatch.setattr(
+        manager,
+        "schedule_llm_title",
+        lambda session, *, text, image_ids: calls.append({"text": text, "image_ids": image_ids}),
+    )
+    session = manager.create_session(session_id="rt-title-1")
+
+    await WebSessionRuntime(session, manager=manager).start_turn(
+        WebTurnRequest(text="帮我建个桶", image_ids=["img-1"], file_refs=[])
+    )
+
+    assert calls == [{"text": "帮我建个桶", "image_ids": ["img-1"]}]
+
+
+@pytest.mark.asyncio
 async def test_prime_session_context_overhead_caches_from_built_runtime(tmp_path, monkeypatch) -> None:
     """切换会话时建一次 runtime,把系统提示 + 工具定义开销缓存到会话,并关闭 runtime。"""
     from iac_code.web import runtime as runtime_module

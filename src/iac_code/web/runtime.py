@@ -471,6 +471,9 @@ class WebSessionRuntime:
                         "user.message", _user_message_payload(request, turn_id=turn_id)
                     )
                     input_consumed = True
+                    self.manager.schedule_llm_title(
+                        self.session, text=request.text, image_ids=request.image_ids
+                    )
                     # 记录本轮“回放下界”:重载进行中会话时只回放本轮事件(尚未持久化),已完成
                     # 轮次由存储转录提供,避免完成轮次被回放而重复渲染。
                     self.session.active_turn_floor_sequence = int(user_event["sequence"]) - 1
