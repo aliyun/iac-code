@@ -6368,6 +6368,44 @@ msgstr "CloudStackInstances"
 msgid "Calling ROS template tool for {template_url}..."
 msgstr "Rufe das ROS-Vorlagenwerkzeug für {template_url} auf..."
 
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+#, python-brace-format
+msgid ""
+"Repeated ROS validation blocked: the template at {template_url} has not "
+"changed since the last failed validation (result_digest={digest}, failed "
+"attempts={count}). Calling ros_validate_template again would return the "
+"same error. Diagnose the template syntax root cause from the error below,"
+" fix the template file first, and only revalidate after the file content "
+"changed.\n"
+"Last validation error:\n"
+"{error}"
+msgstr ""
+"Wiederholte ROS-Validierung blockiert: Die Vorlage unter {template_url} "
+"hat sich seit der letzten fehlgeschlagenen Validierung nicht geändert "
+"(result_digest={digest}, fehlgeschlagene Versuche={count}). Ein erneuter "
+"Aufruf von ros_validate_template würde denselben Fehler zurückgeben. "
+"Diagnostizieren Sie die Ursache des Vorlagensyntaxfehlers anhand des "
+"folgenden Fehlers, korrigieren Sie zuerst die Vorlagendatei und "
+"validieren Sie erst erneut, nachdem sich der Dateiinhalt geändert hat.\n"
+"Letzter Validierungsfehler:\n"
+"{error}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+#, python-brace-format
+msgid ""
+"\n"
+"\n"
+"ros_validate_template failure result_digest={digest}. Locate and fix the "
+"template syntax root cause before revalidating; revalidating the "
+"unchanged template will be blocked."
+msgstr ""
+"\n"
+"\n"
+"ros_validate_template-Fehler result_digest={digest}. Lokalisieren und "
+"beheben Sie die Ursache des Vorlagensyntaxfehlers vor der erneuten "
+"Validierung; die erneute Validierung der unveränderten Vorlage wird "
+"blockiert."
+
 #: src/iac_code/tools/cloud/aliyun/template_source.py
 #, python-brace-format
 msgid ""
@@ -12695,3 +12733,4 @@ msgstr "Bash zulassen?"
 #~ msgstr ""
 #~ "Tool-Aufruf genehmigen: {tool}\n"
 #~ "Eingabezusammenfassung: {summary}"
+

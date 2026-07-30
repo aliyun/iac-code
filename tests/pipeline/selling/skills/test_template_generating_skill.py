@@ -110,6 +110,19 @@ class TestSkillContentRosOnly:
     def test_contains_error_handling(self, body):
         assert "校验失败" in body
 
+    def test_forbids_repeat_validation_of_unchanged_template(self, body):
+        assert "禁止在未修改模板文件的情况下重复调用" in body
+        assert "result_digest" in body
+        assert "先定位模板语法根因" in body or "先定位语法根因" in body
+
+    def test_requires_validation_summary_in_conclusion(self, body):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        props = fm["conclusion_schema"]["properties"]
+        assert "validation_summary" in props
+        assert "validation_summary" not in fm["conclusion_schema"]["required"]
+        assert "validation_summary" in body
+
     def test_honors_candidate_resource_lifecycle_contract(self, body):
         assert "resource_intents" in body
         assert "action=create" in body
