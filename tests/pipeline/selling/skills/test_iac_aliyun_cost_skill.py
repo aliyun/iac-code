@@ -149,6 +149,55 @@ class TestSkillFrontmatter:
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(missing_error, schema)
 
+    def test_preview_validation_can_record_recovery_path(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        schema = fm["conclusion_schema"]
+        conclusion = {
+            "monthly_estimate": "¥100/月",
+            "currency": "CNY",
+            "resources": [{"type": "ALIYUN::ECS::InstanceGroup", "cost": "¥100/月"}],
+            "template_fixed": False,
+            "deployment_parameters": {"ZoneId": "cn-hangzhou-k"},
+            "preview_validation": {
+                "succeeded": True,
+                "template_url": "templates/a.yml",
+                "parameters": {"ZoneId": "cn-hangzhou-k"},
+                "recovered": True,
+                "failure_history": [
+                    {
+                        "error": "body_file invalid",
+                        "error_code": "InvalidTemplateBody",
+                        "resolution": "修复模板后重试预览",
+                    }
+                ],
+            },
+        }
+
+        jsonschema.validate(conclusion, schema)
+
+    def test_preview_validation_failure_history_items_require_error(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        schema = fm["conclusion_schema"]
+        conclusion = {
+            "monthly_estimate": "¥100/月",
+            "currency": "CNY",
+            "resources": [{"type": "ALIYUN::ECS::InstanceGroup", "cost": "¥100/月"}],
+            "template_fixed": False,
+            "deployment_parameters": {"ZoneId": "cn-hangzhou-k"},
+            "preview_validation": {
+                "succeeded": True,
+                "template_url": "templates/a.yml",
+                "parameters": {"ZoneId": "cn-hangzhou-k"},
+                "recovered": True,
+                "failure_history": [{"resolution": "重试"}],
+            },
+        }
+
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(conclusion, schema)
+
 
 class TestSkillContentRosOnly:
     @pytest.fixture()
@@ -254,6 +303,11 @@ class TestSkillContentRosOnly:
         assert "template_url" in body
         assert "parameters" in body
         assert "deploying" in body
+
+    def test_body_requires_recovery_path_when_preview_recovered(self, body):
+        assert "recovered: true" in body
+        assert "failure_history" in body
+        assert "失败-重试-恢复路径" in body
 
     def test_preview_stack_is_not_hard_gate_for_pricing(self, body):
         assert "PreviewStack 不是硬门禁" in body
@@ -432,6 +486,12 @@ class TestCostPrompt:
         body = COST_PROMPT_MD.read_text(encoding="utf-8")
         assert "preview_validation" in body
         assert "PreviewStack 成功证明" in body
+
+    def test_prompt_requires_recovery_path_when_preview_recovered(self):
+        body = COST_PROMPT_MD.read_text(encoding="utf-8")
+        assert "recovered: true" in body
+        assert "failure_history" in body
+        assert "不得用最终成功掩盖恢复过程" in body
 
     def test_prompt_names_template_url_value_for_pricing_tools(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")

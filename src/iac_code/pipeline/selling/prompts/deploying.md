@@ -47,7 +47,7 @@
 ```
 
 ## 输出
-部署完成后调用 `complete_step` 提交部署结果。
+部署完成后调用 `complete_step` 提交部署结果。部署失败时，结论必须包含本次尝试的结构化错误详情（`error_message`，能拿到时附 `error_code` 和 `failed_stack_status`），并把每次失败与恢复动作按时间序写入 `recovery_attempts`；重试后不得复用上一次的失败结论文案。
 
 ## 错误处理
 - 模板校验失败 → 就地修复模板后重试（最多 5 轮）

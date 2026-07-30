@@ -47,6 +47,26 @@ conclusion_schema:
           type: string
         error:
           type: string
+        recovered:
+          type: boolean
+          description: 预览曾失败、经修复或调整后最终成功时为 true；一次成功时可省略
+        failure_history:
+          type: array
+          description: 预览失败-重试-恢复路径的结构化记录，按时间序追加每次失败
+          items:
+            type: object
+            required: [error]
+            additionalProperties: false
+            properties:
+              error:
+                type: string
+                description: 该次预览失败的具体错误消息（如 body_file invalid）
+              error_code:
+                type: string
+                description: 该次预览失败的结构化错误码
+              resolution:
+                type: string
+                description: 针对该次失败采取的处置（如修复模板、调整参数、重试）
       allOf:
         - if:
             properties:
@@ -198,6 +218,7 @@ aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<�
 - 若修复了模板，设置 `template_fixed: true` 并在 `fix_summary` 中说明修复内容；仅形成或输出 `deployment_parameters` 不算模板修复
 - `deployment_parameters` 填当前已选、已验证或已用于 `ros_estimate_template_cost` 的参数字典；PreviewStack 成功但询价失败时仍填该参数集；没有任何可用参数时填 `{}`
 - `preview_validation` 填 `ros_preview_template` 的结构化状态：成功时填 `{"succeeded": true, "template_url": "<当前模板文件路径>", "parameters": <预览通过的同一参数字典>}`；失败或未执行时填 `{"succeeded": false, "error": "<原因>"}`
+- 预览曾失败（如 body_file invalid、参数不合法）、经修复或调整后最终成功时，不得只写 `succeeded: true` 掩盖恢复过程：必须同时设置 `recovered: true`，并把每次失败按时间序写入 `failure_history`（`error` 填该次具体错误消息，能拿到错误码时填 `error_code`，`resolution` 填对应处置），让失败-重试-恢复路径在结论中可追溯
 - `missing_deployment_parameters` 填完整部署或 PreviewStack 仍缺少的参数及原因；没有缺口时可省略或填 `[]`
 - `parameter_set_summary` 可简要说明参数来源、可用性筛选、PreviewStack 验证结果以及是否使用软门禁继续询价
 - 询价失败时 `monthly_estimate` 填 "询价失败"，`resources` 为空数组，`error` 说明原因
