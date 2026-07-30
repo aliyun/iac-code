@@ -67,6 +67,81 @@ def test_a2a_handoff_does_not_reconstruct_cleanup_prompt_from_public_snapshot(tm
     assert "resources" not in cleanup
 
 
+def test_missing_cleanup_ledger_reports_auditable_unavailable_reason(tmp_path: Path) -> None:
+    cleanup = _cleanup_payload_from_private_ledger_or_unavailable(
+        ledger_path=tmp_path / "missing-cleanup.yaml",
+    )
+
+    assert cleanup["status"] == "unavailable"
+    assert cleanup["unavailableReason"] == "ledger_missing"
+    assert "unavailable" not in cleanup["statusMessage"].lower()
+
+
+def test_corrupt_cleanup_ledger_reports_load_failure_reason(tmp_path: Path) -> None:
+    ledger_path = tmp_path / "cleanup.yaml"
+    ledger_path.write_text("::: not yaml :::\n\t- broken", encoding="utf-8")
+
+    cleanup = _cleanup_payload_from_private_ledger_or_unavailable(ledger_path=ledger_path)
+
+    assert cleanup["status"] == "unavailable"
+    assert cleanup["unavailableReason"] == "load_failed"
+    assert "unavailable" not in cleanup["statusMessage"].lower()
+
+
+def test_cleanup_payload_reports_skipped_when_no_cleanup_was_required(tmp_path: Path) -> None:
+    ledger_path = tmp_path / "cleanup.yaml"
+    ledger = CleanupLedger(ledger_path)
+    ledger.record_observed(
+        ObservedResource(
+            provider="ros",
+            resource_type="stack",
+            resource_id="stack-delivered",
+            region_id="cn-hangzhou",
+            observed_action="CreateStack",
+            source_step_id="deploying",
+        )
+    )
+
+    cleanup = _cleanup_payload_from_private_ledger_or_unavailable(ledger_path=ledger_path)
+
+    assert cleanup["status"] == "skipped"
+    assert cleanup["skipped"] is True
+    assert cleanup["resourceCount"] == 0
+    assert "unavailable" not in cleanup["statusMessage"].lower()
+
+
+def test_cleanup_payload_reports_completed_after_cleanup_finished(tmp_path: Path) -> None:
+    ledger_path = tmp_path / "cleanup.yaml"
+    ledger = CleanupLedger(ledger_path)
+    ledger.mark_cleanup_required(
+        [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-leftover",
+                region_id="cn-hangzhou",
+                source_step_id="deploying",
+            )
+        ],
+        source_step_id="deploying",
+        reason="rollback",
+    )
+    ledger.update_resource(
+        provider="ros",
+        resource_type="stack",
+        resource_id="stack-leftover",
+        region_id="cn-hangzhou",
+        cleanup_status="completed",
+    )
+
+    cleanup = _cleanup_payload_from_private_ledger_or_unavailable(ledger_path=ledger_path)
+
+    assert cleanup["status"] == "completed"
+    assert cleanup["resourceCount"] == 1
+    assert "skipped" not in cleanup
+    assert "unavailable" not in cleanup["statusMessage"].lower()
+
+
 def test_normal_chat_cleanup_ledger_ignores_observed_only_ledger(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

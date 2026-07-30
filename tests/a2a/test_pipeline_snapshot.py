@@ -160,6 +160,50 @@ def test_reduce_cleanup_handoff_updates_snapshot_cleanup() -> None:
     assert snapshot["normalHandoff"]["data"]["cleanup"]["resourceCount"] == 1
 
 
+def test_reduce_cleanup_handoff_keeps_real_terminal_cleanup_status_auditable() -> None:
+    handoff = _base("evt-cleanup-skipped", 1, "pipeline_handoff_ready", status="completed")
+    handoff["data"] = {
+        "action": "switch_to_normal",
+        "targetMode": "normal",
+        "outcome": "completed",
+        "summary": "[Pipeline Handoff Context]",
+        "cleanup": {
+            "status": "skipped",
+            "skipped": True,
+            "resourceCount": 0,
+            "statusMessage": "No cloud resources required cleanup.",
+        },
+    }
+
+    snapshot = reduce_pipeline_events([handoff])
+
+    assert snapshot["cleanup"]["status"] == "skipped"
+    assert snapshot["cleanup"]["skipped"] is True
+    assert "unavailable" not in snapshot["cleanup"]["statusMessage"].lower()
+    assert snapshot["cleanup"]["history"][-1]["status"] == "skipped"
+
+
+def test_reduce_cleanup_handoff_preserves_partial_cleanup_status() -> None:
+    handoff = _base("evt-cleanup-partial", 1, "pipeline_handoff_ready", status="completed")
+    handoff["data"] = {
+        "action": "switch_to_normal",
+        "targetMode": "normal",
+        "outcome": "completed",
+        "summary": "[Pipeline Handoff Context]",
+        "cleanup": {
+            "status": "partial",
+            "resourceCount": 2,
+            "statusMessage": "Cleanup partially completed: 1 done, 1 failed, 0 still pending out of 2 resources.",
+        },
+    }
+
+    snapshot = reduce_pipeline_events([handoff])
+
+    assert snapshot["cleanup"]["status"] == "partial"
+    assert snapshot["cleanup"]["history"][-1]["status"] == "partial"
+    assert "unavailable" not in snapshot["cleanup"]["statusMessage"].lower()
+
+
 def test_reduce_cleanup_progress_events_update_snapshot_cleanup() -> None:
     started = _base("evt-cleanup-started", 1, "cleanup_started", scope="cleanup")
     started["data"] = {

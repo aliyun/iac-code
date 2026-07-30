@@ -74,14 +74,6 @@ msgstr "MCP-Warnung: {message}"
 msgid "A temporary error occurred. Please retry."
 msgstr "Ein temporärer Fehler ist aufgetreten. Bitte erneut versuchen."
 
-#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
-msgid ""
-"Cleanup state unavailable. Inspect the session file and cloud resources "
-"manually."
-msgstr ""
-"Bereinigungsstatus nicht verfügbar. Prüfen Sie die Sitzungsdatei und "
-"Cloud-Ressourcen manuell."
-
 #: src/iac_code/a2a/executor.py
 msgid ""
 "Rollback cleanup deferred prompt state is unavailable. Please repair it "
@@ -3796,6 +3788,65 @@ msgid "Detected {count} rollback cleanup resources; starting cleanup."
 msgstr ""
 "{count} Rollback-Bereinigungsressourcen erkannt; Bereinigung wird "
 "gestartet."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid "Cleanup ledger is missing, so cleanup state cannot be audited."
+msgstr ""
+"Das Cleanup-Ledger fehlt, daher kann der Cleanup-Status nicht geprueft "
+"werden."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+#, python-brace-format
+msgid ""
+"Cleanup ledger could not be read ({error}), so cleanup state cannot be "
+"audited."
+msgstr ""
+"Das Cleanup-Ledger konnte nicht gelesen werden ({error}), daher kann der "
+"Cleanup-Status nicht geprueft werden."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid "Cleanup ledger could not be read, so cleanup state cannot be audited."
+msgstr ""
+"Das Cleanup-Ledger konnte nicht gelesen werden, daher kann der Cleanup-"
+"Status nicht geprueft werden."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid "No cloud resources required cleanup."
+msgstr "Keine Cloud-Ressourcen mussten bereinigt werden."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+#, python-brace-format
+msgid "Cleanup skipped for {count} tracked resources."
+msgstr "Bereinigung fuer {count} verfolgte Ressourcen uebersprungen."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+#, python-brace-format
+msgid "Cleanup completed for {count} resources."
+msgstr "Bereinigung fuer {count} Ressourcen abgeschlossen."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+#, python-brace-format
+msgid "Cleanup failed for {failed} of {count} resources."
+msgstr "Bereinigung fuer {failed} von {count} Ressourcen fehlgeschlagen."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+#, python-brace-format
+msgid ""
+"Cleanup partially completed: {completed} done, {failed} failed, {pending}"
+" still pending out of {count} resources."
+msgstr ""
+"Bereinigung teilweise abgeschlossen: {completed} erledigt, {failed} "
+"fehlgeschlagen, {pending} noch offen von {count} Ressourcen."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+#, python-brace-format
+msgid "Cleanup pending for {count} resources."
+msgstr "Bereinigung fuer {count} Ressourcen ausstehend."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+#, python-brace-format
+msgid "Cleanup in progress for {pending} of {count} resources."
+msgstr "Bereinigung fuer {pending} von {count} Ressourcen laeuft."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
@@ -12695,3 +12746,13 @@ msgstr "Bash zulassen?"
 #~ msgstr ""
 #~ "Tool-Aufruf genehmigen: {tool}\n"
 #~ "Eingabezusammenfassung: {summary}"
+
+#~ msgid ""
+#~ "Cleanup state unavailable. Inspect the "
+#~ "session file and cloud resources "
+#~ "manually."
+#~ msgstr ""
+#~ "Bereinigungsstatus nicht verfügbar. Prüfen Sie"
+#~ " die Sitzungsdatei und Cloud-Ressourcen "
+#~ "manuell."
+

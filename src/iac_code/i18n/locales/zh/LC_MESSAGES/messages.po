@@ -68,12 +68,6 @@ msgstr "MCP 警告：{message}"
 msgid "A temporary error occurred. Please retry."
 msgstr "发生临时错误，请重试。"
 
-#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
-msgid ""
-"Cleanup state unavailable. Inspect the session file and cloud resources "
-"manually."
-msgstr "清理状态不可用。请手动检查会话文件和云资源。"
-
 #: src/iac_code/a2a/executor.py
 msgid ""
 "Rollback cleanup deferred prompt state is unavailable. Please repair it "
@@ -3583,6 +3577,57 @@ msgstr ""
 #, python-brace-format
 msgid "Detected {count} rollback cleanup resources; starting cleanup."
 msgstr "检测到 {count} 个回滚清理资源；开始清理。"
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid "Cleanup ledger is missing, so cleanup state cannot be audited."
+msgstr "清理台账缺失，无法审计清理状态。"
+
+#: src/iac_code/pipeline/engine/cleanup.py
+#, python-brace-format
+msgid ""
+"Cleanup ledger could not be read ({error}), so cleanup state cannot be "
+"audited."
+msgstr "清理台账读取失败（{error}），无法审计清理状态。"
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid "Cleanup ledger could not be read, so cleanup state cannot be audited."
+msgstr "清理台账读取失败，无法审计清理状态。"
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid "No cloud resources required cleanup."
+msgstr "没有云资源需要清理。"
+
+#: src/iac_code/pipeline/engine/cleanup.py
+#, python-brace-format
+msgid "Cleanup skipped for {count} tracked resources."
+msgstr "已跳过 {count} 个跟踪资源的清理。"
+
+#: src/iac_code/pipeline/engine/cleanup.py
+#, python-brace-format
+msgid "Cleanup completed for {count} resources."
+msgstr "已完成 {count} 个资源的清理。"
+
+#: src/iac_code/pipeline/engine/cleanup.py
+#, python-brace-format
+msgid "Cleanup failed for {failed} of {count} resources."
+msgstr "{count} 个资源中有 {failed} 个清理失败。"
+
+#: src/iac_code/pipeline/engine/cleanup.py
+#, python-brace-format
+msgid ""
+"Cleanup partially completed: {completed} done, {failed} failed, {pending}"
+" still pending out of {count} resources."
+msgstr "清理部分完成：共 {count} 个资源，{completed} 个已完成，{failed} 个失败，{pending} 个仍待处理。"
+
+#: src/iac_code/pipeline/engine/cleanup.py
+#, python-brace-format
+msgid "Cleanup pending for {count} resources."
+msgstr "有 {count} 个资源等待清理。"
+
+#: src/iac_code/pipeline/engine/cleanup.py
+#, python-brace-format
+msgid "Cleanup in progress for {pending} of {count} resources."
+msgstr "{count} 个资源中有 {pending} 个正在清理。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
@@ -11493,3 +11538,10 @@ msgstr "允许 Bash?"
 #~ msgstr ""
 #~ "批准工具调用：{tool}\n"
 #~ "输入摘要：{summary}"
+
+#~ msgid ""
+#~ "Cleanup state unavailable. Inspect the "
+#~ "session file and cloud resources "
+#~ "manually."
+#~ msgstr "清理状态不可用。请手动检查会话文件和云资源。"
+
