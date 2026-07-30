@@ -825,6 +825,86 @@ def test_reduce_candidate_without_parent_step_does_not_create_none_step() -> Non
     assert snapshot["steps"] == []
 
 
+def _candidate_skeleton_events() -> tuple[dict, dict, dict, dict]:
+    run_id = "candidate-selling_candidate-0-1"
+    parent = _base("evt-1", 1, "step_started", scope="step")
+    parent["step"] = {"runId": "step-evaluate_candidates-1", "id": "evaluate_candidates", "index": 3, "attempt": 1}
+    started = _base("evt-2", 2, "candidate_started", scope="candidate")
+    started["step"] = parent["step"]
+    started["candidate"] = {
+        "runId": run_id,
+        "id": "selling_candidate",
+        "index": 0,
+        "attempt": 1,
+        "steps": [
+            {
+                "runId": f"{run_id}-template_generating-1",
+                "id": "template_generating",
+                "name": "template_generating",
+                "index": 1,
+                "total": 2,
+                "attempt": 1,
+                "status": "pending",
+            },
+            {
+                "runId": f"{run_id}-cost_estimating-1",
+                "id": "cost_estimating",
+                "name": "cost_estimating",
+                "index": 2,
+                "total": 2,
+                "attempt": 1,
+                "status": "pending",
+            },
+        ],
+    }
+    step_started = _base("evt-3", 3, "candidate_step_started", scope="candidate_step")
+    step_started["step"] = parent["step"]
+    step_started["candidate"] = {"runId": run_id, "id": "selling_candidate", "index": 0, "attempt": 1}
+    step_started["candidateStep"] = {
+        "runId": f"{run_id}-template_generating-1",
+        "id": "template_generating",
+        "index": 1,
+        "total": 2,
+        "attempt": 1,
+    }
+    step_completed = _base("evt-4", 4, "candidate_step_completed", scope="candidate_step")
+    step_completed["step"] = parent["step"]
+    step_completed["candidate"] = step_started["candidate"]
+    step_completed["candidateStep"] = step_started["candidateStep"]
+    step_completed["data"] = {"conclusion": {"template": "ros"}}
+    return parent, started, step_started, step_completed
+
+
+def test_reduce_candidate_step_skeleton_does_not_duplicate_completed_step() -> None:
+    parent, started, step_started, step_completed = _candidate_skeleton_events()
+
+    snapshot = reduce_pipeline_events([parent, started, step_started, step_completed])
+
+    steps = snapshot["steps"][0]["candidates"][0]["steps"]
+    assert [step["id"] for step in steps] == ["template_generating", "cost_estimating"]
+    assert steps[0]["status"] == "completed"
+    assert steps[0]["conclusion"] == {"template": "ros"}
+    # Descriptive skeleton fields still land on the tracked step.
+    assert steps[0]["name"] == "template_generating"
+    assert steps[1]["status"] == "pending"
+
+
+def test_reduce_candidate_step_skeleton_does_not_rewind_finished_step() -> None:
+    parent, started, step_started, step_completed = _candidate_skeleton_events()
+    existing = reduce_pipeline_events([parent, started, step_started, step_completed])
+
+    resent_skeleton = _base("evt-5", 5, "candidate_started", scope="candidate")
+    resent_skeleton["step"] = parent["step"]
+    resent_skeleton["candidate"] = started["candidate"]
+
+    snapshot = reduce_pipeline_events([resent_skeleton], existing)
+
+    steps = snapshot["steps"][0]["candidates"][0]["steps"]
+    assert [step["id"] for step in steps] == ["template_generating", "cost_estimating"]
+    assert steps[0]["status"] == "completed"
+    assert steps[0]["conclusion"] == {"template": "ros"}
+
+
 def test_reduce_display_items_and_rollback_are_deduplicated() -> None:
     detail = _base("evt-1", 1, "candidate_detail_shown", scope="candidate")
     detail["candidate"] = {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1}

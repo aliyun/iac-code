@@ -660,9 +660,47 @@ class _PipelineSnapshotReducer:
             step["candidates"].append(candidate)
         self._candidate_parent_step_run_ids[run_id] = step["runId"]
 
+        # ``candidate_started`` carries a pending skeleton of the candidate's
+        # sub-steps.  It must be merged through the run-id index instead of
+        # overwriting ``candidate["steps"]``, otherwise later
+        # ``candidate_step_*`` events append a second entry with the same runId
+        # and the snapshot ends up with a pending/empty-conclusion duplicate
+        # living next to the completed step.
+        skeletons = _dict_list(coordinate.get("steps"))
+        coordinate = {key: value for key, value in coordinate.items() if key != "steps"}
+
         _merge_coordinate(candidate, coordinate)
+        self._merge_candidate_step_skeletons(candidate, skeletons)
         self._apply_candidate_lifecycle(candidate, event)
         return candidate
+
+    def _merge_candidate_step_skeletons(
+        self,
+        candidate: dict[str, Any],
+        skeletons: list[dict[str, Any]],
+    ) -> None:
+        for skeleton in skeletons:
+            run_id = _string_or_none(skeleton.get("runId"))
+            if run_id is None:
+                continue
+
+            candidate_step = self._candidate_steps_by_run_id.get(run_id)
+            if candidate_step is None:
+                candidate_step = {
+                    "runId": run_id,
+                    "id": _string_or_none(skeleton.get("id")) or run_id,
+                    "attempt": _int_or_none(skeleton.get("attempt")) or 1,
+                    "status": _string_or_none(skeleton.get("status")) or "pending",
+                }
+                self._candidate_steps_by_run_id[run_id] = candidate_step
+
+            if candidate_step not in candidate["steps"]:
+                candidate["steps"].append(candidate_step)
+
+            # The skeleton is always ``pending``; never let it rewind a step
+            # that already reached working/completed/failed.
+            descriptive = {key: value for key, value in skeleton.items() if key != "status"}
+            _merge_coordinate(candidate_step, descriptive)
 
     def _apply_candidate_lifecycle(self, candidate: dict[str, Any], event: dict[str, Any]) -> None:
         event_type = event.get("eventType")
