@@ -280,6 +280,10 @@ function normalizeStoredMessage(message, index) {
     thinking: typeof message.thinking === "string" ? message.thinking : "",
     toolUseIds: Array.isArray(message.toolUseIds) ? message.toolUseIds.map(text).filter(Boolean) : [],
     blocks: Array.isArray(message.blocks) ? message.blocks : [],
+    // 会话恢复:把转录行上的图片/文件附件透传到规整消息,否则 buildMessageAttachmentsElement
+    // 读到 undefined→不渲染,重开会话时图片消失(实时 user.message 事件一直设置这两个字段)。
+    imageIds: Array.isArray(message.imageIds) ? message.imageIds.map(text).filter(Boolean) : [],
+    fileRefs: Array.isArray(message.fileRefs) ? message.fileRefs.map(text).filter(Boolean) : [],
     status: "completed",
     sequence: index + 1,
     stored: true,
@@ -5038,6 +5042,13 @@ async function handleStreamEvent(event, generation = sessionLoadGeneration) {
     }
   }
   state = reduceAndDedupe(state, event);
+  // session.updated / session.started 在 reducer 里只更新了 currentSession(驱动主区标题),
+  // 侧栏行读的是 state.sessions[i].title——LLM 生成/重命名的新标题原本要等下一次后台列表轮询
+  // (~2.5s)才追平,表现为「主区标题已变、侧栏行仍是旧标题」。把 currentSession 最新元数据折进
+  // 侧栏各数组(复用重命名/置顶同一条合并逻辑),让侧栏行与主区标题同帧刷新。
+  if ((event.type === "session.updated" || event.type === "session.started") && state.currentSession) {
+    state = replaceUpdatedSessionInState(state, state.currentSession);
+  }
   // 记录最近一次可见流式进度，供流水线事件间隙占位判定「正在流式 vs 陈旧标记」
   // （见 stepBodyHasLiveActivity）。仅文本/思考 delta 算进度；工具活动另由工具卡自述。
   if (event.type === "assistant.text.delta" || event.type === "assistant.thinking.delta") {

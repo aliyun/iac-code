@@ -1114,7 +1114,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-311" in html
-    assert "/static/js/app.js?v=web-repl-ui-314" in html
+    assert "/static/js/app.js?v=web-repl-ui-316" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1148,7 +1148,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-314" in index_html
+    assert "web-repl-ui-316" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-304" in app_source
     assert "./components/workspace.js?v=cloud-creds-v49" in app_source
@@ -2826,6 +2826,19 @@ def test_user_message_attachments_render_in_transcript() -> None:
     assert 'className = "message-attachments"' in app_source
     assert "/api/images/" in app_source
     assert ".message-attachments" in styles
+
+
+def test_stored_message_normalizer_carries_attachment_ids() -> None:
+    # 会话恢复路径:load_visible_transcript 会把用户图片/文件附件以 imageIds/fileRefs
+    # (camelCase,与实时 user.message 事件同名)挂在转录行上,normalizeStoredMessage 必须把它们
+    # 透传到规整后的消息对象,否则 buildMessageAttachmentsElement 读到 undefined→不渲染图片,
+    # 表现为「会话恢复图片不显示」。实时路径(events.js 的 user.message)一直设置这两个字段,
+    # 故 live 正常、reload 丢图,是 reload-vs-live 不一致。
+    app_source = _source(APP_JS)
+    normalizer = app_source.split("function normalizeStoredMessage(", 1)[1].split("\nfunction ", 1)[0]
+
+    assert "message.imageIds" in normalizer
+    assert "message.fileRefs" in normalizer
 
 
 def test_composer_uses_contextual_placeholder_without_visible_label(tmp_path: Path) -> None:
@@ -9507,10 +9520,26 @@ def test_styles_has_compaction_boundary_rule() -> None:
     assert "border-top" not in boundary_block
 
 
+def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
+    # LLM 生成/重命名标题经 session.updated 到达时,reducer 只更新 currentSession(主区标题),
+    # 侧栏行读 state.sessions[i].title。若不把 currentSession 折进侧栏各数组,侧栏要等 ~2.5s
+    # 后台轮询才追平,表现为「主区标题已变、侧栏行仍旧」。handleStreamEvent 收到 session.updated/
+    # session.started 时必须调用 replaceUpdatedSessionInState,让侧栏与主区同帧刷新。
+    app_source = _source(APP_JS)
+    guard = 'event.type === "session.updated" || event.type === "session.started"'
+    assert guard in app_source
+    fold_call = "replaceUpdatedSessionInState(state, state.currentSession)"
+    assert fold_call in app_source
+    # 折叠必须发生在 handleStreamEvent 的 reduceAndDedupe 之后(拿到已合并的 currentSession)。
+    handler = app_source.split("state = reduceAndDedupe(state, event);", 1)[1]
+    assert guard in handler
+    assert fold_call in handler
+
+
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-314" in html
-    assert "web-repl-ui-313" not in html
+    assert "web-repl-ui-316" in html
+    assert "web-repl-ui-315" not in html
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:
