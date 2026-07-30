@@ -1114,7 +1114,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-308" in html
-    assert "/static/js/app.js?v=web-repl-ui-305" in html
+    assert "/static/js/app.js?v=web-repl-ui-306" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1146,7 +1146,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-305" in index_html
+    assert "web-repl-ui-306" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-304" in app_source
     assert "./components/workspace.js?v=cloud-creds-v49" in app_source
@@ -1355,6 +1355,39 @@ def test_sidebar_running_state_stays_fresh_after_switch_and_polling() -> None:
     assert "setTimeout(runSessionsRefreshTick" in app_source
     # 后台标签页重新可见时立即补刷一次,切回原页面无需再等一个周期。
     assert 'addEventListener("visibilitychange"' in app_source
+
+
+def test_sidebar_defers_repaint_while_pointer_inside() -> None:
+    app_source = _source(APP_JS)
+
+    # 运行中侧栏(流式逐帧 render + 后台 2.5s 轮询)高频整栏 replaceChildren 重建,销毁光标下的行,
+    # 令 :hover 背景与 hover 才显形的操作按钮反复通断——用户反馈的「一闪闪」。指针在侧栏内时挂起
+    # 这类自动重绘(只记账不重建),pointerleave 追平一次。
+    assert "let sidebarPointerInside = false;" in app_source
+    assert "let sidebarRepaintPending = false;" in app_source
+
+    assert "function renderSessionsAuto(state)" in app_source
+    auto_body = app_source.split("function renderSessionsAuto(state)", 1)[1].split("\n}", 1)[0]
+    assert "if (sidebarPointerInside)" in auto_body
+    assert "sidebarRepaintPending = true;" in auto_body
+    assert "renderSessions(state);" in auto_body
+
+    # 流式 render 与后台刷新都改走节流包装,不再直接 renderSessions。
+    assert "renderSessionsAuto(state);" in app_source
+    render_body = app_source.split("function render(state)", 1)[1].split("\n}", 1)[0]
+    assert "renderSessionsAuto(state);" in render_body
+    refresh_body = app_source.split("async function refreshSessionsSidebar()", 1)[1].split("\n}", 1)[0]
+    assert "renderSessionsAuto(state);" in refresh_body
+
+    # 稳定容器 .session-rail 绑定进出边界探测(只一次);容器不被 replaceChildren 重建,监听长期有效。
+    assert "function ensureSidebarHoverGuard()" in app_source
+    guard_body = app_source.split("function ensureSidebarHoverGuard()", 1)[1].split("\n}\n", 1)[0]
+    assert '.session-rail' in guard_body
+    assert 'addEventListener("pointerenter"' in guard_body
+    assert 'addEventListener("pointerleave"' in guard_body
+    # pointerleave 时若有挂起重绘则追平一次。
+    assert "sidebarRepaintPending" in guard_body
+    assert "ensureSidebarHoverGuard();" in app_source
 
 
 def test_complete_step_tool_renders_conclusion_card() -> None:
@@ -9412,7 +9445,7 @@ def test_styles_has_compaction_boundary_rule() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-305" in html
+    assert "web-repl-ui-306" in html
     assert "web-repl-ui-304" not in html
 
 

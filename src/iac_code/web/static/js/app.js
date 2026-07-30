@@ -4396,7 +4396,7 @@ function render(state) {
   }
   root.dataset.ready = "true";
   persistCurrentSessionActivity(state);
-  renderSessions(state);
+  renderSessionsAuto(state);
   renderMessages(state);
   renderQueuedInputs(state);
   renderBlocking(state);
@@ -5048,13 +5048,51 @@ function connectCurrentStream(generation = sessionLoadGeneration) {
   );
 }
 
+// 侧栏行由整栏 replaceChildren 全量重建。运行中(流式回合逐帧 render + 后台 2.5s 轮询)会高频重建，
+// 销毁光标下的会话/项目行——:hover 背景与「hover 才显形」的操作按钮(.thread-actions/.project-actions)
+// 随之反复通断，即用户反馈的「一闪闪」。指针在侧栏内时把这类自动重绘挂起(只记账,不重建 DOM)，
+// 指针移开(pointerleave)追平一次;用户主动的展开/收起/置顶/切换走 renderProjectThreadNavigation /
+// renderSessions 直连，不经此挂起，照常即时重绘。
+let sidebarPointerInside = false;
+let sidebarRepaintPending = false;
+
+// 流式 / 后台刷新触发的侧栏重绘经此:指针在侧栏内则挂起(待 pointerleave 追平)，否则立即重绘。
+function renderSessionsAuto(state) {
+  if (sidebarPointerInside) {
+    sidebarRepaintPending = true;
+    return;
+  }
+  sidebarRepaintPending = false;
+  renderSessions(state);
+}
+
+// 给稳定的 .session-rail 容器绑定进出边界的悬停探测(只一次)。pointerenter/leave 不随子节点冒泡，
+// 容器本身不被 replaceChildren 重建,故监听长期有效。
+function ensureSidebarHoverGuard() {
+  const rail = root?.querySelector(".session-rail");
+  if (!rail || rail.dataset.hoverGuardBound === "1") {
+    return;
+  }
+  rail.dataset.hoverGuardBound = "1";
+  rail.addEventListener("pointerenter", () => {
+    sidebarPointerInside = true;
+  });
+  rail.addEventListener("pointerleave", () => {
+    sidebarPointerInside = false;
+    if (sidebarRepaintPending) {
+      sidebarRepaintPending = false;
+      renderSessions(state);
+    }
+  });
+}
+
 // 后台刷新侧边栏快照:非当前会话的「进行中」转圈与相对时间只来自列表快照,靠这里定期/切换时
 // 重新拉取，才能在切走后仍看到正在运行的会话转圈、并让时间反映真实活动。只重绘侧边栏，不动当前
 // 会话的正文，避免打断阅读或滚动。
 async function refreshSessionsSidebar() {
   try {
     await loadSessions();
-    renderSessions(state);
+    renderSessionsAuto(state);
     // 搜索面板对「非当前会话」同样只靠这条轮询刷新:会话从「进行中」变「未读」后,若不重刷
     // 面板,它会一直停在进行中转圈(与侧栏矛盾)。面板打开时用当前输入重刷一遍会话行。
     if (isCommandPaletteOpen()) {
@@ -5115,6 +5153,8 @@ function startSessionsAutoRefresh() {
   if (sessionsRefreshTimer) {
     return;
   }
+  // 运行中侧栏会高频全量重建,指针停在其上会「一闪闪」;绑定悬停探测,悬停期间挂起自动重绘。
+  ensureSidebarHoverGuard();
   // 后台标签页不轮询;重新可见时立即补刷一次,避免切回原页面还要再等一个周期才追上真实状态。
   if (typeof document !== "undefined" && document.addEventListener) {
     document.addEventListener("visibilitychange", () => {
