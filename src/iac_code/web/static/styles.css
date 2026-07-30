@@ -6674,14 +6674,14 @@ body.is-resizing-sidebar {
 .session-status-row dd {
   min-width: 0;
   margin: 0;
-  overflow: hidden;
   color: var(--codex-text);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, monospace;
   font-size: 0.92rem;
   font-weight: 430;
   line-height: 1.38;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* 背景信息等长行改为在值列内换行,完整展示,不再单行截断成省略号。 */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* 带复制按钮的会话行:dd 改为 flex 容器,值文本单独承担省略号,按钮不被裁切。 */
