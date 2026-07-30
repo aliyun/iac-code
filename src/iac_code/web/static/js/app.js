@@ -3889,8 +3889,11 @@ function renderPipeline(state) {
   workspace.replaceChildren(renderPipelineWorkspace(state, { onSelectCandidate: handleSelectPipelineCandidate }));
 }
 
-export function pipelineWorkspaceEntryVisible(candidateState = {}) {
-  return text(candidateState.currentSession?.mode) === "pipeline" && !candidateState.newSessionDraft?.active;
+// 遗留的 pipeline 工作区模态入口已从产品中移除:主区内联体验已完整覆盖流水线，
+// 标题栏「View pipeline」按钮不再向用户暴露。底层的隐藏 tab 与 components/pipeline.js
+// 仍保留(可逆),故此判定恒为 false —— 保留函数与调用点，仅关闭入口。
+export function pipelineWorkspaceEntryVisible(_candidateState = {}) {
+  return false;
 }
 
 function renderStatus(state) {
@@ -4674,6 +4677,8 @@ export function pipelineSelectionRequiresWorkspace(candidateState = {}) {
   return pendingKind === "candidate_selection" || waitingCandidateStep || selectionRequiredEvent;
 }
 
+// 保留(当前无调用):遗留 pipeline 模态入口已下线，候选选择不再自动弹出工作区。
+// 底层判定 pipelineSelectionRequiresWorkspace 与该辅助函数一并保留，便于将来复用/回滚。
 function maybeOpenPipelineSelectionWorkspace(candidateState = state) {
   if (pipelineSelectionRequiresWorkspace(candidateState)) {
     openWorkspaceModal("pipeline");
@@ -4978,7 +4983,6 @@ async function loadSession(sessionId, options = {}) {
   render(state);
   outputController?.reset();
   outputController?.refresh(sessionId);
-  maybeOpenPipelineSelectionWorkspace(state);
   return true;
 }
 
@@ -5025,13 +5029,6 @@ async function handleStreamEvent(event, generation = sessionLoadGeneration) {
   // （见 stepBodyHasLiveActivity）。仅文本/思考 delta 算进度；工具活动另由工具卡自述。
   if (event.type === "assistant.text.delta" || event.type === "assistant.thinking.delta") {
     lastStreamDeltaAt = Date.now();
-  }
-  if (
-    event.type === "candidate.detail" ||
-    event.type === "pipeline.snapshot" ||
-    (event.type === "pipeline.event" && pipelineEventKind(event.payload) === "candidate.selection.required")
-  ) {
-    maybeOpenPipelineSelectionWorkspace(state);
   }
   // 本轮进行中的实时上下文用量:后端把 contextUsage 附在 assistant.message.end / turn.done 上
   // (每个模型往返一次)。收到即写回当前会话,下一帧 renderStatus 会驱动 composer 圆环刷新,

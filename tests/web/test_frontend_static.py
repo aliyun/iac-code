@@ -1114,7 +1114,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-310" in html
-    assert "/static/js/app.js?v=web-repl-ui-308" in html
+    assert "/static/js/app.js?v=web-repl-ui-311" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1146,7 +1146,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-308" in index_html
+    assert "web-repl-ui-311" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-304" in app_source
     assert "./components/workspace.js?v=cloud-creds-v49" in app_source
@@ -6912,13 +6912,19 @@ def test_index_exposes_live_frontend_mount_points() -> None:
         assert hook in source
 
 
-def test_pipeline_workspace_has_a_real_product_entry_and_mobile_visual_coverage() -> None:
+def test_pipeline_workspace_entry_removed_but_code_retained_with_audit_coverage() -> None:
+    # 遗留的 pipeline 工作区模态入口已从产品中下线(用户从未开放该功能):
+    #   1. 标题栏「View pipeline」按钮恒隐藏 —— pipelineWorkspaceEntryVisible 恒返回 false;
+    #   2. 候选选择不再自动弹出工作区 —— maybeOpenPipelineSelectionWorkspace 不再被调用。
+    # 但底层渲染代码(隐藏 tab、components/pipeline.js、按钮 markup 与点击处理)保留、可回滚,
+    # 且视觉审计仍通过临时揭开隐藏按钮覆盖该工作区的回归。
     html = _source(INDEX_HTML)
     app_source = _source(APP_JS)
     styles = _source(STYLES_CSS)
     audit_source = _source(VISUAL_AUDIT_SCRIPT)
     workspace_source = _source(WORKSPACE_JS)
 
+    # 底层代码保留:按钮 markup / 点击处理 / 隐藏态 CSS / 渲染函数都还在。
     assert 'data-app-shell="pipeline-workspace-open"' in html
     assert 'aria-label="View pipeline"' in html
     assert (
@@ -6930,10 +6936,18 @@ def test_pipeline_workspace_has_a_real_product_entry_and_mobile_visual_coverage(
     assert "export function pipelineWorkspaceEntryVisible" in app_source
     assert ".pipeline-workspace-open[hidden]" in styles
 
+    # 入口已关闭:可见性判定恒 false,自动弹出调用已移除。
+    entry_fn = app_source.split("export function pipelineWorkspaceEntryVisible", 1)[1][:200]
+    assert "return false;" in entry_fn
+    assert '=== "pipeline"' not in entry_fn
+    assert "maybeOpenPipelineSelectionWorkspace(state)" not in app_source
+
     assert 'name: "mobile-pipeline-workspace"' in audit_source
     assert 'name: "pipeline-session-entry"' in audit_source
     assert 'await setViewport(page, "tablet");' in audit_source
     assert "showProgrammaticWorkspacePanelForVisualFixture" not in audit_source
+    # 审计临时揭开隐藏入口后仍复用其真实点击处理打开工作区。
+    assert "async function openLegacyPipelineWorkspace(page)" in audit_source
     assert "page.locator('[data-app-shell=\"pipeline-workspace-open\"]').click()" in audit_source
     assert "Exact /status command with suggestion list open." in audit_source
     assert "Exact /auth command with suggestion list open." not in audit_source
@@ -9476,7 +9490,7 @@ def test_styles_has_compaction_boundary_rule() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-308" in html
+    assert "web-repl-ui-311" in html
     assert "web-repl-ui-304" not in html
 
 
