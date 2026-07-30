@@ -6914,6 +6914,11 @@ body.is-resizing-sidebar {
 
 .message-agent:has(.message-tool-cards) {
   display: grid;
+  /* 单列 minmax(0, 1fr):不写显式列时隐式列按 max-content 撑开,子项(.message-tool-cards /
+     .message-body 各自 width: min(40rem, 100%))的 100% 会据此撑到 ~40rem,在被缩进的流水线
+     步骤体里(agent 盒宽随嵌套收窄到 <40rem)整列右缘就溢出到步骤边界之外。约束成 1fr 让列恒等
+     于 agent 内容宽,子项 100% 据此收窄,各层右缘齐平。 */
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.56rem;
   width: 100%;
   max-width: 100%;
@@ -6928,6 +6933,7 @@ body.is-resizing-sidebar {
 
 .message-agent:has(.message-tool-cards) > .message-body {
   width: max-content;
+  min-width: 0;
   max-width: min(40rem, 100%);
   padding: 0;
   border: 0;

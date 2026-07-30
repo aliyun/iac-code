@@ -759,6 +759,7 @@ def test_transcript_chat_flow_uses_codex_unboxed_message_layout() -> None:
     label_block = _css_block(styles, ".transcript-panel .message-label")
     user_block = _css_block(styles, ".transcript-panel .message-user")
     agent_block = _css_block(styles, ".transcript-panel .message-agent")
+    agent_toolcards_block = _css_block(styles, ".message-agent:has(.message-tool-cards)")
     agent_body_block = _css_block(styles, ".message-agent:has(.message-tool-cards) > .message-body")
     tool_container_block = _css_block(styles, ".message-tool-cards .tool-group,\n.message-tool-cards .tool-card")
     tool_row_block = _css_block(styles, ".message-tool-cards .tool-group-summary,\n.message-tool-cards .tool-card-row")
@@ -783,6 +784,9 @@ def test_transcript_chat_flow_uses_codex_unboxed_message_layout() -> None:
     assert "border: 0;" in agent_body_block
     assert "border-radius: 0;" in agent_body_block
     assert "background: transparent;" in agent_body_block
+    # 带工具卡的 agent 网格必须约束单列为 minmax(0, 1fr),否则隐式 max-content 列会把子项撑到 ~40rem,
+    # 在被缩进的流水线步骤体里整列右缘溢出到步骤边界外。
+    assert "grid-template-columns: minmax(0, 1fr);" in agent_toolcards_block
     assert "padding: 0;" in tool_container_block
     assert "margin: 0;" in tool_container_block
     assert "padding: 0.06rem 0;" in tool_row_block
@@ -1109,7 +1113,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-306" in html
+    assert "/static/styles.css?v=web-repl-ui-307" in html
     assert "/static/js/app.js?v=web-repl-ui-305" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
