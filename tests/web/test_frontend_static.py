@@ -1113,14 +1113,14 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-311" in html
-    assert "/static/js/app.js?v=web-repl-ui-316" in html
+    assert "/static/styles.css?v=web-repl-ui-312" in html
+    assert "/static/js/app.js?v=web-repl-ui-317" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
     # 已归档面板复刻(archived tab)新增 listArchivedSessions/deleteArchivedSessions,
     # 同样需 bump api.js 版本位,否则回访浏览器拿不到新导出。
-    assert "./api.js?v=web-repl-ui-303" in app_source
+    assert "./api.js?v=web-repl-ui-305" in app_source
     assert "./components/composer.js?v=session-model-v18" in app_source
     # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
     assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
@@ -1148,10 +1148,10 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-316" in index_html
+    assert "web-repl-ui-317" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-304" in app_source
-    assert "./components/workspace.js?v=cloud-creds-v49" in app_source
+    assert "./components/workspace.js?v=cloud-creds-v50" in app_source
     assert "workspace-cloud-vendors" in workspace_source
     assert "Alibaba Cloud" in workspace_source
     assert "workspace-cloud-mode-fields" in workspace_source
@@ -6634,8 +6634,12 @@ def test_plugins_panel_hosts_skills_and_mcp_subtabs() -> None:
     assert "workspace-tab-icon-mcp" not in html
     assert 'data-workspace-panel="mcp"' not in html
     # NAV_GROUPS 不再含独立 MCP 项(改用逐字段核对,避免与 PLUGINS_SUBTABS 里同样的
-    # `{ id: "mcp", label: "MCP" }` 字面量冲突)。
-    assert '{ id: "memory", label: t("Memory") },\n      { id: "skills", label: t("Plugins") },\n    ],' in source
+    # `{ id: "mcp", label: "MCP" }` 字面量冲突)。skills 之后是 devOnly 的 developer 项。
+    assert (
+        '{ id: "memory", label: t("Memory") },\n'
+        '      { id: "skills", label: t("Plugins") },\n'
+    ) in source
+    assert '{ id: "mcp", label: "MCP" },\n    ],' not in source
 
     # 「插件」容器包住两个子面板,并注册为唯一的 skills 面板控制器。
     assert "function createPluginsPanel(api, context)" in source
@@ -6716,8 +6720,9 @@ def test_general_panel_sections_have_chapter_spacing() -> None:
 
 
 def test_general_panel_section_order() -> None:
-    # 章节顺序:新会话默认 → 配色方案(含界面语言)→ 售卖流水线 → 外来会话可见性 → 重启服务。
-    # languageField 紧随 themeGrid,保证 field→head 相邻关系仍命中现有章节间距选择器。
+    # 章节顺序:新会话默认 → 配色方案(含界面语言)→ 售卖流水线 → 外来会话可见性 → 开发者模式。
+    # 重启服务已从常规面板移至「开发」分页;languageField 紧随 themeGrid,保证 field→head
+    # 相邻关系仍命中现有章节间距选择器。
     workspace_source = _source(WORKSPACE_JS)
     assert (
         "panel.append(\n"
@@ -6731,8 +6736,8 @@ def test_general_panel_section_order() -> None:
         "    reviewStepCard,\n"
         "    groupHead,\n"
         "    card,\n"
-        "    restartGroupHead,\n"
-        "    restartCard,\n"
+        "    devModeGroupHead,\n"
+        "    devModeCard,\n"
         "    status,\n"
         "  );"
     ) in workspace_source
@@ -7285,7 +7290,7 @@ def test_workspace_cloud_panel_prefills_secrets_and_resets_on_mode_switch() -> N
 def test_app_wires_workspace_controls_to_current_session() -> None:
     source = _source(APP_JS)
 
-    assert 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v49";' in source
+    assert 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v50";' in source
     assert "workspace = createWorkspaceController" in source
     assert 'tabs: byShell("workspace-tabs")' in source
     assert 'content: byShell("workspace-content")' in source
@@ -9538,8 +9543,8 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-316" in html
-    assert "web-repl-ui-315" not in html
+    assert "web-repl-ui-317" in html
+    assert "web-repl-ui-316" not in html
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:
@@ -9761,7 +9766,7 @@ def test_styles_define_review_step_prerequisite_progress() -> None:
 
 def test_app_uses_bumped_api_version_for_outputs() -> None:
     source = _source(APP_JS)
-    assert "./api.js?v=web-repl-ui-303" in source
+    assert "./api.js?v=web-repl-ui-305" in source
     assert "./api.js?v=web-repl-ui-159" not in source
 
 
@@ -10502,3 +10507,41 @@ def test_index_html_uses_data_i18n_markers() -> None:
     html = _source(INDEX_HTML)
     assert 'data-i18n="New chat"' in html
     assert html.count("data-i18n") >= 30
+
+
+def test_developer_mode_wiring_present() -> None:
+    # 开发者模式:常规分页放总开关(workspace-developer-mode),开启后 NAV_GROUPS 里
+    # devOnly 的「开发」分页才出现;api.js 暴露读写端点;失败工具标红门控于 body class。
+    workspace = _source(WORKSPACE_JS)
+    api = _source(API_JS)
+    app = _source(APP_JS)
+
+    # 总开关 + devOnly 分页 + 专属面板
+    assert 'makeForeignSwitch("workspace-developer-mode")' in workspace
+    assert "devOnly: true" in workspace
+    assert "function createDeveloperPanel" in workspace
+    # 「失败工具标红」开关(功能1)与其 body class 切换
+    assert 'makeForeignSwitch("workspace-highlight-failed-tools")' in workspace
+    assert 'classList.toggle("dev-highlight-tool-errors"' in workspace
+
+    # api.js 客户端读写端点(功能持久化)
+    assert "export function getDeveloperSettings" in api
+    assert "export function saveDeveloperSettings" in api
+    assert "/api/settings/developer" in api
+
+    # app.js 启动时按已保存设置应用标红 body class
+    assert "applyDeveloperHighlightFromSettings" in app
+    assert "api.getDeveloperSettings()" in app
+
+
+def test_failed_tool_highlight_gated_under_body_class() -> None:
+    # 功能1:失败工具标红规则必须门控在 body.dev-highlight-tool-errors 下,
+    # 开关关闭(默认)时失败工具卡与其它工具一视同仁。
+    css = _source(STYLES_CSS)
+    for rule in (
+        "body.dev-highlight-tool-errors .message-tool-cards .tool-card.is-error",
+        "body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-status.is-error",
+        "body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-bar-fill.is-error",
+        "body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-cell-status.is-error",
+    ):
+        assert rule in css

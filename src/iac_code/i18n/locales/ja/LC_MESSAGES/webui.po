@@ -2217,6 +2217,10 @@ msgid "Account"
 msgstr "アカウント"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Developer"
+msgstr "開発者"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Alibaba Cloud"
 msgstr "Alibaba Cloud"
 
@@ -3532,6 +3536,22 @@ msgid ""
 msgstr "有効にすると、web 以外のエントリーポイントで作成された通常セッションがリストに表示され、web で再開して引き継げます。"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Developer mode"
+msgstr "開発者モード"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "When enabled, a Developer settings tab appears with additional tools."
+msgstr "有効にすると、追加ツールを備えた「開発」設定タブが表示されます。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enable developer mode"
+msgstr "開発者モードを有効化"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Reveals the Developer settings tab. Turning it off hides that tab again."
+msgstr "「開発」設定タブを表示します。オフにすると、そのタブは再び非表示になります。"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid ""
 "Control optional steps of the sales pipeline; affects only newly started "
 "pipeline runs. Running pipelines keep their original configuration."
@@ -3645,6 +3665,24 @@ msgstr "infraguard ツールが検出されず、現在の環境では自動イ�
 #, python-brace-format
 msgid "Install failed: {error}"
 msgstr "インストールに失敗しました: {error}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Failed tool calls"
+msgstr "失敗したツール呼び出し"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Control how failed tool calls are shown in the transcript."
+msgstr "失敗したツール呼び出しをトランスクリプトでどう表示するかを制御します。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Highlight failed tool calls in red"
+msgstr "失敗したツール呼び出しを赤で強調表示"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, failed tool calls are painted red. When disabled, they look"
+" like any other tool call."
+msgstr "有効にすると、失敗したツール呼び出しが赤で表示されます。無効にすると、他のツール呼び出しと同じ見た目になります。"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"

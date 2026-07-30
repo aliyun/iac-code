@@ -197,6 +197,7 @@ def create_app(
     from iac_code.web.settings import (
         aliyun_cloud_summary,
         clear_provider_config,
+        developer_settings,
         get_appearance_theme,
         get_session_defaults,
         get_ui_language,
@@ -207,6 +208,7 @@ def create_app(
         save_active_provider,
         save_aliyun_cloud,
         save_appearance_theme,
+        save_developer_settings,
         save_foreign_sessions_visibility,
         save_provider_config,
         save_selling_review_step,
@@ -3317,6 +3319,18 @@ def create_app(
             return json_error(str(exc), 400)
         return JSONResponse(save_foreign_sessions_visibility(show_pipeline, show_normal))
 
+    async def get_developer_settings(request):
+        return JSONResponse(developer_settings())
+
+    async def put_developer_settings(request):
+        try:
+            data = await json_object_body(request)
+            mode = required_bool(data, "mode")
+            highlight_failed_tools = required_bool(data, "highlightFailedTools")
+        except ValueError as exc:
+            return json_error(str(exc), 400)
+        return JSONResponse(save_developer_settings(mode, highlight_failed_tools))
+
     async def get_pipeline_review_step_settings(request):
         return JSONResponse(selling_review_step_settings())
 
@@ -4715,6 +4729,8 @@ def create_app(
             Route("/api/memory/auto", put_memory_auto, methods=["PUT"]),
             Route("/api/settings/foreign-sessions", get_foreign_settings, methods=["GET"]),
             Route("/api/settings/foreign-sessions", put_foreign_settings, methods=["PUT"]),
+            Route("/api/settings/developer", get_developer_settings, methods=["GET"]),
+            Route("/api/settings/developer", put_developer_settings, methods=["PUT"]),
             Route("/api/settings/pipeline-review-step", get_pipeline_review_step_settings, methods=["GET"]),
             Route("/api/settings/pipeline-review-step", put_pipeline_review_step_settings, methods=["PUT"]),
             Route(

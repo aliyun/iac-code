@@ -1,9 +1,9 @@
-import * as api from "./api.js?v=web-repl-ui-303";
+import * as api from "./api.js?v=web-repl-ui-305";
 import { createComposerController } from "./components/composer.js?v=session-model-v18";
 import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v5";
 import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v7";
 import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v23";
-import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v49";
+import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v50";
 import { createOutputController } from "./components/output_panel.js?v=output-panel-v17";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
 import { reduceEvent } from "./events.js?v=web-repl-ui-304";
@@ -5904,6 +5904,10 @@ async function start() {
     }
   });
   await loadSessions();
+  // 开发者设置:失败工具标红开关持久化于服务端。页面加载即读取并落到 body 类,
+  // 让整段转录的失败工具标红规则(styles.css 门控于 body.dev-highlight-tool-errors)
+  // 从首屏起即反映用户选择——无需打开设置面板。读取失败静默(保持不标红)。
+  void applyDeveloperHighlightFromSettings();
   // 打开 Web 页面时默认进入新会话界面，而非自动选中最近的已有会话。
   startNewSessionDraft();
   // 定时后台刷新侧边栏,让其它会话的运行转圈与相对时间保持新鲜。
@@ -5911,6 +5915,15 @@ async function start() {
   // 顶部更新提醒(fire-and-forget,检查失败静默);随后周期轮询,让运行中发布的新版自动弹出。
   void checkForUpdateBanner();
   startUpdateAutoCheck();
+}
+
+async function applyDeveloperHighlightFromSettings() {
+  try {
+    const developer = await api.getDeveloperSettings();
+    document.body.classList.toggle("dev-highlight-tool-errors", Boolean(developer?.highlightFailedTools));
+  } catch (_error) {
+    /* 读取失败保持默认:不标红 */
+  }
 }
 
 start().catch((error) => {

@@ -2217,6 +2217,10 @@ msgid "Account"
 msgstr "账号"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Developer"
+msgstr "开发者"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Alibaba Cloud"
 msgstr "阿里云"
 
@@ -3528,6 +3532,22 @@ msgid ""
 msgstr "打开后,非 web 入口产生的普通会话在列表出现,并可在 web 中续聊接手。"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Developer mode"
+msgstr "开发者模式"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "When enabled, a Developer settings tab appears with additional tools."
+msgstr "开启后，会出现「开发」设置分页，提供额外的工具。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enable developer mode"
+msgstr "开启开发者模式"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Reveals the Developer settings tab. Turning it off hides that tab again."
+msgstr "显示「开发」设置分页；关闭后该分页会再次隐藏。"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid ""
 "Control optional steps of the sales pipeline; affects only newly started "
 "pipeline runs. Running pipelines keep their original configuration."
@@ -3639,6 +3659,24 @@ msgstr "未检测到 infraguard 工具,且当前环境无法自动安装,请先�
 #, python-brace-format
 msgid "Install failed: {error}"
 msgstr "安装失败:{error}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Failed tool calls"
+msgstr "失败的工具调用"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Control how failed tool calls are shown in the transcript."
+msgstr "控制失败的工具调用在转录中的显示方式。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Highlight failed tool calls in red"
+msgstr "用红色高亮失败的工具调用"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, failed tool calls are painted red. When disabled, they look"
+" like any other tool call."
+msgstr "开启后，失败的工具调用会标红；关闭后，它们与其它工具调用外观一致。"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"

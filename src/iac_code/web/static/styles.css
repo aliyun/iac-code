@@ -7413,14 +7413,15 @@ body.is-resizing-sidebar {
   white-space: nowrap;
 }
 
-/* 工具失败：标题标红，让"运行失败/读取失败…"一眼可辨，不再和成功混淆（Issue 4）。 */
-.message-tool-cards .tool-card.is-error > .tool-card-row .tool-card-title {
+/* 工具失败：标题标红，让"运行失败/读取失败…"一眼可辨（Issue 4）。仅开发者模式下的
+   「失败工具标红」开关开启(body.dev-highlight-tool-errors)时生效；关闭时失败工具与其它工具一视同仁。 */
+body.dev-highlight-tool-errors .message-tool-cards .tool-card.is-error > .tool-card-row .tool-card-title {
   color: var(--danger);
   font-weight: 600;
 }
 
-.message-tool-cards .tool-card.is-error > .tool-card-row .tool-card-icon::before,
-.message-tool-cards .tool-card.is-error > .tool-card-row .tool-card-icon::after {
+body.dev-highlight-tool-errors .message-tool-cards .tool-card.is-error > .tool-card-row .tool-card-icon::before,
+body.dev-highlight-tool-errors .message-tool-cards .tool-card.is-error > .tool-card-row .tool-card-icon::after {
   background: var(--danger);
 }
 
@@ -7557,7 +7558,7 @@ body.is-resizing-sidebar {
   color: color-mix(in srgb, #2fae66 88%, var(--codex-text));
 }
 
-.message-tool-cards .tool-stack-progress-status.is-error {
+body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-status.is-error {
   background: color-mix(in srgb, #e5484d 22%, transparent);
   color: color-mix(in srgb, #e5484d 88%, var(--codex-text));
 }
@@ -7589,7 +7590,7 @@ body.is-resizing-sidebar {
   background: color-mix(in srgb, #2fae66 82%, transparent);
 }
 
-.message-tool-cards .tool-stack-progress-bar-fill.is-error {
+body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-bar-fill.is-error {
   background: color-mix(in srgb, #e5484d 82%, transparent);
 }
 
@@ -7632,7 +7633,7 @@ body.is-resizing-sidebar {
   color: color-mix(in srgb, #2fae66 88%, var(--codex-text));
 }
 
-.message-tool-cards .tool-stack-progress-cell-status.is-error {
+body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-cell-status.is-error {
   color: color-mix(in srgb, #e5484d 88%, var(--codex-text));
 }
 
@@ -9511,6 +9512,10 @@ body.is-resizing-sidebar {
 
 .workspace-tab-icon-other {
   --wtab-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3Cpath d='M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+.workspace-tab-icon-developer {
+  --wtab-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 9l-4 3 4 3'/%3E%3Cpath d='M16 9l4 3-4 3'/%3E%3Cpath d='M13 6l-2 12'/%3E%3C/g%3E%3C/svg%3E");
 }
 
 .workspace-content {

@@ -2241,6 +2241,10 @@ msgid "Account"
 msgstr "Compte"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Developer"
+msgstr "Développeur"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Alibaba Cloud"
 msgstr "Alibaba Cloud"
 
@@ -3622,6 +3626,22 @@ msgstr ""
 "dans le web."
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Developer mode"
+msgstr "Mode développeur"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "When enabled, a Developer settings tab appears with additional tools."
+msgstr "Lorsqu’il est activé, un onglet de paramètres Développeur apparaît avec des outils supplémentaires."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enable developer mode"
+msgstr "Activer le mode développeur"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Reveals the Developer settings tab. Turning it off hides that tab again."
+msgstr "Affiche l’onglet de paramètres Développeur. Le désactiver masque à nouveau cet onglet."
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid ""
 "Control optional steps of the sales pipeline; affects only newly started "
 "pipeline runs. Running pipelines keep their original configuration."
@@ -3753,6 +3773,24 @@ msgstr ""
 #, python-brace-format
 msgid "Install failed: {error}"
 msgstr "Échec de l’installation : {error}"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Failed tool calls"
+msgstr "Appels d’outils en échec"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Control how failed tool calls are shown in the transcript."
+msgstr "Contrôle la façon dont les appels d’outils en échec sont affichés dans la transcription."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Highlight failed tool calls in red"
+msgstr "Surligner en rouge les appels d’outils en échec"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, failed tool calls are painted red. When disabled, they look"
+" like any other tool call."
+msgstr "Lorsqu’il est activé, les appels d’outils en échec sont affichés en rouge. Lorsqu’il est désactivé, ils ressemblent à n’importe quel autre appel d’outil."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"
