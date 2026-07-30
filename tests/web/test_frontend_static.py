@@ -1114,7 +1114,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-310" in html
-    assert "/static/js/app.js?v=web-repl-ui-311" in html
+    assert "/static/js/app.js?v=web-repl-ui-312" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1146,7 +1146,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-311" in index_html
+    assert "web-repl-ui-312" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-304" in app_source
     assert "./components/workspace.js?v=cloud-creds-v49" in app_source
@@ -9490,7 +9490,7 @@ def test_styles_has_compaction_boundary_rule() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-311" in html
+    assert "web-repl-ui-312" in html
     assert "web-repl-ui-304" not in html
 
 
@@ -9743,6 +9743,25 @@ def test_output_panel_resets_on_new_session_draft() -> None:
     assert "outputController?.reset();" in draft_body
     submit_body = app_source.split("async function createSessionForSubmit(", 1)[1].split("\n}", 1)[0]
     assert "outputController?.reset();" in submit_body
+
+
+def test_output_panel_reset_only_on_session_switch_in_load_session() -> None:
+    # loadSession 会在真正切换会话时复位输出面板，但同会话的 resync/重载（流水线运行中权限确认、
+    # input_required 等反复触发）绝不能复位：reset() 会强制关闭再由 refresh 自动展开 → 面板「一闪一闪」，
+    # 并把用户手动 X 关掉的面板重新弹开。故 loadSession 里的 reset() 必须被 switchedSession 守卫，
+    # 而 refresh() 每次都执行（切换与同会话都要拉取最新产物）。
+    app_source = _source(APP_JS)
+    load_body = app_source.split("async function loadSession(", 1)[1].split("\nasync function ", 1)[0]
+    # 引入一次性判定，且 clearDetailsOpenOverrides 与 reset 共用它。
+    assert "const switchedSession = previousSessionId && previousSessionId !== state.currentSessionId;" in load_body
+    reset_idx = load_body.index("outputController?.reset();")
+    guard_idx = load_body.rindex("if (switchedSession) {", 0, reset_idx)
+    # reset 之前最近的 if 必须是 switchedSession 守卫（同会话 resync 不复位）。
+    assert 0 <= guard_idx < reset_idx
+    # refresh 不受守卫限制：紧随其后无条件执行。
+    assert "outputController?.refresh(sessionId);" in load_body
+    refresh_idx = load_body.index("outputController?.refresh(sessionId);")
+    assert refresh_idx > reset_idx
 
 
 def test_output_panel_hidden_css_guard() -> None:

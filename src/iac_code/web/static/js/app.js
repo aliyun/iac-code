@@ -4977,11 +4977,18 @@ async function loadSession(sessionId, options = {}) {
   pendingScrollToBottom = true;
   // 展开态是按 markerId/toolUseId 记的，跨会话可能撞键，切换到别的会话时清空避免串台；
   // 同会话的 resync（如权限确认触发）保留用户展开态，不打断正在查看的过程。
-  if (previousSessionId && previousSessionId !== state.currentSessionId) {
+  const switchedSession = previousSessionId && previousSessionId !== state.currentSessionId;
+  if (switchedSession) {
     clearDetailsOpenOverrides();
   }
   render(state);
-  outputController?.reset();
+  // 仅在真正切换到别的会话时复位输出面板（清空上个会话的资源栈/模板并重新武装「首次自动展开」）。
+  // 同会话的 resync/重载（流水线运行中权限确认、input_required 等会反复触发）绝不复位——否则每次
+  // resync 都强制关闭再由 refresh 自动展开，表现为输出面板「一闪一闪」，还会把用户手动 X 关掉的面板
+  // 重新弹开。跳过 reset 后 refresh 保留 isOpen 与 autoOpenedOnce，用户的开/关意图得以延续。
+  if (switchedSession) {
+    outputController?.reset();
+  }
   outputController?.refresh(sessionId);
   return true;
 }
