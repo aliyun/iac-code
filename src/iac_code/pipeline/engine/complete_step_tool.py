@@ -128,6 +128,8 @@ class CompleteStepTool(Tool):
     def description(self) -> str:
         return _(
             "Complete the current step by calling this tool to submit the conclusion. "
+            "Build the full structured conclusion for the current step before calling; "
+            'arguments must be {"conclusion": {...}} and never empty. '
             "If you need to roll back to an earlier step, set rollback_request."
         )
 
@@ -160,6 +162,9 @@ class CompleteStepTool(Tool):
             return self._step_config.conclusion_schema
         return {
             "type": "object",
+            # Reject empty conclusions ({}) at input validation time so the model
+            # receives an actionable schema hint instead of an accepted no-op.
+            "minProperties": 1,
             "description": _("Structured conclusion for the current step. Required and non-empty."),
         }
 

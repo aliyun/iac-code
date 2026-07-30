@@ -92,7 +92,29 @@ class TestDynamicInputSchema:
         tool = CompleteStepTool(config)
         schema = tool.input_schema
         assert schema["properties"]["conclusion"]["type"] == "object"
+        assert schema["properties"]["conclusion"]["minProperties"] == 1
         assert "properties" not in schema["properties"]["conclusion"]
+
+    def test_empty_arguments_rejected_with_conclusion_contract_hint(self):
+        config = StepConfig(step_id="architecture_planning", conclusion_field="architecture", forward=None)
+        tool = CompleteStepTool(config)
+
+        is_valid, error = tool.validate_input({})
+
+        assert is_valid is False
+        assert "conclusion" in error
+        assert '{"conclusion"' in error
+        assert "do not submit empty arguments" in error
+
+    def test_empty_conclusion_rejected_without_conclusion_schema(self):
+        config = StepConfig(step_id="architecture_planning", conclusion_field="architecture", forward=None)
+        tool = CompleteStepTool(config)
+
+        is_valid, error = tool.validate_input({"conclusion": {}})
+
+        assert is_valid is False
+        assert "conclusion" in error
+        assert "non-empty" in error
 
     def test_rollback_targets_in_schema(self):
         config = StepConfig(

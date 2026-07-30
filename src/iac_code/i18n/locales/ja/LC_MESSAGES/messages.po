@@ -3681,12 +3681,16 @@ msgid ""
 msgstr "デプロイ成功には、ros_deploy が CREATE_COMPLETE を返すまで待つ必要があります。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
 msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
-"If you need to roll back to an earlier step, set rollback_request."
+"Build the full structured conclusion for the current step before calling;"
+" arguments must be {\"conclusion\": {...}} and never empty. If you need "
+"to roll back to an earlier step, set rollback_request."
 msgstr ""
-"このツールを呼び出して結論を送信し、現在のステップを完了します。前のステップに戻る必要がある場合は rollback_request "
-"を設定してください。"
+"このツールを呼び出して結論を提出し、現在のステップを完了します。呼び出す前に、現在のステップの完全な構造化された結論を構築してください。引数は "
+"{\"conclusion\": {...}} "
+"でなければならず、空にしてはいけません。以前のステップにロールバックする必要がある場合は、rollback_request を設定してください。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "Set this field when you need to roll back to an earlier step"

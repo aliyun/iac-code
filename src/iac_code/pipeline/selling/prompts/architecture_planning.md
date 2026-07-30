@@ -15,6 +15,18 @@
 ## 输出
 调用 `complete_step` 提交候选方案列表。
 
+### complete_step 调用合同（必须遵守）
+- 调用 `complete_step` 前，必须先在本轮回复中构造出完整的结构化结论：包含非空 `candidates` 数组，且每个候选项字段齐全（name、output_path、products、topology、monthly_estimate、pros、cons）。
+- 参数外层必须是 `{"conclusion": {"candidates": [...]}}`。
+- 禁止以空参数 `{}` 调用 `complete_step`；禁止缺少 `conclusion`；禁止把 `candidates` 等字段直接放在参数顶层。
+- 如果结论尚未构造完成，先完成结论构造，再调用 `complete_step`；不要先调用再补参数。
+
+参数示例（值需替换为真实结论）：
+
+```json
+{"conclusion": {"candidates": [{"name": "已有 VPC 下新建交换机", "output_path": "templates/1-vswitch-in-existing-vpc.yml", "products": ["VPC"], "topology": "在既有 VPC 下创建一个 VSwitch", "monthly_estimate": "0 元", "pros": ["复用现有网络"], "cons": ["依赖既有 VPC 配置"]}]}}
+```
+
 ### output_path 命名规则
 - 格式：`templates/{index}-{英文简写}.yml`
 - index 从 1 开始

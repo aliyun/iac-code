@@ -3878,13 +3878,18 @@ msgstr ""
 "CREATE_COMPLETE zurückgibt."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
 msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
-"If you need to roll back to an earlier step, set rollback_request."
+"Build the full structured conclusion for the current step before calling;"
+" arguments must be {\"conclusion\": {...}} and never empty. If you need "
+"to roll back to an earlier step, set rollback_request."
 msgstr ""
-"Schließen Sie den aktuellen Schritt ab, indem Sie mit diesem Tool die "
-"Schlussfolgerung übermitteln. Wenn Sie zu einem früheren Schritt "
-"zurückkehren müssen, setzen Sie rollback_request."
+"Schließe den aktuellen Schritt ab, indem du dieses Tool aufrufst, um das "
+"Fazit einzureichen. Erstelle vor dem Aufruf das vollständige "
+"strukturierte Fazit für den aktuellen Schritt; die Argumente müssen "
+"{\"conclusion\": {...}} sein und dürfen niemals leer sein. Wenn du zu "
+"einem früheren Schritt zurückkehren musst, setze rollback_request."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "Set this field when you need to roll back to an earlier step"

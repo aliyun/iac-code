@@ -48,6 +48,8 @@ PIPELINE_USER_VISIBLE_MSGIDS = {
     "Interrupt handling",
     (
         "Complete the current step by calling this tool to submit the conclusion. "
+        "Build the full structured conclusion for the current step before calling; "
+        'arguments must be {"conclusion": {...}} and never empty. '
         "If you need to roll back to an earlier step, set rollback_request."
     ),
     (
