@@ -561,8 +561,16 @@ class IacCodeA2APipelineExecutor:
             except asyncio.CancelledError:
                 try:
                     task.state = TASK_STATE_CANCELED
-                    cancel_data = {"source": "executor", "reason": _("Task canceled.")}
-                    cancel_handoff_data = {"canceled": True, "reason": _("Task canceled.")}
+                    cancel_data: dict[str, Any] = {"source": "executor", "reason": _("Task canceled.")}
+                    cancel_handoff_data: dict[str, Any] = {"canceled": True, "reason": _("Task canceled.")}
+                    cancel_snapshot = publisher.snapshot_store.load() if publisher is not None else None
+                    deploy_evidence = _deployed_before_cancel_evidence(
+                        cancel_snapshot,
+                        cancel_snapshot.get("cleanup") if isinstance(cancel_snapshot, dict) else None,
+                    )
+                    if deploy_evidence is not None:
+                        cancel_data.update(deploy_evidence)
+                        cancel_handoff_data.update(deploy_evidence)
 
                     async def publish_cancel_terminal() -> bool:
                         if pipeline is not None:
@@ -2511,7 +2519,14 @@ class IacCodeA2APipelineExecutor:
             "outcome": outcome,
             "summary": summary,
         }
+        for evidence_key in ("deployedBeforeCancel", "deployedStackIds"):
+            if evidence_key in event_data:
+                data[evidence_key] = copy.deepcopy(event_data[evidence_key])
         cleanup = _pipeline_cleanup_handoff_data(pipeline)
+        if cleanup is None and event_data.get("deployedBeforeCancel") is True:
+            # 部署证据存在但 cleanup 台账没有可展示的 pending 资源:显式回退到
+            # unavailable,提示下游按 stack 证据对账,避免云资源孤儿。
+            cleanup = _cleanup_state_unavailable_payload()
         if cleanup is not None:
             data["cleanup"] = cleanup
         return _NormalHandoffPublication(
@@ -3293,11 +3308,18 @@ def _cancel_waiting_input_task_from_sidecar_locked(
     )
     translator = PipelineEventTranslator(context)
     translator.hydrate_from_events(events)
+    waiting_cancel_data: dict[str, Any] = {"source": "a2a_cancel", "reason": reason}
+    waiting_deploy_evidence = _deployed_before_cancel_evidence(
+        snapshot,
+        snapshot.get("cleanup") if isinstance(snapshot, dict) else None,
+    )
+    if waiting_deploy_evidence is not None:
+        waiting_cancel_data.update(waiting_deploy_evidence)
     envelope = translator.manual_event(
         "pipeline_canceled",
         "pipeline",
         status="canceled",
-        data={"source": "a2a_cancel", "reason": reason},
+        data=waiting_cancel_data,
     )
     high_water_sequence = max(
         [int(event.get("sequence") or 0) for event in events if isinstance(event, dict)]
@@ -3671,7 +3693,17 @@ def _waiting_input_cancel_handoff_event(
         "summary": summary,
         "reason": reason,
     }
+    deploy_evidence = _deployed_before_cancel_evidence(
+        snapshot,
+        snapshot.get("cleanup") if isinstance(snapshot, dict) else None,
+    )
+    if deploy_evidence is not None:
+        data.update(deploy_evidence)
     cleanup = _pipeline_cleanup_handoff_data_from_session(cwd=cwd, session_id=session_id, public_snapshot=snapshot)
+    if cleanup is None and deploy_evidence is not None:
+        # 部署证据存在但 cleanup 台账没有可展示的 pending 资源:显式回退到
+        # unavailable,提示下游按 stack 证据对账,避免云资源孤儿。
+        cleanup = _cleanup_state_unavailable_payload()
     if cleanup is not None:
         data["cleanup"] = cleanup
     return translator.manual_event(
@@ -3850,6 +3882,48 @@ def _persist_normal_handoff_summary(pipeline: Any, summary: str) -> None:
         append(cwd, session_id, AgentMessage(role="user", content=summary))
     except Exception:
         logger.warning("Failed to persist A2A pipeline normal handoff summary", exc_info=True)
+
+
+def _deployed_before_cancel_evidence(
+    snapshot: dict[str, Any] | None,
+    cleanup: Any,
+) -> dict[str, Any] | None:
+    """在取消发布前核对本轮是否已发生部署动作。
+
+    证据来源:
+    - snapshot ``stacks``(CreateStack 已返回 stack_id 即视为已发起部署);
+    - cleanup 数据中存在 pending/unavailable 资源。
+
+    命中时返回 ``{"deployedBeforeCancel": True, "deployedStackIds": [...]}``,
+    供 ``pipeline_canceled`` / ``pipeline_handoff_ready`` 持久化到
+    ``pendingTerminal`` / ``pendingNormalHandoff``,触发下游对账;未命中返回 None。
+    该函数只做只读检测,任何异常都不阻断取消发布。
+    """
+    try:
+        stack_ids: list[str] = []
+        stacks = snapshot.get("stacks") if isinstance(snapshot, dict) else None
+        if isinstance(stacks, dict):
+            candidates: list[Any] = []
+            current = stacks.get("current")
+            if isinstance(current, dict):
+                candidates.append(current)
+            by_id = stacks.get("byId")
+            if isinstance(by_id, dict):
+                candidates.extend(value for value in by_id.values() if isinstance(value, dict))
+            for stack in candidates:
+                stack_id = stack.get("stackId") or stack.get("id")
+                if isinstance(stack_id, str) and stack_id and stack_id not in stack_ids:
+                    stack_ids.append(stack_id)
+        has_cleanup_evidence = _public_cleanup_snapshot_has_pending_evidence(cleanup)
+        if not stack_ids and not has_cleanup_evidence:
+            return None
+        evidence: dict[str, Any] = {"deployedBeforeCancel": True}
+        if stack_ids:
+            evidence["deployedStackIds"] = stack_ids
+        return evidence
+    except Exception:
+        logger.warning("Failed to inspect deploy evidence before pipeline cancel", exc_info=True)
+        return None
 
 
 def _pipeline_cleanup_handoff_data(pipeline: Any) -> dict[str, Any] | None:

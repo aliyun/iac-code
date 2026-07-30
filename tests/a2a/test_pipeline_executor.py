@@ -10386,3 +10386,204 @@ async def test_pending_ask_user_question_resume_preserves_image_input(tmp_path: 
 
     assert events
     assert received["supplemental_input"] == pipeline_input
+
+
+def test_deployed_before_cancel_evidence_detects_snapshot_stacks() -> None:
+    from iac_code.a2a.pipeline_executor import _deployed_before_cancel_evidence
+
+    snapshot = {
+        "stacks": {
+            "current": {"stackId": "stack-current", "status": "CREATE_IN_PROGRESS"},
+            "byId": {
+                "stack-current": {"stackId": "stack-current"},
+                "stack-old": {"stackId": "stack-old", "status": "CREATE_COMPLETE"},
+            },
+            "history": [],
+        },
+    }
+
+    evidence = _deployed_before_cancel_evidence(snapshot, snapshot.get("cleanup"))
+
+    assert evidence is not None
+    assert evidence["deployedBeforeCancel"] is True
+    assert set(evidence["deployedStackIds"]) == {"stack-current", "stack-old"}
+
+
+def test_deployed_before_cancel_evidence_detects_cleanup_pending_resources() -> None:
+    from iac_code.a2a.pipeline_executor import _deployed_before_cancel_evidence
+
+    cleanup = {"status": "pending", "resourceCount": 1, "resources": [{"resourceId": "i-123"}]}
+
+    evidence = _deployed_before_cancel_evidence({"stacks": {"current": None, "byId": {}, "history": []}}, cleanup)
+
+    assert evidence == {"deployedBeforeCancel": True}
+
+
+def test_deployed_before_cancel_evidence_absent_without_deploy_activity() -> None:
+    from iac_code.a2a.pipeline_executor import _deployed_before_cancel_evidence
+
+    snapshot = {"stacks": {"current": None, "byId": {}, "history": []}, "cleanup": {"status": "none"}}
+
+    assert _deployed_before_cancel_evidence(snapshot, snapshot.get("cleanup")) is None
+    assert _deployed_before_cancel_evidence(None, None) is None
+
+
+def test_cancel_waiting_input_after_deploy_marks_deployed_before_cancel(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_executor import (
+        WaitingInputCancelResult,
+        cancel_waiting_input_task_from_sidecar,
+    )
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+
+    cwd = tmp_path / "workspace"
+    session_id = "session-deployed-cancel"
+    context_id = "ctx-1"
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    base = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "pipelineRunId": context_id,
+        "taskId": "task-1",
+        "contextId": context_id,
+        "pipelineName": "selling",
+    }
+    stack_event = {
+        **base,
+        "eventId": "evt-stack",
+        "sequence": 1,
+        "createdAt": "2026-07-14T05:10:00Z",
+        "eventType": "stack_current_changed",
+        "scope": "stack",
+        "status": "working",
+        "data": {"stackId": "stack-deployed-1", "status": "CREATE_COMPLETE"},
+    }
+    pending = {
+        **base,
+        "eventId": "evt-input",
+        "sequence": 2,
+        "createdAt": "2026-07-14T05:10:10Z",
+        "eventType": "input_required",
+        "scope": "step",
+        "status": "input_required",
+        "step": {"runId": "step-deploying-1", "id": "deploying", "attempt": 1},
+        "input": {
+            "inputId": "input-deploying-1",
+            "kind": "candidate_selection",
+            "prompt": "confirm",
+            "options": [{"name": "A", "candidate_index": 0}],
+        },
+    }
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(stack_event)
+    journal.append(pending)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([stack_event, pending]))
+
+    canceled = cancel_waiting_input_task_from_sidecar(
+        cwd=str(cwd),
+        session_id=session_id,
+        context_id=context_id,
+        task_id="task-1",
+        reason="user canceled",
+    )
+
+    assert canceled == WaitingInputCancelResult.CANCELED
+    events = A2APipelineJournal(pipeline_dir).read_all()
+    canceled_events = [event for event in events if event["eventType"] == "pipeline_canceled"]
+    assert canceled_events
+    for event in canceled_events:
+        assert event["data"]["deployedBeforeCancel"] is True
+        assert event["data"]["deployedStackIds"] == ["stack-deployed-1"]
+
+    snapshot = A2APipelineSnapshotStore(pipeline_dir).load()
+    assert snapshot is not None
+    normal_handoff = snapshot.get("normalHandoff") or {}
+    handoff_data = normal_handoff.get("data") or {}
+    assert handoff_data.get("deployedBeforeCancel") is True
+    assert handoff_data.get("deployedStackIds") == ["stack-deployed-1"]
+    assert (handoff_data.get("cleanup") or {}).get("status") == "unavailable"
+
+
+def test_cancel_waiting_input_without_deploy_keeps_payload_unchanged(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_executor import (
+        WaitingInputCancelResult,
+        cancel_waiting_input_task_from_sidecar,
+    )
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+
+    cwd = tmp_path / "workspace"
+    session_id = "session-clean-cancel"
+    context_id = "ctx-1"
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    pending = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-input",
+        "sequence": 1,
+        "createdAt": "2026-07-14T05:10:10Z",
+        "eventType": "input_required",
+        "scope": "step",
+        "pipelineRunId": context_id,
+        "taskId": "task-1",
+        "contextId": context_id,
+        "pipelineName": "selling",
+        "status": "input_required",
+        "step": {"runId": "step-confirm-1", "id": "confirm", "attempt": 1},
+        "input": {
+            "inputId": "input-confirm-1",
+            "kind": "candidate_selection",
+            "prompt": "confirm",
+            "options": [{"name": "A", "candidate_index": 0}],
+        },
+    }
+    A2APipelineJournal(pipeline_dir).append(pending)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+
+    canceled = cancel_waiting_input_task_from_sidecar(
+        cwd=str(cwd),
+        session_id=session_id,
+        context_id=context_id,
+        task_id="task-1",
+        reason="user canceled",
+    )
+
+    assert canceled == WaitingInputCancelResult.CANCELED
+    events = A2APipelineJournal(pipeline_dir).read_all()
+    canceled_events = [event for event in events if event["eventType"] == "pipeline_canceled"]
+    assert canceled_events
+    for event in canceled_events:
+        assert "deployedBeforeCancel" not in event["data"]
+        assert "deployedStackIds" not in event["data"]
+
+
+def test_normal_handoff_publication_carries_deploy_evidence_and_unavailable_cleanup(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+
+    executor = IacCodeA2APipelineExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="test-model",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=True,
+        thinking_exposure_types=set(),
+    )
+    pipeline = FakePipeline([], session_dir=tmp_path / "missing-session")
+    pipeline.handoff_enabled = True
+
+    publication = executor._normal_handoff_publication(
+        pipeline,
+        {
+            "canceled": True,
+            "reason": "Task canceled.",
+            "deployedBeforeCancel": True,
+            "deployedStackIds": ["stack-deployed-1"],
+        },
+    )
+
+    assert publication is not None
+    assert publication.status == "canceled"
+    assert publication.data["outcome"] == "canceled"
+    assert publication.data["deployedBeforeCancel"] is True
+    assert publication.data["deployedStackIds"] == ["stack-deployed-1"]
+    assert publication.data["cleanup"]["status"] == "unavailable"
