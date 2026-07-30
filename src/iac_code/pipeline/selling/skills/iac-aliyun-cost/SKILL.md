@@ -81,6 +81,29 @@ conclusion_schema:
       type: string
     api_raw_summary:
       type: string
+    spec_reconciliation:
+      type: array
+      description: 实测询价资源规格相对 architecture_planning 计划规格（planned_specs）与 template_generating 描述规格的一致性结论；每个核心计算/数据库资源一项。规格偏离计划时必须记录 change_reason，否则回退计划规格
+      items:
+        type: object
+        required: [product, actual_spec, consistent]
+        additionalProperties: false
+        properties:
+          product:
+            type: string
+            description: 产品或资源角色（如 ECS、RDS）
+          planned_spec:
+            type: string
+            description: architecture_planning planned_specs 中该资源的规划规格
+          actual_spec:
+            type: string
+            description: 本步骤询价/预览实际使用的资源规格
+          consistent:
+            type: boolean
+            description: 实测规格是否与计划及描述规格一致
+          change_reason:
+            type: string
+            description: consistent 为 false 时必须说明规格偏离计划的变更理由；一致时可省略
 ---
 
 # ROS 模板成本预估
@@ -181,6 +204,15 @@ ros_estimate_template_cost(
 aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<类型>"})
 ```
 
+## 规格对齐结论（spec_reconciliation）
+
+询价使用的资源规格是候选方案面向用户的“实测规格”。为避免规划、描述、实测三处规格口径不一致，本步骤必须核对并在 `spec_reconciliation` 记录结论：
+
+- 对每个核心计算/数据库资源（ECS、RDS、Redis 等），比较本步骤实际询价/预览使用的规格（`actual_spec`）与 architecture_planning 的 `planned_specs`（`planned_spec`）及 template_generating 描述规格。
+- 三者一致时，填 `consistent: true`。
+- 实测规格偏离计划规格时（如计划 `ecs.t6-c1m2.large`、实测落到 `ecs.g7.large`），必须填 `consistent: false` 并在 `change_reason` 写明变更理由（如原规格无库存、约束不允许）。**没有正当理由时应回退到计划规格重新询价**，不得静默用偏离规格出价。
+- 询价软门禁继续、参数被覆盖或库存回退导致规格变化时，同样按上述规则记录，让下游展示与用户看到的规格口径一致。
+
 ## 重要约束
 
 - **必须**使用 `ros_get_template_parameter_constraints`、`ros_preview_template`、`ros_estimate_template_cost`、`ros_validate_template` 处理 ROS 模板参数约束、预览、询价和校验；不要直接调用 `aliyun_api` 的对应 ROS 模板 API
@@ -200,4 +232,5 @@ aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<�
 - `preview_validation` 填 `ros_preview_template` 的结构化状态：成功时填 `{"succeeded": true, "template_url": "<当前模板文件路径>", "parameters": <预览通过的同一参数字典>}`；失败或未执行时填 `{"succeeded": false, "error": "<原因>"}`
 - `missing_deployment_parameters` 填完整部署或 PreviewStack 仍缺少的参数及原因；没有缺口时可省略或填 `[]`
 - `parameter_set_summary` 可简要说明参数来源、可用性筛选、PreviewStack 验证结果以及是否使用软门禁继续询价
+- `spec_reconciliation` 逐个核对核心资源实测规格与计划/描述规格：一致填 `consistent: true`；偏离计划时填 `consistent: false` 并在 `change_reason` 说明理由，无正当理由应回退计划规格
 - 询价失败时 `monthly_estimate` 填 "询价失败"，`resources` 为空数组，`error` 说明原因

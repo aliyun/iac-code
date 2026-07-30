@@ -85,6 +85,60 @@ class TestSkillFrontmatter:
         assert "missing_deployment_parameters" in schema["properties"]
         assert schema["properties"]["missing_deployment_parameters"]["type"] == "array"
 
+    def test_conclusion_schema_can_report_spec_reconciliation(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        schema = fm["conclusion_schema"]
+        assert "spec_reconciliation" in schema["properties"]
+        recon = schema["properties"]["spec_reconciliation"]
+        assert recon["type"] == "array"
+        item = recon["items"]
+        assert set(item["required"]) == {"product", "actual_spec", "consistent"}
+        assert "planned_spec" in item["properties"]
+        assert "change_reason" in item["properties"]
+        assert item["properties"]["consistent"]["type"] == "boolean"
+
+    def test_spec_reconciliation_validates_consistent_and_changed_entries(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        schema = fm["conclusion_schema"]
+        conclusion = {
+            "monthly_estimate": "¥100/月",
+            "currency": "CNY",
+            "resources": [{"type": "ALIYUN::ECS::InstanceGroup", "cost": "¥100/月"}],
+            "template_fixed": False,
+            "deployment_parameters": {"InstanceType": "ecs.u1-c1m2.large"},
+            "preview_validation": {
+                "succeeded": True,
+                "template_url": "templates/a.yml",
+                "parameters": {"InstanceType": "ecs.u1-c1m2.large"},
+            },
+            "spec_reconciliation": [
+                {
+                    "product": "ECS",
+                    "planned_spec": "ecs.u1-c1m2.large",
+                    "actual_spec": "ecs.u1-c1m2.large",
+                    "consistent": True,
+                },
+                {
+                    "product": "RDS",
+                    "planned_spec": "RDS 1C2G",
+                    "actual_spec": "mysql.n2.small.1 2C4G",
+                    "consistent": False,
+                    "change_reason": "计划规格无库存，回退到最接近的可用规格",
+                },
+            ],
+        }
+        jsonschema.validate(conclusion, schema)
+
+        missing_actual = dict(
+            conclusion,
+            spec_reconciliation=[{"product": "ECS", "planned_spec": "x", "consistent": True}],
+        )
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(missing_actual, schema)
+
+
     def test_conclusion_schema_can_report_preview_validation_proof(self):
         content = SKILL_MD.read_text(encoding="utf-8")
         fm = _parse_frontmatter(content)
@@ -305,6 +359,14 @@ class TestSkillContentRosOnly:
     def test_emphasizes_downstream_dependency(self, body):
         assert "后续" in body and ("部署" in body or "步骤" in body)
 
+    def test_records_spec_reconciliation_against_planned_specs(self, body):
+        assert "规格对齐结论" in body
+        assert "spec_reconciliation" in body
+        assert "planned_specs" in body
+        assert "change_reason" in body
+        assert "回退到计划规格" in body
+
+
     def test_must_not_skip_fix(self, body):
         assert "不要跳过修复" in body
 
@@ -432,6 +494,14 @@ class TestCostPrompt:
         body = COST_PROMPT_MD.read_text(encoding="utf-8")
         assert "preview_validation" in body
         assert "PreviewStack 成功证明" in body
+
+    def test_prompt_requires_spec_reconciliation(self):
+        body = COST_PROMPT_MD.read_text(encoding="utf-8")
+        assert "spec_reconciliation" in body
+        assert "planned_specs" in body
+        assert "change_reason" in body
+        assert "回退计划规格" in body
+
 
     def test_prompt_names_template_url_value_for_pricing_tools(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")

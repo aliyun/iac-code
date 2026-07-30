@@ -19,7 +19,24 @@ conclusion_schema:
       description: 部署地域
     description:
       type: string
-      description: 模板简要描述
+      description: 模板简要描述；其中提及的实例规格（vCPU/内存/实例族）必须与模板中实际使用的资源规格一致
+    described_specs:
+      type: array
+      items:
+        type: object
+        required: [product, spec]
+        additionalProperties: false
+        properties:
+          product:
+            type: string
+            description: 产品或资源角色（如 ECS、RDS）
+          spec:
+            type: string
+            description: 面向用户描述所用的规格口径（如 "2C4G"、"ecs.u1-c1m2.large"）
+          template_ref:
+            type: string
+            description: 该规格在模板中的落地位置（如 InstanceType 参数默认值或资源属性）
+      description: 描述中使用的核心资源规格清单；每一项必须与模板中实际落地的规格一致，供 cost_estimating 做规格口径对齐
 ---
 
 # ROS 模板生成
@@ -58,6 +75,14 @@ conclusion_schema:
 - 如果 candidate 的自然语言、products 和生命周期字段冲突，以生命周期字段为准；冲突严重无法生成时，通过 rollback_request 回到 architecture_planning。
 
 示例：`resource_intents: [{"product": "SecurityGroup", "action": "create"}, {"product": "VPC", "action": "use_existing"}]` 时，只生成 `ALIYUN::ECS::SecurityGroup`，不要生成 `ALIYUN::ECS::VPC` 或 `ALIYUN::ECS::VSwitch`。
+
+## 规格口径一致性（描述必须与模板落地一致）
+
+面向用户的 `description` 与 candidate 描述中提及的实例规格（vCPU/内存/实例族，如 ECS 1C2G、RDS 1C2G），必须与模板中实际落地、并交付给成本预估阶段（cost_estimating）的资源规格一致：
+
+- 不得出现“描述称 ECS 1C2G，但模板 `InstanceType` 参数默认值落地成 2C8G 规格”这类描述与模板资源规格背离的情况。
+- 把描述用到的核心资源规格写入 `described_specs`，并在 `template_ref` 指明其在模板中的落地位置（如 `InstanceType` 参数默认值），确保描述规格与模板资源规格可核对。
+- candidate 的 `planned_specs`（架构规划的规格基线）是本步骤的规格口径来源：优先沿用其规格；确需调整时，模板落地规格与 `described_specs` 必须同步改动，保持三者（规划 / 描述 / 模板）一致，并把调整说明留给成本预估阶段记录理由。
 
 ## 参数化规则
 

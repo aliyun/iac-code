@@ -130,6 +130,25 @@ class TestSkillContentRosOnly:
         assert "bash" not in body.lower()
         assert "mkdir" not in body.lower()
 
+    def test_requires_described_spec_matches_template_spec(self, body):
+        assert "规格口径一致性" in body
+        assert "described_specs" in body
+        assert "planned_specs" in body
+        assert "template_ref" in body
+        assert "描述与模板资源规格背离" in body
+
+    def test_conclusion_schema_carries_described_specs(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        schema = fm["conclusion_schema"]
+        assert "described_specs" in schema["properties"]
+        described = schema["properties"]["described_specs"]
+        assert described["type"] == "array"
+        assert set(described["items"]["required"]) == {"product", "spec"}
+        assert "template_ref" in described["items"]["properties"]
+        assert "一致" in schema["properties"]["description"]["description"]
+
+
 
 class TestSkillDiscovery:
     def test_discovered_by_pipeline_loader(self):
@@ -163,6 +182,13 @@ class TestSkillPromptRendering:
         assert "如果 `templates/` 目录不存在，先创建它" not in body
         assert "mkdir" not in body.lower()
         assert "bash" not in body.lower()
+
+    def test_prompt_requires_described_spec_matches_template(self):
+        body = TEMPLATE_PROMPT_MD.read_text(encoding="utf-8")
+        assert "described_specs" in body
+        assert "planned_specs" in body
+        assert "不得描述一种规格而模板落地另一种" in body
+
 
     def test_full_prompt_includes_skill_base_directory(self, tmp_path):
         from iac_code.pipeline.engine.context import PipelineContext

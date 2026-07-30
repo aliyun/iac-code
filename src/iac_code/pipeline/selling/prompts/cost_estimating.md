@@ -32,5 +32,7 @@ API 调用完成后调用 `complete_step` 提交费用预估。
 
 若 `ros_preview_template` 成功，在 `complete_step.conclusion.preview_validation` 写入 PreviewStack 成功证明：`succeeded: true`、`template_url: "{template.file_path}"`、`parameters: <预览通过的同一参数字典>`；失败或未执行时写入 `succeeded: false`、`error: "<原因>"`。
 
+在 `complete_step.conclusion.spec_reconciliation` 记录规格对齐结论：逐个核对每个核心计算/数据库资源实测询价规格与 architecture_planning 计划规格（planned_specs）及 template_generating 描述规格是否一致。一致填 `consistent: true`；偏离计划时填 `consistent: false` 并在 `change_reason` 写明变更理由，无正当理由应回退计划规格重新询价，避免规划、描述、实测三处规格口径不一致。
+
 ## 注意事项
 - 不要读取项目文件或记忆，所需的上下文已在上方提供。

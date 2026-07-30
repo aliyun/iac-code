@@ -42,6 +42,25 @@ conclusion_schema:
                 notes:
                   type: string
             description: 本方案中每个资源的新建、复用、引用或禁止语义；从 intent.resource_intents 继承或收窄
+          planned_specs:
+            type: array
+            items:
+              type: object
+              required: [product, spec]
+              additionalProperties: false
+              properties:
+                product:
+                  type: string
+                  description: 产品或资源角色（如 ECS、RDS）
+                spec:
+                  type: string
+                  description: 规划规格口径（如 "2C4G"、"ecs.u1-c1m2.large"、"RDS 1C2G"）
+                tier:
+                  type: string
+                  description: 该规格在多候选间的分层定位（如 economy / balanced / performance）
+                notes:
+                  type: string
+            description: 本方案各核心计算/数据库资源的规划规格口径；作为 template_generating 描述与 cost_estimating 实测规格对齐、以及候选间规格分层的基线
           topology:
             type: string
           monthly_estimate:
@@ -85,11 +104,25 @@ conclusion_schema:
 
 不要机械地套用上表。选维度的依据是用户意图中实际存在的不确定性——哪里有取舍，就在哪里提供选择。
 
+## 候选间规格分层（多候选必做）
+
+当输出多个候选方案时，方案之间必须按定位做**规格分层**，不能让不同候选使用完全相同的核心计算/数据库规格：
+
+- 为每个候选的核心资源（ECS、RDS、Redis 等）规划明确的规格档位，并写入 `planned_specs`（含 `product`、`spec`，多候选时用 `tier` 标注分层定位）。
+- 经济/入门定位：选更小或共享型/突发型规格（如 ECS 1C2G 或 `ecs.t6/ecs.e` 共享型、RDS 1C2G）。
+- 均衡/标准定位：选中档规格（如 ECS 2C4G、RDS 2C4G）。
+- 性能/高可用定位：选更高规格或多实例。
+- **禁止**多个候选的核心 ECS/RDS 规格完全一致——那样候选间没有真实取舍，等于凑数。
+- `planned_specs` 是后续 `template_generating`（描述与模板规格）和 `cost_estimating`（实测资源规格）对齐的规格基线：后续阶段偏离该基线时必须记录变更理由或回退到此规格。
+
+单候选时 `planned_specs` 仍应写明核心资源的规格口径，供下游对齐，只是无需分层。
+
 ## 每个方案包含
 
 - 方案名称（体现核心差异，如"Serverless 轻量方案"而非泛泛的"方案一"）
 - 核心阿里云产品组合（只列必要的产品）
 - 资源生命周期：`resource_intents`
+- 核心资源规划规格：`planned_specs`（多候选须体现规格分层）
 - 拓扑描述（简述部署架构）
 - 月度费用估算范围
 - 优势和局限
