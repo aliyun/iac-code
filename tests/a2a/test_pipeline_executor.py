@@ -4195,9 +4195,7 @@ async def test_executor_preserves_auth_looking_pipeline_error_without_safe_mode(
 
     final_status = _status_events(queue)[-1]["status"]
     assert final_status["state"] == "TASK_STATE_FAILED"
-    assert final_status["message"]["parts"][0]["text"] == (
-        "ValueError: missing API key: secret-internal-detail"
-    )
+    assert final_status["message"]["parts"][0]["text"] == ("ValueError: missing API key: secret-internal-detail")
 
 
 @pytest.mark.asyncio

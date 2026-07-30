@@ -181,8 +181,7 @@ def _redact_known_path_token(
 def _path_matches_roots(path: str, roots: list[_NormalizedRoot]) -> bool:
     windows = _is_windows_path(path)
     return any(
-        root.windows == windows
-        and _path_is_under_root(candidate, root.norm_path, windows=windows)
+        root.windows == windows and _path_is_under_root(candidate, root.norm_path, windows=windows)
         for candidate in _candidate_norm_paths(path, windows=windows)
         for root in roots
     )

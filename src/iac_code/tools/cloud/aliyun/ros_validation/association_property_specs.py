@@ -252,11 +252,7 @@ def apply_contract_corrections(payload: Mapping[str, Any]) -> dict[str, Any]:
             frozenset({"component", "deprecated", "replacement", "scope"}),
         ),
         "common_metadata": (
-            {
-                field: deepcopy(common[field])
-                for field in ("coverage", "schema", "semantic_rules")
-                if field in common
-            }
+            {field: deepcopy(common[field]) for field in ("coverage", "schema", "semantic_rules") if field in common}
             if isinstance(common, Mapping)
             else deepcopy(common)
         ),

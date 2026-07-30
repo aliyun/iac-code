@@ -101,6 +101,8 @@ _EXTREME_DEFERRED_EVENT_TYPES = {"text_delta", "thinking_delta"}
 _EXTREME_JOURNAL_FLUSH_EVENTS = 512
 _RECOVERY_STATE_SCOPES = {"step", "candidate", "candidateStep", "candidate_step"}
 _RECOVERY_STATE_STATUSES = {"working"}
+
+
 def backup_committed_delivery_envelope(
     ack_envelope: dict[str, Any],
     committed_envelope: dict[str, Any],
@@ -1034,10 +1036,10 @@ class PipelineA2AEventPublisher:
 
     async def _enqueue_artifact_update(self, envelope: dict[str, Any], artifact_metadata: dict[str, Any]) -> None:
         event = _artifact_update_event(
-                task_id=self._delivery_task_id(envelope),
-                context_id=self._delivery_context_id(envelope),
-                metadata=artifact_metadata,
-            )
+            task_id=self._delivery_task_id(envelope),
+            context_id=self._delivery_context_id(envelope),
+            metadata=artifact_metadata,
+        )
         await self.event_queue.enqueue_event(event)
 
     async def _apply_permission_metadata(

@@ -102,9 +102,7 @@ def test_vendored_contract_contains_only_supported_public_fields() -> None:
         for spec in payload["association_properties"].values()
     )
     assert all(set(spec) <= {"scope"} for spec in payload["excluded_association_properties"].values())
-    assert all(
-        set(spec) <= {"coverage", "metadata", "semantic_rules"} for spec in payload["components"].values()
-    )
+    assert all(set(spec) <= {"coverage", "metadata", "semantic_rules"} for spec in payload["components"].values())
 
 
 def test_contract_corrections_are_idempotent_and_sanitizing() -> None:
@@ -165,15 +163,9 @@ def test_loader_rejects_unknown_consumer_set_and_semantic_rule() -> None:
     "mutate",
     [
         lambda item: item.__setitem__("unsupported_top_level", {"count": 1}),
-        lambda item: item["association_properties"]["AutoCompleteInput"].__setitem__(
-            "unsupported_detail", "discarded"
-        ),
-        lambda item: item["components"]["AutoCompleteInput"].__setitem__(
-            "unsupported_detail", "discarded"
-        ),
-        lambda item: item["excluded_association_properties"]["Default"].__setitem__(
-            "unsupported_detail", "discarded"
-        ),
+        lambda item: item["association_properties"]["AutoCompleteInput"].__setitem__("unsupported_detail", "discarded"),
+        lambda item: item["components"]["AutoCompleteInput"].__setitem__("unsupported_detail", "discarded"),
+        lambda item: item["excluded_association_properties"]["Default"].__setitem__("unsupported_detail", "discarded"),
     ],
 )
 def test_loader_rejects_fields_outside_public_contract(mutate) -> None:

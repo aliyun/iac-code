@@ -110,6 +110,8 @@ _CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS = 1
 _CANCEL_ACTIVE_TASK_DRAIN_TIMEOUT_SECONDS = 30
 _ERROR_TEXT_MAX_CHARS = 1000
 _DEFERRED_CLEANUP_PROMPTS_FILENAME = "cleanup-deferred-prompts.json"
+
+
 def _format_exception(exc: BaseException) -> str:
     message = str(exc)
     raw = type(exc).__name__ if not message else f"{type(exc).__name__}: {message}"

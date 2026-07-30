@@ -92,12 +92,8 @@ async def test_recovery_keeps_pipeline_warning_visible_after_snapshot_sequence(t
     assert state["snapshot"]["lastSequence"] == 2
     assert state["snapshot"]["control"]["warningHistory"][0]["eventId"] == "evt-warning"
     assert state["snapshot"]["control"]["warningHistory"][0]["data"]["reason"] == "cleanup_tracking_unavailable"
-    assert state["snapshot"]["control"]["warningHistory"][0]["data"]["ledger_path"].endswith(
-        "/cleanup.yaml"
-    )
-    assert "while parsing /Users/alice" in state["snapshot"]["control"]["warningHistory"][0]["data"][
-        "load_error"
-    ]
+    assert state["snapshot"]["control"]["warningHistory"][0]["data"]["ledger_path"].endswith("/cleanup.yaml")
+    assert "while parsing /Users/alice" in state["snapshot"]["control"]["warningHistory"][0]["data"]["load_error"]
 
     replay_state = await service.get_state(context_id="ctx-1", after_sequence=1)
 
@@ -336,9 +332,7 @@ async def test_recovery_resolves_cleanup_snapshot_from_normal_delivery_task_id(t
     assert state["snapshot"]["cleanup"]["resources"][0]["resourceId"] == "stack-123"
     assert state["snapshot"]["cleanup"]["prompt"] == "hidden cleanup prompt for stack-123"
     assert state["snapshot"]["cleanup"]["ledgerPath"].endswith("/cleanup.yaml")
-    assert state["snapshot"]["cleanup"]["history"][0]["data"]["prompt"] == (
-        "hidden cleanup prompt for stack-123"
-    )
+    assert state["snapshot"]["cleanup"]["history"][0]["data"]["prompt"] == ("hidden cleanup prompt for stack-123")
     assert state["snapshot"]["cleanup"]["history"][0]["data"]["ledgerPath"].endswith("/cleanup.yaml")
     assert state["snapshot"]["cleanup"]["history"][0]["data"]["lastError"] == raw_error
     assert [event["eventId"] for event in state["events"]] == ["evt-cleanup-started"]
