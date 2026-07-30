@@ -2669,6 +2669,7 @@ class PipelineRunner:
         async for event in self._continue_from_current(
             **self._continue_input_kwargs(pipeline_input),
             resume_waiting_step=True,
+            reemit_step_started=True,
         ):
             if (
                 not selection_observed
@@ -3698,6 +3699,7 @@ class PipelineRunner:
         precompleted_tools: dict[str, dict[str, Any]] | None = None,
         resume_waiting_step: bool = False,
         resume_running_step: bool = False,
+        reemit_step_started: bool = False,
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         is_first_step = True
         terminal_pipeline_telemetry_emitted = False
@@ -3766,6 +3768,28 @@ class PipelineRunner:
                 except PipelineStatePersistenceError as exc:
                     yield self._persistence_failure_event(exc)
                     return
+                if reemit_step_started:
+                    # A waiting-input step (auto_advance=false, e.g. confirm_and_select)
+                    # already emitted STEP_COMPLETED before pausing, and this resume run
+                    # will emit STEP_COMPLETED again after processing the user's answer.
+                    # Re-emit STEP_STARTED for the same attempt so aggregated run-event
+                    # counts keep parent step started/completed strictly paired.
+                    yield PipelineEvent(
+                        type=PipelineEventType.STEP_STARTED,
+                        step_id=step.step_id,
+                        timestamp=step_start,
+                        data={
+                            "index": step_index,
+                            "attempt": step_attempt,
+                            "total": self.state_machine.total_steps,
+                            "name": step.step_id,
+                            "step_type": step.step_type,
+                            "ui_mode": step.ui_mode,
+                            "active_attempt_id": attempt["attempt_id"],
+                            "transcript_id": attempt["transcript_id"],
+                            "resumed": True,
+                        },
+                    )
             else:
                 step_attempt = self._next_step_attempt(step.step_id)
                 try:

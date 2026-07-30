@@ -1554,6 +1554,74 @@ async def test_resume_input_save_failure_stops_before_input_received_event(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_resume_waiting_step_reemits_step_started_so_counts_stay_paired(tmp_path):
+    """A waiting-input step emits STEP_COMPLETED before pausing and again after the
+    user answers; the resume must re-emit STEP_STARTED for the same attempt so
+    aggregated run-event counts keep started/completed strictly paired."""
+    runner = _build_two_step_runner(tmp_path, auto_advance_first=False)
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"ok": True})
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner.run("start")]
+    events += [event async for event in runner.resume("continue")]
+
+    def _step_events(event_type, step_id):
+        return [
+            event
+            for event in events
+            if isinstance(event, PipelineEvent) and event.type == event_type and event.step_id == step_id
+        ]
+
+    started_a = _step_events(PipelineEventType.STEP_STARTED, "a")
+    completed_a = _step_events(PipelineEventType.STEP_COMPLETED, "a")
+    assert len(started_a) == len(completed_a) == 2
+    resumed_started = started_a[1]
+    assert resumed_started.data["resumed"] is True
+    assert resumed_started.data["attempt"] == started_a[0].data["attempt"]
+
+    total_started = sum(
+        1 for event in events if isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_STARTED
+    )
+    total_completed = sum(
+        1 for event in events if isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_COMPLETED
+    )
+    assert total_started == total_completed
+
+
+@pytest.mark.asyncio
+async def test_resume_ask_user_question_does_not_reemit_step_started(tmp_path):
+    """resume_ask_user_question resumes a step that never emitted STEP_COMPLETED
+    before pausing, so re-emitting STEP_STARTED there would create the opposite
+    imbalance; the continue path must not re-emit for that flow."""
+    runner = _build_two_step_runner(tmp_path, auto_advance_first=False)
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"ok": True})
+
+    runner._step_executor.execute = fake_execute
+    runner._ensure_parent_attempt("a")
+    runner._resume_messages_for_current_parent_step = lambda step_id: []
+
+    events = [
+        event
+        async for event in runner.resume_ask_user_question(
+            {"selected_id": "opt-1", "selected_label": "Option 1", "free_text": ""},
+            tool_use_id="tool-1",
+        )
+    ]
+
+    started_a = [
+        event
+        for event in events
+        if isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_STARTED and event.step_id == "a"
+    ]
+    assert not any(event.data.get("resumed") for event in started_a)
+
+
+@pytest.mark.asyncio
 async def test_pause_confirmation_save_failure_stops_before_input_received_event(tmp_path):
     runner = _build_two_step_runner(tmp_path)
     runner.session = FailingUserInputCheckpointPipelineSession()

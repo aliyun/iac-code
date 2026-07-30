@@ -1002,7 +1002,7 @@ async def test_resume_from_waiting_input_sidecar_preserves_step_attempt_for_user
     runner2._observability.selection_made = MagicMock()
 
     async def fake_continue(user_input=None, **kwargs):
-        assert kwargs == {"resume_waiting_step": True}
+        assert kwargs == {"resume_waiting_step": True, "reemit_step_started": True}
         if False:
             yield
 
@@ -1032,7 +1032,7 @@ async def test_resume_candidate_selection_emits_selected_option_details(tmp_path
     ]
 
     async def fake_continue(user_input=None, **kwargs):
-        assert kwargs == {"resume_waiting_step": True}
+        assert kwargs == {"resume_waiting_step": True, "reemit_step_started": True}
         if False:
             yield
 
@@ -1184,7 +1184,7 @@ async def test_resume_candidate_selection_extracts_index_from_structured_json(tm
     ]
 
     async def fake_continue(user_input=None, **kwargs):
-        assert kwargs == {"resume_waiting_step": True}
+        assert kwargs == {"resume_waiting_step": True, "reemit_step_started": True}
         if False:
             yield
 
@@ -1215,7 +1215,7 @@ async def test_resume_candidate_selection_extracts_index_from_numbered_choice(tm
     ]
 
     async def fake_continue(user_input=None, **kwargs):
-        assert kwargs == {"resume_waiting_step": True}
+        assert kwargs == {"resume_waiting_step": True, "reemit_step_started": True}
         if False:
             yield
 
@@ -1239,7 +1239,7 @@ async def test_resume_candidate_selection_prefers_evaluated_index_over_display_i
     ]
 
     async def fake_continue(user_input=None, **kwargs):
-        assert kwargs == {"resume_waiting_step": True}
+        assert kwargs == {"resume_waiting_step": True, "reemit_step_started": True}
         if False:
             yield
 
@@ -1297,7 +1297,7 @@ async def test_resume_candidate_selection_uses_restored_context_options(tmp_path
     )
 
     async def fake_continue(user_input=None, **kwargs):
-        assert kwargs == {"resume_waiting_step": True}
+        assert kwargs == {"resume_waiting_step": True, "reemit_step_started": True}
         if False:
             yield
 
