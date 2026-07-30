@@ -713,6 +713,9 @@ class WebSession:
     # 仅内存的触发标志:全新会话置 True,供后续 LLM 生成会话标题的路径消费；
     # 重开/外来会话为 False(标题已存在或不归 Web 生成)。
     pending_llm_title: bool = False
+    # 仅内存标志:流水线首个回合先设「即时占位」标题让会话立刻出现在侧栏,标记为临时;
+    # 随后在途 LLM 结果可覆盖临时标题(apply_llm_auto_title),用户重命名则清除该标记并胜出。
+    title_provisional: bool = False
     # 运行中 turn 的 agent_loop 与 turn id，供“引导/立即插队”端点即时注入使用；
     # 由 runtime.start_turn 在 turn 期间设置、finally 清空。
     active_agent_loop: Any | None = field(default=None, repr=False)
@@ -2411,22 +2414,25 @@ class WebSessionManager:
         if not title:
             return False
         session.title = title
+        # 即时占位标题:允许随后在途 LLM 结果覆盖(见 apply_llm_auto_title)。
+        session.title_provisional = True
         self.persist_web_metadata(session)
         return True
 
     def apply_llm_auto_title(self, session: WebSession | str, title: str) -> bool:
         """把 LLM 生成/回退得到的标题落到内存 + web sidecar,并发 session.updated。
 
-        仅当当前无有效标题(仍为空或「(empty)」)时生效,避免覆盖用户重命名或
-        运行中已设置的标题。返回是否发生变更(供调用方判断是否已刷新侧栏)。
+        仅当当前无有效标题(仍为空或「(empty)」)、或当前为流水线设的临时占位标题时生效,
+        避免覆盖用户重命名或已冻结的正式标题。落库后清除临时标记(冻结)。返回是否发生变更。
         """
         session = self._resolve_session_arg(session)
         title = (title or "").strip()
         if not title:
             return False
-        if session.title and session.title != "(empty)":
+        if session.title and session.title != "(empty)" and not session.title_provisional:
             return False
         session.title = title
+        session.title_provisional = False
         self.persist_web_metadata(session)
         session.events.append("session.updated", {"title": session.title})
         return True
@@ -2759,6 +2765,8 @@ class WebSessionManager:
         result = self.storage.rename_session(session.cwd, session.session_id, name, git_branch=git_branch)
         metadata = self.storage.read_metadata(session.cwd, session.session_id)
         session.title = metadata.name if metadata and metadata.name else session.title
+        # 用户显式重命名后冻结:在途 LLM 标题结果不得再覆盖。
+        session.title_provisional = False
         session.git_branch = metadata.git_branch if metadata else session.git_branch
         session.updated_at = metadata.updated_at if metadata and metadata.updated_at else session.updated_at
         session.events.append(

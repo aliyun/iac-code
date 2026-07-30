@@ -694,6 +694,44 @@ def test_pipeline_message_route_sets_session_title_from_first_prompt(tmp_path) -
     assert any(event["payload"].get("title") == "帮我搭一条完整的售卖流水线" for event in updated_events)
 
 
+def test_pipeline_first_turn_refreshes_title_with_llm(tmp_path, monkeypatch) -> None:
+    import time
+
+    from iac_code.web import session_manager as sm
+    from iac_code.web.app import create_app
+    from iac_code.web.session_manager import WebSessionManager
+
+    async def fake_generate(**_kwargs):
+        return "AI 生成的流水线标题"
+
+    monkeypatch.setattr(sm.session_titler, "generate_session_title", fake_generate)
+
+    project = tmp_path / "project"
+    project.mkdir()
+    manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=project)
+    runner = _RecordingPipelineActionRunner()
+    session = manager.create_session(mode="pipeline", pipeline_name="selling", session_id="session-1")
+    assert session.pending_llm_title is True
+    app = create_app(session_manager=manager, pipeline_action_runner_factory=lambda: runner)
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/sessions/{session.session_id}/messages",
+            json={"text": "帮我搭一条完整的售卖流水线", "imageIds": [], "fileRefs": []},
+        )
+        assert response.status_code == 202
+
+        # 流水线首个回合应先设即时占位标题,再由后台 LLM 任务刷新为生成的标题。
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if session.title == "AI 生成的流水线标题":
+                break
+            time.sleep(0.02)
+
+    assert session.title == "AI 生成的流水线标题"
+    assert session.pending_llm_title is False
+
+
 def test_handoff_injects_pipeline_context_into_normal_chat_resume(monkeypatch, tmp_path) -> None:
     # 流水线交接给普通对话时,须把引擎生成的交接摘要(normalHandoff.summary)落入 web 会话 JSONL,
     # 否则进入普通对话后 LLM 读不到流水线上下文、答「什么都没创建」。这里模拟已交接的快照,POST

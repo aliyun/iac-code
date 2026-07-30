@@ -1866,6 +1866,68 @@ class _FakeImg:
     base64_data = "AAAA"
 
 
+def test_apply_pipeline_auto_title_marks_title_provisional(tmp_path) -> None:
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(
+        cwd=str(tmp_path / "project"), mode="pipeline", pipeline_name="selling", session_id="pipe-prov-1"
+    )
+    assert session.title_provisional is False
+
+    manager.apply_pipeline_auto_title(session, "帮我搭一条售卖流水线")
+
+    # 流水线首个回合设的是「即时占位」标题,标记为临时,允许随后 LLM 结果覆盖。
+    assert session.title_provisional is True
+
+
+def test_apply_llm_auto_title_overwrites_provisional_pipeline_title(tmp_path) -> None:
+    cwd = str(tmp_path / "project")
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(
+        cwd=cwd, mode="pipeline", pipeline_name="selling", session_id="pipe-prov-2"
+    )
+    manager.apply_pipeline_auto_title(session, "帮我搭一条售卖流水线")
+
+    changed = manager.apply_llm_auto_title(session, "售卖流水线搭建")
+
+    # LLM 结果应覆盖临时占位标题,并清除临时标记(冻结为正式标题)。
+    assert changed is True
+    assert session.title == "售卖流水线搭建"
+    assert session.title_provisional is False
+    sidecar = _read_web_session_metadata(manager.storage, cwd, session.session_id)
+    assert sidecar["autoTitle"] == "售卖流水线搭建"
+    # 覆盖后不再是临时标题,第二次 LLM 结果不得再覆盖。
+    assert manager.apply_llm_auto_title(session, "又一个标题") is False
+    assert session.title == "售卖流水线搭建"
+
+
+def test_apply_llm_auto_title_does_not_overwrite_rename_over_provisional(tmp_path) -> None:
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(
+        cwd=str(tmp_path / "project"), mode="pipeline", pipeline_name="selling", session_id="pipe-prov-3"
+    )
+    manager.apply_pipeline_auto_title(session, "帮我搭一条售卖流水线")
+    # 用户在 LLM 结果回来之前手动重命名 → 重命名必须胜出,不被在途 LLM 结果覆盖。
+    manager.rename_session(session, "my-project")
+
+    changed = manager.apply_llm_auto_title(session, "LLM 想覆盖的标题")
+
+    assert changed is False
+    assert session.title == "my-project"
+
+
+def test_rename_session_clears_title_provisional(tmp_path) -> None:
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(
+        cwd=str(tmp_path / "project"), mode="pipeline", pipeline_name="selling", session_id="pipe-prov-4"
+    )
+    manager.apply_pipeline_auto_title(session, "帮我搭一条售卖流水线")
+    assert session.title_provisional is True
+
+    manager.rename_session(session, "my-project")
+
+    assert session.title_provisional is False
+
+
 def test_schedule_llm_title_noop_when_not_pending(tmp_path, monkeypatch) -> None:
     from iac_code.web import session_manager as sm
 
