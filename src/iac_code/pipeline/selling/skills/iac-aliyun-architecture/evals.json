@@ -172,6 +172,33 @@
         {"name": "within_budget", "check": "所有方案的monthly_cost_range上限不超过500 CNY"},
         {"name": "no_overengineering", "check": "不包含SLB集群、多可用区等超出预算的高可用配置"}
       ]
+    },
+    {
+      "id": 9,
+      "name": "create-vpc-and-vswitch-both-fulfilled",
+      "prompt": "创建一个VPC，并在里面创建一个VSwitch",
+      "intent_context": {
+        "is_infra_intent": true,
+        "confidence": "high",
+        "cloud_platform": "aliyun",
+        "business_type": "网络基础设施",
+        "core_requirements": ["VPC", "VSwitch"],
+        "resource_intents": [
+          {"product": "VPC", "action": "create", "source": "user"},
+          {"product": "VSwitch", "action": "create", "source": "user"}
+        ],
+        "non_functional": {"high_availability": false, "security_level": "basic"},
+        "scale_hint": null,
+        "budget_constraint": null,
+        "additional_notes": "用户明确要求新建 VPC 和 VSwitch"
+      },
+      "expected_behavior": "只输出1个方案；candidate 的 resource_intents 中 VPC 和 VSwitch 均保持 action=create，不得把 VPC 降级为 use_existing 或已有参数",
+      "assertions": [
+        {"name": "single_candidate", "check": "candidates数组长度为1"},
+        {"name": "vpc_create_fulfilled", "check": "candidate.resource_intents 中包含 {product: VPC, action: create}，且不存在 {product: VPC, action: use_existing}"},
+        {"name": "vswitch_create_fulfilled", "check": "candidate.resource_intents 中包含 {product: VSwitch, action: create}"},
+        {"name": "no_extra_resources", "check": "products 只含 VPC/VSwitch 相关资源，不含 ECS/RDS/SLB 等"}
+      ]
     }
   ]
 }

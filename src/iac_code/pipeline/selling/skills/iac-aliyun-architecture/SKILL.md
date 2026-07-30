@@ -99,11 +99,15 @@ conclusion_schema:
 如果 intent 中存在 `resource_intents`，它是架构设计的硬约束：
 
 - 只有 `action=create` 的资源可以作为本方案要新建的资源。不要把 `action=use_existing` 或 `action=reference` 的资源设计成新建资源。
+- intent 中每个 `action=create` 的资源必须在每个 candidate 中兑现为新建资源：candidate 的 `resource_intents` 必须保留该资源且 `action=create`，不得把它降级为 `use_existing`/`reference`，也不得把它退化为已有资源参数（如把要新建的 VPC 改成 `VpcId` 参数）或直接丢弃。
 - `action=use_existing/reference` 必须作为已有资源引用，后续模板中应通过参数（如 `VpcId`）或用户提供 ID 引用，不得生成对应的新建资源。换句话说，use_existing/reference 必须作为已有资源引用。
 - `action=forbid` 的资源不得出现在候选方案的新增资源里，也不得作为“顺手补齐”的依赖加入。
-- 将 `resource_intents` 原样或按方案收窄后写入每个 candidate，供模板生成步骤继续执行同一约束。
+- 将 `resource_intents` 原样或按方案收窄后写入每个 candidate，供模板生成步骤继续执行同一约束。收窄只允许追加推断出的辅助资源或补充说明，不允许改写、降级或删除 intent 中已有的 `action=create` 条目。
+- 如果某个 `action=create` 的资源确实无法在方案中兑现（如与其它约束冲突），不要静默降级；在 rollback_request 中请求回退到 intent_parsing 说明冲突。
 
 示例：intent 表示“已有 VPC 中创建安全组”时，candidate 应包含 `resource_intents: [{"product": "VPC", "action": "use_existing"}, {"product": "SecurityGroup", "action": "create"}]`。不得生成 VSwitch，也不得设计成“创建 VPC + VSwitch + SecurityGroup”。
+
+示例：intent 表示“创建一个 VPC 和一个 VSwitch”（`resource_intents: [{"product": "VPC", "action": "create"}, {"product": "VSwitch", "action": "create"}]`）时，每个 candidate 都必须同时新建 VPC 和 VSwitch。不得把 VPC 改成 `use_existing` 或 `VpcId` 参数、只在已有 VPC 内创建 VSwitch——那会让用户的 VPC 创建意图落空。
 
 ## 输出
 调用 `complete_step` 提交结论。字段定义见 tool schema。

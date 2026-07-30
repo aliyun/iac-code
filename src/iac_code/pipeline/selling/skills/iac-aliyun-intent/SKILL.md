@@ -192,8 +192,10 @@ conclusion_schema:
 - “已有 VPC 下创建安全组” → `core_requirements: ["VPC", "SecurityGroup"]`，`resource_intents: [{"product": "VPC", "action": "use_existing", "role": "attach_security_group_to", "source": "user"}, {"product": "SecurityGroup", "action": "create", "source": "user"}]`
 - 最小表达也必须保留生命周期：`{"product": "VPC", "action": "use_existing"}`、`{"product": "SecurityGroup", "action": "create"}`
 - “选择一个已有 VPC，创建一个 VSwitch” → `resource_intents: [{"product": "VPC", "action": "use_existing", "source": "user"}, {"product": "VSwitch", "action": "create", "source": "user"}]`
+- “创建一个 VPC 和一个 VSwitch” → `resource_intents: [{"product": "VPC", "action": "create", "source": "user"}, {"product": "VSwitch", "action": "create", "source": "user"}]`；两个资源都要新建，不要把 VPC 标成 `use_existing`
 - “只创建安全组，不创建 VSwitch” → `resource_intents: [{"product": "SecurityGroup", "action": "create", "source": "user"}, {"product": "VSwitch", "action": "forbid", "source": "user"}]`
 - 用户没有说明某资源是已有资源时，不要擅自把该资源标成 `action: "use_existing"`
+- 用户没有表达新建语义（说的是“已有”“选择一个”“使用现有”等）的资源，不要擅自把该资源标成 `action: "create"`；`action: "create"` 意味着后续候选和模板必须真正新建该资源，误标会导致方案与用户需求偏离
 
 ### 情况 C — 非阿里云平台需求
 `is_infra_intent: false`，`category: "other"`。在 `rejection_reason` 或 `platform_note` 中说明当前流程只支持阿里云，不能继续生成非阿里云方案；如果用户通过澄清文本改写为阿里云目标，则按情况 B 处理。

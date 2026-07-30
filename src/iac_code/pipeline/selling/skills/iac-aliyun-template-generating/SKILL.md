@@ -53,11 +53,14 @@ conclusion_schema:
 候选架构可能包含 `resource_intents`。该字段优先级高于自然语言描述：
 
 - `resource_intents` 中 `action=create` 的资源才允许出现在 ROS `Resources` 中作为新建资源。
+- `resource_intents` 中所有 `action=create` 的资源都必须出现在 ROS `Resources` 中作为新建资源；任何一个 create 资源缺失（例如被改成 Parameter 或直接省略）都视为模板与意图不一致，必须修复模板；若确实无法在模板中新建，通过 rollback_request 回到 architecture_planning，不得静默降级。
 - action=use_existing/reference 的资源必须建模为 Parameters 或外部引用，不得在 Resources 中创建。例如“已有 VPC 中创建安全组”时，应定义 `VpcId` Parameter，并让 SecurityGroup 的 `VpcId` 引用该参数。
 - `action=forbid` 的资源不得在模板中创建；除非用户明确要求引用已有资源，也不要生成相关 Parameter。
 - 如果 candidate 的自然语言、products 和生命周期字段冲突，以生命周期字段为准；冲突严重无法生成时，通过 rollback_request 回到 architecture_planning。
 
 示例：`resource_intents: [{"product": "SecurityGroup", "action": "create"}, {"product": "VPC", "action": "use_existing"}]` 时，只生成 `ALIYUN::ECS::SecurityGroup`，不要生成 `ALIYUN::ECS::VPC` 或 `ALIYUN::ECS::VSwitch`。
+
+示例：`resource_intents: [{"product": "VPC", "action": "create"}, {"product": "VSwitch", "action": "create"}]` 时，`Resources` 中必须同时包含 `ALIYUN::ECS::VPC` 和 `ALIYUN::ECS::VSwitch`；不得把 VPC 改成 `VpcId` Parameter 只创建 VSwitch。
 
 ## 参数化规则
 

@@ -120,6 +120,13 @@ class TestSkillContentRosOnly:
         assert "已有 VPC 中创建安全组" in body
         assert "forbidden_resources" not in body
 
+    def test_requires_all_create_intents_to_appear_in_resources(self, body):
+        assert "所有 `action=create` 的资源都必须出现在 ROS `Resources` 中" in body
+        assert "视为模板与意图不一致" in body
+        assert "不得静默降级" in body
+        assert "必须同时包含 `ALIYUN::ECS::VPC` 和 `ALIYUN::ECS::VSwitch`" in body
+        assert "不得把 VPC 改成 `VpcId` Parameter 只创建 VSwitch" in body
+
     def test_file_write_details_stay_in_step_prompt(self, body):
         assert "并写入文件" in body
         assert "生成的模板默认放在当前工作目录" in body
