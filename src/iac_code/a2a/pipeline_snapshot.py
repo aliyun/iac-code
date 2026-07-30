@@ -660,9 +660,39 @@ class _PipelineSnapshotReducer:
             step["candidates"].append(candidate)
         self._candidate_parent_step_run_ids[run_id] = step["runId"]
 
-        _merge_coordinate(candidate, coordinate)
+        # ``candidate_started`` carries a skeleton of the candidate's substeps
+        # (each ``status=pending``).  Merge and register them by runId here so a
+        # later real ``candidate_step_*`` event updates the same entry instead of
+        # appending a duplicate placeholder.
+        skeleton_steps = coordinate.get("steps")
+        _merge_coordinate(candidate, {key: value for key, value in coordinate.items() if key != "steps"})
+        if isinstance(skeleton_steps, list):
+            self._merge_candidate_step_skeletons(candidate, skeleton_steps)
         self._apply_candidate_lifecycle(candidate, event)
         return candidate
+
+    def _merge_candidate_step_skeletons(
+        self,
+        candidate: dict[str, Any],
+        skeleton_steps: list[Any],
+    ) -> None:
+        for skeleton in skeleton_steps:
+            if not isinstance(skeleton, dict):
+                continue
+            run_id = _string_or_none(skeleton.get("runId"))
+            if run_id is None:
+                continue
+            existing = self._candidate_steps_by_run_id.get(run_id)
+            if existing is None:
+                candidate_step = copy.deepcopy(skeleton)
+                candidate_step.setdefault("status", "pending")
+                self._candidate_steps_by_run_id[run_id] = candidate_step
+                candidate.setdefault("steps", []).append(candidate_step)
+            else:
+                for key, value in skeleton.items():
+                    if key == "status" or value is None:
+                        continue
+                    existing.setdefault(key, value)
 
     def _apply_candidate_lifecycle(self, candidate: dict[str, Any], event: dict[str, Any]) -> None:
         event_type = event.get("eventType")
@@ -678,6 +708,7 @@ class _PipelineSnapshotReducer:
             _set_time(candidate, "completedAt", created_at)
             _merge_completion_data(candidate, event)
             _remove_value(self._snapshot["control"]["activeCandidateRunIds"], run_id)
+            self._converge_orphan_candidate_steps(candidate, created_at)
         elif event_type == "candidate_failed":
             candidate["status"] = "failed"
             _set_time(candidate, "failedAt", created_at)
@@ -687,6 +718,18 @@ class _PipelineSnapshotReducer:
             candidate["status"] = "restarting"
             _set_time(candidate, "restartingAt", created_at)
             _remove_value(self._snapshot["control"]["activeCandidateRunIds"], run_id)
+
+    def _converge_orphan_candidate_steps(self, candidate: dict[str, Any], created_at: str | None) -> None:
+        """When a candidate completes, any never-started skeleton substep would
+        otherwise linger as ``pending`` with a null ``conclusion``, contradicting
+        the completed parent.  Mark those orphan placeholders ``skipped`` so a
+        completed candidate never exposes pending/null substeps."""
+        for candidate_step in candidate.get("steps", []):
+            if not isinstance(candidate_step, dict):
+                continue
+            if _string_or_none(candidate_step.get("status")) in {"working", "pending", None}:
+                candidate_step["status"] = "skipped"
+                _set_time(candidate_step, "completedAt", created_at)
 
     def _remove_active_candidate_attempts(self, candidate: dict[str, Any]) -> None:
         candidate_id = _string_or_none(candidate.get("id"))

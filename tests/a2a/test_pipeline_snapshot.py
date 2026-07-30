@@ -1480,3 +1480,115 @@ def test_store_returns_none_for_invalid_utf8_snapshot(tmp_path) -> None:
 def test_snapshot_schema_version_is_exported() -> None:
     assert SNAPSHOT_SCHEMA_VERSION == "1.1"
     assert "SNAPSHOT_SCHEMA_VERSION" in pipeline_snapshot.__all__
+
+
+def test_candidate_started_skeletons_deduped_and_registered() -> None:
+    """Skeleton substeps from candidate_started must be registered by runId
+    so later real events update them instead of creating duplicates."""
+    parent = _base("evt-1", 1, "step_started", scope="step")
+    parent["step"] = {"runId": "step-eval-1", "id": "evaluate_candidates", "index": 2, "attempt": 1}
+
+    cs = _base("evt-2", 2, "candidate_started", scope="candidate")
+    cs["step"] = parent["step"]
+    cs["candidate"] = {
+        "runId": "cand-0-1",
+        "id": "evaluate_candidate",
+        "index": 0,
+        "attempt": 1,
+        "steps": [
+            {
+                "runId": "cand-0-1-template_generating-1",
+                "id": "template_generating",
+                "attempt": 1,
+                "index": 1,
+                "total": 2,
+                "status": "pending",
+            },
+            {
+                "runId": "cand-0-1-cost_estimating-1",
+                "id": "cost_estimating",
+                "attempt": 1,
+                "index": 2,
+                "total": 2,
+                "status": "pending",
+            },
+        ],
+    }
+
+    # Real substep started & completed for template_generating only
+    ss = _base("evt-3", 3, "candidate_step_started", scope="candidate_step")
+    ss["step"] = parent["step"]
+    ss["candidate"] = {"runId": "cand-0-1", "id": "evaluate_candidate", "index": 0, "attempt": 1}
+    ss["candidateStep"] = {
+        "runId": "cand-0-1-template_generating-1",
+        "id": "template_generating",
+        "attempt": 1,
+        "index": 1,
+    }
+
+    sc = _base("evt-4", 4, "candidate_step_completed", scope="candidate_step")
+    sc["step"] = parent["step"]
+    sc["candidate"] = ss["candidate"]
+    sc["candidateStep"] = ss["candidateStep"]
+    sc["data"] = {"conclusion": {"template": "ok"}}
+
+    # Candidate completed (cost_estimating was never started)
+    cc = _base("evt-5", 5, "candidate_completed", scope="candidate")
+    cc["step"] = parent["step"]
+    cc["candidate"] = ss["candidate"]
+
+    snapshot = reduce_pipeline_events([parent, cs, ss, sc, cc])
+    candidate = snapshot["steps"][0]["candidates"][0]
+
+    # No duplicates
+    run_ids = [s["runId"] for s in candidate["steps"]]
+    assert len(run_ids) == len(set(run_ids)), f"duplicate runIds: {run_ids}"
+    assert len(candidate["steps"]) == 2
+
+    # template_generating completed with conclusion
+    tg = next(s for s in candidate["steps"] if s["id"] == "template_generating")
+    assert tg["status"] == "completed"
+    assert tg["conclusion"] == {"template": "ok"}
+
+    # cost_estimating was never started → converged to skipped
+    ce = next(s for s in candidate["steps"] if s["id"] == "cost_estimating")
+    assert ce["status"] == "skipped"
+
+    # Candidate itself is completed
+    assert candidate["status"] == "completed"
+
+
+def test_candidate_completed_no_orphan_pending_substeps() -> None:
+    """A completed candidate must not have any substep with status=pending
+    and conclusion=null."""
+    parent = _base("evt-1", 1, "step_started", scope="step")
+    parent["step"] = {"runId": "step-eval-1", "id": "evaluate_candidates", "index": 2, "attempt": 1}
+
+    cs = _base("evt-2", 2, "candidate_started", scope="candidate")
+    cs["step"] = parent["step"]
+    cs["candidate"] = {
+        "runId": "cand-0-1",
+        "id": "evaluate_candidate",
+        "index": 0,
+        "attempt": 1,
+        "steps": [
+            {"runId": "cand-0-1-s1-1", "id": "step1", "attempt": 1, "index": 1, "total": 3, "status": "pending"},
+            {"runId": "cand-0-1-s2-1", "id": "step2", "attempt": 1, "index": 2, "total": 3, "status": "pending"},
+            {"runId": "cand-0-1-s3-1", "id": "step3", "attempt": 1, "index": 3, "total": 3, "status": "pending"},
+        ],
+    }
+
+    # Complete the candidate directly (e.g. early exit)
+    cc = _base("evt-3", 3, "candidate_completed", scope="candidate")
+    cc["step"] = parent["step"]
+    cc["candidate"] = {"runId": "cand-0-1", "id": "evaluate_candidate", "index": 0, "attempt": 1}
+    cc["data"] = {"earlyExit": True, "conclusion": {"result": "skip"}}
+
+    snapshot = reduce_pipeline_events([parent, cs, cc])
+    candidate = snapshot["steps"][0]["candidates"][0]
+
+    assert candidate["status"] == "completed"
+    for substep in candidate["steps"]:
+        assert substep["status"] != "pending", f"substep {substep['id']} still pending"
+        # skipped substeps may not have conclusion—that's OK
+        assert substep["status"] == "skipped"
