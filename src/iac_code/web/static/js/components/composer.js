@@ -729,37 +729,53 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
     }
     chips.replaceChildren();
     for (const attachment of attachments) {
-      const chip = document.createElement("button");
-      chip.type = "button";
       const statusClass = attachment.status ? ` is-${attachment.status}` : "";
-      chip.className = attachment.isImage ? `attachment-chip attachment-chip-image${statusClass}` : "attachment-chip";
       const prefix = attachment.fileRef ? "@ " : "";
       const label =
         attachment.status === "ready" ? `${prefix}${attachment.name}` : `${attachment.name} · ${attachment.status}`;
-      chip.title = label;
-      chip.setAttribute("aria-label", t("Remove {name}", { name: label }));
-      if (attachment.isImage && attachment.previewUrl) {
-        const image = document.createElement("img");
-        image.className = "attachment-chip-preview";
-        image.src = attachment.previewUrl;
-        image.alt = attachment.name;
-        image.draggable = false;
-        const remove = document.createElement("span");
-        remove.className = "attachment-chip-remove";
-        remove.setAttribute("aria-hidden", "true");
-        remove.textContent = "×";
-        chip.replaceChildren(image, remove);
-      } else {
-        chip.textContent = label;
-      }
-      chip.addEventListener("click", () => {
+      const removeAttachment = () => {
         revokeAttachmentPreview(attachment);
         attachments = attachments.filter((item) => item.id !== attachment.id);
         renderAttachmentChips();
         // 移除附件后,排队附件提示不再适用,清除以免残留。
         clearQueuedAttachmentError();
-      });
-      chips.append(chip);
+      };
+      if (attachment.isImage && attachment.previewUrl) {
+        // 图片附件:整块不再是删除按钮。点缩略图预览大图,只有右上角 × 才删除。
+        const chip = document.createElement("div");
+        chip.className = `attachment-chip attachment-chip-image${statusClass}`;
+        chip.title = label;
+        const preview = document.createElement("button");
+        preview.type = "button";
+        preview.className = "attachment-chip-preview-btn";
+        preview.setAttribute("aria-label", t("Preview image"));
+        const image = document.createElement("img");
+        image.className = "attachment-chip-preview";
+        image.src = attachment.previewUrl;
+        image.alt = attachment.name;
+        image.draggable = false;
+        preview.append(image);
+        preview.addEventListener("click", () => {
+          options.onPreviewImage?.({ src: attachment.previewUrl, alt: attachment.name });
+        });
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "attachment-chip-remove";
+        remove.setAttribute("aria-label", t("Remove {name}", { name: label }));
+        remove.textContent = "×";
+        remove.addEventListener("click", removeAttachment);
+        chip.append(preview, remove);
+        chips.append(chip);
+      } else {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "attachment-chip";
+        chip.title = label;
+        chip.setAttribute("aria-label", t("Remove {name}", { name: label }));
+        chip.textContent = label;
+        chip.addEventListener("click", removeAttachment);
+        chips.append(chip);
+      }
     }
   }
 

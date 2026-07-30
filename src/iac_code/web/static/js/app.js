@@ -1,10 +1,11 @@
 import * as api from "./api.js?v=web-repl-ui-303";
-import { createComposerController } from "./components/composer.js?v=session-model-v17";
+import { createComposerController } from "./components/composer.js?v=session-model-v18";
 import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v5";
 import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v7";
 import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v23";
 import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v49";
 import { createOutputController } from "./components/output_panel.js?v=output-panel-v17";
+import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
 import { reduceEvent } from "./events.js?v=web-repl-ui-304";
 import { applyDomI18n, t } from "./i18n.js?v=web-repl-ui-277";
 
@@ -2541,15 +2542,20 @@ function buildMessageAttachmentsElement(message, state) {
   attachments.className = "message-attachments";
   const sessionId = text(state?.currentSessionId || state?.currentSession?.webSessionId || "");
   for (const imageId of imageIds) {
-    const chip = document.createElement("span");
+    // 消息内图片:整块是按钮,点击打开全屏灯箱预览(此前是不可点的静态 span)。
+    const chip = document.createElement("button");
+    chip.type = "button";
     chip.className = "attachment-chip attachment-chip-image message-attachment-image";
     chip.title = imageId;
+    chip.setAttribute("aria-label", t("Preview image"));
+    const src = `/api/images/${encodeURIComponent(imageId)}?sessionId=${encodeURIComponent(sessionId)}`;
     const image = document.createElement("img");
     image.className = "attachment-chip-preview";
-    image.src = `/api/images/${encodeURIComponent(imageId)}?sessionId=${encodeURIComponent(sessionId)}`;
+    image.src = src;
     image.alt = t("Attached image");
     image.draggable = false;
     chip.append(image);
+    chip.addEventListener("click", () => openImageLightbox({ src, alt: t("Attached image") }));
     attachments.append(chip);
   }
   for (const fileRef of fileRefs) {
@@ -5719,6 +5725,8 @@ async function start() {
           setDraftSessionPatch({ providerSelection: selection });
         }
       },
+      // 点 composer 缩略图打开全屏灯箱预览(而非删除;删除只走右上角 ×)。
+      onPreviewImage: ({ src, alt } = {}) => openImageLightbox({ src, alt }),
     },
   );
   workspace = createWorkspaceController(

@@ -643,6 +643,11 @@ msgid "Thinking done"
 msgstr "思考完成"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Preview image"
+msgstr "预览图片"
+
+#: src/iac_code/web/static/js/app.js
 msgid "Attached image"
 msgstr "已附加图片"
 
@@ -1142,6 +1147,11 @@ msgstr "停止"
 msgid "Stop the current reply"
 msgstr "停止当前回复"
 
+#: src/iac_code/web/static/js/components/image_lightbox.js
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Close preview"
+msgstr "关闭预览"
+
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "Success"
 msgstr "成功"
@@ -1153,10 +1163,6 @@ msgstr "进行中/失败"
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "File no longer exists"
 msgstr "文件已不存在"
-
-#: src/iac_code/web/static/js/components/output_panel.js
-msgid "Close preview"
-msgstr "关闭预览"
 
 #: src/iac_code/web/static/js/components/output_panel.js
 #: src/iac_code/web/static/js/components/workspace.js

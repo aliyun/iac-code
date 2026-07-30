@@ -1113,15 +1113,17 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-310" in html
-    assert "/static/js/app.js?v=web-repl-ui-313" in html
+    assert "/static/styles.css?v=web-repl-ui-311" in html
+    assert "/static/js/app.js?v=web-repl-ui-314" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
     # 已归档面板复刻(archived tab)新增 listArchivedSessions/deleteArchivedSessions,
     # 同样需 bump api.js 版本位,否则回访浏览器拿不到新导出。
     assert "./api.js?v=web-repl-ui-303" in app_source
-    assert "./components/composer.js?v=session-model-v17" in app_source
+    assert "./components/composer.js?v=session-model-v18" in app_source
+    # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
+    assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
     assert "./components/tool_cards.js?v=live-inline-tools-v23" in app_source
     assert "./components/blocking.js?v=blocking-keys-v5" in app_source
     # events.js 承载队列/消息 reducer,历次修复都在此;它的 import 必须带版本位,
@@ -1146,7 +1148,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-313" in index_html
+    assert "web-repl-ui-314" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-304" in app_source
     assert "./components/workspace.js?v=cloud-creds-v49" in app_source
@@ -4566,6 +4568,7 @@ def test_composer_keeps_image_thumbnail_when_upload_fails(tmp_path: Path) -> Non
             }
 
             const revoked = [];
+            const previews = [];
             globalThis.URL = {
               createObjectURL(file) {
                 return `blob:preview-${file.name}`;
@@ -4610,6 +4613,11 @@ def test_composer_keeps_image_thumbnail_when_upload_fails(tmp_path: Path) -> Non
                   return Promise.reject(new Error("Current model qwen does not support image input."));
                 },
               },
+              {
+                onPreviewImage(payload) {
+                  previews.push(payload);
+                },
+              },
             );
             controller.setSession("S");
 
@@ -4624,23 +4632,31 @@ def test_composer_keeps_image_thumbnail_when_upload_fails(tmp_path: Path) -> Non
             ]);
 
             const chip = chips.children[0];
-            const image = chip.querySelector(".attachment-chip-preview");
+            const previewBtn = chip.querySelector(".attachment-chip-preview-btn");
+            const image = previewBtn?.children[0] || null;
             const remove = chip.querySelector(".attachment-chip-remove");
             const beforeRemove = {
+              chipTagName: chip.tagName,
               chipClassName: chip.className,
-              chipTextContent: chip.textContent,
               chipTitle: chip.title,
               imageSrc: image?.src || "",
               imageAlt: image?.alt || "",
+              removeTagName: remove?.tagName || "",
               removeText: remove?.textContent || "",
               errorText: errorTarget.textContent,
               formClassName: form.className,
               sendDisabled: sendButton.disabled,
             };
+            // 点缩略图应预览(不删除),点整块容器也不应删除;只有右上角 × 删除。
+            previewBtn.click();
             chip.click();
+            const chipCountAfterPreview = chips.children.length;
+            remove.click();
 
             console.log(JSON.stringify({
               beforeRemove,
+              previews,
+              chipCountAfterPreview,
               chipCountAfterRemove: chips.children.length,
               revoked,
             }));
@@ -4650,16 +4666,19 @@ def test_composer_keeps_image_thumbnail_when_upload_fails(tmp_path: Path) -> Non
 
     assert output == {
         "beforeRemove": {
+            "chipTagName": "DIV",
             "chipClassName": "attachment-chip attachment-chip-image is-failed",
-            "chipTextContent": "",
             "chipTitle": "x.jpg · failed",
             "imageSrc": "blob:preview-x.jpg",
             "imageAlt": "x.jpg",
+            "removeTagName": "BUTTON",
             "removeText": "×",
             "errorText": "Current model qwen does not support image input.",
             "formClassName": "has-attachments",
             "sendDisabled": False,
         },
+        "previews": [{"src": "blob:preview-x.jpg", "alt": "x.jpg"}],
+        "chipCountAfterPreview": 1,
         "chipCountAfterRemove": 0,
         "revoked": ["blob:preview-x.jpg"],
     }
@@ -9490,8 +9509,8 @@ def test_styles_has_compaction_boundary_rule() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-313" in html
-    assert "web-repl-ui-312" not in html
+    assert "web-repl-ui-314" in html
+    assert "web-repl-ui-313" not in html
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:

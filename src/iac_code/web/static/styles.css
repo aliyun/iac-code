@@ -761,6 +761,18 @@ h3 {
   object-fit: cover;
 }
 
+/* 图片缩略图的预览按钮:铺满方块容器,点击开灯箱(删除交给独立的 ×)。 */
+.attachment-chip-preview-btn {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
 .attachment-chip-remove {
   position: absolute;
   top: 0.32rem;
@@ -769,6 +781,8 @@ h3 {
   place-items: center;
   width: 1.42rem;
   height: 1.42rem;
+  padding: 0;
+  border: 0;
   border-radius: 999px;
   background: rgba(255, 255, 252, 0.96);
   color: #20201d;
@@ -776,6 +790,7 @@ h3 {
   font-weight: 400;
   line-height: 1;
   box-shadow: 0 1px 5px rgba(32, 32, 29, 0.2);
+  cursor: pointer;
 }
 
 .composer-row {
@@ -6128,6 +6143,56 @@ body.is-resizing-sidebar {
 
 .app-modal-backdrop[hidden] {
   display: none;
+}
+
+/* 全屏图片灯箱:composer 缩略图与消息内图片共用;点遮罩/×/Esc 关闭。 */
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2.5rem;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.image-lightbox[hidden] {
+  display: none;
+}
+
+.image-lightbox-figure {
+  margin: 0;
+  max-width: 100%;
+  max-height: 100%;
+  display: flex;
+}
+
+.image-lightbox-img {
+  max-width: min(92vw, 1200px);
+  max-height: 88vh;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
+.image-lightbox-close {
+  position: fixed;
+  top: 1.15rem;
+  right: 1.35rem;
+  display: grid;
+  place-items: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 252, 0.94);
+  color: #20201d;
+  font-size: 1.5rem;
+  line-height: 1;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
 }
 
 .app-modal {

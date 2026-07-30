@@ -647,6 +647,11 @@ msgid "Thinking done"
 msgstr "Nachdenken abgeschlossen"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Preview image"
+msgstr "Bildvorschau"
+
+#: src/iac_code/web/static/js/app.js
 msgid "Attached image"
 msgstr "Angehängtes Bild"
 
@@ -1161,6 +1166,11 @@ msgstr "Stoppen"
 msgid "Stop the current reply"
 msgstr "Aktuelle Antwort stoppen"
 
+#: src/iac_code/web/static/js/components/image_lightbox.js
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Close preview"
+msgstr "Vorschau schließen"
+
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "Success"
 msgstr "Erfolg"
@@ -1172,10 +1182,6 @@ msgstr "In Bearbeitung / fehlgeschlagen"
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "File no longer exists"
 msgstr "Datei existiert nicht mehr"
-
-#: src/iac_code/web/static/js/components/output_panel.js
-msgid "Close preview"
-msgstr "Vorschau schließen"
 
 #: src/iac_code/web/static/js/components/output_panel.js
 #: src/iac_code/web/static/js/components/workspace.js

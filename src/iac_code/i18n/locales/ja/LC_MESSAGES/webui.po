@@ -643,6 +643,11 @@ msgid "Thinking done"
 msgstr "思考完了"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/composer.js
+msgid "Preview image"
+msgstr "画像をプレビュー"
+
+#: src/iac_code/web/static/js/app.js
 msgid "Attached image"
 msgstr "画像を添付しました"
 
@@ -1142,6 +1147,11 @@ msgstr "停止"
 msgid "Stop the current reply"
 msgstr "現在の返信を停止"
 
+#: src/iac_code/web/static/js/components/image_lightbox.js
+#: src/iac_code/web/static/js/components/output_panel.js
+msgid "Close preview"
+msgstr "プレビューを閉じる"
+
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "Success"
 msgstr "成功"
@@ -1153,10 +1163,6 @@ msgstr "進行中／失敗"
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "File no longer exists"
 msgstr "ファイルは存在しません"
-
-#: src/iac_code/web/static/js/components/output_panel.js
-msgid "Close preview"
-msgstr "プレビューを閉じる"
 
 #: src/iac_code/web/static/js/components/output_panel.js
 #: src/iac_code/web/static/js/components/workspace.js
