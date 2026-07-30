@@ -660,9 +660,41 @@ class _PipelineSnapshotReducer:
             step["candidates"].append(candidate)
         self._candidate_parent_step_run_ids[run_id] = step["runId"]
 
+        coordinate_steps = coordinate.get("steps")
+        coordinate = {key: value for key, value in coordinate.items() if key != "steps"}
         _merge_coordinate(candidate, coordinate)
+        self._merge_candidate_skeleton_steps(candidate, coordinate_steps)
         self._apply_candidate_lifecycle(candidate, event)
         return candidate
+
+    def _merge_candidate_skeleton_steps(self, candidate: dict[str, Any], coordinate_steps: Any) -> None:
+        """Merge candidate step skeletons (from ``candidate_started``) without
+        clobbering or duplicating lifecycle-tracked step entries.
+
+        Skeleton entries are registered in ``_candidate_steps_by_run_id`` so that
+        later ``candidate_step_*`` events update the same record instead of
+        appending a second entry with the same runId, which previously left a
+        stale ``pending`` twin next to the real terminal record.
+        """
+        for skeleton in _dict_list(coordinate_steps):
+            step_run_id = _string_or_none(skeleton.get("runId"))
+            if step_run_id is None:
+                continue
+            existing = self._candidate_steps_by_run_id.get(step_run_id)
+            if existing is None:
+                entry = copy.deepcopy(skeleton)
+                entry.setdefault("status", "pending")
+                self._candidate_steps_by_run_id[step_run_id] = entry
+                if entry not in candidate["steps"]:
+                    candidate["steps"].append(entry)
+                continue
+            # Only fill in metadata; never downgrade the tracked status.
+            for key, value in skeleton.items():
+                if key == "status" or value is None:
+                    continue
+                existing.setdefault(key, copy.deepcopy(value))
+            if existing not in candidate["steps"]:
+                candidate["steps"].append(existing)
 
     def _apply_candidate_lifecycle(self, candidate: dict[str, Any], event: dict[str, Any]) -> None:
         event_type = event.get("eventType")
@@ -677,16 +709,35 @@ class _PipelineSnapshotReducer:
             candidate["status"] = "completed"
             _set_time(candidate, "completedAt", created_at)
             _merge_completion_data(candidate, event)
+            self._finalize_pending_candidate_steps(candidate, created_at)
             _remove_value(self._snapshot["control"]["activeCandidateRunIds"], run_id)
         elif event_type == "candidate_failed":
             candidate["status"] = "failed"
             _set_time(candidate, "failedAt", created_at)
             _merge_completion_data(candidate, event)
+            self._finalize_pending_candidate_steps(candidate, created_at)
             _remove_value(self._snapshot["control"]["activeCandidateRunIds"], run_id)
         elif event_type == "candidate_restart_requested":
             candidate["status"] = "restarting"
             _set_time(candidate, "restartingAt", created_at)
             _remove_value(self._snapshot["control"]["activeCandidateRunIds"], run_id)
+
+    @staticmethod
+    def _finalize_pending_candidate_steps(candidate: dict[str, Any], created_at: str | None) -> None:
+        """Force every non-terminal candidate step into a terminal state when
+        its candidate reaches a terminal state.
+
+        Steps that never ran (skipped, or superseded by a retried attempt) are
+        marked ``canceled`` so a completed candidate can no longer carry
+        dangling ``pending``/``working`` sub-steps with a null conclusion.
+        """
+        for candidate_step in _dict_list(candidate.get("steps")):
+            status = _string_or_none(candidate_step.get("status"))
+            if status in {"completed", "failed", "canceled"}:
+                continue
+            candidate_step["status"] = "canceled"
+            _set_time(candidate_step, "canceledAt", created_at)
+            candidate_step.setdefault("cancelReason", "candidate_terminal_without_step_completion")
 
     def _remove_active_candidate_attempts(self, candidate: dict[str, Any]) -> None:
         candidate_id = _string_or_none(candidate.get("id"))

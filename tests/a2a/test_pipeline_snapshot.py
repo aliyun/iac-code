@@ -733,6 +733,133 @@ def test_reduce_candidate_lifecycle_and_candidate_steps() -> None:
     assert snapshot["control"]["activeCandidateRunIds"] == []
 
 
+def _candidate_skeleton_steps(candidate_run_id: str, step_ids: list[str]) -> list[dict]:
+    total = len(step_ids)
+    return [
+        {
+            "id": step_id,
+            "name": step_id,
+            "runId": f"{candidate_run_id}-{step_id}-1",
+            "attempt": 1,
+            "index": index,
+            "total": total,
+            "status": "pending",
+        }
+        for index, step_id in enumerate(step_ids, start=1)
+    ]
+
+
+def test_reduce_candidate_started_skeleton_steps_do_not_duplicate_lifecycle_entries() -> None:
+    parent = _base("evt-1", 1, "step_started", scope="step")
+    parent["step"] = {"runId": "step-evaluate-1", "id": "evaluate", "index": 1, "total": 1, "attempt": 1}
+    candidate_coordinate = {
+        "runId": "candidate-eval-0-1",
+        "id": "eval",
+        "index": 0,
+        "attempt": 1,
+        "steps": _candidate_skeleton_steps("candidate-eval-0-1", ["template_generating", "cost_estimating"]),
+    }
+    started = _base("evt-2", 2, "candidate_started", scope="candidate")
+    started["step"] = parent["step"]
+    started["candidate"] = candidate_coordinate
+    step_started = _base("evt-3", 3, "candidate_step_started", scope="candidate_step")
+    step_started["step"] = parent["step"]
+    step_started["candidate"] = {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1}
+    step_started["candidateStep"] = {
+        "runId": "candidate-eval-0-1-template_generating-1",
+        "id": "template_generating",
+        "index": 1,
+        "total": 2,
+        "attempt": 1,
+    }
+    step_completed = _base("evt-4", 4, "candidate_step_completed", scope="candidate_step")
+    step_completed["step"] = parent["step"]
+    step_completed["candidate"] = step_started["candidate"]
+    step_completed["candidateStep"] = step_started["candidateStep"]
+    step_completed["data"] = {"conclusion": {"ok": True}}
+
+    snapshot = reduce_pipeline_events([parent, started, step_started, step_completed])
+
+    steps = snapshot["steps"][0]["candidates"][0]["steps"]
+    run_ids = [entry["runId"] for entry in steps]
+    assert len(run_ids) == len(set(run_ids))
+    by_id = {entry["id"]: entry for entry in steps}
+    assert by_id["template_generating"]["status"] == "completed"
+    assert by_id["template_generating"]["conclusion"] == {"ok": True}
+    assert by_id["cost_estimating"]["status"] == "pending"
+
+
+def test_reduce_candidate_completed_finalizes_dangling_pending_steps() -> None:
+    parent = _base("evt-1", 1, "step_started", scope="step")
+    parent["step"] = {"runId": "step-evaluate-1", "id": "evaluate", "index": 1, "total": 1, "attempt": 1}
+    candidate_run_id = "candidate-eval-0-1"
+    started = _base("evt-2", 2, "candidate_started", scope="candidate")
+    started["step"] = parent["step"]
+    started["candidate"] = {
+        "runId": candidate_run_id,
+        "id": "eval",
+        "index": 0,
+        "attempt": 1,
+        "steps": _candidate_skeleton_steps(candidate_run_id, ["template_generating", "reviewing", "cost_estimating"]),
+    }
+    candidate_coordinate = {"runId": candidate_run_id, "id": "eval", "index": 0, "attempt": 1}
+    step_completed = _base("evt-3", 3, "candidate_step_completed", scope="candidate_step")
+    step_completed["step"] = parent["step"]
+    step_completed["candidate"] = candidate_coordinate
+    step_completed["candidateStep"] = {
+        "runId": f"{candidate_run_id}-reviewing-1",
+        "id": "reviewing",
+        "index": 2,
+        "total": 3,
+        "attempt": 1,
+    }
+    step_completed["data"] = {"conclusion": {"ok": True}}
+    completed = _base("evt-4", 4, "candidate_completed", scope="candidate")
+    completed["step"] = parent["step"]
+    completed["candidate"] = candidate_coordinate
+
+    snapshot = reduce_pipeline_events([parent, started, step_completed, completed])
+
+    candidate = snapshot["steps"][0]["candidates"][0]
+    assert candidate["status"] == "completed"
+    by_id = {entry["id"]: entry for entry in candidate["steps"]}
+    assert by_id["reviewing"]["status"] == "completed"
+    for dangling_id in ("template_generating", "cost_estimating"):
+        assert by_id[dangling_id]["status"] == "canceled"
+        assert by_id[dangling_id]["cancelReason"] == "candidate_terminal_without_step_completion"
+        assert by_id[dangling_id]["canceledAt"] == completed["createdAt"]
+    assert all(entry["status"] in {"completed", "failed", "canceled"} for entry in candidate["steps"])
+
+
+def test_reduce_candidate_failed_finalizes_dangling_working_steps() -> None:
+    parent = _base("evt-1", 1, "step_started", scope="step")
+    parent["step"] = {"runId": "step-evaluate-1", "id": "evaluate", "index": 1, "total": 1, "attempt": 1}
+    candidate_coordinate = {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1}
+    started = _base("evt-2", 2, "candidate_started", scope="candidate")
+    started["step"] = parent["step"]
+    started["candidate"] = candidate_coordinate
+    step_started = _base("evt-3", 3, "candidate_step_started", scope="candidate_step")
+    step_started["step"] = parent["step"]
+    step_started["candidate"] = candidate_coordinate
+    step_started["candidateStep"] = {
+        "runId": "candidate-eval-0-1-template_generating-1",
+        "id": "template_generating",
+        "index": 1,
+        "total": 1,
+        "attempt": 1,
+    }
+    failed = _base("evt-4", 4, "candidate_failed", scope="candidate", status="working")
+    failed["step"] = parent["step"]
+    failed["candidate"] = candidate_coordinate
+
+    snapshot = reduce_pipeline_events([parent, started, step_started, failed])
+
+    candidate = snapshot["steps"][0]["candidates"][0]
+    assert candidate["status"] == "failed"
+    assert candidate["steps"][0]["status"] == "canceled"
+    assert candidate["steps"][0]["cancelReason"] == "candidate_terminal_without_step_completion"
+
+
 def test_reduce_candidate_failure_keeps_snapshot_working() -> None:
     parent = _base("evt-1", 1, "step_started", scope="step")
     parent["step"] = {"runId": "step-evaluate-1", "id": "evaluate", "index": 1, "total": 1, "attempt": 1}
