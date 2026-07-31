@@ -53,6 +53,7 @@ from iac_code.a2a.runtime_overrides import (
     refresh_runtime_cloud_tools,
 )
 from iac_code.a2a.task_store import A2ATaskStore, _close_runtime
+from iac_code.a2a.terminal_templates import A2ATerminalTemplateCollector
 from iac_code.a2a.thinking_metadata import A2AThinkingMetadata
 from iac_code.a2a.types import (
     TASK_STATE_CANCELED,
@@ -945,6 +946,7 @@ class IacCodeA2AExecutor(AgentExecutor):
         self._thinking_exposure_types = normalize_a2a_exposure_types(thinking_exposure_types)
         self._metadata_echo_redactor = A2AMetadataEchoRedactor()
         self._backup_service = backup_service or SessionBackupService()
+        self._terminal_template_collector = A2ATerminalTemplateCollector()
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         requested_task_id = context.task_id or None
@@ -1409,11 +1411,16 @@ class IacCodeA2AExecutor(AgentExecutor):
                     critical=False,
                     metrics=self._metrics,
                 )
+                terminal_templates = await self._terminal_template_collector.collect(cwd)
+                terminal_metadata = (
+                    {"iac_code": {"terminalTemplates": terminal_templates}} if terminal_templates else None
+                )
                 await self._publish_status(
                     event_queue,
                     task_id=task_id,
                     context_id=context_id,
                     state=TaskState.TASK_STATE_INPUT_REQUIRED,
+                    metadata=terminal_metadata,
                     session_id=ctx.session_id,
                 )
                 await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)

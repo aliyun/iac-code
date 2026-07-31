@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import threading
@@ -897,6 +898,51 @@ async def test_executor_runs_prompt_and_finishes_input_required(
     assert states[-1] == "TASK_STATE_INPUT_REQUIRED"
     record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
     assert "".join(record.output_text) == "hi"
+
+
+@pytest.mark.asyncio
+async def test_executor_publishes_workspace_templates_in_terminal_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    template = "ROSTemplateFormatVersion: '2015-09-01'\nResources:\n  Vpc:\n    Type: ALIYUN::ECS::VPC\n"
+    nested = tmp_path / "templates"
+    nested.mkdir()
+    (nested / "vpc.yaml").write_text(template, encoding="utf-8")
+    (tmp_path / "notes.yaml").write_text("title: not a template\n", encoding="utf-8")
+    runtime = FakeRuntime(
+        agent_loop=FakeAgentLoop([TextDeltaEvent(text="done")]),
+        session_id="session-terminal-template",
+    )
+    monkeypatch.setattr(
+        "iac_code.a2a.executor.create_agent_runtime",
+        lambda options: runtime,
+    )
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+    )
+    queue = FakeEventQueue()
+
+    await executor.execute(
+        FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        queue,
+    )
+
+    terminal = next(
+        dump(event)
+        for event in reversed(queue.events)
+        if isinstance(event, TaskStatusUpdateEvent) and dump(event)["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+    )
+    templates = terminal["metadata"]["iac_code"]["terminalTemplates"]
+    assert templates == [
+        {
+            "content": template,
+            "contentSha256": hashlib.sha256(template.encode("utf-8")).hexdigest(),
+            "filePath": "templates/vpc.yaml",
+            "format": "yaml",
+        }
+    ]
 
 
 @pytest.mark.asyncio
