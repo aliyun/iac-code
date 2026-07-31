@@ -51,9 +51,7 @@ def _build_manager(selection: WebModelSelection) -> ProviderManager:
     return ProviderManager(
         model=selection.model,
         credentials=credentials,
-        effort_override=_title_effort_override(
-            selection.provider or get_active_provider_key(), selection.model
-        ),
+        effort_override=_title_effort_override(selection.provider or get_active_provider_key(), selection.model),
         **overrides,
     )
 

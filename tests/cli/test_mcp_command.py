@@ -3000,8 +3000,7 @@ def test_mcp_add_direct_client_secret_is_available_to_env_expanded_auth(monkeypa
     expanded_config = load_result.servers[0].config
     storage = MCPSecretStorage()
     assert (
-        get_oauth_storage_secret(expanded_config, storage, "client_secret", scope=MCPConfigScope.USER)
-        == "super-secret"
+        get_oauth_storage_secret(expanded_config, storage, "client_secret", scope=MCPConfigScope.USER) == "super-secret"
     )
     captured: list[str | None] = []
 

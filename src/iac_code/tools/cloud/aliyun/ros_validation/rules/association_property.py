@@ -733,9 +733,7 @@ class _ValidationState:
                     "ROS5305",
                     Severity.WARNING,
                     _("AssociationProperty availability depends on the stock form read-only state."),
-                    _(
-                        "The editable form path does not support this value, while the read-only path may bypass it."
-                    ),
+                    _("The editable form path does not support this value, while the read-only path may bypass it."),
                     association_path,
                     subject=normalized_association,
                     stable_args=("excluded-read-only-unknown", normalized_association),
@@ -2155,9 +2153,7 @@ class _ValidationState:
             self._emit(
                 "ROS5305",
                 Severity.WARNING,
-                _(
-                    "Metadata reference {} has more than one possible lookup scope."
-                ).format(name),
+                _("Metadata reference {} has more than one possible lookup scope.").format(name),
                 _(
                     "It may resolve from template Parameters or component-local data. The runtime component is "
                     "unknown, so local validation leaves the reference unchecked."

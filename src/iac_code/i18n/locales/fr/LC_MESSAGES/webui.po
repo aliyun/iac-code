@@ -3631,7 +3631,9 @@ msgstr "Mode développeur"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "When enabled, a Developer settings tab appears with additional tools."
-msgstr "Lorsqu’il est activé, un onglet de paramètres Développeur apparaît avec des outils supplémentaires."
+msgstr ""
+"Lorsqu’il est activé, un onglet de paramètres Développeur apparaît avec "
+"des outils supplémentaires."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Enable developer mode"
@@ -3639,7 +3641,9 @@ msgstr "Activer le mode développeur"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Reveals the Developer settings tab. Turning it off hides that tab again."
-msgstr "Affiche l’onglet de paramètres Développeur. Le désactiver masque à nouveau cet onglet."
+msgstr ""
+"Affiche l’onglet de paramètres Développeur. Le désactiver masque à "
+"nouveau cet onglet."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid ""
@@ -3780,7 +3784,9 @@ msgstr "Appels d’outils en échec"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Control how failed tool calls are shown in the transcript."
-msgstr "Contrôle la façon dont les appels d’outils en échec sont affichés dans la transcription."
+msgstr ""
+"Contrôle la façon dont les appels d’outils en échec sont affichés dans la"
+" transcription."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Highlight failed tool calls in red"
@@ -3790,7 +3796,10 @@ msgstr "Surligner en rouge les appels d’outils en échec"
 msgid ""
 "When enabled, failed tool calls are painted red. When disabled, they look"
 " like any other tool call."
-msgstr "Lorsqu’il est activé, les appels d’outils en échec sont affichés en rouge. Lorsqu’il est désactivé, ils ressemblent à n’importe quel autre appel d’outil."
+msgstr ""
+"Lorsqu’il est activé, les appels d’outils en échec sont affichés en "
+"rouge. Lorsqu’il est désactivé, ils ressemblent à n’importe quel autre "
+"appel d’outil."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"

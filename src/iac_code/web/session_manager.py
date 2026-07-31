@@ -2455,9 +2455,7 @@ class WebSessionManager:
                         img = load_cached_image(image_id, cwd=session.cwd, session_id=session.session_id)
                     except Exception:  # noqa: BLE001 - 图片缺失不应中断标题生成
                         continue
-                    image_blocks.append(
-                        ContentBlock(type="image", media_type=img.media_type, data=img.base64_data)
-                    )
+                    image_blocks.append(ContentBlock(type="image", media_type=img.media_type, data=img.base64_data))
                 title = await session_titler.generate_session_title(
                     text=text,
                     image_blocks=image_blocks,

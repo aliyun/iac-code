@@ -61,7 +61,8 @@ def test_developer_settings_api_rejects_non_bool(tmp_path):
     with TestClient(app) as client:
         # 缺字段 / 非布尔都应被 required_bool 拒绝(400),不落库。
         assert client.put("/api/settings/developer", json={"mode": True}).status_code == 400
-        assert client.put(
-            "/api/settings/developer", json={"mode": "yes", "highlightFailedTools": False}
-        ).status_code == 400
+        assert (
+            client.put("/api/settings/developer", json={"mode": "yes", "highlightFailedTools": False}).status_code
+            == 400
+        )
         assert settings.developer_settings() == {"mode": False, "highlightFailedTools": False}

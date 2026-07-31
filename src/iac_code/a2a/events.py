@@ -206,9 +206,7 @@ def _tool_result_metadata_value(value: Any, *, _depth: int = 0, _artifact_scope:
             )
         return output
     if isinstance(value, list | tuple):
-        return [
-            _tool_result_metadata_value(item, _depth=_depth + 1, _artifact_scope=_artifact_scope) for item in value
-        ]
+        return [_tool_result_metadata_value(item, _depth=_depth + 1, _artifact_scope=_artifact_scope) for item in value]
     if value is None or isinstance(value, bool | int | float):
         return value
     return str(value)[:_METADATA_MAX_CHARS]

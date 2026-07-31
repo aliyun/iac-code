@@ -62,27 +62,21 @@ async def test_generate_title_from_text_success():
 @pytest.mark.asyncio
 async def test_generate_title_retries_once_then_succeeds():
     _SCRIPT.extend([("raise", "boom"), ("ok", "重试成功标题")])
-    title = await session_titler.generate_session_title(
-        text="第一条", image_blocks=[], selection=_selection()
-    )
+    title = await session_titler.generate_session_title(text="第一条", image_blocks=[], selection=_selection())
     assert title == "重试成功标题"
 
 
 @pytest.mark.asyncio
 async def test_generate_title_returns_none_after_two_failures():
     _SCRIPT.extend([("raise", "boom1"), ("raise", "boom2")])
-    title = await session_titler.generate_session_title(
-        text="第一条", image_blocks=[], selection=_selection()
-    )
+    title = await session_titler.generate_session_title(text="第一条", image_blocks=[], selection=_selection())
     assert title is None
 
 
 @pytest.mark.asyncio
 async def test_generate_title_returns_none_for_blank_response():
     _SCRIPT.append(("ok", "   "))
-    title = await session_titler.generate_session_title(
-        text="第一条", image_blocks=[], selection=_selection()
-    )
+    title = await session_titler.generate_session_title(text="第一条", image_blocks=[], selection=_selection())
     assert title is None
 
 
@@ -90,7 +84,5 @@ async def test_generate_title_returns_none_for_blank_response():
 async def test_generate_title_from_image_only_builds_image_message():
     _SCRIPT.append(("ok", "架构图会话"))
     block = ContentBlock(type="image", media_type="image/png", data="AAAA")
-    title = await session_titler.generate_session_title(
-        text=None, image_blocks=[block], selection=_selection()
-    )
+    title = await session_titler.generate_session_title(text=None, image_blocks=[block], selection=_selection())
     assert title == "架构图会话"

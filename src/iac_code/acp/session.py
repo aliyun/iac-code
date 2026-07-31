@@ -95,16 +95,12 @@ def _history_tool_input_text(tool_name: str, tool_input: dict[str, Any]) -> str:
     del tool_name
     if not tool_input:
         return ""
-    return _("Input: {input}").format(
-        input=json.dumps(tool_input, ensure_ascii=False, sort_keys=True, default=str)
-    )
+    return _("Input: {input}").format(input=json.dumps(tool_input, ensure_ascii=False, sort_keys=True, default=str))
 
 
 def _display_tool_input_text(tool_name: str, tool_input: dict[str, Any]) -> str:
     del tool_name
-    return _("Input: {input}").format(
-        input=json.dumps(tool_input, ensure_ascii=False, sort_keys=True, default=str)
-    )
+    return _("Input: {input}").format(input=json.dumps(tool_input, ensure_ascii=False, sort_keys=True, default=str))
 
 
 def _permission_request_event(event: Any) -> PermissionRequestEvent | None:

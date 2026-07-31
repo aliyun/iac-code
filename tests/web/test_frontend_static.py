@@ -1384,7 +1384,7 @@ def test_sidebar_defers_repaint_while_pointer_inside() -> None:
     # 稳定容器 .session-rail 绑定进出边界探测(只一次);容器不被 replaceChildren 重建,监听长期有效。
     assert "function ensureSidebarHoverGuard()" in app_source
     guard_body = app_source.split("function ensureSidebarHoverGuard()", 1)[1].split("\n}\n", 1)[0]
-    assert '.session-rail' in guard_body
+    assert ".session-rail" in guard_body
     assert 'addEventListener("pointerenter"' in guard_body
     assert 'addEventListener("pointerleave"' in guard_body
     # pointerleave 时若有挂起重绘则追平一次。
@@ -6635,10 +6635,7 @@ def test_plugins_panel_hosts_skills_and_mcp_subtabs() -> None:
     assert 'data-workspace-panel="mcp"' not in html
     # NAV_GROUPS 不再含独立 MCP 项(改用逐字段核对,避免与 PLUGINS_SUBTABS 里同样的
     # `{ id: "mcp", label: "MCP" }` 字面量冲突)。skills 之后是 devOnly 的 developer 项。
-    assert (
-        '{ id: "memory", label: t("Memory") },\n'
-        '      { id: "skills", label: t("Plugins") },\n'
-    ) in source
+    assert ('{ id: "memory", label: t("Memory") },\n      { id: "skills", label: t("Plugins") },\n') in source
     assert '{ id: "mcp", label: "MCP" },\n    ],' not in source
 
     # 「插件」容器包住两个子面板,并注册为唯一的 skills 面板控制器。

@@ -1847,9 +1847,7 @@ async def test_schedule_llm_title_falls_back_to_image_name(tmp_path, monkeypatch
         return None  # 两次都失败
 
     monkeypatch.setattr(sm.session_titler, "generate_session_title", fake_generate)
-    monkeypatch.setattr(
-        sm, "load_cached_image", lambda image_id, *, cwd, session_id: _FakeImg()
-    )
+    monkeypatch.setattr(sm, "load_cached_image", lambda image_id, *, cwd, session_id: _FakeImg())
     manager = WebSessionManager(projects_dir=tmp_path / "projects")
     session = manager.create_session(cwd=str(tmp_path / "project"), session_id="llm-4")
 
@@ -1882,9 +1880,7 @@ def test_apply_pipeline_auto_title_marks_title_provisional(tmp_path) -> None:
 def test_apply_llm_auto_title_overwrites_provisional_pipeline_title(tmp_path) -> None:
     cwd = str(tmp_path / "project")
     manager = WebSessionManager(projects_dir=tmp_path / "projects")
-    session = manager.create_session(
-        cwd=cwd, mode="pipeline", pipeline_name="selling", session_id="pipe-prov-2"
-    )
+    session = manager.create_session(cwd=cwd, mode="pipeline", pipeline_name="selling", session_id="pipe-prov-2")
     manager.apply_pipeline_auto_title(session, "帮我搭一条售卖流水线")
 
     changed = manager.apply_llm_auto_title(session, "售卖流水线搭建")
