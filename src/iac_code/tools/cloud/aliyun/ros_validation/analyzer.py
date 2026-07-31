@@ -3074,6 +3074,31 @@ class ExpressionAnalyzer:
                     )
                 return InferredValue.invalid()
             expanded_instance = True
+        if (
+            symbol.resource_type == "ALIYUN::ROS::Stack"
+            and attribute is not None
+            and (not attribute.startswith("Outputs.") or not attribute[len("Outputs.") :].strip())
+        ):
+            if semantic_reachable:
+                self.diagnostic(
+                    "ROS4005",
+                    _(
+                        "Fn::GetAtt for nested stack {} must use Outputs.<nested_stack_output_name>."
+                    ).format(resource_name),
+                    _(
+                        "ALIYUN::ROS::Stack exposes child stack outputs only through the fixed Outputs. prefix, "
+                        "followed by a non-empty output name."
+                    ),
+                    _index(path, 1),
+                    stable_args=(resource_name, attribute, "nested-stack-output"),
+                    expected="Outputs.<nested_stack_output_name>",
+                    actual=attribute,
+                    suggestion=_(
+                        "Change the second argument to Outputs.<nested_stack_output_name>, for example "
+                        "Fn::GetAtt: [{}, Outputs.MyOutput]."
+                    ).format(resource_name),
+                )
+            return InferredValue.invalid()
         base_type = (
             self.resource_specs.attribute_type(symbol.resource_type, attribute) if attribute is not None else ANY_VALUE
         )

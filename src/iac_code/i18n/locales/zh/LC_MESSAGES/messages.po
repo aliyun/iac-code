@@ -6996,6 +6996,28 @@ msgstr "资源逻辑名或 Count 实例名无效。"
 #: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
 #, python-brace-format
 msgid ""
+"Fn::GetAtt for nested stack {} must use "
+"Outputs.<nested_stack_output_name>."
+msgstr "嵌套资源栈 {} 的 Fn::GetAtt 必须使用 Outputs.<nested_stack_output_name>。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"ALIYUN::ROS::Stack exposes child stack outputs only through the fixed "
+"Outputs. prefix, followed by a non-empty output name."
+msgstr "ALIYUN::ROS::Stack 只能通过固定的 Outputs. 前缀访问子资源栈输出，前缀后必须跟一个非空的输出名称。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
+"Change the second argument to Outputs.<nested_stack_output_name>, for "
+"example Fn::GetAtt: [{}, Outputs.MyOutput]."
+msgstr ""
+"请将第二个参数改为 Outputs.<nested_stack_output_name>，例如 Fn::GetAtt: [{}, "
+"Outputs.MyOutput]。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
 "Count resource {} expands into multiple instances, but this Fn::GetAtt "
 "cannot be automatically rewritten into an attribute list."
 msgstr "Count 资源 {} 会展开为多个实例，但此处的 Fn::GetAtt 不能自动改写成属性列表。"

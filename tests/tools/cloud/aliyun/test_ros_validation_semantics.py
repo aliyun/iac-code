@@ -147,6 +147,38 @@ Resources:
     assert not any(item.code == "ROS4005" for item in report.diagnostics)
 
 
+def test_nested_stack_getatt_requires_outputs_prefix_and_nonempty_output_name() -> None:
+    report = validate(
+        """ROSTemplateFormatVersion: 2015-09-01
+Resources:
+  Nested:
+    Type: ALIYUN::ROS::Stack
+    Properties:
+      TemplateBody:
+        ROSTemplateFormatVersion: 2015-09-01
+        Outputs:
+          Child: {Value: ok}
+Outputs:
+  Valid: {Value: {Fn::GetAtt: [Nested, Outputs.Child]}}
+  MissingPrefix: {Value: {Fn::GetAtt: [Nested, Child]}}
+  EmptyOutputName: {Value: {Fn::GetAtt: [Nested, Outputs.]}}
+  WrongAttribute: {Value: {Fn::GetAtt: [Nested, StackId]}}
+"""
+    )
+
+    errors = [item for item in report.diagnostics if item.code == "ROS4005"]
+    assert len(errors) == 3
+    assert {display_path(item.path) for item in errors} == {
+        "$.Outputs.MissingPrefix.Value.Fn::GetAtt[1]",
+        "$.Outputs.EmptyOutputName.Value.Fn::GetAtt[1]",
+        "$.Outputs.WrongAttribute.Value.Fn::GetAtt[1]",
+    }
+    assert all("Outputs.<nested_stack_output_name>" in item.summary for item in errors)
+    assert all(item.expected == "Outputs.<nested_stack_output_name>" for item in errors)
+    assert {item.actual for item in errors} == {"Child", "Outputs.", "StackId"}
+    assert all("Fn::GetAtt: [Nested, Outputs.MyOutput]" in (item.suggestion or "") for item in errors)
+
+
 def test_count_ref_is_lifted_once_and_invalid_count_is_independent() -> None:
     report = validate(
         """ROSTemplateFormatVersion: 2015-09-01
