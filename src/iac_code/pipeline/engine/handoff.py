@@ -43,5 +43,21 @@ def build_handoff_summary(
     if missing:
         lines.extend(["", "Missing context fields:"])
         lines.extend(f"- {field_name}" for field_name in missing)
-    lines.extend(["", "Use this context when answering follow-up questions after the pipeline handoff."])
+    lines.extend(
+        [
+            "",
+            "Safety requirements for normal chat:",
+            (
+                "- Before performing any operation that releases, deletes, or otherwise destroys a resource, "
+                "obtain a fresh, explicit confirmation from the user in normal chat. Any confirmation given "
+                "during the pipeline does not count."
+            ),
+            (
+                "- Exception: pipeline-managed automatic cleanup may proceed without this additional "
+                "confirmation."
+            ),
+            "",
+            "Use this context when answering follow-up questions after the pipeline handoff.",
+        ]
+    )
     return "\n".join(lines)
