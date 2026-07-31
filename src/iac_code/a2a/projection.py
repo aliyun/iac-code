@@ -386,9 +386,7 @@ def _project_mapping(
     public_path_roots: Iterable[Mapping[str, str]] | None,
 ) -> dict[Any, Any]:
     unchanged_keys = {
-        key
-        for key in value
-        if not isinstance(key, str) or redact_known_public_paths(key, public_path_roots) == key
+        key for key in value if not isinstance(key, str) or redact_known_public_paths(key, public_path_roots) == key
     }
     used_keys: set[Any] = set()
     projected: dict[Any, Any] = {}

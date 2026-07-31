@@ -191,9 +191,7 @@ async def test_official_grpc_projects_success_and_error_from_new_request_cwd(mon
     ParseDict({"path": server_path, "password": "real-secret"}, response.message.metadata)
 
     projected = await handler._handle_unary(request, object(), None, response)
-    handler.error_to_abort = WireError(
-        message=f"failed token=real-secret at {server_path}", data={"path": server_path}
-    )
+    handler.error_to_abort = WireError(message=f"failed token=real-secret at {server_path}", data={"path": server_path})
     await handler._handle_unary(request, object(), None, a2a_pb2.SendMessageResponse())
 
     assert MessageToDict(projected.message.metadata) == {"path": "[PATH]", "password": "real-secret"}

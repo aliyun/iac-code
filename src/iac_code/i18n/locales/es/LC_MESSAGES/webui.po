@@ -3617,7 +3617,9 @@ msgstr "Modo de desarrollador"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "When enabled, a Developer settings tab appears with additional tools."
-msgstr "Cuando se activa, aparece una pestaña de ajustes de Desarrollador con herramientas adicionales."
+msgstr ""
+"Cuando se activa, aparece una pestaña de ajustes de Desarrollador con "
+"herramientas adicionales."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Enable developer mode"
@@ -3625,7 +3627,9 @@ msgstr "Activar el modo de desarrollador"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Reveals the Developer settings tab. Turning it off hides that tab again."
-msgstr "Muestra la pestaña de ajustes de Desarrollador. Al desactivarlo, esa pestaña se oculta de nuevo."
+msgstr ""
+"Muestra la pestaña de ajustes de Desarrollador. Al desactivarlo, esa "
+"pestaña se oculta de nuevo."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid ""
@@ -3763,7 +3767,9 @@ msgstr "Llamadas a herramientas fallidas"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Control how failed tool calls are shown in the transcript."
-msgstr "Controla cómo se muestran en la transcripción las llamadas a herramientas fallidas."
+msgstr ""
+"Controla cómo se muestran en la transcripción las llamadas a herramientas"
+" fallidas."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Highlight failed tool calls in red"
@@ -3773,7 +3779,10 @@ msgstr "Resaltar en rojo las llamadas a herramientas fallidas"
 msgid ""
 "When enabled, failed tool calls are painted red. When disabled, they look"
 " like any other tool call."
-msgstr "Cuando se activa, las llamadas a herramientas fallidas se muestran en rojo. Cuando se desactiva, se ven como cualquier otra llamada a herramientas."
+msgstr ""
+"Cuando se activa, las llamadas a herramientas fallidas se muestran en "
+"rojo. Cuando se desactiva, se ven como cualquier otra llamada a "
+"herramientas."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"

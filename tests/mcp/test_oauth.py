@@ -1653,8 +1653,7 @@ def test_oauth_token_storage_stores_registered_client_information_by_scope() -> 
     )
 
     assert (
-        get_oauth_storage_secret(config, storage, "client_id", scope="project:/repo/.mcp.json")
-        == "registered-client"
+        get_oauth_storage_secret(config, storage, "client_id", scope="project:/repo/.mcp.json") == "registered-client"
     )
     assert (
         get_oauth_storage_secret(config, storage, "client_secret", scope="project:/repo/.mcp.json")

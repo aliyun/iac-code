@@ -3610,7 +3610,9 @@ msgstr "Modo de desenvolvedor"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "When enabled, a Developer settings tab appears with additional tools."
-msgstr "Quando ativado, uma aba de configurações de Desenvolvedor aparece com ferramentas adicionais."
+msgstr ""
+"Quando ativado, uma aba de configurações de Desenvolvedor aparece com "
+"ferramentas adicionais."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Enable developer mode"
@@ -3618,7 +3620,9 @@ msgstr "Ativar o modo de desenvolvedor"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Reveals the Developer settings tab. Turning it off hides that tab again."
-msgstr "Mostra a aba de configurações de Desenvolvedor. Ao desativá-lo, essa aba é ocultada novamente."
+msgstr ""
+"Mostra a aba de configurações de Desenvolvedor. Ao desativá-lo, essa aba "
+"é ocultada novamente."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid ""
@@ -3755,7 +3759,9 @@ msgstr "Chamadas de ferramenta com falha"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Control how failed tool calls are shown in the transcript."
-msgstr "Controla como as chamadas de ferramenta com falha são exibidas na transcrição."
+msgstr ""
+"Controla como as chamadas de ferramenta com falha são exibidas na "
+"transcrição."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Highlight failed tool calls in red"
@@ -3765,7 +3771,9 @@ msgstr "Destacar em vermelho as chamadas de ferramenta com falha"
 msgid ""
 "When enabled, failed tool calls are painted red. When disabled, they look"
 " like any other tool call."
-msgstr "Quando ativado, as chamadas de ferramenta com falha ficam em vermelho. Quando desativado, elas parecem qualquer outra chamada de ferramenta."
+msgstr ""
+"Quando ativado, as chamadas de ferramenta com falha ficam em vermelho. "
+"Quando desativado, elas parecem qualquer outra chamada de ferramenta."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"

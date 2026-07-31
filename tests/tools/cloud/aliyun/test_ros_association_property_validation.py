@@ -456,9 +456,7 @@ def test_known_unknown_excluded_apsara_and_deprecated_association_properties() -
     excluded = _validate({"Type": "String", "AssociationProperty": "ALIYUN::OOS::Component::ActionChoice"})
     assert _codes(excluded) == ["ROS1302"]
     excluded_diagnostic = next(item for item in excluded.diagnostics if item.code == "ROS1302")
-    assert excluded_diagnostic.detail == (
-        "This AssociationProperty value is available only in the OOS parameter form."
-    )
+    assert excluded_diagnostic.detail == ("This AssociationProperty value is available only in the OOS parameter form.")
 
     for allowed_values in ([], ["a"], {}):
         bypassed = _validate(

@@ -227,9 +227,7 @@ def test_http_projection_uses_new_request_cwd_before_task_context_exists(tmp_pat
 def test_http_jsonrpc_task_scoped_error_uses_params_task_workspace(tmp_path, monkeypatch) -> None:
     workspace = tmp_path / "task-workspace"
     server_path = str(workspace / "private" / "result.json")
-    store = _MultiProjectionTaskStore(
-        {"task-1": ("context-1", str(workspace), "session-1")}
-    )
+    store = _MultiProjectionTaskStore({"task-1": ("context-1", str(workspace), "session-1")})
 
     async def fail(_request: Request) -> JSONResponse:
         return JSONResponse({"jsonrpc": "2.0", "id": "request-1", "error": {"message": server_path}})
@@ -325,9 +323,7 @@ def test_http_projection_aggregates_roots_for_list_tasks_response(tmp_path, monk
 @pytest.mark.asyncio
 async def test_task_scoped_request_and_grpc_bare_id_resolve_task_workspace_roots(tmp_path) -> None:
     workspace = tmp_path / "task-workspace"
-    store = _MultiProjectionTaskStore(
-        {"task-1": ("context-1", str(workspace), "session-1")}
-    )
+    store = _MultiProjectionTaskStore({"task-1": ("context-1", str(workspace), "session-1")})
 
     jsonrpc_roots = await resolve_a2a_public_path_roots_for_data(
         store,

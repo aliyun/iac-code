@@ -3629,7 +3629,9 @@ msgstr "Entwicklermodus"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "When enabled, a Developer settings tab appears with additional tools."
-msgstr "Wenn aktiviert, erscheint ein Entwickler-Einstellungstab mit zusätzlichen Werkzeugen."
+msgstr ""
+"Wenn aktiviert, erscheint ein Entwickler-Einstellungstab mit zusätzlichen"
+" Werkzeugen."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Enable developer mode"
@@ -3637,7 +3639,9 @@ msgstr "Entwicklermodus aktivieren"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Reveals the Developer settings tab. Turning it off hides that tab again."
-msgstr "Zeigt den Entwickler-Einstellungstab an. Beim Deaktivieren wird dieser Tab wieder ausgeblendet."
+msgstr ""
+"Zeigt den Entwickler-Einstellungstab an. Beim Deaktivieren wird dieser "
+"Tab wieder ausgeblendet."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid ""
@@ -3788,7 +3792,9 @@ msgstr "Fehlgeschlagene Tool-Aufrufe rot hervorheben"
 msgid ""
 "When enabled, failed tool calls are painted red. When disabled, they look"
 " like any other tool call."
-msgstr "Wenn aktiviert, werden fehlgeschlagene Tool-Aufrufe rot dargestellt. Wenn deaktiviert, sehen sie aus wie jeder andere Tool-Aufruf."
+msgstr ""
+"Wenn aktiviert, werden fehlgeschlagene Tool-Aufrufe rot dargestellt. Wenn"
+" deaktiviert, sehen sie aus wie jeder andere Tool-Aufruf."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"

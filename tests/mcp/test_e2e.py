@@ -333,9 +333,7 @@ async def test_remote_mcp_server_e2e_oauth_bearer_token_connect(monkeypatch, tmp
             },
         )
         storage = MCPSecretStorage()
-        set_oauth_storage_secret(
-            scoped.config, storage, "access_token", "access-token", scope=MCPConfigScope.SESSION
-        )
+        set_oauth_storage_secret(scoped.config, storage, "access_token", "access-token", scope=MCPConfigScope.SESSION)
         manager = MCPManager([scoped], roots=[tmp_path])
 
         await manager.connect_all()

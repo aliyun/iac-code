@@ -140,9 +140,7 @@ def serialize_input_messages(messages: list) -> str:
             for block in content:
                 btype = getattr(block, "type", "text")
                 if btype == "text":
-                    parts.append(
-                        {"type": "text", "content": _truncate(_strict_text(getattr(block, "text", "") or ""))}
-                    )
+                    parts.append({"type": "text", "content": _truncate(_strict_text(getattr(block, "text", "") or ""))})
                 elif btype == "tool_use":
                     tool_use_id = _tool_call_id(block)
                     tool_name = _strict_text(getattr(block, "name", ""))
