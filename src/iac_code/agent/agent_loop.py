@@ -294,6 +294,12 @@ class AgentLoop:
     and yields fine-grained StreamEvents for the UI layer.
     """
 
+    _MAX_OUTPUT_LIMIT_CONTINUATIONS = 1
+    _OUTPUT_LIMIT_CONTINUATION_PROMPT = (
+        "Continue from the previous reasoning and complete the original request now. "
+        "Prioritize the required tool calls and a concise final answer."
+    )
+
     def __init__(
         self,
         provider_manager: Any,  # ProviderManager (avoid circular import)
@@ -446,6 +452,18 @@ class AgentLoop:
                     message,
                     git_branch=self._current_git_branch,
                 )
+
+    def _append_output_limit_continuation(self) -> None:
+        """Persist a bounded internal continuation after provider output exhaustion."""
+        message = self.context_manager.add_user_message(self._OUTPUT_LIMIT_CONTINUATION_PROMPT)
+        message.metadata.update({"synthetic": True, "reason": "max_tokens"})
+        if self._session_storage:
+            self._session_storage.append(
+                self._cwd,
+                self._session_id,
+                message,
+                git_branch=self._current_git_branch,
+            )
 
     def set_provider(self, provider_manager: Any, system_prompt: str | None = None) -> None:
         """Swap the provider manager in place, preserving conversation history.
@@ -1125,6 +1143,7 @@ class AgentLoop:
         from iac_code.services.telemetry.content_serializer import serialize_output_messages
         from iac_code.services.telemetry.names import GenAiAttr, GenAiOperationName, GenAiSpanKind, Spans
 
+        output_limit_continuations = 0
         for _turn in range(self._max_turns):
             # Pipeline interrupt/recovery can pause between LLM turns and
             # inject supplemental user text before the next provider call.
@@ -1303,10 +1322,26 @@ class AgentLoop:
                             git_branch=self._current_git_branch,
                         )
 
-                # No tool calls -> end turn
+                # A provider can exhaust its output budget while emitting only
+                # private reasoning. Give it one bounded continuation so the
+                # original request still has a chance to produce tools/output.
                 if not completed_tools:
                     self._accepting_injected_user_messages = False
-                    step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, "stop")
+                    if (
+                        turn_stop_reason == "max_tokens"
+                        and output_limit_continuations < self._MAX_OUTPUT_LIMIT_CONTINUATIONS
+                        and _turn < self._max_turns - 1
+                    ):
+                        output_limit_continuations += 1
+                        self._append_output_limit_continuation()
+                        step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, "max_tokens")
+                        logger.warning(
+                            "Provider output limit reached without tool calls; continuing agent turn ({}/{})",
+                            output_limit_continuations,
+                            self._MAX_OUTPUT_LIMIT_CONTINUATIONS,
+                        )
+                        continue
+                    step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, turn_stop_reason)
                     break
 
                 step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, "tool_calls")

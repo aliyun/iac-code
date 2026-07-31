@@ -461,6 +461,56 @@ class TestAgentLoopStreaming:
         types = [e.type for e in events]
         assert "text_delta" in types
 
+    async def test_max_tokens_without_tool_calls_continues_once(self, mock_provider, mock_registry):
+        captured_messages = []
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            captured_messages.append(messages)
+            yield MessageStartEvent(message_id=f"m{len(captured_messages)}")
+            if len(captured_messages) == 1:
+                yield ThinkingDeltaEvent(text="unfinished reasoning")
+                yield MessageEndEvent(
+                    stop_reason="max_tokens",
+                    usage=Usage(input_tokens=10, output_tokens=8193),
+                )
+                return
+            yield TextDeltaEvent(text="completed answer")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=12, output_tokens=3))
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+
+        events = [event async for event in loop.run_streaming("build the template")]
+
+        assert len(captured_messages) == 2
+        assert any(
+            message.role == "user" and "complete the original request" in str(message.content).lower()
+            for message in captured_messages[1]
+        )
+        assert "".join(event.text for event in events if isinstance(event, TextDeltaEvent)) == "completed answer"
+
+    async def test_repeated_max_tokens_stops_after_bounded_continuation(self, mock_provider, mock_registry):
+        calls = 0
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            nonlocal calls
+            calls += 1
+            yield MessageStartEvent(message_id=f"m{calls}")
+            yield ThinkingDeltaEvent(text=f"unfinished reasoning {calls}")
+            yield MessageEndEvent(
+                stop_reason="max_tokens",
+                usage=Usage(input_tokens=10, output_tokens=8193),
+            )
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+
+        events = [event async for event in loop.run_streaming("build the template")]
+
+        assert calls == 2
+        assert isinstance(events[-1], MessageEndEvent)
+        assert events[-1].stop_reason == "max_tokens"
+
     async def test_entry_ttft_uses_first_non_empty_thinking_delta_and_keeps_scope(
         self,
         mock_provider,
