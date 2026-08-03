@@ -694,6 +694,78 @@ async def test_subscribe_to_task_stops_after_input_required_status(monkeypatch) 
 
 
 @pytest.mark.asyncio
+async def test_subscribe_to_task_recovers_terminal_snapshot_when_sdk_stream_ends_early(monkeypatch) -> None:
+    task = Task(
+        id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+    store = A2ATaskStore()
+    call_context = ServerCallContext()
+    await store.save(task, call_context)
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    record.active_task = asyncio.current_task()
+
+    async def truncated_sdk_subscription(self, params, context):
+        yield TaskStatusUpdateEvent(
+            task_id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+        )
+        final_task = Task(
+            id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
+        )
+        await store.save(final_task, context)
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_subscribe_to_task", truncated_sdk_subscription)
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler._validate_extensions = lambda context: None
+
+    events = await _collect_async(handler.on_subscribe_to_task(SubscribeToTaskRequest(id="task-1"), call_context))
+
+    assert [event.status.state for event in events] == [
+        TaskState.TASK_STATE_WORKING,
+        TaskState.TASK_STATE_COMPLETED,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_subscribe_to_task_does_not_duplicate_terminal_sdk_event(monkeypatch) -> None:
+    task = Task(
+        id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+    store = A2ATaskStore()
+    call_context = ServerCallContext()
+    await store.save(task, call_context)
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    record.active_task = asyncio.current_task()
+
+    async def complete_sdk_subscription(self, params, context):
+        final_task = Task(
+            id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
+        )
+        await store.save(final_task, context)
+        yield final_task
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_subscribe_to_task", complete_sdk_subscription)
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler._validate_extensions = lambda context: None
+
+    events = await _collect_async(handler.on_subscribe_to_task(SubscribeToTaskRequest(id="task-1"), call_context))
+
+    assert len(events) == 1
+    assert events[0].status.state == TaskState.TASK_STATE_COMPLETED
+
+
+@pytest.mark.asyncio
 async def test_create_runtime_components_returns_shared_objects() -> None:
     components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
 
