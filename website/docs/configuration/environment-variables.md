@@ -19,10 +19,12 @@ Environment variables are useful for CI/CD pipelines, containers, and one-off ov
 |---|---|
 | `IAC_CODE_PROVIDER` | Model provider name (case-insensitive). Valid values: `DashScope`, `DashScope Token Plan`, `OpenAI`, `Anthropic`, `DeepSeek`, `Gemini`, `Azure OpenAI`, `ModelScope`, `Kimi CN`, `Kimi Intl`, `MiniMax CN`, `MiniMax Intl`, `ZhiPu CN`, `ZhiPu Intl`, `Volcengine CN`, `SiliconFlow CN`, `SiliconFlow Intl`, `Aliyun CodingPlan`, `Aliyun CodingPlan Intl`, `ZhiPu CN CodingPlan`, `ZhiPu Intl CodingPlan`, `Volcengine CodingPlan`, `OpenAI Compatible`, `Anthropic Compatible`, `OpenRouter`, `Ollama`, `LM Studio` |
 | `IAC_CODE_MODEL` | Model name |
-| `IAC_CODE_BASE_URL` | API endpoint for `OpenAI Compatible` only; ignored (with a warning) for other providers |
+| `IAC_CODE_BASE_URL` | API endpoint override for the active provider; takes precedence over the saved `apiBase` and built-in default URL |
 | `IAC_CODE_API_KEY` | Provider API key; overrides the active provider's key in `.credentials.yml` |
 
 See [LLM Providers](./llm-providers.md) for provider details.
+
+The effective provider Base URL precedence is: explicit runtime override, `IAC_CODE_BASE_URL`, saved `apiBase`, provider registry default, then SDK default.
 
 ## Alibaba Cloud Credentials
 

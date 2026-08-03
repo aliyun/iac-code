@@ -38,6 +38,37 @@ async def _collect_stream_events(stream):
 
 
 class TestCreateProvider:
+    @pytest.mark.parametrize("provider_key", PROVIDER_REGISTRY)
+    def test_saved_api_base_overrides_registry_default_for_every_provider(self, provider_key):
+        descriptor = PROVIDER_REGISTRY[provider_key]
+        model = descriptor.default_model or "custom-model"
+        custom_base_url = "https://saved.example/v1"
+
+        provider = create_provider(
+            model,
+            credentials={provider_key: "fake-key"},
+            provider_key_override=provider_key,
+            provider_config_override={"apiBase": custom_base_url},
+        )
+
+        assert str(provider._client.base_url).rstrip("/") == custom_base_url
+
+    @pytest.mark.parametrize("provider_key", PROVIDER_REGISTRY)
+    def test_explicit_base_url_overrides_saved_and_registry_urls_for_every_provider(self, provider_key):
+        descriptor = PROVIDER_REGISTRY[provider_key]
+        model = descriptor.default_model or "custom-model"
+        explicit_base_url = "https://explicit.example/v1"
+
+        provider = create_provider(
+            model,
+            credentials={provider_key: "fake-key"},
+            provider_key_override=provider_key,
+            base_url=explicit_base_url,
+            provider_config_override={"apiBase": "https://saved.example/v1"},
+        )
+
+        assert str(provider._client.base_url).rstrip("/") == explicit_base_url
+
     def test_anthropic(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic")
         p = create_provider("claude-sonnet-4-6", credentials={"anthropic": "key"})

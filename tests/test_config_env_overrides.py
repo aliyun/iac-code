@@ -4,15 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-
-@pytest.fixture(autouse=True)
-def _reset_warn_state():
-    """Reset module-level warn flag between tests so warning behavior is deterministic."""
-    import iac_code.config as cfg
-
-    cfg._warned_base_url_ignored = False
-    yield
-    cfg._warned_base_url_ignored = False
+from iac_code.providers.registry import PROVIDER_REGISTRY
 
 
 class TestGetEnvOverrides:
@@ -224,18 +216,19 @@ class TestGetProviderConfigEnv:
 
             assert get_provider_config("bailian")["model"] == "qwen3.6-plus"
 
-    def test_base_url_env_overlays_when_active_is_openai_compatible(self, monkeypatch, tmp_path):
+    @pytest.mark.parametrize("provider_key", PROVIDER_REGISTRY)
+    def test_base_url_env_overlays_active_provider(self, monkeypatch, tmp_path, provider_key):
         from unittest.mock import patch
 
         self._write_settings(
             tmp_path,
-            ("activeProvider: openai_compatible\nproviders:\n  openai_compatible:\n    apiBase: https://old/v1\n"),
+            f"activeProvider: {provider_key}\nproviders:\n  {provider_key}:\n    apiBase: https://old/v1\n",
         )
         monkeypatch.setenv("IAC_CODE_BASE_URL", "https://new/v1")
         with patch("iac_code.config.Path.home", return_value=tmp_path):
             from iac_code.config import get_provider_config
 
-            assert get_provider_config("openai_compatible")["apiBase"] == "https://new/v1"
+            assert get_provider_config(provider_key)["apiBase"] == "https://new/v1"
 
     def test_openapi_compatible_settings_key_is_legacy_alias_for_openai_compatible(self, monkeypatch, tmp_path):
         from unittest.mock import patch
@@ -252,21 +245,24 @@ class TestGetProviderConfigEnv:
             assert get_provider_config("openai_compatible")["apiBase"] == "https://new/v1"
             assert get_provider_config("openapi_compatible")["apiBase"] == "https://new/v1"
 
-    def test_base_url_env_ignored_when_active_is_not_openai_compatible(self, monkeypatch, tmp_path, caplog):
-        import logging
+    def test_base_url_env_does_not_leak_to_inactive_provider(self, monkeypatch, tmp_path):
         from unittest.mock import patch
 
         self._write_settings(
             tmp_path,
-            "activeProvider: openai\nproviders:\n  openai:\n    model: gpt-5.4\n",
+            (
+                "activeProvider: openai\n"
+                "providers:\n"
+                "  openai:\n    model: gpt-5.4\n"
+                "  dashscope:\n    apiBase: https://saved.example/v1\n"
+            ),
         )
         monkeypatch.setenv("IAC_CODE_BASE_URL", "https://example/v1")
         with patch("iac_code.config.Path.home", return_value=tmp_path):
             from iac_code.config import get_provider_config
 
-            with caplog.at_level(logging.WARNING):
-                cfg = get_provider_config("openai")
-        assert "apiBase" not in cfg or cfg.get("apiBase") != "https://example/v1"
+            cfg = get_provider_config("dashscope")
+        assert cfg["apiBase"] == "https://saved.example/v1"
 
     def test_env_overlay_does_not_mutate_unset_fields(self, monkeypatch, tmp_path):
         from unittest.mock import patch

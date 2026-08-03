@@ -19,7 +19,7 @@ CLI 引数 > 環境変数 > 設定ファイル
 |---|---|
 | `IAC_CODE_PROVIDER` | モデルプロバイダー名（大文字小文字不問）。有効な値：`DashScope`、`DashScope Token Plan`、`OpenAI`、`Anthropic`、`DeepSeek`、`Gemini`、`Azure OpenAI`、`ModelScope`、`Kimi CN`、`Kimi Intl`、`MiniMax CN`、`MiniMax Intl`、`ZhiPu CN`、`ZhiPu Intl`、`Volcengine CN`、`SiliconFlow CN`、`SiliconFlow Intl`、`Aliyun CodingPlan`、`Aliyun CodingPlan Intl`、`ZhiPu CN CodingPlan`、`ZhiPu Intl CodingPlan`、`Volcengine CodingPlan`、`OpenAPI Compatible`、`Anthropic Compatible`、`OpenRouter`、`Ollama`、`LM Studio` |
 | `IAC_CODE_MODEL` | モデル名 |
-| `IAC_CODE_BASE_URL` | `OpenAI Compatible` 専用の API エンドポイント。他のプロバイダーでは無視され、warning が表示されます |
+| `IAC_CODE_BASE_URL` | 現在アクティブなプロバイダーの API エンドポイントを上書きします。保存済みの `apiBase` と組み込みの既定 URL より優先されます |
 | `IAC_CODE_API_KEY` | プロバイダー API キー。`.credentials.yml` のアクティブプロバイダーのキーを上書きします |
 
 詳細は [LLM プロバイダー](./llm-providers.md) をご覧ください。

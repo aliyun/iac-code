@@ -74,5 +74,5 @@ CLI arguments > environment variables > configuration files
 |---|---|
 | `IAC_CODE_PROVIDER` | Model provider name (case-insensitive). See tables above for valid values |
 | `IAC_CODE_MODEL` | Model name |
-| `IAC_CODE_BASE_URL` | API endpoint for `OpenAI Compatible` only; ignored (with a warning) for other providers |
+| `IAC_CODE_BASE_URL` | API endpoint override for the active provider; takes precedence over the saved `apiBase` and built-in default URL |
 | `IAC_CODE_API_KEY` | Provider API key |
