@@ -33,6 +33,7 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
         "qwen-plus",
         "qwen-flash",
         "deepseek-v4-pro",
+        "deepseek-v4-flash-0731",
         "deepseek-v4-flash",
         "kimi/kimi-k3",
         "kimi-k2.7-code",
@@ -54,6 +55,7 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
     assert PROVIDER_REGISTRY["dashscope"].default_model == "qwen3.7-max"
     assert not _model_entry("dashscope", "glm-5.2-fast-preview").support_multimodal
     assert "glm-5.2-fast-preview" not in _model_ids("dashscope_token_plan")
+    assert "deepseek-v4-flash-0731" not in _model_ids("dashscope_token_plan")
     assert not _model_entry("dashscope", "qwen3.7-max").support_multimodal
     for model_id in (
         "qwen3.7-plus",
@@ -124,6 +126,9 @@ def test_openai_azure_anthropic_and_gemini_models_are_updated() -> None:
 
     assert PROVIDER_REGISTRY["anthropic"].default_model == "claude-fable-5"
     assert get_thinking_spec("anthropic", "claude-fable-5").family is ThinkingFamily.ANTHROPIC_ADAPTIVE
+    assert "claude-opus-5" in _model_ids("anthropic")
+    assert _model_entry("anthropic", "claude-opus-5").support_multimodal
+    assert get_thinking_spec("anthropic", "claude-opus-5").family is ThinkingFamily.ANTHROPIC_ADAPTIVE
     assert get_thinking_spec("anthropic", "claude-opus-4-8").family is ThinkingFamily.ANTHROPIC_ADAPTIVE
     assert get_thinking_spec("anthropic", "claude-sonnet-5").family is ThinkingFamily.ANTHROPIC_ADAPTIVE
 
@@ -258,6 +263,11 @@ def test_gemini_thinking_rules_match_each_model_generation() -> None:
 def test_anthropic_effort_and_disable_rules_are_model_specific() -> None:
     from iac_code.providers.anthropic_provider import AnthropicProvider
 
+    opus_5 = get_thinking_spec("anthropic", "claude-opus-5")
+    assert opus_5.thinking_enabled_by_default is True
+    assert opus_5.default_effort is EffortLevel.HIGH
+    assert opus_5.disable_forbidden_efforts == (EffortLevel.XHIGH, EffortLevel.MAX)
+
     sonnet_5 = get_thinking_spec("anthropic", "claude-sonnet-5")
     assert sonnet_5.adaptive_always_on is False
     assert AnthropicProvider(
@@ -274,6 +284,17 @@ def test_anthropic_effort_and_disable_rules_are_model_specific() -> None:
 
 def test_dashscope_new_model_protocols_are_not_flattened() -> None:
     from iac_code.providers.dashscope_provider import DashScopeProvider
+
+    deepseek = get_thinking_spec("dashscope", "deepseek-v4-flash-0731")
+    assert deepseek.allowed_efforts == (
+        EffortLevel.LOW,
+        EffortLevel.MEDIUM,
+        EffortLevel.HIGH,
+        EffortLevel.XHIGH,
+        EffortLevel.MAX,
+    )
+    assert deepseek.default_effort is EffortLevel.HIGH
+    assert deepseek.uses_reasoning_effort_param is True
 
     qwen = get_thinking_spec("dashscope_token_plan", "qwen3.8-max-preview")
     assert qwen.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.XHIGH)

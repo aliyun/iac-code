@@ -30,6 +30,7 @@ def test_known_models_contains_claude_and_openai():
 def test_known_models_contains_researched_provider_updates():
     for model in (
         "claude-fable-5",
+        "claude-opus-5",
         "gpt-5.6-sol",
         "qwen3.8-max-preview",
         "kimi-k3",
@@ -40,6 +41,7 @@ def test_known_models_contains_researched_provider_updates():
         "gemini-3.5-flash-lite",
         "gemini-2.5-pro",
         "deepseek-v4-pro",
+        "deepseek-v4-flash-0731",
         "MiniMax-M3",
         "doubao-seed-2-0-pro-260215",
     ):

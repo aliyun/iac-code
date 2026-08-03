@@ -373,6 +373,13 @@ class TestProviderManager:
 
         assert manager._get_fallback_model() == "claude-opus-4-8"
 
+    def test_opus5_falls_back_to_opus48_for_errors_and_refusals(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic")
+        manager = ProviderManager(model="claude-opus-5", credentials={})
+
+        assert manager._get_fallback_model() == "claude-opus-4-8"
+        assert manager._get_refusal_fallback_model("claude-opus-5", "anthropic") == "claude-opus-4-8"
+
     def test_no_fallback_cheapest(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic")
         m = ProviderManager(model="claude-haiku-4-5-20251001", credentials={})
