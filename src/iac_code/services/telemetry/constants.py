@@ -44,6 +44,7 @@ KNOWN_MODELS: frozenset[str] = frozenset(
     {
         # Anthropic
         "claude-fable-5",
+        "claude-opus-5",
         "claude-opus-4-8",
         "claude-sonnet-5",
         "claude-opus-4-7",
@@ -130,6 +131,7 @@ KNOWN_MODELS: frozenset[str] = frozenset(
         "gemini-2.5-flash-lite",
         # DeepSeek / MiniMax / Volcengine
         "deepseek-v4-pro",
+        "deepseek-v4-flash-0731",
         "deepseek-v4-flash",
         "deepseek-v3.2",
         "MiniMax/MiniMax-M3",

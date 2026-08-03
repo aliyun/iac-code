@@ -77,6 +77,8 @@ class ThinkingSpec:
     uses_reasoning_effort_param: bool = False
     adaptive_always_on: bool = False
     supports_disable: bool = True
+    thinking_enabled_by_default: bool = False
+    disable_forbidden_efforts: tuple[EffortLevel, ...] = ()
 
     @property
     def supports_effort(self) -> bool:
@@ -155,8 +157,19 @@ _ANTHROPIC_46_EFFORTS: tuple[EffortLevel, ...] = (
     EffortLevel.AUTO,
 )
 
-# DeepSeek V4 accepts only high/max — XHIGH is intentionally skipped.
+# The official DeepSeek endpoint exposes only high/max — XHIGH is intentionally skipped.
 _DEEPSEEK_EFFORTS: tuple[EffortLevel, ...] = (EffortLevel.HIGH, EffortLevel.MAX)
+
+# DashScope accepts the full effort vocabulary for its hosted DeepSeek V4
+# models. Low/medium currently map to high and xhigh maps to max server-side,
+# but keeping the accepted wire values lets callers migrate without a 400.
+_DASHSCOPE_DEEPSEEK_EFFORTS: tuple[EffortLevel, ...] = (
+    EffortLevel.LOW,
+    EffortLevel.MEDIUM,
+    EffortLevel.HIGH,
+    EffortLevel.XHIGH,
+    EffortLevel.MAX,
+)
 
 _GLM_EFFORTS: tuple[EffortLevel, ...] = (
     EffortLevel.NONE,
@@ -230,6 +243,14 @@ _ANTHROPIC_ADAPTIVE_SPEC = ThinkingSpec(
     EffortLevel.HIGH,
 )
 
+_ANTHROPIC_OPUS5_SPEC = ThinkingSpec(
+    ThinkingFamily.ANTHROPIC_ADAPTIVE,
+    _ANTHROPIC_MODERN_EFFORTS,
+    EffortLevel.HIGH,
+    thinking_enabled_by_default=True,
+    disable_forbidden_efforts=(EffortLevel.XHIGH, EffortLevel.MAX),
+)
+
 _ANTHROPIC_46_ADAPTIVE_SPEC = ThinkingSpec(
     ThinkingFamily.ANTHROPIC_ADAPTIVE,
     _ANTHROPIC_46_EFFORTS,
@@ -262,6 +283,7 @@ _ZHIPU_GLM52_SPEC = ThinkingSpec(
 MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
     "anthropic": {
         "claude-fable-5": _ANTHROPIC_ADAPTIVE_ALWAYS_ON_SPEC,
+        "claude-opus-5": _ANTHROPIC_OPUS5_SPEC,
         "claude-sonnet-5": _ANTHROPIC_ADAPTIVE_SPEC,
         "claude-opus-4-8": _ANTHROPIC_ADAPTIVE_SPEC,
         "claude-opus-4-7": _ANTHROPIC_ADAPTIVE_SPEC,
@@ -314,8 +336,24 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "glm-5.1": _DASHSCOPE_GLM51_SPEC,
         "MiniMax-M2.5": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "MiniMax/MiniMax-M3": ThinkingSpec(ThinkingFamily.MINIMAX),
-        "deepseek-v4-pro": ThinkingSpec(ThinkingFamily.DASHSCOPE, _DEEPSEEK_EFFORTS, EffortLevel.HIGH),
-        "deepseek-v4-flash": ThinkingSpec(ThinkingFamily.DASHSCOPE, _DEEPSEEK_EFFORTS, EffortLevel.HIGH),
+        "deepseek-v4-pro": ThinkingSpec(
+            ThinkingFamily.DASHSCOPE,
+            _DASHSCOPE_DEEPSEEK_EFFORTS,
+            EffortLevel.HIGH,
+            uses_reasoning_effort_param=True,
+        ),
+        "deepseek-v4-flash-0731": ThinkingSpec(
+            ThinkingFamily.DASHSCOPE,
+            _DASHSCOPE_DEEPSEEK_EFFORTS,
+            EffortLevel.HIGH,
+            uses_reasoning_effort_param=True,
+        ),
+        "deepseek-v4-flash": ThinkingSpec(
+            ThinkingFamily.DASHSCOPE,
+            _DASHSCOPE_DEEPSEEK_EFFORTS,
+            EffortLevel.HIGH,
+            uses_reasoning_effort_param=True,
+        ),
     },
     "dashscope_token_plan": {
         "qwen3.8-max-preview": _DASHSCOPE_QWEN38_SPEC,
@@ -473,9 +511,9 @@ _THINKING_DISABLE_EFFORTS: frozenset[str] = frozenset({"none", "off", "disable",
 # Families whose providers emit an explicit "thinking on" directive by default
 # when the user has NOT configured ``thinkingEnabled`` (DashScope
 # ``enable_thinking=True``, Kimi/Zhipu ``thinking.type=enabled``). For these an
-# unset config still means the next turn thinks. Reasoning-effort families
-# (OpenAI/Anthropic/Gemini) instead emit nothing when unset and let the server
-# decide — unobservable here, so they resolve to off.
+# unset config still means the next turn thinks. Most reasoning-effort models
+# (OpenAI/Anthropic/Gemini) instead emit nothing when unset and resolve to off;
+# models with a documented server-side thinking default opt in explicitly.
 _DEFAULT_ON_FAMILIES: frozenset[ThinkingFamily] = frozenset(
     {ThinkingFamily.DASHSCOPE, ThinkingFamily.KIMI, ThinkingFamily.ZHIPU}
 )
@@ -498,15 +536,19 @@ def resolve_thinking_active(
     spec = get_thinking_spec(provider_key or "", model or "")
     if spec.family is ThinkingFamily.NONE:
         return False
+    normalized_effort = normalize_effort(effort)
     if thinking_enabled is False:
-        return False
+        if not spec.supports_disable:
+            return True
+        forbidden = {item.value for item in spec.disable_forbidden_efforts}
+        return normalized_effort in forbidden
     # DashScope disable-effort tokens force thinking off even when configured on.
-    if spec.family is ThinkingFamily.DASHSCOPE and normalize_effort(effort) in _THINKING_DISABLE_EFFORTS:
+    if spec.family is ThinkingFamily.DASHSCOPE and normalized_effort in _THINKING_DISABLE_EFFORTS:
         return False
     if thinking_enabled is True:
         return True
     # thinking_enabled is None (not configured): use the family default.
-    return spec.family in _DEFAULT_ON_FAMILIES
+    return spec.thinking_enabled_by_default or spec.adaptive_always_on or spec.family in _DEFAULT_ON_FAMILIES
 
 
 # Anthropic extended-thinking budget tokens per effort level.

@@ -17,6 +17,21 @@ class TestGetThinkingSpec:
         assert spec.supports_effort is True
         assert spec.default_effort is EffortLevel.HIGH
 
+    def test_anthropic_opus5_defaults_on_and_limits_disable_efforts(self):
+        spec = get_thinking_spec("anthropic", "claude-opus-5")
+        assert spec.family is ThinkingFamily.ANTHROPIC_ADAPTIVE
+        assert spec.allowed_efforts == (
+            EffortLevel.LOW,
+            EffortLevel.MEDIUM,
+            EffortLevel.HIGH,
+            EffortLevel.XHIGH,
+            EffortLevel.MAX,
+            EffortLevel.AUTO,
+        )
+        assert spec.default_effort is EffortLevel.HIGH
+        assert spec.thinking_enabled_by_default is True
+        assert spec.disable_forbidden_efforts == (EffortLevel.XHIGH, EffortLevel.MAX)
+
     def test_anthropic_haiku_supports_manual_thinking_budget(self):
         spec = get_thinking_spec("anthropic", "claude-haiku-4-5-20251001")
         assert spec.family is ThinkingFamily.ANTHROPIC
@@ -184,11 +199,19 @@ class TestGetThinkingSpec:
             assert spec.use_max_completion_tokens is False, (provider_key, model)
             assert spec.default_thinking_budget is None, (provider_key, model)
 
-    def test_dashscope_deepseek_supports_high_max(self):
-        spec = get_thinking_spec("dashscope", "deepseek-v4-pro")
-        assert spec.family is ThinkingFamily.DASHSCOPE
-        assert spec.allowed_efforts == (EffortLevel.HIGH, EffortLevel.MAX)
-        assert spec.default_effort is EffortLevel.HIGH
+    def test_dashscope_deepseek_supports_documented_efforts(self):
+        for model in ("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-0731"):
+            spec = get_thinking_spec("dashscope", model)
+            assert spec.family is ThinkingFamily.DASHSCOPE
+            assert spec.allowed_efforts == (
+                EffortLevel.LOW,
+                EffortLevel.MEDIUM,
+                EffortLevel.HIGH,
+                EffortLevel.XHIGH,
+                EffortLevel.MAX,
+            )
+            assert spec.default_effort is EffortLevel.HIGH
+            assert spec.uses_reasoning_effort_param is True
 
     def test_dashscope_qwen36_max_preview(self):
         spec = get_thinking_spec("dashscope", "qwen3.6-max-preview")
@@ -267,6 +290,13 @@ class TestResolveThinkingActive:
         assert resolve_thinking_active("openai", "gpt-5.5", None) is False
         assert resolve_thinking_active("anthropic", "claude-opus-4-8", None) is False
         assert resolve_thinking_active("gemini", "gemini-3.5-flash", None) is False
+
+    def test_anthropic_default_on_and_disable_constraints_are_reflected(self):
+        assert resolve_thinking_active("anthropic", "claude-fable-5", None) is True
+        assert resolve_thinking_active("anthropic", "claude-opus-5", None) is True
+        assert resolve_thinking_active("anthropic", "claude-opus-5", False, effort="high") is False
+        assert resolve_thinking_active("anthropic", "claude-opus-5", False, effort="xhigh") is True
+        assert resolve_thinking_active("anthropic", "claude-opus-5", False, effort="max") is True
 
     def test_explicit_true_forces_on_across_families(self):
         assert resolve_thinking_active("openai", "gpt-5.5", True) is True

@@ -50,6 +50,7 @@ def _context_config(context_window: int, max_output_tokens: int = 8_192) -> Cont
 
 _MODEL_EXACT_CONFIGS: dict[str, ContextWindowConfig] = {
     "claude-fable-5": _context_config(1_000_000, 128_000),
+    "claude-opus-5": _context_config(1_000_000, 128_000),
     "claude-opus-4-8": _context_config(1_000_000, 128_000),
     "claude-sonnet-5": _context_config(1_000_000, 128_000),
     "claude-sonnet-4-6-1m": _context_config(1_000_000, 64_000),
@@ -91,6 +92,7 @@ _MODEL_EXACT_CONFIGS: dict[str, ContextWindowConfig] = {
     "qwen3-max": _context_config(262_144),
     "qwen3-coder-next": _context_config(262_144),
     "deepseek-v4-pro": _context_config(1_000_000),
+    "deepseek-v4-flash-0731": _context_config(1_000_000, 393_216),
     "deepseek-v4-flash": _context_config(1_000_000),
     "glm-5.2-fast-preview": _context_config(1_048_576, 131_072),
     "glm-5.2": _context_config(1_000_000, 128_000),

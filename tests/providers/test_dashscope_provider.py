@@ -109,12 +109,14 @@ class TestDashScopeBuildThinkingKwargs:
         p = DashScopeProvider(model="glm-5.1", api_key="k")
         assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True}}
 
-    def test_bailian_deepseek_does_not_emit_reasoning_effort(self):
-        # Bailian-hosted DeepSeek uses the BAILIAN wire format, not OpenAI's.
-        p = DashScopeProvider(model="deepseek-v4-pro", api_key="k", effort="high")
+    @pytest.mark.parametrize("model", ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-0731"])
+    def test_bailian_deepseek_emits_enable_thinking_and_reasoning_effort(self, model):
+        p = DashScopeProvider(model=model, api_key="k", effort="xhigh")
         kwargs = p._build_thinking_kwargs()
-        assert kwargs == {"extra_body": {"enable_thinking": True}}
-        assert "reasoning_effort" not in kwargs
+        assert kwargs == {
+            "extra_body": {"enable_thinking": True},
+            "reasoning_effort": "xhigh",
+        }
 
     def test_unknown_model_returns_empty(self):
         p = DashScopeProvider(model="not-real", api_key="k")

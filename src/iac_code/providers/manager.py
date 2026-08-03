@@ -304,6 +304,7 @@ def _error_event_from_exception(exc: BaseException) -> ErrorEvent:
 
 MODEL_FALLBACK_MAP = {
     "claude-fable-5": "claude-opus-4-8",
+    "claude-opus-5": "claude-opus-4-8",
     "claude-opus-4-8": "claude-sonnet-5",
     "claude-opus-4-7": "claude-haiku-4-5-20251001",
     "claude-opus-4-6": "claude-haiku-4-5-20251001",
@@ -322,10 +323,12 @@ MODEL_FALLBACK_MAP = {
     "glm-5.2-fast-preview": "glm-5.2",
     "glm-5.2": "glm-5.1",
     "deepseek-v4-pro": "deepseek-v4-flash",
+    "deepseek-v4-flash-0731": "deepseek-v4-flash",
 }
 
 _MODEL_REFUSAL_FALLBACK_MAP = {
     "claude-fable-5": "claude-opus-4-8",
+    "claude-opus-5": "claude-opus-4-8",
 }
 
 _PROVIDER_MODEL_FALLBACK_MAP = {

@@ -271,6 +271,39 @@ class TestAnthropicProvider:
 
 
 class TestAnthropicBuildThinkingKwargs:
+    def test_opus5_defaults_to_server_managed_thinking(self):
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+
+        p = AnthropicProvider(model="claude-opus-5", api_key="k")
+        assert p._build_thinking_kwargs() == {}
+
+    def test_opus5_can_disable_thinking_at_high_or_lower_effort(self):
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+
+        p = AnthropicProvider(
+            model="claude-opus-5",
+            api_key="k",
+            effort="high",
+            thinking_enabled=False,
+        )
+        assert p._build_thinking_kwargs() == {
+            "thinking": {"type": "disabled"},
+            "output_config": {"effort": "high"},
+        }
+
+    @pytest.mark.parametrize("effort", ["xhigh", "max"])
+    def test_opus5_rejects_disabling_thinking_at_highest_efforts(self, effort):
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+
+        p = AnthropicProvider(
+            model="claude-opus-5",
+            api_key="k",
+            effort=effort,
+            thinking_enabled=False,
+        )
+        with pytest.raises(ValueError, match="cannot be disabled.*use high or lower"):
+            p._build_thinking_kwargs()
+
     def test_high_returns_adaptive_thinking_and_effort(self):
         from iac_code.providers.anthropic_provider import AnthropicProvider
 

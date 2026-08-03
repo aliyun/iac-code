@@ -65,6 +65,7 @@ PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
             ModelEntry("kimi-k2.6", support_multimodal=True),
             ModelEntry("kimi-k2.5", support_multimodal=True),
             ModelEntry("deepseek-v4-pro"),
+            ModelEntry("deepseek-v4-flash-0731"),
             ModelEntry("deepseek-v4-flash"),
             ModelEntry("glm-5.2-fast-preview"),
             ModelEntry("glm-5.2"),
@@ -129,6 +130,7 @@ PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
         base_url=None,
         models=[
             ModelEntry("claude-fable-5", is_default=True, support_multimodal=True),
+            ModelEntry("claude-opus-5", support_multimodal=True),
             ModelEntry("claude-opus-4-8", support_multimodal=True),
             ModelEntry("claude-sonnet-5", support_multimodal=True),
             ModelEntry("claude-opus-4-7", support_multimodal=True),

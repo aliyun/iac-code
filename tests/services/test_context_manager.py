@@ -59,7 +59,7 @@ class TestContextWindowConfig:
         assert config.context_window == 1_000_000
         assert config.max_output_tokens == 128_000
 
-    @pytest.mark.parametrize("model", ["claude-opus-4-8", "gpt-5.5", "gpt-5.4"])
+    @pytest.mark.parametrize("model", ["claude-opus-5", "claude-opus-4-8", "gpt-5.5", "gpt-5.4"])
     def test_new_frontier_models_use_documented_long_context_capacity(self, model):
         config = get_context_window_config(model)
         assert config.context_window in {1_000_000, 1_050_000}
@@ -103,6 +103,7 @@ class TestContextWindowConfig:
             ("qwen3.7-plus", 1_000_000),
             ("qwen3.6-flash", 1_000_000),
             ("deepseek-v4-pro", 1_000_000),
+            ("deepseek-v4-flash-0731", 1_000_000),
             ("deepseek-v4-flash", 1_000_000),
             ("glm-5.1", 202_752),
             ("MiniMax-M3", 1_000_000),
@@ -111,6 +112,10 @@ class TestContextWindowConfig:
     )
     def test_current_dashscope_models_use_documented_context_capacity(self, model, context_window):
         assert get_context_window_config(model).context_window == context_window
+
+    def test_dashscope_deepseek_v4_flash_0731_uses_documented_output_capacity(self):
+        config = get_context_window_config("deepseek-v4-flash-0731")
+        assert config.max_output_tokens == 393_216
 
     def test_direct_glm52_uses_documented_context_and_output_capacity(self):
         config = get_context_window_config("glm-5.2")

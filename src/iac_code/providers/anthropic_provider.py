@@ -144,7 +144,12 @@ class AnthropicProvider(Provider):
 
         kwargs: dict[str, Any] = {}
         if self._thinking_disabled():
-            if not spec.adaptive_always_on:
+            forbidden_disable_efforts = {item.value for item in spec.disable_forbidden_efforts}
+            if effort in forbidden_disable_efforts:
+                raise ValueError(
+                    f"Anthropic thinking cannot be disabled for {self._model} at {effort} effort; use high or lower"
+                )
+            if spec.supports_disable:
                 kwargs["thinking"] = {"type": "disabled"}
         elif not spec.adaptive_always_on and (effort is not None or self._thinking_forced()):
             kwargs["thinking"] = {"type": "adaptive"}
