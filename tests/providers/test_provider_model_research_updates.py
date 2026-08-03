@@ -24,6 +24,7 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
     models = _model_ids("dashscope")
 
     for model_id in (
+        "qwen3.8-max",
         "qwen3.7-max",
         "qwen3.7-plus",
         "qwen3.6-plus",
@@ -52,10 +53,10 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
         assert model_id in models
         assert not _model_entry("dashscope", model_id).is_default
 
-    assert PROVIDER_REGISTRY["dashscope"].default_model == "qwen3.7-max"
+    assert PROVIDER_REGISTRY["dashscope"].default_model == "qwen3.8-max"
     assert not _model_entry("dashscope", "glm-5.2-fast-preview").support_multimodal
     assert "glm-5.2-fast-preview" not in _model_ids("dashscope_token_plan")
-    assert "deepseek-v4-flash-0731" not in _model_ids("dashscope_token_plan")
+    assert _model_entry("dashscope", "qwen3.8-max").support_multimodal
     assert not _model_entry("dashscope", "qwen3.7-max").support_multimodal
     for model_id in (
         "qwen3.7-plus",
@@ -76,12 +77,14 @@ def test_dashscope_token_plan_uses_exact_supported_chat_models() -> None:
     models = _model_ids("dashscope_token_plan")
 
     for model_id in (
+        "qwen3.8-max",
         "qwen3.8-max-preview",
         "qwen3.7-max",
         "qwen3.7-plus",
         "qwen3.6-plus",
         "qwen3.6-flash",
         "deepseek-v4-pro",
+        "deepseek-v4-flash-0731",
         "deepseek-v4-flash",
         "deepseek-v3.2",
         "glm-5.2",
@@ -96,7 +99,8 @@ def test_dashscope_token_plan_uses_exact_supported_chat_models() -> None:
 
     assert "glm-5-turbo" not in models
     assert "MiniMax-M2.7" not in models
-    assert PROVIDER_REGISTRY["dashscope_token_plan"].default_model == "qwen3.8-max-preview"
+    assert PROVIDER_REGISTRY["dashscope_token_plan"].default_model == "qwen3.8-max"
+    assert _model_entry("dashscope_token_plan", "qwen3.8-max").support_multimodal
     assert _model_entry("dashscope_token_plan", "qwen3.8-max-preview").support_multimodal
     assert not _model_entry("dashscope_token_plan", "qwen3.7-max").support_multimodal
     for model_id in ("qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash", "kimi-k2.7-code", "kimi-k2.5", "kimi-k2.6"):
@@ -296,10 +300,28 @@ def test_dashscope_new_model_protocols_are_not_flattened() -> None:
     assert deepseek.default_effort is EffortLevel.HIGH
     assert deepseek.uses_reasoning_effort_param is True
 
-    qwen = get_thinking_spec("dashscope_token_plan", "qwen3.8-max-preview")
+    qwen = get_thinking_spec("dashscope", "qwen3.8-max")
     assert qwen.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.XHIGH)
     assert qwen.default_effort is EffortLevel.XHIGH
-    assert qwen.supports_disable is False
+    assert qwen.supports_disable is True
+    assert DashScopeProvider(
+        model="qwen3.8-max",
+        api_key="k",
+        thinking_enabled=False,
+    )._build_thinking_kwargs() == {"extra_body": {"enable_thinking": False}}
+    assert DashScopeProvider(
+        model="qwen3.8-max",
+        api_key="k",
+        thinking_enabled=True,
+    )._build_thinking_kwargs() == {
+        "extra_body": {"enable_thinking": True, "preserve_thinking": True},
+        "reasoning_effort": "xhigh",
+    }
+
+    preview = get_thinking_spec("dashscope_token_plan", "qwen3.8-max-preview")
+    assert preview.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.XHIGH)
+    assert preview.default_effort is EffortLevel.XHIGH
+    assert preview.supports_disable is False
     assert DashScopeProvider(
         model="qwen3.8-max-preview",
         api_key="k",

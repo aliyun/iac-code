@@ -66,11 +66,12 @@ class TestGetThinkingSpec:
         assert o4_mini.allowed_efforts == o3.allowed_efforts
         assert EffortLevel.NONE not in o3.allowed_efforts
 
-    def test_deepseek_official_uses_openai_family_with_high_max(self):
+    def test_deepseek_official_uses_openai_family_with_low_high_max(self):
         spec = get_thinking_spec("deepseek", "deepseek-v4-pro")
         assert spec.family is ThinkingFamily.OPENAI
-        assert spec.allowed_efforts == (EffortLevel.HIGH, EffortLevel.MAX)
+        assert spec.allowed_efforts == (EffortLevel.LOW, EffortLevel.HIGH, EffortLevel.MAX)
         assert spec.default_effort is EffortLevel.HIGH
+        assert spec.thinking_enabled_by_default is True
 
     def test_dashscope_qwen_supports_thinking_no_effort(self):
         spec = get_thinking_spec("dashscope", "qwen3.6-plus")
@@ -114,11 +115,19 @@ class TestGetThinkingSpec:
             assert spec.use_max_completion_tokens is True
             assert spec.uses_reasoning_effort_param is True
 
-    def test_token_plan_qwen38_is_visual_always_thinking_with_three_efforts(self):
-        spec = get_thinking_spec("dashscope_token_plan", "qwen3.8-max-preview")
-        assert spec.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.XHIGH)
-        assert spec.default_effort is EffortLevel.XHIGH
-        assert spec.supports_disable is False
+    def test_qwen38_formal_and_preview_have_distinct_thinking_modes(self):
+        for provider_key in ("dashscope", "dashscope_token_plan"):
+            formal = get_thinking_spec(provider_key, "qwen3.8-max")
+            assert formal.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.XHIGH)
+            assert formal.default_effort is EffortLevel.XHIGH
+            assert formal.supports_disable is True
+            assert formal.thinking_enabled_by_default is True
+
+        preview = get_thinking_spec("dashscope_token_plan", "qwen3.8-max-preview")
+        assert preview.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.XHIGH)
+        assert preview.default_effort is EffortLevel.XHIGH
+        assert preview.supports_disable is False
+        assert preview.thinking_enabled_by_default is True
 
     def test_anthropic_46_excludes_xhigh_but_keeps_max(self):
         spec = get_thinking_spec("anthropic", "claude-sonnet-4-6")
@@ -212,6 +221,12 @@ class TestGetThinkingSpec:
             )
             assert spec.default_effort is EffortLevel.HIGH
             assert spec.uses_reasoning_effort_param is True
+
+    def test_token_plan_deepseek_0731_is_registered(self):
+        spec = get_thinking_spec("dashscope_token_plan", "deepseek-v4-flash-0731")
+        assert spec.family is ThinkingFamily.DASHSCOPE
+        assert spec.allowed_efforts == (EffortLevel.LOW, EffortLevel.HIGH, EffortLevel.MAX)
+        assert spec.default_effort is EffortLevel.HIGH
 
     def test_dashscope_qwen36_max_preview(self):
         spec = get_thinking_spec("dashscope", "qwen3.6-max-preview")

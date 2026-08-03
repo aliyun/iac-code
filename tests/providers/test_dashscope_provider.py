@@ -96,6 +96,17 @@ class TestDashScopeBuildThinkingKwargs:
         )
         assert p._build_thinking_kwargs() == {"extra_body": {"preserve_thinking": True}}
 
+    def test_qwen38_formal_uses_hybrid_thinking_and_preserves_reasoning(self):
+        p = DashScopeProvider(model="qwen3.8-max", api_key="k", effort="low")
+        assert p._build_thinking_kwargs() == {
+            "extra_body": {"enable_thinking": True, "preserve_thinking": True},
+            "reasoning_effort": "low",
+        }
+
+    def test_qwen38_formal_can_disable_thinking(self):
+        p = DashScopeProvider(model="qwen3.8-max", api_key="k", thinking_enabled=False)
+        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": False}}
+
     @pytest.mark.parametrize("prefix", _PRESERVE_THINKING_MODEL_PREFIXES)
     def test_documented_models_support_preserve_thinking(self, prefix):
         p = DashScopeProvider(model=prefix, api_key="k")

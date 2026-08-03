@@ -78,6 +78,7 @@ KNOWN_MODELS: frozenset[str] = frozenset(
         "o3-mini",
         "o4-mini",
         # Dashscope / Qwen
+        "qwen3.8-max",
         "qwen3.8-max-preview",
         "qwen3.7-max",
         "qwen3.7-plus",

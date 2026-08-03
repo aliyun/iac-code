@@ -206,14 +206,16 @@ class TestModelPickerEffortCycle:
         picker._cycle_effort(("dashscope", "qwen3.6-plus"), 1)
         assert picker._efforts.get(("dashscope", "qwen3.6-plus")) == initial
 
-    def test_deepseek_effort_cycle_skips_xhigh(self):
-        """DeepSeek V4 only accepts high/max — cycling must skip xhigh."""
+    def test_deepseek_effort_cycle_uses_low_high_max_only(self):
+        """DeepSeek V4 accepts low/high/max, skipping medium and xhigh."""
         picker = make_picker(configured_providers=["deepseek"])
         picker._efforts[("deepseek", "deepseek-v4-pro")] = EffortLevel.HIGH
-        # Clamps at HIGH going down
+        # Cycle down: HIGH → LOW (skipping MEDIUM)
         picker._cycle_effort(("deepseek", "deepseek-v4-pro"), -1)
+        assert picker._efforts[("deepseek", "deepseek-v4-pro")] == EffortLevel.LOW
+        # Cycle up: LOW → HIGH → MAX (skipping MEDIUM and XHIGH)
+        picker._cycle_effort(("deepseek", "deepseek-v4-pro"), 1)
         assert picker._efforts[("deepseek", "deepseek-v4-pro")] == EffortLevel.HIGH
-        # Cycle up: HIGH → MAX (skipping XHIGH)
         picker._cycle_effort(("deepseek", "deepseek-v4-pro"), 1)
         assert picker._efforts[("deepseek", "deepseek-v4-pro")] == EffortLevel.MAX
         # Clamps at MAX going up

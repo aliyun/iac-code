@@ -14,7 +14,9 @@ class DeepSeekProvider(OpenAIProvider):
 
     DeepSeek uses ``reasoning_effort`` plus
     ``extra_body.thinking.type=enabled``; the registry's ``allowed_efforts``
-    constrains the effort vocabulary to ``high`` / ``max`` for DeepSeek V4.
+    constrains the effort vocabulary to ``low`` / ``high`` / ``max`` for
+    DeepSeek V4. Non-thinking mode is selected with
+    ``extra_body.thinking.type=disabled``.
 
     Reasoning content is captured via ``reasoning_content`` in the stream
     and echoed back as ``reasoning_content`` on subsequent assistant
@@ -48,6 +50,8 @@ class DeepSeekProvider(OpenAIProvider):
         )
 
     def _build_thinking_kwargs(self) -> dict[str, Any]:
+        if self._thinking_disabled():
+            return {"extra_body": {"thinking": {"type": "disabled"}}}
         kwargs = super()._build_thinking_kwargs()
         if not kwargs:
             return {}

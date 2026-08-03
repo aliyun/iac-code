@@ -19,7 +19,7 @@ from iac_code.i18n import _
 from iac_code.utils.file_security import atomic_write_text, ensure_private_dir, ensure_private_file
 
 # Default LLM model used when no model is saved in settings
-DEFAULT_MODEL = "qwen3.7-max"
+DEFAULT_MODEL = "qwen3.8-max"
 
 # Configuration directory
 _CONFIG_DIR_NAME = ".iac-code"
