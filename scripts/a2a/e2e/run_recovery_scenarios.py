@@ -1078,7 +1078,7 @@ def run_ask_waiting(args: argparse.Namespace, scenario: str) -> int:
         answer = h.stream(prompt=ASK_FIRST_ANSWER, name="02-answer-first-ask", task_id="")
         _add_hydrated_task_checks(h, answer, "first ask answer")
         final_summary = answer
-        if answer.last_input_required_step_id:
+        if _waiting_for_followup_ask(h, answer):
             second = h.stream(prompt=ASK_SECOND_ANSWER, name="03-answer-second-ask")
             _add_same_task_checks(h, second, "second ask answer")
             _finish_pipeline_after_possible_input(h, second, args)
@@ -1086,6 +1086,7 @@ def run_ask_waiting(args: argparse.Namespace, scenario: str) -> int:
         else:
             _finish_pipeline_after_possible_input(h, answer, args)
         h.checks["pipeline completed after ask recovery"] = _completed_snapshot_or_stream(h, final_summary)
+        h.checks["deployment succeeded with Stack ID"] = _deployment_succeeded_with_stack_id(h.run_dir)
         h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
 
     return _run_with_harness(args, scenario, callback)
@@ -1190,7 +1191,7 @@ def run_image_ask_waiting(args: argparse.Namespace, scenario: str) -> int:
         )
         _add_hydrated_task_checks(h, answer, "first ask image answer")
         final_summary = answer
-        if answer.last_input_required_step_id:
+        if _waiting_for_followup_ask(h, answer):
             second = h.stream_image_text(
                 text=ASK_SECOND_ANSWER,
                 image_key="ask-second-answer",
@@ -1202,6 +1203,7 @@ def run_image_ask_waiting(args: argparse.Namespace, scenario: str) -> int:
         else:
             _finish_pipeline_after_possible_input(h, answer, args)
         h.checks["pipeline completed after ask image recovery"] = _completed_snapshot_or_stream(h, final_summary)
+        h.checks["deployment succeeded with Stack ID"] = _deployment_succeeded_with_stack_id(h.run_dir)
         h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
 
     return _run_with_harness(args, scenario, callback)
@@ -1966,6 +1968,13 @@ def _answer_intervening_ask_inputs(
     return current
 
 
+def _waiting_for_followup_ask(h: ScenarioHarness, summary: StreamSummary) -> bool:
+    if not summary.last_input_required_step_id:
+        return False
+    events_path = h.run_dir / f"{summary.name}.events.jsonl"
+    return _latest_pending_kind(events_path) == "ask_user_question"
+
+
 def _join_after_kill(stream: BackgroundStream, h: ScenarioHarness) -> None:
     try:
         stream.join(timeout=10)
@@ -2687,6 +2696,49 @@ def _latest_input_required_step_id_from_events(events: Iterable[Any]) -> str:
             if isinstance(data, dict) and data.get("stepId"):
                 step_id = str(data.get("stepId") or "")
     return step_id
+
+
+def _deployment_succeeded_with_stack_id(run_dir: Path) -> bool:
+    latest_rank: tuple[float, int] | None = None
+    latest_conclusion: dict[str, Any] = {}
+    event_order = 0
+    for path in sorted(run_dir.glob("*.events.jsonl")):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            for envelope in _extract_pipeline_envelopes(value):
+                event_order += 1
+                step = envelope.get("step")
+                if envelope.get("eventType") != "step_completed" or not isinstance(step, dict):
+                    continue
+                if step.get("id") != "deploying":
+                    continue
+                data = envelope.get("data")
+                conclusion = data.get("conclusion") if isinstance(data, dict) else None
+                if not isinstance(conclusion, dict):
+                    continue
+                try:
+                    sequence = float(envelope.get("sequence"))
+                except (TypeError, ValueError):
+                    sequence = float("-inf")
+                rank = (sequence, event_order)
+                if latest_rank is None or rank > latest_rank:
+                    latest_rank = rank
+                    latest_conclusion = conclusion
+
+    if str(latest_conclusion.get("status") or "").casefold() != "success":
+        return False
+    stack_id = latest_conclusion.get("stack_id") or latest_conclusion.get("stackId")
+    outputs = latest_conclusion.get("outputs")
+    if not stack_id and isinstance(outputs, dict):
+        stack_id = outputs.get("StackId") or outputs.get("stackId") or outputs.get("stack_id")
+    return isinstance(stack_id, str) and bool(stack_id.strip())
 
 
 def _all_evidence(h: ScenarioHarness) -> str:

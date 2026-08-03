@@ -52,10 +52,7 @@ def build_handoff_summary(
                 "obtain a fresh, explicit confirmation from the user in normal chat. Any confirmation given "
                 "during the pipeline does not count."
             ),
-            (
-                "- Exception: pipeline-managed automatic cleanup may proceed without this additional "
-                "confirmation."
-            ),
+            ("- Exception: pipeline-managed automatic cleanup may proceed without this additional confirmation."),
             "",
             "Use this context when answering follow-up questions after the pipeline handoff.",
         ]
