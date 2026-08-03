@@ -289,6 +289,34 @@ class TestCheckTemplate:
             "$.Parameters.GeneratedSuffix.AssociationPropertyMetadata.CharacterClasses[0].Class"
         )
 
+    def test_nested_stack_getatt_error_explains_the_required_output_format(self) -> None:
+        body = {
+            "ROSTemplateFormatVersion": "2015-09-01",
+            "Resources": {
+                "Nested": {
+                    "Type": "ALIYUN::ROS::Stack",
+                    "Properties": {
+                        "TemplateBody": {
+                            "ROSTemplateFormatVersion": "2015-09-01",
+                            "Outputs": {"Child": {"Value": "ok"}},
+                        }
+                    },
+                }
+            },
+            "Outputs": {"Invalid": {"Value": {"Fn::GetAtt": ["Nested", "Child"]}}},
+        }
+
+        result = check_template("ros", "ValidateTemplate", {"TemplateBody": body})
+
+        assert result is not None and result.blocking_result is not None
+        assert result.template_analyzed
+        assert "ROS4005" in result.blocking_result.content
+        assert "Outputs.<nested_stack_output_name>" in result.blocking_result.content
+        assert "Fn::GetAtt: [Nested, Outputs.MyOutput]" in result.blocking_result.content
+        metadata = result.blocking_result.metadata["ros_validation"]
+        assert metadata["error_count"] == 1
+        assert metadata["diagnostics"][0]["path"] == "$.Outputs.Invalid.Value.Fn::GetAtt[1]"
+
     def test_association_property_rule_is_shared_with_create_stack(self) -> None:
         body = {
             "ROSTemplateFormatVersion": "2015-09-01",

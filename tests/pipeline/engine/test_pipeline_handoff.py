@@ -80,6 +80,14 @@ def test_build_handoff_summary_includes_only_configured_fields_and_deterministic
         },
         include_fields=["intent", "missing_field"],
     )
+    resource_release_requirement = (
+        "- Before performing any operation that releases, deletes, or otherwise destroys a resource, "
+        "obtain a fresh, explicit confirmation from the user in normal chat. Any confirmation given "
+        "during the pipeline does not count."
+    )
+    automatic_cleanup_exception = (
+        "- Exception: pipeline-managed automatic cleanup may proceed without this additional confirmation."
+    )
 
     assert (
         summary
@@ -101,12 +109,32 @@ def test_build_handoff_summary_includes_only_configured_fields_and_deterministic
         Missing context fields:
         - missing_field
 
+        Safety requirements for normal chat:
+        RESOURCE_RELEASE_REQUIREMENT
+        AUTOMATIC_CLEANUP_EXCEPTION
+
         Use this context when answering follow-up questions after the pipeline handoff.
         """
-        ).strip()
+        )
+        .strip()
+        .replace("RESOURCE_RELEASE_REQUIREMENT", resource_release_requirement)
+        .replace("AUTOMATIC_CLEANUP_EXCEPTION", automatic_cleanup_exception)
     )
     assert "architecture" not in summary
     assert "deployment" not in summary
+
+
+def test_build_handoff_summary_requires_new_confirmation_for_resource_release_except_automatic_cleanup():
+    summary = build_handoff_summary(
+        pipeline_name="selling",
+        outcome="completed",
+        context_snapshot={},
+        include_fields=[],
+    )
+
+    assert "obtain a fresh, explicit confirmation from the user in normal chat" in summary
+    assert "Any confirmation given during the pipeline does not count" in summary
+    assert "pipeline-managed automatic cleanup may proceed without this additional confirmation" in summary
 
 
 def test_runner_should_switch_to_normal_for_completed_policy(tmp_path):

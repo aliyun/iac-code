@@ -1,4 +1,4 @@
-.PHONY: help install test coverage lint format translate run dev clean publish
+.PHONY: help install test coverage lint format translate run dev web pipeline clean publish
 
 .DEFAULT_GOAL := help
 
@@ -79,6 +79,14 @@ run: ## Run iac-code
 
 dev: ## Run iac-code in debug mode
 	IAC_CODE_INSTRUCTION_MEMORY_FILE=IAC-CODE.md uv run iac-code --debug
+
+web: ## Run iac-code as a local Web app
+	IAC_CODE_INSTRUCTION_MEMORY_FILE=IAC-CODE.md uv run iac-code web
+
+PIPELINE_NAME ?= selling
+
+pipeline: ## Run iac-code in pipeline mode (PIPELINE_NAME=selling by default)
+	IAC_CODE_INSTRUCTION_MEMORY_FILE=IAC-CODE.md IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=$(PIPELINE_NAME) uv run iac-code
 
 clean: ## Clean build artifacts
 	rm -rf .ruff_cache .pytest_cache dist build htmlcov .coverage coverage.xml

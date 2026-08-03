@@ -7649,6 +7649,33 @@ msgstr "El nombre lógico de recurso o el nombre de instancia Count es inválido
 #: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
 #, python-brace-format
 msgid ""
+"Fn::GetAtt for nested stack {} must use "
+"Outputs.<nested_stack_output_name>."
+msgstr ""
+"Fn::GetAtt para la pila anidada {} debe usar "
+"Outputs.<nested_stack_output_name>."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid ""
+"ALIYUN::ROS::Stack exposes child stack outputs only through the fixed "
+"Outputs. prefix, followed by a non-empty output name."
+msgstr ""
+"ALIYUN::ROS::Stack expone las salidas de la pila secundaria únicamente "
+"mediante el prefijo fijo Outputs., seguido de un nombre de salida no "
+"vacío."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
+"Change the second argument to Outputs.<nested_stack_output_name>, for "
+"example Fn::GetAtt: [{}, Outputs.MyOutput]."
+msgstr ""
+"Cambie el segundo argumento a Outputs.<nested_stack_output_name>, por "
+"ejemplo Fn::GetAtt: [{}, Outputs.MyOutput]."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid ""
 "Count resource {} expands into multiple instances, but this Fn::GetAtt "
 "cannot be automatically rewritten into an attribute list."
 msgstr ""
