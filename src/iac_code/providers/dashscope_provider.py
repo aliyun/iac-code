@@ -17,7 +17,7 @@ DASHSCOPE_TOKEN_PLAN_BASE_URL = "https://token-plan.cn-beijing.maas.aliyuncs.com
 # Prefix-matched against the model name.  Extend when new models are added.
 # Ref: https://help.aliyun.com/zh/model-studio/context-cache
 _EXPLICIT_CACHE_MODEL_PREFIXES: tuple[str, ...] = (
-    "qwen3.8-max-preview",
+    "qwen3.8-max",
     "qwen3.7-max",
     "qwen3.7-plus",
     "qwen3-coder-plus",
@@ -33,7 +33,7 @@ _EXPLICIT_CACHE_MODEL_PREFIXES: tuple[str, ...] = (
 # Models documented to accept extra_body.preserve_thinking. Keep this list
 # separate from thinking support: sending the parameter to other models fails.
 _PRESERVE_THINKING_MODEL_PREFIXES: tuple[str, ...] = (
-    "qwen3.8-max-preview",
+    "qwen3.8-max",
     "qwen3.7-max",
     "qwen3.7-plus",
     "qwen3.6-max-preview",

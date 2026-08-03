@@ -157,8 +157,13 @@ _ANTHROPIC_46_EFFORTS: tuple[EffortLevel, ...] = (
     EffortLevel.AUTO,
 )
 
-# The official DeepSeek endpoint exposes only high/max — XHIGH is intentionally skipped.
-_DEEPSEEK_EFFORTS: tuple[EffortLevel, ...] = (EffortLevel.HIGH, EffortLevel.MAX)
+# The official DeepSeek endpoint exposes low/high/max — MEDIUM and XHIGH are
+# intentionally skipped because the API rejects them.
+_DEEPSEEK_EFFORTS: tuple[EffortLevel, ...] = (
+    EffortLevel.LOW,
+    EffortLevel.HIGH,
+    EffortLevel.MAX,
+)
 
 # DashScope accepts the full effort vocabulary for its hosted DeepSeek V4
 # models. Low/medium currently map to high and xhigh maps to max server-side,
@@ -226,7 +231,16 @@ _DASHSCOPE_QWEN38_SPEC = ThinkingSpec(
     (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.XHIGH),
     EffortLevel.XHIGH,
     uses_reasoning_effort_param=True,
+    thinking_enabled_by_default=True,
+)
+
+_DASHSCOPE_QWEN38_PREVIEW_SPEC = ThinkingSpec(
+    ThinkingFamily.DASHSCOPE,
+    (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.XHIGH),
+    EffortLevel.XHIGH,
+    uses_reasoning_effort_param=True,
     supports_disable=False,
+    thinking_enabled_by_default=True,
 )
 
 _DASHSCOPE_KIMI_K3_SPEC = ThinkingSpec(
@@ -271,6 +285,12 @@ _OPENAI_GPT55_SPEC = ThinkingSpec(ThinkingFamily.OPENAI, _OPENAI_EFFORTS, Effort
 _OPENAI_REASONING_SPEC = ThinkingSpec(ThinkingFamily.OPENAI, _OPENAI_EFFORTS, EffortLevel.HIGH)
 _OPENAI_CODEX_SPEC = ThinkingSpec(ThinkingFamily.OPENAI, _OPENAI_CODEX_EFFORTS, EffortLevel.MEDIUM)
 _OPENAI_O_SERIES_SPEC = ThinkingSpec(ThinkingFamily.OPENAI, _OPENAI_O_SERIES_EFFORTS, EffortLevel.HIGH)
+_DEEPSEEK_SPEC = ThinkingSpec(
+    ThinkingFamily.OPENAI,
+    _DEEPSEEK_EFFORTS,
+    EffortLevel.HIGH,
+    thinking_enabled_by_default=True,
+)
 _KIMI_K3_SPEC = ThinkingSpec(ThinkingFamily.KIMI, _KIMI_K3_EFFORTS, EffortLevel.MAX)
 _ZHIPU_GLM52_SPEC = ThinkingSpec(
     ThinkingFamily.ZHIPU,
@@ -313,10 +333,11 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "o4-mini": _OPENAI_O_SERIES_SPEC,
     },
     "deepseek": {
-        "deepseek-v4-pro": ThinkingSpec(ThinkingFamily.OPENAI, _DEEPSEEK_EFFORTS, EffortLevel.HIGH),
-        "deepseek-v4-flash": ThinkingSpec(ThinkingFamily.OPENAI, _DEEPSEEK_EFFORTS, EffortLevel.HIGH),
+        "deepseek-v4-pro": _DEEPSEEK_SPEC,
+        "deepseek-v4-flash": _DEEPSEEK_SPEC,
     },
     "dashscope": {
+        "qwen3.8-max": _DASHSCOPE_QWEN38_SPEC,
         "qwen3.7-max": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.7-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.6-max-preview": ThinkingSpec(ThinkingFamily.DASHSCOPE),
@@ -356,12 +377,14 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         ),
     },
     "dashscope_token_plan": {
-        "qwen3.8-max-preview": _DASHSCOPE_QWEN38_SPEC,
+        "qwen3.8-max": _DASHSCOPE_QWEN38_SPEC,
+        "qwen3.8-max-preview": _DASHSCOPE_QWEN38_PREVIEW_SPEC,
         "qwen3.7-max": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.7-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.6-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.6-flash": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "deepseek-v4-pro": ThinkingSpec(ThinkingFamily.DASHSCOPE, _DEEPSEEK_EFFORTS, EffortLevel.HIGH),
+        "deepseek-v4-flash-0731": ThinkingSpec(ThinkingFamily.DASHSCOPE, _DEEPSEEK_EFFORTS, EffortLevel.HIGH),
         "deepseek-v4-flash": ThinkingSpec(ThinkingFamily.DASHSCOPE, _DEEPSEEK_EFFORTS, EffortLevel.HIGH),
         "deepseek-v3.2": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "glm-5.1": _DASHSCOPE_GLM51_SPEC,

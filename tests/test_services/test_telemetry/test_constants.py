@@ -32,6 +32,7 @@ def test_known_models_contains_researched_provider_updates():
         "claude-fable-5",
         "claude-opus-5",
         "gpt-5.6-sol",
+        "qwen3.8-max",
         "qwen3.8-max-preview",
         "kimi-k3",
         "glm-5.2-fast-preview",

@@ -2045,7 +2045,7 @@ class TestProviderManagerCompleteRetry:
         assert response.text == "fallback ok"
         assert created == [
             ("qwen3.8-max-preview", None),
-            ("qwen3.7-plus", "dashscope_token_plan"),
+            ("qwen3.8-max", "dashscope_token_plan"),
         ]
 
     async def test_provider_specific_fallback_uses_wire_key_and_preserves_logical_provider(self, monkeypatch):
@@ -2230,6 +2230,7 @@ class TestModelPrefixAutoMapping:
             ("o1-preview", "openai"),
             ("o3-mini", "openai"),
             ("qwen3.6-plus", "dashscope"),
+            ("qwen3.8-max", "dashscope"),
             ("qwen-max", "dashscope"),
             ("deepseek-v4-pro", "deepseek"),
             ("deepseek-chat", "deepseek"),
@@ -2273,7 +2274,7 @@ def test_qwen38_multimodal_fallback_preserves_image_support():
     fallback_model = MODEL_FALLBACK_MAP[source_model]
     entries = {model.id: model for model in PROVIDER_REGISTRY["dashscope_token_plan"].models}
 
-    assert fallback_model == "qwen3.7-plus"
+    assert fallback_model == "qwen3.8-max"
     assert entries[source_model].support_multimodal is True
     assert entries[fallback_model].support_multimodal is True
 

@@ -41,12 +41,10 @@ class TestDeepSeekProvider:
             "extra_body": {"thinking": {"type": "enabled"}},
         }
 
-    def test_effort_request_kwargs_low_falls_back_to_default_high(self):
-        # DeepSeek allowed_efforts = (HIGH, MAX), default = HIGH.
-        # An out-of-range value falls back to default rather than dropping.
+    def test_effort_request_kwargs_low(self):
         p = DeepSeekProvider(model="deepseek-v4-pro", api_key="test", effort="low")
         assert p._effort_request_kwargs() == {
-            "reasoning_effort": "high",
+            "reasoning_effort": "low",
             "extra_body": {"thinking": {"type": "enabled"}},
         }
 
@@ -56,6 +54,15 @@ class TestDeepSeekProvider:
             "reasoning_effort": "high",
             "extra_body": {"thinking": {"type": "enabled"}},
         }
+
+    def test_thinking_can_be_disabled(self):
+        p = DeepSeekProvider(
+            model="deepseek-v4-pro",
+            api_key="test",
+            effort="max",
+            thinking_enabled=False,
+        )
+        assert p._effort_request_kwargs() == {"extra_body": {"thinking": {"type": "disabled"}}}
 
 
 class TestReasoningContentRoundTrip:
@@ -196,5 +203,7 @@ class TestProviderDefinitions:
         for model in ("deepseek-v4-pro", "deepseek-v4-flash"):
             spec = get_thinking_spec("deepseek", model)
             assert spec.supports_effort is True
-            assert spec.effort_range == (EffortLevel.HIGH, EffortLevel.MAX)
+            assert spec.allowed_efforts == (EffortLevel.LOW, EffortLevel.HIGH, EffortLevel.MAX)
+            assert spec.effort_range == (EffortLevel.LOW, EffortLevel.MAX)
             assert spec.default_effort == EffortLevel.HIGH
+            assert spec.thinking_enabled_by_default is True

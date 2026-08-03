@@ -369,3 +369,12 @@ git diff HEAD -- iac-code-rs
 
 这些内容只用于说明调研方法，不能作为下一次更新的事实来源。模型、参数、区域和套餐可用性都
 必须在每次更新时重新核验。
+
+### 2026-08-03 增量证据附录
+
+本节记录 2026-08-03 在上述基线之后重新核验的模型变化；若与 2026-07-21 表格冲突，以本节为准。
+
+| 范围 | 2026-08-03 核验结论 | 代码/测试落点 | 官方证据 |
+| --- | --- | --- | --- |
+| DashScope / Token Plan | 正式模型 `qwen3.8-max` 已同时进入标准百炼与 Token Plan，支持视觉输入、1M context、Function Calling、结构化输出和显式缓存；它是默认开启思考的混合思考模型，接受 `low/medium/xhigh`，可显式关闭，并要求工具循环完整回传 `reasoning_content`。预览模型 `qwen3.8-max-preview` 仍仅在 Token Plan 可用且保持仅思考模式。Token Plan 团队版同时列出 `deepseek-v4-flash` 与 `deepseek-v4-flash-0731`，个人版列出后者，因此共享目录保留两个 ID | `config.py`、`registry.py`、`thinking.py`、`dashscope_provider.py`、`manager.py`、`context_manager.py`、遥测及对应测试 | [模型列表](https://help.aliyun.com/zh/model-studio/models)、[文本生成](https://help.aliyun.com/zh/model-studio/text-generation-model)、[深度思考](https://help.aliyun.com/zh/model-studio/deep-thinking)、[OpenAI-compatible Chat](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions)、[Context Cache](https://help.aliyun.com/zh/model-studio/context-cache)、[Token Plan 个人版](https://help.aliyun.com/zh/model-studio/token-plan-personal-overview)、[Token Plan 团队版](https://help.aliyun.com/zh/model-studio/token-plan-team-overview) |
+| DeepSeek 官方 | Chat Completions 的精确 API model ID 仍为 `deepseek-v4-pro`、`deepseek-v4-flash`；`DeepSeek-V4-Flash-0731` 是后者的模型版本而不是新的直连 model ID。两者均支持思考/非思考切换、`low/high/max` effort、1M context 和最大 384K 输出；使用工具时必须在后续请求完整回传 `reasoning_content` | `thinking.py`、`deepseek_provider.py`、`context_manager.py` 及对应测试 | [Models and pricing](https://api-docs.deepseek.com/quick_start/pricing/)、[Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/) |
