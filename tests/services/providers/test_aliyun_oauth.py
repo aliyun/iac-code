@@ -16,6 +16,9 @@ from iac_code.services.providers.aliyun_oauth import (
     OAuthStsCredentials,
     OAuthToken,
     build_authorization_url,
+    create_oauth_authorization,
+    exchange_oauth_authorization_code,
+    fixed_manual_redirect_uri,
     generate_code_challenge,
     get_oauth_site,
     is_epoch_expired,
@@ -78,6 +81,48 @@ def test_build_authorization_url_uses_signin_host_and_pkce():
         "code_challenge": ["fake-challenge"],
         "code_challenge_method": ["S256"],
     }
+
+
+def test_manual_authorization_uses_fixed_official_cli_loopback_redirect() -> None:
+    authorization = create_oauth_authorization(
+        "CN",
+        fixed_manual_redirect_uri(),
+        state="manual-state",
+        code_verifier="manual-verifier",
+    )
+
+    query = parse_qs(urlparse(authorization.authorization_url).query)
+    assert authorization.redirect_uri == "http://127.0.0.1:12345/cli/callback"
+    assert query["client_id"] == ["4038181954557748008"]
+    assert query["state"] == ["manual-state"]
+    assert query["redirect_uri"] == [authorization.redirect_uri]
+
+
+def test_shared_code_exchange_uses_authorization_pkce_values() -> None:
+    authorization = create_oauth_authorization(
+        "CN",
+        fixed_manual_redirect_uri(),
+        state="manual-state",
+        code_verifier="manual-verifier",
+    )
+    calls: list[dict] = []
+
+    class FakeClient:
+        def exchange_code_for_token(self, **kwargs):
+            calls.append(kwargs)
+            return OAuthToken("access", "refresh", 2000)
+
+    token = exchange_oauth_authorization_code(authorization, "authorization-code", oauth_client=FakeClient(), now=1000)
+
+    assert token.access_token == "access"
+    assert calls == [
+        {
+            "code": "authorization-code",
+            "redirect_uri": "http://127.0.0.1:12345/cli/callback",
+            "code_verifier": "manual-verifier",
+            "now": 1000,
+        }
+    ]
 
 
 def test_callback_server_accepts_matching_state():

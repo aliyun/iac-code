@@ -181,6 +181,11 @@ class TestSkillContentRosOnly:
         assert "`ros_deploy` 的 `create`" in body
         assert "DisableRollback" in body
 
+    def test_successful_deployment_preserves_real_stack_outputs(self, body):
+        assert "`complete_step.conclusion.outputs`" in body
+        assert "原样写入" in body
+        assert "不得使用模板表达式、占位符或推断值" in body
+
     def test_template_url_source_is_not_duplicated_from_prompt(self, body):
         assert "模板来源硬约束" not in body
         assert "prompt 中已渲染" not in body

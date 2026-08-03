@@ -9,7 +9,7 @@ from iac_code.web import settings as settings_module
 from iac_code.web import settings as web_settings
 
 
-def _app(monkeypatch, tmp_path):
+def _app(monkeypatch, tmp_path, *, token_mode: bool = False):
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     for name in ("IAC_CODE_PROVIDER", "IAC_CODE_MODEL", "IAC_CODE_BASE_URL", "IAC_CODE_API_KEY"):
         monkeypatch.delenv(name, raising=False)
@@ -32,7 +32,7 @@ def _app(monkeypatch, tmp_path):
 
     from iac_code.web.app import create_app
 
-    return create_app()
+    return create_app(token_mode=token_mode)
 
 
 def test_get_providers_returns_capabilities_and_active_summary_without_secret(monkeypatch, tmp_path) -> None:
@@ -951,6 +951,91 @@ def test_login_aliyun_oauth_reports_failure(monkeypatch, tmp_path):
     resp = client.post("/api/cloud/aliyun/oauth-login", json={"site": "CN"})
     assert resp.status_code == 400
     assert "login failed" in resp.json()["error"]["message"]
+
+
+def test_token_mode_uses_only_manual_oauth_routes(monkeypatch, tmp_path) -> None:
+    from urllib.parse import parse_qs, urlparse
+
+    from iac_code.services.providers.aliyun_oauth import OAuthToken
+
+    exchanged: list[tuple[str, str]] = []
+
+    def fake_exchange(authorization, code):
+        exchanged.append((authorization.redirect_uri, code))
+        return OAuthToken("fake-access", "fake-refresh", 1798790400, 1801382400)
+
+    monkeypatch.setattr(settings_module, "exchange_oauth_authorization_code", fake_exchange)
+    monkeypatch.setattr(
+        aliyun_module.AliyunCredentials,
+        "refresh_oauth_if_needed",
+        staticmethod(lambda credential: credential),
+    )
+    client = TestClient(_app(monkeypatch, tmp_path, token_mode=True))
+
+    assert client.post("/api/cloud/aliyun/oauth-login", json={"site": "CN"}).status_code == 404
+    started = client.post("/api/cloud/aliyun/oauth-start", json={"site": "CN", "region": "cn-beijing"})
+    assert started.status_code == 200
+    start_payload = started.json()
+    query = parse_qs(urlparse(start_payload["authorizationUrl"]).query)
+    callback = "http://127.0.0.1:12345/cli/callback?code=fake-code&state={}".format(query["state"][0])
+
+    completed = client.post(
+        "/api/cloud/aliyun/oauth-complete",
+        json={"flowId": start_payload["flowId"], "callback": callback},
+    )
+    replayed = client.post(
+        "/api/cloud/aliyun/oauth-complete",
+        json={"flowId": start_payload["flowId"], "callback": callback},
+    )
+
+    assert completed.status_code == 200
+    assert completed.json()["mode"] == "OAuth"
+    assert "fake-access" not in completed.text
+    assert exchanged == [("http://127.0.0.1:12345/cli/callback", "fake-code")]
+    assert replayed.status_code == 400
+
+
+def test_default_mode_keeps_automatic_oauth_and_hides_manual_routes(monkeypatch, tmp_path) -> None:
+    client = TestClient(_app(monkeypatch, tmp_path))
+
+    assert client.post("/api/cloud/aliyun/oauth-start", json={"site": "CN"}).status_code == 404
+    assert client.post("/api/cloud/aliyun/oauth-complete", json={}).status_code == 404
+
+
+def test_manual_oauth_full_url_checks_state_and_code_only_is_supported(monkeypatch) -> None:
+    from urllib.parse import parse_qs, urlparse
+
+    from iac_code.services.providers.aliyun_oauth import OAuthToken
+
+    now = [1000.0]
+    store = settings_module.AliyunOAuthManualFlowStore(clock=lambda: now[0])
+    calls: list[str] = []
+    monkeypatch.setattr(
+        settings_module,
+        "exchange_oauth_authorization_code",
+        lambda _authorization, code: calls.append(code) or OAuthToken("access", "refresh", 2000),
+    )
+    monkeypatch.setattr(settings_module, "_save_aliyun_oauth_token", lambda *_args: {"mode": "OAuth"})
+
+    bad = store.start({"site": "CN"})
+    bad_query = parse_qs(urlparse(bad["authorizationUrl"]).query)
+    with pytest.raises(ValueError, match="state"):
+        store.complete(
+            {
+                "flowId": bad["flowId"],
+                "callback": "http://127.0.0.1:12345/cli/callback?code=bad&state=wrong",
+            }
+        )
+    assert bad_query["state"][0] != "wrong"
+
+    code_only = store.start({"site": "CN"})
+    assert store.complete({"flowId": code_only["flowId"], "authorizationCode": "code-only"}) == {"mode": "OAuth"}
+    assert calls == ["code-only"]
+
+    expired = store.start({"site": "CN"})
+    now[0] += 301
+    with pytest.raises(ValueError, match="invalid or expired"):
+        store.complete({"flowId": expired["flowId"], "authorizationCode": "late"})
 
 
 def test_prune_aliyun_credential_oauth_clears_ak_sts() -> None:

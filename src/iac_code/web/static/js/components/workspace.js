@@ -1295,10 +1295,13 @@ function createCloudPanel(api, context) {
     oauthLoginButton.disabled = false;
     oauthCancelButton.hidden = true;
   };
+  let oauthAbortController = null;
 
   cloudModeSelect.addEventListener("change", () => {
     // 若正在等待 OAuth(取消按钮可见),切换认证方式即视为放弃本次登录。
     if (!oauthCancelButton.hidden) {
+      oauthAbortController?.abort();
+      oauthAbortController = null;
       requestToken++;
       resetOauthUi();
     }
@@ -1324,26 +1327,37 @@ function createCloudPanel(api, context) {
 
   oauthLoginButton.addEventListener("click", async () => {
     const token = ++requestToken;
+    const abortController = new AbortController();
+    oauthAbortController = abortController;
     const site = selectedValue(cloudOauthSiteSelect) || "CN";
     oauthLoginButton.disabled = true;
     oauthCancelButton.hidden = false;
     oauthStatus.textContent = t("Opening the browser; please complete login on the Alibaba Cloud page… (if the browser did not open or was closed, click Cancel)");
     try {
-      const payload = await api.oauthLoginAliyun({ site, region: regionChoice.value.trim() });
+      const payload = await api.oauthLoginAliyun({
+        site,
+        region: regionChoice.value.trim(),
+        signal: abortController.signal,
+      });
       if (token !== requestToken) return;
       fillCloudForm(payload);
       oauthStatus.textContent = t("Login succeeded.");
     } catch (error) {
       if (token !== requestToken) return;
-      oauthStatus.textContent = t("Login failed: {error}", { error: error instanceof Error ? error.message : String(error) });
+      oauthStatus.textContent = error?.name === "AbortError"
+        ? t("OAuth login cancelled.")
+        : t("Login failed: {error}", { error: error instanceof Error ? error.message : String(error) });
     } finally {
       // 仅在本次请求仍是最新时复位;被取消/切换认证方式作废的请求已各自复位。
+      if (oauthAbortController === abortController) oauthAbortController = null;
       if (token === requestToken) resetOauthUi();
     }
   });
 
   oauthCancelButton.addEventListener("click", () => {
-    // 作废进行中的登录请求(后端浏览器等待线程会自然超时,不阻塞界面)。
+    // 作废进行中的登录请求,并关闭 token 模式的手工回填弹窗。
+    oauthAbortController?.abort();
+    oauthAbortController = null;
     requestToken++;
     resetOauthUi();
     oauthStatus.textContent = t("Login canceled. You can start again or switch to another authentication method.");

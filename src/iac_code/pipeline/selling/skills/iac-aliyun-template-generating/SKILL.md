@@ -37,6 +37,10 @@ conclusion_schema:
 
 ## 模板生成流程
 
+若 `candidate.name` 精确等于 `iac-code-web-single-ecs`，先读取
+`references/solutions/iac-code-web.md`，再复制 `references/solutions/iac-code-web.ros.yml`
+作为模板基线；不要重新设计拓扑。
+
 1. 分析架构方案，确定资源列表
 2. 查阅 [references/cloud-products/](references/cloud-products/) 下对应产品文件，了解选型策略和库存相关属性
 3. **必须**阅读 [references/ros-template.md](references/ros-template.md)，了解 ROS 模板最佳实践，未阅读不得生成模板

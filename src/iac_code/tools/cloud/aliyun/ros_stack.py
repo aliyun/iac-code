@@ -174,6 +174,20 @@ def _parameter_value_to_str(value: Any) -> str:
     return str(value)
 
 
+def _normalize_stack_outputs(value: Any) -> dict[str, object]:
+    if not isinstance(value, list):
+        return {}
+
+    outputs: dict[str, object] = {}
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        key = item.get("OutputKey")
+        if isinstance(key, str) and key:
+            outputs[key] = item.get("OutputValue")
+    return outputs
+
+
 def _normalize_stack_parameters_for_sdk(params: dict[str, Any]) -> None:
     """Normalize ROS Parameters into the typed SDK model shape.
 
@@ -1006,6 +1020,7 @@ class RosStack(BaseCloudStack):
             status=data.get("Status", ""),
             status_reason=data.get("StatusReason", ""),
             progress_percentage=data.get("ResourceProgress", {}).get("StackOperationProgress", 0),
+            outputs=_normalize_stack_outputs(data.get("Outputs")),
         )
 
     async def get_stack_resources(self, stack_id: str, region: str) -> list[ResourceStatus]:

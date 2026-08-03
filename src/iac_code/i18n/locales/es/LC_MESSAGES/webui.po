@@ -283,6 +283,7 @@ msgstr "Cerrar"
 #: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
 #: src/iac_code/web/static/js/components/blocking.js
 #: src/iac_code/web/static/js/components/workspace.js
+#: src/iac_code/web/static/js/token_transport.js
 msgid "Cancel"
 msgstr "Cancelar"
 
@@ -883,6 +884,65 @@ msgstr "Sin información de precios"
 #: src/iac_code/web/static/js/mermaid_render.js
 msgid "Estimated monthly cost"
 msgstr "Costo mensual estimado"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Enter Web access token"
+msgstr "Introduzca el token de acceso web"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Enter the Web access token shown on the deployment result page."
+msgstr ""
+"Introduzca el token de acceso web que aparece en la página de resultados "
+"del despliegue."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Unlock"
+msgstr "Desbloquear"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Enter a valid access token."
+msgstr "Introduzca un token de acceso válido."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Unable to start an encrypted session."
+msgstr "No se pudo iniciar una sesión cifrada."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Unsupported encrypted transport version."
+msgstr "Versión de transporte cifrado no compatible."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "The Web access token is incorrect."
+msgstr "El token de acceso web es incorrecto."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Complete OAuth login"
+msgstr "Completar el inicio de sesión OAuth"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid ""
+"Paste the complete OAuth callback URL (recommended), or paste only the "
+"authorization code."
+msgstr ""
+"Pegue la URL de callback OAuth completa (recomendado) o solo el código de"
+" autorización."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Paste callback URL or authorization code"
+msgstr "Pegue la URL de callback o el código de autorización"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Complete login"
+msgstr "Completar inicio de sesión"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#: src/iac_code/web/static/js/token_transport.js
+msgid "OAuth login cancelled."
+msgstr "Inicio de sesión OAuth cancelado."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Authorization code is required."
+msgstr "Se requiere el código de autorización."
 
 #: src/iac_code/web/static/js/components/blocking.js
 msgid "Authorization required"
@@ -3826,4 +3886,13 @@ msgstr ""
 
 #~ msgid "Completed step: {step}"
 #~ msgstr "Paso completado: {step}"
+
+#~ msgid ""
+#~ "Copy the token from the deployment "
+#~ "page. It stays in this browser tab"
+#~ " and is not sent to the server."
+#~ msgstr ""
+#~ "Copie el token de la página de "
+#~ "despliegue. Permanece en esta pestaña y"
+#~ " no se envía al servidor."
 

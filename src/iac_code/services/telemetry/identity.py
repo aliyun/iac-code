@@ -1,6 +1,6 @@
 """Identity generation for telemetry.
 
-user.id    = iac_user_<uuid4>, persisted to a settings.yml path
+user.id    = a configured 16-digit Alibaba Cloud account ID or iac_user_<uuid4>
 session.id = iac_sess_<uuid4>, per Identity instance (per process)
 tenant.id  = iac_tenant_<user-defined>, from IAC_CODE_TENANT_ID
 """
@@ -22,6 +22,7 @@ TENANT_ID_PREFIX = "iac_tenant_"
 
 _USER_ID_KEY = "userID"
 _TENANT_ENV_VAR = "IAC_CODE_TENANT_ID"
+_ALIYUN_ACCOUNT_ID_LENGTH = 16
 
 # Per-async-context override for session id. Set via use_session_id; when
 # present, Identity.get_session_id returns this instead of the process-level
@@ -80,6 +81,9 @@ class Identity:
     def get_user_id(self) -> str:
         """Return the persistent user.id; generate + persist on first miss.
 
+        A ROS-deployed Web instance may use its 16-digit Alibaba Cloud account
+        ID directly so restarts preserve the account-scoped identity.
+
         Honors an active ``use_user_id`` override so a2a servers can report
         per-task user ids in telemetry without mutating process state.
         """
@@ -90,7 +94,10 @@ class Identity:
             return self._user_id
         settings = _load_yaml(self._settings_path)
         existing = settings.get(_USER_ID_KEY)
-        if isinstance(existing, str) and existing.startswith(USER_ID_PREFIX):
+        if isinstance(existing, str) and (
+            existing.startswith(USER_ID_PREFIX)
+            or (len(existing) == _ALIYUN_ACCOUNT_ID_LENGTH and existing.isascii() and existing.isdigit())
+        ):
             self._user_id = existing
             return existing
         new_id = f"{USER_ID_PREFIX}{uuid.uuid4()}"

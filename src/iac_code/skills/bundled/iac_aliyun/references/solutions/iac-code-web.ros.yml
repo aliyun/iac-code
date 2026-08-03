@@ -1,0 +1,318 @@
+ROSTemplateFormatVersion: '2015-09-01'
+Description:
+  en: Deploy one iac-code Web instance with an EIP, encrypted token transport, and a ROS-managed Bailian API key.
+  zh-cn: 部署一套带 EIP、Token 加密通道和 ROS 托管百炼 API Key 的 iac-code Web。
+Metadata:
+  ALIYUN::ROS::Interface:
+    ParameterGroups:
+      - Parameters:
+          - ZoneId
+          - AccessCidr
+        Label:
+          default: Network
+      - Parameters:
+          - InstanceType
+          - SystemDiskCategory
+          - InternetBandwidth
+          - IacCodeVersion
+        Label:
+          default: iac-code Web
+Parameters:
+  ZoneId:
+    Type: String
+    Label:
+      en: Zone ID
+      zh-cn: 可用区
+    AssociationProperty: ALIYUN::ECS::ZoneId
+    AssociationPropertyMetadata:
+      RegionId: ${ALIYUN::Region}
+  InstanceType:
+    Type: String
+    Label:
+      en: ECS instance type
+      zh-cn: ECS 实例规格
+    AssociationProperty: ALIYUN::ECS::Instance::InstanceType
+    AssociationPropertyMetadata:
+      ZoneId: ${ZoneId}
+      InstanceChargeType: PostPaid
+  SystemDiskCategory:
+    Type: String
+    Label:
+      en: System disk category
+      zh-cn: 系统盘类型
+    AssociationProperty: ALIYUN::ECS::Disk::SystemDiskCategory
+    AssociationPropertyMetadata:
+      ZoneId: ${ZoneId}
+      InstanceType: ${InstanceType}
+  InternetBandwidth:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 100
+    Label:
+      en: EIP bandwidth
+      zh-cn: EIP 带宽
+    AssociationProperty: Number
+  AccessCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: ^(?:\d{1,3}\.){3}\d{1,3}/(?:[0-9]|[12][0-9]|3[0-2])$
+    Label:
+      en: Web access CIDR
+      zh-cn: Web 访问网段
+    AssociationProperty: String
+  IacCodeVersion:
+    Type: String
+    Default: 0.11.0
+    AllowedPattern: ^[0-9]+\.[0-9]+\.[0-9]+(?:[a-zA-Z0-9.-]*)?$
+    Label:
+      en: iac-code version
+      zh-cn: iac-code 版本
+    AssociationProperty: String
+Resources:
+  Vpc:
+    Type: ALIYUN::ECS::VPC
+    Properties:
+      CidrBlock: 192.168.0.0/16
+      VpcName: iac-code-web-vpc
+  VSwitch:
+    Type: ALIYUN::ECS::VSwitch
+    Properties:
+      VpcId:
+        Ref: Vpc
+      ZoneId:
+        Ref: ZoneId
+      CidrBlock: 192.168.1.0/24
+      VSwitchName: iac-code-web-vswitch
+  SecurityGroup:
+    Type: ALIYUN::ECS::SecurityGroup
+    Properties:
+      VpcId:
+        Ref: Vpc
+      SecurityGroupName: iac-code-web-sg
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          PortRange: 8766/8766
+          SourceCidrIp:
+            Ref: AccessCidr
+  Instance:
+    Type: ALIYUN::ECS::Instance
+    Properties:
+      ImageFamily: acs:alibaba_cloud_linux_3_2104_lts_x64
+      InstanceType:
+        Ref: InstanceType
+      SecurityGroupId:
+        Ref: SecurityGroup
+      VSwitchId:
+        Ref: VSwitch
+      SystemDiskCategory:
+        Ref: SystemDiskCategory
+      InstanceName: iac-code-web
+      IoOptimized: optimized
+      AllocatePublicIP: false
+  Eip:
+    Type: ALIYUN::VPC::EIP
+    Properties:
+      Bandwidth:
+        Ref: InternetBandwidth
+      InstanceChargeType: Postpaid
+      InternetChargeType: PayByTraffic
+  EipAssociation:
+    Type: ALIYUN::VPC::EIPAssociation
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+          - Eip
+          - AllocationId
+      InstanceId:
+        Ref: Instance
+  BailianApiKey:
+    Type: ALIYUN::Bailian::ApiKey
+    Properties:
+      Description: Managed by the iac-code Web ROS stack
+      AuthSetModel:
+        AuthSetMode: Custom
+        AccessIps:
+          - Fn::GetAtt:
+              - Eip
+              - EipAddress
+  Bootstrap:
+    Type: ALIYUN::ECS::RunCommand
+    DependsOn: EipAssociation
+    Properties:
+      InstanceIds:
+        - Ref: Instance
+      Type: RunShellScript
+      ContentEncoding: PlainText
+      Sync: true
+      Timeout: 1800
+      CommandContent:
+        Fn::Sub:
+          - |
+            #!/bin/bash
+            set -euo pipefail
+            LOG=/var/log/iac-code-bootstrap.log
+            exec 3>&1
+            exec >>"$LOG" 2>&1
+
+            dnf install -y python3.11 python3.11-pip
+            id iac-code >/dev/null 2>&1 || useradd --system --create-home --home-dir /var/lib/iac-code iac-code
+            install -d -m 0700 -o iac-code -g iac-code /var/lib/iac-code
+            python3.11 -m venv /opt/iac-code/venv
+            /opt/iac-code/venv/bin/pip install --index-url https://mirrors.aliyun.com/pypi/simple/ "iac-code[http]==${IacCodeVersion}"
+
+            TOKEN_FILE=/var/lib/iac-code/web-access.token
+            if [ -f "$TOKEN_FILE" ]; then
+              TOKEN=$(/opt/iac-code/venv/bin/python -c 'import base64,pathlib; p=pathlib.Path("/var/lib/iac-code/web-access.token"); t=p.read_text("ascii").strip(); d=base64.urlsafe_b64decode(t+"="*((4-len(t)%4)%4)); assert len(d)>=32 and base64.urlsafe_b64encode(d).decode().rstrip("=")==t; print(t,end="")')
+            else
+              TOKEN=$(/opt/iac-code/venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(32),end="")')
+              TOKEN_TMP="$TOKEN_FILE.tmp"
+              umask 077
+              printf '%s' "$TOKEN" >"$TOKEN_TMP"
+              chown iac-code:iac-code "$TOKEN_TMP"
+              chmod 0600 "$TOKEN_TMP"
+              mv -f "$TOKEN_TMP" "$TOKEN_FILE"
+            fi
+            chown iac-code:iac-code "$TOKEN_FILE"
+            chmod 0600 "$TOKEN_FILE"
+
+            BAILIAN_API_KEY=$(printf '%s' '${BailianApiKeyB64}' | base64 -d)
+            export BAILIAN_API_KEY
+            /opt/iac-code/venv/bin/python <<'PY'
+            import os
+            import pathlib
+            import pwd
+            import tempfile
+            import yaml
+
+            root = pathlib.Path('/var/lib/iac-code')
+            updates = {
+                root / '.credentials.yml': {'dashscope': os.environ['BAILIAN_API_KEY']},
+                root / 'settings.yml': {
+                    'activeProvider': 'dashscope',
+                    'memory': {'autoMemory': True},
+                    'pipeline': {'sellingReviewStep': False},
+                    'providers': {
+                        'dashscope': {
+                            'apiBase': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+                            'model': 'qwen3.7-max',
+                            'name': 'DashScope',
+                        }
+                    },
+                    'sessionDefaults': {
+                        'mode': 'normal',
+                        'permissionMode': 'bypass_permissions',
+                        'pipelineName': 'selling',
+                    },
+                    'ui': {'language': 'zh'},
+                    'userID': '${MasterAccountId}',
+                },
+            }
+
+            def merge(target, source):
+                for key, value in source.items():
+                    if isinstance(value, dict) and isinstance(target.get(key), dict):
+                        merge(target[key], value)
+                    else:
+                        target[key] = value
+
+            for path, update in updates.items():
+                current = {}
+                if path.exists():
+                    loaded = yaml.safe_load(path.read_text(encoding='utf-8'))
+                    if isinstance(loaded, dict):
+                        current = loaded
+                merge(current, update)
+                fd, temporary = tempfile.mkstemp(prefix=path.name + '.', dir=root)
+                try:
+                    with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+                        yaml.safe_dump(current, stream, allow_unicode=True, sort_keys=False)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    os.chmod(temporary, 0o600)
+                    account = pwd.getpwnam('iac-code')
+                    os.chown(temporary, account.pw_uid, account.pw_gid)
+                    os.replace(temporary, path)
+                finally:
+                    if os.path.exists(temporary):
+                        os.unlink(temporary)
+            PY
+            unset BAILIAN_API_KEY
+
+            cat >/etc/systemd/system/iac-code-web.service <<'UNIT'
+            [Unit]
+            Description=iac-code Web
+            After=network-online.target
+            Wants=network-online.target
+
+            [Service]
+            Type=simple
+            User=iac-code
+            Group=iac-code
+            WorkingDirectory=/var/lib/iac-code
+            Environment=IAC_CODE_CONFIG_DIR=/var/lib/iac-code
+            ExecStart=/opt/iac-code/venv/bin/iac-code web --host 0.0.0.0 --port 8766 --access-token-file /var/lib/iac-code/web-access.token --no-open
+            Restart=on-failure
+
+            [Install]
+            WantedBy=multi-user.target
+            UNIT
+            systemctl daemon-reload
+            systemctl enable --now iac-code-web
+            for ATTEMPT in $(seq 1 60); do
+              curl --fail --silent http://127.0.0.1:8766/health >/dev/null && break
+              [ "$ATTEMPT" -eq 60 ] && exit 1
+              sleep 2
+            done
+            printf '%s' "$TOKEN" >&3
+          - BailianApiKeyB64:
+              Fn::Base64Encode:
+                Fn::GetAtt:
+                  - BailianApiKey
+                  - Key
+            MasterAccountId:
+              Ref: ALIYUN::TenantId
+Outputs:
+  PublicUrl:
+    Label:
+      en: Public URL
+      zh-cn: 公网访问地址
+    Value:
+      Fn::Sub:
+        - http://${EipAddress}:8766
+        - EipAddress:
+            Fn::GetAtt:
+              - Eip
+              - EipAddress
+  WebAccessToken:
+    Label:
+      en: Web access token
+      zh-cn: Web 访问 Token
+    Value:
+      Fn::Base64Decode:
+        Fn::Jq:
+          - First
+          - .[0].Output
+          - Fn::GetAtt:
+              - Bootstrap
+              - InvokeResults
+  InstanceId:
+    Label:
+      en: ECS instance ID
+      zh-cn: ECS 实例 ID
+    Value:
+      Ref: Instance
+  EipAddress:
+    Label:
+      en: EIP address
+      zh-cn: EIP 地址
+    Value:
+      Fn::GetAtt:
+        - Eip
+        - EipAddress
+  IacCodeVersion:
+    Label:
+      en: iac-code version
+      zh-cn: iac-code 版本
+    Value:
+      Ref: IacCodeVersion

@@ -69,6 +69,9 @@ conclusion_schema:
 
 判断标准：如果你需要添加用户完全没提到的产品来"制造"差异，那就不该有多个方案。
 
+若意图是把 iac-code Web 部署到 ECS，只生成一个候选，并固定
+`candidate.name = iac-code-web-single-ecs`。
+
 ## 差异化维度
 
 当需求确实存在设计取舍时，根据场景从以下维度中选择最相关的来构建差异方案：

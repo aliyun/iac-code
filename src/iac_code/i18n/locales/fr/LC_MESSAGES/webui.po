@@ -283,6 +283,7 @@ msgstr "Fermer"
 #: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
 #: src/iac_code/web/static/js/components/blocking.js
 #: src/iac_code/web/static/js/components/workspace.js
+#: src/iac_code/web/static/js/token_transport.js
 msgid "Cancel"
 msgstr "Annuler"
 
@@ -887,6 +888,65 @@ msgstr "Aucune information tarifaire"
 #: src/iac_code/web/static/js/mermaid_render.js
 msgid "Estimated monthly cost"
 msgstr "Coût mensuel estimé"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Enter Web access token"
+msgstr "Saisissez le jeton d’accès Web"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Enter the Web access token shown on the deployment result page."
+msgstr ""
+"Saisissez le jeton d’accès Web affiché sur la page de résultat du "
+"déploiement."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Unlock"
+msgstr "Déverrouiller"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Enter a valid access token."
+msgstr "Saisissez un jeton d’accès valide."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Unable to start an encrypted session."
+msgstr "Impossible de démarrer une session chiffrée."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Unsupported encrypted transport version."
+msgstr "Version de transport chiffré non prise en charge."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "The Web access token is incorrect."
+msgstr "Le jeton d’accès Web est incorrect."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Complete OAuth login"
+msgstr "Terminer la connexion OAuth"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid ""
+"Paste the complete OAuth callback URL (recommended), or paste only the "
+"authorization code."
+msgstr ""
+"Collez l’URL de callback OAuth complète (recommandé), ou uniquement le "
+"code d’autorisation."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Paste callback URL or authorization code"
+msgstr "Collez l’URL de callback ou le code d’autorisation"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Complete login"
+msgstr "Terminer la connexion"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#: src/iac_code/web/static/js/token_transport.js
+msgid "OAuth login cancelled."
+msgstr "Connexion OAuth annulée."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Authorization code is required."
+msgstr "Le code d’autorisation est requis."
 
 #: src/iac_code/web/static/js/components/blocking.js
 msgid "Authorization required"
@@ -3844,4 +3904,14 @@ msgstr ""
 
 #~ msgid "Completed step: {step}"
 #~ msgstr "Étape terminée : {step}"
+
+#~ msgid ""
+#~ "Copy the token from the deployment "
+#~ "page. It stays in this browser tab"
+#~ " and is not sent to the server."
+#~ msgstr ""
+#~ "Copiez le jeton depuis la page de"
+#~ " déploiement. Il reste dans cet "
+#~ "onglet et n’est pas envoyé au "
+#~ "serveur."
 

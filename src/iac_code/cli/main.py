@@ -89,6 +89,11 @@ app.add_typer(_mcp_app, name="mcp")
 def web(
     host: str = typer.Option("127.0.0.1", help=_("HTTP server host")),
     port: int = typer.Option(8766, help=_("HTTP server port")),
+    access_token_file: str | None = typer.Option(
+        None,
+        "--access-token-file",
+        help=_("Enable encrypted public access using the token stored in this file."),
+    ),
     open_browser: bool = typer.Option(
         True,
         "--open/--no-open",
@@ -101,7 +106,12 @@ def web(
 
     bootstrap_telemetry(session_id="web-server-{}".format(uuid.uuid4()))
     try:
-        run_web_server(host=host, port=port, open_browser=open_browser)
+        run_web_server(
+            host=host,
+            port=port,
+            open_browser=open_browser,
+            access_token_file=access_token_file,
+        )
     finally:
         graceful_shutdown()
 
