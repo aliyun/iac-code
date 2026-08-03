@@ -89,10 +89,8 @@ def test_build_handoff_summary_includes_only_configured_fields_and_deterministic
         "- Exception: pipeline-managed automatic cleanup may proceed without this additional confirmation."
     )
 
-    assert (
-        summary
-        == dedent(
-            """\
+    assert summary == dedent(
+        """\
         [Pipeline Handoff Context]
         This is injected context for the assistant, not a user request.
         Pipeline: selling
@@ -115,10 +113,8 @@ def test_build_handoff_summary_includes_only_configured_fields_and_deterministic
 
         Use this context when answering follow-up questions after the pipeline handoff.
         """
-        )
-        .strip()
-        .replace("RESOURCE_RELEASE_REQUIREMENT", resource_release_requirement)
-        .replace("AUTOMATIC_CLEANUP_EXCEPTION", automatic_cleanup_exception)
+    ).strip().replace("RESOURCE_RELEASE_REQUIREMENT", resource_release_requirement).replace(
+        "AUTOMATIC_CLEANUP_EXCEPTION", automatic_cleanup_exception
     )
     assert "architecture" not in summary
     assert "deployment" not in summary

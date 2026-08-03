@@ -3082,9 +3082,9 @@ class ExpressionAnalyzer:
             if semantic_reachable:
                 self.diagnostic(
                     "ROS4005",
-                    _(
-                        "Fn::GetAtt for nested stack {} must use Outputs.<nested_stack_output_name>."
-                    ).format(resource_name),
+                    _("Fn::GetAtt for nested stack {} must use Outputs.<nested_stack_output_name>.").format(
+                        resource_name
+                    ),
                     _(
                         "ALIYUN::ROS::Stack exposes child stack outputs only through the fixed Outputs. prefix, "
                         "followed by a non-empty output name."
