@@ -141,11 +141,6 @@ _MODEL_PREFIX_TO_PROVIDER: tuple[tuple[str, str], ...] = (
     ("doubao-", "volcengine_cn"),
 )
 
-# Module-level flag — warn once per process when IAC_CODE_BASE_URL is set
-# but the active provider is not OpenAICompatible. Reset by tests.
-_warned_base_url_ignored: bool = False
-
-
 # ---------------------------------------------------------------------------
 # Environment variable overrides
 # ---------------------------------------------------------------------------
@@ -328,12 +323,8 @@ def get_provider_config(key_name: str) -> dict[str, Any]:
     """Return the persisted per-provider config dict (empty when unset).
 
     When ``key_name`` is the active provider, IAC_CODE_MODEL and
-    IAC_CODE_BASE_URL env values are overlaid. IAC_CODE_BASE_URL only
-    applies when the active provider is ``openai_compatible``; setting
-    it for other providers logs a one-time warning and is ignored.
+    IAC_CODE_BASE_URL env values are overlaid.
     """
-    global _warned_base_url_ignored
-
     key_name = _LEGACY_KEY_NAME_ALIASES.get(key_name, key_name)
     settings = _load_yaml(get_settings_path())
     providers = settings.get("providers")
@@ -361,17 +352,7 @@ def get_provider_config(key_name: str) -> dict[str, Any]:
         if env["model"]:
             entry["model"] = env["model"]
         if env["api_base"]:
-            if active_key == "openai_compatible":
-                entry["apiBase"] = env["api_base"]
-            elif not _warned_base_url_ignored:
-                from loguru import logger
-
-                logger.warning(
-                    "IAC_CODE_BASE_URL is set but active provider is "
-                    f"{active_key!r}; the value is ignored. "
-                    "IAC_CODE_BASE_URL only applies to OpenAICompatible."
-                )
-                _warned_base_url_ignored = True
+            entry["apiBase"] = env["api_base"]
 
     return entry
 

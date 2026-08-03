@@ -74,5 +74,5 @@ CLI arguments > environment variables > configuration files
 |---|---|
 | `IAC_CODE_PROVIDER` | Nom du fournisseur de modèles (insensible à la casse). Consultez les tableaux ci-dessus pour les valeurs valides |
 | `IAC_CODE_MODEL` | Nom du modèle |
-| `IAC_CODE_BASE_URL` | Point de terminaison API pour `OpenAPI Compatible` uniquement ; ignoré (avec un avertissement) pour les autres fournisseurs |
+| `IAC_CODE_BASE_URL` | Remplace le point de terminaison API du fournisseur actif ; prioritaire sur l’`apiBase` enregistré et l’URL intégrée par défaut |
 | `IAC_CODE_API_KEY` | Clé API du fournisseur |

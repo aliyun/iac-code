@@ -74,5 +74,5 @@ CLI 引数 > 環境変数 > 設定ファイル
 |---|---|
 | `IAC_CODE_PROVIDER` | モデルプロバイダー名（大文字小文字不問）。有効な値は上記の表を参照 |
 | `IAC_CODE_MODEL` | モデル名 |
-| `IAC_CODE_BASE_URL` | `OpenAI Compatible` 専用の API エンドポイント。他のプロバイダーでは無視され、warning が表示されます |
+| `IAC_CODE_BASE_URL` | 現在アクティブなプロバイダーの API エンドポイントを上書きします。保存済みの `apiBase` と組み込みの既定 URL より優先されます |
 | `IAC_CODE_API_KEY` | プロバイダー API キー |

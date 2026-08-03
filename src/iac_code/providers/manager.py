@@ -414,11 +414,9 @@ def create_provider(
         provider_cfg = get_provider_config(provider_key)
     else:
         provider_cfg = copy.deepcopy(provider_config_override)
-    effective_base_url = base_url or desc.base_url
-    if not effective_base_url:
-        saved_base = provider_cfg.get("apiBase")
-        if isinstance(saved_base, str) and saved_base:
-            effective_base_url = saved_base
+    saved_base = provider_cfg.get("apiBase")
+    configured_base_url = saved_base if isinstance(saved_base, str) and saved_base else None
+    effective_base_url = base_url or configured_base_url or desc.base_url
     effort_value = _get_provider_config_value(provider_cfg, model, "effort")
     effort = effort_value if isinstance(effort_value, str) else None
     if request_policy_override is not None and request_policy_override.effort is not None:
