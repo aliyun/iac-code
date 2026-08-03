@@ -925,8 +925,7 @@ def _run_scenario1(
             backup_restore["primaryAbsentAfterRestart"] = not primary_session_dir.exists()
             backup_restore["primarySessionFileAbsentAfterRestart"] = not primary_session_file.exists()
             h.checks["primary session stayed absent after restart"] = (
-                backup_restore["primaryAbsentAfterRestart"]
-                and backup_restore["primarySessionFileAbsentAfterRestart"]
+                backup_restore["primaryAbsentAfterRestart"] and backup_restore["primarySessionFileAbsentAfterRestart"]
             )
             _write_json(h.run_dir / "step4.backup-only-restore.json", backup_restore)
         selection = h.stream(
@@ -988,9 +987,7 @@ def _run_scenario1(
         h.checks["normal follow-up persisted in session"] = _a2a_session_contains_user_message(
             h, args.normal_followup_prompt
         )
-        h.checks["recovery question persisted in session"] = _a2a_session_contains_user_message(
-            h, args.recovery_prompt
-        )
+        h.checks["recovery question persisted in session"] = _a2a_session_contains_user_message(h, args.recovery_prompt)
         h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
         h.checks["scenario1 emitted no cleanup events"] = not _run_dir_has_cleanup_events(h.run_dir)
         h.checks["scenario1 persisted no cleanup prompt"] = not _session_has_cleanup_prompt(h)
@@ -1078,7 +1075,7 @@ def run_ask_waiting(args: argparse.Namespace, scenario: str) -> int:
         answer = h.stream(prompt=ASK_FIRST_ANSWER, name="02-answer-first-ask", task_id="")
         _add_hydrated_task_checks(h, answer, "first ask answer")
         final_summary = answer
-        if answer.last_input_required_step_id:
+        if _waiting_for_followup_ask(h, answer):
             second = h.stream(prompt=ASK_SECOND_ANSWER, name="03-answer-second-ask")
             _add_same_task_checks(h, second, "second ask answer")
             _finish_pipeline_after_possible_input(h, second, args)
@@ -1086,6 +1083,7 @@ def run_ask_waiting(args: argparse.Namespace, scenario: str) -> int:
         else:
             _finish_pipeline_after_possible_input(h, answer, args)
         h.checks["pipeline completed after ask recovery"] = _completed_snapshot_or_stream(h, final_summary)
+        h.checks["deployment succeeded with Stack ID"] = _deployment_succeeded_with_stack_id(h.run_dir)
         h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
 
     return _run_with_harness(args, scenario, callback)
@@ -1190,7 +1188,7 @@ def run_image_ask_waiting(args: argparse.Namespace, scenario: str) -> int:
         )
         _add_hydrated_task_checks(h, answer, "first ask image answer")
         final_summary = answer
-        if answer.last_input_required_step_id:
+        if _waiting_for_followup_ask(h, answer):
             second = h.stream_image_text(
                 text=ASK_SECOND_ANSWER,
                 image_key="ask-second-answer",
@@ -1202,6 +1200,7 @@ def run_image_ask_waiting(args: argparse.Namespace, scenario: str) -> int:
         else:
             _finish_pipeline_after_possible_input(h, answer, args)
         h.checks["pipeline completed after ask image recovery"] = _completed_snapshot_or_stream(h, final_summary)
+        h.checks["deployment succeeded with Stack ID"] = _deployment_succeeded_with_stack_id(h.run_dir)
         h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
 
     return _run_with_harness(args, scenario, callback)
@@ -1966,6 +1965,13 @@ def _answer_intervening_ask_inputs(
     return current
 
 
+def _waiting_for_followup_ask(h: ScenarioHarness, summary: StreamSummary) -> bool:
+    if not summary.last_input_required_step_id:
+        return False
+    events_path = h.run_dir / f"{summary.name}.events.jsonl"
+    return _latest_pending_kind(events_path) == "ask_user_question"
+
+
 def _join_after_kill(stream: BackgroundStream, h: ScenarioHarness) -> None:
     try:
         stream.join(timeout=10)
@@ -2359,9 +2365,7 @@ def _known_server_path_occurrences(value: Any, known_server_paths: Iterable[str]
 
     def visit(item: Any) -> int:
         if isinstance(item, dict):
-            return sum(
-                (count_text(key) if isinstance(key, str) else 0) + visit(child) for key, child in item.items()
-            )
+            return sum((count_text(key) if isinstance(key, str) else 0) + visit(child) for key, child in item.items())
         if isinstance(item, (list, tuple)):
             return sum(visit(child) for child in item)
         if isinstance(item, str):
@@ -2596,10 +2600,7 @@ def _a2a_session_contains_user_message(h: Any, text: str) -> bool:
     except Exception as exc:
         _append_harness_note(h, f"cannot inspect A2A session: {type(exc).__name__} loading {session_id}")
         return False
-    return any(
-        getattr(message, "role", "") == "user" and text in _agent_message_text(message)
-        for message in messages
-    )
+    return any(getattr(message, "role", "") == "user" and text in _agent_message_text(message) for message in messages)
 
 
 def _agent_message_text(message: Any) -> str:
@@ -2687,6 +2688,49 @@ def _latest_input_required_step_id_from_events(events: Iterable[Any]) -> str:
             if isinstance(data, dict) and data.get("stepId"):
                 step_id = str(data.get("stepId") or "")
     return step_id
+
+
+def _deployment_succeeded_with_stack_id(run_dir: Path) -> bool:
+    latest_rank: tuple[float, int] | None = None
+    latest_conclusion: dict[str, Any] = {}
+    event_order = 0
+    for path in sorted(run_dir.glob("*.events.jsonl")):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            for envelope in _extract_pipeline_envelopes(value):
+                event_order += 1
+                step = envelope.get("step")
+                if envelope.get("eventType") != "step_completed" or not isinstance(step, dict):
+                    continue
+                if step.get("id") != "deploying":
+                    continue
+                data = envelope.get("data")
+                conclusion = data.get("conclusion") if isinstance(data, dict) else None
+                if not isinstance(conclusion, dict):
+                    continue
+                try:
+                    sequence = float(envelope.get("sequence"))
+                except (TypeError, ValueError):
+                    sequence = float("-inf")
+                rank = (sequence, event_order)
+                if latest_rank is None or rank > latest_rank:
+                    latest_rank = rank
+                    latest_conclusion = conclusion
+
+    if str(latest_conclusion.get("status") or "").casefold() != "success":
+        return False
+    stack_id = latest_conclusion.get("stack_id") or latest_conclusion.get("stackId")
+    outputs = latest_conclusion.get("outputs")
+    if not stack_id and isinstance(outputs, dict):
+        stack_id = outputs.get("StackId") or outputs.get("stackId") or outputs.get("stack_id")
+    return isinstance(stack_id, str) and bool(stack_id.strip())
 
 
 def _all_evidence(h: ScenarioHarness) -> str:
@@ -2838,11 +2882,14 @@ def _created_stack_event(
     expected_stack_name: str | None = None,
 ) -> Callable[[Any, StreamSummary], bool]:
     def predicate(event: Any, _summary: StreamSummary) -> bool:
-        return _created_stack_id_from_event(
-            event,
-            exclude=exclude,
-            expected_stack_name=expected_stack_name,
-        ) is not None
+        return (
+            _created_stack_id_from_event(
+                event,
+                exclude=exclude,
+                expected_stack_name=expected_stack_name,
+            )
+            is not None
+        )
 
     return predicate
 

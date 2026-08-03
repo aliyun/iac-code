@@ -70,6 +70,61 @@ def test_latest_input_required_kind_from_events_uses_latest_kind() -> None:
     assert kind == "candidate_selection"
 
 
+def test_waiting_for_followup_ask_distinguishes_candidate_selection(tmp_path: Path) -> None:
+    runner = _load_runner()
+    summary = runner.StreamSummary(
+        name="02-answer-first-ask",
+        prompt=runner.ASK_FIRST_ANSWER,
+        pipeline_event_types=["input_required"],
+        last_input_required_step_id="confirm_and_select",
+    )
+    events_path = tmp_path / "02-answer-first-ask.events.jsonl"
+    events_path.write_text(
+        json.dumps(_input_required_event("candidate_selection", step_id="confirm_and_select")) + "\n",
+        encoding="utf-8",
+    )
+    harness = SimpleNamespace(run_dir=tmp_path)
+
+    assert runner._waiting_for_followup_ask(harness, summary) is False
+
+    events_path.write_text(
+        json.dumps(_input_required_event("ask_user_question", step_id="intent_parsing")) + "\n",
+        encoding="utf-8",
+    )
+    assert runner._waiting_for_followup_ask(harness, summary) is True
+
+
+def test_deployment_success_requires_latest_success_and_stack_id(tmp_path: Path) -> None:
+    runner = _load_runner()
+    events_path = tmp_path / "02-answer.events.jsonl"
+
+    def completed(sequence: int, conclusion: dict) -> dict:
+        return _pipeline_batch(
+            {
+                "eventType": "step_completed",
+                "sequence": sequence,
+                "step": {"id": "deploying"},
+                "data": {"conclusion": conclusion},
+            }
+        )
+
+    events_path.write_text(
+        "\n".join(
+            [
+                json.dumps(completed(1, {"status": "success", "stack_id": "stack-1"})),
+                json.dumps(completed(2, {"status": "failed", "resources_created": []})),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert runner._deployment_succeeded_with_stack_id(tmp_path) is False
+
+    with events_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(completed(3, {"status": "success", "outputs": {"StackId": "stack-2"}})) + "\n")
+    assert runner._deployment_succeeded_with_stack_id(tmp_path) is True
+
+
 def test_recovery_predicates_and_evidence_inspect_every_batched_event() -> None:
     runner = _load_runner()
     event = _pipeline_batch(
