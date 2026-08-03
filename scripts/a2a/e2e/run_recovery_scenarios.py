@@ -925,7 +925,8 @@ def _run_scenario1(
             backup_restore["primaryAbsentAfterRestart"] = not primary_session_dir.exists()
             backup_restore["primarySessionFileAbsentAfterRestart"] = not primary_session_file.exists()
             h.checks["primary session stayed absent after restart"] = (
-                backup_restore["primaryAbsentAfterRestart"] and backup_restore["primarySessionFileAbsentAfterRestart"]
+                backup_restore["primaryAbsentAfterRestart"]
+                and backup_restore["primarySessionFileAbsentAfterRestart"]
             )
             _write_json(h.run_dir / "step4.backup-only-restore.json", backup_restore)
         selection = h.stream(
@@ -987,7 +988,9 @@ def _run_scenario1(
         h.checks["normal follow-up persisted in session"] = _a2a_session_contains_user_message(
             h, args.normal_followup_prompt
         )
-        h.checks["recovery question persisted in session"] = _a2a_session_contains_user_message(h, args.recovery_prompt)
+        h.checks["recovery question persisted in session"] = _a2a_session_contains_user_message(
+            h, args.recovery_prompt
+        )
         h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
         h.checks["scenario1 emitted no cleanup events"] = not _run_dir_has_cleanup_events(h.run_dir)
         h.checks["scenario1 persisted no cleanup prompt"] = not _session_has_cleanup_prompt(h)
@@ -2365,7 +2368,9 @@ def _known_server_path_occurrences(value: Any, known_server_paths: Iterable[str]
 
     def visit(item: Any) -> int:
         if isinstance(item, dict):
-            return sum((count_text(key) if isinstance(key, str) else 0) + visit(child) for key, child in item.items())
+            return sum(
+                (count_text(key) if isinstance(key, str) else 0) + visit(child) for key, child in item.items()
+            )
         if isinstance(item, (list, tuple)):
             return sum(visit(child) for child in item)
         if isinstance(item, str):
@@ -2600,7 +2605,10 @@ def _a2a_session_contains_user_message(h: Any, text: str) -> bool:
     except Exception as exc:
         _append_harness_note(h, f"cannot inspect A2A session: {type(exc).__name__} loading {session_id}")
         return False
-    return any(getattr(message, "role", "") == "user" and text in _agent_message_text(message) for message in messages)
+    return any(
+        getattr(message, "role", "") == "user" and text in _agent_message_text(message)
+        for message in messages
+    )
 
 
 def _agent_message_text(message: Any) -> str:
@@ -2882,14 +2890,11 @@ def _created_stack_event(
     expected_stack_name: str | None = None,
 ) -> Callable[[Any, StreamSummary], bool]:
     def predicate(event: Any, _summary: StreamSummary) -> bool:
-        return (
-            _created_stack_id_from_event(
-                event,
-                exclude=exclude,
-                expected_stack_name=expected_stack_name,
-            )
-            is not None
-        )
+        return _created_stack_id_from_event(
+            event,
+            exclude=exclude,
+            expected_stack_name=expected_stack_name,
+        ) is not None
 
     return predicate
 
