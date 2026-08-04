@@ -179,14 +179,20 @@ def test_ping_request_replay_and_internal_denials(client: TestClient, token: str
     out_of_order = client.post("/api/token/request", json=browser.request_envelope(2, "/api/echo"))
     assert out_of_order.status_code == 200
     assert client.post("/api/token/request", json=request).status_code == 401
-    assert client.post(
-        "/api/token/request",
-        json=browser.request_envelope(5, "/api/token/challenge"),
-    ).status_code == 401
-    assert client.post(
-        "/api/token/request",
-        json=browser.request_envelope(6, "/api/cloud/aliyun/oauth-login"),
-    ).status_code == 401
+    assert (
+        client.post(
+            "/api/token/request",
+            json=browser.request_envelope(5, "/api/token/challenge"),
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/api/token/request",
+            json=browser.request_envelope(6, "/api/cloud/aliyun/oauth-login"),
+        ).status_code
+        == 401
+    )
 
 
 def test_wrong_token_cannot_validate_ping(client: TestClient) -> None:
@@ -215,8 +221,7 @@ def test_stream_metadata_body_and_end_are_encrypted(client: TestClient, token: s
     start = json.loads(browser.decrypt(envelopes[0], "stream-start"))
     assert start["status"] == 200
     body = b"".join(
-        _decode(json.loads(browser.decrypt(envelope, "stream-body"))["body"])
-        for envelope in envelopes[1:-1]
+        _decode(json.loads(browser.decrypt(envelope, "stream-body"))["body"]) for envelope in envelopes[1:-1]
     )
     assert body == b'data: {"value":1}\n\ndata: {"value":2}\n\n'
     assert json.loads(browser.decrypt(envelopes[-1], "stream-end")) == {}
