@@ -344,6 +344,53 @@ def test_reducer_reuses_persisted_message_ids_during_live_replay(tmp_path) -> No
     }
 
 
+def test_turn_done_stamps_elapsed_seconds_on_turn_assistant_messages(tmp_path) -> None:
+    # 折叠回合头「已处理 <时间>」实时偶尔只显示「已处理」,手动重载又正常:实时助手消息不像
+    # 重载转录那样自带 elapsedSeconds,折叠渲染的时长实时只有 state.turns[turnId].elapsedMs
+    # 一个来源。resync/重连重建状态后分组 turnId 落不回 state.turns 就丢时长。turn.done 必须把
+    # 本轮时长回写到本轮助手消息,让折叠渲染的按消息兜底与重载同源。用户气泡不应被打时长。
+    output = _run_events_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            const { reduceEvent } = await import(__EVENTS_MODULE__);
+
+            let state = { messages: {}, tools: {}, turns: {}, lastSequence: 0 };
+            state = reduceEvent(state, {
+              sequence: 1, type: "user.message",
+              payload: { messageId: "user-T", turnId: "T", text: "创建 ECS" },
+            });
+            state = reduceEvent(state, {
+              sequence: 2, type: "assistant.message.start",
+              payload: { messageId: "asst-T", turnId: "T" },
+            });
+            state = reduceEvent(state, {
+              sequence: 3, type: "assistant.text.delta",
+              payload: { messageId: "asst-T", turnId: "T", delta: "好的" },
+            });
+            state = reduceEvent(state, {
+              sequence: 4, type: "assistant.message.end",
+              payload: { messageId: "asst-T", turnId: "T" },
+            });
+            state = reduceEvent(state, {
+              sequence: 5, type: "turn.done",
+              payload: { turnId: "T", elapsedMs: 37000 },
+            });
+
+            console.log(JSON.stringify({
+              turnElapsedMs: state.turns["T"].elapsedMs,
+              assistantElapsedSeconds: state.messages["asst-T"].elapsedSeconds ?? null,
+              userElapsedSeconds: state.messages["user-T"].elapsedSeconds ?? null,
+            }));
+            """
+        ),
+    )
+
+    assert output["turnElapsedMs"] == 37000
+    assert output["assistantElapsedSeconds"] == 37.0
+    assert output["userElapsedSeconds"] is None
+
+
 def test_user_message_reducer_clears_prior_turn_error_banner(tmp_path) -> None:
     # provider 切换 bug：某轮失败后 error 事件写进单例 next.lastError,而 app.js 把它当作栈底
     # 唯一错误横幅渲染。旧代码在新一轮 user.message 到来时从不清空 lastError,于是上一轮的报错
@@ -1116,7 +1163,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-313" in html
-    assert "/static/js/app.js?v=web-repl-ui-318" in html
+    assert "/static/js/app.js?v=web-repl-ui-320" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1150,9 +1197,9 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-318" in index_html
+    assert "web-repl-ui-320" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
-    assert "./events.js?v=web-repl-ui-304" in app_source
+    assert "./events.js?v=web-repl-ui-319" in app_source
     assert "./components/workspace.js?v=cloud-creds-v51" in app_source
     assert "workspace-cloud-vendors" in workspace_source
     assert "Alibaba Cloud" in workspace_source
@@ -9823,8 +9870,8 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-318" in html
-    assert "web-repl-ui-317" not in html
+    assert "web-repl-ui-320" in html
+    assert "web-repl-ui-318" not in html
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:

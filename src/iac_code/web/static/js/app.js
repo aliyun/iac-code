@@ -6,7 +6,7 @@ import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components
 import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v51";
 import { createOutputController } from "./components/output_panel.js?v=output-panel-v17";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
-import { reduceEvent } from "./events.js?v=web-repl-ui-304";
+import { reduceEvent } from "./events.js?v=web-repl-ui-319";
 import { applyDomI18n, t } from "./i18n.js?v=web-repl-ui-277";
 
 const root = document.getElementById("iac-code-web-root");
