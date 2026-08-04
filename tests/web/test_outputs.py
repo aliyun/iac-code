@@ -357,6 +357,71 @@ def test_payload_pipeline_ros_deploy_stack(tmp_path):
     assert stack["consoleUrl"] == "https://ros.console.aliyun.com/cn-hangzhou/stacks/3bc4c072"
 
 
+# ros_stack/ros_deploy 的结果 JSON 后可能被 attach_ros_validation 追加本地预检诊断块
+# (见 tools/cloud/aliyun/ros_validation/outcome.py),使整体结果内容不再是合法 JSON。
+_PREFLIGHT_SUFFIX = (
+    "\n\n---\nROS local preflight diagnostics:\n"
+    "ROS local validation completed: 0 errors, 0 warnings, 5 restrictions.\n"
+)
+
+
+def test_payload_pipeline_stack_result_with_preflight_diagnostics_suffix(tmp_path):
+    # 真实 create 结果内容是「栈 JSON + 追加的本地预检诊断块」,整体不是合法 JSON。
+    # 派生必须容忍尾随文本、解析开头的 JSON 对象,否则该栈的权威终态会被整条丢弃。
+    envelopes = [
+        _env_tool_result(
+            "ros_deploy",
+            tool_input={"action": "create", "region_id": "cn-hangzhou"},
+            result=(
+                '{"stack_id": "stk-diag", "stack_name": "webapp", '
+                '"status": "CREATE_COMPLETE", "status_reason": "ok", "is_success": true}'
+                + _PREFLIGHT_SUFFIX
+            ),
+        ),
+    ]
+    session = _FakeSession(tmp_path, context_id="ctx-1")
+    payload = outputs.outputs_payload(_FakeManager([], envelopes), session)
+    assert len(payload["stacks"]) == 1
+    stack = payload["stacks"][0]
+    assert stack["stackId"] == "stk-diag"
+    assert stack["status"] == "CREATE_COMPLETE"
+    assert stack["isSuccess"] is True
+
+
+def test_payload_pipeline_delete_and_create_shows_new_stack(tmp_path):
+    # 复现 bug:create → delete_and_create 后,输出面板永远只显示「之前删除的那个 stack」。
+    # 旧栈先以 CREATE_IN_PROGRESS(stack_current_changed)落面板;随后 create 与
+    # delete_and_create 的权威终态 tool_result 都携带本地预检诊断块——若解析用严格 json.loads
+    # 会整条丢弃,新栈(delete_and_create 产出的 create_result)永远进不来,面板停留在旧的已删栈。
+    envelopes = [
+        _env_stack_current_changed(stack_id="stk-old", stack_name="app", stack_status="CREATE_IN_PROGRESS"),
+        _env_tool_result(
+            "ros_deploy",
+            tool_input={"action": "create", "region_id": "cn-hangzhou"},
+            result=(
+                '{"stack_id": "stk-old", "stack_name": "app", '
+                '"status": "CREATE_FAILED", "status_reason": "ContinueCreateStackValidationFailed", '
+                '"is_success": false}' + _PREFLIGHT_SUFFIX
+            ),
+        ),
+        _env_tool_result(
+            "ros_deploy",
+            tool_input={"action": "delete_and_create", "region_id": "cn-hangzhou"},
+            result=(
+                '{"stack_id": "stk-new", "stack_name": "app", '
+                '"status": "CREATE_COMPLETE", "status_reason": "ok", "is_success": true}' + _PREFLIGHT_SUFFIX
+            ),
+        ),
+    ]
+    session = _FakeSession(tmp_path, context_id="ctx-1")
+    payload = outputs.outputs_payload(_FakeManager([], envelopes), session)
+    assert len(payload["stacks"]) == 1
+    stack = payload["stacks"][0]
+    assert stack["stackId"] == "stk-new"  # 应显示新建的栈,而非之前删除的 stk-old
+    assert stack["status"] == "CREATE_COMPLETE"
+    assert stack["isSuccess"] is True
+
+
 def test_payload_pipeline_stack_appears_in_progress(tmp_path):
     # 部署开始:仅有进行中态 stack_current_changed(尚无终态 tool_result)时,资源栈就应出现,
     # 状态为 CREATE_IN_PROGRESS、isSuccess=False、带 console URL——让面板在创建开始即显示,而非完成后。
