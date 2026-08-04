@@ -35,6 +35,7 @@ from iac_code.pipeline.display_names import display_step_name
 from iac_code.pipeline.engine.display_replay import DISPLAY_TRANSCRIPT_FILENAME
 from iac_code.pipeline.engine.step_spec import AllowUserEscapes
 from iac_code.providers.base import ContentBlock
+from iac_code.providers.registry import PROVIDER_REGISTRY
 from iac_code.services.permissions.storage import apply_session_rule
 from iac_code.services.permissions.trusted_roots import build_session_trusted_read_directories
 from iac_code.services.session_index import SessionEntry, SessionIndex, _trim_title
@@ -537,6 +538,11 @@ def _runtime_settings_payload() -> dict[str, Any]:
     )
 
 
+def _runtime_string(runtime: Mapping[str, Any], key: str) -> str | None:
+    value = runtime.get(key)
+    return value if isinstance(value, str) and value else None
+
+
 def _provider_thinking_config(provider: str | None, model: str | None) -> bool | None:
     """Read the configured ``thinkingEnabled`` (True/False/None-if-unset) for a
     (provider, model).
@@ -554,6 +560,19 @@ def _provider_thinking_config(provider: str | None, model: str | None) -> bool |
 
         provider_cfg = get_provider_config(provider)
         return _get_bool_provider_config_value(provider_cfg, model or "", "thinkingEnabled")
+    except Exception:
+        return None
+
+
+def _provider_positive_int_config(provider: str | None, model: str | None, key: str) -> int | None:
+    if not provider:
+        return None
+    try:
+        from iac_code.config import get_provider_config
+        from iac_code.providers.manager import _get_positive_int_provider_config_value
+
+        provider_cfg = get_provider_config(provider)
+        return _get_positive_int_provider_config_value(provider_cfg, model or "", key)
     except Exception:
         return None
 
@@ -1015,6 +1034,55 @@ class WebSessionManager:
         if not storage_existed:
             self._record_session_lifecycle_mutation(actual_cwd, actual_session_id)
         self.persist_web_metadata(session)
+        from iac_code.services.session_logging import (
+            is_custom_endpoint,
+            log_session_configured,
+            log_session_start_safely,
+            sanitize_endpoint_origin,
+        )
+
+        def _log_web_session_started() -> None:
+            runtime = _runtime_settings_payload()
+            log_provider = session.provider or runtime.get("provider")
+            log_model = session.model or runtime.get("model")
+            log_provider_key = log_provider if isinstance(log_provider, str) else None
+            log_model_name = log_model if isinstance(log_model, str) else None
+            active_provider = runtime.get("activeProvider")
+            log_endpoint = active_provider.get("apiBase") if isinstance(active_provider, Mapping) else None
+            log_endpoint_url = log_endpoint if isinstance(log_endpoint, str) else None
+            endpoint_origin = sanitize_endpoint_origin(log_endpoint_url)
+            provider_descriptor = PROVIDER_REGISTRY.get(log_provider_key or "")
+            default_endpoint = provider_descriptor.base_url if provider_descriptor is not None else None
+            log_session_configured(
+                session_id=session.session_id,
+                cwd=session.cwd,
+                provider=log_provider_key,
+                model=log_model_name,
+                effort=session.effort if session.effort is not None else _runtime_string(runtime, "effort"),
+                thinking_enabled=(
+                    session.thinking_enabled
+                    if session.thinking_enabled is not None
+                    else _provider_thinking_config(log_provider_key, log_model_name)
+                ),
+                thinking_budget=_provider_positive_int_config(log_provider_key, log_model_name, "thinkingBudget"),
+                max_completion_tokens=_provider_positive_int_config(
+                    log_provider_key,
+                    log_model_name,
+                    "maxCompletionTokens",
+                ),
+                endpoint_origin=endpoint_origin,
+                endpoint_custom=endpoint_origin is not None and is_custom_endpoint(log_endpoint_url, default_endpoint),
+                permission_mode=(
+                    session.permission_mode.value
+                    if session.permission_mode is not None
+                    else PermissionMode.DEFAULT.value
+                ),
+                provider_config_frozen=session.provider is not None,
+                source="web",
+            )
+
+        if not storage_existed:
+            log_session_start_safely(_log_web_session_started)
         return session
 
     def _foreign_visibility_flags(self) -> tuple[bool, bool]:

@@ -129,6 +129,34 @@ _MCP_ELICITATION_DISPLAY_MAX_CHARS = 1000
 PipelineHandoffResult = Literal["not_applicable", "succeeded", "failed", "persistence_failed"]
 
 
+def _tool_count_for_session_logging(tool_registry: Any) -> int | None:
+    list_tools = getattr(tool_registry, "list_tools", None)
+    if not callable(list_tools):
+        return None
+    try:
+        return len(list(list_tools()))
+    except Exception:
+        return None
+
+
+def _mcp_server_count_for_session_logging(mcp_manager: Any) -> int:
+    connections = getattr(mcp_manager, "_connections", None)
+    if connections is None:
+        return 0
+    try:
+        return len(connections)
+    except TypeError:
+        return 0
+
+
+def _permission_mode_for_session_logging(permission_context: Any) -> str | None:
+    mode = getattr(permission_context, "mode", None)
+    value = getattr(mode, "value", None)
+    if isinstance(value, str):
+        return value
+    return mode if isinstance(mode, str) else None
+
+
 class _BlockingPrerequisiteInterruptGuard:
     """Make Ctrl+C interrupt synchronous prerequisite work immediately."""
 
@@ -803,6 +831,30 @@ class InlineREPL:
     def locked_skill_names(self):
         """Return skill names that cannot be disabled."""
         return getattr(self, "_locked_skill_names", set())
+
+    def log_session_started(self) -> None:
+        from iac_code.services.session_logging import (
+            log_session_start_safely,
+            log_session_started_from_provider_settings,
+        )
+
+        def _log_session_started() -> None:
+            log_session_started_from_provider_settings(
+                session_id=self._session_id,
+                provider_settings=self._provider_manager.session_start_settings(),
+                cwd=self._original_cwd,
+                max_turns=getattr(self._agent_loop, "max_turns", None),
+                tool_count=_tool_count_for_session_logging(self.tool_registry),
+                mcp_server_count=_mcp_server_count_for_session_logging(self._mcp_manager),
+                permission_mode=_permission_mode_for_session_logging(self.store.get_state().permission_context),
+                provider_config_frozen=False,
+                a2a_safe_mode=False,
+                resume_message_count=len(self._resume_messages or []),
+                external_services_enabled=True,
+                source="repl",
+            )
+
+        log_session_start_safely(_log_session_started)
 
     def _session_dir_for_artifacts(self, session_id: str | None = None):
         from pathlib import Path

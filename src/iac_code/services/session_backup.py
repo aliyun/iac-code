@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -13,6 +14,7 @@ import uuid
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
 from enum import Enum
+from functools import wraps
 from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, Iterable, Literal, Mapping, NoReturn
 
@@ -34,6 +36,7 @@ from iac_code.utils.state_io import atomic_write_json, fsync_parent_dir, safe_re
 BACKUP_ENV_VAR = "IAC_CODE_CONFIG_BACKUP_DIR"
 BACKUP_STATE_FILENAME = ".backup-state.json"
 BACKUP_LOCK_FILENAME = ".backup-lock"
+logger = logging.getLogger(__name__)
 _SAFE_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
 _PUBLIC_BACKUP_PATH_PATTERN = re.compile(
     r"""(?x)
@@ -71,6 +74,62 @@ class BackupResult:
     commit_id: str | None = None
     shared_committed: bool = False
     requires_reconcile: bool = False
+
+
+def _log_backup_session_elapsed(function: Callable[..., BackupResult]) -> Callable[..., BackupResult]:
+    @wraps(function)
+    def wrapper(self: object, *args: Any, **kwargs: Any) -> BackupResult:
+        started_at = time.perf_counter()
+        log_session_id = _format_backup_log_value(_session_id_from_backup_call(args, kwargs))
+        try:
+            result = function(self, *args, **kwargs)
+        except Exception as exc:
+            elapsed_ms = (time.perf_counter() - started_at) * 1000
+            _log_backup_elapsed(
+                "Session backup failed session_id=%s elapsed_ms=%.3f succeeded=false error_type=%s",
+                log_session_id,
+                elapsed_ms,
+                type(exc).__name__,
+            )
+            raise
+        if not result.enabled:
+            return result
+        elapsed_ms = (time.perf_counter() - started_at) * 1000
+        if result.succeeded:
+            _log_backup_elapsed(
+                "Session backup completed session_id=%s elapsed_ms=%.3f succeeded=true",
+                log_session_id,
+                elapsed_ms,
+            )
+        else:
+            _log_backup_elapsed(
+                "Session backup failed session_id=%s elapsed_ms=%.3f succeeded=false",
+                log_session_id,
+                elapsed_ms,
+            )
+        return result
+
+    return wrapper
+
+
+def _session_id_from_backup_call(args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> Any:
+    if len(args) >= 2:
+        return args[1]
+    return kwargs.get("session_id")
+
+
+def _log_backup_elapsed(message: str, *args: Any) -> None:
+    with suppress(Exception):
+        logger.info(message, *args)
+
+
+def _format_backup_log_value(value: Any) -> str:
+    try:
+        from iac_code.services.session_logging import format_log_value
+
+        return format_log_value(value)
+    except Exception:
+        return "unavailable"
 
 
 @dataclass(frozen=True)
@@ -132,6 +191,7 @@ class SessionBackupService:
         self._retry_delays = tuple(retry_delays)
         self._writer_id = "{}-{}-{}".format(os.getpid(), id(self), uuid.uuid4())
 
+    @_log_backup_session_elapsed
     def backup_session(
         self,
         cwd: str,

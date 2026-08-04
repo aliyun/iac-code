@@ -169,6 +169,57 @@ class TestCreateProvider:
         assert getattr(p, "_thinking_budget", None) == 2048
         assert getattr(p, "_max_completion_tokens", None) == 12288
 
+    def test_session_start_settings_include_performance_parameters(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
+        monkeypatch.setattr("iac_code.config.get_provider_config", lambda name: {})
+
+        manager = ProviderManager(
+            model="glm-5.2",
+            credentials={"dashscope": "key"},
+            stream_idle_timeout=12.5,
+            request_policy_override=ProviderRequestPolicy(
+                thinking_enabled=False,
+                effort="high",
+                thinking_budget=2048,
+            ),
+            provider_config_override={
+                "effort": "low",
+                "thinkingBudget": 4096,
+                "maxCompletionTokens": 10000,
+            },
+        )
+
+        assert manager.session_start_settings() == {
+            "provider": "dashscope",
+            "provider_display": "Alibaba Cloud Bailian",
+            "model": "glm-5.2",
+            "effort": "high",
+            "thinking_enabled": False,
+            "thinking_budget": 2048,
+            "max_completion_tokens": 10000,
+            "stream_idle_timeout": 12.5,
+            "endpoint_origin": "https://dashscope.aliyuncs.com",
+            "endpoint_custom": False,
+        }
+
+    def test_session_start_settings_sanitize_custom_endpoint(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
+        monkeypatch.setattr("iac_code.config.get_provider_config", lambda name: {})
+
+        manager = ProviderManager(
+            model="glm-5.2",
+            credentials={"dashscope": "key"},
+            provider_config_override={
+                "apiBase": "https://user:pass@llm.example.com:9443/v1?api_key=secret",
+            },
+        )
+
+        settings = manager.session_start_settings()
+        assert settings["endpoint_origin"] == "https://llm.example.com:9443"
+        assert settings["endpoint_custom"] is True
+        assert "user:pass" not in str(settings)
+        assert "api_key=secret" not in str(settings)
+
     def test_claude_46_request_budget_reaches_manual_thinking_wire_format(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic")
         monkeypatch.setattr("iac_code.config.get_provider_config", lambda name: {})

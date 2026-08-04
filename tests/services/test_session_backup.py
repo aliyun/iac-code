@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -56,6 +57,24 @@ def test_backup_disabled_when_env_unset(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
     assert result.enabled is False
     assert result.copied_files == 0
+
+
+def test_backup_timing_wrapper_preserves_keyword_call_form(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.delenv("IAC_CODE_CONFIG_BACKUP_DIR", raising=False)
+    caplog.set_level(logging.INFO, logger="iac_code.services.session_backup")
+
+    result = SessionBackupService().backup_session(
+        cwd="/repo",
+        session_id="s1",
+        reason=BackupReason.NORMAL_TURN_END,
+        critical=False,
+    )
+
+    assert result.enabled is False
+    assert "Session backup" not in caplog.text
 
 
 def test_backup_disabled_when_env_unset_does_not_resolve_session_dir(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -180,6 +199,97 @@ def test_backup_mirrors_session_and_excludes_local_markers(monkeypatch: pytest.M
     assert marker["status"] == "succeeded"
     assert marker["reason"] == "pipeline_step_completed"
     assert "error" not in marker
+
+
+def test_backup_logs_session_id_and_elapsed_time(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
+    session_dir = _create_v2_session_dir(storage, "/repo", "s1")
+    (session_dir / "session.jsonl").write_text("one\n", encoding="utf-8")
+    perf_counter_values = iter((100.0, 100.25))
+    monkeypatch.setattr(
+        "iac_code.services.session_backup.time.perf_counter",
+        lambda: next(perf_counter_values),
+    )
+    caplog.set_level(logging.INFO, logger="iac_code.services.session_backup")
+
+    SessionBackupService(session_storage=storage).backup_session(
+        "/repo",
+        "s1",
+        reason=BackupReason.PIPELINE_STEP_COMPLETED,
+        critical=True,
+    )
+
+    assert "Session backup completed" in caplog.text
+    assert "session_id=s1" in caplog.text
+    assert "elapsed_ms=250.000" in caplog.text
+    assert "succeeded=true" in caplog.text
+
+
+def test_backup_logs_failure_elapsed_time_without_marking_completed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(tmp_path / "backup"))
+    perf_counter_values = iter((200.0, 200.125))
+    monkeypatch.setattr(
+        "iac_code.services.session_backup.time.perf_counter",
+        lambda: next(perf_counter_values),
+    )
+
+    class RaisingStorage:
+        def session_dir(self, _cwd: str, _session_id: str) -> Path:
+            raise RuntimeError("storage failed")
+
+    caplog.set_level(logging.INFO, logger="iac_code.services.session_backup")
+
+    with pytest.raises(RuntimeError, match="storage failed"):
+        SessionBackupService(session_storage=RaisingStorage()).backup_session(
+            "/repo",
+            "s1",
+            reason=BackupReason.PIPELINE_STEP_COMPLETED,
+            critical=True,
+        )
+
+    assert "Session backup failed" in caplog.text
+    assert "Session backup completed" not in caplog.text
+    assert "session_id=s1" in caplog.text
+    assert "elapsed_ms=125.000" in caplog.text
+    assert "succeeded=false" in caplog.text
+    assert "error_type=RuntimeError" in caplog.text
+
+
+def test_backup_failure_log_quotes_unsafe_session_id(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(tmp_path / "backup"))
+    perf_counter_values = iter((300.0, 300.001))
+    monkeypatch.setattr(
+        "iac_code.services.session_backup.time.perf_counter",
+        lambda: next(perf_counter_values),
+    )
+    caplog.set_level(logging.INFO, logger="iac_code.services.session_backup")
+
+    with pytest.raises(SessionBackupError, match="unsafe session_id"):
+        SessionBackupService().backup_session(
+            "/repo",
+            "bad id\nsecond=true",
+            reason=BackupReason.PIPELINE_STEP_COMPLETED,
+            critical=True,
+        )
+
+    message = caplog.records[-1].getMessage()
+    assert 'session_id="bad id\\nsecond=true"' in message
+    assert "\nsecond=true" not in message
+    assert "succeeded=false" in message
 
 
 def test_restore_session_copies_backup_only_v2_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -320,6 +320,7 @@ class IacCodeA2APipelineExecutor:
                     provider_config_frozen=self._provider_config_frozen,
                     provider_config_override=self._provider_config_override,
                     effort_override=self._effort_override,
+                    source="a2a-pipeline",
                 )
             )
 
@@ -722,6 +723,7 @@ class IacCodeA2APipelineExecutor:
                     provider_config_frozen=self._provider_config_frozen,
                     provider_config_override=self._provider_config_override,
                     effort_override=self._effort_override,
+                    source="a2a-pipeline",
                 )
             ),
         )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import subprocess
 import sys
@@ -55,6 +56,70 @@ def make_session_entry(session_id: str, cwd: str, name: str | None = None):
         name=name,
         is_legacy=False,
     )
+
+
+def test_repl_log_session_started_records_runtime_parameters(tmp_path, caplog) -> None:
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._session_id = "repl-log"
+    repl._original_cwd = str(tmp_path)
+    repl._agent_loop = SimpleNamespace(max_turns=5)
+    repl._resume_messages = ["one", "two"]
+    repl._mcp_manager = SimpleNamespace(_connections={"server-a": object()})
+    repl.tool_registry = SimpleNamespace(list_tools=lambda: [object(), object()])
+    repl._provider_manager = SimpleNamespace(
+        session_start_settings=lambda: {
+            "provider": "dashscope",
+            "provider_display": "Alibaba Cloud Bailian",
+            "model": "qwen3.6-plus",
+            "effort": "high",
+            "thinking_enabled": True,
+            "thinking_budget": 2048,
+            "max_completion_tokens": 10000,
+            "stream_idle_timeout": 12.5,
+            "endpoint_origin": "https://dashscope.aliyuncs.com",
+            "endpoint_custom": False,
+        }
+    )
+    repl.store = SimpleNamespace(
+        get_state=lambda: SimpleNamespace(permission_context=SimpleNamespace(mode=SimpleNamespace(value="default")))
+    )
+    caplog.set_level(logging.INFO, logger="iac_code.services.session_logging")
+
+    repl.log_session_started()
+
+    assert "Session started" in caplog.text
+    assert "session_id=repl-log" in caplog.text
+    assert "source=repl" in caplog.text
+    assert "provider=dashscope" in caplog.text
+    assert 'provider_display="Alibaba Cloud Bailian"' in caplog.text
+    assert "model=qwen3.6-plus" in caplog.text
+    assert "effort=high" in caplog.text
+    assert "endpoint_origin=https://dashscope.aliyuncs.com" in caplog.text
+    assert "endpoint_custom=false" in caplog.text
+    assert "tool_count=2" in caplog.text
+    assert "mcp_server_count=1" in caplog.text
+    assert "resume_message_count=2" in caplog.text
+
+
+def test_repl_log_session_started_ignores_logging_failure(tmp_path, caplog) -> None:
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._session_id = "repl-log-failure"
+    repl._original_cwd = str(tmp_path)
+    repl._agent_loop = SimpleNamespace(max_turns=5)
+    repl._resume_messages = []
+    repl._mcp_manager = SimpleNamespace(_connections={})
+    repl.tool_registry = SimpleNamespace(list_tools=lambda: [])
+    repl._provider_manager = SimpleNamespace(session_start_settings=Mock(side_effect=RuntimeError("logging failed")))
+    repl.store = SimpleNamespace(
+        get_state=lambda: SimpleNamespace(permission_context=SimpleNamespace(mode=SimpleNamespace(value="default")))
+    )
+    caplog.set_level(logging.INFO, logger="iac_code.services.session_logging")
+
+    repl.log_session_started()
 
 
 def _current_time_line(prompt: str) -> str:

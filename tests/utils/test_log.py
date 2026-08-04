@@ -1,5 +1,7 @@
 """Tests for iac_code.utils.log."""
 
+import logging
+
 from loguru import logger
 
 from iac_code.utils.log import (
@@ -44,6 +46,26 @@ def test_setup_logging_info_level(tmp_path, monkeypatch):
     content = log_file.read_text(encoding="utf-8")
     assert "should be skipped" not in content
     assert "should be present" in content
+
+
+def test_setup_logging_routes_iac_code_stdlib_info_to_loguru_file(tmp_path, monkeypatch):
+    """Session lifecycle loggers use stdlib logging and must reach the configured log file."""
+    monkeypatch.setattr("iac_code.utils.log.get_config_dir", lambda: tmp_path)
+    logger.remove()
+
+    setup_logging(session_id="stdlib-info", debug=False)
+    session_logger = logging.getLogger("iac_code.services.session_logging")
+    backup_logger = logging.getLogger("iac_code.services.session_backup")
+
+    assert session_logger.isEnabledFor(logging.INFO)
+    assert backup_logger.isEnabledFor(logging.INFO)
+    session_logger.info("stdlib session lifecycle message")
+    backup_logger.info("stdlib backup timing message")
+    logger.complete()
+
+    content = (tmp_path / "logs" / "stdlib-info.log").read_text(encoding="utf-8")
+    assert "stdlib session lifecycle message" in content
+    assert "stdlib backup timing message" in content
 
 
 def test_setup_logging_can_mirror_to_stdout(tmp_path, monkeypatch, capsys):

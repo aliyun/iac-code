@@ -1179,6 +1179,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     cwd=cwd,
                     resume_messages=resume_messages,
                     a2a_safe_mode=_a2a_safe_mode_enabled(),
+                    source="a2a",
                 )
             )
 
