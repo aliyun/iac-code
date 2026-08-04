@@ -8,6 +8,7 @@ from iac_code.cli.main import app
 def setup_logging_calls(monkeypatch) -> list[dict]:
     calls: list[dict] = []
     monkeypatch.setattr("iac_code.cli.main.setup_logging", lambda **kwargs: calls.append(kwargs))
+    monkeypatch.setattr("iac_code.web.settings.developer_settings", lambda: {"debug": False})
     return calls
 
 
@@ -26,6 +27,7 @@ def test_web_command_runs_local_server_with_safe_defaults(monkeypatch) -> None:
 
 
 def test_web_command_configures_logging(monkeypatch, setup_logging_calls) -> None:
+    monkeypatch.setattr("iac_code.web.settings.developer_settings", lambda: {"debug": True})
     monkeypatch.setattr("iac_code.web.server.run_web_server", lambda **_kwargs: None)
 
     result = CliRunner().invoke(app, ["web"])
@@ -33,7 +35,7 @@ def test_web_command_configures_logging(monkeypatch, setup_logging_calls) -> Non
     assert result.exit_code == 0
     assert len(setup_logging_calls) == 1
     assert str(setup_logging_calls[0]["session_id"]).startswith("web-server-")
-    assert setup_logging_calls[0]["debug"] is False
+    assert setup_logging_calls[0]["debug"] is True
 
 
 def test_web_command_accepts_host_port_and_open_browser(monkeypatch) -> None:
@@ -84,7 +86,7 @@ def test_web_command_passes_access_token_file(monkeypatch) -> None:
     ]
 
 
-def test_web_command_bootstraps_and_gracefully_shuts_down_telemetry(monkeypatch) -> None:
+def test_web_command_bootstraps_and_gracefully_shuts_down_telemetry(monkeypatch, setup_logging_calls) -> None:
     lifecycle: list[object] = []
 
     monkeypatch.setattr(
@@ -105,6 +107,7 @@ def test_web_command_bootstraps_and_gracefully_shuts_down_telemetry(monkeypatch)
     assert result.exit_code == 0
     assert lifecycle[0][0] == "bootstrap"
     assert str(lifecycle[0][1]).startswith("web-server-")
+    assert setup_logging_calls == [{"session_id": lifecycle[0][1], "debug": False}]
     assert lifecycle[1:] == ["run", "shutdown"]
 
 

@@ -93,8 +93,9 @@ def test_developer_settings_api_enables_debug_with_web_dedup_optin(tmp_path, mon
     captured: list[dict] = []
     monkeypatch.setattr(
         "iac_code.utils.log.enable_debug_at_runtime",
-        lambda session_id="web", **kwargs: captured.append(kwargs),
+        lambda session_id="web", **kwargs: captured.append({"session_id": session_id, **kwargs}),
     )
+    monkeypatch.setattr("iac_code.utils.log.current_log_file", lambda: tmp_path / "web-server-test.log")
     monkeypatch.setattr("iac_code.utils.log.disable_debug_at_runtime", lambda: None)
 
     manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=tmp_path / "project")
@@ -106,7 +107,7 @@ def test_developer_settings_api_enables_debug_with_web_dedup_optin(tmp_path, mon
         )
         assert put.status_code == 200
 
-    assert captured == [{"replace_startup_info_handler": True}]
+    assert captured == [{"session_id": "web-server-test", "replace_startup_info_handler": True}]
 
 
 def test_web_debug_toggle_writes_info_once_and_returns_to_info(tmp_path, monkeypatch):
