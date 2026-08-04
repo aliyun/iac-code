@@ -75,7 +75,57 @@ export function diagramStateBadge(stateStr) {
   return null;
 }
 
-export function createOutputController({ getSessionId, api, onPayload = () => {}, getDiagramState = () => "none" }) {
+// 资源栈控制台 URL(与后端 outputs.build_ros_console_url 一致):region 与 stackId 均非空才生成。
+// 前端 live 进行中栈(普通对话 ros_stack 创建期间)由此补出控制台链接,与服务端派生栈观感一致。
+export function rosConsoleUrl(regionId, stackId) {
+  if (!regionId || !stackId) return null;
+  return `https://ros.console.aliyun.com/${regionId}/stacks/${stackId}`;
+}
+
+// 资源栈去重键(与后端 outputs.add_stack 一致):有栈名用「region::栈名」,否则退回 stackId。
+// live 进行中栈必须用同一套键与服务端权威栈对齐,终态 tool_result 落盘后服务端条目才能覆盖占位。
+function stackDedupKey(stack) {
+  const name = stack?.stackName || "";
+  const region = stack?.regionId || "";
+  return name ? `${region}::${name}` : stack?.stackId || "";
+}
+
+function normalizeLiveStack(stack) {
+  return {
+    stackId: stack.stackId || "",
+    stackName: stack.stackName || "",
+    status: stack.status || "",
+    statusReason: stack.statusReason || "",
+    isSuccess: stack.isSuccess === true,
+    regionId: stack.regionId || "",
+    consoleUrl: stack.consoleUrl || rosConsoleUrl(stack.regionId, stack.stackId),
+  };
+}
+
+// 合并服务端派生栈与 live 进行中栈供面板渲染。服务端为权威(有则以它为准,含终态与 status_reason);
+// live 只补充服务端尚未收录的栈——普通对话 ros_stack 创建期间,后端 outputs_payload 派生不出该栈
+// (无流水线 envelope、终态 tool_result 尚未落盘),面板整个创建过程为空,故用 live 事件态占位。
+// 键一致,终态到达后服务端条目自然取代 live 占位,不重复也不回退。
+export function mergeStacksForDisplay(serverStacks, liveStacks) {
+  const byKey = new Map();
+  for (const stack of serverStacks || []) {
+    byKey.set(stackDedupKey(stack), stack);
+  }
+  for (const stack of liveStacks || []) {
+    const key = stackDedupKey(stack);
+    if (byKey.has(key)) continue;
+    byKey.set(key, normalizeLiveStack(stack));
+  }
+  return [...byKey.values()];
+}
+
+export function createOutputController({
+  getSessionId,
+  api,
+  onPayload = () => {},
+  getDiagramState = () => "none",
+  getLiveStacks = () => [],
+}) {
   const toggle = byShell("output-toggle");
   const countBadge = byShell("output-count");
   const panel = byShell("output-panel");
@@ -194,8 +244,14 @@ export function createOutputController({ getSessionId, api, onPayload = () => {}
     return div;
   }
 
-  function total(payload) {
-    return (payload.stacks?.length || 0) + (payload.files?.length || 0) + (payload.diagrams?.length || 0);
+  // 面板实际展示的资源栈 = 服务端权威栈 + live 进行中栈(合并去重)。renderPanel / total 均以此为准,
+  // 故 live 进行中栈同样计入角标数与自动展开判定,创建一开始面板就带上「创建中」栈。
+  function displayStacks() {
+    return mergeStacksForDisplay(latestPayload.stacks, getLiveStacks());
+  }
+
+  function total() {
+    return displayStacks().length + (latestPayload.files?.length || 0) + (latestPayload.diagrams?.length || 0);
   }
 
   function setOpen(open) {
@@ -204,7 +260,7 @@ export function createOutputController({ getSessionId, api, onPayload = () => {}
   }
 
   function updateToggle() {
-    const count = total(latestPayload);
+    const count = total();
     if (!toggle) return;
     toggle.hidden = count === 0;
     if (countBadge) {
@@ -217,8 +273,9 @@ export function createOutputController({ getSessionId, api, onPayload = () => {}
   function renderPanel() {
     if (!body) return;
     const sections = [];
-    if (latestPayload.stacks?.length) {
-      sections.push(renderSection(t("Resource stacks"), latestPayload.stacks.map(renderStackRow)));
+    const stacks = displayStacks();
+    if (stacks.length) {
+      sections.push(renderSection(t("Resource stacks"), stacks.map(renderStackRow)));
     }
     if (latestPayload.files?.length) {
       sections.push(renderSection(t("Template files"), latestPayload.files.map(renderFileRow)));
@@ -319,7 +376,7 @@ export function createOutputController({ getSessionId, api, onPayload = () => {}
     }
     renderPanel();
     updateToggle();
-    if (total(latestPayload) > 0 && !autoOpenedOnce) {
+    if (total() > 0 && !autoOpenedOnce) {
       autoOpenedOnce = true;
       setOpen(true);
     }

@@ -4,7 +4,7 @@ import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v
 import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v7";
 import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v23";
 import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v51";
-import { createOutputController } from "./components/output_panel.js?v=output-panel-v17";
+import { createOutputController } from "./components/output_panel.js?v=output-panel-v18";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
 import { reduceEvent } from "./events.js?v=web-repl-ui-319";
 import { applyDomI18n, t } from "./i18n.js?v=web-repl-ui-277";
@@ -4629,6 +4629,52 @@ function scheduleOutputsRefresh() {
     outputController?.refresh(state.currentSessionId);
   }, 400);
 }
+
+// 普通对话 ros_stack 创建期间,后端 outputs_payload 派生不出「创建中」栈(无流水线 envelope、
+// 终态 tool_result 尚未落盘),故输出面板在整个创建过程中为空——ros_deploy 走流水线路径由
+// stack_current_changed(进行中态)提前入栈,而 ros_stack 的进行中态只经 live SSE 到达前端。
+// 这里从 live 事件态派生进行中栈,交由 output_panel 与服务端权威栈按「region::栈名」合并(服务端
+// 有则以它为准),让资源栈在创建开始即出现,终态到达后由服务端条目自然取代。两个来源:
+//   1) resource.observed —— CreateStack 返回即到(t0 最早,且 region 可靠);
+//   2) 工具卡 stackProgress —— 每约 5s 轮询一帧,带真实栈状态。
+function liveStacksFromState() {
+  // resource.observed 的 region 可靠(始终为本次操作 region),用作 stackProgress 早期缺 region 时的回退,
+  // 保证两来源落到同一「region::栈名」键、且与服务端键一致(否则终态到达会并出两行而非覆盖)。
+  const regionByStackId = new Map();
+  for (const r of state.resources || []) {
+    if (r?.resourceType === "stack" && r.resourceId && r.regionId) {
+      regionByStackId.set(r.resourceId, r.regionId);
+    }
+  }
+  const keyOf = (region, name, id) => (name ? `${region || ""}::${name}` : id || "");
+  const byKey = new Map();
+  // resource.observed:创建一开始的最早占位(尚无真实状态,创建动作按 CREATE_IN_PROGRESS 记)。
+  for (const r of state.resources || []) {
+    if (r?.resourceType !== "stack" || !r.resourceId) continue;
+    const region = r.regionId || "";
+    byKey.set(keyOf(region, r.resourceName, r.resourceId), {
+      stackId: r.resourceId,
+      stackName: r.resourceName || "",
+      status: r.action === "CreateStack" ? "CREATE_IN_PROGRESS" : "",
+      isSuccess: false,
+      regionId: region,
+    });
+  }
+  // stackProgress:轮询真实状态覆盖占位(同键 last-wins),region 缺失时回退 resource.observed 记录的可靠值。
+  for (const tool of Object.values(state.tools || {})) {
+    const sp = tool?.stackProgress;
+    if (!sp || sp.kind !== "stack.progress" || (!sp.stackId && !sp.stackName)) continue;
+    const region = sp.regionId || regionByStackId.get(sp.stackId) || "";
+    byKey.set(keyOf(region, sp.stackName, sp.stackId), {
+      stackId: sp.stackId || "",
+      stackName: sp.stackName || "",
+      status: sp.status || "",
+      isSuccess: sp.deploymentComplete === true,
+      regionId: region,
+    });
+  }
+  return [...byKey.values()];
+}
 let sessionLoadGeneration = 0;
 let materializedDraftSession = null;
 let draftProjectMenuOpen = false;
@@ -5115,6 +5161,11 @@ async function handleStreamEvent(event, generation = sessionLoadGeneration) {
     if (kind === "stack.progress" || kind === "stack.instances.progress") {
       scheduleOutputsRefresh();
     }
+  }
+  // 普通对话 ros_stack 建栈:CreateStack 返回即发 resource.observed(t0 最早)。刷新输出面板让
+  // liveStacksFromState 派生的「创建中」栈立刻出现(服务端此刻还派生不出该栈),而非等首帧 stack.progress。
+  if (event.type === "resource.observed") {
+    scheduleOutputsRefresh();
   }
   // 合并渲染：高频流式事件下每帧只重建一次正文，避免逐 token 全量重排造成卡顿。
   scheduleStreamRender();
@@ -5789,6 +5840,8 @@ async function start() {
     api,
     // 架构图行/预览头的优化三态(待优化/优化中/已完成),按当前会话事件态计算。
     getDiagramState: (item) => diagramOptimizationState(item, state),
+    // 普通对话 ros_stack 创建期间的 live「创建中」栈,由 output_panel 与服务端权威栈合并去重后渲染。
+    getLiveStacks: liveStacksFromState,
     // /outputs 的架构图落到 state.webDiagrams,供 pipeline step4 候选卡内联折叠图消费;
     // pipeline 视图下触发一次重渲染(与 renderPipelineWorkspace 同一渲染入口)。
     onPayload: (payload) => {

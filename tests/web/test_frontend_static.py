@@ -1163,7 +1163,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-313" in html
-    assert "/static/js/app.js?v=web-repl-ui-321" in html
+    assert "/static/js/app.js?v=web-repl-ui-322" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1197,7 +1197,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-321" in index_html
+    assert "web-repl-ui-322" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-319" in app_source
     assert "./components/workspace.js?v=cloud-creds-v51" in app_source
@@ -9892,7 +9892,7 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-321" in html
+    assert "web-repl-ui-322" in html
     assert "web-repl-ui-319" not in html
 
 
@@ -10134,7 +10134,7 @@ def test_output_panel_module_exists_and_wired() -> None:
     assert "getOutputs" in source
     app_source = _source(APP_JS)
     assert "createOutputController" in app_source
-    assert "output_panel.js?v=output-panel-v17" in app_source
+    assert "output_panel.js?v=output-panel-v18" in app_source
 
 
 def test_output_panel_resets_on_new_session_draft() -> None:
@@ -10192,8 +10192,8 @@ def test_output_preview_and_highlight() -> None:
     assert "File no longer exists" in source
     assert "tok-" in source
     app_source = _source(APP_JS)
-    assert "output_panel.js?v=output-panel-v17" in app_source
-    assert "output_panel.js?v=output-panel-v16" not in app_source
+    assert "output_panel.js?v=output-panel-v18" in app_source
+    assert "output_panel.js?v=output-panel-v17" not in app_source
 
 
 def test_output_preview_tok_css() -> None:
@@ -10384,6 +10384,64 @@ def test_output_panel_refresh_forwards_candidates_to_onpayload(tmp_path: Path) -
     assert result["diagramCount"] == 1
 
 
+def test_output_panel_merges_live_inprogress_stacks(tmp_path: Path) -> None:
+    # 普通对话 ros_stack 创建期间,后端 outputs_payload 派生不出「创建中」栈(无流水线 envelope、
+    # 终态 tool_result 尚未落盘),故服务端 stacks 为空、面板整个创建过程空白。前端须用 live 事件
+    # (resource.observed / stack.progress)派生的进行中栈补进面板,让资源栈在创建开始即出现;
+    # 终态到达后由服务端权威态(相同 region::栈名键)覆盖,不重复也不回退。
+    source = """
+    const { mergeStacksForDisplay, rosConsoleUrl } = await import(__OUTPUT_PANEL_MODULE__);
+
+    // 1) 服务端无栈 → live 进行中栈应显示,并补出控制台链接。
+    const merged1 = mergeStacksForDisplay(
+      [],
+      [{ stackId: "stk-1", stackName: "web", status: "CREATE_IN_PROGRESS", isSuccess: false, regionId: "cn-hangzhou" }],
+    );
+
+    // 2) 键冲突(region::栈名相同)→ 服务端权威终态胜出,不因 live 而重复或回退到进行中。
+    const merged2 = mergeStacksForDisplay(
+      [{
+        stackId: "stk-1", stackName: "web", status: "CREATE_COMPLETE",
+        isSuccess: true, regionId: "cn-hangzhou", consoleUrl: "srv",
+      }],
+      [{ stackId: "stk-1", stackName: "web", status: "CREATE_IN_PROGRESS", isSuccess: false, regionId: "cn-hangzhou" }],
+    );
+
+    console.log(JSON.stringify({
+      len1: merged1.length,
+      status1: merged1[0] && merged1[0].status,
+      url1: merged1[0] && merged1[0].consoleUrl,
+      len2: merged2.length,
+      status2: merged2[0] && merged2[0].status,
+      url2: merged2[0] && merged2[0].consoleUrl,
+      rosUrl: rosConsoleUrl("cn-hangzhou", "stk-9"),
+      rosUrlNull: rosConsoleUrl("", "stk-9"),
+    }));
+    """
+    result = _run_output_panel_script(tmp_path, source)
+    assert result["len1"] == 1
+    assert result["status1"] == "CREATE_IN_PROGRESS"
+    assert result["url1"] == "https://ros.console.aliyun.com/cn-hangzhou/stacks/stk-1"
+    # 服务端权威态覆盖 live 占位,合并后仍只有一行且为终态。
+    assert result["len2"] == 1
+    assert result["status2"] == "CREATE_COMPLETE"
+    assert result["url2"] == "srv"
+    assert result["rosUrl"] == "https://ros.console.aliyun.com/cn-hangzhou/stacks/stk-9"
+    assert result["rosUrlNull"] is None
+
+
+def test_app_wires_live_stacks_into_output_panel() -> None:
+    # app.js 须把「live 进行中栈」派生器接入输出面板,并在 resource.observed(创建一开始)即刷新面板。
+    app_source = _source(APP_JS)
+    assert "getLiveStacks" in app_source
+    assert "liveStacksFromState" in app_source
+    # 两个 live 来源:resource.observed(t0 最早占位)与工具卡 stackProgress(轮询真实状态)。
+    assert "stackProgress" in app_source
+    assert 'resourceType' in app_source
+    # resource.observed 到达即刷新输出面板,让「创建中」栈立即出现,而非等首个 stack.progress(约 5s 后)。
+    assert 'event.type === "resource.observed"' in app_source
+
+
 def test_output_panel_diagram_preview_guard_uses_diagram_id() -> None:
     # 预览陈旧性守卫用唯一 diagramId 作键(重名候选 title 可能相同,无法区分)。
     source = _source(OUTPUT_PANEL_JS)
@@ -10454,8 +10512,8 @@ def test_app_regroups_pipeline_messages_before_render() -> None:
 
 def test_app_output_panel_import_bumped_to_v11() -> None:
     js = _source(APP_JS)
-    assert "output-panel-v17" in js
-    assert "output-panel-v16" not in js
+    assert "output-panel-v18" in js
+    assert "output-panel-v17" not in js
 
 
 def test_appearance_theme_css_blocks_present() -> None:
