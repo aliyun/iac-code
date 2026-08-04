@@ -50,6 +50,7 @@ from iac_code.utils.public_errors import sanitize_strict_text
 
 PipelinePermissionResolver = Callable[[PermissionRequestEvent], bool | Awaitable[bool]]
 PipelineBeforeEnqueueHook = Callable[[dict[str, Any]], bool | Awaitable[bool]]
+PipelineAfterEnqueueHook = Callable[[dict[str, Any]], None | Awaitable[None]]
 PipelineAfterBackupCommitHook = Callable[[dict[str, Any]], None | Awaitable[None]]
 PipelineBackupCommitGate = Callable[[dict[str, Any]], bool]
 logger = logging.getLogger(__name__)
@@ -147,6 +148,7 @@ class PipelineA2AEventPublisher:
         delivery_task_id: str | None = None,
         delivery_context_id: str | None = None,
         before_enqueue: PipelineBeforeEnqueueHook | None = None,
+        after_enqueue: PipelineAfterEnqueueHook | None = None,
         after_backup_commit: PipelineAfterBackupCommitHook | None = None,
         backup_commit_gate: PipelineBackupCommitGate | None = None,
         extreme_performance: bool | None = None,
@@ -161,6 +163,7 @@ class PipelineA2AEventPublisher:
         self.delivery_task_id = delivery_task_id
         self.delivery_context_id = delivery_context_id
         self.before_enqueue = before_enqueue
+        self.after_enqueue = after_enqueue
         self.after_backup_commit = after_backup_commit
         self.backup_commit_gate = backup_commit_gate
         self.flow_monitor = flow_monitor
@@ -715,6 +718,7 @@ class PipelineA2AEventPublisher:
                 await self._forward_local_pipeline_envelope(local_envelope)
             await self._enqueue_status(envelope, wait_for_transport=wait_for_transport)
             self.last_envelope = envelope
+            await self._run_after_enqueue_hook(envelope)
         return True
 
     async def _forward_local_pipeline_envelope(self, local_envelope: dict[str, Any]) -> None:
@@ -761,6 +765,8 @@ class PipelineA2AEventPublisher:
                 pending,
                 wait_for_transport=wait_for_transport,
             )
+            for envelope in deliverable:
+                await self._run_after_enqueue_hook(envelope)
         return frame_count
 
     async def _enqueue_persisted_batches(
@@ -898,6 +904,13 @@ class PipelineA2AEventPublisher:
         if inspect.isawaitable(should_enqueue):
             should_enqueue = await should_enqueue
         return should_enqueue is not False
+
+    async def _run_after_enqueue_hook(self, envelope: dict[str, Any]) -> None:
+        if self.after_enqueue is None:
+            return
+        result = self.after_enqueue(envelope)
+        if inspect.isawaitable(result):
+            await result
 
     async def _run_after_backup_commit_hook(self, envelope: dict[str, Any]) -> None:
         if self.after_backup_commit is None:

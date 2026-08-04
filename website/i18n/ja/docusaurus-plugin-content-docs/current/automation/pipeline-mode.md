@@ -103,4 +103,4 @@ ACP は現在パイプラインモードをサポートしていません。`--p
 
 ## バックアップチェックポイント
 
-Pipeline mode は agent loop step の完了後、および待機状態、`pipeline_handoff_ready`、終端状態を外部へ公開する前に重要バックアップを実行します。重要バックアップが完了できない場合、pipeline は `backup_blocked` を出して復旧可能な状態で停止し、`input_required`、`waiting_input`、`pipeline_handoff_ready`、終端完了を先に公開しません。A2A observer には、terminal と `pipeline_handoff_ready` の保護された publication で、mirror が durable になった時点で `committedEventId`、`committedEventType`、`committedSequence` を含む `backup_committed` event が続きます。`parallel_sub_pipeline` の子 step は兄弟 sub-pipeline が実行中の間は個別にバックアップせず、親チェックポイントで安定した集約状態を保存します。
+Pipeline mode は完了した agent loop step ごとの backup を実行しません。最初に `input_required` または `waiting_input` を公開し、その後で重要 backup を 1 回だけ実行します。失敗時は `backup_blocked` を公開して復旧可能な状態で停止します。`pipeline_handoff_ready` と終端状態は、引き続き公開前の重要 backup で保護されます。A2A observer には、terminal と `pipeline_handoff_ready` の保護された publication で、mirror が durable になった時点で `committedEventId`、`committedEventType`、`committedSequence` を含む `backup_committed` event が続きます。`parallel_sub_pipeline` の進行状況は step ごとではなく、次の待機、handoff、または terminal backup で保存されます。

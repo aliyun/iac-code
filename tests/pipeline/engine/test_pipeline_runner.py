@@ -270,6 +270,7 @@ def _build_two_step_runner(
     mcp_manager=None,
     mcp_config_warnings=None,
     aliyun_delegated_executor_factory=None,
+    surface="repl",
 ):
     (tmp_path / "prompts").mkdir(exist_ok=True)
     (tmp_path / "prompts" / "a.md").write_text("A", encoding="utf-8")
@@ -309,6 +310,7 @@ def _build_two_step_runner(
         mcp_manager=mcp_manager,
         mcp_config_warnings=mcp_config_warnings,
         aliyun_delegated_executor_factory=aliyun_delegated_executor_factory,
+        surface=surface,
     )
 
 
@@ -852,7 +854,7 @@ async def test_pipeline_runner_reemits_initial_mcp_status_on_sidecar_continue_af
 
 
 @pytest.mark.asyncio
-async def test_critical_backup_runs_after_completed_steps_and_terminal(tmp_path):
+async def test_critical_backup_runs_only_at_terminal(tmp_path):
     def assert_terminal_sidecar_saved(reason):
         if reason == BackupReason.TERMINAL:
             assert any(call[0] == "completed" for call in runner.session.calls)
@@ -870,11 +872,7 @@ async def test_critical_backup_runs_after_completed_steps_and_terminal(tmp_path)
 
     events = [event async for event in runner._continue_from_current()]
 
-    assert [call["reason"] for call in backup.calls] == [
-        BackupReason.PIPELINE_STEP_COMPLETED,
-        BackupReason.PIPELINE_STEP_COMPLETED,
-        BackupReason.TERMINAL,
-    ]
+    assert [call["reason"] for call in backup.calls] == [BackupReason.TERMINAL]
     assert all(call["critical"] is True for call in backup.calls)
     assert all(call["cwd"] == str(tmp_path) and call["session_id"] == "test" for call in backup.calls)
     assert any(
@@ -883,7 +881,7 @@ async def test_critical_backup_runs_after_completed_steps_and_terminal(tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_step_complete_metadata_is_appended_before_step_backup(tmp_path):
+async def test_step_complete_metadata_is_appended_before_terminal_backup(tmp_path):
     order: list[str] = []
     backup = RecordingBackupService(order_log=order)
     storage = OrderingSessionStorage(order)
@@ -899,17 +897,15 @@ async def test_step_complete_metadata_is_appended_before_step_backup(tmp_path):
     async for _event in runner._continue_from_current():
         pass
 
-    assert order[:5] == [
+    assert order[:3] == [
         "append:pipeline_step_complete:a",
-        "backup:pipeline_step_completed",
         "append:pipeline_step_complete:b",
-        "backup:pipeline_step_completed",
         "backup:terminal",
     ]
 
 
 @pytest.mark.asyncio
-async def test_rollback_metadata_is_appended_before_rollback_backup(tmp_path):
+async def test_rollback_metadata_is_appended_without_step_backup(tmp_path):
     order: list[str] = []
     backup = RecordingBackupService(order_log=order)
     storage = OrderingSessionStorage(order)
@@ -938,16 +934,13 @@ async def test_rollback_metadata_is_appended_before_rollback_backup(tmp_path):
 
     step_b_meta = order.index("append:pipeline_step_complete:b")
     rollback_meta = order.index("append:pipeline_rollback:b->a")
-    pre_rollback_step_backups = [item for item in order[:rollback_meta] if item == "backup:pipeline_step_completed"]
-    rollback_backup = next(
-        index for index, item in enumerate(order) if index > rollback_meta and item == "backup:pipeline_step_completed"
-    )
-    assert pre_rollback_step_backups == ["backup:pipeline_step_completed"]
-    assert step_b_meta < rollback_meta < rollback_backup
+    terminal_backup = order.index("backup:terminal")
+    assert "backup:pipeline_step_completed" not in order
+    assert step_b_meta < rollback_meta < terminal_backup
 
 
 @pytest.mark.asyncio
-async def test_backup_after_step_records_success_metric(tmp_path):
+async def test_removed_step_backup_does_not_record_success_metric(tmp_path):
     backup = RecordingBackupService(retry_count=1)
     runner = _build_two_step_runner(tmp_path, backup_service=backup)
     runner._observability.backup_succeeded = MagicMock()
@@ -961,19 +954,20 @@ async def test_backup_after_step_records_success_metric(tmp_path):
 
     [event async for event in runner._continue_from_current()]
 
-    assert (
-        call(
-            step_id="a",
-            reason=BackupReason.PIPELINE_STEP_COMPLETED.value,
-            critical=True,
-            retry_count=1,
-        )
-        in runner._observability.backup_succeeded.call_args_list
+    assert call(
+        step_id=None,
+        reason=BackupReason.TERMINAL.value,
+        critical=True,
+        retry_count=1,
+    ) in runner._observability.backup_succeeded.call_args_list
+    assert all(
+        item.kwargs["reason"] != BackupReason.PIPELINE_STEP_COMPLETED.value
+        for item in runner._observability.backup_succeeded.call_args_list
     )
 
 
 @pytest.mark.asyncio
-async def test_backup_blocked_after_step_yields_recoverable_event_without_failed_completion(tmp_path):
+async def test_removed_step_backup_cannot_block_pipeline_completion(tmp_path):
     backup = RecordingBackupService(block_on=BackupReason.PIPELINE_STEP_COMPLETED, retry_count=2)
     runner = _build_two_step_runner(tmp_path, backup_service=backup)
     runner.session = RecordingPipelineSession()
@@ -994,34 +988,19 @@ async def test_backup_blocked_after_step_yields_recoverable_event_without_failed
     blocked_events = [
         event for event in events if isinstance(event, PipelineEvent) and event.type == PipelineEventType.BACKUP_BLOCKED
     ]
-    assert len(blocked_events) == 1
-    assert blocked_events[0].step_id == "a"
-    assert blocked_events[0].data["reason"] == BackupReason.PIPELINE_STEP_COMPLETED.value
-    assert blocked_events[0].data["recoverable"] is True
-    assert "/Users/alice" in blocked_events[0].data["error"]
-    assert "abc123" in blocked_events[0].data["error"]
+    assert blocked_events == []
     assert not any(isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_FAILED for event in events)
-    assert not any(
+    assert any(
         isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
     )
-    runner._observability.step_completed.assert_not_called()
-    runner._observability.funnel_step.assert_not_called()
-    runner._observability.backup_blocked.assert_called_once_with(
-        step_id="a",
-        reason=BackupReason.PIPELINE_STEP_COMPLETED.value,
-        recoverable=True,
-        persisted=True,
-    )
-    runner._observability.backup_failed.assert_called_once_with(
-        step_id="a",
-        reason=BackupReason.PIPELINE_STEP_COMPLETED.value,
-        critical=True,
-        retry_count=2,
-    )
+    assert runner._observability.step_completed.call_count == 2
+    assert runner._observability.funnel_step.call_count == 2
+    runner._observability.backup_blocked.assert_not_called()
+    runner._observability.backup_failed.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_backup_blocked_sidecar_persist_failure_does_not_publish_recoverable_event(tmp_path, caplog):
+async def test_removed_step_backup_does_not_write_backup_blocked_sidecar(tmp_path, caplog):
     backup = RecordingBackupService(block_on=BackupReason.PIPELINE_STEP_COMPLETED)
     runner = _build_two_step_runner(tmp_path, backup_service=backup)
     caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.pipeline_runner")
@@ -1047,37 +1026,20 @@ async def test_backup_blocked_sidecar_persist_failure_does_not_publish_recoverab
         isinstance(event, PipelineEvent) and event.type == PipelineEventType.BACKUP_BLOCKED for event in events
     )
     assert any(
-        isinstance(event, PipelineEvent)
-        and event.type == PipelineEventType.STEP_FAILED
-        and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
-        for event in events
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
     )
-    runner._observability.backup_blocked.assert_called_once_with(
-        step_id="a",
-        reason=BackupReason.PIPELINE_STEP_COMPLETED.value,
-        recoverable=False,
-        persisted=False,
-    )
-    runner._observability.backup_failed.assert_called_once_with(
-        step_id="a",
-        reason=BackupReason.PIPELINE_STEP_COMPLETED.value,
-        critical=True,
-        retry_count=0,
-    )
+    runner._observability.backup_blocked.assert_not_called()
+    runner._observability.backup_failed.assert_not_called()
     messages = [
         record.getMessage()
         for record in caplog.records
         if "Failed to persist pipeline backup_blocked sidecar state" in record.getMessage()
     ]
-    assert messages
-    assert "session_id=" not in messages[0]
-    assert "/mnt/oss" not in messages[0]
-    assert "customer-bucket" not in messages[0]
-    assert "sensitive-session-id" not in messages[0]
+    assert messages == []
 
 
 @pytest.mark.asyncio
-async def test_backup_blocked_missing_sidecar_does_not_publish_recoverable_event(tmp_path):
+async def test_removed_step_backup_does_not_require_sidecar(tmp_path):
     backup = RecordingBackupService(block_on=BackupReason.PIPELINE_STEP_COMPLETED)
     runner = _build_two_step_runner(tmp_path, backup_service=backup)
     runner.session = None
@@ -1097,23 +1059,10 @@ async def test_backup_blocked_missing_sidecar_does_not_publish_recoverable_event
         isinstance(event, PipelineEvent) and event.type == PipelineEventType.BACKUP_BLOCKED for event in events
     )
     assert any(
-        isinstance(event, PipelineEvent)
-        and event.type == PipelineEventType.STEP_FAILED
-        and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
-        for event in events
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
     )
-    runner._observability.backup_blocked.assert_called_once_with(
-        step_id="a",
-        reason=BackupReason.PIPELINE_STEP_COMPLETED.value,
-        recoverable=False,
-        persisted=False,
-    )
-    runner._observability.backup_failed.assert_called_once_with(
-        step_id="a",
-        reason=BackupReason.PIPELINE_STEP_COMPLETED.value,
-        critical=True,
-        retry_count=0,
-    )
+    runner._observability.backup_blocked.assert_not_called()
+    runner._observability.backup_failed.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1150,8 +1099,8 @@ async def test_terminal_backup_blocked_stops_before_pipeline_completed_event(tmp
 
 
 @pytest.mark.asyncio
-async def test_input_required_backup_blocks_before_user_input_required_event(tmp_path):
-    backup = RecordingBackupService(block_on=BackupReason.INPUT_REQUIRED)
+async def test_non_a2a_runner_backs_up_before_emitting_user_input_required(tmp_path):
+    backup = RecordingBackupService()
     runner = _build_two_step_runner(tmp_path, auto_advance_first=False, backup_service=backup)
     runner.session = RecordingPipelineSession()
     runner._observability.user_input_required = MagicMock()
@@ -1166,26 +1115,64 @@ async def test_input_required_backup_blocks_before_user_input_required_event(tmp
 
     events = [event async for event in runner._continue_from_current()]
 
-    assert [call["reason"] for call in backup.calls] == [
-        BackupReason.PIPELINE_STEP_COMPLETED,
-        BackupReason.INPUT_REQUIRED,
-    ]
+    assert [backup_call["reason"] for backup_call in backup.calls] == [BackupReason.INPUT_REQUIRED]
     blocked_events = [
         event for event in events if isinstance(event, PipelineEvent) and event.type == PipelineEventType.BACKUP_BLOCKED
     ]
-    assert len(blocked_events) == 1
-    assert blocked_events[0].step_id == "a"
-    assert blocked_events[0].data["reason"] == BackupReason.INPUT_REQUIRED.value
-    assert not any(
+    assert blocked_events == []
+    assert any(
         isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_REQUIRED for event in events
     )
-    runner._observability.user_input_required.assert_not_called()
-    assert not any(
+    runner._observability.user_input_required.assert_called_once()
+    assert any(
         call.kwargs.get("status") == "waiting_input" for call in runner._observability.funnel_step.call_args_list
     )
     assert not any(
         isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
     )
+
+
+@pytest.mark.asyncio
+async def test_a2a_runner_defers_user_input_required_backup_to_publisher(tmp_path):
+    backup = RecordingBackupService(block_on=BackupReason.INPUT_REQUIRED)
+    runner = _build_two_step_runner(
+        tmp_path,
+        auto_advance_first=False,
+        backup_service=backup,
+        surface="a2a",
+    )
+    runner.session = RecordingPipelineSession()
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        conclusion = {"user_prompt": "choose", "options": ["one"]}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    assert backup.calls == []
+    assert any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_REQUIRED for event in events
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("surface", "expected_reasons"), [("repl", [BackupReason.INPUT_REQUIRED]), ("a2a", [])])
+async def test_interrupt_pause_backup_is_deferred_only_for_a2a(tmp_path, surface, expected_reasons):
+    from iac_code.pipeline.engine.interrupt import InterruptVerdict
+
+    backup = RecordingBackupService()
+    runner = _build_two_step_runner(tmp_path, backup_service=backup, surface=surface)
+    runner.session = RecordingPipelineSession()
+
+    event = await runner.save_interrupt_pause(
+        InterruptVerdict(action="continue", reason="judge failed", paused=True)
+    )
+
+    assert event.type == PipelineEventType.USER_INPUT_REQUIRED
+    assert [backup_call["reason"] for backup_call in backup.calls] == expected_reasons
 
 
 @pytest.mark.asyncio
@@ -2446,7 +2433,7 @@ class TestPipelineRunnerContextDeps:
 
 class TestParallelSubPipelineStep:
     @pytest.mark.asyncio
-    async def test_sub_pipeline_backup_blocked_surfaces_as_parent_backup_blocked(self, tmp_path, monkeypatch):
+    async def test_parallel_step_does_not_run_step_backup(self, tmp_path, monkeypatch):
         backup = RecordingBackupService(block_on=BackupReason.PIPELINE_STEP_COMPLETED)
         runner = _build_parallel_runner(tmp_path, backup_service=backup)
         runner.session = RecordingPipelineSession()
@@ -2471,9 +2458,8 @@ class TestParallelSubPipelineStep:
             for event in events
             if isinstance(event, PipelineEvent) and event.type == PipelineEventType.BACKUP_BLOCKED
         ]
-        assert len(blocked_events) == 1
-        assert blocked_events[0].step_id == "eval"
-        assert blocked_events[0].data["reason"] == BackupReason.PIPELINE_STEP_COMPLETED.value
+        assert blocked_events == []
+        assert all(call["reason"] != BackupReason.PIPELINE_STEP_COMPLETED for call in backup.calls)
         assert not any(
             isinstance(event, PipelineEvent)
             and event.type in {PipelineEventType.SUB_STEP_FAILED, PipelineEventType.STEP_FAILED}

@@ -309,6 +309,23 @@ async def test_publish_serializes_delivery_while_before_enqueue_waits(tmp_path: 
 
 
 @pytest.mark.asyncio
+async def test_publish_runs_after_enqueue_hook_after_delivery(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+    seen: list[str] = []
+
+    async def after_enqueue(envelope: dict[str, Any]) -> None:
+        pipeline_events = [dump(event)["metadata"]["iac_code"]["pipeline"] for event in queue.events]
+        assert pipeline_events[-1]["eventId"] == envelope["eventId"]
+        seen.append(str(envelope["eventType"]))
+
+    publisher.after_enqueue = after_enqueue
+
+    await publisher.publish_manual("input_required", "pipeline", status="input_required")
+
+    assert seen == ["input_required"]
+
+
+@pytest.mark.asyncio
 async def test_publish_rebuilds_missing_snapshot_from_journal_history(tmp_path: Path) -> None:
     publisher, _queue = _publisher(tmp_path)
     await publisher.publish(TextDeltaEvent(text="hello"))

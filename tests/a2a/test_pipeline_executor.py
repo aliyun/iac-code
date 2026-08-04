@@ -2915,7 +2915,7 @@ async def test_executor_publishes_normal_handoff_ready_after_failed_pipeline_whe
 
 
 @pytest.mark.asyncio
-async def test_pipeline_executor_runs_critical_backup_before_input_required_publication(
+async def test_pipeline_executor_runs_critical_backup_after_input_required_publication(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -2933,13 +2933,19 @@ async def test_pipeline_executor_runs_critical_backup_before_input_required_publ
     )
     monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: fake_pipeline)
     monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+    queue = FakeEventQueue()
+
+    def assert_input_required_published(reason: BackupReason) -> None:
+        if reason == BackupReason.INPUT_REQUIRED:
+            assert _pipeline_status_events(queue)[-1]["eventType"] == "input_required"
+
     backup_service = RecordingBackupService(
         expected_task_states={BackupReason.INPUT_REQUIRED: "input-required"},
+        on_backup=assert_input_required_published,
     )
 
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
     executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus", backup_service=backup_service)
-    queue = FakeEventQueue()
 
     await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
 
@@ -3057,7 +3063,7 @@ async def test_pipeline_executor_runs_critical_backups_for_terminal_and_handoff_
 
 
 @pytest.mark.asyncio
-async def test_pipeline_backup_blocked_before_input_required_publishes_recoverable_state(
+async def test_pipeline_backup_blocked_after_input_required_publishes_recoverable_state(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -3091,8 +3097,8 @@ async def test_pipeline_backup_blocked_before_input_required_publishes_recoverab
     await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
 
     pipeline_events = _pipeline_status_events(queue)
-    assert [event["eventType"] for event in pipeline_events] == ["backup_blocked"]
-    blocked = pipeline_events[0]
+    assert [event["eventType"] for event in pipeline_events] == ["input_required", "backup_blocked"]
+    blocked = pipeline_events[1]
     assert blocked["status"] == "input_required"
     assert blocked["data"]["reason"] == "input_required"
     assert blocked["data"]["recoverable"] is True
@@ -3151,7 +3157,7 @@ async def test_pipeline_backup_blocked_sidecar_persist_failure_is_not_reported_r
 
     await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
 
-    assert [event["eventType"] for event in _pipeline_status_events(queue)] == []
+    assert [event["eventType"] for event in _pipeline_status_events(queue)] == ["input_required"]
     record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
     assert record.state == "input-required"
     assert fake_pipeline.sidecar_status is None
