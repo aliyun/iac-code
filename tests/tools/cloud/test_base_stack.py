@@ -44,6 +44,7 @@ class MockCloudStack(BaseCloudStack):
                 status="CREATE_COMPLETE",
                 status_reason="Completed",
                 progress_percentage=100,
+                outputs={"PublicUrl": "http://203.0.113.10:8766", "WebAccessToken": "test-token"},
             )
         return StackStatus(
             stack_id=stack_id,
@@ -199,6 +200,10 @@ class TestBaseCloudStackExecute:
         data = json.loads(result.content)
         assert data["stack_id"] == "stack-id-123"
         assert data["status"] == "CREATE_COMPLETE"
+        assert data["outputs"] == {
+            "PublicUrl": "http://203.0.113.10:8766",
+            "WebAccessToken": "test-token",
+        }
 
     @pytest.mark.asyncio
     async def test_execute_emits_progress_events_to_queue(self, stack: MockCloudStack) -> None:

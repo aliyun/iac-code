@@ -127,6 +127,7 @@ conclusion_schema:
 - `ros_deploy` 的 `create` 会使用 `DisableRollback: true`
 - `ros_deploy` 的 `wait` 只等待已有 Stack 创建完成，不发起创建、继续创建、删除或更新
 - `ros_deploy` 的创建类动作使用装配后的 `parameters` 字典；不要手动展开为 `Parameters.N.ParameterKey`
+- `ros_deploy` 成功结果包含 `outputs` 时，将其原样写入 `complete_step.conclusion.outputs`；不得使用模板表达式、占位符或推断值代替真实 Stack Outputs
 
 > **template_url 支持本地文件路径**：`ros_deploy` 的创建类动作中，`template_url` 可传当前工作目录内的本地文件路径（如 `./template.yml`），工具会自动读取文件内容。避免将大模板内容直接作为参数传递。
 

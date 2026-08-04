@@ -42,6 +42,26 @@ def test_user_id_persists_to_settings_yml(settings_path):
     assert data["userID"] == user_id
 
 
+def test_user_id_accepts_aliyun_main_account_id(settings_path):
+    account_id = "1234567890123456"
+    settings_path.write_text(yaml.safe_dump({"userID": account_id}), encoding="utf-8")
+
+    identity = Identity(settings_path)
+
+    assert identity.get_user_id() == account_id
+    assert identity.was_first_run() is False
+
+
+@pytest.mark.parametrize("invalid", ["123", "123456789012345x", "arbitrary-user-id"])
+def test_user_id_replaces_noncanonical_custom_values(settings_path, invalid):
+    settings_path.write_text(yaml.safe_dump({"userID": invalid}), encoding="utf-8")
+
+    user_id = Identity(settings_path).get_user_id()
+
+    assert user_id.startswith(USER_ID_PREFIX)
+    assert user_id != invalid
+
+
 def test_user_id_regenerated_after_file_delete(settings_path):
     first = Identity(settings_path).get_user_id()
     settings_path.unlink()

@@ -1,3 +1,10 @@
+import {
+  bytesToObjectUrl,
+  isTokenMode,
+  requestAuthorizationCode,
+  tokenFetch,
+} from "./token_transport.js?v=token-transport-v3";
+
 export const WEB_EVENT_TYPES = [
   "session.started",
   "session.updated",
@@ -62,7 +69,7 @@ async function jsonFetch(url, options = {}) {
     ...(options.body === undefined ? {} : { "Content-Type": "application/json" }),
     ...(options.headers || {}),
   };
-  const response = await fetch(url, { cache: "no-store", ...options, headers });
+  const response = await tokenFetch(url, { cache: "no-store", ...options, headers });
   const contentType = response.headers.get("content-type") || "";
   let payload = "";
   try {
@@ -303,15 +310,44 @@ export function saveAliyunCloud({
   });
 }
 
-export function oauthLoginAliyun({ site = "", region = "" } = {}) {
+export function oauthLoginAliyun({ site = "", region = "", signal } = {}) {
   const payload = { site };
   if (region) {
     payload.region = region;
   }
-  return jsonFetch("/api/cloud/aliyun/oauth-login", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  if (!isTokenMode()) {
+    return jsonFetch("/api/cloud/aliyun/oauth-login", {
+      method: "POST",
+      signal,
+      body: JSON.stringify(payload),
+    });
+  }
+  return (async () => {
+    const authorizationWindow = window.open("about:blank", "_blank");
+    try {
+      const started = await jsonFetch("/api/cloud/aliyun/oauth-start", {
+        method: "POST",
+        signal,
+        body: JSON.stringify(payload),
+      });
+      if (authorizationWindow) {
+        authorizationWindow.location.replace(started.authorizationUrl);
+      } else {
+        window.open(started.authorizationUrl, "_blank", "noopener,noreferrer");
+      }
+      const callback = await requestAuthorizationCode({ signal });
+      const completed = await jsonFetch("/api/cloud/aliyun/oauth-complete", {
+        method: "POST",
+        signal,
+        body: JSON.stringify({ flowId: started.flowId, callback }),
+      });
+      authorizationWindow?.close();
+      return completed;
+    } catch (error) {
+      authorizationWindow?.close();
+      throw error;
+    }
+  })();
 }
 
 export function getMemory({ sessionId = "", cwd = "" } = {}) {
@@ -403,11 +439,11 @@ export function getReviewStepPrerequisite() {
 
 // 触发 infraguard 安装,逐行读取 NDJSON 进度事件并回调 onEvent。
 export async function installReviewStepPrerequisite(onEvent) {
-  const response = await fetch("/api/settings/pipeline-review-step/install", {
+  const response = await tokenFetch("/api/settings/pipeline-review-step/install", {
     method: "POST",
     cache: "no-store",
     headers: { Accept: "application/x-ndjson" },
-  });
+  }, { stream: true });
   if (!response.ok) {
     let message = `Request failed with ${response.status}`;
     try {
@@ -724,9 +760,28 @@ function base64FromBytes(bytes) {
   return btoa(binary);
 }
 
+const imageObjectUrls = new Map();
+
+export async function getImageObjectUrl(imageId, sessionId) {
+  const path = `/api/images/${encodeURIComponent(imageId)}?sessionId=${encodeURIComponent(sessionId)}`;
+  if (!isTokenMode()) return path;
+  if (!imageObjectUrls.has(path)) {
+    const pending = (async () => {
+      const response = await tokenFetch(path, { cache: "no-store", headers: { Accept: "image/*" } });
+      if (!response.ok) throw new Error(`Request failed with ${response.status}`);
+      return bytesToObjectUrl(new Uint8Array(await response.arrayBuffer()), response.headers.get("content-type"));
+    })();
+    pending.catch(() => imageObjectUrls.delete(path));
+    imageObjectUrls.set(path, pending);
+  }
+  return imageObjectUrls.get(path);
+}
+
+export { isTokenMode };
+
 export async function uploadImage(sessionId, file) {
   const bytes = new Uint8Array(await file.arrayBuffer());
-  return jsonFetch(sessionUrl(sessionId, "/images"), {
+  const uploaded = await jsonFetch(sessionUrl(sessionId, "/images"), {
     method: "POST",
     body: JSON.stringify({
       name: file.name || "image",
@@ -734,6 +789,10 @@ export async function uploadImage(sessionId, file) {
       data: base64FromBytes(bytes),
     }),
   });
+  if (isTokenMode() && uploaded?.imageId) {
+    uploaded.previewUrl = await getImageObjectUrl(uploaded.imageId, sessionId);
+  }
+  return uploaded;
 }
 
 export function postMessage(sessionId, { text = "", imageIds = [], fileRefs = [] } = {}) {
@@ -845,6 +904,10 @@ export function openEventStream(sessionId, afterSequence = 0, onEvent = () => {}
     url.searchParams.set("afterSequence", String(afterSequence));
   }
 
+  if (isTokenMode()) {
+    return openEncryptedEventStream(url, sessionId, afterSequence, onEvent);
+  }
+
   const source = new EventSource(url.toString());
   const handlers = new Map();
 
@@ -927,4 +990,75 @@ export function openEventStream(sessionId, afterSequence = 0, onEvent = () => {}
       source.close();
     },
   };
+}
+
+function openEncryptedEventStream(url, sessionId, afterSequence, onEvent) {
+  let closed = false;
+  let cursor = afterSequence;
+  let abortController = null;
+  const source = {
+    close() {
+      closed = true;
+      abortController?.abort();
+    },
+  };
+
+  const dispatchEvent = (event, { synthetic = false } = {}) => {
+    if (Number.isFinite(event?.sequence) && event.sequence > cursor) cursor = event.sequence;
+    Promise.resolve(onEvent(event, source)).catch((error) => {
+      if (!synthetic) {
+        dispatchEvent({
+          type: "error",
+          sequence: 0,
+          sessionId,
+          payload: { message: error instanceof Error ? error.message : String(error), sourceEventType: event.type },
+        }, { synthetic: true });
+      }
+    });
+  };
+
+  const connect = async () => {
+    while (!closed) {
+      abortController = new AbortController();
+      const target = new URL(url.toString());
+      if (cursor > 0) target.searchParams.set("afterSequence", String(cursor));
+      try {
+        const response = await tokenFetch(target.toString(), {
+          cache: "no-store",
+          headers: { Accept: "text/event-stream" },
+          signal: abortController.signal,
+        }, { stream: true });
+        if (!response.ok) throw new Error(`Request failed with ${response.status}`);
+        dispatchEvent({ type: "stream.connected", sequence: 0, sessionId, payload: {} }, { synthetic: true });
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error("Event stream has no response body");
+        const streamDecoder = new TextDecoder();
+        let buffer = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          buffer += streamDecoder.decode(value || new Uint8Array(), { stream: !done });
+          let boundary = buffer.indexOf("\n\n");
+          while (boundary !== -1) {
+            const block = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            const data = block.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
+            if (data) dispatchEvent(JSON.parse(data));
+            boundary = buffer.indexOf("\n\n");
+          }
+          if (done) break;
+        }
+      } catch (error) {
+        if (closed || error?.name === "AbortError") return;
+        dispatchEvent({
+          type: "stream.disconnected",
+          sequence: 0,
+          sessionId,
+          payload: { message: error instanceof Error ? error.message : "Event stream disconnected" },
+        }, { synthetic: true });
+      }
+      if (!closed) await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  };
+  void connect();
+  return { source, close: source.close };
 }

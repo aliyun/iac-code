@@ -104,6 +104,7 @@ def create_app(
     shell_runner_factory: WebShellRunnerFactory | None = None,
     pipeline_action_runner_factory: WebPipelineActionRunnerFactory | None = None,
     expose_local_paths: bool = False,
+    token_mode: bool = False,
 ) -> Any:
     """Create the loopback-only Web workbench without generic user-data redaction.
 
@@ -195,6 +196,7 @@ def create_app(
         compute_replay_sequence,
     )
     from iac_code.web.settings import (
+        AliyunOAuthManualFlowStore,
         aliyun_cloud_summary,
         clear_provider_config,
         developer_settings,
@@ -233,6 +235,7 @@ def create_app(
     command_dispatcher = WebCommandDispatcher(manager)
     shell_runner = make_shell_runner()
     pipeline_action_runner = make_pipeline_action_runner()
+    aliyun_oauth_manual_flows = AliyunOAuthManualFlowStore() if token_mode else None
     init_bundled_skills()
 
     # Set once app-wide shutdown begins so follow-up work (e.g. post-stop queue
@@ -1844,10 +1847,11 @@ def create_app(
         defaults = get_session_defaults()
         html = html.replace(
             "<body>",
-            '<body data-default-permission-mode="{}" data-default-mode="{}" data-default-pipeline-name="{}">'.format(
+            '<body data-default-permission-mode="{}" data-default-mode="{}" data-default-pipeline-name="{}"{}>'.format(
                 escape(defaults["permissionMode"], quote=True),
                 escape(defaults["mode"], quote=True),
                 escape(defaults["pipelineName"], quote=True),
+                ' data-token-mode="true"' if token_mode else "",
             ),
             1,
         )
@@ -3179,6 +3183,26 @@ def create_app(
         try:
             data = await json_object_body(request)
             payload = await run_in_threadpool(login_aliyun_oauth, data)
+        except ValueError as exc:
+            return json_error(str(exc), 400)
+        return JSONResponse(payload)
+
+    async def post_cloud_aliyun_oauth_start(request):
+        if aliyun_oauth_manual_flows is None:
+            return json_error(_("not found"), 404)
+        try:
+            data = await json_object_body(request)
+            payload = aliyun_oauth_manual_flows.start(data)
+        except ValueError as exc:
+            return json_error(str(exc), 400)
+        return JSONResponse(payload)
+
+    async def post_cloud_aliyun_oauth_complete(request):
+        if aliyun_oauth_manual_flows is None:
+            return json_error(_("not found"), 404)
+        try:
+            data = await json_object_body(request)
+            payload = await run_in_threadpool(aliyun_oauth_manual_flows.complete, data)
         except ValueError as exc:
             return json_error(str(exc), 400)
         return JSONResponse(payload)
@@ -4720,7 +4744,14 @@ def create_app(
             Route("/api/providers/active", put_active_provider, methods=["PUT"]),
             Route("/api/cloud/aliyun", get_cloud_aliyun, methods=["GET"]),
             Route("/api/cloud/aliyun", put_cloud_aliyun, methods=["PUT"]),
-            Route("/api/cloud/aliyun/oauth-login", post_cloud_aliyun_oauth_login, methods=["POST"]),
+            *(
+                [
+                    Route("/api/cloud/aliyun/oauth-start", post_cloud_aliyun_oauth_start, methods=["POST"]),
+                    Route("/api/cloud/aliyun/oauth-complete", post_cloud_aliyun_oauth_complete, methods=["POST"]),
+                ]
+                if token_mode
+                else [Route("/api/cloud/aliyun/oauth-login", post_cloud_aliyun_oauth_login, methods=["POST"])]
+            ),
             Route("/api/suggestions", get_suggestions, methods=["GET"]),
             Route("/api/memory", get_memory, methods=["GET"]),
             Route("/api/memory/projects", get_memory_projects, methods=["GET"]),

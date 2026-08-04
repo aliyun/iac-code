@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import os
+import secrets
+import threading
+import time
+from dataclasses import dataclass
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from iac_code.config import (
     _LEGACY_KEY_NAME_ALIASES,
@@ -22,7 +27,14 @@ from iac_code.pipeline.config import is_selling_review_step_enabled, save_sellin
 from iac_code.providers.registry import PROVIDER_GROUPS, PROVIDER_REGISTRY, ProviderDescriptor
 from iac_code.providers.thinking import get_thinking_spec, normalize_effort, resolve_thinking_active
 from iac_code.services.providers.aliyun import CREDENTIAL_MODES, DEFAULT_REGION, AliyunCredential, AliyunCredentials
-from iac_code.services.providers.aliyun_oauth import AliyunOAuthError, run_browser_oauth_flow
+from iac_code.services.providers.aliyun_oauth import (
+    AliyunOAuthError,
+    OAuthAuthorization,
+    create_oauth_authorization,
+    exchange_oauth_authorization_code,
+    fixed_manual_redirect_uri,
+    run_browser_oauth_flow,
+)
 from iac_code.types.permissions import PermissionMode
 
 _FOREIGN_SESSIONS_SETTINGS_KEY = "foreignSessions"
@@ -608,22 +620,9 @@ def save_aliyun_cloud(data: dict[str, Any]) -> dict[str, Any]:
     return _aliyun_summary(credential)
 
 
-def login_aliyun_oauth(data: dict[str, Any]) -> dict[str, Any]:
-    """Run the browser OAuth flow, persist the credential, and return its summary.
-
-    The blocking browser flow is expected to be dispatched to a threadpool by the
-    caller. Invalid input or a failed flow surfaces as a ``ValueError``.
-    """
-    site = _required_string(data, "site", "siteType", "oauthSiteType")
-    region = _optional_string(data, "region", "regionId") or ""
+def _save_aliyun_oauth_token(site: str, region: str, token: Any) -> dict[str, Any]:
     existing = AliyunCredentials.load()
-    # AliyunCredentials.load() returns None when nothing is configured, so guard
-    # before dereferencing region_id.
     existing_region = existing.region_id if existing is not None else ""
-    try:
-        token = run_browser_oauth_flow(site)
-    except AliyunOAuthError as exc:
-        raise ValueError(str(exc)) from exc
     credential = AliyunCredential(
         mode="OAuth",
         oauth_site_type=site,
@@ -639,6 +638,93 @@ def login_aliyun_oauth(data: dict[str, Any]) -> dict[str, Any]:
         pass
     AliyunCredentials.save(credential)
     return _aliyun_summary(credential)
+
+
+def login_aliyun_oauth(data: dict[str, Any]) -> dict[str, Any]:
+    """Run the existing loopback browser flow and persist its credential."""
+    site = _required_string(data, "site", "siteType", "oauthSiteType")
+    region = _optional_string(data, "region", "regionId") or ""
+    try:
+        token = run_browser_oauth_flow(site)
+    except AliyunOAuthError as exc:
+        raise ValueError(str(exc)) from exc
+    return _save_aliyun_oauth_token(site, region, token)
+
+
+@dataclass(frozen=True)
+class _ManualAliyunOAuthFlow:
+    authorization: OAuthAuthorization
+    region: str
+    expires_at: float
+
+
+class AliyunOAuthManualFlowStore:
+    """Short-lived in-memory PKCE flows for token-mode manual completion."""
+
+    def __init__(self, *, ttl_seconds: int = 300, clock: Any = time.time) -> None:
+        self._ttl_seconds = ttl_seconds
+        self._clock = clock
+        self._flows: dict[str, _ManualAliyunOAuthFlow] = {}
+        self._lock = threading.Lock()
+
+    def start(self, data: dict[str, Any]) -> dict[str, Any]:
+        site = _required_string(data, "site", "siteType", "oauthSiteType")
+        region = _optional_string(data, "region", "regionId") or ""
+        authorization = create_oauth_authorization(site, fixed_manual_redirect_uri())
+        flow_id = secrets.token_urlsafe(24)
+        expires_at = float(self._clock()) + self._ttl_seconds
+        with self._lock:
+            self._remove_expired(float(self._clock()))
+            self._flows[flow_id] = _ManualAliyunOAuthFlow(authorization, region, expires_at)
+        return {
+            "flowId": flow_id,
+            "authorizationUrl": authorization.authorization_url,
+            "expiresAt": int(expires_at),
+        }
+
+    def complete(self, data: dict[str, Any]) -> dict[str, Any]:
+        flow_id = _required_string(data, "flowId")
+        submitted = _required_string(data, "callback", "callbackUrl", "authorizationCode", "code").strip()
+        now = float(self._clock())
+        with self._lock:
+            self._remove_expired(now)
+            flow = self._flows.pop(flow_id, None)
+        if flow is None or flow.expires_at <= now:
+            raise ValueError(_("OAuth authorization flow is invalid or expired."))
+        code = self._authorization_code(flow.authorization, submitted)
+        try:
+            token = exchange_oauth_authorization_code(flow.authorization, code)
+        except AliyunOAuthError as exc:
+            raise ValueError(str(exc)) from exc
+        return _save_aliyun_oauth_token(flow.authorization.site_type, flow.region, token)
+
+    def _remove_expired(self, now: float) -> None:
+        for flow_id in [key for key, value in self._flows.items() if value.expires_at <= now]:
+            self._flows.pop(flow_id, None)
+
+    @staticmethod
+    def _authorization_code(authorization: OAuthAuthorization, submitted: str) -> str:
+        if not submitted:
+            raise ValueError(_("Authorization code is required."))
+        if "://" not in submitted:
+            return submitted
+        parsed = urlparse(submitted)
+        expected = urlparse(authorization.redirect_uri)
+        if (
+            parsed.scheme != expected.scheme
+            or parsed.hostname != expected.hostname
+            or parsed.port != expected.port
+            or parsed.path != expected.path
+        ):
+            raise ValueError(_("OAuth callback URL does not match the authorization flow."))
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        states = query.get("state", [])
+        codes = query.get("code", [])
+        if len(states) != 1 or not secrets.compare_digest(states[0], authorization.state):
+            raise ValueError(_("OAuth callback state is invalid."))
+        if len(codes) != 1 or not codes[0]:
+            raise ValueError(_("Authorization code is required."))
+        return codes[0]
 
 
 def _provider_payload(

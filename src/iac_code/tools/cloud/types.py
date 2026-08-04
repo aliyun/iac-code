@@ -65,6 +65,7 @@ class StackStatus:
     status: str
     status_reason: str
     progress_percentage: float
+    outputs: dict[str, object] | None = None
 
     @property
     def is_terminal(self) -> bool:

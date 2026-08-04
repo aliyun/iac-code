@@ -303,6 +303,99 @@ h3 {
   color: var(--danger);
 }
 
+.token-access-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: color-mix(in srgb, var(--codex-bg) 78%, transparent);
+}
+
+.token-access-dialog {
+  width: min(28rem, 100%);
+  padding: 1.35rem;
+  border: 1px solid var(--codex-border-strong);
+  border-radius: 14px;
+  background: var(--codex-panel-raised);
+  color: var(--codex-text);
+  box-shadow: var(--codex-shadow);
+}
+
+.token-access-dialog h1 {
+  margin: 0 0 0.55rem;
+  color: var(--codex-text);
+  font-size: 1.15rem;
+}
+
+.token-access-description {
+  margin: 0 0 1rem;
+  color: var(--codex-muted);
+  line-height: 1.45;
+}
+
+.token-access-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.token-access-input {
+  width: 100%;
+  padding: 0.72rem 0.8rem;
+  border: 1px solid var(--codex-border);
+  border-radius: 9px;
+  outline: 0;
+  background: color-mix(in srgb, var(--codex-ink) 6%, transparent);
+  color: var(--codex-text);
+  caret-color: var(--codex-text);
+  font: inherit;
+}
+
+.token-access-input::placeholder {
+  color: var(--codex-subtle);
+}
+
+.token-access-input:focus {
+  border-color: var(--codex-border-strong);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--codex-ink) 24%, transparent);
+}
+
+.token-access-error {
+  min-height: 1.2rem;
+  color: var(--danger);
+  font-size: 0.82rem;
+}
+
+.token-access-submit {
+  justify-self: end;
+  padding: 0.58rem 1rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--codex-text);
+  color: var(--codex-bg);
+  font-weight: 700;
+}
+
+.oauth-code-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.oauth-code-cancel {
+  padding: 0.58rem 1rem;
+  border: 1px solid var(--codex-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--codex-ink) 7%, transparent);
+  color: var(--codex-text);
+  font-weight: 650;
+}
+
+.oauth-code-cancel:hover {
+  background: var(--codex-hover);
+}
+
 .message-stack {
   display: grid;
   align-content: start;

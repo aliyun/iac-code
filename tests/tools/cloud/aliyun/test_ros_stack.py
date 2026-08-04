@@ -340,6 +340,10 @@ class TestRosStackExecute:
             "StackName": "test",
             "Status": "CREATE_COMPLETE",
             "StatusReason": "",
+            "Outputs": [
+                {"OutputKey": "PublicUrl", "OutputValue": "http://203.0.113.10:8766"},
+                {"OutputKey": "WebAccessToken", "OutputValue": "test-token"},
+            ],
         }
         mock_client.get_stack.return_value = get_stack_response
 
@@ -375,6 +379,11 @@ class TestRosStackExecute:
             )
 
         assert result.is_error is False
+        result_data = json.loads(result.content)
+        assert result_data["outputs"] == {
+            "PublicUrl": "http://203.0.113.10:8766",
+            "WebAccessToken": "test-token",
+        }
         mock_client.create_stack.assert_called_once()
         mock_client.get_stack.assert_called()
         mock_client.list_stack_resources.assert_called()

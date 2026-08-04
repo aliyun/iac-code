@@ -677,6 +677,10 @@ msgid "HTTP server port"
 msgstr "HTTP 服务器端口"
 
 #: src/iac_code/cli/main.py
+msgid "Enable encrypted public access using the token stored in this file."
+msgstr "使用此文件中保存的 Token 启用加密公网访问。"
+
+#: src/iac_code/cli/main.py
 msgid ""
 "Open the Web app in the default browser on startup (use --no-open to "
 "disable)."
@@ -10930,6 +10934,10 @@ msgid "Press Ctrl+C to stop"
 msgstr "按 Ctrl+C 停止"
 
 #: src/iac_code/web/server.py
+msgid "Token mode requires an IP address as the HTTP server host."
+msgstr "Token 模式要求 HTTP 服务器主机为 IP 地址。"
+
+#: src/iac_code/web/server.py
 msgid ""
 "Web server dependencies are missing. Install with: pip install 'iac-"
 "code[http]'"
@@ -11000,6 +11008,22 @@ msgstr "未知的伙伴来源"
 #: src/iac_code/web/settings.py
 msgid "unknown aliyun credential mode"
 msgstr "未知的阿里云凭证模式"
+
+#: src/iac_code/web/settings.py
+msgid "OAuth authorization flow is invalid or expired."
+msgstr "OAuth 授权流程无效或已过期。"
+
+#: src/iac_code/web/settings.py
+msgid "Authorization code is required."
+msgstr "需要授权码。"
+
+#: src/iac_code/web/settings.py
+msgid "OAuth callback URL does not match the authorization flow."
+msgstr "OAuth 回调 URL 与授权流程不匹配。"
+
+#: src/iac_code/web/settings.py
+msgid "OAuth callback state is invalid."
+msgstr "OAuth 回调 state 无效。"
 
 #: src/iac_code/web/settings.py
 msgid "stored aliyun credentials are invalid"

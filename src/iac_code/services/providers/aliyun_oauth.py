@@ -68,6 +68,15 @@ class OAuthStsCredentials:
     sts_expiration: int
 
 
+@dataclass(frozen=True)
+class OAuthAuthorization:
+    site_type: str
+    redirect_uri: str
+    state: str
+    code_verifier: str
+    authorization_url: str
+
+
 class AliyunOAuthError(RuntimeError):
     def __init__(self, message: str, *, error_code: str | None = None, status_code: int | None = None) -> None:
         super().__init__(message)
@@ -136,6 +145,57 @@ def build_authorization_url(site: AliyunOAuthSite, redirect_uri: str, state: str
         }
     )
     return "{}/oauth2/v1/auth?{}".format(site.signin_base_url.rstrip("/"), query)
+
+
+def fixed_manual_redirect_uri() -> str:
+    """Return the official-cli loopback redirect used by remote manual completion."""
+    return "http://{}:{}{}".format(CALLBACK_HOST, CALLBACK_PORTS[0], CALLBACK_PATH)
+
+
+def create_oauth_authorization(
+    site_type: str,
+    redirect_uri: str,
+    *,
+    state: str | None = None,
+    code_verifier: str | None = None,
+) -> OAuthAuthorization:
+    site = get_oauth_site(site_type)
+    resolved_state = state or generate_state()
+    resolved_verifier = code_verifier or generate_code_verifier()
+    return OAuthAuthorization(
+        site_type=site.site_type,
+        redirect_uri=redirect_uri,
+        state=resolved_state,
+        code_verifier=resolved_verifier,
+        authorization_url=build_authorization_url(
+            site,
+            redirect_uri,
+            resolved_state,
+            generate_code_challenge(resolved_verifier),
+        ),
+    )
+
+
+def exchange_oauth_authorization_code(
+    authorization: OAuthAuthorization,
+    code: str,
+    *,
+    oauth_client: Any | None = None,
+    now: int | None = None,
+) -> OAuthToken:
+    site = get_oauth_site(authorization.site_type)
+    owns_client = oauth_client is None
+    client = AliyunOAuthClient(site) if oauth_client is None else oauth_client
+    try:
+        return client.exchange_code_for_token(
+            code=code,
+            redirect_uri=authorization.redirect_uri,
+            code_verifier=authorization.code_verifier,
+            now=now,
+        )
+    finally:
+        if owns_client:
+            client.close()
 
 
 class OAuthCallbackServer:
@@ -272,25 +332,24 @@ def run_browser_oauth_flow(
         server = callback_server_factory() if callback_server_factory is not None else OAuthCallbackServer()
         state = generate_state()
         code_verifier = generate_code_verifier()
-        code_challenge = generate_code_challenge(code_verifier)
         server.start(state)
-        url = build_authorization_url(site, server.redirect_uri, state, code_challenge)
+        authorization = create_oauth_authorization(
+            site.site_type,
+            server.redirect_uri,
+            state=state,
+            code_verifier=code_verifier,
+        )
         for line in oauth_browser_login_guidance():
             writer(line)
         writer("  {}".format(_("Open in your browser:")))
-        writer("  {}".format(url))
+        writer("  {}".format(authorization.authorization_url))
         try:
-            browser_opener(url)
+            browser_opener(authorization.authorization_url)
         except Exception:
             pass
 
         code = server.wait_for_code(cancel_event=cancel_event) if cancel_event is not None else server.wait_for_code()
-        return client.exchange_code_for_token(
-            code=code,
-            redirect_uri=server.redirect_uri,
-            code_verifier=code_verifier,
-            now=now,
-        )
+        return exchange_oauth_authorization_code(authorization, code, oauth_client=client, now=now)
     finally:
         if server is not None:
             server.close()

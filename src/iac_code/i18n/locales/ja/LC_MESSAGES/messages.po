@@ -683,6 +683,10 @@ msgid "HTTP server port"
 msgstr "HTTP サーバーのポート"
 
 #: src/iac_code/cli/main.py
+msgid "Enable encrypted public access using the token stored in this file."
+msgstr "このファイルに保存されたトークンで暗号化された公開アクセスを有効にします。"
+
+#: src/iac_code/cli/main.py
 msgid ""
 "Open the Web app in the default browser on startup (use --no-open to "
 "disable)."
@@ -11109,6 +11113,10 @@ msgid "Press Ctrl+C to stop"
 msgstr "停止するには Ctrl+C を押してください"
 
 #: src/iac_code/web/server.py
+msgid "Token mode requires an IP address as the HTTP server host."
+msgstr "トークンモードでは HTTP サーバーのホストに IP アドレスが必要です。"
+
+#: src/iac_code/web/server.py
 msgid ""
 "Web server dependencies are missing. Install with: pip install 'iac-"
 "code[http]'"
@@ -11179,6 +11187,22 @@ msgstr "不明なパートナーソース"
 #: src/iac_code/web/settings.py
 msgid "unknown aliyun credential mode"
 msgstr "不明な Aliyun 認証情報モード"
+
+#: src/iac_code/web/settings.py
+msgid "OAuth authorization flow is invalid or expired."
+msgstr "OAuth 認可フローが無効か、有効期限が切れています。"
+
+#: src/iac_code/web/settings.py
+msgid "Authorization code is required."
+msgstr "認可コードが必要です。"
+
+#: src/iac_code/web/settings.py
+msgid "OAuth callback URL does not match the authorization flow."
+msgstr "OAuth コールバック URL が認可フローと一致しません。"
+
+#: src/iac_code/web/settings.py
+msgid "OAuth callback state is invalid."
+msgstr "OAuth コールバックの state が無効です。"
 
 #: src/iac_code/web/settings.py
 msgid "stored aliyun credentials are invalid"

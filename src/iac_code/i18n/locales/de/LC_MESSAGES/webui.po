@@ -283,6 +283,7 @@ msgstr "Schließen"
 #: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
 #: src/iac_code/web/static/js/components/blocking.js
 #: src/iac_code/web/static/js/components/workspace.js
+#: src/iac_code/web/static/js/token_transport.js
 msgid "Cancel"
 msgstr "Abbrechen"
 
@@ -884,6 +885,65 @@ msgstr "Keine Preisinformationen"
 #: src/iac_code/web/static/js/mermaid_render.js
 msgid "Estimated monthly cost"
 msgstr "Geschätzte monatliche Kosten"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Enter Web access token"
+msgstr "Web-Zugriffstoken eingeben"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Enter the Web access token shown on the deployment result page."
+msgstr ""
+"Geben Sie das auf der Bereitstellungsergebnisseite angezeigte Web-"
+"Zugriffstoken ein."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Unlock"
+msgstr "Entsperren"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Enter a valid access token."
+msgstr "Geben Sie ein gültiges Zugriffstoken ein."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Unable to start an encrypted session."
+msgstr "Die verschlüsselte Sitzung konnte nicht gestartet werden."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Unsupported encrypted transport version."
+msgstr "Nicht unterstützte Version des verschlüsselten Transports."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "The Web access token is incorrect."
+msgstr "Das Web-Zugriffstoken ist falsch."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Complete OAuth login"
+msgstr "OAuth-Anmeldung abschließen"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid ""
+"Paste the complete OAuth callback URL (recommended), or paste only the "
+"authorization code."
+msgstr ""
+"Fügen Sie die vollständige OAuth-Callback-URL (empfohlen) oder nur den "
+"Autorisierungscode ein."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Paste callback URL or authorization code"
+msgstr "Callback-URL oder Autorisierungscode einfügen"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Complete login"
+msgstr "Anmeldung abschließen"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#: src/iac_code/web/static/js/token_transport.js
+msgid "OAuth login cancelled."
+msgstr "OAuth-Anmeldung abgebrochen."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Authorization code is required."
+msgstr "Der Autorisierungscode ist erforderlich."
 
 #: src/iac_code/web/static/js/components/blocking.js
 msgid "Authorization required"
@@ -3838,4 +3898,14 @@ msgstr ""
 
 #~ msgid "Completed step: {step}"
 #~ msgstr "Schritt abgeschlossen: {step}"
+
+#~ msgid ""
+#~ "Copy the token from the deployment "
+#~ "page. It stays in this browser tab"
+#~ " and is not sent to the server."
+#~ msgstr ""
+#~ "Kopieren Sie das Token von der "
+#~ "Bereitstellungsseite. Es bleibt in diesem "
+#~ "Tab und wird nicht an den Server"
+#~ " gesendet."
 

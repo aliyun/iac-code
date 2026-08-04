@@ -241,9 +241,20 @@ def run_web_server(
     host: str = DEFAULT_WEB_HOST,
     port: int = DEFAULT_WEB_PORT,
     open_browser: bool = False,
+    access_token_file: str | None = None,
 ) -> None:
     """Run the local Web workbench."""
-    safe_host = ensure_loopback_host(host)
+    access_token: str | None = None
+    if access_token_file:
+        from iac_code.web.token_transport import load_access_token
+
+        try:
+            safe_host = str(ipaddress.ip_address(host))
+        except ValueError as exc:
+            raise ValueError(_("Token mode requires an IP address as the HTTP server host.")) from exc
+        access_token = load_access_token(access_token_file)
+    else:
+        safe_host = ensure_loopback_host(host)
     try:
         import uvicorn
     except ImportError as exc:  # pragma: no cover - exercised when optional extra is absent
@@ -261,6 +272,11 @@ def run_web_server(
     _start_update_check()
     if open_browser:
         _schedule_browser_open(url, safe_host, port)
-    # 该服务只绑定 loopback，所有本地用户数据均不执行通用路径或凭据脱敏。
-    # 参数保留用于兼容旧调用方；所有 Web app 实例使用相同本地策略。
-    uvicorn.run(protect_loopback_app(create_app(expose_local_paths=True)), host=safe_host, port=port)
+    app = create_app(expose_local_paths=True, token_mode=access_token is not None)
+    if access_token is None:
+        app = protect_loopback_app(app)
+    else:
+        from iac_code.web.token_transport import TokenTransport
+
+        app = TokenTransport(app, access_token)
+    uvicorn.run(app, host=safe_host, port=port)

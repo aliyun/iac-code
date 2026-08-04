@@ -1,3 +1,4 @@
+import base64
 import sys
 from types import SimpleNamespace
 
@@ -155,3 +156,47 @@ def test_run_web_server_accepts_loopback_ip_alias(monkeypatch) -> None:
         assert uvicorn_calls[0]["port"] == 8767
     finally:
         i18n.set_language(_prev_lang)
+
+
+def test_run_web_server_token_mode_allows_wildcard_ip_and_wraps_app(monkeypatch, tmp_path) -> None:
+    import iac_code.web.server as server
+    from iac_code.web.token_transport import TokenTransport
+
+    token_file = tmp_path / "web.token"
+    token_file.write_text(base64.urlsafe_b64encode(bytes(range(32))).decode().rstrip("="), encoding="ascii")
+    token_file.chmod(0o600)
+    uvicorn_calls: list[dict] = []
+    monkeypatch.setattr("iac_code.web.server.get_ui_language", lambda: None)
+    monkeypatch.setattr(server, "_start_update_check", lambda: None)
+    monkeypatch.setitem(
+        sys.modules,
+        "uvicorn",
+        SimpleNamespace(run=lambda app, *, host, port: uvicorn_calls.append({"app": app, "host": host, "port": port})),
+    )
+
+    import iac_code.i18n as i18n
+
+    previous = i18n._current_language
+    try:
+        server.run_web_server(
+            host="0.0.0.0",
+            port=8766,
+            open_browser=False,
+            access_token_file=str(token_file),
+        )
+    finally:
+        i18n.set_language(previous)
+
+    assert uvicorn_calls[0]["host"] == "0.0.0.0"
+    assert isinstance(uvicorn_calls[0]["app"], TokenTransport)
+
+
+def test_run_web_server_token_mode_rejects_hostname(tmp_path) -> None:
+    import iac_code.web.server as server
+
+    token_file = tmp_path / "web.token"
+    token_file.write_text(base64.urlsafe_b64encode(bytes(range(32))).decode().rstrip("="), encoding="ascii")
+    token_file.chmod(0o600)
+
+    with pytest.raises(ValueError, match="IP address"):
+        server.run_web_server(host="localhost", access_token_file=str(token_file))

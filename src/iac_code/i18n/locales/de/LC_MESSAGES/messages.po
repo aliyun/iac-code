@@ -728,6 +728,12 @@ msgid "HTTP server port"
 msgstr "HTTP-Server-Port"
 
 #: src/iac_code/cli/main.py
+msgid "Enable encrypted public access using the token stored in this file."
+msgstr ""
+"Verschlüsselten öffentlichen Zugriff mit dem Token aus dieser Datei "
+"aktivieren."
+
+#: src/iac_code/cli/main.py
 msgid ""
 "Open the Web app in the default browser on startup (use --no-open to "
 "disable)."
@@ -11966,6 +11972,10 @@ msgid "Press Ctrl+C to stop"
 msgstr "Zum Beenden Strg+C drücken"
 
 #: src/iac_code/web/server.py
+msgid "Token mode requires an IP address as the HTTP server host."
+msgstr "Der Token-Modus erfordert eine IP-Adresse als Host des HTTP-Servers."
+
+#: src/iac_code/web/server.py
 msgid ""
 "Web server dependencies are missing. Install with: pip install 'iac-"
 "code[http]'"
@@ -12038,6 +12048,22 @@ msgstr "unbekannte Partnerquelle"
 #: src/iac_code/web/settings.py
 msgid "unknown aliyun credential mode"
 msgstr "unbekannter Aliyun-Anmeldeinformationsmodus"
+
+#: src/iac_code/web/settings.py
+msgid "OAuth authorization flow is invalid or expired."
+msgstr "Der OAuth-Autorisierungsablauf ist ungültig oder abgelaufen."
+
+#: src/iac_code/web/settings.py
+msgid "Authorization code is required."
+msgstr "Der Autorisierungscode ist erforderlich."
+
+#: src/iac_code/web/settings.py
+msgid "OAuth callback URL does not match the authorization flow."
+msgstr "Die OAuth-Callback-URL stimmt nicht mit dem Autorisierungsablauf überein."
+
+#: src/iac_code/web/settings.py
+msgid "OAuth callback state is invalid."
+msgstr "Der OAuth-Callback-Status ist ungültig."
 
 #: src/iac_code/web/settings.py
 msgid "stored aliyun credentials are invalid"

@@ -12,6 +12,8 @@ API_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/api.js"
 APP_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/app.js"
 I18N_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/i18n.js"
 COMPOSER_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/components/composer.js"
+TOKEN_TRANSPORT_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/token_transport.js"
+TOKEN_CRYPTO_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/vendor/token-crypto.js"
 BLOCKING_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/components/blocking.js"
 PIPELINE_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/components/pipeline.js"
 WORKSPACE_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/components/workspace.js"
@@ -1113,15 +1115,15 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-312" in html
-    assert "/static/js/app.js?v=web-repl-ui-317" in html
+    assert "/static/styles.css?v=web-repl-ui-313" in html
+    assert "/static/js/app.js?v=web-repl-ui-318" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
     # 已归档面板复刻(archived tab)新增 listArchivedSessions/deleteArchivedSessions,
     # 同样需 bump api.js 版本位,否则回访浏览器拿不到新导出。
-    assert "./api.js?v=web-repl-ui-305" in app_source
-    assert "./components/composer.js?v=session-model-v18" in app_source
+    assert "./api.js?v=web-repl-ui-307" in app_source
+    assert "./components/composer.js?v=session-model-v19" in app_source
     # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
     assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
     assert "./components/tool_cards.js?v=live-inline-tools-v23" in app_source
@@ -1148,10 +1150,10 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-317" in index_html
+    assert "web-repl-ui-318" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-304" in app_source
-    assert "./components/workspace.js?v=cloud-creds-v50" in app_source
+    assert "./components/workspace.js?v=cloud-creds-v51" in app_source
     assert "workspace-cloud-vendors" in workspace_source
     assert "Alibaba Cloud" in workspace_source
     assert "workspace-cloud-mode-fields" in workspace_source
@@ -1184,6 +1186,287 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     # OAuth 派生的 STS 临时凭证独立展示第三行;尚未换取时给出诚实兜底文案。
     assert "STS expiry" in workspace_source
     assert "Unknown (STS credentials not yet obtained)" in workspace_source
+
+
+def test_token_mode_frontend_uses_only_encrypted_transport_for_business_data() -> None:
+    api_source = _source(API_JS)
+    transport_source = _source(TOKEN_TRANSPORT_JS)
+    crypto_source = _source(TOKEN_CRYPTO_JS)
+    app_source = _source(APP_JS)
+    composer_source = _source(COMPOSER_JS)
+
+    assert 'from "./token_transport.js?v=token-transport-v3"' in api_source
+    assert 'fetch("/api/token/challenge"' in transport_source
+    assert 'fetch("/api/token/ping"' in transport_source
+    assert 'stream ? "/api/token/stream" : "/api/token/request"' in transport_source
+    assert "window.sessionStorage" in transport_source
+    assert "document.cookie" not in transport_source
+    assert "crypto.subtle" not in crypto_source
+    assert "https://" not in crypto_source
+    assert 'jsonFetch("/api/cloud/aliyun/oauth-start"' in api_source
+    assert 'jsonFetch("/api/cloud/aliyun/oauth-complete"' in api_source
+    assert "authorizationWindow?.close()" in api_source
+    assert "authorizationWindow.location.href" not in api_source
+    assert "await requestAuthorizationCode({ signal })" in api_source
+    assert "window.prompt" not in transport_source
+    assert "oauth-code-input" in transport_source
+    assert "new AbortController()" in _source(WORKSPACE_JS)
+    assert "oauthAbortController?.abort()" in _source(WORKSPACE_JS)
+    token_dialog = _css_block(_source(STYLES_CSS), ".token-access-dialog")
+    token_input = _css_block(_source(STYLES_CSS), ".token-access-input")
+    assert "background: var(--codex-panel-raised)" in token_dialog
+    assert "color: var(--codex-text)" in token_dialog
+    assert "var(--codex-ink)" in token_input
+    assert "color: var(--codex-text)" in token_input
+    assert "getImageObjectUrl" in api_source
+    assert "api.getImageObjectUrl" in app_source
+    assert "api.getImageObjectUrl" in composer_source
+
+
+def test_token_crypto_matches_python_interop_vectors(tmp_path) -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    script = tmp_path / "token-vector.mjs"
+    script.write_text(
+        textwrap.dedent(
+            f"""
+            import {{
+              chacha20poly1305Encrypt,
+              hkdfSha256,
+              base64UrlEncode,
+            }} from {json.dumps(TOKEN_CRYPTO_JS.as_uri())};
+            const encoder = new TextEncoder();
+            const key = Uint8Array.from({{length: 32}}, (_, index) => index);
+            const nonce = Uint8Array.from({{length: 12}}, (_, index) => index + 32);
+            const encrypted = chacha20poly1305Encrypt(
+              key,
+              nonce,
+              encoder.encode("hello token transport"),
+              encoder.encode("iac-code-aad"),
+            );
+            const derived = hkdfSha256(
+              encoder.encode("token"),
+              encoder.encode("salt"),
+              encoder.encode("iac-code-web-token-v1"),
+              64,
+            );
+            const key2 = Uint8Array.from({{length: 32}}, (_, index) => 255 - index);
+            const nonce2 = Uint8Array.from({{length: 12}}, (_, index) => (17 * index) % 256);
+            const encrypted2 = chacha20poly1305Encrypt(
+              key2,
+              nonce2,
+              encoder.encode("ping"),
+              encoder.encode("v1\\nsession-two\\nrequest\\nping\\n1"),
+            );
+            const derived2 = hkdfSha256(
+              encoder.encode("another-token"),
+              Uint8Array.from({{length: 32}}, (_, index) => index + 1),
+              encoder.encode("iac-code-web-token-v1"),
+              64,
+            );
+            process.stdout.write(JSON.stringify({{
+              encrypted: base64UrlEncode(encrypted),
+              derived: base64UrlEncode(derived),
+              encrypted2: base64UrlEncode(encrypted2),
+              derived2: base64UrlEncode(derived2),
+            }}));
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run([node, str(script)], capture_output=True, text=True, encoding="utf-8", check=False)
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "encrypted": "G4LkEH7PiFXwoMPoPU3u1ggeEUBkDj8CLtQzy7fkTnk5vChXpA",
+        "derived": "VpWNFUgiXfWtSb9zSF-saEQCsGKv40UX_ujm-fikLPsyKAEi39LxCQG3ABR6bJFnLLFnbtsg9Ib5LgaQ8eA9wA",
+        "encrypted2": "JpOtxAXrIdk7XH1JRyBKvTSt-Fc",
+        "derived2": "QzDXpz7rGU8wM98Vb3SS590czheQ3t9XMFWwss4mQWzcBvOjZXknBKeGBKZwu_rXoT-5EdhwmSFVjM4VGm_1sQ",
+    }
+
+
+def test_token_transport_rebuilds_bodyless_response(tmp_path) -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    script = tmp_path / "token-bodyless-response.mjs"
+    script.write_text(
+        textwrap.dedent(
+            f"""
+            import {{
+              base64UrlEncode,
+              chacha20poly1305Encrypt,
+              concatBytes,
+              hkdfSha256,
+            }} from {json.dumps(TOKEN_CRYPTO_JS.as_uri())};
+
+            const encoder = new TextEncoder();
+            const token = base64UrlEncode(Uint8Array.from({{length: 32}}, (_, index) => index));
+            const salt = Uint8Array.from({{length: 32}}, (_, index) => index + 32);
+            const responsePrefix = encoder.encode("resp");
+            const sessionId = "bodyless-session";
+            const keys = hkdfSha256(
+              encoder.encode(token),
+              salt,
+              encoder.encode("iac-code-web-token-v1"),
+              64,
+            );
+            const responseKey = keys.slice(32);
+            const storage = new Map([["iac-code:web-access-token", token]]);
+            globalThis.window = {{
+              __IAC_I18N__: {{ lang: "en", messages: {{}} }},
+              location: new URL("http://203.0.113.10:8766/"),
+              sessionStorage: {{
+                getItem: (key) => storage.get(key) || null,
+                setItem: (key, value) => storage.set(key, value),
+                removeItem: (key) => storage.delete(key),
+              }},
+            }};
+            globalThis.document = {{ body: {{ dataset: {{ tokenMode: "true" }} }} }};
+
+            function envelope(type, sequence, plaintext) {{
+              const counter = new Uint8Array(8);
+              new DataView(counter.buffer).setBigUint64(0, BigInt(sequence));
+              const aad = encoder.encode(`v1\\n${{sessionId}}\\nresponse\\n${{type}}\\n${{sequence}}`);
+              return {{
+                sessionId,
+                sequence,
+                type,
+                ciphertext: base64UrlEncode(chacha20poly1305Encrypt(
+                  responseKey,
+                  concatBytes(responsePrefix, counter),
+                  encoder.encode(plaintext),
+                  aad,
+                )),
+              }};
+            }}
+
+            const challenge = {{
+              version: "v1",
+              sessionId,
+              salt: base64UrlEncode(salt),
+              requestNoncePrefix: base64UrlEncode(encoder.encode("reqp")),
+              responseNoncePrefix: base64UrlEncode(responsePrefix),
+              expiresAt: Math.floor(Date.now() / 1000) + 300,
+            }};
+            globalThis.fetch = async (url) => {{
+              if (url === "/api/token/challenge") return Response.json(challenge);
+              if (url === "/api/token/ping") return Response.json(envelope("pong", 1, "pong"));
+              if (url === "/api/token/request") {{
+                return Response.json(envelope("response", 2, JSON.stringify({{
+                  status: 204,
+                  headers: [],
+                  body: "",
+                }})));
+              }}
+              throw new Error(`unexpected fetch: ${{url}}`);
+            }};
+
+            const {{ tokenFetch }} = await import({json.dumps(TOKEN_TRANSPORT_JS.as_uri())});
+            const response = await tokenFetch("/api/update/dismiss", {{ method: "POST" }});
+            process.stdout.write(JSON.stringify({{ status: response.status, body: await response.text() }}));
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run([node, str(script)], capture_output=True, text=True, encoding="utf-8", check=False)
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"status": 204, "body": ""}
+
+
+def test_oauth_manual_code_uses_inline_dialog_and_supports_abort(tmp_path) -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    script = tmp_path / "oauth-code-dialog.mjs"
+    script.write_text(
+        textwrap.dedent(
+            f"""
+            class Element {{
+              constructor() {{
+                this.listeners = {{}};
+                this.value = "";
+                this.textContent = "";
+                this.placeholder = "";
+                this.removed = false;
+              }}
+              addEventListener(type, callback) {{
+                this.listeners[type] = callback;
+              }}
+              dispatch(type, event = {{}}) {{
+                this.listeners[type]?.(event);
+              }}
+              focus() {{}}
+              remove() {{ this.removed = true; }}
+            }}
+
+            function createGate() {{
+              const gate = new Element();
+              const selectors = new Map([
+                ["h1", new Element()],
+                [".oauth-code-description", new Element()],
+                [".oauth-code-input", new Element()],
+                [".oauth-code-error", new Element()],
+                [".oauth-code-cancel", new Element()],
+                [".oauth-code-submit", new Element()],
+                ["form", new Element()],
+              ]);
+              gate.querySelector = (selector) => selectors.get(selector);
+              return gate;
+            }}
+
+            let activeGate = null;
+            globalThis.window = {{
+              __IAC_I18N__: {{ lang: "en", messages: {{}} }},
+              prompt() {{ throw new Error("native prompt must not be used"); }},
+            }};
+            globalThis.document = {{
+              body: {{ append(gate) {{ activeGate = gate; }} }},
+              createElement() {{ return createGate(); }},
+            }};
+
+            const {{ requestAuthorizationCode }} = await import({json.dumps(TOKEN_TRANSPORT_JS.as_uri())});
+            const submittedPromise = requestAuthorizationCode();
+            const submittedGate = activeGate;
+            submittedGate.querySelector(".oauth-code-input").value =
+              "http://127.0.0.1:12345/cli/callback?code=example&state=expected";
+            submittedGate.querySelector("form").dispatch("submit", {{ preventDefault() {{}} }});
+            const submitted = await submittedPromise;
+
+            const abortController = new AbortController();
+            const abortedPromise = requestAuthorizationCode({{ signal: abortController.signal }});
+            const abortedGate = activeGate;
+            abortController.abort();
+            let abortName = "";
+            try {{
+              await abortedPromise;
+            }} catch (error) {{
+              abortName = error.name;
+            }}
+            process.stdout.write(JSON.stringify({{
+              submitted,
+              submittedRemoved: submittedGate.removed,
+              abortName,
+              abortedRemoved: abortedGate.removed,
+            }}));
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run([node, str(script)], capture_output=True, text=True, encoding="utf-8", check=False)
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "submitted": "http://127.0.0.1:12345/cli/callback?code=example&state=expected",
+        "submittedRemoved": True,
+        "abortName": "AbortError",
+        "abortedRemoved": True,
+    }
 
 
 def test_archived_conversations_panel_replicates_codex_management_view() -> None:
@@ -7287,7 +7570,7 @@ def test_workspace_cloud_panel_prefills_secrets_and_resets_on_mode_switch() -> N
 def test_app_wires_workspace_controls_to_current_session() -> None:
     source = _source(APP_JS)
 
-    assert 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v50";' in source
+    assert 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v51";' in source
     assert "workspace = createWorkspaceController" in source
     assert 'tabs: byShell("workspace-tabs")' in source
     assert 'content: byShell("workspace-content")' in source
@@ -9540,8 +9823,8 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-317" in html
-    assert "web-repl-ui-316" not in html
+    assert "web-repl-ui-318" in html
+    assert "web-repl-ui-317" not in html
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:
@@ -9763,7 +10046,7 @@ def test_styles_define_review_step_prerequisite_progress() -> None:
 
 def test_app_uses_bumped_api_version_for_outputs() -> None:
     source = _source(APP_JS)
-    assert "./api.js?v=web-repl-ui-305" in source
+    assert "./api.js?v=web-repl-ui-307" in source
     assert "./api.js?v=web-repl-ui-159" not in source
 
 

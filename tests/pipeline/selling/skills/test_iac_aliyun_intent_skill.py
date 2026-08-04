@@ -84,6 +84,16 @@ def test_intent_prompt_requires_dynamic_contextual_questions_for_known_deploymen
     assert '"id": "high_availability"' not in known_object_section
 
 
+def test_intent_prompt_treats_iac_code_web_as_a_predefined_deployment() -> None:
+    body = PROMPT_FILE.read_text(encoding="utf-8")
+
+    exception = body.split("上述通用澄清规则的例外", 1)[1].split("\n", 1)[0]
+    assert "iac-code Web" in exception
+    assert "直接调用 `complete_step`" in exception
+    assert "不得再询问应用形态、技术栈、运行环境、规模、预算或架构偏好" in exception
+    assert "后续步骤使用默认值" in exception
+
+
 def test_intent_prompt_requires_single_focused_question_per_call():
     body = PROMPT_FILE.read_text(encoding="utf-8")
 

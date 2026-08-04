@@ -319,7 +319,7 @@ function makeFileReferenceAttachment(fileRef) {
   };
 }
 
-function makeImageReferenceAttachment(imageId, sessionId) {
+function makeImageReferenceAttachment(imageId, sessionId, tokenMode = false) {
   return {
     id: `image-ref-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     name: imageId,
@@ -329,7 +329,7 @@ function makeImageReferenceAttachment(imageId, sessionId) {
     status: "ready",
     imageId,
     fileRef: "",
-    previewUrl: sessionId
+    previewUrl: sessionId && !tokenMode
       ? `/api/images/${encodeURIComponent(imageId)}?sessionId=${encodeURIComponent(sessionId)}`
       : "",
     localPreviewUrl: "",
@@ -2202,7 +2202,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       const imageIds = Array.isArray(payload.imageIds) ? payload.imageIds.map(text).filter(Boolean) : [];
       const fileRefs = Array.isArray(payload.fileRefs) ? payload.fileRefs.map(text).filter(Boolean) : [];
       attachments = [
-        ...imageIds.map((imageId) => makeImageReferenceAttachment(imageId, sessionId)),
+        ...imageIds.map((imageId) => makeImageReferenceAttachment(imageId, sessionId, Boolean(api.isTokenMode?.()))),
         ...fileRefs.map(makeFileReferenceAttachment),
       ];
       clearSelectedSkill();
@@ -2212,6 +2212,15 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       localDraftDirty = Boolean(text(payload.draft).trim()) || attachments.length > 0;
       resetHistoryNav();
       renderAttachmentChips();
+      if (api.isTokenMode?.() && api.getImageObjectUrl) {
+        for (const attachment of attachments.filter((item) => item.imageId && !item.previewUrl)) {
+          void api.getImageObjectUrl(attachment.imageId, sessionId).then((url) => {
+            if (!attachments.includes(attachment)) return;
+            attachment.previewUrl = text(url);
+            renderAttachmentChips();
+          }).catch(() => {});
+        }
+      }
       clearSuggestions();
       clearError();
       syncSendButtonState();

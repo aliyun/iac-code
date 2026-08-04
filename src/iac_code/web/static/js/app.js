@@ -1,9 +1,9 @@
-import * as api from "./api.js?v=web-repl-ui-305";
-import { createComposerController } from "./components/composer.js?v=session-model-v18";
+import * as api from "./api.js?v=web-repl-ui-307";
+import { createComposerController } from "./components/composer.js?v=session-model-v19";
 import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v5";
 import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v7";
 import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v23";
-import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v50";
+import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v51";
 import { createOutputController } from "./components/output_panel.js?v=output-panel-v17";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
 import { reduceEvent } from "./events.js?v=web-repl-ui-304";
@@ -2555,11 +2555,20 @@ function buildMessageAttachmentsElement(message, state) {
     const src = `/api/images/${encodeURIComponent(imageId)}?sessionId=${encodeURIComponent(sessionId)}`;
     const image = document.createElement("img");
     image.className = "attachment-chip-preview";
-    image.src = src;
+    if (api.isTokenMode()) {
+      void api.getImageObjectUrl(imageId, sessionId).then((url) => {
+        if (image.isConnected) image.src = url;
+      }).catch(() => {});
+    } else {
+      image.src = src;
+    }
     image.alt = t("Attached image");
     image.draggable = false;
     chip.append(image);
-    chip.addEventListener("click", () => openImageLightbox({ src, alt: t("Attached image") }));
+    chip.addEventListener("click", () => {
+      const previewSrc = image.currentSrc || image.src;
+      if (previewSrc) openImageLightbox({ src: previewSrc, alt: t("Attached image") });
+    });
     attachments.append(chip);
   }
   for (const fileRef of fileRefs) {

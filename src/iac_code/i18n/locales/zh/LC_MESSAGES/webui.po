@@ -281,6 +281,7 @@ msgstr "关闭"
 #: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
 #: src/iac_code/web/static/js/components/blocking.js
 #: src/iac_code/web/static/js/components/workspace.js
+#: src/iac_code/web/static/js/token_transport.js
 msgid "Cancel"
 msgstr "取消"
 
@@ -875,6 +876,61 @@ msgstr "暂无询价信息"
 #: src/iac_code/web/static/js/mermaid_render.js
 msgid "Estimated monthly cost"
 msgstr "预估月度费用"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Enter Web access token"
+msgstr "请输入 Web 访问口令"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Enter the Web access token shown on the deployment result page."
+msgstr "请输入部署结果页面中显示的 Web 访问口令。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Unlock"
+msgstr "进入"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Enter a valid access token."
+msgstr "请输入有效的 Web 访问口令。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Unable to start an encrypted session."
+msgstr "无法启动加密会话。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Unsupported encrypted transport version."
+msgstr "不支持的加密传输版本。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "The Web access token is incorrect."
+msgstr "Web 访问口令不正确。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Complete OAuth login"
+msgstr "完成 OAuth 登录"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid ""
+"Paste the complete OAuth callback URL (recommended), or paste only the "
+"authorization code."
+msgstr "粘贴完整的 OAuth 回调 URL（推荐），或只粘贴授权码。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Paste callback URL or authorization code"
+msgstr "粘贴回调 URL 或授权码"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Complete login"
+msgstr "完成登录"
+
+#: src/iac_code/web/static/js/components/workspace.js
+#: src/iac_code/web/static/js/token_transport.js
+msgid "OAuth login cancelled."
+msgstr "OAuth 登录已取消。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Authorization code is required."
+msgstr "需要授权码。"
 
 #: src/iac_code/web/static/js/components/blocking.js
 msgid "Authorization required"
@@ -3716,4 +3772,10 @@ msgstr "重启中,服务恢复后会自动刷新…"
 
 #~ msgid "Completed step: {step}"
 #~ msgstr "已完成步骤：{step}"
+
+#~ msgid ""
+#~ "Copy the token from the deployment "
+#~ "page. It stays in this browser tab"
+#~ " and is not sent to the server."
+#~ msgstr "从部署页面复制 Token。它只保存在当前浏览器标签页中，不会发送到服务器。"
 

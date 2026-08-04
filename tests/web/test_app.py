@@ -68,6 +68,18 @@ def test_web_app_exposes_health_and_index() -> None:
     assert "/static/js/app.js" in index_response.text
 
 
+def test_index_marks_only_explicit_token_mode() -> None:
+    from iac_code.web.app import create_app
+
+    with TestClient(create_app()) as client:
+        default_html = client.get("/").text
+    with TestClient(create_app(token_mode=True)) as client:
+        token_html = client.get("/").text
+
+    assert 'data-token-mode="true"' not in default_html
+    assert 'data-token-mode="true"' in token_html
+
+
 def test_restart_endpoint_schedules_restart_and_returns_202(monkeypatch) -> None:
     from iac_code.web import server as web_server
     from iac_code.web.app import create_app

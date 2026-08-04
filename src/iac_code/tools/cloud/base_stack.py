@@ -347,7 +347,7 @@ class BaseCloudStack(Tool):
 
                 if self.is_action_terminal(action, status):
                     action_success = self.is_action_success(action, status)
-                    result_data = {
+                    result_data: dict[str, object] = {
                         "stack_id": status.stack_id,
                         "stack_name": status.stack_name,
                         "status": status.status,
@@ -356,6 +356,8 @@ class BaseCloudStack(Tool):
                         "elapsed_seconds": elapsed,
                         "is_success": action_success,
                     }
+                    if action_success and status.outputs:
+                        result_data["outputs"] = status.outputs
                     try:
                         self.on_terminal_status(action, params, region, status, resources, elapsed)
                     except Exception:
