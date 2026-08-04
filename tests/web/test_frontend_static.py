@@ -1163,7 +1163,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-313" in html
-    assert "/static/js/app.js?v=web-repl-ui-320" in html
+    assert "/static/js/app.js?v=web-repl-ui-321" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1197,7 +1197,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-320" in index_html
+    assert "web-repl-ui-321" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-319" in app_source
     assert "./components/workspace.js?v=cloud-creds-v51" in app_source
@@ -1720,6 +1720,28 @@ def test_sidebar_defers_repaint_while_pointer_inside() -> None:
     # pointerleave 时若有挂起重绘则追平一次。
     assert "sidebarRepaintPending" in guard_body
     assert "ensureSidebarHoverGuard();" in app_source
+
+
+def test_inline_status_panels_skip_rebuild_when_unchanged() -> None:
+    app_source = _source(APP_JS)
+
+    # 会话进行中,流式逐帧 render 反复调用两个内联状态面板的渲染;面板内容是打开时的快照,期间不变,
+    # 但旧实现每帧都 replaceChildren 重建,销毁并重建光标下的关闭按钮,令其 :hover 反复通断
+    # (用户反馈鼠标悬停「一闪闪」)。内容签名一致时短路,完全不动 DOM,且短路必须发生在
+    # replaceChildren 之前。
+    status_body = app_source.split("function renderInlineSessionStatusPanel(currentState = {})", 1)[1].split(
+        "\n}\n", 1
+    )[0]
+    assert 'const signature = status ? JSON.stringify(rows) : "";' in status_body
+    assert "if (target.dataset.statusSignature === signature) {" in status_body
+    assert "target.dataset.statusSignature = signature;" in status_body
+    assert status_body.index("dataset.statusSignature === signature") < status_body.index("replaceChildren()")
+
+    mcp_body = app_source.split("function renderInlineMcpStatusPanel(currentState = {})", 1)[1].split("\n}\n", 1)[0]
+    assert 'const signature = mcp ? JSON.stringify(servers) : "";' in mcp_body
+    assert "if (target.dataset.mcpStatusSignature === signature) {" in mcp_body
+    assert "target.dataset.mcpStatusSignature = signature;" in mcp_body
+    assert mcp_body.index("dataset.mcpStatusSignature === signature") < mcp_body.index("replaceChildren()")
 
 
 def test_complete_step_tool_renders_conclusion_card() -> None:
@@ -9870,8 +9892,8 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-320" in html
-    assert "web-repl-ui-318" not in html
+    assert "web-repl-ui-321" in html
+    assert "web-repl-ui-319" not in html
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:

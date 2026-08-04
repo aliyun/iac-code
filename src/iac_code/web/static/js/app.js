@@ -624,8 +624,20 @@ function renderInlineSessionStatusPanel(currentState = {}) {
   if (!target) {
     return;
   }
-  target.replaceChildren();
   const status = currentState.inlineSessionStatus;
+  // 流水线会话:/status 展示与 composer 圈圈同源的每步上下文用量(文字版);其余会话保持单条会话级用量。
+  const contextWindows =
+    currentState.currentSession?.mode === "pipeline" ? deriveContextUsageWindows(currentState) : [];
+  const rows = status ? statusPanelRows(status, { contextWindows }) : [];
+  // 会话进行中每次流式 render 都会调到这里;内容未变仍 replaceChildren 重建,会销毁并重建光标下的
+  // 关闭按钮,令其 :hover 反复通断(用户反馈鼠标悬停时「一闪闪」)。内容签名一致时直接短路,完全不动
+  // DOM,hover 态得以保持。
+  const signature = status ? JSON.stringify(rows) : "";
+  if (target.dataset.statusSignature === signature) {
+    return;
+  }
+  target.dataset.statusSignature = signature;
+  target.replaceChildren();
   target.hidden = !status;
   if (!status) {
     return;
@@ -648,11 +660,8 @@ function renderInlineSessionStatusPanel(currentState = {}) {
 
   const list = document.createElement("dl");
   list.className = "session-status-list";
-  // 流水线会话:/status 展示与 composer 圈圈同源的每步上下文用量(文字版);其余会话保持单条会话级用量。
-  const contextWindows =
-    currentState.currentSession?.mode === "pipeline" ? deriveContextUsageWindows(currentState) : [];
   list.append(
-    ...statusPanelRows(status, { contextWindows }).map((row) =>
+    ...rows.map((row) =>
       makeSessionStatusRow(row.label, row.value, { copyValue: row.copyable ? row.value : "" }),
     ),
   );
@@ -730,8 +739,16 @@ function renderInlineMcpStatusPanel(currentState = {}) {
   if (!target) {
     return;
   }
-  target.replaceChildren();
   const mcp = currentState.inlineMcpStatus;
+  const servers = mcp ? mcpStatusServers(mcp) : [];
+  // 同 renderInlineSessionStatusPanel:内容未变时按签名短路,避免流式逐帧 replaceChildren 销毁并
+  // 重建光标下的关闭按钮,令其 :hover「一闪闪」。
+  const signature = mcp ? JSON.stringify(servers) : "";
+  if (target.dataset.mcpStatusSignature === signature) {
+    return;
+  }
+  target.dataset.mcpStatusSignature = signature;
+  target.replaceChildren();
   target.hidden = !mcp;
   if (!mcp) {
     return;
@@ -752,7 +769,6 @@ function renderInlineMcpStatusPanel(currentState = {}) {
   close.addEventListener("click", hideInlineMcpStatus);
   header.append(title, close);
 
-  const servers = mcpStatusServers(mcp);
   const list = document.createElement("div");
   list.className = "mcp-status-list";
   if (servers.length) {
