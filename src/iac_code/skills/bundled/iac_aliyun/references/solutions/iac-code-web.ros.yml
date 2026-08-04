@@ -14,7 +14,6 @@ Metadata:
           - InstanceType
           - SystemDiskCategory
           - InternetBandwidth
-          - IacCodeVersion
         Label:
           default: iac-code Web
 Parameters:
@@ -60,14 +59,6 @@ Parameters:
     Label:
       en: Web access CIDR
       zh-cn: Web 访问网段
-    AssociationProperty: String
-  IacCodeVersion:
-    Type: String
-    Default: 0.11.0
-    AllowedPattern: ^[0-9]+\.[0-9]+\.[0-9]+(?:[a-zA-Z0-9.-]*)?$
-    Label:
-      en: iac-code version
-      zh-cn: iac-code 版本
     AssociationProperty: String
 Resources:
   Vpc:
@@ -159,7 +150,7 @@ Resources:
             id iac-code >/dev/null 2>&1 || useradd --system --create-home --home-dir /var/lib/iac-code iac-code
             install -d -m 0700 -o iac-code -g iac-code /var/lib/iac-code
             python3.11 -m venv /opt/iac-code/venv
-            /opt/iac-code/venv/bin/pip install --index-url https://mirrors.aliyun.com/pypi/simple/ "iac-code[http]==${IacCodeVersion}"
+            /opt/iac-code/venv/bin/pip install --upgrade --index-url https://mirrors.aliyun.com/pypi/simple/ "iac-code[http]"
 
             TOKEN_FILE=/var/lib/iac-code/web-access.token
             if [ -f "$TOKEN_FILE" ]; then
@@ -310,9 +301,3 @@ Outputs:
       Fn::GetAtt:
         - Eip
         - EipAddress
-  IacCodeVersion:
-    Label:
-      en: iac-code version
-      zh-cn: iac-code 版本
-    Value:
-      Ref: IacCodeVersion
