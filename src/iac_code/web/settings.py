@@ -93,10 +93,11 @@ _DEVELOPER_SETTINGS_KEY = "developer"
 
 
 def developer_settings() -> dict[str, bool]:
-    """Return the developer-mode flags for the settings API (both default ``False``).
+    """Return the developer-mode flags for the settings API (all default ``False``).
 
     ``mode`` gates the Developer settings tab; ``highlightFailedTools`` controls
-    whether failed tool calls are painted red (off = rendered like any other tool).
+    whether failed tool calls are painted red (off = rendered like any other tool);
+    ``debug`` enables backend DEBUG-level logging to the log file (off = INFO).
     """
     settings = _load_yaml(get_settings_path())
     section = settings.get(_DEVELOPER_SETTINGS_KEY)
@@ -105,10 +106,11 @@ def developer_settings() -> dict[str, bool]:
     return {
         "mode": bool(section.get("mode", False)),
         "highlightFailedTools": bool(section.get("highlightFailedTools", False)),
+        "debug": bool(section.get("debug", False)),
     }
 
 
-def save_developer_settings(mode: bool, highlight_failed_tools: bool) -> dict[str, bool]:
+def save_developer_settings(mode: bool, highlight_failed_tools: bool, debug: bool) -> dict[str, bool]:
     """Persist the developer-mode flags, preserving other section keys."""
     settings_path = get_settings_path()
     settings = _load_yaml(settings_path)
@@ -117,9 +119,14 @@ def save_developer_settings(mode: bool, highlight_failed_tools: bool) -> dict[st
         section = {}
     section["mode"] = bool(mode)
     section["highlightFailedTools"] = bool(highlight_failed_tools)
+    section["debug"] = bool(debug)
     settings[_DEVELOPER_SETTINGS_KEY] = section
     _save_yaml(settings_path, settings)
-    return {"mode": bool(mode), "highlightFailedTools": bool(highlight_failed_tools)}
+    return {
+        "mode": bool(mode),
+        "highlightFailedTools": bool(highlight_failed_tools),
+        "debug": bool(debug),
+    }
 
 
 _APPEARANCE_SETTINGS_KEY = "appearance"

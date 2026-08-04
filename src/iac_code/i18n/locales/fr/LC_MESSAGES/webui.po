@@ -3862,6 +3862,28 @@ msgstr ""
 "appel d’outil."
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Debug logging"
+msgstr "Journalisation de débogage"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Control the verbosity of backend logs written to the log file."
+msgstr ""
+"Contrôle le niveau de détail des journaux backend écrits dans le fichier "
+"journal."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enable debug logging"
+msgstr "Activer la journalisation de débogage"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, the backend writes DEBUG-level logs to the log file. Off by"
+" default."
+msgstr ""
+"Lorsque cette option est activée, le backend écrit des journaux de niveau"
+" DEBUG dans le fichier journal. Désactivé par défaut."
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"
 msgstr "Redémarrer le service"
 

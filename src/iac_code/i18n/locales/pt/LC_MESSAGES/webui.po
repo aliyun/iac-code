@@ -3836,6 +3836,28 @@ msgstr ""
 "Quando desativado, elas parecem qualquer outra chamada de ferramenta."
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Debug logging"
+msgstr "Registro de depuração"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Control the verbosity of backend logs written to the log file."
+msgstr ""
+"Controla o nível de detalhe dos registros de backend gravados no arquivo "
+"de log."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enable debug logging"
+msgstr "Ativar registro de depuração"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, the backend writes DEBUG-level logs to the log file. Off by"
+" default."
+msgstr ""
+"Quando ativado, o backend grava registros de nível DEBUG no arquivo de "
+"log. Desativado por padrão."
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"
 msgstr "Reiniciar serviço"
 

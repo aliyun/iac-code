@@ -3857,6 +3857,28 @@ msgstr ""
 " deaktiviert, sehen sie aus wie jeder andere Tool-Aufruf."
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Debug logging"
+msgstr "Debug-Protokollierung"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Control the verbosity of backend logs written to the log file."
+msgstr ""
+"Steuert die Ausführlichkeit der in die Protokolldatei geschriebenen "
+"Backend-Protokolle."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enable debug logging"
+msgstr "Debug-Protokollierung aktivieren"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, the backend writes DEBUG-level logs to the log file. Off by"
+" default."
+msgstr ""
+"Wenn aktiviert, schreibt das Backend Protokolle der Stufe DEBUG in die "
+"Protokolldatei. Standardmäßig deaktiviert."
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"
 msgstr "Dienst neu starten"
 

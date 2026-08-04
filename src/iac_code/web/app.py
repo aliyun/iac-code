@@ -3351,9 +3351,19 @@ def create_app(
             data = await json_object_body(request)
             mode = required_bool(data, "mode")
             highlight_failed_tools = required_bool(data, "highlightFailedTools")
+            debug = required_bool(data, "debug")
         except ValueError as exc:
             return json_error(str(exc), 400)
-        return JSONResponse(save_developer_settings(mode, highlight_failed_tools))
+        saved = save_developer_settings(mode, highlight_failed_tools, debug)
+        # 立即应用后端日志级别(进程级全局开关,与 REPL/ACP 的 /debug 同一机制):
+        # 开 → DEBUG 落 logs/web.log;关 → 回落 INFO。session_id 与启动时 setup_logging 一致("web")。
+        from iac_code.utils.log import disable_debug_at_runtime, enable_debug_at_runtime
+
+        if debug:
+            enable_debug_at_runtime("web")
+        else:
+            disable_debug_at_runtime()
+        return JSONResponse(saved)
 
     async def get_pipeline_review_step_settings(request):
         return JSONResponse(selling_review_step_settings())

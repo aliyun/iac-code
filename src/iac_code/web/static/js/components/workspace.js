@@ -4623,6 +4623,47 @@ function createDeveloperPanel(api, context) {
   }
   highlightToggle.input.addEventListener("change", persistHighlight);
 
+  // Debug 日志:开启后端 DEBUG 级别文件日志(落 logs/web.log),默认关。持久化到 settings.yml 的
+  // developer.debug,并由后端在保存时即时切换进程级日志级别(与 REPL/ACP 的 /debug 同一机制)。
+  const debugToggle = makeForeignSwitch("workspace-debug-logging");
+  const debugGroupHead = makeElement("div", { className: "workspace-settings-group-head" });
+  debugGroupHead.append(
+    makeElement("h4", { className: "workspace-settings-group-title", textContent: t("Debug logging") }),
+    makeElement("p", {
+      className: "workspace-settings-group-desc",
+      textContent: t("Control the verbosity of backend logs written to the log file."),
+    }),
+  );
+  const debugCard = makeElement("section", {
+    className: "workspace-settings-group workspace-settings-provider",
+  });
+  debugCard.append(
+    makeField(
+      t("Enable debug logging"),
+      debugToggle.control,
+      t("When enabled, the backend writes DEBUG-level logs to the log file. Off by default."),
+    ),
+  );
+
+  async function persistDebug() {
+    const token = ++requestToken;
+    const enabled = debugToggle.input.checked;
+    stamp(t("Saving…"));
+    try {
+      await context.saveDeveloperState?.({ debug: enabled });
+      if (token !== requestToken) {
+        return;
+      }
+      stampSaved(token);
+    } catch (error) {
+      if (token !== requestToken) {
+        return;
+      }
+      stamp(t("Save failed: {error}", { error: error instanceof Error ? error.message : String(error) }), true);
+    }
+  }
+  debugToggle.input.addEventListener("change", persistDebug);
+
   // 重启服务:通用重启入口。点击 → 全屏遮罩确认 → POST → 轮询 /health → 恢复后自动刷新。
   const restartGroupHead = makeElement("div", { className: "workspace-settings-group-head" });
   restartGroupHead.append(
@@ -4695,7 +4736,16 @@ function createDeveloperPanel(api, context) {
   };
   restartButton.addEventListener("click", runRestartFlow);
 
-  panel.append(heading, highlightGroupHead, highlightCard, restartGroupHead, restartCard, status);
+  panel.append(
+    heading,
+    highlightGroupHead,
+    highlightCard,
+    debugGroupHead,
+    debugCard,
+    restartGroupHead,
+    restartCard,
+    status,
+  );
 
   return {
     panel,
@@ -4708,9 +4758,13 @@ function createDeveloperPanel(api, context) {
         }
         const state = context.cacheDeveloperState
           ? context.cacheDeveloperState(developer)
-          : { highlightFailedTools: Boolean(developer?.highlightFailedTools) };
+          : {
+              highlightFailedTools: Boolean(developer?.highlightFailedTools),
+              debug: Boolean(developer?.debug),
+            };
         highlightToggle.input.checked = Boolean(state.highlightFailedTools);
         applyHighlightClass(state.highlightFailedTools);
+        debugToggle.input.checked = Boolean(state.debug);
       } catch (error) {
         if (token !== requestToken) {
           return;
@@ -4745,10 +4799,10 @@ export function createWorkspaceController({ tabs, content }, api, options = {}) 
   let currentSession = null;
   const panelControllers = new Map();
   // 开发者模式:developerMode 决定「开发」分页是否出现在导航;developerState 是 {mode,
-  // highlightFailedTools} 的单一缓存,让「常规」面板的开发者开关与「开发」面板的标红开关
-  // 各自改一个字段而不覆盖另一个(保存前先并入缓存)。
+  // highlightFailedTools, debug} 的单一缓存,让「常规」面板的开发者开关与「开发」面板的标红/
+  // Debug 日志开关各自改一个字段而不覆盖另一个(保存前先并入缓存)。
   let developerMode = false;
-  const developerState = { mode: false, highlightFailedTools: false };
+  const developerState = { mode: false, highlightFailedTools: false, debug: false };
 
   const context = {
     sessionId: () => currentSessionId,
@@ -4771,6 +4825,7 @@ export function createWorkspaceController({ tabs, content }, api, options = {}) 
   context.cacheDeveloperState = (value) => {
     developerState.mode = Boolean(value?.mode);
     developerState.highlightFailedTools = Boolean(value?.highlightFailedTools);
+    developerState.debug = Boolean(value?.debug);
     return context.getDeveloperState();
   };
   context.saveDeveloperState = async (partial) => {

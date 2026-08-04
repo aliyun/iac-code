@@ -14,8 +14,9 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from iac_code.i18n import _, resolve_ui_language, set_language
+from iac_code.utils.log import setup_logging
 from iac_code.web.security import ensure_loopback_host
-from iac_code.web.settings import get_ui_language
+from iac_code.web.settings import developer_settings, get_ui_language
 
 DEFAULT_WEB_HOST = "127.0.0.1"
 DEFAULT_WEB_PORT = 8766
@@ -262,6 +263,11 @@ def run_web_server(
         raise RuntimeError(message) from exc
 
     from iac_code.web.app import create_app
+
+    # 建立日志基线并应用持久化的 debug 偏好(设置→开发的「Debug 日志」开关)。Web 此前从不 setup_logging,
+    # 与 a2a-server / acp 对齐:开 → DEBUG 落 logs/web.log,关 → INFO;运行时开关经 enable/disable_debug_at_runtime
+    # 复用同一 session_id("web")与同一日志文件。
+    setup_logging(session_id="web", debug=bool(developer_settings().get("debug")))
 
     # 单用户本地进程:按持久化的 UI 语言重绑定进程级 gettext,使后端 _() 与前端 UI 语言一致。
     set_language(resolve_ui_language(get_ui_language()))

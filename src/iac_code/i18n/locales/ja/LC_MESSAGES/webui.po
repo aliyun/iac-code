@@ -3741,6 +3741,24 @@ msgid ""
 msgstr "有効にすると、失敗したツール呼び出しが赤で表示されます。無効にすると、他のツール呼び出しと同じ見た目になります。"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Debug logging"
+msgstr "デバッグログ"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Control the verbosity of backend logs written to the log file."
+msgstr "ログファイルに書き込まれるバックエンドログの詳細度を制御します。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enable debug logging"
+msgstr "デバッグログを有効化"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, the backend writes DEBUG-level logs to the log file. Off by"
+" default."
+msgstr "有効にすると、バックエンドは DEBUG レベルのログをログファイルに書き込みます。デフォルトは無効です。"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"
 msgstr "サービスを再起動"
 

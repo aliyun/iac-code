@@ -3735,6 +3735,24 @@ msgid ""
 msgstr "开启后，失败的工具调用会标红；关闭后，它们与其它工具调用外观一致。"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Debug logging"
+msgstr "调试日志"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Control the verbosity of backend logs written to the log file."
+msgstr "控制写入日志文件的后端日志详细程度。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enable debug logging"
+msgstr "启用调试日志"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, the backend writes DEBUG-level logs to the log file. Off by"
+" default."
+msgstr "启用后,后端会向日志文件写入 DEBUG 级别的日志。默认关闭。"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"
 msgstr "重启服务"
 
