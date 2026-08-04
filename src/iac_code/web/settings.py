@@ -129,6 +129,37 @@ def save_developer_settings(mode: bool, highlight_failed_tools: bool, debug: boo
     }
 
 
+_TELEMETRY_SETTINGS_KEY = "telemetry"
+
+
+def telemetry_settings() -> dict[str, bool]:
+    """Return the telemetry content-sharing preference (default ``False``).
+
+    ``shareContent`` opts in to attaching full conversation content (prompts,
+    model responses, tool inputs/outputs) to emitted telemetry. Off by default;
+    an explicitly set ``OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT``
+    environment variable overrides this preference at runtime.
+    """
+    settings = _load_yaml(get_settings_path())
+    section = settings.get(_TELEMETRY_SETTINGS_KEY)
+    if not isinstance(section, dict):
+        section = {}
+    return {"shareContent": bool(section.get("shareContent", False))}
+
+
+def save_telemetry_settings(share_content: bool) -> dict[str, bool]:
+    """Persist the telemetry content-sharing preference, preserving other keys."""
+    settings_path = get_settings_path()
+    settings = _load_yaml(settings_path)
+    section = settings.get(_TELEMETRY_SETTINGS_KEY)
+    if not isinstance(section, dict):
+        section = {}
+    section["shareContent"] = bool(share_content)
+    settings[_TELEMETRY_SETTINGS_KEY] = section
+    _save_yaml(settings_path, settings)
+    return {"shareContent": bool(share_content)}
+
+
 _APPEARANCE_SETTINGS_KEY = "appearance"
 VALID_THEMES = ("graphite", "midnight", "evergreen", "sepia", "ivory")
 DEFAULT_THEME = "graphite"

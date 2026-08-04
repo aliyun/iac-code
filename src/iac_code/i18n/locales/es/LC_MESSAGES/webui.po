@@ -3727,6 +3727,34 @@ msgid "Install infraguard"
 msgstr "Instalar infraguard"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Help improve iac-code"
+msgstr "Ayuda a mejorar iac-code"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Share full conversation content"
+msgstr "Compartir el contenido completo de la conversación"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, iac-code attaches full conversation content — your prompts,"
+" model responses, and tool inputs and outputs — to the telemetry it "
+"sends, to help diagnose issues and improve the product. Off by default. "
+"Data is only uploaded when a telemetry endpoint is configured, and an "
+"explicitly set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT "
+"environment variable overrides this switch. You can turn it off at any "
+"time."
+msgstr ""
+"Cuando está activado, iac-code adjunta el contenido completo de la "
+"conversación —tus indicaciones, las respuestas del modelo y las entradas "
+"y salidas de las herramientas— a la telemetría que envía, para ayudar a "
+"diagnosticar problemas y mejorar el producto. Desactivado de forma "
+"predeterminada. Los datos solo se envían cuando hay un endpoint de "
+"telemetría configurado, y una variable de entorno "
+"OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT establecida "
+"explícitamente anula este interruptor. Puedes desactivarlo en cualquier "
+"momento."
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "New session defaults"
 msgstr "Valores predeterminados de nueva sesión"
 

@@ -102,18 +102,42 @@ class ContentCaptureMode(Enum):
     SPAN_AND_EVENT = "span_and_event"
 
 
-def get_content_capture_mode() -> ContentCaptureMode:
-    """Read OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT env var.
+# Process-global opt-in set by the web layer (Settings → General → "Help improve
+# iac-code"). Kept here — not read from web.settings — so this low-level module
+# never depends on the web package. The env var still wins when explicitly set.
+_content_capture_optin: bool = False
 
-    Compatible with loongsuite-util-genai. Default: NO_CONTENT.
+
+def set_content_capture_optin(enabled: bool) -> None:
+    """Enable/disable full conversation-content capture from a user preference.
+
+    Only takes effect when OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT is
+    not explicitly set; an explicit env var always overrides this opt-in.
+    """
+    global _content_capture_optin
+    _content_capture_optin = bool(enabled)
+
+
+def get_content_capture_mode() -> ContentCaptureMode:
+    """Resolve the gen_ai content-capture mode.
+
+    Precedence:
+    1. OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT env var, when explicitly
+       set (non-empty) — compatible with loongsuite-util-genai.
+    2. The user opt-in (:func:`set_content_capture_optin`) → SPAN_AND_EVENT.
+    3. NO_CONTENT (default).
     """
     raw = os.environ.get("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "").strip().upper()
-    _mapping = {
-        "SPAN_ONLY": ContentCaptureMode.SPAN_ONLY,
-        "EVENT_ONLY": ContentCaptureMode.EVENT_ONLY,
-        "SPAN_AND_EVENT": ContentCaptureMode.SPAN_AND_EVENT,
-    }
-    return _mapping.get(raw, ContentCaptureMode.NO_CONTENT)
+    if raw:
+        _mapping = {
+            "SPAN_ONLY": ContentCaptureMode.SPAN_ONLY,
+            "EVENT_ONLY": ContentCaptureMode.EVENT_ONLY,
+            "SPAN_AND_EVENT": ContentCaptureMode.SPAN_AND_EVENT,
+        }
+        return _mapping.get(raw, ContentCaptureMode.NO_CONTENT)
+    if _content_capture_optin:
+        return ContentCaptureMode.SPAN_AND_EVENT
+    return ContentCaptureMode.NO_CONTENT
 
 
 def should_capture_content_on_span() -> bool:

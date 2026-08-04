@@ -1163,13 +1163,13 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-313" in html
-    assert "/static/js/app.js?v=web-repl-ui-323" in html
+    assert "/static/js/app.js?v=web-repl-ui-324" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
     # 已归档面板复刻(archived tab)新增 listArchivedSessions/deleteArchivedSessions,
     # 同样需 bump api.js 版本位,否则回访浏览器拿不到新导出。
-    assert "./api.js?v=web-repl-ui-308" in app_source
+    assert "./api.js?v=web-repl-ui-309" in app_source
     assert "./components/composer.js?v=session-model-v19" in app_source
     # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
     assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
@@ -1197,10 +1197,10 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-323" in index_html
+    assert "web-repl-ui-324" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-319" in app_source
-    assert "./components/workspace.js?v=cloud-creds-v52" in app_source
+    assert "./components/workspace.js?v=cloud-creds-v53" in app_source
     assert "workspace-cloud-vendors" in workspace_source
     assert "Alibaba Cloud" in workspace_source
     assert "workspace-cloud-mode-fields" in workspace_source
@@ -7085,6 +7085,8 @@ def test_general_panel_section_order() -> None:
         "    reviewStepCard,\n"
         "    groupHead,\n"
         "    card,\n"
+        "    telemetryGroupHead,\n"
+        "    telemetryCard,\n"
         "    devModeGroupHead,\n"
         "    devModeCard,\n"
         "    status,\n"
@@ -7639,7 +7641,7 @@ def test_workspace_cloud_panel_prefills_secrets_and_resets_on_mode_switch() -> N
 def test_app_wires_workspace_controls_to_current_session() -> None:
     source = _source(APP_JS)
 
-    assert 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v52";' in source
+    assert 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v53";' in source
     assert "workspace = createWorkspaceController" in source
     assert 'tabs: byShell("workspace-tabs")' in source
     assert 'content: byShell("workspace-content")' in source
@@ -9892,7 +9894,7 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-323" in html
+    assert "web-repl-ui-324" in html
     assert "web-repl-ui-319" not in html
 
 
@@ -10115,7 +10117,7 @@ def test_styles_define_review_step_prerequisite_progress() -> None:
 
 def test_app_uses_bumped_api_version_for_outputs() -> None:
     source = _source(APP_JS)
-    assert "./api.js?v=web-repl-ui-308" in source
+    assert "./api.js?v=web-repl-ui-309" in source
     assert "./api.js?v=web-repl-ui-159" not in source
 
 
@@ -10946,6 +10948,27 @@ def test_developer_mode_wiring_present() -> None:
     # app.js 启动时按已保存设置应用标红 body class
     assert "applyDeveloperHighlightFromSettings" in app
     assert "api.getDeveloperSettings()" in app
+
+
+def test_general_panel_exposes_telemetry_share_content_toggle() -> None:
+    """「帮助改进 iac-code」开关:常规页开关 + 标题词条 + api 读写端点。"""
+    workspace = _source(WORKSPACE_JS)
+    api = _source(API_JS)
+
+    # 常规页开关(makeForeignSwitch)+ 标题词条(必须走 t(),i18n 强门)
+    assert 'makeForeignSwitch("workspace-telemetry-share-content")' in workspace
+    assert 't("Help improve iac-code")' in workspace
+    assert 't("Share full conversation content")' in workspace
+    # activate() 回填与 persist 走遥测端点
+    assert "api.getTelemetrySettings()" in workspace
+    assert "api.saveTelemetrySettings(" in workspace
+
+    # api.js 客户端读写端点
+    assert "export function getTelemetrySettings" in api
+    assert "export function saveTelemetrySettings" in api
+    assert "/api/settings/telemetry" in api
+    # 保存 body 须带 shareContent 字段
+    assert "shareContent: Boolean(shareContent)" in api
 
 
 def test_failed_tool_highlight_gated_under_body_class() -> None:

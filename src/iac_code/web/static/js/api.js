@@ -422,6 +422,18 @@ export function saveDeveloperSettings({ mode = false, highlightFailedTools = fal
   });
 }
 
+// 遥测内容共享:读取/保存是否附带完整对话内容(「帮助改进 iac-code」开关)。
+export function getTelemetrySettings() {
+  return jsonFetch("/api/settings/telemetry");
+}
+
+export function saveTelemetrySettings({ shareContent = false } = {}) {
+  return jsonFetch("/api/settings/telemetry", {
+    method: "PUT",
+    body: JSON.stringify({ shareContent: Boolean(shareContent) }),
+  });
+}
+
 // 售卖流水线审查步骤:读取/保存是否开启 review step(enable_reviewing 特性开关)。
 export function getSellingReviewStep() {
   return jsonFetch("/api/settings/pipeline-review-step");

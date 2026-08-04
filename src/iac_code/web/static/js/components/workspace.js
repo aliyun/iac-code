@@ -3809,6 +3809,7 @@ function createOtherPanel(api, context) {
   const pipelineToggle = makeForeignSwitch("workspace-foreign-pipeline");
   const normalToggle = makeForeignSwitch("workspace-foreign-normal");
   const reviewStepToggle = makeForeignSwitch("workspace-pipeline-review-step");
+  const telemetryToggle = makeForeignSwitch("workspace-telemetry-share-content");
   const devModeToggle = makeForeignSwitch("workspace-developer-mode");
   const status = makeElement("span", { className: "workspace-memory-status workspace-foreign-status" });
   // 「已保存」是瞬时反馈:安排一个自动淡出定时器,避免它永久驻留在面板里。
@@ -3922,6 +3923,23 @@ function createOtherPanel(api, context) {
   prereqProgress.append(prereqPhaseLabel, prereqBar);
   prereqNotice.append(prereqText, prereqInstallButton, prereqProgress);
   reviewStepCard.append(prereqNotice);
+
+  // 帮助改进 iac-code:打开后向遥测附带完整对话内容(提示词/模型回复/工具输入输出),用于诊断与改进。
+  // 默认关闭。仅当已配置遥测端点时才实际上传;显式设置的环境变量优先于此开关。文案如实告知,避免误解。
+  const telemetryGroupHead = makeElement("div", { className: "workspace-settings-group-head" });
+  telemetryGroupHead.append(
+    makeElement("h4", { className: "workspace-settings-group-title", textContent: t("Help improve iac-code") }),
+  );
+  const telemetryCard = makeElement("section", {
+    className: "workspace-settings-group workspace-settings-provider",
+  });
+  telemetryCard.append(
+    makeField(
+      t("Share full conversation content"),
+      telemetryToggle.control,
+      t("When enabled, iac-code attaches full conversation content — your prompts, model responses, and tool inputs and outputs — to the telemetry it sends, to help diagnose issues and improve the product. Off by default. Data is only uploaded when a telemetry endpoint is configured, and an explicitly set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT environment variable overrides this switch. You can turn it off at any time."),
+    ),
+  );
 
   // 新会话默认:控制「新建会话」草稿的初始权限模式与会话模式,免去每次手动重选。
   // 仅影响新建草稿;已有会话保留各自存储的选择,重开时不受此处影响。
@@ -4253,6 +4271,23 @@ function createOtherPanel(api, context) {
     }
   }
 
+  async function persistTelemetry() {
+    const token = ++requestToken;
+    stamp(t("Saving…"));
+    try {
+      await api.saveTelemetrySettings({ shareContent: telemetryToggle.input.checked });
+      if (token !== requestToken) {
+        return;
+      }
+      stampSaved(token);
+    } catch (error) {
+      if (token !== requestToken) {
+        return;
+      }
+      stamp(t("Save failed: {error}", { error: error instanceof Error ? error.message : String(error) }), true);
+    }
+  }
+
   // 后端只回传结构化的 phase(不含译文);中文标签一律在前端映射,后端保持零翻译。
   const PREREQ_PHASE_LABELS = {
     download: t("Downloading…"),
@@ -4396,6 +4431,7 @@ function createOtherPanel(api, context) {
   pipelineToggle.input.addEventListener("change", persist);
   normalToggle.input.addEventListener("change", persist);
   reviewStepToggle.input.addEventListener("change", persistReviewStep);
+  telemetryToggle.input.addEventListener("change", persistTelemetry);
   prereqInstallButton.addEventListener("click", installReviewPrereq);
   permissionSelect.addEventListener("change", persistSessionDefaults);
 
@@ -4419,7 +4455,7 @@ function createOtherPanel(api, context) {
   }
   devModeToggle.input.addEventListener("change", persistDeveloperMode);
 
-  // 章节顺序:新会话默认 → 配色方案(含界面语言)→ 售卖流水线 → 外来会话可见性 → 开发者模式。
+  // 章节顺序:新会话默认 → 配色方案(含界面语言)→ 售卖流水线 → 外来会话可见性 → 帮助改进 iac-code → 开发者模式。
   // 界面语言(languageField)紧随配色方案,既保持外观类设置成组,也让所有分区标题的相邻关系
   // (h3→head、settings-group→head、field→head)仍被现有章节间距选择器覆盖,无需改 CSS。
   panel.append(
@@ -4433,6 +4469,8 @@ function createOtherPanel(api, context) {
     reviewStepCard,
     groupHead,
     card,
+    telemetryGroupHead,
+    telemetryCard,
     devModeGroupHead,
     devModeCard,
     status,
@@ -4462,6 +4500,14 @@ function createOtherPanel(api, context) {
         }
       } catch (error) {
         /* 审查步骤开关加载失败保持默认关闭,不覆盖其它已加载状态 */
+      }
+      try {
+        const telemetry = await api.getTelemetrySettings();
+        if (token === requestToken) {
+          telemetryToggle.input.checked = Boolean(telemetry?.shareContent);
+        }
+      } catch (error) {
+        /* 遥测内容共享加载失败保持默认关闭,不覆盖其它已加载状态 */
       }
       // 前置依赖探测独立于开关状态(不受 token 竞态影响,内部自行处理失败)。
       await refreshReviewPrereq();
@@ -4522,6 +4568,7 @@ function createOtherPanel(api, context) {
       normalToggle.input.checked = false;
       devModeToggle.input.checked = false;
       reviewStepToggle.input.checked = false;
+      telemetryToggle.input.checked = false;
       prereqNotice.hidden = true;
       prereqNotice.classList.remove("is-installed", "is-missing");
       prereqInstallButton.hidden = false;

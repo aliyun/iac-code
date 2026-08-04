@@ -41,6 +41,11 @@ def _clear_env(monkeypatch):
     log_mod._debug_enabled = False
     log_mod._current_log_file = None
 
+    # Reset the process-global content-capture opt-in so tests don't leak into each other.
+    import iac_code.services.telemetry.config as _cfg_mod
+
+    _cfg_mod._content_capture_optin = False
+
 
 def test_default_level_when_no_env_vars_set():
     assert get_privacy_level() == PrivacyLevel.DEFAULT
@@ -216,6 +221,45 @@ def test_content_capture_event_only_does_not_enable_span(monkeypatch):
 def test_content_capture_case_insensitive(monkeypatch):
     monkeypatch.setenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "span_only")
     assert get_content_capture_mode() == ContentCaptureMode.SPAN_ONLY
+
+
+# --- User opt-in (Settings → General → "Help improve iac-code") ---
+
+
+def test_content_capture_optin_enables_span_and_event():
+    """With no env var set, the opt-in maps to the fullest capture mode."""
+    from iac_code.services.telemetry.config import set_content_capture_optin
+
+    set_content_capture_optin(True)
+    assert get_content_capture_mode() == ContentCaptureMode.SPAN_AND_EVENT
+    assert should_capture_content_on_span() is True
+
+
+def test_content_capture_optin_off_is_no_content():
+    from iac_code.services.telemetry.config import set_content_capture_optin
+
+    set_content_capture_optin(False)
+    assert get_content_capture_mode() == ContentCaptureMode.NO_CONTENT
+    assert should_capture_content_on_span() is False
+
+
+def test_explicit_env_var_overrides_optin(monkeypatch):
+    """An explicitly set env var wins over the opt-in, even to a narrower mode."""
+    from iac_code.services.telemetry.config import set_content_capture_optin
+
+    set_content_capture_optin(True)
+    monkeypatch.setenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "EVENT_ONLY")
+    assert get_content_capture_mode() == ContentCaptureMode.EVENT_ONLY
+    assert should_capture_content_on_span() is False
+
+
+def test_empty_env_var_falls_through_to_optin(monkeypatch):
+    """A blank env var is not "explicitly set" and yields to the opt-in."""
+    from iac_code.services.telemetry.config import set_content_capture_optin
+
+    set_content_capture_optin(True)
+    monkeypatch.setenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "  ")
+    assert get_content_capture_mode() == ContentCaptureMode.SPAN_AND_EVENT
 
 
 # --- Debug mode drives sensitive-content capture via is_debug_enabled() ---

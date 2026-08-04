@@ -269,6 +269,13 @@ def run_web_server(
     # 复用同一 session_id("web")与同一日志文件。
     setup_logging(session_id="web", debug=bool(developer_settings().get("debug")))
 
+    # 应用持久化的遥测内容共享偏好(设置→常规的「帮助改进 iac-code」开关):开 → 遥测附带完整
+    # 对话内容(SPAN_AND_EVENT)。显式设置的 OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT 仍优先。
+    from iac_code.services.telemetry.config import set_content_capture_optin
+    from iac_code.web.settings import telemetry_settings
+
+    set_content_capture_optin(bool(telemetry_settings().get("shareContent")))
+
     # 单用户本地进程:按持久化的 UI 语言重绑定进程级 gettext,使后端 _() 与前端 UI 语言一致。
     set_language(resolve_ui_language(get_ui_language()))
 
