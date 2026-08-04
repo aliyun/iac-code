@@ -3640,17 +3640,9 @@ msgstr "共享完整对话内容"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid ""
-"When enabled, iac-code attaches full conversation content — your prompts,"
-" model responses, and tool inputs and outputs — to the telemetry it "
-"sends, to help diagnose issues and improve the product. Off by default. "
-"Data is only uploaded when a telemetry endpoint is configured, and an "
-"explicitly set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT "
-"environment variable overrides this switch. You can turn it off at any "
-"time."
+"When enabled, iac-code attaches full conversation content — your prompts, model responses, and tool inputs and outputs — to the telemetry it sends to iac-code's default backend, or to an explicitly configured OTLP endpoint, to help diagnose issues and improve the product. Off by default. An explicitly set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT environment variable overrides this switch. You can turn it off at any time."
 msgstr ""
-"开启后,iac-code "
-"会在发送的遥测数据中附带完整的对话内容——包括你的提示词、模型回复以及工具的输入与输出——用于诊断问题和改进产品。默认关闭。仅当已配置遥测上报端点时数据才会实际上传;若显式设置了环境变量"
-" OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT,则以该环境变量为准。你可以随时关闭此开关。"
+"开启后,iac-code 会在发送的遥测数据中附带完整的对话内容——包括你的提示词、模型回复以及工具的输入与输出——发送到 iac-code 的默认遥测后端,或你显式配置的 OTLP 端点,用于诊断问题和改进产品。默认关闭。若显式设置了环境变量 OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT,则以该环境变量为准。你可以随时关闭此开关。"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "New session defaults"

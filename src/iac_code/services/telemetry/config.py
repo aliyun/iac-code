@@ -107,6 +107,13 @@ class ContentCaptureMode(Enum):
 # never depends on the web package. The env var still wins when explicitly set.
 _content_capture_optin: bool = False
 
+# Whether enabling debug logging also forces conversation content onto exported
+# spans. True (the default) preserves the historical CLI/REPL/ACP behavior where
+# `--debug` / `/debug on` implies full content capture for diagnostics. The web
+# layer flips this off at startup so its "Debug logging" developer toggle can
+# never override the explicit "Help improve iac-code" content-sharing opt-in.
+_debug_forces_content_capture: bool = True
+
 
 def set_content_capture_optin(enabled: bool) -> None:
     """Enable/disable full conversation-content capture from a user preference.
@@ -116,6 +123,19 @@ def set_content_capture_optin(enabled: bool) -> None:
     """
     global _content_capture_optin
     _content_capture_optin = bool(enabled)
+
+
+def set_debug_content_capture_backdoor(enabled: bool) -> None:
+    """Control whether debug logging forces conversation content onto spans.
+
+    CLI/REPL/ACP keep the historical behavior (``True``): turning on debug
+    logging also captures full prompt/response/tool content on spans. The web
+    process calls this with ``False`` so that its "Debug logging" toggle never
+    overrides the explicit content-sharing opt-in; there, span content capture
+    is governed solely by :func:`set_content_capture_optin` (and the env var).
+    """
+    global _debug_forces_content_capture
+    _debug_forces_content_capture = bool(enabled)
 
 
 def get_content_capture_mode() -> ContentCaptureMode:
@@ -143,7 +163,7 @@ def get_content_capture_mode() -> ContentCaptureMode:
 def should_capture_content_on_span() -> bool:
     from iac_code.utils.log import is_debug_enabled
 
-    if is_debug_enabled():
+    if _debug_forces_content_capture and is_debug_enabled():
         return True
     mode = get_content_capture_mode()
     return mode in (ContentCaptureMode.SPAN_ONLY, ContentCaptureMode.SPAN_AND_EVENT)

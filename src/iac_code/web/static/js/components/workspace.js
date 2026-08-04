@@ -3925,7 +3925,8 @@ function createOtherPanel(api, context) {
   reviewStepCard.append(prereqNotice);
 
   // 帮助改进 iac-code:打开后向遥测附带完整对话内容(提示词/模型回复/工具输入输出),用于诊断与改进。
-  // 默认关闭。仅当已配置遥测端点时才实际上传;显式设置的环境变量优先于此开关。文案如实告知,避免误解。
+  // 默认关闭。文案须如实告知:内容会发送到 iac-code 的默认遥测后端(或显式配置的 OTLP 端点),而非
+  // 「仅在你自己配置端点时才上传」——后者隐去了默认远端后端,会误导用户。显式设置的环境变量优先于此开关。
   const telemetryGroupHead = makeElement("div", { className: "workspace-settings-group-head" });
   telemetryGroupHead.append(
     makeElement("h4", { className: "workspace-settings-group-title", textContent: t("Help improve iac-code") }),
@@ -3937,7 +3938,7 @@ function createOtherPanel(api, context) {
     makeField(
       t("Share full conversation content"),
       telemetryToggle.control,
-      t("When enabled, iac-code attaches full conversation content — your prompts, model responses, and tool inputs and outputs — to the telemetry it sends, to help diagnose issues and improve the product. Off by default. Data is only uploaded when a telemetry endpoint is configured, and an explicitly set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT environment variable overrides this switch. You can turn it off at any time."),
+      t("When enabled, iac-code attaches full conversation content — your prompts, model responses, and tool inputs and outputs — to the telemetry it sends to iac-code's default backend, or to an explicitly configured OTLP endpoint, to help diagnose issues and improve the product. Off by default. An explicitly set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT environment variable overrides this switch. You can turn it off at any time."),
     ),
   );
 

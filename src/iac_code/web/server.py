@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 from iac_code.i18n import _, resolve_ui_language, set_language
 from iac_code.utils.log import setup_logging
 from iac_code.web.security import ensure_loopback_host
-from iac_code.web.settings import developer_settings, get_ui_language
+from iac_code.web.settings import developer_settings, get_ui_language, telemetry_settings
 
 DEFAULT_WEB_HOST = "127.0.0.1"
 DEFAULT_WEB_PORT = 8766
@@ -237,6 +237,26 @@ def protect_loopback_app(app: Any) -> Any:
     return _LoopbackRequestGuard(app)
 
 
+def _apply_persisted_telemetry_content_settings() -> None:
+    """Apply the persisted telemetry content-sharing preference for the web process.
+
+    Two decisions live here, kept separate on purpose:
+
+    * The web "Debug logging" developer toggle must never smuggle conversation
+      content onto exported spans, so we sever the debug→content backdoor that
+      CLI/REPL/ACP keep for diagnostics (:func:`set_debug_content_capture_backdoor`
+      with ``False``). After this, span content capture in the web process is
+      governed solely by the explicit opt-in below (and the env var).
+    * The "Help improve iac-code" opt-in (Settings → General) still drives full
+      content capture (SPAN_AND_EVENT) when enabled. An explicitly set
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT env var always wins.
+    """
+    from iac_code.services.telemetry.config import set_content_capture_optin, set_debug_content_capture_backdoor
+
+    set_debug_content_capture_backdoor(False)
+    set_content_capture_optin(bool(telemetry_settings().get("shareContent")))
+
+
 def run_web_server(
     *,
     host: str = DEFAULT_WEB_HOST,
@@ -269,12 +289,7 @@ def run_web_server(
     # 复用同一 session_id("web")与同一日志文件。
     setup_logging(session_id="web", debug=bool(developer_settings().get("debug")))
 
-    # 应用持久化的遥测内容共享偏好(设置→常规的「帮助改进 iac-code」开关):开 → 遥测附带完整
-    # 对话内容(SPAN_AND_EVENT)。显式设置的 OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT 仍优先。
-    from iac_code.services.telemetry.config import set_content_capture_optin
-    from iac_code.web.settings import telemetry_settings
-
-    set_content_capture_optin(bool(telemetry_settings().get("shareContent")))
+    _apply_persisted_telemetry_content_settings()
 
     # 单用户本地进程:按持久化的 UI 语言重绑定进程级 gettext,使后端 _() 与前端 UI 语言一致。
     set_language(resolve_ui_language(get_ui_language()))

@@ -106,6 +106,9 @@ function normalizeLiveStack(stack) {
 // live 只补充服务端尚未收录的栈——普通对话 ros_stack 创建期间,后端 outputs_payload 派生不出该栈
 // (无流水线 envelope、终态 tool_result 尚未落盘),面板整个创建过程为空,故用 live 事件态占位。
 // 键一致,终态到达后服务端条目自然取代 live 占位,不重复也不回退。
+// 例外(delete_and_create):同 region::栈名键下若 server 与 live 的 stackId 都存在且不同,说明
+// 旧栈已删除、正在新建另一个栈,server 留存的是旧栈终态 —— 此时以当前 live 新建栈覆盖旧终态,
+// 避免面板停留在已删除旧栈。仅 stackId 相同(同一栈)才由 server 终态覆盖 live 占位。
 export function mergeStacksForDisplay(serverStacks, liveStacks) {
   const byKey = new Map();
   for (const stack of serverStacks || []) {
@@ -113,7 +116,13 @@ export function mergeStacksForDisplay(serverStacks, liveStacks) {
   }
   for (const stack of liveStacks || []) {
     const key = stackDedupKey(stack);
-    if (byKey.has(key)) continue;
+    const existing = byKey.get(key);
+    if (existing) {
+      const existingId = existing.stackId || "";
+      const liveId = stack.stackId || "";
+      // 同一栈 / 无法辨别 stackId → 保留服务端权威态;不同栈 → 当前 live 新建栈胜出。
+      if (!existingId || !liveId || existingId === liveId) continue;
+    }
     byKey.set(key, normalizeLiveStack(stack));
   }
   return [...byKey.values()];

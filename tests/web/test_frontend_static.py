@@ -1163,7 +1163,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-313" in html
-    assert "/static/js/app.js?v=web-repl-ui-324" in html
+    assert "/static/js/app.js?v=web-repl-ui-325" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1197,10 +1197,10 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-324" in index_html
+    assert "web-repl-ui-325" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-319" in app_source
-    assert "./components/workspace.js?v=cloud-creds-v53" in app_source
+    assert "./components/workspace.js?v=cloud-creds-v54" in app_source
     assert "workspace-cloud-vendors" in workspace_source
     assert "Alibaba Cloud" in workspace_source
     assert "workspace-cloud-mode-fields" in workspace_source
@@ -7641,7 +7641,7 @@ def test_workspace_cloud_panel_prefills_secrets_and_resets_on_mode_switch() -> N
 def test_app_wires_workspace_controls_to_current_session() -> None:
     source = _source(APP_JS)
 
-    assert 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v53";' in source
+    assert 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v54";' in source
     assert "workspace = createWorkspaceController" in source
     assert 'tabs: byShell("workspace-tabs")' in source
     assert 'content: byShell("workspace-content")' in source
@@ -9894,7 +9894,7 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-324" in html
+    assert "web-repl-ui-325" in html
     assert "web-repl-ui-319" not in html
 
 
@@ -10136,7 +10136,7 @@ def test_output_panel_module_exists_and_wired() -> None:
     assert "getOutputs" in source
     app_source = _source(APP_JS)
     assert "createOutputController" in app_source
-    assert "output_panel.js?v=output-panel-v18" in app_source
+    assert "output_panel.js?v=output-panel-v19" in app_source
 
 
 def test_output_panel_resets_on_new_session_draft() -> None:
@@ -10194,7 +10194,7 @@ def test_output_preview_and_highlight() -> None:
     assert "File no longer exists" in source
     assert "tok-" in source
     app_source = _source(APP_JS)
-    assert "output_panel.js?v=output-panel-v18" in app_source
+    assert "output_panel.js?v=output-panel-v19" in app_source
     assert "output_panel.js?v=output-panel-v17" not in app_source
 
 
@@ -10432,6 +10432,54 @@ def test_output_panel_merges_live_inprogress_stacks(tmp_path: Path) -> None:
     assert result["rosUrlNull"] is None
 
 
+def test_output_panel_live_new_stack_overrides_stale_server_by_stackid(tmp_path: Path) -> None:
+    # delete_and_create:同 region::栈名下,旧栈已被删除(服务端仍留其终态),新栈正在创建。
+    # 两者 stackId 不同 → 当前 live 创建栈应覆盖旧 server 终态,面板显示「创建中」的新栈,
+    # 而非停留在已删除旧栈的终态。仅 stackId 相同(同一栈)时才由 server 终态覆盖 live。
+    source = """
+    const { mergeStacksForDisplay } = await import(__OUTPUT_PANEL_MODULE__);
+
+    // 不同 stackId:server 是旧栈终态,live 是新建中栈 → live 胜出。
+    const diff = mergeStacksForDisplay(
+      [{
+        stackId: "stk-old", stackName: "web", status: "DELETE_COMPLETE",
+        isSuccess: true, regionId: "cn-hangzhou", consoleUrl: "srv-old",
+      }],
+      [{
+        stackId: "stk-new", stackName: "web", status: "CREATE_IN_PROGRESS",
+        isSuccess: false, regionId: "cn-hangzhou",
+      }],
+    );
+
+    // 相同 stackId:同一栈,server 终态仍覆盖 live(回归保护)。
+    const same = mergeStacksForDisplay(
+      [{
+        stackId: "stk-1", stackName: "web", status: "CREATE_COMPLETE",
+        isSuccess: true, regionId: "cn-hangzhou", consoleUrl: "srv",
+      }],
+      [{ stackId: "stk-1", stackName: "web", status: "CREATE_IN_PROGRESS", isSuccess: false, regionId: "cn-hangzhou" }],
+    );
+
+    console.log(JSON.stringify({
+      diffLen: diff.length,
+      diffStackId: diff[0] && diff[0].stackId,
+      diffStatus: diff[0] && diff[0].status,
+      sameLen: same.length,
+      sameStackId: same[0] && same[0].stackId,
+      sameStatus: same[0] && same[0].status,
+    }));
+    """
+    result = _run_output_panel_script(tmp_path, source)
+    # 不同 stackId → live 新建栈覆盖旧 server 终态,仍只一行。
+    assert result["diffLen"] == 1
+    assert result["diffStackId"] == "stk-new"
+    assert result["diffStatus"] == "CREATE_IN_PROGRESS"
+    # 相同 stackId → server 终态覆盖 live。
+    assert result["sameLen"] == 1
+    assert result["sameStackId"] == "stk-1"
+    assert result["sameStatus"] == "CREATE_COMPLETE"
+
+
 def test_app_wires_live_stacks_into_output_panel() -> None:
     # app.js 须把「live 进行中栈」派生器接入输出面板,并在 resource.observed(创建一开始)即刷新面板。
     app_source = _source(APP_JS)
@@ -10442,6 +10490,75 @@ def test_app_wires_live_stacks_into_output_panel() -> None:
     assert 'resourceType' in app_source
     # resource.observed 到达即刷新输出面板,让「创建中」栈立即出现,而非等首个 stack.progress(约 5s 后)。
     assert 'event.type === "resource.observed"' in app_source
+
+
+def test_live_stacks_only_kept_while_owning_tool_runs(tmp_path: Path) -> None:
+    # liveStacksFromState 只应保留关联 toolUseId 仍在运行的进行中栈:
+    #  - 轮询失败 / 工具终止(tool.status → failed/completed)后,不得永久 CREATE_IN_PROGRESS;
+    #  - 取消 / 中断(turn.done → currentTurnActive=false)后,live 栈全部清空,交还服务端权威态。
+    # app.js 不可直接 import(顶层依赖 document + start()),故按大括号配平抽取该纯函数,注入 mock state 执行。
+    source = """
+    import fs from "node:fs";
+    const src = fs.readFileSync(new URL(__APP_MODULE__), "utf-8");
+    const start = src.indexOf("function liveStacksFromState()");
+    let depth = 0, end = -1;
+    for (let j = src.indexOf("{", start); j < src.length; j++) {
+      if (src[j] === "{") depth++;
+      else if (src[j] === "}" && --depth === 0) { end = j + 1; break; }
+    }
+    const fnText = src.slice(start, end);
+    const run = (state) => new Function("state", fnText + "\\nreturn liveStacksFromState();")(state);
+
+    const resource = {
+      resourceType: "stack", resourceId: "stk-1", resourceName: "web",
+      regionId: "cn-hangzhou", action: "CreateStack", toolUseId: "t1",
+    };
+
+    // A) 工具在运行 → 进行中栈显示。
+    const running = run({ currentTurnActive: true, resources: [resource], tools: { t1: { status: "running" } } });
+
+    // B) 工具已失败(轮询失败/工具终止)→ 不再显示,避免永久 CREATE_IN_PROGRESS。
+    const failed = run({ currentTurnActive: true, resources: [resource], tools: { t1: { status: "failed" } } });
+
+    // C) 回合已结束(取消/中断)→ live 栈全部清空。
+    const doneTurn = run({ currentTurnActive: false, resources: [resource], tools: { t1: { status: "running" } } });
+
+    // D) stackProgress 来自已完成工具 → 丢弃(仅运行中工具的进度才算 live)。
+    const spDone = run({
+      currentTurnActive: true, resources: [],
+      tools: { t1: { status: "completed", stackProgress: {
+        kind: "stack.progress", stackId: "stk-1", stackName: "web",
+        regionId: "cn-hangzhou", status: "CREATE_IN_PROGRESS",
+      } } },
+    });
+
+    // E) stackProgress 来自运行中工具 → 保留(真实状态覆盖占位)。
+    const spRunning = run({
+      currentTurnActive: true, resources: [],
+      tools: { t1: { status: "running", stackProgress: {
+        kind: "stack.progress", stackId: "stk-1", stackName: "web",
+        regionId: "cn-hangzhou", status: "CREATE_COMPLETE",
+      } } },
+    });
+
+    console.log(JSON.stringify({
+      runningLen: running.length,
+      runningStatus: running[0] && running[0].status,
+      failedLen: failed.length,
+      doneTurnLen: doneTurn.length,
+      spDoneLen: spDone.length,
+      spRunningLen: spRunning.length,
+      spRunningStatus: spRunning[0] && spRunning[0].status,
+    }));
+    """
+    result = _run_app_script(tmp_path, source)
+    assert result["runningLen"] == 1
+    assert result["runningStatus"] == "CREATE_IN_PROGRESS"
+    assert result["failedLen"] == 0
+    assert result["doneTurnLen"] == 0
+    assert result["spDoneLen"] == 0
+    assert result["spRunningLen"] == 1
+    assert result["spRunningStatus"] == "CREATE_COMPLETE"
 
 
 def test_output_panel_diagram_preview_guard_uses_diagram_id() -> None:
@@ -10514,8 +10631,8 @@ def test_app_regroups_pipeline_messages_before_render() -> None:
 
 def test_app_output_panel_import_bumped_to_v11() -> None:
     js = _source(APP_JS)
-    assert "output-panel-v18" in js
-    assert "output-panel-v17" not in js
+    assert "output-panel-v19" in js
+    assert "output-panel-v18" not in js
 
 
 def test_appearance_theme_css_blocks_present() -> None:
@@ -10959,6 +11076,10 @@ def test_general_panel_exposes_telemetry_share_content_toggle() -> None:
     assert 'makeForeignSwitch("workspace-telemetry-share-content")' in workspace
     assert 't("Help improve iac-code")' in workspace
     assert 't("Share full conversation content")' in workspace
+    # Bug5:说明须明确完整内容会发送到 iac-code 默认(或显式配置)遥测后端,
+    # 不得再用「仅在配置了端点时才上传」的误导措辞(隐去了默认远端后端)。
+    assert "default backend" in workspace
+    assert "only uploaded when a telemetry endpoint is configured" not in workspace
     # activate() 回填与 persist 走遥测端点
     assert "api.getTelemetrySettings()" in workspace
     assert "api.saveTelemetrySettings(" in workspace

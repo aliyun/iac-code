@@ -188,6 +188,29 @@ def test_disable_debug_drops_debug_from_startup_handler(tmp_path, monkeypatch):
     assert "should appear" in content
 
 
+def test_enable_debug_at_runtime_default_preserves_startup_handler(tmp_path, monkeypatch):
+    """Default (no opt-in) callers keep the historical handler layout.
+
+    CLI/REPL/A2A/ACP call enable_debug_at_runtime without replace_startup_info_handler,
+    so the startup INFO handler stays installed alongside the runtime DEBUG handler —
+    exactly as before this branch. This locks the shared default semantics in place so
+    the Web-only dedup opt-in cannot silently change other entrypoints.
+    """
+    import iac_code.utils.log as log_mod
+
+    monkeypatch.setattr("iac_code.utils.log.get_config_dir", lambda: tmp_path)
+    monkeypatch.delenv("DEBUG", raising=False)
+    logger.remove()
+
+    setup_logging(session_id="rtdef", debug=False)
+    startup_id = log_mod._startup_handler_id
+    enable_debug_at_runtime("rtdef")
+
+    # Startup handler id is untouched by the default path.
+    assert log_mod._startup_handler_id == startup_id
+    assert is_debug_enabled() is True
+
+
 def test_enable_debug_at_runtime_is_idempotent(tmp_path, monkeypatch):
     """Calling enable twice does not stack up duplicate handlers or break anything."""
     monkeypatch.setattr("iac_code.utils.log.get_config_dir", lambda: tmp_path)

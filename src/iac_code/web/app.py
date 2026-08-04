@@ -3362,7 +3362,7 @@ def create_app(
         from iac_code.utils.log import disable_debug_at_runtime, enable_debug_at_runtime
 
         if debug:
-            enable_debug_at_runtime("web")
+            enable_debug_at_runtime("web", replace_startup_info_handler=True)
         else:
             disable_debug_at_runtime()
         return JSONResponse(saved)

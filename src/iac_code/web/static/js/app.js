@@ -3,8 +3,8 @@ import { createComposerController } from "./components/composer.js?v=session-mod
 import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v5";
 import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v7";
 import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v23";
-import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v53";
-import { createOutputController } from "./components/output_panel.js?v=output-panel-v18";
+import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v54";
+import { createOutputController } from "./components/output_panel.js?v=output-panel-v19";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
 import { reduceEvent } from "./events.js?v=web-repl-ui-319";
 import { applyDomI18n, t } from "./i18n.js?v=web-repl-ui-277";
@@ -4638,6 +4638,13 @@ function scheduleOutputsRefresh() {
 //   1) resource.observed —— CreateStack 返回即到(t0 最早,且 region 可靠);
 //   2) 工具卡 stackProgress —— 每约 5s 轮询一帧,带真实栈状态。
 function liveStacksFromState() {
+  // live 进行中栈只在「当前回合正进行 + 发起该操作的工具仍在运行」时有效。回合结束(turn.done →
+  // currentTurnActive=false,含取消/中断)或工具终止(tool.result/finished → status 非 running,含轮询失败)
+  // 后必须清空对应占位,交还服务端权威态,否则面板会永久停在 CREATE_IN_PROGRESS。
+  if (!state.currentTurnActive) return [];
+  const tools = state.tools || {};
+  const isToolRunning = (toolUseId) => !!toolUseId && tools[toolUseId]?.status === "running";
+
   // resource.observed 的 region 可靠(始终为本次操作 region),用作 stackProgress 早期缺 region 时的回退,
   // 保证两来源落到同一「region::栈名」键、且与服务端键一致(否则终态到达会并出两行而非覆盖)。
   const regionByStackId = new Map();
@@ -4649,8 +4656,10 @@ function liveStacksFromState() {
   const keyOf = (region, name, id) => (name ? `${region || ""}::${name}` : id || "");
   const byKey = new Map();
   // resource.observed:创建一开始的最早占位(尚无真实状态,创建动作按 CREATE_IN_PROGRESS 记)。
+  // 仅当发起观测的工具仍在运行才保留——否则这只是已终止操作遗留的陈旧占位。
   for (const r of state.resources || []) {
     if (r?.resourceType !== "stack" || !r.resourceId) continue;
+    if (!isToolRunning(r.toolUseId)) continue;
     const region = r.regionId || "";
     byKey.set(keyOf(region, r.resourceName, r.resourceId), {
       stackId: r.resourceId,
@@ -4661,7 +4670,9 @@ function liveStacksFromState() {
     });
   }
   // stackProgress:轮询真实状态覆盖占位(同键 last-wins),region 缺失时回退 resource.observed 记录的可靠值。
-  for (const tool of Object.values(state.tools || {})) {
+  // 同样只认仍在运行的工具卡进度;已完成/失败工具的最后一帧不再作为 live。
+  for (const [toolUseId, tool] of Object.entries(tools)) {
+    if (!isToolRunning(toolUseId)) continue;
     const sp = tool?.stackProgress;
     if (!sp || sp.kind !== "stack.progress" || (!sp.stackId && !sp.stackName)) continue;
     const region = sp.regionId || regionByStackId.get(sp.stackId) || "";

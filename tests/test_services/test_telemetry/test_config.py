@@ -45,6 +45,8 @@ def _clear_env(monkeypatch):
     import iac_code.services.telemetry.config as _cfg_mod
 
     _cfg_mod._content_capture_optin = False
+    # Reset the debug→content backdoor to its historical CLI default (True).
+    _cfg_mod._debug_forces_content_capture = True
 
 
 def test_default_level_when_no_env_vars_set():
@@ -298,4 +300,49 @@ def test_startup_debug_flag_enables_span_capture(tmp_path, monkeypatch):
     from iac_code.utils.log import setup_logging
 
     setup_logging(session_id="tele2", debug=True)
+    assert should_capture_content_on_span() is True
+
+
+# --- Debug→content backdoor (web disables it; CLI keeps it) ---
+
+
+def test_debug_backdoor_disabled_keeps_span_capture_off_under_debug(tmp_path, monkeypatch):
+    """With the backdoor off (web), debug logging alone must NOT capture content."""
+    from iac_code.services.telemetry.config import set_debug_content_capture_backdoor
+    from iac_code.utils.log import setup_logging
+
+    monkeypatch.setattr("iac_code.utils.log.get_config_dir", lambda: tmp_path)
+    set_debug_content_capture_backdoor(False)
+
+    setup_logging(session_id="tele3", debug=True)
+
+    # Debug is on, but with no content opt-in and no env var, capture stays off.
+    assert should_capture_content_on_span() is False
+
+
+def test_debug_backdoor_disabled_still_respects_content_optin(tmp_path, monkeypatch):
+    """The web still captures when the explicit content opt-in is on, debug or not."""
+    from iac_code.services.telemetry.config import set_content_capture_optin, set_debug_content_capture_backdoor
+    from iac_code.utils.log import setup_logging
+
+    monkeypatch.setattr("iac_code.utils.log.get_config_dir", lambda: tmp_path)
+    set_debug_content_capture_backdoor(False)
+    set_content_capture_optin(True)
+
+    setup_logging(session_id="tele4", debug=True)
+
+    assert should_capture_content_on_span() is True
+
+
+def test_debug_backdoor_disabled_still_respects_explicit_env_var(tmp_path, monkeypatch):
+    """An explicitly set env var still governs capture when the backdoor is off."""
+    from iac_code.services.telemetry.config import set_debug_content_capture_backdoor
+    from iac_code.utils.log import setup_logging
+
+    monkeypatch.setattr("iac_code.utils.log.get_config_dir", lambda: tmp_path)
+    monkeypatch.setenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "SPAN_ONLY")
+    set_debug_content_capture_backdoor(False)
+
+    setup_logging(session_id="tele5", debug=True)
+
     assert should_capture_content_on_span() is True
