@@ -14,12 +14,17 @@ from scripts.repl.e2e.run_real_aliyun_contract_canary import (
     _is_allowed_describe_vpcs,
     _is_business_vpc_body,
     main,
+    parse_args,
 )
 
 
 def test_real_canary_requires_explicit_cloud_opt_in() -> None:
     with pytest.raises(SystemExit, match="--allow-real-cloud"):
         main([])
+
+
+def test_real_canary_defaults_to_text_e2e_model() -> None:
+    assert parse_args([]).model == "deepseek-v4-flash-0731"
 
 
 def test_copy_runtime_config_requires_all_files_and_restricts_permissions(tmp_path) -> None:
@@ -86,5 +91,6 @@ def test_real_canary_child_env_removes_deterministic_fixtures(monkeypatch, tmp_p
 
     assert env["IAC_CODE_CONFIG_DIR"] == str(tmp_path)
     assert env["IAC_CODE_MODE"] == "normal"
+    assert env["IAC_CODE_MODEL"] == "deepseek-v4-flash-0731"
     assert env["OTEL_EXPORTER_OTLP_ENDPOINT"] == "fixture"
     assert not any(key.startswith("IAC_CODE_E2E_") for key in env)

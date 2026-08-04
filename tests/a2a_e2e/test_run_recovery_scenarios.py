@@ -267,6 +267,7 @@ def test_scenario_harness_stream_passes_image_parts(monkeypatch, tmp_path: Path)
         leave_server_running=False,
     )
     harness = runner.ScenarioHarness(args, scenario="image-initial")
+    assert harness.server_env["IAC_CODE_MODEL"] == "qwen3.8-max"
     image = {"filename": "initial.png", "mediaType": "image/png", "bytes": "iVBORw0KGgo="}
 
     def fake_stream_message(**kwargs):
@@ -298,6 +299,22 @@ def test_image_recovery_scenarios_are_registered() -> None:
     ]:
         assert scenario in runner._SCENARIOS
         assert scenario in runner._REAL_CLOUD_SCENARIOS
+
+
+def test_default_models_are_selected_per_scenario() -> None:
+    runner = _load_runner()
+    args = runner.parse_args([])
+
+    assert runner._model_for_scenario(args, "scenario1") == "deepseek-v4-flash-0731"
+    assert runner._model_for_scenario(args, "image-initial") == "qwen3.8-max"
+
+
+def test_explicit_model_overrides_every_scenario() -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--model", "custom-model"])
+
+    assert runner._model_for_scenario(args, "scenario1") == "custom-model"
+    assert runner._model_for_scenario(args, "image-initial") == "custom-model"
 
 
 def test_scenario1_performance_backup_is_registered_and_requires_real_cloud() -> None:
@@ -867,6 +884,7 @@ def test_scenario1_performance_backup_configures_server_env(tmp_path: Path) -> N
 
     harness = runner.ScenarioHarness(args, scenario="scenario1-performance-backup")
 
+    assert harness.server_env["IAC_CODE_MODEL"] == "deepseek-v4-flash-0731"
     assert harness.server_env["IAC_CODE_A2A_EXTREME_PERFORMANCE"] == "true"
     assert harness.server_env["IAC_CODE_CONFIG_BACKUP_DIR"] == str((tmp_path / "run" / "session-backup").resolve())
     assert harness.backup_root == (tmp_path / "run" / "session-backup").resolve()

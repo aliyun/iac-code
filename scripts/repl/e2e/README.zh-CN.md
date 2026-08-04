@@ -6,11 +6,16 @@ REPL / PTY 入口，而 A2A runner 走 JSON-RPC / SSE 入口。
 
 ## 重要说明
 
-- 默认使用当前用户真实 `~/.iac-code` 配置。
+- 默认使用当前用户真实 `~/.iac-code` 配置；真实场景的模型由 runner 按下述规则覆盖。
 - 会调用真实 LLM provider。
 - 带 `--allow-real-cloud` 的 pipeline 场景可能调用真实阿里云工具和凭证。
 - 不属于普通 `make test`，也不会在 pytest 中执行真实场景。
 - 该 runner 通过 `pexpect` 使用真实 PTY，仅支持 POSIX 环境；Windows 会提前报错，不作为本脚本支持目标。
+
+非多模态场景默认使用 `deepseek-v4-flash-0731`，所有 `image-*` 场景默认使用
+`qwen3.8-max`。一次命令混跑文本和图片场景时会逐场景选择模型；显式传入 `--model` 会覆盖
+本次命令中的所有场景。E5 只读 canary 属于非多模态场景，也默认使用
+`deepseek-v4-flash-0731`；E1/E2 的确定性 provider fixture 不受此规则影响。
 
 ## Aliyun 结果契约与 telemetry 回归
 
@@ -53,14 +58,14 @@ uv run python scripts/repl/e2e/run_pipeline_scenarios.py \
   --scenario scenario1
 ```
 
-指定 provider/model 但不写入 `settings.yml`：
+指定 provider 并显式覆盖 model，但不写入 `settings.yml`：
 
 ```bash
 PATH="$HOME/.local/bin:$PATH" \
 uv run python scripts/repl/e2e/run_pipeline_scenarios.py \
   --allow-real-cloud \
   --provider dashscope \
-  --model qwen3.6-plus \
+  --model deepseek-v4-flash-0731 \
   --scenario scenario1
 ```
 

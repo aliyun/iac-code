@@ -16,6 +16,10 @@ A2A JSON-RPC streaming endpoint 并记录 SSE 事件和 pipeline snapshot。恢�
 cd /path/to/iac-code
 ```
 
+真实场景会按输入类型自动选择模型：非多模态场景使用 `deepseek-v4-flash-0731`，所有
+`image-*` 场景使用 `qwen3.8-max`。一次命令混跑文本和图片场景时也会逐场景选择；显式传入
+`--model` 会覆盖本次命令中的所有场景。
+
 ### Aliyun 结果契约与 telemetry 场景
 
 以下 wrapper 复用本目录真实 A2A server、JSON-RPC/SSE client 和 session persistence，但使用确定性
@@ -54,7 +58,6 @@ PATH="$HOME/.local/bin:$PATH" \
 uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --allow-real-cloud \
   --provider dashscope \
-  --model qwen3.6-plus \
   --stream-timeout 2400 \
   --preflight-timeout 60 \
   --scenario scenario1
@@ -68,7 +71,6 @@ PATH="$HOME/.local/bin:$PATH" \
 uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --allow-real-cloud \
   --provider dashscope \
-  --model qwen3.6-plus \
   --stream-timeout 2400 \
   --preflight-timeout 60 \
   --scenario redaction-step4
@@ -89,7 +91,6 @@ PATH="$HOME/.local/bin:$PATH" \
 uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --allow-real-cloud \
   --provider dashscope \
-  --model qwen3.6-plus \
   --stream-timeout 2400 \
   --preflight-timeout 60 \
   --scenario scenario1-performance-backup
@@ -102,7 +103,6 @@ PATH="$HOME/.local/bin:$PATH" \
 uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --allow-real-cloud \
   --provider dashscope \
-  --model qwen3.6-plus \
   --stream-timeout 2400 \
   --event-timeout 300 \
   --preflight-timeout 60 \
@@ -240,9 +240,11 @@ CLI 覆盖后的文本，才会回退到运行时渲染图片。
 ```bash
 PATH="$HOME/.local/bin:$PATH" IAC_CODE_MODE=normal \
 IAC_CODE_PROVIDER=dashscope \
-IAC_CODE_MODEL=qwen3.6-plus \
+IAC_CODE_MODEL=deepseek-v4-flash-0731 \
 uv run iac-code --prompt '只回复 OK'
 ```
+
+上面的命令对应非多模态场景；检查图片场景时将模型改为 `qwen3.8-max`。
 
 如果这里返回 `APIConnectionError`、`APITimeoutError` 或认证错误，需要先修复
 provider、网络或凭证。否则 E2E 会在证明 A2A 会话恢复前就失败。
@@ -279,7 +281,7 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --allow-real-cloud \
   --scenario scenario1 \
   --provider dashscope \
-  --model qwen3.6-plus
+  --model deepseek-v4-flash-0731
 
 # 结束后保留重启后的 server，便于手工排查。
 uv run python scripts/a2a/e2e/run_recovery_scenarios.py \

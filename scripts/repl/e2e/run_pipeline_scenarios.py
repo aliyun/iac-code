@@ -59,6 +59,17 @@ DEFAULT_EVALUATE_RESUME_CONTINUE_PROMPT = "continue"
 DEFAULT_CLEANUP_CONTINUE_PROMPT = (
     "只执行上面的回滚清理：仅删除待清理列表中的 stack id，完成后停止，不要删除或检查其他 stack。"
 )
+DEFAULT_TEXT_MODEL = "deepseek-v4-flash-0731"
+DEFAULT_MULTIMODAL_MODEL = "qwen3.8-max"
+MULTIMODAL_SCENARIOS = frozenset(
+    {
+        "image-ask-waiting-resume",
+        "image-initial",
+        "image-interrupt",
+        "image-normal-handoff",
+        "image-selection-waiting-resume",
+    }
+)
 DEFAULT_PERMISSION_PROMPT_RESPONSE = "pageup-enter"
 
 PIPELINE_STARTED_PATTERNS = (r"Pipeline", r"pipeline", r"intent_parsing", r"意图")
@@ -260,7 +271,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-dir", default="", help="Explicit run dir. Only valid with one scenario.")
     parser.add_argument("--python", default="uv run python")
     parser.add_argument("--provider", default="")
-    parser.add_argument("--model", default="")
+    parser.add_argument(
+        "--model",
+        default="",
+        help=(
+            "Override the model for every selected scenario. By default, image scenarios use "
+            f"{DEFAULT_MULTIMODAL_MODEL} and all other scenarios use {DEFAULT_TEXT_MODEL}."
+        ),
+    )
     parser.add_argument("--api-base", default="")
     parser.add_argument("--timeout", type=float, default=45.0)
     parser.add_argument("--stream-timeout", type=float, default=1800.0)
@@ -320,14 +338,19 @@ def _split_python_command(value: str) -> list[str]:
     return parts
 
 
-def _build_child_env(args: argparse.Namespace) -> dict[str, str]:
+def _model_for_scenario(args: argparse.Namespace, scenario: str) -> str:
+    if args.model:
+        return args.model
+    return DEFAULT_MULTIMODAL_MODEL if scenario in MULTIMODAL_SCENARIOS else DEFAULT_TEXT_MODEL
+
+
+def _build_child_env(args: argparse.Namespace, scenario: str) -> dict[str, str]:
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["IAC_CODE_MODE"] = "pipeline"
     if args.provider:
         env["IAC_CODE_PROVIDER"] = args.provider
-    if args.model:
-        env["IAC_CODE_MODEL"] = args.model
+    env["IAC_CODE_MODEL"] = _model_for_scenario(args, scenario)
     if args.api_base:
         env["IAC_CODE_BASE_URL"] = args.api_base
     return env
@@ -717,7 +740,7 @@ def _run_with_pty(
     run_dir = _scenario_run_dir(args, scenario)
     workspace_dir = Path(args.cwd).expanduser().resolve() if args.cwd else run_dir / "workspace"
     workspace_dir.mkdir(parents=True, exist_ok=True)
-    shared_env = _build_child_env(args)
+    shared_env = _build_child_env(args, scenario)
     env = ScenarioRuntimePaths.for_run(
         run_dir,
         environment=shared_env,
