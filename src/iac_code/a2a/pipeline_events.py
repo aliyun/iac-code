@@ -14,6 +14,7 @@ from iac_code.a2a.pipeline_journal import to_json_safe
 from iac_code.mcp.progress import mcp_progress_metadata
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.services.permissions.audit import build_input_summary, build_redacted_tool_input, fingerprint_text
+from iac_code.tools.cloud.base_stack import stack_result_from_metadata
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     CandidateDetailEvent,
@@ -900,7 +901,7 @@ class PipelineEventTranslator:
         action = operation["action"]
         params = operation["params"]
 
-        result = _json_object_from_string(event.result)
+        result = stack_result_from_metadata(event.metadata) or _json_object_from_string(event.result)
         if result is None:
             return None
         is_success = _bool_or_none(result.get("is_success"))
@@ -1480,12 +1481,15 @@ def _safe_permission_field_name(key: Any) -> str:
 
 
 def _tool_result_data(event: ToolResultEvent) -> dict[str, Any]:
-    return {
+    data = {
         "toolName": event.tool_name,
         "toolUseId": event.tool_use_id,
         "isError": event.is_error,
         "result": to_json_safe(event.result),
     }
+    if stack_result := stack_result_from_metadata(event.metadata):
+        data["stackResult"] = to_json_safe(stack_result)
+    return data
 
 
 def _sanitize_tool_input(tool_input: dict[str, Any]) -> dict[str, Any]:

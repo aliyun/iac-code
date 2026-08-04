@@ -28,7 +28,10 @@ def test_solution_reference_is_shared_and_pipeline_prompts_are_minimal() -> None
     architecture = (SELLING / "skills/iac-aliyun-architecture/SKILL.md").read_text(encoding="utf-8")
     generating = (SELLING / "skills/iac-aliyun-template-generating/SKILL.md").read_text(encoding="utf-8")
     deploying = (SELLING / "skills/iac-aliyun-deploying/SKILL.md").read_text(encoding="utf-8")
-    assert "candidate.name = iac-code-web-single-ecs" in architecture
+    assert "`candidate.name` 固定为 `iac-code-web-single-ecs`" in architecture
+    assert "单 ECS + EIP" in architecture
+    assert "安全组仅开放 8766" in architecture
+    assert "不得增加其他入口资源" in architecture
     assert "references/solutions/iac-code-web.md" in generating
     assert "references/solutions/iac-code-web.ros.yml" in generating
     assert "iac-code-web-single-ecs" not in deploying

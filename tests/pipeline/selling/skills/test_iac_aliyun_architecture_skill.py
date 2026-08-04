@@ -34,3 +34,12 @@ def test_architecture_prompt_guides_optional_memory_lookup_for_planning_context(
     assert "架构偏好" in body
     assert "已有 VPC" in body
     assert "当前用户意图为准" in body
+
+
+def test_architecture_keeps_iac_code_web_candidate_on_fixed_entry_topology():
+    body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "单 ECS + EIP" in body
+    assert "安全组仅开放 8766" in body
+    assert "不得增加其他入口资源" in body
+    assert "`candidate.name` 固定为 `iac-code-web-single-ecs`" in body

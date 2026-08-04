@@ -11,6 +11,7 @@ from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.step_spec import A2AArtifactSpec
 from iac_code.services.permissions.audit import fingerprint_text
 from iac_code.tools.cloud.aliyun.result_contract import ALIYUN_HTTP_METADATA_KEY
+from iac_code.tools.cloud.base_stack import STACK_RESULT_METADATA_KEY
 from iac_code.tools.result_storage import ResultStorage
 from iac_code.types.stream_events import (
     CandidateDetailEvent,
@@ -1785,6 +1786,46 @@ def test_stack_current_changed_emits_after_successful_ros_deploy_recreate() -> N
         "isSuccess": True,
         "current": True,
     }
+
+
+def test_stack_current_changed_uses_metadata_when_display_content_has_diagnostics() -> None:
+    ctx = _ctx()
+    ctx.emit_stack_events = True
+    translator = PipelineEventTranslator(ctx)
+    translator.translate(
+        ToolUseEndEvent(
+            tool_use_id="toolu-deploy",
+            name="ros_deploy",
+            input={
+                "action": "create",
+                "stack_name": "demo",
+                "template_url": "templates/demo.yml",
+                "region_id": "cn-hangzhou",
+            },
+        )
+    )
+    stack_result = {
+        "stack_id": "stack-failed",
+        "stack_name": "demo",
+        "status": "CREATE_FAILED",
+        "status_reason": "Bootstrap failed",
+        "is_success": False,
+    }
+
+    envelopes = translator.translate(
+        ToolResultEvent(
+            tool_use_id="toolu-deploy",
+            tool_name="ros_deploy",
+            result=json.dumps(stack_result) + "\n---\nROS local preflight diagnostics:\n3 limitations",
+            is_error=True,
+            metadata={STACK_RESULT_METADATA_KEY: stack_result},
+        )
+    )
+
+    assert [envelope["eventType"] for envelope in envelopes] == ["stack_current_changed", "tool_result"]
+    assert envelopes[0]["data"]["stackId"] == "stack-failed"
+    assert envelopes[0]["data"]["stackStatus"] == "CREATE_FAILED"
+    assert envelopes[1]["data"]["stackResult"] == stack_result
 
 
 def test_stack_current_changed_emits_when_create_stack_resource_is_observed() -> None:
