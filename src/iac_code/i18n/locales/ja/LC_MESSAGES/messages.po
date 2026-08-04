@@ -4442,7 +4442,7 @@ msgstr "Alibaba Cloud 百錬 Token Plan"
 
 #: src/iac_code/providers/registry.py
 msgid "OpenAI Compatible"
-msgstr "OpenAPI 互換"
+msgstr "OpenAI 互換"
 
 #: src/iac_code/providers/registry.py
 msgid "Kimi (China)"

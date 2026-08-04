@@ -4716,7 +4716,7 @@ msgstr "Alibaba Cloud Bailian Token Plan"
 
 #: src/iac_code/providers/registry.py
 msgid "OpenAI Compatible"
-msgstr "OpenAPI-kompatibel"
+msgstr "OpenAI-kompatibel"
 
 #: src/iac_code/providers/registry.py
 msgid "Kimi (China)"

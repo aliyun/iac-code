@@ -4385,7 +4385,7 @@ msgstr "阿里云百炼 Token Plan"
 
 #: src/iac_code/providers/registry.py
 msgid "OpenAI Compatible"
-msgstr "OpenAPI 兼容"
+msgstr "OpenAI 兼容"
 
 #: src/iac_code/providers/registry.py
 msgid "Kimi (China)"
