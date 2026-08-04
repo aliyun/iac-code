@@ -36,6 +36,7 @@ class AgentFactoryOptions:
     provider_config_frozen: bool = False
     effort_override: str | None = None
     provider_config_override: dict[str, Any] | None = field(default=None, repr=False)
+    source: str | None = None
 
 
 @dataclass
@@ -477,6 +478,28 @@ def _create_agent_runtime(options: AgentFactoryOptions, aliyun_services: Any) ->
             _mcp_auth_flows=mcp_auth_flows,
         )
         setup_complete = True
+        from iac_code.services.session_logging import (
+            log_session_start_safely,
+            log_session_started_from_provider_settings,
+        )
+
+        def _log_session_started() -> None:
+            log_session_started_from_provider_settings(
+                session_id=session_id,
+                provider_settings=provider_manager.session_start_settings(),
+                cwd=cwd,
+                max_turns=options.max_turns,
+                tool_count=_tool_count(tool_registry),
+                mcp_server_count=_mcp_server_count(mcp_load_result),
+                permission_mode=_permission_mode_name(permission_context),
+                provider_config_frozen=options.provider_config_frozen,
+                a2a_safe_mode=options.a2a_safe_mode,
+                resume_message_count=len(options.resume_messages or []),
+                external_services_enabled=not options.disable_external_services,
+                source=options.source or ("a2a" if options.a2a_safe_mode else "agent"),
+            )
+
+        log_session_start_safely(_log_session_started)
         return runtime
     finally:
         if not setup_complete:
@@ -538,6 +561,34 @@ def _session_mcp_configs(configs: list[dict[str, Any]] | None) -> dict[str, dict
             continue
         normalized[name] = {key: value for key, value in config.items() if key != "name"}
     return normalized
+
+
+def _tool_count(tool_registry: Any) -> int | None:
+    list_tools = getattr(tool_registry, "list_tools", None)
+    if not callable(list_tools):
+        return None
+    try:
+        return len(list(list_tools()))
+    except Exception:
+        return None
+
+
+def _mcp_server_count(load_result: Any) -> int:
+    servers = getattr(load_result, "servers", None)
+    if servers is None:
+        return 0
+    try:
+        return len(servers)
+    except TypeError:
+        return 0
+
+
+def _permission_mode_name(permission_context: Any) -> str | None:
+    mode = getattr(permission_context, "mode", None)
+    value = getattr(mode, "value", None)
+    if isinstance(value, str):
+        return value
+    return mode if isinstance(mode, str) else None
 
 
 def _prepare_session_dir_for_artifacts(session_storage: Any, cwd: str, session_id: str) -> Path | None:

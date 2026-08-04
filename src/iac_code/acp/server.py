@@ -803,7 +803,7 @@ class ACPServer:
         """Create an agent runtime, converting auth errors to ACP RequestError."""
         try:
             return create_agent_runtime(
-                AgentFactoryOptions(model=model, session_id=session_id, cwd=cwd, mcp_configs=mcp_configs)
+                AgentFactoryOptions(model=model, session_id=session_id, cwd=cwd, mcp_configs=mcp_configs, source="acp")
             )
         except Exception as exc:
             if _is_auth_error(exc):

@@ -262,6 +262,7 @@ def agent_factory_options_for_session(
         effort_override=selection.effort,
         mcp_elicitation_handler=_make_web_mcp_elicitation_handler(session, manager),
         disable_external_services=disable_external_services,
+        source="web-runtime",
     )
 
 

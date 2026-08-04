@@ -104,7 +104,9 @@ def web(
     from iac_code.services.telemetry import bootstrap_telemetry, graceful_shutdown
     from iac_code.web.server import run_web_server
 
-    bootstrap_telemetry(session_id="web-server-{}".format(uuid.uuid4()))
+    session_id = "web-server-{}".format(uuid.uuid4())
+    setup_logging(session_id=session_id, debug=False)
+    bootstrap_telemetry(session_id=session_id)
     try:
         run_web_server(
             host=host,
@@ -432,6 +434,7 @@ def main(
             raise typer.Exit(1)
 
         setup_logging(session_id=repl.session_id, debug=debug)
+        repl.log_session_started()
 
         from iac_code.services.telemetry import add_metric, bootstrap_telemetry, graceful_shutdown, log_event
         from iac_code.services.telemetry.names import Events, Metrics

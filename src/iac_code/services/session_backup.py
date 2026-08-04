@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -13,6 +14,7 @@ import uuid
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
 from enum import Enum
+from functools import wraps
 from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, Iterable, Literal, Mapping, NoReturn
 
@@ -34,6 +36,8 @@ from iac_code.utils.state_io import atomic_write_json, fsync_parent_dir, safe_re
 BACKUP_ENV_VAR = "IAC_CODE_CONFIG_BACKUP_DIR"
 BACKUP_STATE_FILENAME = ".backup-state.json"
 BACKUP_LOCK_FILENAME = ".backup-lock"
+_PREPARED_DIR_CACHE_LIMIT = 4096
+logger = logging.getLogger(__name__)
 _SAFE_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
 _PUBLIC_BACKUP_PATH_PATTERN = re.compile(
     r"""(?x)
@@ -73,6 +77,62 @@ class BackupResult:
     requires_reconcile: bool = False
 
 
+def _log_backup_session_elapsed(function: Callable[..., BackupResult]) -> Callable[..., BackupResult]:
+    @wraps(function)
+    def wrapper(self: object, *args: Any, **kwargs: Any) -> BackupResult:
+        started_at = time.perf_counter()
+        log_session_id = _format_backup_log_value(_session_id_from_backup_call(args, kwargs))
+        try:
+            result = function(self, *args, **kwargs)
+        except Exception as exc:
+            elapsed_ms = (time.perf_counter() - started_at) * 1000
+            _log_backup_elapsed(
+                "Session backup failed session_id=%s elapsed_ms=%.3f succeeded=false error_type=%s",
+                log_session_id,
+                elapsed_ms,
+                type(exc).__name__,
+            )
+            raise
+        if not result.enabled:
+            return result
+        elapsed_ms = (time.perf_counter() - started_at) * 1000
+        if result.succeeded:
+            _log_backup_elapsed(
+                "Session backup completed session_id=%s elapsed_ms=%.3f succeeded=true",
+                log_session_id,
+                elapsed_ms,
+            )
+        else:
+            _log_backup_elapsed(
+                "Session backup failed session_id=%s elapsed_ms=%.3f succeeded=false",
+                log_session_id,
+                elapsed_ms,
+            )
+        return result
+
+    return wrapper
+
+
+def _session_id_from_backup_call(args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> Any:
+    if len(args) >= 2:
+        return args[1]
+    return kwargs.get("session_id")
+
+
+def _log_backup_elapsed(message: str, *args: Any) -> None:
+    with suppress(Exception):
+        logger.info(message, *args)
+
+
+def _format_backup_log_value(value: Any) -> str:
+    try:
+        from iac_code.services.session_logging import format_log_value
+
+        return format_log_value(value)
+    except Exception:
+        return "unavailable"
+
+
 @dataclass(frozen=True)
 class SessionRestoreResult:
     enabled: bool
@@ -88,6 +148,7 @@ class SessionRestoreResult:
 class SessionReconcileResult:
     enabled: bool
     action: Literal["disabled", "current", "initialized", "restored", "repaired", "metadata_repaired"]
+    source: Path | None = None
     state: SessionBackupState | None = None
     copied_files: int = 0
     deleted_files: int = 0
@@ -131,7 +192,9 @@ class SessionBackupService:
         self._session_storage = session_storage or SessionStorage()
         self._retry_delays = tuple(retry_delays)
         self._writer_id = "{}-{}-{}".format(os.getpid(), id(self), uuid.uuid4())
+        self._prepared_dirs: dict[Path, None] = {}
 
+    @_log_backup_session_elapsed
     def backup_session(
         self,
         cwd: str,
@@ -348,7 +411,7 @@ class SessionBackupService:
 
             if local is None:
                 if shared is None or shared_state is None:
-                    return SessionReconcileResult(enabled=True, action="initialized")
+                    return SessionReconcileResult(enabled=True, action="initialized", source=shared)
                 self._validate_restore_paths(shared, destination, backup_root)
                 self._reject_existing_restore_destination(destination)
                 result = self._mirror(shared, destination)
@@ -357,6 +420,7 @@ class SessionBackupService:
                 return SessionReconcileResult(
                     enabled=True,
                     action="restored",
+                    source=shared,
                     state=shared_state,
                     copied_files=result.copied_files,
                     deleted_files=result.deleted_files,
@@ -369,7 +433,12 @@ class SessionBackupService:
                 if shared is not None:
                     raise SessionBackupError("shared session is missing backup state")
                 if local_state.generation == 0 and local_state.status == "succeeded":
-                    return SessionReconcileResult(enabled=True, action="initialized", state=local_state)
+                    return SessionReconcileResult(
+                        enabled=True,
+                        action="initialized",
+                        source=shared,
+                        state=local_state,
+                    )
                 if local_state.status == "failed" and local_state.generation == 0:
                     return self._repair_failed_local(
                         local,
@@ -382,20 +451,24 @@ class SessionBackupService:
 
             assert shared is not None and shared_state is not None
             if local_state.status == "failed" and local_state.same_lineage(shared_state):
-                return self._repair_failed_local(
-                    local,
-                    shared,
-                    local_state,
-                    shared_state,
-                    attempted_proof_validator,
+                return replace(
+                    self._repair_failed_local(
+                        local,
+                        shared,
+                        local_state,
+                        shared_state,
+                        attempted_proof_validator,
+                    ),
+                    source=shared,
                 )
             if local_state.same_lineage(shared_state) and local_state.status == "succeeded":
                 if local_state == shared_state:
-                    return SessionReconcileResult(enabled=True, action="current", state=local_state)
+                    return SessionReconcileResult(enabled=True, action="current", source=shared, state=local_state)
                 self._write_state(local, shared_state)
                 return SessionReconcileResult(
                     enabled=True,
                     action="metadata_repaired",
+                    source=shared,
                     state=shared_state,
                     payload_changed=False,
                 )
@@ -404,6 +477,7 @@ class SessionBackupService:
                 return SessionReconcileResult(
                     enabled=True,
                     action="metadata_repaired",
+                    source=shared,
                     state=shared_state,
                     payload_changed=True,
                 )
@@ -414,6 +488,7 @@ class SessionBackupService:
                 return SessionReconcileResult(
                     enabled=True,
                     action="restored",
+                    source=shared,
                     state=shared_state,
                     copied_files=result.copied_files,
                     deleted_files=result.deleted_files,
@@ -424,13 +499,11 @@ class SessionBackupService:
 
     def restore_session(self, cwd: str, session_id: str) -> SessionRestoreResult:
         destination = Path(self._session_storage.session_dir(cwd, session_id))
-        backup_root = self._backup_root() if self._backup_enabled() else None
-        source = self._source_for_restore(cwd, session_id, backup_root) if backup_root is not None else None
         result = self.reconcile_session(cwd, session_id)
         return SessionRestoreResult(
             enabled=result.enabled,
             restored=result.action == "restored",
-            source=source,
+            source=result.source,
             destination=destination,
             copied_files=result.copied_files,
             deleted_files=result.deleted_files,
@@ -643,12 +716,14 @@ class SessionBackupService:
             or self._is_reparse_point(destination)
             or (destination.exists() and not destination.is_dir())
         ):
+            self._forget_prepared_dirs(destination)
             self._unlink(destination)
             self._fsync_parent_dir(destination)
         self._ensure_private_dir(destination)
         copied_files = 0
         deleted_files = 0
         included_files: set[Path] = set()
+        included_dirs: set[Path] = set()
 
         for path in self._iter_tree(source):
             if path.is_symlink():
@@ -658,6 +733,7 @@ class SessionBackupService:
                 continue
             target = destination / relative
             if path.is_dir():
+                included_dirs.add(relative)
                 self._remove_conflicting_file(destination, target)
                 self._ensure_private_dir(target)
                 continue
@@ -669,22 +745,28 @@ class SessionBackupService:
                 self._copy_file(path, target)
                 copied_files += 1
 
-        stale_paths = sorted(
-            (
-                p
-                for p in self._iter_tree(destination, include_reparse=True)
-                if p.is_symlink() or self._is_reparse_point(p) or not p.is_dir()
-            ),
-            reverse=True,
-        )
+        stale_paths: list[Path] = []
+        prune_candidates: set[Path] = set()
+        for path in self._iter_tree(destination, include_reparse=True):
+            if path.is_symlink() or self._is_reparse_point(path) or not path.is_dir():
+                stale_paths.append(path)
+                continue
+            if path.relative_to(destination) not in included_dirs:
+                prune_candidates.add(path)
+
+        stale_paths.sort(reverse=True)
         for path in stale_paths:
             relative = path.relative_to(destination)
             if self._included(relative) and relative not in included_files:
                 self._unlink(path)
                 self._fsync_parent_dir(path)
                 deleted_files += 1
+                parent = path.parent
+                while parent != destination:
+                    prune_candidates.add(parent)
+                    parent = parent.parent
 
-        self._prune_empty_dirs(destination)
+        self._prune_empty_dirs(prune_candidates)
         return BackupResult(
             enabled=True,
             source=source,
@@ -1110,7 +1192,8 @@ class SessionBackupService:
         return os.fdopen(fd, "a+b")
 
     def _copy_file(self, src: Path, dst: Path) -> None:
-        self._ensure_private_dir(dst.parent)
+        if not self._is_regular_file(src):
+            raise SessionBackupError(_("session source entry is not a regular file: {source}").format(source=src))
         handle = tempfile.NamedTemporaryFile(
             prefix=".iacbk.",
             suffix=".tmp",
@@ -1283,13 +1366,28 @@ class SessionBackupService:
                 os.fsync(handle.fileno())
 
     def _ensure_private_dir(self, path: Path) -> Path:
+        if path in self._prepared_dirs:
+            try:
+                path_stat = path.stat(follow_symlinks=False)
+            except OSError:
+                self._forget_prepared_dirs(path)
+            else:
+                is_reparse_point = bool(
+                    getattr(path_stat, "st_file_attributes", 0)
+                    & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+                )
+                if stat.S_ISDIR(path_stat.st_mode) and not is_reparse_point:
+                    self._prepared_dirs.pop(path)
+                    self._prepared_dirs[path] = None
+                    return path
+                self._forget_prepared_dirs(path)
         missing_dirs = self._missing_directory_chain(path)
         ensure_private_dir(path)
-        if missing_dirs:
-            for created_dir in reversed(missing_dirs):
-                self._fsync_parent_dir(created_dir)
-        else:
-            self._fsync_parent_dir(path)
+        for created_dir in reversed(missing_dirs):
+            self._fsync_parent_dir(created_dir)
+        if len(self._prepared_dirs) >= _PREPARED_DIR_CACHE_LIMIT:
+            self._prepared_dirs.pop(next(iter(self._prepared_dirs)))
+        self._prepared_dirs[path] = None
         return path
 
     @staticmethod
@@ -1304,6 +1402,11 @@ class SessionBackupService:
             current = parent
         return missing_dirs
 
+    def _forget_prepared_dirs(self, root: Path) -> None:
+        for path in tuple(self._prepared_dirs):
+            if path == root or root in path.parents:
+                self._prepared_dirs.pop(path, None)
+
     @staticmethod
     def _fsync_parent_dir(path: Path) -> None:
         with suppress(OSError):
@@ -1312,15 +1415,18 @@ class SessionBackupService:
     def _remove_conflicting_file(self, root: Path, path: Path) -> None:
         self._require_under_root(root, path)
         if path.is_symlink() or self._is_reparse_point(path) or (path.exists() and not path.is_dir()):
+            self._forget_prepared_dirs(path)
             self._unlink(path)
             self._fsync_parent_dir(path)
 
     def _remove_conflicting_non_file(self, root: Path, path: Path) -> None:
         self._require_under_root(root, path)
         if path.is_symlink() or self._is_reparse_point(path):
+            self._forget_prepared_dirs(path)
             self._unlink(path)
             self._fsync_parent_dir(path)
         elif path.is_dir():
+            self._forget_prepared_dirs(path)
             self._rmtree(path)
             self._fsync_parent_dir(path)
         elif path.exists() and not path.is_file():
@@ -1452,8 +1558,8 @@ class SessionBackupService:
                 return True
         return False
 
-    def _prune_empty_dirs(self, root: Path) -> None:
-        for path in sorted((p for p in self._iter_tree(root, include_reparse=True) if p.is_dir()), reverse=True):
+    def _prune_empty_dirs(self, candidates: Iterable[Path]) -> None:
+        for path in sorted(set(candidates), reverse=True):
             try:
                 if self._is_reparse_point(path):
                     continue
@@ -1461,6 +1567,7 @@ class SessionBackupService:
                 path.rmdir()
             except OSError:
                 continue
+            self._forget_prepared_dirs(path)
             self._fsync_parent_dir(path)
 
     @staticmethod

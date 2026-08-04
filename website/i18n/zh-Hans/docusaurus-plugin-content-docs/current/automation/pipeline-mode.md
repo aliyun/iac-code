@@ -111,4 +111,4 @@ ACP 目前不支持 Pipeline 模式。`--prompt` / [非交互模式](./non-inter
 
 ## 备份检查点
 
-Pipeline 模式会在每个 agent loop step 完成后，以及对外发布等待输入、`pipeline_handoff_ready` 或终态前执行关键备份。如果关键备份失败，pipeline 会发送 `backup_blocked` 并停在可恢复状态，而不会先发布 `input_required`、`waiting_input`、`pipeline_handoff_ready` 或终态完成事件。对 A2A 观察者来说，terminal 和 `pipeline_handoff_ready` 受保护发布在镜像持久化后，会跟随一个包含 `committedEventId`、`committedEventType` 和 `committedSequence` 的 `backup_committed` 事件。`parallel_sub_pipeline` 的子 step 进度不会在兄弟 sub-pipeline 仍运行时单独备份，父级检查点会捕获稳定的聚合状态。
+Pipeline 模式不再为完成的 agent loop step 执行备份。它会先发布 `input_required` 或 `waiting_input`，再执行一次关键备份；如果备份失败，pipeline 随后发送 `backup_blocked` 并停在可恢复状态。`pipeline_handoff_ready` 和终态仍然会在发布前受到关键备份保护。对 A2A 观察者来说，terminal 和 `pipeline_handoff_ready` 受保护发布在镜像持久化后，会跟随一个包含 `committedEventId`、`committedEventType` 和 `committedSequence` 的 `backup_committed` 事件。`parallel_sub_pipeline` 的子 step 进度由下一次等待输入、handoff 或终态备份捕获，不再创建逐步检查点。

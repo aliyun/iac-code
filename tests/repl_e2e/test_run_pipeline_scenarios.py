@@ -272,14 +272,14 @@ def test_redaction_hides_sensitive_env_values() -> None:
     env = {
         "IAC_CODE_API_KEY": "sk-live-secret",
         "CUSTOM_TOKEN": "abcdefghijklmnop",
-        "IAC_CODE_MODEL": "qwen3.6-plus",
+        "IAC_CODE_MODEL": "deepseek-v4-flash-0731",
     }
 
     redacted = runner._redact_sensitive_text(text, env)
 
     assert "sk-live-secret" not in redacted
     assert "abcdefghijklmnop" not in redacted
-    assert "qwen3.6-plus" not in redacted
+    assert "deepseek-v4-flash-0731" not in redacted
     assert "<redacted>" in redacted
 
 
@@ -305,16 +305,28 @@ def test_build_child_env_sets_pipeline_mode_without_overriding_home(monkeypatch)
     runner = _load_runner()
     monkeypatch.setenv("HOME", "/Users/example")
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", "/custom/iac")
-    args = runner.parse_args(["--allow-real-cloud", "--provider", "dashscope", "--model", "qwen3.6-plus"])
+    args = runner.parse_args(["--allow-real-cloud", "--provider", "dashscope", "--model", "custom-model"])
 
-    env = runner._build_child_env(args)
+    env = runner._build_child_env(args, "scenario1")
 
     assert env["HOME"] == "/Users/example"
     assert env["IAC_CODE_CONFIG_DIR"] == "/custom/iac"
     assert env["IAC_CODE_MODE"] == "pipeline"
     assert env["IAC_CODE_PROVIDER"] == "dashscope"
-    assert env["IAC_CODE_MODEL"] == "qwen3.6-plus"
+    assert env["IAC_CODE_MODEL"] == "custom-model"
     assert env["PYTHONUTF8"] == "1"
+
+
+def test_build_child_env_selects_default_model_per_scenario(monkeypatch) -> None:
+    runner = _load_runner()
+    monkeypatch.setenv("IAC_CODE_MODEL", "configured-model")
+    args = runner.parse_args(["--allow-real-cloud"])
+
+    text_env = runner._build_child_env(args, "scenario1")
+    image_env = runner._build_child_env(args, "image-initial")
+
+    assert text_env["IAC_CODE_MODEL"] == "deepseek-v4-flash-0731"
+    assert image_env["IAC_CODE_MODEL"] == "qwen3.8-max"
 
 
 def test_repeated_scenarios_are_preserved() -> None:
@@ -402,7 +414,7 @@ def test_write_result_writes_summary_and_transcripts(tmp_path: Path) -> None:
 
     runner._write_run_artifacts(
         run_dir=tmp_path,
-        env={"IAC_CODE_API_KEY": "sk-secret123456", "IAC_CODE_MODEL": "qwen3.6-plus"},
+        env={"IAC_CODE_API_KEY": "sk-secret123456", "IAC_CODE_MODEL": "deepseek-v4-flash-0731"},
         raw_transcript="hello sk-secret123456",
         events=[{"type": "check", "name": "pipeline started", "passed": True}],
         result=result,

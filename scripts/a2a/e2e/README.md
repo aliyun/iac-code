@@ -18,6 +18,11 @@ Run commands from the repository root:
 cd /path/to/iac-code
 ```
 
+Real scenarios choose a model by input type: non-multimodal scenarios use
+`deepseek-v4-flash-0731`, while every `image-*` scenario uses `qwen3.8-max`.
+Mixed text/image runs select a model separately for each scenario. An explicit
+`--model` overrides this selection for every scenario in the command.
+
 Use this deterministic crash smoke when you want the shortest recovery check.
 It injects a crash after the A2A pipeline snapshot is saved, then restarts the
 server and verifies task recovery artifacts:
@@ -40,7 +45,6 @@ PATH="$HOME/.local/bin:$PATH" \
 uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --allow-real-cloud \
   --provider dashscope \
-  --model qwen3.6-plus \
   --stream-timeout 2400 \
   --preflight-timeout 60 \
   --scenario scenario1
@@ -54,7 +58,6 @@ PATH="$HOME/.local/bin:$PATH" \
 uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --allow-real-cloud \
   --provider dashscope \
-  --model qwen3.6-plus \
   --stream-timeout 2400 \
   --preflight-timeout 60 \
   --scenario redaction-step4
@@ -79,7 +82,6 @@ PATH="$HOME/.local/bin:$PATH" \
 uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --allow-real-cloud \
   --provider dashscope \
-  --model qwen3.6-plus \
   --stream-timeout 2400 \
   --preflight-timeout 60 \
   --scenario scenario1-performance-backup
@@ -92,7 +94,6 @@ PATH="$HOME/.local/bin:$PATH" \
 uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --allow-real-cloud \
   --provider dashscope \
-  --model qwen3.6-plus \
   --stream-timeout 2400 \
   --event-timeout 300 \
   --preflight-timeout 60 \
@@ -234,9 +235,12 @@ unless `--skip-preflight` is set. You can run the same check manually:
 ```bash
 PATH="$HOME/.local/bin:$PATH" IAC_CODE_MODE=normal \
 IAC_CODE_PROVIDER=dashscope \
-IAC_CODE_MODEL=qwen3.6-plus \
+IAC_CODE_MODEL=deepseek-v4-flash-0731 \
 uv run iac-code --prompt '只回复 OK'
 ```
+
+That command matches non-multimodal scenarios. Use `qwen3.8-max` when
+preflighting an image scenario.
 
 If this returns `APIConnectionError`, `APITimeoutError`, or an authentication
 error, fix provider, network, or credentials first. Otherwise the E2E run will
@@ -274,7 +278,7 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --allow-real-cloud \
   --scenario scenario1 \
   --provider dashscope \
-  --model qwen3.6-plus
+  --model deepseek-v4-flash-0731
 
 # Keep the restarted server running for manual inspection.
 uv run python scripts/a2a/e2e/run_recovery_scenarios.py \

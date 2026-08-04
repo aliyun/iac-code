@@ -18,9 +18,10 @@ from opentelemetry.trace import Status, StatusCode
 
 from iac_code.i18n import _
 from iac_code.providers.base import Message, NonStreamingResponse, Provider, ToolDefinition
-from iac_code.providers.request_policy import ProviderRequestPolicy, bool_or_none
+from iac_code.providers.request_policy import ProviderRequestPolicy, bool_or_none, positive_int_or_none
 from iac_code.providers.retry import RetryableError, RetryConfig, with_retry
 from iac_code.providers.stream_watchdog import StreamWatchdog
+from iac_code.services.session_logging import is_custom_endpoint, sanitize_endpoint_origin
 from iac_code.services.telemetry import (
     add_metric,
     attach_context,
@@ -485,6 +486,13 @@ def create_provider(
         **request_policy_kwargs,
     )
     setattr(provider, "_logical_provider_key", provider_key)
+    endpoint_url = _provider_endpoint_url(provider) or effective_base_url
+    setattr(provider, "_session_endpoint_origin", sanitize_endpoint_origin(endpoint_url))
+    setattr(
+        provider,
+        "_session_endpoint_custom",
+        is_custom_endpoint(base_url or configured_base_url, desc.base_url),
+    )
     return provider
 
 
@@ -587,6 +595,39 @@ def _request_policy_with_effort_override(
             max_completion_tokens=policy.max_completion_tokens if policy is not None else None,
         )
     )
+
+
+def _first_not_none(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _string_provider_attr(provider: Any, name: str) -> str | None:
+    value = getattr(provider, name, None)
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _bool_provider_attr(provider: Any, name: str) -> bool | None:
+    value = getattr(provider, name, None)
+    return value if isinstance(value, bool) else None
+
+
+def _positive_int_provider_attr(provider: Any, name: str) -> int | None:
+    return positive_int_or_none(getattr(provider, name, None))
+
+
+def _provider_endpoint_url(provider: Any) -> str | None:
+    base_url = getattr(provider, "_base_url", None)
+    if base_url:
+        return str(base_url)
+    client = getattr(provider, "_client", None)
+    client_base_url = getattr(client, "base_url", None)
+    return str(client_base_url) if client_base_url else None
 
 
 class ProviderManager:
@@ -752,6 +793,38 @@ class ProviderManager:
 
         descriptor = PROVIDER_REGISTRY.get(key)
         return descriptor.display_name if descriptor is not None else key
+
+    def session_start_settings(self) -> dict[str, Any]:
+        """Return non-sensitive provider settings that affect session performance."""
+        provider = self._provider
+        policy = self._request_policy_override
+        max_completion_tokens = _first_not_none(
+            _positive_int_provider_attr(provider, "_max_completion_tokens"),
+            _positive_int_provider_attr(provider, "_max_output_tokens"),
+            policy.max_completion_tokens if policy is not None else None,
+        )
+        return {
+            "provider": self.get_provider_key() or None,
+            "provider_display": self.get_provider_display() or None,
+            "model": self.get_model_name(),
+            "effort": _first_not_none(
+                _string_provider_attr(provider, "_effort"),
+                self._effort_override,
+                policy.effort if policy is not None else None,
+            ),
+            "thinking_enabled": _first_not_none(
+                _bool_provider_attr(provider, "_thinking_enabled"),
+                policy.thinking_enabled if policy is not None else None,
+            ),
+            "thinking_budget": _first_not_none(
+                _positive_int_provider_attr(provider, "_thinking_budget"),
+                policy.thinking_budget if policy is not None else None,
+            ),
+            "max_completion_tokens": max_completion_tokens,
+            "stream_idle_timeout": self._stream_idle_timeout,
+            "endpoint_origin": _string_provider_attr(provider, "_session_endpoint_origin"),
+            "endpoint_custom": _bool_provider_attr(provider, "_session_endpoint_custom"),
+        }
 
     def _get_fallback_model(self, model: str | None = None, provider_key: str | None = None) -> str | None:
         current_model = model or self._model

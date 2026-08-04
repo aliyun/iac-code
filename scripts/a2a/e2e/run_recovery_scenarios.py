@@ -111,6 +111,17 @@ CLEANUP_EVENT_TYPES = frozenset(
 CLEANUP_ACTIVE_STATUSES = frozenset({"pending", "started", "in_progress", "failed"})
 FAULT_AFTER_SNAPSHOT_POINT = "after_a2a_pipeline_snapshot_saved"
 PERFORMANCE_BACKUP_SCENARIOS = frozenset({"scenario1-performance-backup"})
+DEFAULT_TEXT_MODEL = "deepseek-v4-flash-0731"
+DEFAULT_MULTIMODAL_MODEL = "qwen3.8-max"
+MULTIMODAL_SCENARIOS = frozenset(
+    {
+        "image-ask-waiting",
+        "image-initial",
+        "image-interrupt",
+        "image-normal-handoff",
+        "image-selection-waiting",
+    }
+)
 IMAGE_TEXT_PROMPT = "请读取图片中的文字，并将图片中的文字作为本轮用户输入执行。"
 STATIC_TEXT_IMAGE_FIXTURE_ROOT = E2E_SCRIPTS_DIR / "fixtures" / "text-images"
 STATIC_TEXT_IMAGE_FIXTURES = {
@@ -510,7 +521,7 @@ class ScenarioHarness:
         self.server_env = _server_env(
             os.environ.copy(),
             provider=args.provider,
-            model=args.model,
+            model=_model_for_scenario(args, scenario),
             api_base=args.api_base,
         )
         if scenario == REDACTION_STEP4_SCENARIO:
@@ -813,7 +824,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-dir", default="", help="Explicit run dir. Only valid when running one scenario.")
     parser.add_argument("--python", default="uv run python")
     parser.add_argument("--provider", default="")
-    parser.add_argument("--model", default="")
+    parser.add_argument(
+        "--model",
+        default="",
+        help=(
+            "Override the model for every selected scenario. By default, image scenarios use "
+            f"{DEFAULT_MULTIMODAL_MODEL} and all other scenarios use {DEFAULT_TEXT_MODEL}."
+        ),
+    )
     parser.add_argument("--api-base", default="")
     parser.add_argument(
         "--deterministic",
@@ -847,6 +865,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--recovery-prompt", default=DEFAULT_RECOVERY_PROMPT)
     parser.add_argument("--expected-text", default=DEFAULT_NORMAL_FOLLOWUP_PROMPT)
     return parser.parse_args(argv)
+
+
+def _model_for_scenario(args: argparse.Namespace, scenario: str) -> str:
+    if args.model:
+        return args.model
+    return DEFAULT_MULTIMODAL_MODEL if scenario in MULTIMODAL_SCENARIOS else DEFAULT_TEXT_MODEL
 
 
 def main(argv: list[str] | None = None) -> int:

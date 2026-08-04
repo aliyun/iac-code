@@ -320,6 +320,7 @@ class IacCodeA2APipelineExecutor:
                     provider_config_frozen=self._provider_config_frozen,
                     provider_config_override=self._provider_config_override,
                     effort_override=self._effort_override,
+                    source="a2a-pipeline",
                 )
             )
 
@@ -722,6 +723,7 @@ class IacCodeA2APipelineExecutor:
                     provider_config_frozen=self._provider_config_frozen,
                     provider_config_override=self._provider_config_override,
                     effort_override=self._effort_override,
+                    source="a2a-pipeline",
                 )
             ),
         )
@@ -1753,10 +1755,22 @@ class IacCodeA2APipelineExecutor:
                 ctx=ctx,
             )
 
+        async def after_enqueue(envelope: dict[str, Any]) -> None:
+            await self._backup_after_pipeline_publication(
+                envelope,
+                publisher=publisher,
+                pipeline=pipeline,
+                cwd=cwd,
+                session_id=session_id,
+                task=task,
+                ctx=ctx,
+            )
+
         async def after_backup_commit(envelope: dict[str, Any]) -> None:
             self._mirror_a2a_snapshots_for_pipeline_publication(envelope, task=task, ctx=ctx)
 
         publisher.before_enqueue = before_enqueue
+        publisher.after_enqueue = after_enqueue
         publisher.after_backup_commit = after_backup_commit
 
     async def _backup_before_pipeline_publication(
@@ -1773,11 +1787,63 @@ class IacCodeA2APipelineExecutor:
         reason = _backup_reason_for_pipeline_envelope(envelope)
         if reason is None:
             return True
+        if reason in {BackupReason.INPUT_REQUIRED, BackupReason.WAITING_INPUT}:
+            return True
         if reason in {BackupReason.TERMINAL, BackupReason.HANDOFF_READY}:
             if _is_pending_backup_publication_event(envelope):
                 return True
         else:
             self._mirror_a2a_snapshots_for_pipeline_publication(envelope, task=task, ctx=ctx)
+        await self._backup_pipeline_publication(
+            envelope,
+            publisher=publisher,
+            pipeline=pipeline,
+            cwd=cwd,
+            session_id=session_id,
+            task=task,
+            ctx=ctx,
+            reason=reason,
+        )
+        return True
+
+    async def _backup_after_pipeline_publication(
+        self,
+        envelope: dict[str, Any],
+        *,
+        publisher: PipelineA2AEventPublisher,
+        pipeline: Any,
+        cwd: str,
+        session_id: str,
+        task: Any,
+        ctx: Any,
+    ) -> None:
+        reason = _backup_reason_for_pipeline_envelope(envelope)
+        if reason not in {BackupReason.INPUT_REQUIRED, BackupReason.WAITING_INPUT}:
+            return
+        self._mirror_a2a_snapshots_for_pipeline_publication(envelope, task=task, ctx=ctx)
+        await self._backup_pipeline_publication(
+            envelope,
+            publisher=publisher,
+            pipeline=pipeline,
+            cwd=cwd,
+            session_id=session_id,
+            task=task,
+            ctx=ctx,
+            reason=reason,
+        )
+
+    async def _backup_pipeline_publication(
+        self,
+        envelope: dict[str, Any],
+        *,
+        publisher: PipelineA2AEventPublisher,
+        pipeline: Any,
+        cwd: str,
+        session_id: str,
+        task: Any,
+        ctx: Any,
+        reason: BackupReason,
+    ) -> None:
         publication_proofs = None
         if reason == BackupReason.HANDOFF_READY and envelope.get("visibility") == "committed":
             publication_proofs = {
@@ -1831,7 +1897,6 @@ class IacCodeA2APipelineExecutor:
             self._task_store.mirror_task(task)
             self._task_store.mirror_context(ctx)
             raise _PipelineBackupBlockedTransitionError from exc
-        return True
 
     def _mirror_a2a_snapshots_for_pipeline_publication(
         self,

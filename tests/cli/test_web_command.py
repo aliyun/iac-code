@@ -1,6 +1,14 @@
+import pytest
 from typer.testing import CliRunner
 
 from iac_code.cli.main import app
+
+
+@pytest.fixture(autouse=True)
+def setup_logging_calls(monkeypatch) -> list[dict]:
+    calls: list[dict] = []
+    monkeypatch.setattr("iac_code.cli.main.setup_logging", lambda **kwargs: calls.append(kwargs))
+    return calls
 
 
 def test_web_command_runs_local_server_with_safe_defaults(monkeypatch) -> None:
@@ -15,6 +23,17 @@ def test_web_command_runs_local_server_with_safe_defaults(monkeypatch) -> None:
 
     assert result.exit_code == 0
     assert calls == [{"host": "127.0.0.1", "port": 8766, "open_browser": True, "access_token_file": None}]
+
+
+def test_web_command_configures_logging(monkeypatch, setup_logging_calls) -> None:
+    monkeypatch.setattr("iac_code.web.server.run_web_server", lambda **_kwargs: None)
+
+    result = CliRunner().invoke(app, ["web"])
+
+    assert result.exit_code == 0
+    assert len(setup_logging_calls) == 1
+    assert str(setup_logging_calls[0]["session_id"]).startswith("web-server-")
+    assert setup_logging_calls[0]["debug"] is False
 
 
 def test_web_command_accepts_host_port_and_open_browser(monkeypatch) -> None:

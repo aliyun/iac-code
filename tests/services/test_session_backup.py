@@ -1,7 +1,10 @@
 import json
+import logging
 import os
+import shutil
 import sys
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -56,6 +59,24 @@ def test_backup_disabled_when_env_unset(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
     assert result.enabled is False
     assert result.copied_files == 0
+
+
+def test_backup_timing_wrapper_preserves_keyword_call_form(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.delenv("IAC_CODE_CONFIG_BACKUP_DIR", raising=False)
+    caplog.set_level(logging.INFO, logger="iac_code.services.session_backup")
+
+    result = SessionBackupService().backup_session(
+        cwd="/repo",
+        session_id="s1",
+        reason=BackupReason.NORMAL_TURN_END,
+        critical=False,
+    )
+
+    assert result.enabled is False
+    assert "Session backup" not in caplog.text
 
 
 def test_backup_disabled_when_env_unset_does_not_resolve_session_dir(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -182,6 +203,97 @@ def test_backup_mirrors_session_and_excludes_local_markers(monkeypatch: pytest.M
     assert "error" not in marker
 
 
+def test_backup_logs_session_id_and_elapsed_time(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
+    session_dir = _create_v2_session_dir(storage, "/repo", "s1")
+    (session_dir / "session.jsonl").write_text("one\n", encoding="utf-8")
+    perf_counter_values = iter((100.0, 100.25))
+    monkeypatch.setattr(
+        "iac_code.services.session_backup.time.perf_counter",
+        lambda: next(perf_counter_values),
+    )
+    caplog.set_level(logging.INFO, logger="iac_code.services.session_backup")
+
+    SessionBackupService(session_storage=storage).backup_session(
+        "/repo",
+        "s1",
+        reason=BackupReason.PIPELINE_STEP_COMPLETED,
+        critical=True,
+    )
+
+    assert "Session backup completed" in caplog.text
+    assert "session_id=s1" in caplog.text
+    assert "elapsed_ms=250.000" in caplog.text
+    assert "succeeded=true" in caplog.text
+
+
+def test_backup_logs_failure_elapsed_time_without_marking_completed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(tmp_path / "backup"))
+    perf_counter_values = iter((200.0, 200.125))
+    monkeypatch.setattr(
+        "iac_code.services.session_backup.time.perf_counter",
+        lambda: next(perf_counter_values),
+    )
+
+    class RaisingStorage:
+        def session_dir(self, _cwd: str, _session_id: str) -> Path:
+            raise RuntimeError("storage failed")
+
+    caplog.set_level(logging.INFO, logger="iac_code.services.session_backup")
+
+    with pytest.raises(RuntimeError, match="storage failed"):
+        SessionBackupService(session_storage=RaisingStorage()).backup_session(
+            "/repo",
+            "s1",
+            reason=BackupReason.PIPELINE_STEP_COMPLETED,
+            critical=True,
+        )
+
+    assert "Session backup failed" in caplog.text
+    assert "Session backup completed" not in caplog.text
+    assert "session_id=s1" in caplog.text
+    assert "elapsed_ms=125.000" in caplog.text
+    assert "succeeded=false" in caplog.text
+    assert "error_type=RuntimeError" in caplog.text
+
+
+def test_backup_failure_log_quotes_unsafe_session_id(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(tmp_path / "backup"))
+    perf_counter_values = iter((300.0, 300.001))
+    monkeypatch.setattr(
+        "iac_code.services.session_backup.time.perf_counter",
+        lambda: next(perf_counter_values),
+    )
+    caplog.set_level(logging.INFO, logger="iac_code.services.session_backup")
+
+    with pytest.raises(SessionBackupError, match="unsafe session_id"):
+        SessionBackupService().backup_session(
+            "/repo",
+            "bad id\nsecond=true",
+            reason=BackupReason.PIPELINE_STEP_COMPLETED,
+            critical=True,
+        )
+
+    message = caplog.records[-1].getMessage()
+    assert 'session_id="bad id\\nsecond=true"' in message
+    assert "\nsecond=true" not in message
+    assert "succeeded=false" in message
+
+
 def test_restore_session_copies_backup_only_v2_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_projects = tmp_path / "config" / "projects"
     backup_root = tmp_path / "backup"
@@ -195,7 +307,11 @@ def test_restore_session_copies_backup_only_v2_session(monkeypatch: pytest.Monke
     (backup_session_dir / "a2a").mkdir()
     (backup_session_dir / "a2a" / "context.json").write_text('{"context_id":"ctx-1"}\n', encoding="utf-8")
 
-    result = SessionBackupService(session_storage=storage, retry_delays=()).restore_session(cwd, session_id)
+    service = SessionBackupService(session_storage=storage, retry_delays=())
+    source_lookups = Mock(wraps=service._source_for_restore)
+    monkeypatch.setattr(service, "_source_for_restore", source_lookups)
+
+    result = service.restore_session(cwd, session_id)
 
     restored_session_dir = storage.session_dir(cwd, session_id)
     assert isinstance(result, SessionRestoreResult)
@@ -203,6 +319,7 @@ def test_restore_session_copies_backup_only_v2_session(monkeypatch: pytest.Monke
     assert result.restored is True
     assert result.source == backup_session_dir
     assert result.destination == restored_session_dir
+    assert source_lookups.call_count == 1
     assert (restored_session_dir / "metadata.json").is_file()
     assert (restored_session_dir / "session.jsonl").read_text(encoding="utf-8") == (
         '{"role":"user","content":"from backup"}\n'
@@ -1713,11 +1830,80 @@ def test_backup_fsyncs_structural_metadata_changes(monkeypatch: pytest.MonkeyPat
         critical=True,
     )
 
-    assert mirror in fsync_calls
     assert mirror / "new_dir" in fsync_calls
     assert mirror / "stale.txt" in fsync_calls
     assert mirror / "dir_conflict" in fsync_calls
     assert mirror / "empty" in fsync_calls
+
+
+def test_incremental_backup_scans_destination_once_without_restricting_existing_dirs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.services import session_backup as session_backup_module
+
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
+    session_dir = _create_v2_session_dir(storage, "/repo", "s1")
+    payload = session_dir / "session.jsonl"
+    payload.write_text("one\n", encoding="utf-8")
+    service = SessionBackupService(session_storage=storage, retry_delays=())
+    service.backup_session("/repo", "s1", reason=BackupReason.INPUT_REQUIRED, critical=True)
+    mirror = backup_root / "projects" / session_dir.parent.name / "s1"
+
+    destination_scans = 0
+    original_iter_tree = service._iter_tree
+
+    def record_iter_tree(root: Path, *, include_reparse: bool = False):
+        nonlocal destination_scans
+        if Path(root) == mirror:
+            destination_scans += 1
+        yield from original_iter_tree(root, include_reparse=include_reparse)
+
+    restricted_dirs: list[Path] = []
+    original_ensure_private_dir = session_backup_module.ensure_private_dir
+
+    def record_ensure_private_dir(path: Path) -> Path:
+        restricted_dirs.append(path)
+        return original_ensure_private_dir(path)
+
+    monkeypatch.setattr(service, "_iter_tree", record_iter_tree)
+    monkeypatch.setattr(session_backup_module, "ensure_private_dir", record_ensure_private_dir)
+    payload.write_text("two with a different size\n", encoding="utf-8")
+
+    service.backup_session("/repo", "s1", reason=BackupReason.TERMINAL, critical=True)
+
+    assert destination_scans == 1
+    assert restricted_dirs == []
+
+
+def test_incremental_backup_recreates_cached_destination_directory_removed_out_of_band(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
+    session_dir = _create_v2_session_dir(storage, "/repo", "s1")
+    nested = session_dir / "nested"
+    nested.mkdir()
+    payload = nested / "payload.txt"
+    payload.write_text("one\n", encoding="utf-8")
+    service = SessionBackupService(session_storage=storage, retry_delays=())
+
+    first = service.backup_session("/repo", "s1", reason=BackupReason.INPUT_REQUIRED, critical=True)
+    assert first.destination is not None
+    mirrored_nested = first.destination / "nested"
+    assert mirrored_nested.is_dir()
+
+    shutil.rmtree(mirrored_nested)
+    payload.write_text("two changed\n", encoding="utf-8")
+
+    second = service.backup_session("/repo", "s1", reason=BackupReason.TERMINAL, critical=True)
+
+    assert second.succeeded is True
+    assert (mirrored_nested / "payload.txt").read_text(encoding="utf-8") == "two changed\n"
 
 
 def test_failed_marker_for_mirror_failure_is_written_while_lock_is_held(

@@ -187,6 +187,7 @@ class HeadlessRunner:
                 cli_permission_mode=self._cli_permission_mode,
                 resume_messages=resume_messages,
                 mcp_elicitation_handler=_headless_mcp_elicitation_handler,
+                source="headless",
             )
         )
         self._runtime = runtime

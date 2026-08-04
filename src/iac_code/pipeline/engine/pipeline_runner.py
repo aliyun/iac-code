@@ -1178,10 +1178,11 @@ class PipelineRunner:
         user_input: str | list[ContentBlock] | PipelineUserInput | None = None,
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         reason = self._backup_blocked_restore_reason()
-        blocked_event = await self._critical_backup_blocked_event(self._terminal_current_step_id() or None, reason)
-        if blocked_event is not None:
-            yield blocked_event
-            return
+        if reason != BackupReason.PIPELINE_STEP_COMPLETED:
+            blocked_event = await self._critical_backup_blocked_event(self._terminal_current_step_id() or None, reason)
+            if blocked_event is not None:
+                yield blocked_event
+                return
         if self._sidecar_status == "backup_blocked":
             self._sidecar_status = "running"
         if not user_input:
@@ -1369,9 +1370,10 @@ class PipelineRunner:
         )
         self._set_pending_input_kind(_PIPELINE_PAUSE_CONFIRMATION_KIND)
         await self._save_waiting_input(step_id)
-        blocked_event = await self._critical_backup_blocked_event(step_id, BackupReason.INPUT_REQUIRED)
-        if blocked_event is not None:
-            return blocked_event
+        if self._surface != "a2a":
+            blocked_event = await self._critical_backup_blocked_event(step_id or None, BackupReason.INPUT_REQUIRED)
+            if blocked_event is not None:
+                return blocked_event
         if step_id:
             self._waiting_input_started_at[step_id] = self._observability.now()
             self._waiting_input_options_by_step[step_id] = []
@@ -3890,13 +3892,6 @@ class PipelineRunner:
                 except PipelineStatePersistenceError as exc:
                     yield self._persistence_failure_event(exc)
                     return
-                blocked_event = await self._critical_backup_blocked_event(
-                    completed_step_id,
-                    BackupReason.PIPELINE_STEP_COMPLETED,
-                )
-                if blocked_event is not None:
-                    yield blocked_event
-                    return
                 self._observability.step_completed(
                     step_id=step.step_id,
                     duration_ms=duration_ms,
@@ -4155,13 +4150,6 @@ class PipelineRunner:
                 if matched:
                     logger.info("Exit condition met for step %s: %s=%r", step.step_id, ec_field, ec_value)
                     append_step_success_meta()
-                    blocked_event = await self._critical_backup_blocked_event(
-                        step.step_id,
-                        BackupReason.PIPELINE_STEP_COMPLETED,
-                    )
-                    if blocked_event is not None:
-                        yield blocked_event
-                        return
                     try:
                         await self._save_completed(step.step_id, reason="exit condition met")
                     except PipelineStatePersistenceError as exc:
@@ -4289,13 +4277,6 @@ class PipelineRunner:
                     {"type": "pipeline_rollback", "from": step.step_id, "to": target, "reason": reason},
                     operation="pipeline_rollback",
                 )
-                blocked_event = await self._critical_backup_blocked_event(
-                    step.step_id,
-                    BackupReason.PIPELINE_STEP_COMPLETED,
-                )
-                if blocked_event is not None:
-                    yield blocked_event
-                    return
                 self._observability.rollback(
                     from_step=step.step_id,
                     to_step=target,
@@ -4327,13 +4308,6 @@ class PipelineRunner:
                     yield self._persistence_failure_event(exc)
                     return
                 append_step_success_meta()
-                blocked_event = await self._critical_backup_blocked_event(
-                    completed_step_id,
-                    BackupReason.PIPELINE_STEP_COMPLETED,
-                )
-                if blocked_event is not None:
-                    yield blocked_event
-                    return
                 pipeline_completed_event = None
                 if self.state_machine.is_complete:
                     try:
@@ -4367,13 +4341,6 @@ class PipelineRunner:
                     yield self._persistence_failure_event(exc)
                     return
                 append_step_success_meta()
-                blocked_event = await self._critical_backup_blocked_event(
-                    step.step_id,
-                    BackupReason.PIPELINE_STEP_COMPLETED,
-                )
-                if blocked_event is not None:
-                    yield blocked_event
-                    return
                 emit_step_success_observability(funnel_status=None)
                 yield step_completed_event
                 conclusion = step_result.conclusion or {}
@@ -4381,10 +4348,14 @@ class PipelineRunner:
                 options = conclusion.get("options", [])
                 if not isinstance(options, list):
                     options = []
-                blocked_event = await self._critical_backup_blocked_event(step.step_id, BackupReason.INPUT_REQUIRED)
-                if blocked_event is not None:
-                    yield blocked_event
-                    return
+                if self._surface != "a2a":
+                    blocked_event = await self._critical_backup_blocked_event(
+                        step.step_id,
+                        BackupReason.INPUT_REQUIRED,
+                    )
+                    if blocked_event is not None:
+                        yield blocked_event
+                        return
                 self._waiting_input_started_at[step.step_id] = self._observability.now()
                 self._waiting_input_options_by_step[step.step_id] = options
                 self._observability.user_input_required(

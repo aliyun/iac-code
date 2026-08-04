@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 from contextlib import suppress
 from datetime import datetime, timezone
@@ -76,6 +77,107 @@ def test_create_session_uses_directory_storage_and_metadata(tmp_path) -> None:
     assert session.draft == ""
     assert session.pending_permissions == {}
     assert session.pending_questions == {}
+
+
+def test_create_session_logs_session_start_parameters(tmp_path, monkeypatch, caplog) -> None:
+    monkeypatch.setattr(
+        "iac_code.web.settings.active_provider_summary",
+        lambda: {
+            "provider": "dashscope",
+            "model": "glm-5.2",
+            "effort": "high",
+            "apiBase": "https://user:pass@llm.example.com:8443/v1?api_key=secret",
+            "hasApiKey": True,
+        },
+    )
+    monkeypatch.setattr("iac_code.web.settings.aliyun_cloud_summary", lambda: {})
+    monkeypatch.setattr(
+        "iac_code.config.get_provider_config",
+        lambda _provider: {
+            "thinkingEnabled": False,
+            "thinkingBudget": 2048,
+            "maxCompletionTokens": 10000,
+        },
+    )
+    caplog.set_level(logging.INFO, logger="iac_code.services.session_logging")
+
+    manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=tmp_path / "project")
+    manager.create_session(session_id="web-log")
+
+    assert "Session configured" in caplog.text
+    assert "session_id=web-log" in caplog.text
+    assert "source=web" in caplog.text
+    assert "provider=dashscope" in caplog.text
+    assert "model=glm-5.2" in caplog.text
+    assert "effort=high" in caplog.text
+    assert "thinking_enabled=false" in caplog.text
+    assert "thinking_budget=2048" in caplog.text
+    assert "max_completion_tokens=10000" in caplog.text
+    assert "endpoint_origin=https://llm.example.com:8443" in caplog.text
+    assert "endpoint_custom=true" in caplog.text
+    assert "user:pass" not in caplog.text
+    assert "api_key=secret" not in caplog.text
+
+
+def test_create_session_logs_default_endpoint_as_not_custom(tmp_path, monkeypatch, caplog) -> None:
+    monkeypatch.setattr(
+        "iac_code.web.settings.active_provider_summary",
+        lambda: {
+            "provider": "dashscope",
+            "model": "glm-5.2",
+            "effort": None,
+            "apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "hasApiKey": True,
+        },
+    )
+    monkeypatch.setattr("iac_code.web.settings.aliyun_cloud_summary", lambda: {})
+    monkeypatch.setattr("iac_code.config.get_provider_config", lambda _provider: {})
+    caplog.set_level(logging.INFO, logger="iac_code.services.session_logging")
+
+    manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=tmp_path / "project")
+    manager.create_session(session_id="web-default-endpoint-log")
+
+    assert "endpoint_origin=https://dashscope.aliyuncs.com" in caplog.text
+    assert "endpoint_custom=false" in caplog.text
+
+
+def test_create_session_does_not_relog_configured_for_existing_storage(tmp_path, monkeypatch, caplog) -> None:
+    monkeypatch.setattr(
+        "iac_code.web.settings.active_provider_summary",
+        lambda: {
+            "provider": "dashscope",
+            "model": "glm-5.2",
+            "effort": None,
+            "apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "hasApiKey": True,
+        },
+    )
+    monkeypatch.setattr("iac_code.web.settings.aliyun_cloud_summary", lambda: {})
+    caplog.set_level(logging.INFO, logger="iac_code.services.session_logging")
+
+    manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=tmp_path / "project")
+    manager.create_session(session_id="web-existing-log")
+    manager._sessions.clear()
+    manager.create_session(session_id="web-existing-log")
+
+    configured_messages = [
+        record.getMessage() for record in caplog.records if "Session configured" in record.getMessage()
+    ]
+    assert len(configured_messages) == 1
+    assert "session_id=web-existing-log" in configured_messages[0]
+
+
+def test_create_session_ignores_session_start_logging_failure(tmp_path, monkeypatch, caplog) -> None:
+    def fail_active_provider_summary() -> dict[str, object]:
+        raise RuntimeError("settings unavailable")
+
+    monkeypatch.setattr("iac_code.web.settings.active_provider_summary", fail_active_provider_summary)
+    caplog.set_level(logging.INFO, logger="iac_code.services.session_logging")
+
+    manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=tmp_path / "project")
+    session = manager.create_session(session_id="web-log-failure")
+
+    assert session.session_id == "web-log-failure"
 
 
 def test_cancel_pending_request_tolerates_owner_loop_closing_during_resolution(tmp_path) -> None:

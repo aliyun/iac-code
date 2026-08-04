@@ -26,7 +26,7 @@ from scripts.observability.local_observe.e2e_audit import (  # noqa: E402
     ObserveCapture,
     audit_provider_attempts,
 )
-from scripts.repl.e2e.run_pipeline_scenarios import ReplPty  # noqa: E402
+from scripts.repl.e2e.run_pipeline_scenarios import DEFAULT_TEXT_MODEL, ReplPty  # noqa: E402
 
 SCENARIO = "e5-real-aliyun-readonly-canary"
 PROMPT_MARKER = "[E5_REAL_ALIYUN_READONLY]"
@@ -49,6 +49,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--source-config-dir", default="")
     parser.add_argument("--python", default="uv run python")
+    parser.add_argument("--model", default=DEFAULT_TEXT_MODEL)
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--stream-timeout", type=float, default=300.0)
     return parser.parse_args(argv)
@@ -81,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     try:
         _copy_runtime_config(source_config_dir, config_dir)
-        env = _child_env(config_dir=config_dir, observe=observe)
+        env = _child_env(config_dir=config_dir, observe=observe, model=args.model)
         pty_args = SimpleNamespace(
             python=args.python,
             timeout=args.timeout,
@@ -174,10 +175,17 @@ def _copy_runtime_config(source: Path, destination: Path) -> None:
         target.chmod(0o600)
 
 
-def _child_env(*, config_dir: Path, observe: ObserveCapture) -> dict[str, str]:
+def _child_env(*, config_dir: Path, observe: ObserveCapture, model: str = DEFAULT_TEXT_MODEL) -> dict[str, str]:
     env = os.environ.copy()
     env.update(observe.env)
-    env.update({"PYTHONUTF8": "1", "IAC_CODE_CONFIG_DIR": str(config_dir), "IAC_CODE_MODE": "normal"})
+    env.update(
+        {
+            "PYTHONUTF8": "1",
+            "IAC_CODE_CONFIG_DIR": str(config_dir),
+            "IAC_CODE_MODE": "normal",
+            "IAC_CODE_MODEL": model,
+        }
+    )
     for key in list(env):
         if key.startswith("IAC_CODE_E2E_"):
             env.pop(key, None)

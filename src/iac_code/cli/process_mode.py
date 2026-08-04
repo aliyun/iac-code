@@ -194,6 +194,7 @@ class ProcessRuntimeController:
                     cli_allowed_tools=self._options.cli_allowed_tools,
                     cli_disallowed_tools=self._options.cli_disallowed_tools,
                     cli_permission_mode=self._options.cli_permission_mode,
+                    source="process-mode",
                 )
             )
             self.session_id = runtime.session_id
@@ -780,6 +781,7 @@ class PipelineProcessRuntimeController:
                 cli_allowed_tools=self._options.cli_allowed_tools,
                 cli_disallowed_tools=self._options.cli_disallowed_tools,
                 cli_permission_mode=self._options.cli_permission_mode,
+                source="process-pipeline",
             )
         )
 

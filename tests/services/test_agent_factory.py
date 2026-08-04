@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -47,6 +48,62 @@ def test_create_agent_runtime_minimal_options(tmp_path, monkeypatch) -> None:
     assert isinstance(runtime, AgentRuntime)
     assert runtime.agent_loop is not None
     assert runtime.session_id  # non-empty
+
+
+def test_create_agent_runtime_logs_session_start_parameters(tmp_path, monkeypatch, caplog) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("IAC_CODE_PROVIDER", "dashscope")
+    monkeypatch.setenv("IAC_CODE_API_KEY", "fake-key")
+    monkeypatch.chdir(tmp_path)
+    caplog.set_level(logging.INFO, logger="iac_code.services.session_logging")
+
+    create_agent_runtime(
+        AgentFactoryOptions(
+            model="qwen3.6-plus",
+            session_id="logged-session",
+            cwd=str(tmp_path),
+            max_turns=3,
+            source="test",
+        )
+    )
+
+    assert "Session started" in caplog.text
+    assert "session_id=logged-session" in caplog.text
+    assert "source=test" in caplog.text
+    assert "provider=dashscope" in caplog.text
+    assert "model=qwen3.6-plus" in caplog.text
+    assert "endpoint_origin=https://dashscope.aliyuncs.com" in caplog.text
+    assert "endpoint_custom=false" in caplog.text
+    assert "max_turns=3" in caplog.text
+    assert "tool_count=" in caplog.text
+    assert "mcp_server_count=0" in caplog.text
+
+
+def test_create_agent_runtime_ignores_session_start_logging_failure(tmp_path, monkeypatch, caplog) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("IAC_CODE_PROVIDER", "dashscope")
+    monkeypatch.setenv("IAC_CODE_API_KEY", "fake-key")
+    monkeypatch.chdir(tmp_path)
+    caplog.set_level(logging.INFO, logger="iac_code.services.session_logging")
+
+    def fail_session_start_settings(self) -> dict[str, object]:
+        raise RuntimeError("session logging failed")
+
+    monkeypatch.setattr(
+        "iac_code.providers.manager.ProviderManager.session_start_settings",
+        fail_session_start_settings,
+    )
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(
+            model="qwen3.6-plus",
+            session_id="logging-failure-session",
+            cwd=str(tmp_path),
+        )
+    )
+
+    assert runtime.session_id == "logging-failure-session"
+    assert runtime.agent_loop is not None
 
 
 def test_create_agent_runtime_different_session_ids(tmp_path, monkeypatch) -> None:
