@@ -235,9 +235,7 @@ class TokenTransport:
             origins and not _origin_matches(origins[0], hosts[0], str(scope.get("scheme") or "http"))
         ):
             return False
-        return len(fetch_sites) <= 1 and (
-            not fetch_sites or fetch_sites[0].lower() in {"same-origin", "none"}
-        )
+        return len(fetch_sites) <= 1 and (not fetch_sites or fetch_sites[0].lower() in {"same-origin", "none"})
 
     async def _challenge(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         await _read_body(receive)

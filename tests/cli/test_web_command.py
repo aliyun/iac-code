@@ -7,9 +7,7 @@ def test_web_command_runs_local_server_with_safe_defaults(monkeypatch) -> None:
     calls: list[dict] = []
 
     def fake_run_web_server(*, host: str, port: int, open_browser: bool, access_token_file: str | None) -> None:
-        calls.append(
-            {"host": host, "port": port, "open_browser": open_browser, "access_token_file": access_token_file}
-        )
+        calls.append({"host": host, "port": port, "open_browser": open_browser, "access_token_file": access_token_file})
 
     monkeypatch.setattr("iac_code.web.server.run_web_server", fake_run_web_server)
 
@@ -23,9 +21,7 @@ def test_web_command_accepts_host_port_and_open_browser(monkeypatch) -> None:
     calls: list[dict] = []
 
     def fake_run_web_server(*, host: str, port: int, open_browser: bool, access_token_file: str | None) -> None:
-        calls.append(
-            {"host": host, "port": port, "open_browser": open_browser, "access_token_file": access_token_file}
-        )
+        calls.append({"host": host, "port": port, "open_browser": open_browser, "access_token_file": access_token_file})
 
     monkeypatch.setattr("iac_code.web.server.run_web_server", fake_run_web_server)
 
@@ -39,9 +35,7 @@ def test_web_command_no_open_disables_browser(monkeypatch) -> None:
     calls: list[dict] = []
 
     def fake_run_web_server(*, host: str, port: int, open_browser: bool, access_token_file: str | None) -> None:
-        calls.append(
-            {"host": host, "port": port, "open_browser": open_browser, "access_token_file": access_token_file}
-        )
+        calls.append({"host": host, "port": port, "open_browser": open_browser, "access_token_file": access_token_file})
 
     monkeypatch.setattr("iac_code.web.server.run_web_server", fake_run_web_server)
 

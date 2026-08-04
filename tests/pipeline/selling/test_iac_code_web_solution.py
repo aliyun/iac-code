@@ -115,7 +115,7 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
     assert "--host 0.0.0.0 --port 8766 --access-token-file" in script
     assert "Restart=on-failure" in script
     assert "secrets.token_urlsafe(32)" in script
-    assert "exec >>\"$LOG\" 2>&1" in script
+    assert 'exec >>"$LOG" 2>&1' in script
     assert "printf '%s' \"$TOKEN\" >&3" in script
     assert set(re.findall(r"\$\{([^}]+)\}", script)) == {
         "IacCodeVersion",
@@ -141,9 +141,7 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
     assert set(outputs) == {"PublicUrl", "WebAccessToken", "InstanceId", "EipAddress", "IacCodeVersion"}
     assert all(set(output["Label"]) == {"en", "zh-cn"} for output in outputs.values())
     assert outputs["WebAccessToken"]["Value"] == {
-        "Fn::Base64Decode": {
-            "Fn::Jq": ["First", ".[0].Output", {"Fn::GetAtt": ["Bootstrap", "InvokeResults"]}]
-        }
+        "Fn::Base64Decode": {"Fn::Jq": ["First", ".[0].Output", {"Fn::GetAtt": ["Bootstrap", "InvokeResults"]}]}
     }
     assert "ApiKey" not in outputs
 
