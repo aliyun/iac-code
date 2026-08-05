@@ -1815,10 +1815,12 @@ class AgentLoop:
                 ALIYUN_HTTP_METADATA_KEY,
                 sanitize_aliyun_http_metadata,
             )
+            from iac_code.tools.cloud.base_stack import persisted_stack_metadata
 
             aliyun_http = sanitize_aliyun_http_metadata(result_metadata.get(ALIYUN_HTTP_METADATA_KEY))
             if aliyun_http is not None:
                 metadata[ALIYUN_HTTP_METADATA_KEY] = aliyun_http
+            metadata.update(persisted_stack_metadata(result_metadata))
             render_metadata = result_metadata.get(TOOL_RENDER_METADATA_KEY)
             if isinstance(render_metadata, dict):
                 safe_render_metadata: dict[str, Any] = {}

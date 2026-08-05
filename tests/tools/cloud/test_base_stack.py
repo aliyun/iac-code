@@ -8,7 +8,7 @@ import json
 import pytest
 
 from iac_code.tools.base import ToolContext
-from iac_code.tools.cloud.base_stack import BaseCloudStack
+from iac_code.tools.cloud.base_stack import STACK_RESULT_METADATA_KEY, BaseCloudStack
 from iac_code.tools.cloud.types import ResourceStatus, StackStatus
 from iac_code.types.stream_events import (
     ResourceObservedEvent,
@@ -216,6 +216,9 @@ class TestBaseCloudStackExecute:
             "PublicUrl": "http://203.0.113.10:8766",
             "WebAccessToken": "test-token",
         }
+        assert result.metadata is not None
+        assert result.metadata["stack_id"] == "stack-id-123"
+        assert result.metadata[STACK_RESULT_METADATA_KEY] == data
 
     @pytest.mark.asyncio
     async def test_execute_emits_progress_events_to_queue(self, stack: MockCloudStack) -> None:

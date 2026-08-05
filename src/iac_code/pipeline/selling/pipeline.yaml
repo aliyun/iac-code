@@ -376,7 +376,7 @@ steps:
         message_key: intent_cloud_resource_clarification_required
       - require_tool: ask_user_question
         when_user_message_matches_any:
-          - "(AWS|Amazon Web Services|Azure|GCP|Google Cloud|GoogleCloud|腾讯云|华为云|火山引擎|UCloud|EC2|S3|Lambda|CloudFormation|EKS|AKS|GKE)"
+          - '(?<![A-Za-z0-9])(AWS|Amazon Web Services|Azure|GCP|Google Cloud|GoogleCloud|UCloud|EC2|S3|Lambda|CloudFormation|EKS|AKS|GKE)(?![A-Za-z0-9])|腾讯云|华为云|火山引擎'
         required_conclusion_any_of: [clarification_choice, clarification_text]
         copy_tool_result_to_conclusion:
           selected_id: clarification_choice
