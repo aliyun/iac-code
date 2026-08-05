@@ -57,6 +57,7 @@ class A2ATaskStore(TaskStore):
         self._sdk_tasks: dict[str, dict[str, Task]] = {}
         self._sdk_tasks_by_context: dict[str, dict[str, set[str]]] = {}
         self._tasks: dict[str, A2ATaskRecord] = {}
+        self._task_persistence_dirty: set[str] = set()
         self._contexts: dict[str, A2AContextRecord] = {}
         self._expired_task_tombstones: dict[str, float] = {}
         self._metrics = metrics or NoOpA2AMetrics()
@@ -99,22 +100,32 @@ class A2ATaskStore(TaskStore):
             owner_tasks[task_id] = _copy_task(task)
             self._sdk_tasks_by_context.setdefault(owner, {}).setdefault(task.context_id, set()).add(task_id)
             record = self._tasks.get(task_id)
+            next_state = _task_state_from_sdk_task(task)
+            # The SDK saves the full Task before yielding every streaming frame. Executors already
+            # mirror task records explicitly at output/state durability boundaries, so repeated SDK
+            # saves with the same projected state only need the session-local mirror below.
+            persist_shared_snapshot = (
+                record is None
+                or task_id in self._task_persistence_dirty
+                or record.state != next_state
+                or record.owner != owner
+            )
             if record is None:
                 record = A2ATaskRecord(
                     task_id=task_id,
                     context_id=task.context_id,
-                    state=_task_state_from_sdk_task(task),
+                    state=next_state,
                     owner=owner,
                     updated_at=_task_updated_at_from_sdk_task(task),
                 )
                 self._tasks[task_id] = record
                 self._metrics.record_task_created()
             else:
-                record.state = _task_state_from_sdk_task(task)
+                record.state = next_state
                 record.owner = owner
                 record.updated_at = _task_updated_at_from_sdk_task(task)
                 record.touch()
-            self._mirror_task(record)
+            self._mirror_task(record, persist_shared_snapshot=persist_shared_snapshot)
 
     def _attach_context_metadata(self, task: Task) -> None:
         context = self._contexts.get(task.context_id)
@@ -135,6 +146,7 @@ class A2ATaskStore(TaskStore):
                 self._remove_sdk_task_from_index(owner, task_id, existing.context_id)
             owner_tasks.pop(task_id, None)
             self._tasks.pop(task_id, None)
+            self._task_persistence_dirty.discard(task_id)
             self._expired_task_tombstones.pop(task_id, None)
 
     async def list(self, params: ListTasksRequest, context: ServerCallContext | None = None) -> ListTasksResponse:
@@ -798,6 +810,7 @@ class A2ATaskStore(TaskStore):
                 if now - expired_at > self._cleanup_interval_seconds:
                     self._expired_task_tombstones.pop(task_id, None)
                     self._tasks.pop(task_id, None)
+                    self._task_persistence_dirty.discard(task_id)
                     for owner, owner_tasks in list(self._sdk_tasks.items()):
                         existing = owner_tasks.pop(task_id, None)
                         if existing is not None:
@@ -846,7 +859,7 @@ class A2ATaskStore(TaskStore):
             except Exception:
                 logger.exception("A2A cleanup loop failed")
 
-    def _mirror_task(self, record: A2ATaskRecord) -> None:
+    def _mirror_task(self, record: A2ATaskRecord, *, persist_shared_snapshot: bool = True) -> None:
         snapshot = A2ATaskSnapshot(
             task_id=record.task_id,
             context_id=record.context_id,
@@ -855,10 +868,12 @@ class A2ATaskStore(TaskStore):
             output_text=list(record.output_text),
             updated_at=record.updated_at,
         )
-        if self._persistence is not None:
+        if self._persistence is not None and persist_shared_snapshot:
             try:
                 self._persistence.save_task(snapshot)
+                self._task_persistence_dirty.discard(record.task_id)
             except Exception:
+                self._task_persistence_dirty.add(record.task_id)
                 logger.exception("Failed to persist A2A task %s", record.task_id)
         self._mirror_session_task(snapshot)
 
