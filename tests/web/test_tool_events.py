@@ -2904,6 +2904,40 @@ def test_stack_progress_event_does_not_mark_deploy_success_until_create_complete
     assert event["payload"]["deploymentComplete"] is deployment_succeeded
 
 
+def test_stack_progress_event_region_from_event_field_when_resources_lack_region() -> None:
+    # 生产中 base_stack 构造的 resources 只含 name/resource_type/status/status_reason,
+    # 没有任何 region 字段,所以 _first_region_id(resources) 恒为 None。若栈操作事件本身不带
+    # region,live overlay 的 regionId 会是空串,去重键 `::name` 与服务端 `region::name` 分裂,
+    # 建栈期短暂出现两个同名栈。StackProgressEvent 必须自带权威 region_id 并透出到 SSE。
+    from iac_code.types.stream_events import StackProgressEvent
+    from iac_code.web.events import WebEventTranslator
+
+    translator = WebEventTranslator("session-1")
+
+    event = translator.translate_stream_event(
+        StackProgressEvent(
+            stack_id="stack-1",
+            stack_name="single-vpc",
+            status="CREATE_IN_PROGRESS",
+            progress_percentage=40.0,
+            resources=[
+                {
+                    "name": "vpc",
+                    "resource_type": "ALIYUN::ECS::VPC",
+                    "status": "CREATE_IN_PROGRESS",
+                    "status_reason": "",
+                }
+            ],
+            elapsed_seconds=12,
+            region_id="cn-hangzhou",
+        ),
+        turn_id="turn-1",
+    )
+
+    assert event["type"] == "pipeline.event"
+    assert event["payload"]["regionId"] == "cn-hangzhou"
+
+
 def test_translator_assistant_text_delta_uses_delta_key() -> None:
     from iac_code.web.events import WebEventTranslator
 

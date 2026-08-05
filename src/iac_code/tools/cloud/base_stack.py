@@ -390,6 +390,7 @@ class BaseCloudStack(Tool):
                             for r in resources
                         ],
                         elapsed_seconds=elapsed,
+                        region_id=region,
                         tool_use_id=context.tool_use_id,
                     )
                     await context.event_queue.put(event)

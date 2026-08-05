@@ -102,28 +102,56 @@ function normalizeLiveStack(stack) {
   };
 }
 
-// 合并服务端派生栈与 live 进行中栈供面板渲染。服务端为权威(有则以它为准,含终态与 status_reason);
-// live 只补充服务端尚未收录的栈——普通对话 ros_stack 创建期间,后端 outputs_payload 派生不出该栈
-// (无流水线 envelope、终态 tool_result 尚未落盘),面板整个创建过程为空,故用 live 事件态占位。
-// 键一致,终态到达后服务端条目自然取代 live 占位,不重复也不回退。
-// 例外(delete_and_create):同 region::栈名键下若 server 与 live 的 stackId 都存在且不同,说明
-// 旧栈已删除、正在新建另一个栈,server 留存的是旧栈终态 —— 此时以当前 live 新建栈覆盖旧终态,
-// 避免面板停留在已删除旧栈。仅 stackId 相同(同一栈)才由 server 终态覆盖 live 占位。
+// 判断是否为「进行中」状态(*_IN_PROGRESS / *_REQUESTED)。
+function isTransitionalStackStatus(status) {
+  const s = String(status || "").toUpperCase();
+  return s.endsWith("_IN_PROGRESS") || s.endsWith("_REQUESTED");
+}
+
+// 判断是否为删除态(DELETE_*)。删除是「离开」建栈/更新终态的状态迁移,live 的删除态(含终态
+// DELETE_COMPLETE)比服务端上一轮的建栈/更新终态更新,须覆盖之——否则删除刚完成、tool_result 尚未落盘
+// 的窗口里,面板会「删除完成却仍显示 CREATE_COMPLETE」。
+function isDeleteStackStatus(status) {
+  return String(status || "").toUpperCase().startsWith("DELETE");
+}
+
+// 合并服务端派生栈与 live 进行中栈供面板渲染。
+// live 进行中栈代表「当前回合正在执行」的栈操作(liveStacksFromState 已用 currentTurnActive +
+// 工具仍在运行 守卫),是该物理栈的最新真实状态;服务端派生栈可能仍是上一轮的旧终态——建栈的
+// CREATE_COMPLETE 尚未被本次 delete/update 的终态 tool_result 覆盖。故 live 的进行中态必须覆盖
+// 服务端旧终态,否则删除看不到 DELETE_IN_PROGRESS、更新停在 CREATE_COMPLETE(见回归用例)。
+// 工具结束后 live 清空,自然交还服务端权威终态(含 status_reason)。
+// 匹配同一物理栈:优先同 dedup 键;delete/update 常只带 StackId(无 StackName),其无名 t0 用
+// stackId 作键,与服务端 region::栈名 键不同 —— 再按 stackId 找回服务端行并删除,避免同一栈并排两行。
+// live 非进行中(极少见:轮询末帧已是终态)时保留服务端权威态;delete_and_create 新建的另一个栈
+// (同名不同 stackId)因进行中态也会正确覆盖旧栈终态。
 export function mergeStacksForDisplay(serverStacks, liveStacks) {
   const byKey = new Map();
+  const serverKeyByStackId = new Map();
   for (const stack of serverStacks || []) {
-    byKey.set(stackDedupKey(stack), stack);
+    const key = stackDedupKey(stack);
+    byKey.set(key, stack);
+    if (stack?.stackId) serverKeyByStackId.set(stack.stackId, key);
   }
   for (const stack of liveStacks || []) {
-    const key = stackDedupKey(stack);
-    const existing = byKey.get(key);
-    if (existing) {
+    const live = normalizeLiveStack(stack);
+    const key = stackDedupKey(live);
+    // 找出服务端同一物理栈:先按 dedup 键;无名 t0 则按 stackId 回找其(可能不同的)键。
+    const serverKeyForId = live.stackId ? serverKeyByStackId.get(live.stackId) : undefined;
+    const matchKey = byKey.has(key) ? key : serverKeyForId;
+    const existing = matchKey != null ? byKey.get(matchKey) : undefined;
+    if (existing && !isTransitionalStackStatus(live.status)) {
+      // live 非进行中 → 保留服务端权威终态;仅当 live 属另一个栈(stackId 不同)才让它胜出。
+      // 例外:live 是删除终态而服务端非 delete 态(旧建栈/更新终态)——删除是更新的状态迁移,
+      // 即便同 stackId 也让 live 胜出,避免删除完成后面板闪回 CREATE_COMPLETE。
       const existingId = existing.stackId || "";
-      const liveId = stack.stackId || "";
-      // 同一栈 / 无法辨别 stackId → 保留服务端权威态;不同栈 → 当前 live 新建栈胜出。
-      if (!existingId || !liveId || existingId === liveId) continue;
+      const liveId = live.stackId || "";
+      const liveDeleteSupersedes = isDeleteStackStatus(live.status) && !isDeleteStackStatus(existing.status);
+      if (!liveDeleteSupersedes && (!existingId || !liveId || existingId === liveId)) continue;
     }
-    byKey.set(key, normalizeLiveStack(stack));
+    // live 进行中态胜出:取代服务端旧终态。若匹配到的服务端行键不同(无名 t0),先删旧键,单行不重复。
+    if (matchKey != null && matchKey !== key) byKey.delete(matchKey);
+    byKey.set(key, live);
   }
   return [...byKey.values()];
 }

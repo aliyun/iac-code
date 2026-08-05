@@ -4,7 +4,7 @@ import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v
 import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v7";
 import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v23";
 import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v55";
-import { createOutputController } from "./components/output_panel.js?v=output-panel-v19";
+import { createOutputController } from "./components/output_panel.js?v=output-panel-v21";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
 import { reduceEvent } from "./events.js?v=web-repl-ui-319";
 import { applyDomI18n, t } from "./i18n.js?v=web-repl-ui-277";
@@ -4652,13 +4652,16 @@ function liveStacksFromState() {
   const tools = state.tools || {};
   const isToolRunning = (toolUseId) => !!toolUseId && tools[toolUseId]?.status === "running";
 
-  // resource.observed 的 region 可靠(始终为本次操作 region),用作 stackProgress 早期缺 region 时的回退,
-  // 保证两来源落到同一「region::栈名」键、且与服务端键一致(否则终态到达会并出两行而非覆盖)。
+  // resource.observed 的 region/栈名可靠(始终为本次操作 region;非 create 的 t0 也带名),用作
+  // stackProgress 早期缺 region 或无名时的回退。栈名回填尤为关键:delete_and_create 的 delete 相
+  // 轮询帧常只带 StackId、无名,若不回填则该相在合并层退回裸 stackId 键,与创建相的
+  // 「region::栈名」键分裂 → 面板瞬时并排两行同名栈;回填后两相凭同名在合并层折为单行。
   const regionByStackId = new Map();
+  const nameByStackId = new Map();
   for (const r of state.resources || []) {
-    if (r?.resourceType === "stack" && r.resourceId && r.regionId) {
-      regionByStackId.set(r.resourceId, r.regionId);
-    }
+    if (r?.resourceType !== "stack" || !r.resourceId) continue;
+    if (r.regionId) regionByStackId.set(r.resourceId, r.regionId);
+    if (r.resourceName) nameByStackId.set(r.resourceId, r.resourceName);
   }
   // 去重键 stackId 优先:非 create 的 t0(如 DeleteStack 常只带 StackId、无名)与之后带名的
   // stack.progress 凭同一 stackId 合并成一行,真实进度 last-wins 覆盖占位状态。
@@ -4685,9 +4688,10 @@ function liveStacksFromState() {
     const sp = tool?.stackProgress;
     if (!sp || sp.kind !== "stack.progress" || (!sp.stackId && !sp.stackName)) continue;
     const region = sp.regionId || regionByStackId.get(sp.stackId) || "";
-    byKey.set(keyOf(region, sp.stackName, sp.stackId), {
+    const name = sp.stackName || nameByStackId.get(sp.stackId) || "";
+    byKey.set(keyOf(region, name, sp.stackId), {
       stackId: sp.stackId || "",
-      stackName: sp.stackName || "",
+      stackName: name,
       status: sp.status || "",
       isSuccess: sp.deploymentComplete === true,
       regionId: region,

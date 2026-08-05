@@ -270,7 +270,10 @@ class TestBaseCloudStackExecute:
         assert events[0].tool_name == "mock_stack"
         assert events[0].tool_use_id == "toolu-create"
         assert events[0].metadata == {}
-        assert any(isinstance(event, StackProgressEvent) for event in events[1:])
+        progress_events = [event for event in events[1:] if isinstance(event, StackProgressEvent)]
+        assert progress_events
+        # 进度帧必须自带权威 region;web 无法从 resources 推断 region,缺失会导致建栈期同名双栈。
+        assert all(event.region_id == "cn-hangzhou" for event in progress_events)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("action", ["DeleteStack", "UpdateStack", "ContinueCreateStack"])

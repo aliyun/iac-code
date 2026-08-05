@@ -575,7 +575,7 @@ class WebEventTranslator:
                     "toolUseId": event.tool_use_id,
                     "stackId": event.stack_id,
                     "stackName": event.stack_name,
-                    "regionId": _first_region_id(event.resources),
+                    "regionId": event.region_id or _first_region_id(event.resources),
                     "status": event.status,
                     "progress": event.progress_percentage,
                     "progressPercentage": event.progress_percentage,
