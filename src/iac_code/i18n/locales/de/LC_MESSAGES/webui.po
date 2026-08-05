@@ -3748,9 +3748,11 @@ msgstr "Vollständigen Gesprächsinhalt teilen"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid ""
-"When enabled, iac-code attaches full conversation content — your prompts, model responses, and tool inputs and outputs — to the telemetry it sends to iac-code's default backend, or to an explicitly configured OTLP endpoint, to help diagnose issues and improve the product. Off by default. An explicitly set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT environment variable overrides this switch. You can turn it off at any time."
-msgstr ""
-"Wenn aktiviert, fügt iac-code den vollständigen Gesprächsinhalt – Ihre Eingaben, die Modellantworten sowie die Ein- und Ausgaben von Werkzeugen – der Telemetrie bei, die es an das Standard-Backend von iac-code oder an einen explizit konfigurierten OTLP-Endpunkt sendet, um bei der Fehlerdiagnose zu helfen und das Produkt zu verbessern. Standardmäßig deaktiviert. Eine explizit gesetzte Umgebungsvariable OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT hat Vorrang vor diesem Schalter. Sie können ihn jederzeit deaktivieren."
+"When enabled, iac-code attaches full conversation content (your prompts, "
+"model responses, and tool inputs and outputs) to the telemetry it sends "
+"to iac-code's default backend or an explicitly configured OTLP endpoint, "
+"to help diagnose issues and improve the product."
+msgstr "Wenn aktiviert, hängt iac-code den vollständigen Gesprächsinhalt (deine Eingaben, Modellantworten sowie Werkzeug-Ein- und -Ausgaben) an die Telemetrie an, die es an das Standard-Backend von iac-code oder an einen explizit konfigurierten OTLP-Endpunkt sendet, um bei der Diagnose von Problemen und der Verbesserung des Produkts zu helfen."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "New session defaults"
@@ -3851,12 +3853,12 @@ msgid "Install failed: {error}"
 msgstr "Installation fehlgeschlagen: {error}"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Failed tool calls"
-msgstr "Fehlgeschlagene Tool-Aufrufe"
+msgid "Debug options"
+msgstr "Debug-Optionen"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Control how failed tool calls are shown in the transcript."
-msgstr "Steuert, wie fehlgeschlagene Tool-Aufrufe im Transkript angezeigt werden."
+msgid "Control local debug highlighting and backend log verbosity."
+msgstr "Steuert die lokale Debug-Hervorhebung und die Ausführlichkeit der Backend-Protokolle."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Highlight failed tool calls in red"
@@ -3869,16 +3871,6 @@ msgid ""
 msgstr ""
 "Wenn aktiviert, werden fehlgeschlagene Tool-Aufrufe rot dargestellt. Wenn"
 " deaktiviert, sehen sie aus wie jeder andere Tool-Aufruf."
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Debug logging"
-msgstr "Debug-Protokollierung"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Control the verbosity of backend logs written to the log file."
-msgstr ""
-"Steuert die Ausführlichkeit der in die Protokolldatei geschriebenen "
-"Backend-Protokolle."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Enable debug logging"
@@ -3944,4 +3936,20 @@ msgstr ""
 #~ "Bereitstellungsseite. Es bleibt in diesem "
 #~ "Tab und wird nicht an den Server"
 #~ " gesendet."
+
+#~ msgid "Failed tool calls"
+#~ msgstr "Fehlgeschlagene Tool-Aufrufe"
+
+#~ msgid "Control how failed tool calls are shown in the transcript."
+#~ msgstr ""
+#~ "Steuert, wie fehlgeschlagene Tool-Aufrufe "
+#~ "im Transkript angezeigt werden."
+
+#~ msgid "Debug logging"
+#~ msgstr "Debug-Protokollierung"
+
+#~ msgid "Control the verbosity of backend logs written to the log file."
+#~ msgstr ""
+#~ "Steuert die Ausführlichkeit der in die"
+#~ " Protokolldatei geschriebenen Backend-Protokolle."
 

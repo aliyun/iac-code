@@ -3729,9 +3729,11 @@ msgstr "Compartilhar o conteúdo completo da conversa"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid ""
-"When enabled, iac-code attaches full conversation content — your prompts, model responses, and tool inputs and outputs — to the telemetry it sends to iac-code's default backend, or to an explicitly configured OTLP endpoint, to help diagnose issues and improve the product. Off by default. An explicitly set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT environment variable overrides this switch. You can turn it off at any time."
-msgstr ""
-"Quando ativado, o iac-code anexa o conteúdo completo da conversa — seus prompts, as respostas do modelo e as entradas e saídas das ferramentas — à telemetria que envia para o backend padrão do iac-code, ou para um endpoint OTLP configurado explicitamente, para ajudar a diagnosticar problemas e melhorar o produto. Desativado por padrão. Uma variável de ambiente OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT definida explicitamente substitui esta opção. Você pode desativá-la a qualquer momento."
+"When enabled, iac-code attaches full conversation content (your prompts, "
+"model responses, and tool inputs and outputs) to the telemetry it sends "
+"to iac-code's default backend or an explicitly configured OTLP endpoint, "
+"to help diagnose issues and improve the product."
+msgstr "Quando ativado, o iac-code anexa o conteúdo completo da conversa (seus prompts, respostas do modelo e entradas e saídas das ferramentas) à telemetria que envia ao backend padrão do iac-code ou a um endpoint OTLP configurado explicitamente, para ajudar a diagnosticar problemas e melhorar o produto."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "New session defaults"
@@ -3828,14 +3830,12 @@ msgid "Install failed: {error}"
 msgstr "Falha na instalação: {error}"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Failed tool calls"
-msgstr "Chamadas de ferramenta com falha"
+msgid "Debug options"
+msgstr "Opções de depuração"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Control how failed tool calls are shown in the transcript."
-msgstr ""
-"Controla como as chamadas de ferramenta com falha são exibidas na "
-"transcrição."
+msgid "Control local debug highlighting and backend log verbosity."
+msgstr "Controla o destaque de depuração local e o nível de detalhe dos logs do backend."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Highlight failed tool calls in red"
@@ -3848,16 +3848,6 @@ msgid ""
 msgstr ""
 "Quando ativado, as chamadas de ferramenta com falha ficam em vermelho. "
 "Quando desativado, elas parecem qualquer outra chamada de ferramenta."
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Debug logging"
-msgstr "Registro de depuração"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Control the verbosity of backend logs written to the log file."
-msgstr ""
-"Controla o nível de detalhe dos registros de backend gravados no arquivo "
-"de log."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Enable debug logging"
@@ -3922,4 +3912,22 @@ msgstr ""
 #~ "Copie o token da página de "
 #~ "implantação. Ele permanece nesta aba e"
 #~ " não é enviado ao servidor."
+
+#~ msgid "Failed tool calls"
+#~ msgstr "Chamadas de ferramenta com falha"
+
+#~ msgid "Control how failed tool calls are shown in the transcript."
+#~ msgstr ""
+#~ "Controla como as chamadas de ferramenta"
+#~ " com falha são exibidas na "
+#~ "transcrição."
+
+#~ msgid "Debug logging"
+#~ msgstr "Registro de depuração"
+
+#~ msgid "Control the verbosity of backend logs written to the log file."
+#~ msgstr ""
+#~ "Controla o nível de detalhe dos "
+#~ "registros de backend gravados no arquivo"
+#~ " de log."
 
