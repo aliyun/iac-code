@@ -91,6 +91,26 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --scenario scenario1-performance-backup
 ```
 
+To reproduce the race where the candidate page is already visible while the
+post-`input_required` backup is still running on slow storage:
+
+```bash
+PATH="$HOME/.local/bin:$PATH" \
+uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
+  --allow-real-cloud \
+  --provider dashscope \
+  --stream-timeout 2400 \
+  --event-timeout 300 \
+  --preflight-timeout 60 \
+  --scenario selection-during-backup
+```
+
+An E2E-only fixture delays the Step 4 `input_required` backup by at least 10
+seconds. The client submits its selection as soon as the event arrives. The
+scenario proves that dispatch happened inside the backup started/finished
+window, the message was consumed as candidate input, and no
+`interrupt_received` / `interrupt_classified` event was emitted.
+
 Run the full real E2E matrix:
 
 ```bash
@@ -103,6 +123,7 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --preflight-timeout 60 \
   --scenario scenario1 \
   --scenario scenario1-performance-backup \
+  --scenario selection-during-backup \
   --scenario redaction-step4 \
   --scenario selection-waiting \
   --scenario ask-waiting \
@@ -149,6 +170,7 @@ the rest of the tests.
 | `redaction-step4` | Force A2A safe mode and stop when the real mini-app backend/database task reaches step 4 candidate selection | None; no candidate selection is submitted | Canonical password parameters are not placeholders; public A2A passwords equal canonical values; token counters stay numeric when present; known server paths become `[PATH]` only in the public copy; deployment never starts. |
 | `scenario1` | After pipeline completion and one normal-chat follow-up | Ask what the previous normal-chat question was | Normal-chat history survives restart; VSwitch evidence exists. |
 | `scenario1-performance-backup` | Full `scenario1` with `IAC_CODE_A2A_EXTREME_PERFORMANCE=true` and `IAC_CODE_CONFIG_BACKUP_DIR=<run-dir>/session-backup` | After the Step4 backup is durable, stop the server, remove the matching primary session under `projects`, restart, and select without `taskId`; later normal-chat recovery also omits `taskId` | Only the backup session exists before restart; restart alone does not recreate the primary session; selection without `taskId` restores the primary session from backup and hydrates the recovered task; full scenario1 passes. |
+| `selection-during-backup` | Step 4 `input_required` is published, then an E2E fixture blocks its backup for at least 10 seconds | Immediately send `你随便选一个方案。` with the active pipeline `taskId` while backup is running | Dispatch falls inside the backup started/finished window; the request is queued and consumed as candidate input; no interrupt events are emitted; the pipeline completes. |
 | `selection-waiting` | Step 4 waits for candidate selection | `你随便选一个方案。` without `taskId` | Waiting step4 task is recovered and selected; VSwitch evidence exists. |
 | `ask-waiting` | `ask_user_question` waits for user input | Clarification answers without `taskId` | Pending ask input is recovered and pipeline completes; VSwitch evidence exists. |
 | `image-initial` | Initial user message is the static `initial.png` image fixture | Candidate selection text | The image starts the pipeline, reaches step4 selection, completes, and produces VSwitch evidence. |
@@ -221,15 +243,16 @@ When stabilizing changes, run the smaller or more diagnostic cases first:
 2. `fault-after-snapshot`
 3. `scenario1`
 4. `scenario1-performance-backup`
-5. `selection-waiting`
-6. `ask-waiting`
-7. `image-initial`, `image-ask-waiting`, and `image-selection-waiting`
-8. `image-normal-handoff` and `image-interrupt`
-9. `step1-running` through `step5-running`
-10. `normal-running`
-11. `cancel-step1` through `cancel-step5`
-12. `rollback-step1` through `rollback-step5`
-13. `rollback-step5-cleanup`, then `rollback-step5-cleanup-recovery`
+5. `selection-during-backup`
+6. `selection-waiting`
+7. `ask-waiting`
+8. `image-initial`, `image-ask-waiting`, and `image-selection-waiting`
+9. `image-normal-handoff` and `image-interrupt`
+10. `step1-running` through `step5-running`
+11. `normal-running`
+12. `cancel-step1` through `cancel-step5`
+13. `rollback-step1` through `rollback-step5`
+14. `rollback-step5-cleanup`, then `rollback-step5-cleanup-recovery`
 
 ## Preflight
 

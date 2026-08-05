@@ -110,7 +110,10 @@ CLEANUP_EVENT_TYPES = frozenset(
 )
 CLEANUP_ACTIVE_STATUSES = frozenset({"pending", "started", "in_progress", "failed"})
 FAULT_AFTER_SNAPSHOT_POINT = "after_a2a_pipeline_snapshot_saved"
-PERFORMANCE_BACKUP_SCENARIOS = frozenset({"scenario1-performance-backup"})
+SELECTION_DURING_BACKUP_SCENARIO = "selection-during-backup"
+BACKUP_DELAY_SECONDS = 10.0
+BACKUP_DELAY_FIXTURE_ROOT = E2E_SCRIPTS_DIR / "fixtures" / "backup-delay-sitecustomize"
+PERFORMANCE_BACKUP_SCENARIOS = frozenset({"scenario1-performance-backup", SELECTION_DURING_BACKUP_SCENARIO})
 DEFAULT_TEXT_MODEL = "deepseek-v4-flash-0731"
 DEFAULT_MULTIMODAL_MODEL = "qwen3.8-max"
 MULTIMODAL_SCENARIOS = frozenset(
@@ -401,6 +404,8 @@ class BackgroundStream:
         self.summary = StreamSummary(name=name, prompt=prompt, request_task_id=task_id)
         self.events: list[Any] = []
         self.exception: BaseException | None = None
+        self.request_started_at: float | None = None
+        self.request_started_monotonic: float | None = None
         self._condition = threading.Condition()
         self._done = False
         self._thread = threading.Thread(target=self._run, name=f"a2a-e2e-{name}", daemon=True)
@@ -457,6 +462,8 @@ class BackgroundStream:
             message_id=str(uuid.uuid4()),
             images=self.images,
         )
+        self.request_started_at = time.time()
+        self.request_started_monotonic = time.monotonic()
         _append_jsonl(
             self.run_dir / "requests.jsonl",
             {"name": self.name, "payload": payload, "at": _utc_now()},
@@ -533,6 +540,17 @@ class ScenarioHarness:
             self.server_env["IAC_CODE_A2A_EXTREME_PERFORMANCE"] = "true"
             self.server_env["IAC_CODE_CONFIG_BACKUP_DIR"] = str(self.backup_root)
             self.notes.append(f"enabled A2A extreme performance and backup dir {self.backup_root}")
+        if scenario == SELECTION_DURING_BACKUP_SCENARIO:
+            fixture_path = str(BACKUP_DELAY_FIXTURE_ROOT.resolve())
+            existing_pythonpath = self.server_env.get("PYTHONPATH", "")
+            self.server_env["PYTHONPATH"] = os.pathsep.join(
+                value for value in (fixture_path, existing_pythonpath) if value
+            )
+            self.server_env["IAC_CODE_E2E_BACKUP_DELAY_SECONDS"] = str(BACKUP_DELAY_SECONDS)
+            self.server_env["IAC_CODE_E2E_BACKUP_DELAY_CONTROL"] = str(
+                (self.run_dir / "selection-backup-delay").resolve()
+            )
+            self.notes.append(f"armed E2E-only input_required backup delay fixture for {BACKUP_DELAY_SECONDS:.0f}s")
         if args.deterministic:
             self.server_env["IAC_CODE_A2A_DETERMINISTIC_RECOVERY"] = "1"
             self.server_env["IAC_CODE_TEST_FAULT_INJECTION"] = "1"
@@ -1121,6 +1139,78 @@ def run_selection_waiting(args: argparse.Namespace, scenario: str) -> int:
         selection = h.stream(prompt=args.selection_prompt, name="02-select-after-restart", task_id="")
         _add_hydrated_task_checks(h, selection, "selection answer")
         h.checks["selection accepted and advanced past waiting step"] = _selection_advanced_past_waiting_step(selection)
+        h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
+
+    return _run_with_harness(args, scenario, callback)
+
+
+def run_selection_during_backup(args: argparse.Namespace, scenario: str) -> int:
+    def callback(h: ScenarioHarness) -> None:
+        initial_streams = _wait_for_with_intervening_ask_inputs(
+            h,
+            [h.start_stream(prompt=args.initial_prompt, name="01-initial", context_id="", task_id="")],
+            _input_required_step("confirm_and_select"),
+            description="step4 candidate selection input_required",
+            timeout=args.event_timeout,
+            name_prefix="01-initial",
+        )
+        h.checks["initial reached step4 input_required before stream completed"] = any(
+            stream.summary.last_input_required_step_id == "confirm_and_select" and not stream.done
+            for stream in initial_streams
+        )
+
+        control = _backup_delay_control_path(h)
+        arm_path = _backup_delay_marker_path(control, "arm")
+        _write_json(
+            arm_path,
+            {
+                "armedAt": time.time(),
+                "scenario": scenario,
+                "delaySeconds": BACKUP_DELAY_SECONDS,
+            },
+        )
+        started = _wait_for_backup_delay_marker(control, "started", timeout=min(10.0, args.event_timeout))
+        h.snapshots["backup_delay_started"] = started
+        h.checks["input_required backup delay started"] = started.get("delaySeconds") == BACKUP_DELAY_SECONDS
+
+        h.checks["backup was unfinished when selection request was dispatched"] = not _backup_delay_marker_path(
+            control, "finished"
+        ).exists()
+        selection_stream = h.start_stream(prompt=args.selection_prompt, name="02-select-during-backup")
+
+        for stream in initial_streams:
+            stream.join(timeout=args.stream_timeout)
+        selection = selection_stream.join(timeout=args.stream_timeout)
+        finished = _wait_for_backup_delay_marker(control, "finished", timeout=min(10.0, args.event_timeout))
+        h.snapshots["backup_delay_finished"] = finished
+        h.snapshots["selection_dispatch"] = {
+            "dispatchedAt": selection_stream.request_started_at,
+            "dispatchedMonotonic": selection_stream.request_started_monotonic,
+        }
+
+        started_monotonic = _float_value(started.get("startedMonotonic"))
+        finished_monotonic = _float_value(finished.get("finishedMonotonic"))
+        selection_dispatched_monotonic = selection_stream.request_started_monotonic
+        delay_elapsed = _float_value(finished.get("elapsedSeconds"))
+        h.checks["selection request was dispatched during backup delay"] = (
+            started_monotonic is not None
+            and finished_monotonic is not None
+            and selection_dispatched_monotonic is not None
+            and started_monotonic <= selection_dispatched_monotonic < finished_monotonic
+        )
+        h.checks["backup delay lasted at least 10 seconds"] = (
+            delay_elapsed is not None and delay_elapsed >= BACKUP_DELAY_SECONDS
+        )
+        h.checks["selection stayed on pipeline task"] = selection.task_id == h.pipeline_task_id
+        h.checks["selection was consumed as candidate input"] = _selection_advanced_past_waiting_step(selection)
+        observed_event_types = set(selection.pipeline_event_types)
+        for stream in initial_streams:
+            observed_event_types.update(stream.summary.pipeline_event_types)
+        h.checks["selection did not enter interrupt routing"] = not {
+            "interrupt_received",
+            "interrupt_classified",
+        }.intersection(observed_event_types)
+        h.checks["selection completed pipeline"] = _pipeline_completed(selection)
         h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
 
     return _run_with_harness(args, scenario, callback)
@@ -2015,6 +2105,42 @@ def _selection_advanced_past_waiting_step(summary: StreamSummary) -> bool:
     except ValueError:
         return False
     return "step_started" in event_types[completed_index + 1 :] or _pipeline_completed(summary)
+
+
+def _backup_delay_control_path(h: ScenarioHarness) -> Path:
+    raw = h.server_env.get("IAC_CODE_E2E_BACKUP_DELAY_CONTROL", "")
+    if not raw:
+        raise RuntimeError("backup delay control path is not configured")
+    return Path(raw)
+
+
+def _backup_delay_marker_path(control: Path, marker: str) -> Path:
+    return control.with_name(f"{control.name}.{marker}.json")
+
+
+def _wait_for_backup_delay_marker(control: Path, marker: str, *, timeout: float) -> dict[str, Any]:
+    path = _backup_delay_marker_path(control, marker)
+    deadline = time.monotonic() + timeout
+    last_error = ""
+    while time.monotonic() < deadline:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            last_error = str(exc)
+            time.sleep(0.05)
+            continue
+        if isinstance(value, dict):
+            return value
+        last_error = "marker was not a JSON object"
+        time.sleep(0.05)
+    raise TimeoutError(f"Timed out waiting for backup delay marker {path}: {last_error}")
+
+
+def _float_value(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _add_same_task_checks(h: ScenarioHarness, summary: StreamSummary, prefix: str) -> None:
@@ -3537,6 +3663,7 @@ _REAL_CLOUD_SCENARIOS = {
     "image-selection-waiting",
     "scenario1",
     "scenario1-performance-backup",
+    SELECTION_DURING_BACKUP_SCENARIO,
     "normal-running",
     "ask-waiting",
     REDACTION_STEP4_SCENARIO,
@@ -3557,6 +3684,7 @@ _SCENARIOS: dict[str, Callable[[argparse.Namespace, str], int]] = {
     "image-selection-waiting": run_image_selection_waiting,
     "scenario1": run_scenario1,
     "scenario1-performance-backup": run_scenario1_performance_backup,
+    SELECTION_DURING_BACKUP_SCENARIO: run_selection_during_backup,
     "normal-running": run_normal_running,
     "ask-waiting": run_ask_waiting,
     REDACTION_STEP4_SCENARIO: run_redaction_step4,

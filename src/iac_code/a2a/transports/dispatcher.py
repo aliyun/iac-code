@@ -472,7 +472,11 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         if task_id and isinstance(self.task_store, A2ATaskStore) and await self.task_store.is_task_active(task_id):
             task = await self.task_store.get(task_id, context)
             active_task = await self._active_task_registry.get(task_id)
-            if task is not None and active_task is not None and task.status.state not in TERMINAL_TASK_STATES:
+            if (
+                task is not None
+                and active_task is not None
+                and task.status.state not in TERMINAL_TASK_STATES | INTERRUPTED_TASK_STATES
+            ):
                 active_stream = self._on_active_message_send_stream(
                     params,
                     context,

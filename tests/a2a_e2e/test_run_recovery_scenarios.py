@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -329,6 +331,20 @@ def test_scenario1_performance_backup_is_registered_and_requires_real_cloud() ->
         assert "--allow-real-cloud" in str(exc)
     else:
         raise AssertionError("scenario1-performance-backup should require --allow-real-cloud")
+
+
+def test_selection_during_backup_is_registered_and_requires_real_cloud() -> None:
+    runner = _load_runner()
+
+    scenario = runner.SELECTION_DURING_BACKUP_SCENARIO
+    assert runner._SCENARIOS[scenario] is runner.run_selection_during_backup
+    args = SimpleNamespace(allow_real_cloud=False, deterministic=False)
+    try:
+        runner._validate_scenario_execution(args, scenario)
+    except SystemExit as exc:
+        assert "--allow-real-cloud" in str(exc)
+    else:
+        raise AssertionError(f"{scenario} should require --allow-real-cloud")
 
 
 def test_redaction_step4_is_registered_requires_real_cloud_and_forces_safe_mode(tmp_path: Path) -> None:
@@ -889,6 +905,66 @@ def test_scenario1_performance_backup_configures_server_env(tmp_path: Path) -> N
     assert harness.server_env["IAC_CODE_A2A_EXTREME_PERFORMANCE"] == "true"
     assert harness.server_env["IAC_CODE_CONFIG_BACKUP_DIR"] == str((tmp_path / "run" / "session-backup").resolve())
     assert harness.backup_root == (tmp_path / "run" / "session-backup").resolve()
+
+
+def test_selection_during_backup_configures_e2e_only_delay(tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = SimpleNamespace(
+        server_cwd=str(tmp_path),
+        run_dir=str(tmp_path / "run"),
+        run_root=str(tmp_path),
+        cwd="",
+        host="127.0.0.1",
+        port=0,
+        no_auto_approve_permissions=False,
+        provider="",
+        model="",
+        api_base="",
+        deterministic=False,
+        fault_at="",
+    )
+
+    harness = runner.ScenarioHarness(args, scenario=runner.SELECTION_DURING_BACKUP_SCENARIO)
+
+    assert harness.server_env["IAC_CODE_A2A_EXTREME_PERFORMANCE"] == "true"
+    assert harness.server_env["IAC_CODE_E2E_BACKUP_DELAY_SECONDS"] == "10.0"
+    assert harness.server_env["IAC_CODE_E2E_BACKUP_DELAY_CONTROL"] == str(
+        (tmp_path / "run" / "selection-backup-delay").resolve()
+    )
+    assert str(runner.BACKUP_DELAY_FIXTURE_ROOT.resolve()) == harness.server_env["PYTHONPATH"].split(os.pathsep)[0]
+
+
+def test_backup_delay_sitecustomize_delays_armed_input_required_backup(tmp_path: Path) -> None:
+    runner = _load_runner()
+    control = tmp_path / "backup-delay"
+    runner._write_json(runner._backup_delay_marker_path(control, "arm"), {"armed": True})
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        value for value in (str(runner.BACKUP_DELAY_FIXTURE_ROOT.resolve()), env.get("PYTHONPATH", "")) if value
+    )
+    env["IAC_CODE_E2E_BACKUP_DELAY_SECONDS"] = "0.05"
+    env["IAC_CODE_E2E_BACKUP_DELAY_CONTROL"] = str(control)
+    script = "\n".join(
+        [
+            "from iac_code.services.session_backup import BackupReason, SessionBackupService",
+            "service = SessionBackupService()",
+            "service.backup_session('', 'session-1', reason=BackupReason.INPUT_REQUIRED, critical=False)",
+        ]
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr
+    finished = runner._wait_for_backup_delay_marker(control, "finished", timeout=1)
+    assert finished["elapsedSeconds"] >= 0.05
+    assert finished["succeeded"] is True
 
 
 def test_scenario1_performance_backup_omits_selection_task_id_and_checks_backup(
