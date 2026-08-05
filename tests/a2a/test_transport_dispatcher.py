@@ -421,6 +421,63 @@ async def test_message_stream_does_not_acknowledge_transport_delivery_when_close
 
 
 @pytest.mark.asyncio
+async def test_message_stream_queues_input_required_followup_instead_of_routing_as_interrupt(monkeypatch) -> None:
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    await store.save(
+        Task(
+            id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+        ),
+        call_context,
+    )
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    record.active_task = asyncio.current_task()
+    update = TaskStatusUpdateEvent(
+        task_id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+    sdk_stream_called = False
+
+    async def sdk_stream(_handler, _params, _context):
+        nonlocal sdk_stream_called
+        sdk_stream_called = True
+        yield update
+
+    async def hydrate(_params) -> None:
+        return None
+
+    async def reconcile(_params, _context) -> None:
+        return None
+
+    class ActiveTaskRegistry:
+        async def get(self, _task_id):
+            return object()
+
+    async def fail_active_stream(*_args, **_kwargs):
+        raise AssertionError("input-required follow-up must not use the active interrupt route")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send_stream", sdk_stream)
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler._active_task_registry = ActiveTaskRegistry()
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    handler._reconcile_recoverable_pipeline_task = reconcile
+    handler._on_active_message_send_stream = fail_active_stream
+    params = SimpleNamespace(message=SimpleNamespace(task_id="task-1", context_id="ctx-1"))
+
+    events = await _collect_async(handler.on_message_send_stream(params, call_context))
+
+    assert events == [update]
+    assert sdk_stream_called is True
+
+
+@pytest.mark.asyncio
 async def test_dispatcher_stream_preserves_message_metadata_echo_without_safe_mode(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("IAC_CODE_A2A_SAFE_MODE", raising=False)
     loop = FakeAgentLoop([TextDeltaEvent(text="streamed")])
