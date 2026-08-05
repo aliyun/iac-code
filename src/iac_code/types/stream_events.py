@@ -284,6 +284,27 @@ class ResourceObservedEvent(ToolEmittedEvent):
 
 
 @dataclass
+class StackOperationStartedEvent(ToolEmittedEvent):
+    """A stack lifecycle operation has started, before its first poll.
+
+    Web-only t0 signal so the output panel shows ``*_IN_PROGRESS`` immediately for
+    non-create actions (delete/update/continue), instead of waiting for the first
+    poll (~POLL_INTERVAL). Deliberately separate from ResourceObservedEvent: the a2a
+    translator (which turns ResourceObservedEvent into ``stack_current_changed``) does
+    not recognize this type and ignores it, so current-stack semantics stay untouched.
+    """
+
+    provider: str
+    stack_id: str
+    stack_name: str = ""
+    region_id: str = ""
+    action: str = ""
+    tool_name: str = ""
+    tool_use_id: str | None = None
+    type: Literal["stack_operation_started"] = "stack_operation_started"
+
+
+@dataclass
 class StackProgressEvent(ToolEmittedEvent):
     """Real-time progress from a stack lifecycle operation."""
 
@@ -412,6 +433,7 @@ StreamEvent = Union[
     QueuedInputSubmittedEvent,
     SubAgentToolEvent,
     ResourceObservedEvent,
+    StackOperationStartedEvent,
     StackProgressEvent,
     StackInstancesProgressEvent,
     MCPProgressEvent,

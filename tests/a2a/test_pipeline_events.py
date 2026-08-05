@@ -21,6 +21,7 @@ from iac_code.types.stream_events import (
     PermissionRequestEvent,
     ResourceObservedEvent,
     StackInstancesProgressEvent,
+    StackOperationStartedEvent,
     StackProgressEvent,
     SubPipelineStreamEvent,
     TextDeltaEvent,
@@ -1909,6 +1910,47 @@ def test_stack_current_changed_emits_for_observed_resource_in_sub_pipeline() -> 
     assert stack_event["candidate"]["index"] == 0
     assert stack_event["data"]["stackId"] == "stack-123"
     assert stack_event["data"]["stackStatus"] == "CREATE_IN_PROGRESS"
+
+
+def test_stack_operation_started_event_produces_no_a2a_envelope() -> None:
+    # The web-only t0 event must be ignored by the a2a translator even with stack events on,
+    # so it can never leak into stack_current_changed (which DeleteStack would invert).
+    ctx = _ctx()
+    ctx.emit_stack_events = True
+    translator = PipelineEventTranslator(ctx)
+    translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.STEP_STARTED,
+            step_id="deploying",
+            timestamp=time.time(),
+            data={"index": 5, "total": 5},
+        )
+    )
+    translator.translate(
+        ToolUseEndEvent(
+            tool_use_id="toolu-deploy",
+            name="ros_deploy",
+            input={"action": "delete_and_create", "stack_name": "demo", "region_id": "cn-hangzhou"},
+        )
+    )
+
+    started = StackOperationStartedEvent(
+        provider="ros",
+        stack_id="stack-123",
+        stack_name="demo",
+        region_id="cn-hangzhou",
+        action="DeleteStack",
+        tool_name="ros_stack",
+        tool_use_id="toolu-deploy",
+    )
+    assert translator.translate(started) == []
+    # Also inert when wrapped in a sub-pipeline envelope (only ResourceObservedEvent is special-cased).
+    assert (
+        translator.translate(
+            SubPipelineStreamEvent(sub_pipeline_id="sp", candidate_index=0, inner=started)
+        )
+        == []
+    )
 
 
 def test_stack_current_changed_keeps_current_stack_after_statusless_successful_delete() -> None:

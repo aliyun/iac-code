@@ -10,7 +10,11 @@ import pytest
 from iac_code.tools.base import ToolContext
 from iac_code.tools.cloud.base_stack import BaseCloudStack
 from iac_code.tools.cloud.types import ResourceStatus, StackStatus
-from iac_code.types.stream_events import ResourceObservedEvent, StackProgressEvent
+from iac_code.types.stream_events import (
+    ResourceObservedEvent,
+    StackOperationStartedEvent,
+    StackProgressEvent,
+)
 
 
 class MockCloudStack(BaseCloudStack):
@@ -86,6 +90,14 @@ class MockDeleteCloudStack(MockCloudStack):
 class EmptyStackIdCloudStack(MockCloudStack):
     async def call_action(self, action: str, params: dict, region: str) -> str:
         return ""
+
+
+class MultiActionCloudStack(MockCloudStack):
+    """Supports the full set of write actions so non-create t0 emission can be exercised."""
+
+    @property
+    def supported_actions(self) -> list[str]:
+        return ["CreateStack", "DeleteStack", "UpdateStack", "ContinueCreateStack"]
 
 
 class HookCapturingCloudStack(MockCloudStack):
@@ -256,6 +268,62 @@ class TestBaseCloudStackExecute:
         assert events[0].tool_use_id == "toolu-create"
         assert events[0].metadata == {}
         assert any(isinstance(event, StackProgressEvent) for event in events[1:])
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("action", ["DeleteStack", "UpdateStack", "ContinueCreateStack"])
+    async def test_execute_emits_stack_operation_started_for_non_create(self, action: str) -> None:
+        stack = MultiActionCloudStack()
+        queue: asyncio.Queue = asyncio.Queue()
+        context = ToolContext(event_queue=queue, tool_use_id="toolu-op")
+
+        await stack.execute(
+            tool_input={
+                "action": action,
+                "params": {"StackName": "test"},
+                "region_id": "cn-hangzhou",
+            },
+            context=context,
+        )
+
+        events = []
+        while not queue.empty():
+            events.append(await queue.get())
+
+        # t0 event is first and precedes any progress frame.
+        assert isinstance(events[0], StackOperationStartedEvent)
+        started = events[0]
+        assert started.provider == "mock"
+        assert started.stack_id == "stack-id-123"
+        assert started.stack_name == "test"
+        assert started.region_id == "cn-hangzhou"
+        assert started.action == action
+        assert started.tool_name == "mock_stack"
+        assert started.tool_use_id == "toolu-op"
+        assert started.type == "stack_operation_started"
+        # Non-create must not emit ResourceObservedEvent (which drives a2a stack_current_changed).
+        assert not any(isinstance(event, ResourceObservedEvent) for event in events)
+        progress_index = next(i for i, e in enumerate(events) if isinstance(e, StackProgressEvent))
+        assert progress_index > 0
+
+    @pytest.mark.asyncio
+    async def test_execute_does_not_emit_stack_operation_started_for_create(
+        self, stack: MockCloudStack
+    ) -> None:
+        queue: asyncio.Queue = asyncio.Queue()
+        context = ToolContext(event_queue=queue, tool_use_id="toolu-create")
+
+        await stack.execute(
+            tool_input={"action": "CreateStack", "params": {"StackName": "test"}, "region_id": "cn-hangzhou"},
+            context=context,
+        )
+
+        events = []
+        while not queue.empty():
+            events.append(await queue.get())
+
+        # CreateStack keeps its ResourceObservedEvent t0 and must NOT emit the new event.
+        assert not any(isinstance(event, StackOperationStartedEvent) for event in events)
+        assert isinstance(events[0], ResourceObservedEvent)
 
     @pytest.mark.asyncio
     async def test_execute_does_not_emit_resource_observed_for_empty_stack_id(self) -> None:

@@ -11,7 +11,7 @@ from typing import Any
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.tools.cloud.types import ResourceStatus, StackStatus, translate_status
-from iac_code.types.stream_events import ResourceObservedEvent, StackProgressEvent
+from iac_code.types.stream_events import ResourceObservedEvent, StackOperationStartedEvent, StackProgressEvent
 
 POLL_INTERVAL = 5
 
@@ -278,6 +278,23 @@ class BaseCloudStack(Tool):
     ) -> ToolResult:
         """Poll an already-started stack operation until it reaches a terminal state."""
         start_time = time.monotonic()
+        # t0 signal so the web output panel shows *_IN_PROGRESS immediately for non-create
+        # actions (delete/update/continue), instead of waiting for the first poll (~POLL_INTERVAL).
+        # CreateStack already gets its t0 via ResourceObservedEvent in execute(); this deliberately
+        # separate event type is ignored by the a2a translator, so stack_current_changed semantics
+        # stay untouched.
+        if context.event_queue is not None and stack_id and action != "CreateStack":
+            await context.event_queue.put(
+                StackOperationStartedEvent(
+                    provider=self.provider_name,
+                    stack_id=stack_id,
+                    stack_name=str(params.get("StackName") or params.get("stack_name") or ""),
+                    region_id=region,
+                    action=action,
+                    tool_name=self.name,
+                    tool_use_id=context.tool_use_id,
+                )
+            )
         try:
             while True:
                 await asyncio.sleep(self._poll_interval)

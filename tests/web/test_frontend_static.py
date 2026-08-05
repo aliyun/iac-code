@@ -1162,8 +1162,8 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-313" in html
-    assert "/static/js/app.js?v=web-repl-ui-325" in html
+    assert "/static/styles.css?v=web-repl-ui-314" in html
+    assert "/static/js/app.js?v=web-repl-ui-327" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1197,10 +1197,10 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-325" in index_html
+    assert "web-repl-ui-327" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-319" in app_source
-    assert "./components/workspace.js?v=cloud-creds-v54" in app_source
+    assert "./components/workspace.js?v=cloud-creds-v55" in app_source
     assert "workspace-cloud-vendors" in workspace_source
     assert "Alibaba Cloud" in workspace_source
     assert "workspace-cloud-mode-fields" in workspace_source
@@ -9894,7 +9894,7 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-325" in html
+    assert "web-repl-ui-327" in html
     assert "web-repl-ui-319" not in html
 
 
@@ -10490,6 +10490,10 @@ def test_app_wires_live_stacks_into_output_panel() -> None:
     assert 'resourceType' in app_source
     # resource.observed 到达即刷新输出面板,让「创建中」栈立即出现,而非等首个 stack.progress(约 5s 后)。
     assert 'event.type === "resource.observed"' in app_source
+    # 非 create 写操作(delete/update/continue)也须在 t0 映射出对应 *_IN_PROGRESS,
+    # 而不是空状态——后端新增 StackOperationStartedEvent 桥成同一 resource.observed 事件驱动。
+    assert "DELETE_IN_PROGRESS" in app_source
+    assert "UPDATE_IN_PROGRESS" in app_source
 
 
 def test_live_stacks_only_kept_while_owning_tool_runs(tmp_path: Path) -> None:
@@ -10559,6 +10563,66 @@ def test_live_stacks_only_kept_while_owning_tool_runs(tmp_path: Path) -> None:
     assert result["spDoneLen"] == 0
     assert result["spRunningLen"] == 1
     assert result["spRunningStatus"] == "CREATE_COMPLETE"
+
+
+def test_live_stacks_map_non_create_actions_and_merge_by_stack_id(tmp_path: Path) -> None:
+    # 非 create 操作(delete/update/continue)的 t0(经 StackOperationStartedEvent 桥成
+    # resource.observed)须映射对应 *_IN_PROGRESS;且无名 t0(DeleteStack 常只带 StackId)与
+    # 之后带名、同 stackId 的 stackProgress 应凭 stackId 合并成一行,真实进度覆盖占位状态。
+    source = """
+    import fs from "node:fs";
+    const src = fs.readFileSync(new URL(__APP_MODULE__), "utf-8");
+    const start = src.indexOf("function liveStacksFromState()");
+    let depth = 0, end = -1;
+    for (let j = src.indexOf("{", start); j < src.length; j++) {
+      if (src[j] === "{") depth++;
+      else if (src[j] === "}" && --depth === 0) { end = j + 1; break; }
+    }
+    const fnText = src.slice(start, end);
+    const run = (state) => new Function("state", fnText + "\\nreturn liveStacksFromState();")(state);
+
+    // A) DeleteStack t0(无名,仅 StackId)→ DELETE_IN_PROGRESS,立即出现。
+    const del = run({
+      currentTurnActive: true,
+      resources: [{ resourceType: "stack", resourceId: "stk-9", resourceName: "",
+        regionId: "cn-hangzhou", action: "DeleteStack", toolUseId: "t1" }],
+      tools: { t1: { status: "running" } },
+    });
+
+    // B) UpdateStack t0 → UPDATE_IN_PROGRESS。
+    const upd = run({
+      currentTurnActive: true,
+      resources: [{ resourceType: "stack", resourceId: "stk-u", resourceName: "web",
+        regionId: "cn-hangzhou", action: "UpdateStack", toolUseId: "t1" }],
+      tools: { t1: { status: "running" } },
+    });
+
+    // C) 无名 t0(DeleteStack)+ 带名同 stackId 的 stackProgress → 合并为一行,进度状态覆盖占位。
+    const merged = run({
+      currentTurnActive: true,
+      resources: [{ resourceType: "stack", resourceId: "stk-9", resourceName: "",
+        regionId: "cn-hangzhou", action: "DeleteStack", toolUseId: "t1" }],
+      tools: { t1: { status: "running", stackProgress: {
+        kind: "stack.progress", stackId: "stk-9", stackName: "web",
+        regionId: "cn-hangzhou", status: "DELETE_IN_PROGRESS",
+      } } },
+    });
+
+    console.log(JSON.stringify({
+      delStatus: del[0] && del[0].status,
+      updStatus: upd[0] && upd[0].status,
+      mergedLen: merged.length,
+      mergedName: merged[0] && merged[0].stackName,
+      mergedStatus: merged[0] && merged[0].status,
+    }));
+    """
+    result = _run_app_script(tmp_path, source)
+    assert result["delStatus"] == "DELETE_IN_PROGRESS"
+    assert result["updStatus"] == "UPDATE_IN_PROGRESS"
+    # 一行,而非占位 + 进度两行;带名进度覆盖无名占位。
+    assert result["mergedLen"] == 1
+    assert result["mergedName"] == "web"
+    assert result["mergedStatus"] == "DELETE_IN_PROGRESS"
 
 
 def test_output_panel_diagram_preview_guard_uses_diagram_id() -> None:

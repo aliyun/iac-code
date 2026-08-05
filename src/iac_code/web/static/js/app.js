@@ -4638,6 +4638,13 @@ function scheduleOutputsRefresh() {
 //   1) resource.observed —— CreateStack 返回即到(t0 最早,且 region 可靠);
 //   2) 工具卡 stackProgress —— 每约 5s 轮询一帧,带真实栈状态。
 function liveStacksFromState() {
+  // 动作→进行中状态:每个写操作在 t0 应显示的 *_IN_PROGRESS(轮询到真实状态后被覆盖)。
+  const STACK_ACTION_STATUS = {
+    CreateStack: "CREATE_IN_PROGRESS",
+    UpdateStack: "UPDATE_IN_PROGRESS",
+    DeleteStack: "DELETE_IN_PROGRESS",
+    ContinueCreateStack: "CREATE_IN_PROGRESS",
+  };
   // live 进行中栈只在「当前回合正进行 + 发起该操作的工具仍在运行」时有效。回合结束(turn.done →
   // currentTurnActive=false,含取消/中断)或工具终止(tool.result/finished → status 非 running,含轮询失败)
   // 后必须清空对应占位,交还服务端权威态,否则面板会永久停在 CREATE_IN_PROGRESS。
@@ -4653,7 +4660,9 @@ function liveStacksFromState() {
       regionByStackId.set(r.resourceId, r.regionId);
     }
   }
-  const keyOf = (region, name, id) => (name ? `${region || ""}::${name}` : id || "");
+  // 去重键 stackId 优先:非 create 的 t0(如 DeleteStack 常只带 StackId、无名)与之后带名的
+  // stack.progress 凭同一 stackId 合并成一行,真实进度 last-wins 覆盖占位状态。
+  const keyOf = (region, name, id) => id || (name ? `${region || ""}::${name}` : "");
   const byKey = new Map();
   // resource.observed:创建一开始的最早占位(尚无真实状态,创建动作按 CREATE_IN_PROGRESS 记)。
   // 仅当发起观测的工具仍在运行才保留——否则这只是已终止操作遗留的陈旧占位。
@@ -4664,7 +4673,7 @@ function liveStacksFromState() {
     byKey.set(keyOf(region, r.resourceName, r.resourceId), {
       stackId: r.resourceId,
       stackName: r.resourceName || "",
-      status: r.action === "CreateStack" ? "CREATE_IN_PROGRESS" : "",
+      status: STACK_ACTION_STATUS[r.action] || "",
       isSuccess: false,
       regionId: region,
     });

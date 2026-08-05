@@ -316,6 +316,38 @@ def test_stream_event_translator_backend_event_names_match_contract() -> None:
     ] == [event_type for _stream_event, event_type in cases]
 
 
+def test_stack_operation_started_bridges_to_resource_observed() -> None:
+    from iac_code.types.stream_events import StackOperationStartedEvent
+    from iac_code.web.events import WebEventTranslator
+
+    translated = WebEventTranslator("session-1").translate_stream_event(
+        StackOperationStartedEvent(
+            provider="ros",
+            stack_id="stack-9",
+            stack_name="demo",
+            region_id="cn-hangzhou",
+            action="DeleteStack",
+            tool_name="ros_stack",
+            tool_use_id="tool-9",
+        ),
+        turn_id="turn-1",
+    )
+
+    # Reuses the same SSE the frontend already consumes so *_IN_PROGRESS shows at t0.
+    assert translated["type"] == "resource.observed"
+    payload = translated["payload"]
+    assert payload["turnId"] == "turn-1"
+    assert payload["provider"] == "ros"
+    assert payload["resourceType"] == "stack"
+    assert payload["resourceId"] == "stack-9"
+    assert payload["resourceName"] == "demo"
+    assert payload["regionId"] == "cn-hangzhou"
+    assert payload["action"] == "DeleteStack"
+    assert payload["toolName"] == "ros_stack"
+    assert payload["toolUseId"] == "tool-9"
+    assert payload["metadata"] == {}
+
+
 def test_mcp_progress_translates_to_stable_tool_progress_event() -> None:
     from iac_code.types.stream_events import MCPProgressEvent
     from iac_code.web.events import WebEventTranslator
