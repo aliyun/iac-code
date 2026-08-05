@@ -16,6 +16,8 @@ Metadata:
           - InternetBandwidth
         Label:
           default: iac-code Web
+    TemplateTags:
+      - acs:solution:iac-code:iac-code-web
 Parameters:
   ZoneId:
     Type: String

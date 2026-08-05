@@ -67,6 +67,9 @@ def test_golden_template_has_only_the_fixed_single_ecs_topology() -> None:
     template = _template()
     resources = template["Resources"]
 
+    assert template["Metadata"]["ALIYUN::ROS::Interface"]["TemplateTags"] == [
+        "acs:solution:iac-code:iac-code-web"
+    ]
     assert {name: resource["Type"] for name, resource in resources.items()} == {
         "Vpc": "ALIYUN::ECS::VPC",
         "VSwitch": "ALIYUN::ECS::VSwitch",
