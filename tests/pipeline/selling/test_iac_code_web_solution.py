@@ -113,6 +113,7 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
     assert variables == {
         "BailianApiKeyB64": {"Fn::Base64Encode": {"Fn::GetAtt": ["BailianApiKey", "Key"]}},
         "MasterAccountId": {"Ref": "ALIYUN::TenantId"},
+        "StackRegion": {"Ref": "ALIYUN::Region"},
     }
     assert 'pip install --upgrade --index-url https://mirrors.aliyun.com/pypi/simple/ "iac-code[http]"' in script
     assert "iac-code[http]==" not in script
@@ -124,13 +125,18 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
     assert set(re.findall(r"\$\{([^}]+)\}", script)) == {
         "BailianApiKeyB64",
         "MasterAccountId",
+        "StackRegion",
     }
     for expected in (
         "'activeProvider': 'dashscope'",
+        "root / '.cloud-credentials.yml'",
+        "'mode': 'OAuth'",
+        "'region_id': '${StackRegion}'",
+        "'oauth_site_type': 'CN'",
         "'memory': {'autoMemory': True}",
         "'pipeline': {'sellingReviewStep': False}",
         "'apiBase': 'https://dashscope.aliyuncs.com/compatible-mode/v1'",
-        "'model': 'qwen3.7-max'",
+        "'model': 'deepseek-v4-flash-0731'",
         "'name': 'DashScope'",
         "'mode': 'normal'",
         "'permissionMode': 'bypass_permissions'",
@@ -139,6 +145,7 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
         "'userID': '${MasterAccountId}'",
     ):
         assert expected in script
+    assert "'model': 'qwen3.7-max'" not in script
 
     outputs = template["Outputs"]
     assert set(outputs) == {"PublicUrl", "WebAccessToken", "InstanceId", "EipAddress"}

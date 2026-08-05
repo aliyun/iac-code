@@ -179,6 +179,13 @@ Resources:
             root = pathlib.Path('/var/lib/iac-code')
             updates = {
                 root / '.credentials.yml': {'dashscope': os.environ['BAILIAN_API_KEY']},
+                root / '.cloud-credentials.yml': {
+                    'aliyun': {
+                        'mode': 'OAuth',
+                        'region_id': '${StackRegion}',
+                        'oauth_site_type': 'CN',
+                    }
+                },
                 root / 'settings.yml': {
                     'activeProvider': 'dashscope',
                     'memory': {'autoMemory': True},
@@ -186,7 +193,7 @@ Resources:
                     'providers': {
                         'dashscope': {
                             'apiBase': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-                            'model': 'qwen3.7-max',
+                            'model': 'deepseek-v4-flash-0731',
                             'name': 'DashScope',
                         }
                     },
@@ -263,6 +270,8 @@ Resources:
                   - Key
             MasterAccountId:
               Ref: ALIYUN::TenantId
+            StackRegion:
+              Ref: ALIYUN::Region
 Outputs:
   PublicUrl:
     Label:
