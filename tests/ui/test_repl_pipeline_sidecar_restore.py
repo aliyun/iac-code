@@ -6,6 +6,8 @@ from iac_code.agent.message import Message
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.pipeline_runner import PipelineStatePersistenceError
 from iac_code.pipeline.engine.user_input import PipelineUserInput
+from iac_code.ui.core.prompt_input import PromptInputResult
+from iac_code.utils.image.pasted_content import PastedContent
 
 
 @pytest.fixture
@@ -560,6 +562,62 @@ async def test_startup_pending_ask_user_question_replays_prompt_and_resumes_pipe
         pending_input=pending,
     )
     repl_for_sidecar_restore._render_pipeline_stream.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_startup_pending_ask_forwards_pasted_image_as_supplemental_input(
+    monkeypatch,
+    repl_for_sidecar_restore,
+):
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    from iac_code.pipeline.config import RunMode
+    from iac_code.ui.repl import InlineREPL
+
+    pending = {
+        "kind": "ask_user_question",
+        "toolUseId": "ask-image",
+        "question": "请补充图片",
+        "options": [],
+        "allowFreeText": True,
+    }
+    answer = {"selected_id": "", "selected_label": "", "free_text": "[Image #1]继续"}
+    pasted = PastedContent(id=1, type="image", content="iVBORw0KGgo=", media_type="image/png")
+
+    prompt_input = MagicMock()
+    prompt_input.get_input = AsyncMock(return_value="[Image #1]继续")
+    prompt_input.make_result.return_value = PromptInputResult(
+        text="[Image #1]继续",
+        pasted_contents={1: pasted},
+    )
+    repl_for_sidecar_restore._prompt_input = prompt_input
+    repl_for_sidecar_restore._runtime_mode = RunMode.PIPELINE
+    repl_for_sidecar_restore.renderer.prompt_user_question = AsyncMock()
+
+    async def prompt_question(_event, *, input_reader):
+        assert await input_reader("  > ") == "[Image #1]继续"
+        return answer
+
+    repl_for_sidecar_restore.renderer.prompt_user_question.side_effect = prompt_question
+    pipeline = MagicMock()
+    pipeline.sidecar_restore_result = MagicMock(ok=True, status="waiting_input", reason=None)
+    pipeline.pending_ask_user_question.return_value = pending
+    pipeline.persist_pending_ask_user_question_answer = AsyncMock()
+    pipeline.resume_ask_user_question.return_value = _empty_stream()
+    pipeline.state_machine.current_step.ui_mode = ""
+    pipeline.sidecar_status = "waiting_input"
+    pipeline.display_transcript_path = None
+    repl_for_sidecar_restore._render_pipeline_display_replay_on_startup = MagicMock()
+    repl_for_sidecar_restore._render_pipeline_stream = AsyncMock(return_value=None)
+    repl_for_sidecar_restore._maybe_start_pipeline_cleanup = AsyncMock(return_value=False)
+    _seed_sidecar(repl_for_sidecar_restore, "waiting_input")
+
+    with patch("iac_code.pipeline.create_pipeline", return_value=pipeline):
+        assert await InlineREPL._resume_pipeline_sidecar_on_startup(repl_for_sidecar_restore) is True
+
+    kwargs = pipeline.resume_ask_user_question.call_args.kwargs
+    assert kwargs["tool_use_id"] == "ask-image"
+    assert kwargs["pending_input"] == pending
+    assert kwargs["supplemental_input"].has_images is True
 
 
 @pytest.mark.asyncio

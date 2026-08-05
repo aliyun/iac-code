@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from iac_code.pipeline.engine.complete_step_tool import CompleteStepTool
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.loader import load_pipeline_dir
 from iac_code.pipeline.engine.step_executor import StepExecutor
@@ -44,6 +45,21 @@ def test_selling_intent_step_guards_non_deployment_completion_until_question():
     }
 
     assert {"chat", "code_request", "knowledge_question"}.issubset(guarded_categories)
+
+
+def test_other_cloud_guard_does_not_match_provider_tokens_inside_aliyun_resource_ids():
+    loaded = load_pipeline_dir(_selling_dir())
+    intent_step = next(step for step in loaded.steps if step.step_id == "intent_parsing")
+    guard = next(
+        guard
+        for guard in intent_step.completion_guards
+        if guard.get("message_key") == "intent_alibaba_cloud_only"
+    )
+    pattern = guard["when_user_message_matches_any"][0]
+
+    assert not CompleteStepTool._matches(pattern, "使用已有 VPC vpc-bp1gko19lwa6ngkey6wv7 创建 VSwitch")
+    assert CompleteStepTool._matches(pattern, "请部署到 GKE")
+    assert CompleteStepTool._matches(pattern, "请部署到华为云")
 
 
 def test_selling_intent_step_builds_registry_with_ask_user_question():
