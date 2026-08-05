@@ -7058,12 +7058,20 @@ def test_general_panel_sections_have_chapter_spacing() -> None:
     styles = _source(STYLES_CSS)
 
     assert ".workspace-other-panel {\n  gap: 0.4rem;\n}" in styles
-    assert ".workspace-other-panel .workspace-settings-group-head {\n  margin: 0 0 0.12rem;\n}" in styles
+    # 常规页与开发者页共用同一套章节间距:标题贴紧自身卡片(0.12rem),分区之间拉开 2.25rem。
+    assert (
+        ".workspace-other-panel .workspace-settings-group-head,\n"
+        ".workspace-developer-panel .workspace-settings-group-head {\n"
+        "  margin: 0 0 0.12rem;\n}"
+    ) in styles
     # 面板标题→首个分区标题、卡片→下一分区标题、裸 languageField→重启标题,统一 2.25rem 章节间距。
     assert (
         ".workspace-other-panel > h3 + .workspace-settings-group-head,\n"
         ".workspace-other-panel .workspace-settings-group + .workspace-settings-group-head,\n"
-        ".workspace-other-panel .workspace-field + .workspace-settings-group-head {\n"
+        ".workspace-other-panel .workspace-field + .workspace-settings-group-head,\n"
+        ".workspace-developer-panel > h3 + .workspace-settings-group-head,\n"
+        ".workspace-developer-panel .workspace-settings-group + .workspace-settings-group-head,\n"
+        ".workspace-developer-panel .workspace-field + .workspace-settings-group-head {\n"
         "  margin-top: 2.25rem;\n}"
     ) in styles
 
@@ -7641,7 +7649,7 @@ def test_workspace_cloud_panel_prefills_secrets_and_resets_on_mode_switch() -> N
 def test_app_wires_workspace_controls_to_current_session() -> None:
     source = _source(APP_JS)
 
-    assert 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v54";' in source
+    assert 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v55";' in source
     assert "workspace = createWorkspaceController" in source
     assert 'tabs: byShell("workspace-tabs")' in source
     assert 'content: byShell("workspace-content")' in source
@@ -11116,7 +11124,7 @@ def test_developer_mode_wiring_present() -> None:
 
     # 「Debug 日志」开关(后端 DEBUG 级别文件日志,持久化到 developer.debug)
     assert 'makeForeignSwitch("workspace-debug-logging")' in workspace
-    assert 't("Debug logging")' in workspace
+    assert 't("Debug options")' in workspace
     assert "saveDeveloperState?.({ debug:" in workspace
 
     # api.js 客户端读写端点(功能持久化)

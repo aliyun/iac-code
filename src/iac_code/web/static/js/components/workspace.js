@@ -3938,7 +3938,7 @@ function createOtherPanel(api, context) {
     makeField(
       t("Share full conversation content"),
       telemetryToggle.control,
-      t("When enabled, iac-code attaches full conversation content — your prompts, model responses, and tool inputs and outputs — to the telemetry it sends to iac-code's default backend, or to an explicitly configured OTLP endpoint, to help diagnose issues and improve the product. Off by default. An explicitly set OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT environment variable overrides this switch. You can turn it off at any time."),
+      t("When enabled, iac-code attaches full conversation content (your prompts, model responses, and tool inputs and outputs) to the telemetry it sends to iac-code's default backend or an explicitly configured OTLP endpoint, to help diagnose issues and improve the product."),
     ),
   );
 
@@ -4632,22 +4632,33 @@ function createDeveloperPanel(api, context) {
   };
 
   const highlightToggle = makeForeignSwitch("workspace-highlight-failed-tools");
-  const highlightGroupHead = makeElement("div", { className: "workspace-settings-group-head" });
-  highlightGroupHead.append(
-    makeElement("h4", { className: "workspace-settings-group-title", textContent: t("Failed tool calls") }),
+  // Debug 日志:开启后端 DEBUG 级别文件日志(落 logs/web.log),默认关。持久化到 settings.yml 的
+  // developer.debug,并由后端在保存时即时切换进程级日志级别(与 REPL/ACP 的 /debug 同一机制)。
+  const debugToggle = makeForeignSwitch("workspace-debug-logging");
+
+  // 「调试选项」:失败工具标红(本机转录显示)与调试日志(后端文件日志)同属排查用途,
+  // 合并进同一分组的同一张卡片,两行以 .workspace-field 的分隔线区隔。
+  const debugOptionsGroupHead = makeElement("div", { className: "workspace-settings-group-head" });
+  debugOptionsGroupHead.append(
+    makeElement("h4", { className: "workspace-settings-group-title", textContent: t("Debug options") }),
     makeElement("p", {
       className: "workspace-settings-group-desc",
-      textContent: t("Control how failed tool calls are shown in the transcript."),
+      textContent: t("Control local debug highlighting and backend log verbosity."),
     }),
   );
-  const highlightCard = makeElement("section", {
+  const debugOptionsCard = makeElement("section", {
     className: "workspace-settings-group workspace-settings-provider",
   });
-  highlightCard.append(
+  debugOptionsCard.append(
     makeField(
       t("Highlight failed tool calls in red"),
       highlightToggle.control,
       t("When enabled, failed tool calls are painted red. When disabled, they look like any other tool call."),
+    ),
+    makeField(
+      t("Enable debug logging"),
+      debugToggle.control,
+      t("When enabled, the backend writes DEBUG-level logs to the log file. Off by default."),
     ),
   );
 
@@ -4670,28 +4681,6 @@ function createDeveloperPanel(api, context) {
     }
   }
   highlightToggle.input.addEventListener("change", persistHighlight);
-
-  // Debug 日志:开启后端 DEBUG 级别文件日志(落 logs/web.log),默认关。持久化到 settings.yml 的
-  // developer.debug,并由后端在保存时即时切换进程级日志级别(与 REPL/ACP 的 /debug 同一机制)。
-  const debugToggle = makeForeignSwitch("workspace-debug-logging");
-  const debugGroupHead = makeElement("div", { className: "workspace-settings-group-head" });
-  debugGroupHead.append(
-    makeElement("h4", { className: "workspace-settings-group-title", textContent: t("Debug logging") }),
-    makeElement("p", {
-      className: "workspace-settings-group-desc",
-      textContent: t("Control the verbosity of backend logs written to the log file."),
-    }),
-  );
-  const debugCard = makeElement("section", {
-    className: "workspace-settings-group workspace-settings-provider",
-  });
-  debugCard.append(
-    makeField(
-      t("Enable debug logging"),
-      debugToggle.control,
-      t("When enabled, the backend writes DEBUG-level logs to the log file. Off by default."),
-    ),
-  );
 
   async function persistDebug() {
     const token = ++requestToken;
@@ -4786,10 +4775,8 @@ function createDeveloperPanel(api, context) {
 
   panel.append(
     heading,
-    highlightGroupHead,
-    highlightCard,
-    debugGroupHead,
-    debugCard,
+    debugOptionsGroupHead,
+    debugOptionsCard,
     restartGroupHead,
     restartCard,
     status,
