@@ -11,7 +11,39 @@ from typing import Any
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.tools.cloud.types import ResourceStatus, StackStatus, translate_status
-from iac_code.types.stream_events import ResourceObservedEvent, StackProgressEvent
+from iac_code.types.stream_events import ResourceObservedEvent, StackOperationStartedEvent, StackProgressEvent
+
+STACK_RESULT_METADATA_KEY = "stack_result"
+_STACK_OPERATION_METADATA_KEYS = (
+    "provider",
+    "action",
+    "stack_id",
+    "stack_name",
+    "region_id",
+    "error_stage",
+)
+
+
+def stack_result_from_metadata(metadata: Any) -> dict[str, Any] | None:
+    """Return the structured terminal stack result carried beside display content."""
+    if not isinstance(metadata, dict):
+        return None
+    result = metadata.get(STACK_RESULT_METADATA_KEY)
+    return dict(result) if isinstance(result, dict) else None
+
+
+def persisted_stack_metadata(metadata: Any) -> dict[str, Any]:
+    """Keep only reviewed stack metadata needed by replay and pipeline recovery."""
+    if not isinstance(metadata, dict):
+        return {}
+    persisted: dict[str, Any] = {}
+    for key in _STACK_OPERATION_METADATA_KEYS:
+        value = metadata.get(key)
+        if isinstance(value, str):
+            persisted[key] = value
+    if result := stack_result_from_metadata(metadata):
+        persisted[STACK_RESULT_METADATA_KEY] = result
+    return persisted
 
 POLL_INTERVAL = 5
 
@@ -278,6 +310,23 @@ class BaseCloudStack(Tool):
     ) -> ToolResult:
         """Poll an already-started stack operation until it reaches a terminal state."""
         start_time = time.monotonic()
+        # t0 signal so the web output panel shows *_IN_PROGRESS immediately for non-create
+        # actions (delete/update/continue), instead of waiting for the first poll (~POLL_INTERVAL).
+        # CreateStack already gets its t0 via ResourceObservedEvent in execute(); this deliberately
+        # separate event type is ignored by the a2a translator, so stack_current_changed semantics
+        # stay untouched.
+        if context.event_queue is not None and stack_id and action != "CreateStack":
+            await context.event_queue.put(
+                StackOperationStartedEvent(
+                    provider=self.provider_name,
+                    stack_id=stack_id,
+                    stack_name=str(params.get("StackName") or params.get("stack_name") or ""),
+                    region_id=region,
+                    action=action,
+                    tool_name=self.name,
+                    tool_use_id=context.tool_use_id,
+                )
+            )
         try:
             while True:
                 await asyncio.sleep(self._poll_interval)
@@ -341,6 +390,7 @@ class BaseCloudStack(Tool):
                             for r in resources
                         ],
                         elapsed_seconds=elapsed,
+                        region_id=region,
                         tool_use_id=context.tool_use_id,
                     )
                     await context.event_queue.put(event)
@@ -362,10 +412,18 @@ class BaseCloudStack(Tool):
                         self.on_terminal_status(action, params, region, status, resources, elapsed)
                     except Exception:
                         pass
-                    if action_success:
-                        return ToolResult.success(json.dumps(result_data, ensure_ascii=False, indent=2))
-                    else:
-                        return ToolResult.error(json.dumps(result_data, ensure_ascii=False, indent=2))
+                    metadata: dict[str, Any] = self._started_stack_metadata(
+                        action,
+                        params,
+                        region,
+                        status.stack_id,
+                    )
+                    metadata[STACK_RESULT_METADATA_KEY] = result_data
+                    return ToolResult(
+                        content=json.dumps(result_data, ensure_ascii=False, indent=2),
+                        is_error=not action_success,
+                        metadata=metadata,
+                    )
         except (KeyboardInterrupt, asyncio.CancelledError):
             elapsed = int(time.monotonic() - start_time)
             try:

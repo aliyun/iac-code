@@ -31,6 +31,7 @@ from iac_code.types.stream_events import (
     QueuedInputSubmittedEvent,
     ResourceObservedEvent,
     StackInstancesProgressEvent,
+    StackOperationStartedEvent,
     StackProgressEvent,
     StreamEvent,
     SubAgentToolEvent,
@@ -526,6 +527,24 @@ class WebEventTranslator:
                     "metadata": event.metadata,
                 },
             )
+        if isinstance(event, StackOperationStartedEvent):
+            # t0 for non-create stack operations, bridged onto the same "resource.observed"
+            # SSE the frontend already consumes so *_IN_PROGRESS shows immediately.
+            return self._make(
+                "resource.observed",
+                {
+                    "turnId": turn_id,
+                    "provider": event.provider,
+                    "resourceType": "stack",
+                    "resourceId": event.stack_id,
+                    "resourceName": event.stack_name,
+                    "regionId": event.region_id,
+                    "action": event.action,
+                    "toolName": event.tool_name,
+                    "toolUseId": event.tool_use_id,
+                    "metadata": {},
+                },
+            )
         if isinstance(event, DiagramEvent):
             return self._make(
                 "diagram.render",
@@ -556,7 +575,7 @@ class WebEventTranslator:
                     "toolUseId": event.tool_use_id,
                     "stackId": event.stack_id,
                     "stackName": event.stack_name,
-                    "regionId": _first_region_id(event.resources),
+                    "regionId": event.region_id or _first_region_id(event.resources),
                     "status": event.status,
                     "progress": event.progress_percentage,
                     "progressPercentage": event.progress_percentage,

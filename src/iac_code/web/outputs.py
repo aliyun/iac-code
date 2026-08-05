@@ -91,15 +91,34 @@ def _default_region_id() -> str | None:
     return getattr(provider, "region_id", None) or None
 
 
+def _leading_json_object(text: str) -> dict[str, Any] | None:
+    """从可能带尾随非 JSON 文本的字符串里解析开头的 JSON 对象,否则 None。
+
+    ros_stack/ros_deploy 的结果 JSON 后常被 ``attach_ros_validation`` 追加一段
+    ``\\n\\n---\\nROS local preflight diagnostics:\\n...`` 本地预检诊断块(见
+    tools/cloud/aliyun/ros_validation/outcome.py),使整体不再是合法 JSON。若用严格
+    ``json.loads`` 会整条失败,create/continue_create/delete_and_create 的权威终态因此
+    被丢弃——面板只剩更早捕获的过渡态(可能是已删除的旧栈),即「永远只显示之前删除的那个 stack」。
+    这里用 ``raw_decode`` 只解析开头对象、容忍其后任意文本。
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(text, start)
+    except (ValueError, TypeError):
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
 def _stack_result_dict(result: Any) -> dict[str, Any] | None:
     """把单个 ros_stack 结果(str 或 dict)解析为含 stack_id 的字典,否则 None。"""
     if isinstance(result, dict):
-        data = result
+        data: dict[str, Any] | None = result
+    elif isinstance(result, str):
+        data = _leading_json_object(result)
     else:
-        try:
-            data = json.loads(result)
-        except (ValueError, TypeError):
-            return None
+        return None
     if isinstance(data, dict) and data.get("stack_id"):
         return data
     return None

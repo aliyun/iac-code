@@ -316,6 +316,38 @@ def test_stream_event_translator_backend_event_names_match_contract() -> None:
     ] == [event_type for _stream_event, event_type in cases]
 
 
+def test_stack_operation_started_bridges_to_resource_observed() -> None:
+    from iac_code.types.stream_events import StackOperationStartedEvent
+    from iac_code.web.events import WebEventTranslator
+
+    translated = WebEventTranslator("session-1").translate_stream_event(
+        StackOperationStartedEvent(
+            provider="ros",
+            stack_id="stack-9",
+            stack_name="demo",
+            region_id="cn-hangzhou",
+            action="DeleteStack",
+            tool_name="ros_stack",
+            tool_use_id="tool-9",
+        ),
+        turn_id="turn-1",
+    )
+
+    # Reuses the same SSE the frontend already consumes so *_IN_PROGRESS shows at t0.
+    assert translated["type"] == "resource.observed"
+    payload = translated["payload"]
+    assert payload["turnId"] == "turn-1"
+    assert payload["provider"] == "ros"
+    assert payload["resourceType"] == "stack"
+    assert payload["resourceId"] == "stack-9"
+    assert payload["resourceName"] == "demo"
+    assert payload["regionId"] == "cn-hangzhou"
+    assert payload["action"] == "DeleteStack"
+    assert payload["toolName"] == "ros_stack"
+    assert payload["toolUseId"] == "tool-9"
+    assert payload["metadata"] == {}
+
+
 def test_mcp_progress_translates_to_stable_tool_progress_event() -> None:
     from iac_code.types.stream_events import MCPProgressEvent
     from iac_code.web.events import WebEventTranslator
@@ -2870,6 +2902,40 @@ def test_stack_progress_event_does_not_mark_deploy_success_until_create_complete
     assert event["payload"]["kind"] == "stack.progress"
     assert event["payload"]["deploymentSucceeded"] is deployment_succeeded
     assert event["payload"]["deploymentComplete"] is deployment_succeeded
+
+
+def test_stack_progress_event_region_from_event_field_when_resources_lack_region() -> None:
+    # 生产中 base_stack 构造的 resources 只含 name/resource_type/status/status_reason,
+    # 没有任何 region 字段,所以 _first_region_id(resources) 恒为 None。若栈操作事件本身不带
+    # region,live overlay 的 regionId 会是空串,去重键 `::name` 与服务端 `region::name` 分裂,
+    # 建栈期短暂出现两个同名栈。StackProgressEvent 必须自带权威 region_id 并透出到 SSE。
+    from iac_code.types.stream_events import StackProgressEvent
+    from iac_code.web.events import WebEventTranslator
+
+    translator = WebEventTranslator("session-1")
+
+    event = translator.translate_stream_event(
+        StackProgressEvent(
+            stack_id="stack-1",
+            stack_name="single-vpc",
+            status="CREATE_IN_PROGRESS",
+            progress_percentage=40.0,
+            resources=[
+                {
+                    "name": "vpc",
+                    "resource_type": "ALIYUN::ECS::VPC",
+                    "status": "CREATE_IN_PROGRESS",
+                    "status_reason": "",
+                }
+            ],
+            elapsed_seconds=12,
+            region_id="cn-hangzhou",
+        ),
+        turn_id="turn-1",
+    )
+
+    assert event["type"] == "pipeline.event"
+    assert event["payload"]["regionId"] == "cn-hangzhou"
 
 
 def test_translator_assistant_text_delta_uses_delta_key() -> None:

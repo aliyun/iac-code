@@ -104,3 +104,42 @@ def test_start_update_check_swallows_errors():
 
     # 后台检查绝不能让启动崩溃。
     web_server._start_update_check(start_fn=boom)
+
+
+def test_apply_telemetry_content_settings_disables_debug_backdoor(monkeypatch):
+    """Web startup must sever the debug→content backdoor and honor shareContent."""
+    calls: dict[str, object] = {}
+    monkeypatch.setattr(
+        "iac_code.services.telemetry.config.set_debug_content_capture_backdoor",
+        lambda enabled: calls.__setitem__("backdoor", enabled),
+    )
+    monkeypatch.setattr(
+        "iac_code.services.telemetry.config.set_content_capture_optin",
+        lambda enabled: calls.__setitem__("optin", enabled),
+    )
+    monkeypatch.setattr(web_server, "telemetry_settings", lambda: {"shareContent": True})
+
+    web_server._apply_persisted_telemetry_content_settings()
+
+    # The web "Debug logging" toggle can never force content onto spans...
+    assert calls["backdoor"] is False
+    # ...but the explicit "Help improve iac-code" opt-in still drives capture.
+    assert calls["optin"] is True
+
+
+def test_apply_telemetry_content_settings_respects_share_off(monkeypatch):
+    calls: dict[str, object] = {}
+    monkeypatch.setattr(
+        "iac_code.services.telemetry.config.set_debug_content_capture_backdoor",
+        lambda enabled: calls.__setitem__("backdoor", enabled),
+    )
+    monkeypatch.setattr(
+        "iac_code.services.telemetry.config.set_content_capture_optin",
+        lambda enabled: calls.__setitem__("optin", enabled),
+    )
+    monkeypatch.setattr(web_server, "telemetry_settings", lambda: {"shareContent": False})
+
+    web_server._apply_persisted_telemetry_content_settings()
+
+    assert calls["backdoor"] is False
+    assert calls["optin"] is False

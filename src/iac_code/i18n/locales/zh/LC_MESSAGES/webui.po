@@ -3631,6 +3631,22 @@ msgid "Install infraguard"
 msgstr "安装 infraguard"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Help improve iac-code"
+msgstr "帮助改进 iac-code"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Share full conversation content"
+msgstr "共享完整对话内容"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, iac-code attaches full conversation content (your prompts, "
+"model responses, and tool inputs and outputs) to the telemetry it sends "
+"to iac-code's default backend or an explicitly configured OTLP endpoint, "
+"to help diagnose issues and improve the product."
+msgstr "开启后,iac-code 会在发送的遥测数据中附带完整的对话内容(包括你的提示词、模型回复以及工具的输入与输出),发送到 iac-code 的默认遥测后端或你显式配置的 OTLP 端点,用于诊断问题和改进产品。"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "New session defaults"
 msgstr "新会话默认"
 
@@ -3717,12 +3733,12 @@ msgid "Install failed: {error}"
 msgstr "安装失败:{error}"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Failed tool calls"
-msgstr "失败的工具调用"
+msgid "Debug options"
+msgstr "调试选项"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Control how failed tool calls are shown in the transcript."
-msgstr "控制失败的工具调用在转录中的显示方式。"
+msgid "Control local debug highlighting and backend log verbosity."
+msgstr "控制本机的调试高亮显示与后端日志详细程度。"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Highlight failed tool calls in red"
@@ -3733,6 +3749,16 @@ msgid ""
 "When enabled, failed tool calls are painted red. When disabled, they look"
 " like any other tool call."
 msgstr "开启后，失败的工具调用会标红；关闭后，它们与其它工具调用外观一致。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enable debug logging"
+msgstr "启用调试日志"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, the backend writes DEBUG-level logs to the log file. Off by"
+" default."
+msgstr "启用后,后端会向日志文件写入 DEBUG 级别的日志。默认关闭。"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"
@@ -3778,4 +3804,16 @@ msgstr "重启中,服务恢复后会自动刷新…"
 #~ "page. It stays in this browser tab"
 #~ " and is not sent to the server."
 #~ msgstr "从部署页面复制 Token。它只保存在当前浏览器标签页中，不会发送到服务器。"
+
+#~ msgid "Failed tool calls"
+#~ msgstr "失败的工具调用"
+
+#~ msgid "Control how failed tool calls are shown in the transcript."
+#~ msgstr "控制失败的工具调用在转录中的显示方式。"
+
+#~ msgid "Debug logging"
+#~ msgstr "调试日志"
+
+#~ msgid "Control the verbosity of backend logs written to the log file."
+#~ msgstr "控制写入日志文件的后端日志详细程度。"
 

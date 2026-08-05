@@ -21,6 +21,7 @@ from iac_code.agent.message import (
 from iac_code.services.telemetry.names import GenAiAttr, IacCodeAttr, PipelineAttr, Spans
 from iac_code.services.telemetry.scope import get_span_attributes
 from iac_code.tools.base import ToolResult
+from iac_code.tools.cloud.base_stack import STACK_RESULT_METADATA_KEY
 from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY
 from iac_code.tools.tool_executor import ToolExecutor
 from iac_code.types.permissions import PermissionResult
@@ -204,6 +205,36 @@ def test_tool_result_metadata_marks_inline_content_without_externalized_path():
     assert event_metadata == block_metadata
     assert block_metadata["aliyun_http"]["content_state"] == "inline_final"
     assert EXTERNALIZED_RESULT_PATH_METADATA_KEY not in block_metadata
+
+
+def test_tool_result_block_metadata_persists_structured_stack_result():
+    processed = SimpleNamespace(is_externalized=False, file_path=None)
+    stack_result = {
+        "stack_id": "stack-123",
+        "stack_name": "demo",
+        "status": "CREATE_FAILED",
+        "is_success": False,
+    }
+
+    block_metadata = AgentLoop._tool_result_block_metadata(
+        processed,
+        {
+            "provider": "ros",
+            "action": "CreateStack",
+            "stack_id": "stack-123",
+            "region_id": "cn-hangzhou",
+            STACK_RESULT_METADATA_KEY: stack_result,
+            "private_plugin_value": "drop-me",
+        },
+    )
+
+    assert block_metadata == {
+        "provider": "ros",
+        "action": "CreateStack",
+        "stack_id": "stack-123",
+        "region_id": "cn-hangzhou",
+        STACK_RESULT_METADATA_KEY: stack_result,
+    }
 
 
 class TestAgentLoopInit:

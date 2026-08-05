@@ -7,6 +7,8 @@ import logging
 import os
 from typing import Any
 
+from iac_code.tools.cloud.base_stack import stack_result_from_metadata
+
 logger = logging.getLogger(__name__)
 
 _FILE_MUTATION_TOOLS = {"write_file", "edit_file"}
@@ -28,6 +30,7 @@ def record_completion_guard_tool_result(
     content: Any,
     is_error: bool,
     cwd: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> None:
     """Record tool results that completion guards may need later in the same step."""
 
@@ -38,7 +41,15 @@ def record_completion_guard_tool_result(
         if tool_name == "ask_user_question":
             _record_ask_user_question(state, content, is_error=is_error)
             return
-        parsed = _json_object(content, log_failure=tool_name in _STRUCTURED_RESULT_TOOLS)
+        parsed = None
+        if tool_name in {"ros_deploy", "ros_stack"}:
+            parsed = stack_result_from_metadata(metadata)
+            if parsed is None and isinstance(metadata, dict):
+                stack_id = metadata.get("stack_id")
+                if isinstance(stack_id, str) and stack_id:
+                    parsed = {"stack_id": stack_id}
+        if parsed is None:
+            parsed = _json_object(content, log_failure=tool_name in _STRUCTURED_RESULT_TOOLS)
         if parsed is None and tool_name in _FILE_MUTATION_TOOLS:
             parsed = _file_mutation_result(tool_input, cwd=cwd)
         elif parsed is not None:
@@ -89,6 +100,21 @@ def _record_ros_deploy_owned_stack(state: dict[str, Any], tool_input: dict[str, 
     owned = state.setdefault("ros_deploy_owned_stack_ids", {})
     if isinstance(owned, dict):
         owned[stack_id] = {"action": action}
+
+
+def record_ros_deploy_observed_stack(
+    state: dict[str, Any],
+    *,
+    tool_input: dict[str, Any],
+    stack_id: str,
+) -> None:
+    """Record a Stack ID observed while the current step is starting it."""
+    if tool_input.get("action") not in {"create", "delete_and_create"} or not stack_id:
+        return
+    ensure_completion_guard_state(state)
+    owned = state.setdefault("ros_deploy_owned_stack_ids", {})
+    if isinstance(owned, dict):
+        owned[stack_id] = {"action": tool_input["action"]}
 
 
 def _file_mutation_result(tool_input: dict[str, Any], *, cwd: str | None = None) -> dict[str, Any] | None:

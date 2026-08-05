@@ -3637,6 +3637,22 @@ msgid "Install infraguard"
 msgstr "infraguard をインストール"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Help improve iac-code"
+msgstr "iac-code の改善に協力する"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Share full conversation content"
+msgstr "会話の全内容を共有する"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, iac-code attaches full conversation content (your prompts, "
+"model responses, and tool inputs and outputs) to the telemetry it sends "
+"to iac-code's default backend or an explicitly configured OTLP endpoint, "
+"to help diagnose issues and improve the product."
+msgstr "有効にすると、iac-code は送信するテレメトリに完全な会話内容(あなたのプロンプト、モデルの応答、ツールの入力と出力)を添付し、iac-code の既定のバックエンドまたは明示的に構成された OTLP エンドポイントに送信して、問題の診断と製品の改善に役立てます。"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "New session defaults"
 msgstr "新規セッションのデフォルト"
 
@@ -3723,12 +3739,12 @@ msgid "Install failed: {error}"
 msgstr "インストールに失敗しました: {error}"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Failed tool calls"
-msgstr "失敗したツール呼び出し"
+msgid "Debug options"
+msgstr "デバッグオプション"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Control how failed tool calls are shown in the transcript."
-msgstr "失敗したツール呼び出しをトランスクリプトでどう表示するかを制御します。"
+msgid "Control local debug highlighting and backend log verbosity."
+msgstr "ローカルのデバッグ表示とバックエンドログの詳細度を制御します。"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Highlight failed tool calls in red"
@@ -3739,6 +3755,16 @@ msgid ""
 "When enabled, failed tool calls are painted red. When disabled, they look"
 " like any other tool call."
 msgstr "有効にすると、失敗したツール呼び出しが赤で表示されます。無効にすると、他のツール呼び出しと同じ見た目になります。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enable debug logging"
+msgstr "デバッグログを有効化"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, the backend writes DEBUG-level logs to the log file. Off by"
+" default."
+msgstr "有効にすると、バックエンドは DEBUG レベルのログをログファイルに書き込みます。デフォルトは無効です。"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"
@@ -3784,4 +3810,16 @@ msgstr "再起動しています。サービスが復旧するとページが自
 #~ "page. It stays in this browser tab"
 #~ " and is not sent to the server."
 #~ msgstr "デプロイページからトークンをコピーしてください。このタブ内だけに保存され、サーバーには送信されません。"
+
+#~ msgid "Failed tool calls"
+#~ msgstr "失敗したツール呼び出し"
+
+#~ msgid "Control how failed tool calls are shown in the transcript."
+#~ msgstr "失敗したツール呼び出しをトランスクリプトでどう表示するかを制御します。"
+
+#~ msgid "Debug logging"
+#~ msgstr "デバッグログ"
+
+#~ msgid "Control the verbosity of backend logs written to the log file."
+#~ msgstr "ログファイルに書き込まれるバックエンドログの詳細度を制御します。"
 

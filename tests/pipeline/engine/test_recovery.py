@@ -8,7 +8,10 @@ import pytest
 from iac_code.agent.message import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from iac_code.pipeline.engine import completion_guard_state
 from iac_code.pipeline.engine.complete_step_tool import CompleteStepTool
-from iac_code.pipeline.engine.completion_guard_state import record_completion_guard_tool_result
+from iac_code.pipeline.engine.completion_guard_state import (
+    record_completion_guard_tool_result,
+    record_ros_deploy_observed_stack,
+)
 from iac_code.pipeline.engine.recovery import (
     last_successful_tool_input,
     reconstruct_completion_guard_state,
@@ -17,6 +20,7 @@ from iac_code.pipeline.engine.recovery import (
 from iac_code.pipeline.engine.step_executor import _completion_guard_tool_result_content
 from iac_code.pipeline.engine.types import StepConfig, StepStatus
 from iac_code.tools.base import ToolContext
+from iac_code.tools.cloud.base_stack import STACK_RESULT_METADATA_KEY
 from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY, ResultStorage
 from iac_code.types.stream_events import ToolResultEvent
 
@@ -548,6 +552,60 @@ def test_reconstruct_completion_guard_state_records_ros_deploy_owned_failed_crea
     state = reconstruct_completion_guard_state(messages)
 
     assert state["ros_deploy_owned_stack_ids"]["stack-failed"]["action"] == "create"
+
+
+def test_reconstruct_completion_guard_state_prefers_stack_result_metadata_over_display_content():
+    stack_result = {
+        "stack_id": "stack-failed",
+        "stack_name": "demo",
+        "status": "CREATE_FAILED",
+        "is_success": False,
+    }
+    messages = [
+        Message(
+            role="assistant",
+            content=[
+                ToolUseBlock(
+                    id="tu_deploy",
+                    name="ros_deploy",
+                    input={"action": "create", "stack_name": "demo"},
+                )
+            ],
+        ),
+        Message(
+            role="user",
+            content=[
+                ToolResultBlock(
+                    tool_use_id="tu_deploy",
+                    content=json.dumps(stack_result) + "\n---\nROS local preflight diagnostics:\n3 limitations",
+                    metadata={STACK_RESULT_METADATA_KEY: stack_result},
+                    is_error=True,
+                )
+            ],
+        ),
+    ]
+
+    state = reconstruct_completion_guard_state(messages)
+
+    assert state["tool_results"]["ros_deploy"] == stack_result
+    assert state["ros_deploy_owned_stack_ids"]["stack-failed"] == {"action": "create"}
+
+
+def test_observed_ros_deploy_create_stack_is_owned_but_wait_is_not():
+    state = {}
+
+    record_ros_deploy_observed_stack(
+        state,
+        tool_input={"action": "create", "stack_name": "demo"},
+        stack_id="stack-created",
+    )
+    record_ros_deploy_observed_stack(
+        state,
+        tool_input={"action": "wait", "stack_id": "stack-other"},
+        stack_id="stack-other",
+    )
+
+    assert state["ros_deploy_owned_stack_ids"] == {"stack-created": {"action": "create"}}
 
 
 def test_completion_guard_state_logs_json_parse_failures(caplog):

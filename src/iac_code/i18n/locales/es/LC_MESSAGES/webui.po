@@ -3727,6 +3727,22 @@ msgid "Install infraguard"
 msgstr "Instalar infraguard"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Help improve iac-code"
+msgstr "Ayuda a mejorar iac-code"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Share full conversation content"
+msgstr "Compartir el contenido completo de la conversación"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, iac-code attaches full conversation content (your prompts, "
+"model responses, and tool inputs and outputs) to the telemetry it sends "
+"to iac-code's default backend or an explicitly configured OTLP endpoint, "
+"to help diagnose issues and improve the product."
+msgstr "Cuando se activa, iac-code adjunta el contenido completo de la conversación (tus indicaciones, las respuestas del modelo y las entradas y salidas de las herramientas) a la telemetría que envía al backend predeterminado de iac-code o a un endpoint OTLP configurado explícitamente, para ayudar a diagnosticar problemas y mejorar el producto."
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "New session defaults"
 msgstr "Valores predeterminados de nueva sesión"
 
@@ -3822,14 +3838,12 @@ msgid "Install failed: {error}"
 msgstr "Error en la instalación: {error}"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Failed tool calls"
-msgstr "Llamadas a herramientas fallidas"
+msgid "Debug options"
+msgstr "Opciones de depuración"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Control how failed tool calls are shown in the transcript."
-msgstr ""
-"Controla cómo se muestran en la transcripción las llamadas a herramientas"
-" fallidas."
+msgid "Control local debug highlighting and backend log verbosity."
+msgstr "Controla el resaltado de depuración local y el nivel de detalle de los registros del backend."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Highlight failed tool calls in red"
@@ -3843,6 +3857,18 @@ msgstr ""
 "Cuando se activa, las llamadas a herramientas fallidas se muestran en "
 "rojo. Cuando se desactiva, se ven como cualquier otra llamada a "
 "herramientas."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enable debug logging"
+msgstr "Habilitar registro de depuración"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, the backend writes DEBUG-level logs to the log file. Off by"
+" default."
+msgstr ""
+"Cuando está habilitado, el backend escribe registros de nivel DEBUG en el"
+" archivo de registro. Desactivado de forma predeterminada."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"
@@ -3895,4 +3921,22 @@ msgstr ""
 #~ "Copie el token de la página de "
 #~ "despliegue. Permanece en esta pestaña y"
 #~ " no se envía al servidor."
+
+#~ msgid "Failed tool calls"
+#~ msgstr "Llamadas a herramientas fallidas"
+
+#~ msgid "Control how failed tool calls are shown in the transcript."
+#~ msgstr ""
+#~ "Controla cómo se muestran en la "
+#~ "transcripción las llamadas a herramientas "
+#~ "fallidas."
+
+#~ msgid "Debug logging"
+#~ msgstr "Registro de depuración"
+
+#~ msgid "Control the verbosity of backend logs written to the log file."
+#~ msgstr ""
+#~ "Controla el nivel de detalle de "
+#~ "los registros del backend escritos en"
+#~ " el archivo de registro."
 

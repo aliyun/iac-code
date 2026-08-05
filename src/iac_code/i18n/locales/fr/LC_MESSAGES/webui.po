@@ -3741,6 +3741,22 @@ msgid "Install infraguard"
 msgstr "Installer infraguard"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Help improve iac-code"
+msgstr "Aider à améliorer iac-code"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Share full conversation content"
+msgstr "Partager le contenu complet de la conversation"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, iac-code attaches full conversation content (your prompts, "
+"model responses, and tool inputs and outputs) to the telemetry it sends "
+"to iac-code's default backend or an explicitly configured OTLP endpoint, "
+"to help diagnose issues and improve the product."
+msgstr "Lorsqu'elle est activée, iac-code joint l'intégralité du contenu de la conversation (vos invites, les réponses du modèle ainsi que les entrées et sorties des outils) à la télémétrie qu'il envoie au backend par défaut d'iac-code ou à un point de terminaison OTLP explicitement configuré, afin d'aider à diagnostiquer les problèmes et à améliorer le produit."
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "New session defaults"
 msgstr "Valeurs par défaut des nouvelles sessions"
 
@@ -3839,14 +3855,12 @@ msgid "Install failed: {error}"
 msgstr "Échec de l’installation : {error}"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Failed tool calls"
-msgstr "Appels d’outils en échec"
+msgid "Debug options"
+msgstr "Options de débogage"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Control how failed tool calls are shown in the transcript."
-msgstr ""
-"Contrôle la façon dont les appels d’outils en échec sont affichés dans la"
-" transcription."
+msgid "Control local debug highlighting and backend log verbosity."
+msgstr "Contrôle la mise en évidence de débogage locale et le niveau de détail des journaux du backend."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Highlight failed tool calls in red"
@@ -3860,6 +3874,18 @@ msgstr ""
 "Lorsqu’il est activé, les appels d’outils en échec sont affichés en "
 "rouge. Lorsqu’il est désactivé, ils ressemblent à n’importe quel autre "
 "appel d’outil."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Enable debug logging"
+msgstr "Activer la journalisation de débogage"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"When enabled, the backend writes DEBUG-level logs to the log file. Off by"
+" default."
+msgstr ""
+"Lorsque cette option est activée, le backend écrit des journaux de niveau"
+" DEBUG dans le fichier journal. Désactivé par défaut."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Restart service"
@@ -3914,4 +3940,22 @@ msgstr ""
 #~ " déploiement. Il reste dans cet "
 #~ "onglet et n’est pas envoyé au "
 #~ "serveur."
+
+#~ msgid "Failed tool calls"
+#~ msgstr "Appels d’outils en échec"
+
+#~ msgid "Control how failed tool calls are shown in the transcript."
+#~ msgstr ""
+#~ "Contrôle la façon dont les appels "
+#~ "d’outils en échec sont affichés dans "
+#~ "la transcription."
+
+#~ msgid "Debug logging"
+#~ msgstr "Journalisation de débogage"
+
+#~ msgid "Control the verbosity of backend logs written to the log file."
+#~ msgstr ""
+#~ "Contrôle le niveau de détail des "
+#~ "journaux backend écrits dans le fichier"
+#~ " journal."
 

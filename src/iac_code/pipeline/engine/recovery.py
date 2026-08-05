@@ -83,6 +83,7 @@ def reconstruct_completion_guard_state(messages: list[Message]) -> dict[str, Any
                 tool_input=tool_use.input,
                 content=_tool_result_content_for_recovery(block),
                 is_error=block.is_error,
+                metadata=block.metadata,
             )
     return state
 

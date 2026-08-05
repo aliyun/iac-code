@@ -3809,6 +3809,7 @@ function createOtherPanel(api, context) {
   const pipelineToggle = makeForeignSwitch("workspace-foreign-pipeline");
   const normalToggle = makeForeignSwitch("workspace-foreign-normal");
   const reviewStepToggle = makeForeignSwitch("workspace-pipeline-review-step");
+  const telemetryToggle = makeForeignSwitch("workspace-telemetry-share-content");
   const devModeToggle = makeForeignSwitch("workspace-developer-mode");
   const status = makeElement("span", { className: "workspace-memory-status workspace-foreign-status" });
   // 「已保存」是瞬时反馈:安排一个自动淡出定时器,避免它永久驻留在面板里。
@@ -3922,6 +3923,24 @@ function createOtherPanel(api, context) {
   prereqProgress.append(prereqPhaseLabel, prereqBar);
   prereqNotice.append(prereqText, prereqInstallButton, prereqProgress);
   reviewStepCard.append(prereqNotice);
+
+  // 帮助改进 iac-code:打开后向遥测附带完整对话内容(提示词/模型回复/工具输入输出),用于诊断与改进。
+  // 默认关闭。文案须如实告知:内容会发送到 iac-code 的默认遥测后端(或显式配置的 OTLP 端点),而非
+  // 「仅在你自己配置端点时才上传」——后者隐去了默认远端后端,会误导用户。显式设置的环境变量优先于此开关。
+  const telemetryGroupHead = makeElement("div", { className: "workspace-settings-group-head" });
+  telemetryGroupHead.append(
+    makeElement("h4", { className: "workspace-settings-group-title", textContent: t("Help improve iac-code") }),
+  );
+  const telemetryCard = makeElement("section", {
+    className: "workspace-settings-group workspace-settings-provider",
+  });
+  telemetryCard.append(
+    makeField(
+      t("Share full conversation content"),
+      telemetryToggle.control,
+      t("When enabled, iac-code attaches full conversation content (your prompts, model responses, and tool inputs and outputs) to the telemetry it sends to iac-code's default backend or an explicitly configured OTLP endpoint, to help diagnose issues and improve the product."),
+    ),
+  );
 
   // 新会话默认:控制「新建会话」草稿的初始权限模式与会话模式,免去每次手动重选。
   // 仅影响新建草稿;已有会话保留各自存储的选择,重开时不受此处影响。
@@ -4253,6 +4272,23 @@ function createOtherPanel(api, context) {
     }
   }
 
+  async function persistTelemetry() {
+    const token = ++requestToken;
+    stamp(t("Saving…"));
+    try {
+      await api.saveTelemetrySettings({ shareContent: telemetryToggle.input.checked });
+      if (token !== requestToken) {
+        return;
+      }
+      stampSaved(token);
+    } catch (error) {
+      if (token !== requestToken) {
+        return;
+      }
+      stamp(t("Save failed: {error}", { error: error instanceof Error ? error.message : String(error) }), true);
+    }
+  }
+
   // 后端只回传结构化的 phase(不含译文);中文标签一律在前端映射,后端保持零翻译。
   const PREREQ_PHASE_LABELS = {
     download: t("Downloading…"),
@@ -4396,6 +4432,7 @@ function createOtherPanel(api, context) {
   pipelineToggle.input.addEventListener("change", persist);
   normalToggle.input.addEventListener("change", persist);
   reviewStepToggle.input.addEventListener("change", persistReviewStep);
+  telemetryToggle.input.addEventListener("change", persistTelemetry);
   prereqInstallButton.addEventListener("click", installReviewPrereq);
   permissionSelect.addEventListener("change", persistSessionDefaults);
 
@@ -4419,7 +4456,7 @@ function createOtherPanel(api, context) {
   }
   devModeToggle.input.addEventListener("change", persistDeveloperMode);
 
-  // 章节顺序:新会话默认 → 配色方案(含界面语言)→ 售卖流水线 → 外来会话可见性 → 开发者模式。
+  // 章节顺序:新会话默认 → 配色方案(含界面语言)→ 售卖流水线 → 外来会话可见性 → 帮助改进 iac-code → 开发者模式。
   // 界面语言(languageField)紧随配色方案,既保持外观类设置成组,也让所有分区标题的相邻关系
   // (h3→head、settings-group→head、field→head)仍被现有章节间距选择器覆盖,无需改 CSS。
   panel.append(
@@ -4433,6 +4470,8 @@ function createOtherPanel(api, context) {
     reviewStepCard,
     groupHead,
     card,
+    telemetryGroupHead,
+    telemetryCard,
     devModeGroupHead,
     devModeCard,
     status,
@@ -4462,6 +4501,14 @@ function createOtherPanel(api, context) {
         }
       } catch (error) {
         /* 审查步骤开关加载失败保持默认关闭,不覆盖其它已加载状态 */
+      }
+      try {
+        const telemetry = await api.getTelemetrySettings();
+        if (token === requestToken) {
+          telemetryToggle.input.checked = Boolean(telemetry?.shareContent);
+        }
+      } catch (error) {
+        /* 遥测内容共享加载失败保持默认关闭,不覆盖其它已加载状态 */
       }
       // 前置依赖探测独立于开关状态(不受 token 竞态影响,内部自行处理失败)。
       await refreshReviewPrereq();
@@ -4522,6 +4569,7 @@ function createOtherPanel(api, context) {
       normalToggle.input.checked = false;
       devModeToggle.input.checked = false;
       reviewStepToggle.input.checked = false;
+      telemetryToggle.input.checked = false;
       prereqNotice.hidden = true;
       prereqNotice.classList.remove("is-installed", "is-missing");
       prereqInstallButton.hidden = false;
@@ -4584,22 +4632,33 @@ function createDeveloperPanel(api, context) {
   };
 
   const highlightToggle = makeForeignSwitch("workspace-highlight-failed-tools");
-  const highlightGroupHead = makeElement("div", { className: "workspace-settings-group-head" });
-  highlightGroupHead.append(
-    makeElement("h4", { className: "workspace-settings-group-title", textContent: t("Failed tool calls") }),
+  // Debug 日志:开启后端 DEBUG 级别文件日志(落 logs/web.log),默认关。持久化到 settings.yml 的
+  // developer.debug,并由后端在保存时即时切换进程级日志级别(与 REPL/ACP 的 /debug 同一机制)。
+  const debugToggle = makeForeignSwitch("workspace-debug-logging");
+
+  // 「调试选项」:失败工具标红(本机转录显示)与调试日志(后端文件日志)同属排查用途,
+  // 合并进同一分组的同一张卡片,两行以 .workspace-field 的分隔线区隔。
+  const debugOptionsGroupHead = makeElement("div", { className: "workspace-settings-group-head" });
+  debugOptionsGroupHead.append(
+    makeElement("h4", { className: "workspace-settings-group-title", textContent: t("Debug options") }),
     makeElement("p", {
       className: "workspace-settings-group-desc",
-      textContent: t("Control how failed tool calls are shown in the transcript."),
+      textContent: t("Control local debug highlighting and backend log verbosity."),
     }),
   );
-  const highlightCard = makeElement("section", {
+  const debugOptionsCard = makeElement("section", {
     className: "workspace-settings-group workspace-settings-provider",
   });
-  highlightCard.append(
+  debugOptionsCard.append(
     makeField(
       t("Highlight failed tool calls in red"),
       highlightToggle.control,
       t("When enabled, failed tool calls are painted red. When disabled, they look like any other tool call."),
+    ),
+    makeField(
+      t("Enable debug logging"),
+      debugToggle.control,
+      t("When enabled, the backend writes DEBUG-level logs to the log file. Off by default."),
     ),
   );
 
@@ -4622,6 +4681,25 @@ function createDeveloperPanel(api, context) {
     }
   }
   highlightToggle.input.addEventListener("change", persistHighlight);
+
+  async function persistDebug() {
+    const token = ++requestToken;
+    const enabled = debugToggle.input.checked;
+    stamp(t("Saving…"));
+    try {
+      await context.saveDeveloperState?.({ debug: enabled });
+      if (token !== requestToken) {
+        return;
+      }
+      stampSaved(token);
+    } catch (error) {
+      if (token !== requestToken) {
+        return;
+      }
+      stamp(t("Save failed: {error}", { error: error instanceof Error ? error.message : String(error) }), true);
+    }
+  }
+  debugToggle.input.addEventListener("change", persistDebug);
 
   // 重启服务:通用重启入口。点击 → 全屏遮罩确认 → POST → 轮询 /health → 恢复后自动刷新。
   const restartGroupHead = makeElement("div", { className: "workspace-settings-group-head" });
@@ -4695,7 +4773,14 @@ function createDeveloperPanel(api, context) {
   };
   restartButton.addEventListener("click", runRestartFlow);
 
-  panel.append(heading, highlightGroupHead, highlightCard, restartGroupHead, restartCard, status);
+  panel.append(
+    heading,
+    debugOptionsGroupHead,
+    debugOptionsCard,
+    restartGroupHead,
+    restartCard,
+    status,
+  );
 
   return {
     panel,
@@ -4708,9 +4793,13 @@ function createDeveloperPanel(api, context) {
         }
         const state = context.cacheDeveloperState
           ? context.cacheDeveloperState(developer)
-          : { highlightFailedTools: Boolean(developer?.highlightFailedTools) };
+          : {
+              highlightFailedTools: Boolean(developer?.highlightFailedTools),
+              debug: Boolean(developer?.debug),
+            };
         highlightToggle.input.checked = Boolean(state.highlightFailedTools);
         applyHighlightClass(state.highlightFailedTools);
+        debugToggle.input.checked = Boolean(state.debug);
       } catch (error) {
         if (token !== requestToken) {
           return;
@@ -4745,10 +4834,10 @@ export function createWorkspaceController({ tabs, content }, api, options = {}) 
   let currentSession = null;
   const panelControllers = new Map();
   // 开发者模式:developerMode 决定「开发」分页是否出现在导航;developerState 是 {mode,
-  // highlightFailedTools} 的单一缓存,让「常规」面板的开发者开关与「开发」面板的标红开关
-  // 各自改一个字段而不覆盖另一个(保存前先并入缓存)。
+  // highlightFailedTools, debug} 的单一缓存,让「常规」面板的开发者开关与「开发」面板的标红/
+  // Debug 日志开关各自改一个字段而不覆盖另一个(保存前先并入缓存)。
   let developerMode = false;
-  const developerState = { mode: false, highlightFailedTools: false };
+  const developerState = { mode: false, highlightFailedTools: false, debug: false };
 
   const context = {
     sessionId: () => currentSessionId,
@@ -4771,6 +4860,7 @@ export function createWorkspaceController({ tabs, content }, api, options = {}) 
   context.cacheDeveloperState = (value) => {
     developerState.mode = Boolean(value?.mode);
     developerState.highlightFailedTools = Boolean(value?.highlightFailedTools);
+    developerState.debug = Boolean(value?.debug);
     return context.getDeveloperState();
   };
   context.saveDeveloperState = async (partial) => {

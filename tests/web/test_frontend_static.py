@@ -344,6 +344,53 @@ def test_reducer_reuses_persisted_message_ids_during_live_replay(tmp_path) -> No
     }
 
 
+def test_turn_done_stamps_elapsed_seconds_on_turn_assistant_messages(tmp_path) -> None:
+    # 折叠回合头「已处理 <时间>」实时偶尔只显示「已处理」,手动重载又正常:实时助手消息不像
+    # 重载转录那样自带 elapsedSeconds,折叠渲染的时长实时只有 state.turns[turnId].elapsedMs
+    # 一个来源。resync/重连重建状态后分组 turnId 落不回 state.turns 就丢时长。turn.done 必须把
+    # 本轮时长回写到本轮助手消息,让折叠渲染的按消息兜底与重载同源。用户气泡不应被打时长。
+    output = _run_events_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            const { reduceEvent } = await import(__EVENTS_MODULE__);
+
+            let state = { messages: {}, tools: {}, turns: {}, lastSequence: 0 };
+            state = reduceEvent(state, {
+              sequence: 1, type: "user.message",
+              payload: { messageId: "user-T", turnId: "T", text: "创建 ECS" },
+            });
+            state = reduceEvent(state, {
+              sequence: 2, type: "assistant.message.start",
+              payload: { messageId: "asst-T", turnId: "T" },
+            });
+            state = reduceEvent(state, {
+              sequence: 3, type: "assistant.text.delta",
+              payload: { messageId: "asst-T", turnId: "T", delta: "好的" },
+            });
+            state = reduceEvent(state, {
+              sequence: 4, type: "assistant.message.end",
+              payload: { messageId: "asst-T", turnId: "T" },
+            });
+            state = reduceEvent(state, {
+              sequence: 5, type: "turn.done",
+              payload: { turnId: "T", elapsedMs: 37000 },
+            });
+
+            console.log(JSON.stringify({
+              turnElapsedMs: state.turns["T"].elapsedMs,
+              assistantElapsedSeconds: state.messages["asst-T"].elapsedSeconds ?? null,
+              userElapsedSeconds: state.messages["user-T"].elapsedSeconds ?? null,
+            }));
+            """
+        ),
+    )
+
+    assert output["turnElapsedMs"] == 37000
+    assert output["assistantElapsedSeconds"] == 37.0
+    assert output["userElapsedSeconds"] is None
+
+
 def test_user_message_reducer_clears_prior_turn_error_banner(tmp_path) -> None:
     # provider 切换 bug：某轮失败后 error 事件写进单例 next.lastError,而 app.js 把它当作栈底
     # 唯一错误横幅渲染。旧代码在新一轮 user.message 到来时从不清空 lastError,于是上一轮的报错
@@ -1115,14 +1162,14 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-313" in html
-    assert "/static/js/app.js?v=web-repl-ui-318" in html
+    assert "/static/styles.css?v=web-repl-ui-314" in html
+    assert "/static/js/app.js?v=web-repl-ui-330" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
     # 已归档面板复刻(archived tab)新增 listArchivedSessions/deleteArchivedSessions,
     # 同样需 bump api.js 版本位,否则回访浏览器拿不到新导出。
-    assert "./api.js?v=web-repl-ui-307" in app_source
+    assert "./api.js?v=web-repl-ui-309" in app_source
     assert "./components/composer.js?v=session-model-v19" in app_source
     # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
     assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
@@ -1150,10 +1197,10 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-318" in index_html
+    assert "web-repl-ui-330" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
-    assert "./events.js?v=web-repl-ui-304" in app_source
-    assert "./components/workspace.js?v=cloud-creds-v51" in app_source
+    assert "./events.js?v=web-repl-ui-319" in app_source
+    assert "./components/workspace.js?v=cloud-creds-v55" in app_source
     assert "workspace-cloud-vendors" in workspace_source
     assert "Alibaba Cloud" in workspace_source
     assert "workspace-cloud-mode-fields" in workspace_source
@@ -1673,6 +1720,28 @@ def test_sidebar_defers_repaint_while_pointer_inside() -> None:
     # pointerleave 时若有挂起重绘则追平一次。
     assert "sidebarRepaintPending" in guard_body
     assert "ensureSidebarHoverGuard();" in app_source
+
+
+def test_inline_status_panels_skip_rebuild_when_unchanged() -> None:
+    app_source = _source(APP_JS)
+
+    # 会话进行中,流式逐帧 render 反复调用两个内联状态面板的渲染;面板内容是打开时的快照,期间不变,
+    # 但旧实现每帧都 replaceChildren 重建,销毁并重建光标下的关闭按钮,令其 :hover 反复通断
+    # (用户反馈鼠标悬停「一闪闪」)。内容签名一致时短路,完全不动 DOM,且短路必须发生在
+    # replaceChildren 之前。
+    status_body = app_source.split("function renderInlineSessionStatusPanel(currentState = {})", 1)[1].split(
+        "\n}\n", 1
+    )[0]
+    assert 'const signature = status ? JSON.stringify(rows) : "";' in status_body
+    assert "if (target.dataset.statusSignature === signature) {" in status_body
+    assert "target.dataset.statusSignature = signature;" in status_body
+    assert status_body.index("dataset.statusSignature === signature") < status_body.index("replaceChildren()")
+
+    mcp_body = app_source.split("function renderInlineMcpStatusPanel(currentState = {})", 1)[1].split("\n}\n", 1)[0]
+    assert 'const signature = mcp ? JSON.stringify(servers) : "";' in mcp_body
+    assert "if (target.dataset.mcpStatusSignature === signature) {" in mcp_body
+    assert "target.dataset.mcpStatusSignature = signature;" in mcp_body
+    assert mcp_body.index("dataset.mcpStatusSignature === signature") < mcp_body.index("replaceChildren()")
 
 
 def test_complete_step_tool_renders_conclusion_card() -> None:
@@ -6989,12 +7058,20 @@ def test_general_panel_sections_have_chapter_spacing() -> None:
     styles = _source(STYLES_CSS)
 
     assert ".workspace-other-panel {\n  gap: 0.4rem;\n}" in styles
-    assert ".workspace-other-panel .workspace-settings-group-head {\n  margin: 0 0 0.12rem;\n}" in styles
+    # 常规页与开发者页共用同一套章节间距:标题贴紧自身卡片(0.12rem),分区之间拉开 2.25rem。
+    assert (
+        ".workspace-other-panel .workspace-settings-group-head,\n"
+        ".workspace-developer-panel .workspace-settings-group-head {\n"
+        "  margin: 0 0 0.12rem;\n}"
+    ) in styles
     # 面板标题→首个分区标题、卡片→下一分区标题、裸 languageField→重启标题,统一 2.25rem 章节间距。
     assert (
         ".workspace-other-panel > h3 + .workspace-settings-group-head,\n"
         ".workspace-other-panel .workspace-settings-group + .workspace-settings-group-head,\n"
-        ".workspace-other-panel .workspace-field + .workspace-settings-group-head {\n"
+        ".workspace-other-panel .workspace-field + .workspace-settings-group-head,\n"
+        ".workspace-developer-panel > h3 + .workspace-settings-group-head,\n"
+        ".workspace-developer-panel .workspace-settings-group + .workspace-settings-group-head,\n"
+        ".workspace-developer-panel .workspace-field + .workspace-settings-group-head {\n"
         "  margin-top: 2.25rem;\n}"
     ) in styles
 
@@ -7016,6 +7093,8 @@ def test_general_panel_section_order() -> None:
         "    reviewStepCard,\n"
         "    groupHead,\n"
         "    card,\n"
+        "    telemetryGroupHead,\n"
+        "    telemetryCard,\n"
         "    devModeGroupHead,\n"
         "    devModeCard,\n"
         "    status,\n"
@@ -7570,7 +7649,7 @@ def test_workspace_cloud_panel_prefills_secrets_and_resets_on_mode_switch() -> N
 def test_app_wires_workspace_controls_to_current_session() -> None:
     source = _source(APP_JS)
 
-    assert 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v51";' in source
+    assert 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v55";' in source
     assert "workspace = createWorkspaceController" in source
     assert 'tabs: byShell("workspace-tabs")' in source
     assert 'content: byShell("workspace-content")' in source
@@ -9823,8 +9902,8 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-318" in html
-    assert "web-repl-ui-317" not in html
+    assert "web-repl-ui-330" in html
+    assert "web-repl-ui-329" not in html
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:
@@ -10046,7 +10125,7 @@ def test_styles_define_review_step_prerequisite_progress() -> None:
 
 def test_app_uses_bumped_api_version_for_outputs() -> None:
     source = _source(APP_JS)
-    assert "./api.js?v=web-repl-ui-307" in source
+    assert "./api.js?v=web-repl-ui-309" in source
     assert "./api.js?v=web-repl-ui-159" not in source
 
 
@@ -10065,7 +10144,7 @@ def test_output_panel_module_exists_and_wired() -> None:
     assert "getOutputs" in source
     app_source = _source(APP_JS)
     assert "createOutputController" in app_source
-    assert "output_panel.js?v=output-panel-v17" in app_source
+    assert "output_panel.js?v=output-panel-v22" in app_source
 
 
 def test_output_panel_resets_on_new_session_draft() -> None:
@@ -10123,8 +10202,8 @@ def test_output_preview_and_highlight() -> None:
     assert "File no longer exists" in source
     assert "tok-" in source
     app_source = _source(APP_JS)
-    assert "output_panel.js?v=output-panel-v17" in app_source
-    assert "output_panel.js?v=output-panel-v16" not in app_source
+    assert "output_panel.js?v=output-panel-v22" in app_source
+    assert "output_panel.js?v=output-panel-v21" not in app_source
 
 
 def test_output_preview_tok_css() -> None:
@@ -10315,6 +10394,414 @@ def test_output_panel_refresh_forwards_candidates_to_onpayload(tmp_path: Path) -
     assert result["diagramCount"] == 1
 
 
+def test_output_panel_merges_live_inprogress_stacks(tmp_path: Path) -> None:
+    # 普通对话 ros_stack 创建期间,后端 outputs_payload 派生不出「创建中」栈(无流水线 envelope、
+    # 终态 tool_result 尚未落盘),故服务端 stacks 为空、面板整个创建过程空白。前端须用 live 事件
+    # (resource.observed / stack.progress)派生的进行中栈补进面板,让资源栈在创建开始即出现;
+    # 终态到达后由服务端权威态(相同 region::栈名键)覆盖,不重复也不回退。
+    source = """
+    const { mergeStacksForDisplay, rosConsoleUrl } = await import(__OUTPUT_PANEL_MODULE__);
+
+    // 1) 服务端无栈 → live 进行中栈应显示,并补出控制台链接。
+    const merged1 = mergeStacksForDisplay(
+      [],
+      [{ stackId: "stk-1", stackName: "web", status: "CREATE_IN_PROGRESS", isSuccess: false, regionId: "cn-hangzhou" }],
+    );
+
+    // 2) 键冲突(region::栈名相同)→ live 进行中态胜出,合并后单行进行中(不重复)。
+    //    live 只在工具运行期存在,其进行中态比服务端旧终态更新;工具结束后 live 清空交还服务端终态。
+    const merged2 = mergeStacksForDisplay(
+      [{
+        stackId: "stk-1", stackName: "web", status: "CREATE_COMPLETE",
+        isSuccess: true, regionId: "cn-hangzhou", consoleUrl: "srv",
+      }],
+      [{ stackId: "stk-1", stackName: "web", status: "CREATE_IN_PROGRESS", isSuccess: false, regionId: "cn-hangzhou" }],
+    );
+
+    console.log(JSON.stringify({
+      len1: merged1.length,
+      status1: merged1[0] && merged1[0].status,
+      url1: merged1[0] && merged1[0].consoleUrl,
+      len2: merged2.length,
+      status2: merged2[0] && merged2[0].status,
+      rosUrl: rosConsoleUrl("cn-hangzhou", "stk-9"),
+      rosUrlNull: rosConsoleUrl("", "stk-9"),
+    }));
+    """
+    result = _run_output_panel_script(tmp_path, source)
+    assert result["len1"] == 1
+    assert result["status1"] == "CREATE_IN_PROGRESS"
+    assert result["url1"] == "https://ros.console.aliyun.com/cn-hangzhou/stacks/stk-1"
+    # live 进行中态覆盖服务端旧终态,合并后仍只有一行且为进行中。
+    assert result["len2"] == 1
+    assert result["status2"] == "CREATE_IN_PROGRESS"
+    assert result["rosUrl"] == "https://ros.console.aliyun.com/cn-hangzhou/stacks/stk-9"
+    assert result["rosUrlNull"] is None
+
+
+def test_output_panel_live_new_stack_overrides_stale_server_by_stackid(tmp_path: Path) -> None:
+    # delete_and_create:同 region::栈名下,旧栈已被删除(服务端仍留其终态),新栈正在创建。
+    # 两者 stackId 不同 → 当前 live 创建栈应覆盖旧 server 终态,面板显示「创建中」的新栈。
+    # 同 stackId 的进行中 live(如对已存在栈 update/delete)同样覆盖服务端旧终态 —— live 只在工具
+    # 运行期存在,其进行中态比服务端上一轮终态更新;工具结束后 live 清空,交还服务端权威终态。
+    source = """
+    const { mergeStacksForDisplay } = await import(__OUTPUT_PANEL_MODULE__);
+
+    // 不同 stackId:server 是旧栈终态,live 是新建中栈 → live 胜出。
+    const diff = mergeStacksForDisplay(
+      [{
+        stackId: "stk-old", stackName: "web", status: "DELETE_COMPLETE",
+        isSuccess: true, regionId: "cn-hangzhou", consoleUrl: "srv-old",
+      }],
+      [{
+        stackId: "stk-new", stackName: "web", status: "CREATE_IN_PROGRESS",
+        isSuccess: false, regionId: "cn-hangzhou",
+      }],
+    );
+
+    // 相同 stackId + live 进行中(对已存在栈 update/delete):live 进行中态覆盖服务端旧终态。
+    const same = mergeStacksForDisplay(
+      [{
+        stackId: "stk-1", stackName: "web", status: "CREATE_COMPLETE",
+        isSuccess: true, regionId: "cn-hangzhou", consoleUrl: "srv",
+      }],
+      [{ stackId: "stk-1", stackName: "web", status: "UPDATE_IN_PROGRESS", isSuccess: false, regionId: "cn-hangzhou" }],
+    );
+
+    // 相同 stackId + live 已是终态(轮询末帧,极少见):保留服务端权威终态(含 status_reason)。
+    const sameTerminal = mergeStacksForDisplay(
+      [{
+        stackId: "stk-1", stackName: "web", status: "CREATE_COMPLETE",
+        isSuccess: true, regionId: "cn-hangzhou", consoleUrl: "srv",
+      }],
+      [{ stackId: "stk-1", stackName: "web", status: "CREATE_COMPLETE", isSuccess: true, regionId: "cn-hangzhou" }],
+    );
+
+    console.log(JSON.stringify({
+      diffLen: diff.length,
+      diffStackId: diff[0] && diff[0].stackId,
+      diffStatus: diff[0] && diff[0].status,
+      sameLen: same.length,
+      sameStackId: same[0] && same[0].stackId,
+      sameStatus: same[0] && same[0].status,
+      sameTermStatus: sameTerminal[0] && sameTerminal[0].status,
+      sameTermUrl: sameTerminal[0] && sameTerminal[0].consoleUrl,
+    }));
+    """
+    result = _run_output_panel_script(tmp_path, source)
+    # 不同 stackId → live 新建栈覆盖旧 server 终态,仍只一行。
+    assert result["diffLen"] == 1
+    assert result["diffStackId"] == "stk-new"
+    assert result["diffStatus"] == "CREATE_IN_PROGRESS"
+    # 相同 stackId + live 进行中 → live 覆盖服务端旧终态。
+    assert result["sameLen"] == 1
+    assert result["sameStackId"] == "stk-1"
+    assert result["sameStatus"] == "UPDATE_IN_PROGRESS"
+    # 相同 stackId + live 终态 → 保留服务端权威终态(含 consoleUrl)。
+    assert result["sameTermStatus"] == "CREATE_COMPLETE"
+    assert result["sameTermUrl"] == "srv"
+
+
+def test_output_panel_live_delete_complete_overrides_stale_create(tmp_path: Path) -> None:
+    # 删除刚完成的窗口:发起删除的工具仍在运行(如 delete_and_create 的 delete 相已到 DELETE_COMPLETE、
+    # create 相尚未 observed;或直连 DeleteStack 末帧已终态但 tool_result 尚未落盘),服务端派生栈仍是
+    # 上一轮建栈的 CREATE_COMPLETE。此时 live 的 DELETE_COMPLETE 是同一物理栈的更新终态,必须覆盖服务端
+    # 陈旧的 CREATE_COMPLETE,否则面板会「删除完成却仍显示 CREATE_COMPLETE」(用户实测撞见)。
+    # 注意区别于 sameTerminal 用例:那里 live 与 server 同为 CREATE_COMPLETE(操作一致)→ 保留服务端权威态;
+    # 这里 live 是 DELETE 终态而 server 非 delete(操作不一致、live 更新)→ live 胜出。
+    source = """
+    const { mergeStacksForDisplay } = await import(__OUTPUT_PANEL_MODULE__);
+
+    // 同 stackId:server 旧建栈终态 CREATE_COMPLETE,live 是刚完成的删除 DELETE_COMPLETE → live 胜出。
+    const del = mergeStacksForDisplay(
+      [{
+        stackId: "stk-1", stackName: "web", status: "CREATE_COMPLETE",
+        isSuccess: true, regionId: "cn-hangzhou", consoleUrl: "srv",
+      }],
+      [{ stackId: "stk-1", stackName: "web", status: "DELETE_COMPLETE", isSuccess: true, regionId: "cn-hangzhou" }],
+    );
+
+    // 回归:server 已是 DELETE 终态(重载后落盘)+ live 同为 DELETE_COMPLETE → 保留服务端权威态(含 consoleUrl)。
+    const bothDeleted = mergeStacksForDisplay(
+      [{
+        stackId: "stk-1", stackName: "web", status: "DELETE_COMPLETE",
+        isSuccess: true, regionId: "cn-hangzhou", consoleUrl: "srv-del",
+      }],
+      [{ stackId: "stk-1", stackName: "web", status: "DELETE_COMPLETE", isSuccess: true, regionId: "cn-hangzhou" }],
+    );
+
+    console.log(JSON.stringify({
+      delLen: del.length,
+      delStatus: del[0] && del[0].status,
+      bothDeletedStatus: bothDeleted[0] && bothDeleted[0].status,
+      bothDeletedUrl: bothDeleted[0] && bothDeleted[0].consoleUrl,
+    }));
+    """
+    result = _run_output_panel_script(tmp_path, source)
+    # live 删除终态覆盖服务端陈旧建栈终态,单行显示 DELETE_COMPLETE(而非闪回 CREATE_COMPLETE)。
+    assert result["delLen"] == 1
+    assert result["delStatus"] == "DELETE_COMPLETE"
+    # server 已是 delete 终态时不被 live 无谓替换,保留权威 consoleUrl。
+    assert result["bothDeletedStatus"] == "DELETE_COMPLETE"
+    assert result["bothDeletedUrl"] == "srv-del"
+
+
+def test_output_panel_live_inprogress_overrides_stale_terminal(tmp_path: Path) -> None:
+    # 对已存在的栈做 delete/update:服务端派生栈仍是上一轮的旧终态(如建栈的 CREATE_COMPLETE,
+    # 删除/更新的 tool_result 尚未落盘),而 live 进行中栈(DELETE_IN_PROGRESS/UPDATE_IN_PROGRESS)
+    # 代表「当前回合正在执行」的操作(liveStacksFromState 已用 currentTurnActive + 工具仍在运行 守卫),
+    # 是该物理栈的最新状态。进行中态必须覆盖服务端旧终态,否则面板永远显示 CREATE_COMPLETE,
+    # 用户看不到 DELETE_IN_PROGRESS、更新也停在 CREATE_COMPLETE。工具结束后 live 清空,交还服务端权威态。
+    # 关键:delete/update 常只带 StackId(无 StackName),故无名 t0 用 stackId 作键,与服务端
+    # region::栈名 键不同 —— 必须按 stackId 找回并取代旧行,而不是并排两行。
+    source = """
+    const { mergeStacksForDisplay } = await import(__OUTPUT_PANEL_MODULE__);
+
+    const server = [{
+      stackId: "53cb", stackName: "single-vpc", status: "CREATE_COMPLETE",
+      isSuccess: true, regionId: "cn-hangzhou", consoleUrl: "srv",
+    }];
+
+    // A) DELETE t0:live 无名(仅 StackId,键为 stackId),须按 stackId 取代服务端旧终态行 → 单行进行中。
+    const delT0 = mergeStacksForDisplay(server, [
+      { stackId: "53cb", stackName: "", status: "DELETE_IN_PROGRESS", isSuccess: false, regionId: "cn-hangzhou" },
+    ]);
+
+    // B) DELETE 首个轮询后:live 带名(同 region::栈名键) → 覆盖服务端旧终态,单行进行中。
+    const delPoll = mergeStacksForDisplay(server, [
+      { stackId: "53cb", stackName: "single-vpc", status: "DELETE_IN_PROGRESS",
+        isSuccess: false, regionId: "cn-hangzhou" },
+    ]);
+
+    // C) UPDATE:进行中态覆盖服务端旧 CREATE_COMPLETE(修复「更新结束仍是 CREATE_COMPLETE」)。
+    const updPoll = mergeStacksForDisplay(server, [
+      { stackId: "53cb", stackName: "single-vpc", status: "UPDATE_IN_PROGRESS",
+        isSuccess: false, regionId: "cn-hangzhou" },
+    ]);
+
+    console.log(JSON.stringify({
+      delT0Len: delT0.length, delT0Status: delT0[0] && delT0[0].status, delT0Id: delT0[0] && delT0[0].stackId,
+      delPollLen: delPoll.length, delPollStatus: delPoll[0] && delPoll[0].status,
+      updPollLen: updPoll.length, updPollStatus: updPoll[0] && updPoll[0].status,
+    }));
+    """
+    result = _run_output_panel_script(tmp_path, source)
+    # A) 无名 t0 取代旧行,单行 DELETE_IN_PROGRESS(而非「旧终态 + 无名进行中」两行)。
+    assert result["delT0Len"] == 1
+    assert result["delT0Status"] == "DELETE_IN_PROGRESS"
+    assert result["delT0Id"] == "53cb"
+    # B) 带名进行中覆盖旧终态,单行。
+    assert result["delPollLen"] == 1
+    assert result["delPollStatus"] == "DELETE_IN_PROGRESS"
+    # C) 更新进行中覆盖旧 CREATE_COMPLETE。
+    assert result["updPollLen"] == 1
+    assert result["updPollStatus"] == "UPDATE_IN_PROGRESS"
+
+
+def test_app_wires_live_stacks_into_output_panel() -> None:
+    # app.js 须把「live 进行中栈」派生器接入输出面板,并在 resource.observed(创建一开始)即刷新面板。
+    app_source = _source(APP_JS)
+    assert "getLiveStacks" in app_source
+    assert "liveStacksFromState" in app_source
+    # 两个 live 来源:resource.observed(t0 最早占位)与工具卡 stackProgress(轮询真实状态)。
+    assert "stackProgress" in app_source
+    assert 'resourceType' in app_source
+    # resource.observed 到达即刷新输出面板,让「创建中」栈立即出现,而非等首个 stack.progress(约 5s 后)。
+    assert 'event.type === "resource.observed"' in app_source
+    # 非 create 写操作(delete/update/continue)也须在 t0 映射出对应 *_IN_PROGRESS,
+    # 而不是空状态——后端新增 StackOperationStartedEvent 桥成同一 resource.observed 事件驱动。
+    assert "DELETE_IN_PROGRESS" in app_source
+    assert "UPDATE_IN_PROGRESS" in app_source
+
+
+def test_live_stacks_only_kept_while_owning_tool_runs(tmp_path: Path) -> None:
+    # liveStacksFromState 只应保留关联 toolUseId 仍在运行的进行中栈:
+    #  - 轮询失败 / 工具终止(tool.status → failed/completed)后,不得永久 CREATE_IN_PROGRESS;
+    #  - 取消 / 中断(turn.done → currentTurnActive=false)后,live 栈全部清空,交还服务端权威态。
+    # app.js 不可直接 import(顶层依赖 document + start()),故按大括号配平抽取该纯函数,注入 mock state 执行。
+    source = """
+    import fs from "node:fs";
+    const src = fs.readFileSync(new URL(__APP_MODULE__), "utf-8");
+    const start = src.indexOf("function liveStacksFromState()");
+    let depth = 0, end = -1;
+    for (let j = src.indexOf("{", start); j < src.length; j++) {
+      if (src[j] === "{") depth++;
+      else if (src[j] === "}" && --depth === 0) { end = j + 1; break; }
+    }
+    const fnText = src.slice(start, end);
+    const run = (state) => new Function("state", fnText + "\\nreturn liveStacksFromState();")(state);
+
+    const resource = {
+      resourceType: "stack", resourceId: "stk-1", resourceName: "web",
+      regionId: "cn-hangzhou", action: "CreateStack", toolUseId: "t1",
+    };
+
+    // A) 工具在运行 → 进行中栈显示。
+    const running = run({ currentTurnActive: true, resources: [resource], tools: { t1: { status: "running" } } });
+
+    // B) 工具已失败(轮询失败/工具终止)→ 不再显示,避免永久 CREATE_IN_PROGRESS。
+    const failed = run({ currentTurnActive: true, resources: [resource], tools: { t1: { status: "failed" } } });
+
+    // C) 回合已结束(取消/中断)→ live 栈全部清空。
+    const doneTurn = run({ currentTurnActive: false, resources: [resource], tools: { t1: { status: "running" } } });
+
+    // D) stackProgress 来自已完成工具 → 丢弃(仅运行中工具的进度才算 live)。
+    const spDone = run({
+      currentTurnActive: true, resources: [],
+      tools: { t1: { status: "completed", stackProgress: {
+        kind: "stack.progress", stackId: "stk-1", stackName: "web",
+        regionId: "cn-hangzhou", status: "CREATE_IN_PROGRESS",
+      } } },
+    });
+
+    // E) stackProgress 来自运行中工具 → 保留(真实状态覆盖占位)。
+    const spRunning = run({
+      currentTurnActive: true, resources: [],
+      tools: { t1: { status: "running", stackProgress: {
+        kind: "stack.progress", stackId: "stk-1", stackName: "web",
+        regionId: "cn-hangzhou", status: "CREATE_COMPLETE",
+      } } },
+    });
+
+    console.log(JSON.stringify({
+      runningLen: running.length,
+      runningStatus: running[0] && running[0].status,
+      failedLen: failed.length,
+      doneTurnLen: doneTurn.length,
+      spDoneLen: spDone.length,
+      spRunningLen: spRunning.length,
+      spRunningStatus: spRunning[0] && spRunning[0].status,
+    }));
+    """
+    result = _run_app_script(tmp_path, source)
+    assert result["runningLen"] == 1
+    assert result["runningStatus"] == "CREATE_IN_PROGRESS"
+    assert result["failedLen"] == 0
+    assert result["doneTurnLen"] == 0
+    assert result["spDoneLen"] == 0
+    assert result["spRunningLen"] == 1
+    assert result["spRunningStatus"] == "CREATE_COMPLETE"
+
+
+def test_live_stacks_map_non_create_actions_and_merge_by_stack_id(tmp_path: Path) -> None:
+    # 非 create 操作(delete/update/continue)的 t0(经 StackOperationStartedEvent 桥成
+    # resource.observed)须映射对应 *_IN_PROGRESS;且无名 t0(DeleteStack 常只带 StackId)与
+    # 之后带名、同 stackId 的 stackProgress 应凭 stackId 合并成一行,真实进度覆盖占位状态。
+    source = """
+    import fs from "node:fs";
+    const src = fs.readFileSync(new URL(__APP_MODULE__), "utf-8");
+    const start = src.indexOf("function liveStacksFromState()");
+    let depth = 0, end = -1;
+    for (let j = src.indexOf("{", start); j < src.length; j++) {
+      if (src[j] === "{") depth++;
+      else if (src[j] === "}" && --depth === 0) { end = j + 1; break; }
+    }
+    const fnText = src.slice(start, end);
+    const run = (state) => new Function("state", fnText + "\\nreturn liveStacksFromState();")(state);
+
+    // A) DeleteStack t0(无名,仅 StackId)→ DELETE_IN_PROGRESS,立即出现。
+    const del = run({
+      currentTurnActive: true,
+      resources: [{ resourceType: "stack", resourceId: "stk-9", resourceName: "",
+        regionId: "cn-hangzhou", action: "DeleteStack", toolUseId: "t1" }],
+      tools: { t1: { status: "running" } },
+    });
+
+    // B) UpdateStack t0 → UPDATE_IN_PROGRESS。
+    const upd = run({
+      currentTurnActive: true,
+      resources: [{ resourceType: "stack", resourceId: "stk-u", resourceName: "web",
+        regionId: "cn-hangzhou", action: "UpdateStack", toolUseId: "t1" }],
+      tools: { t1: { status: "running" } },
+    });
+
+    // C) 无名 t0(DeleteStack)+ 带名同 stackId 的 stackProgress → 合并为一行,进度状态覆盖占位。
+    const merged = run({
+      currentTurnActive: true,
+      resources: [{ resourceType: "stack", resourceId: "stk-9", resourceName: "",
+        regionId: "cn-hangzhou", action: "DeleteStack", toolUseId: "t1" }],
+      tools: { t1: { status: "running", stackProgress: {
+        kind: "stack.progress", stackId: "stk-9", stackName: "web",
+        regionId: "cn-hangzhou", status: "DELETE_IN_PROGRESS",
+      } } },
+    });
+
+    console.log(JSON.stringify({
+      delStatus: del[0] && del[0].status,
+      updStatus: upd[0] && upd[0].status,
+      mergedLen: merged.length,
+      mergedName: merged[0] && merged[0].stackName,
+      mergedStatus: merged[0] && merged[0].status,
+    }));
+    """
+    result = _run_app_script(tmp_path, source)
+    assert result["delStatus"] == "DELETE_IN_PROGRESS"
+    assert result["updStatus"] == "UPDATE_IN_PROGRESS"
+    # 一行,而非占位 + 进度两行;带名进度覆盖无名占位。
+    assert result["mergedLen"] == 1
+    assert result["mergedName"] == "web"
+    assert result["mergedStatus"] == "DELETE_IN_PROGRESS"
+
+
+def test_live_stacks_delete_and_create_collapse_to_single_row(tmp_path: Path) -> None:
+    # delete_and_create:同一 ros_deploy 调用先删旧栈(id A,名 vpc-demo-stack),再建同名新栈
+    # (id B,新 stackId)。reload/restart 后旧 create observation 已丢失，DeleteStack 的真实 t0
+    # 只有 StackId、没有 StackName；新栈首帧又会覆盖工具卡唯一的 stackProgress。若合并层不从
+    # 服务端旧栈 A 回填名称，A 会以裸 stackId 为键，与 B 的 region::name 键并排显示到工具结束。
+    source = """
+    import fs from "node:fs";
+    const src = fs.readFileSync(new URL(__APP_MODULE__), "utf-8");
+    const start = src.indexOf("function liveStacksFromState()");
+    let depth = 0, end = -1;
+    for (let j = src.indexOf("{", start); j < src.length; j++) {
+      if (src[j] === "{") depth++;
+      else if (src[j] === "}" && --depth === 0) { end = j + 1; break; }
+    }
+    const fnText = src.slice(start, end);
+    const run = (state) => new Function("state", fnText + "\\nreturn liveStacksFromState();")(state);
+    const { mergeStacksForDisplay } = await import(
+      new URL("./components/output_panel.js", __APP_MODULE__).href
+    );
+
+    // delete 相旧栈 A + create 相新栈 B(同名不同 id),同一运行中工具;轮询首帧为 delete 相、无名。
+    const live = run({
+      currentTurnActive: true,
+      resources: [
+        { resourceType: "stack", resourceId: "A", resourceName: "",
+          regionId: "cn-hangzhou", action: "DeleteStack", toolUseId: "t1" },
+        { resourceType: "stack", resourceId: "B", resourceName: "vpc-demo-stack",
+          regionId: "cn-hangzhou", action: "CreateStack", toolUseId: "t1" },
+      ],
+      tools: { t1: { status: "running", stackProgress: {
+        kind: "stack.progress", stackId: "B", stackName: "vpc-demo-stack",
+        regionId: "cn-hangzhou", status: "CREATE_IN_PROGRESS",
+      } } },
+    });
+
+    // 服务端此刻仍留上一轮旧栈 A 的终态;合并 live 后同名应折为单行(而非并排两行)。
+    const merged = mergeStacksForDisplay(
+      [{ stackId: "A", stackName: "vpc-demo-stack", status: "CREATE_COMPLETE",
+        isSuccess: true, regionId: "cn-hangzhou" }],
+      live,
+    );
+
+    const delEntry = live.find((s) => s.stackId === "A") || {};
+    console.log(JSON.stringify({
+      delName: delEntry.stackName,
+      mergedLen: merged.length,
+      mergedStackId: merged[0] && merged[0].stackId,
+      mergedStatus: merged[0] && merged[0].status,
+    }));
+    """
+    result = _run_app_script(tmp_path, source)
+    # 生产形态的 delete t0 确实无名；修复必须发生在与服务端权威栈合并时，而非依赖虚构的前端名字。
+    assert result["delName"] == ""
+    # 服务端 A 为无名 delete live 回填名称后，与同名新栈 B 折为一行，并由更新的创建态胜出。
+    assert result["mergedLen"] == 1
+    assert result["mergedStackId"] == "B"
+    assert result["mergedStatus"] == "CREATE_IN_PROGRESS"
+
+
 def test_output_panel_diagram_preview_guard_uses_diagram_id() -> None:
     # 预览陈旧性守卫用唯一 diagramId 作键(重名候选 title 可能相同,无法区分)。
     source = _source(OUTPUT_PANEL_JS)
@@ -10385,8 +10872,8 @@ def test_app_regroups_pipeline_messages_before_render() -> None:
 
 def test_app_output_panel_import_bumped_to_v11() -> None:
     js = _source(APP_JS)
-    assert "output-panel-v17" in js
-    assert "output-panel-v16" not in js
+    assert "output-panel-v22" in js
+    assert "output-panel-v21" not in js
 
 
 def test_appearance_theme_css_blocks_present() -> None:
@@ -10804,14 +11291,46 @@ def test_developer_mode_wiring_present() -> None:
     assert 'makeForeignSwitch("workspace-highlight-failed-tools")' in workspace
     assert 'classList.toggle("dev-highlight-tool-errors"' in workspace
 
+    # 「Debug 日志」开关(后端 DEBUG 级别文件日志,持久化到 developer.debug)
+    assert 'makeForeignSwitch("workspace-debug-logging")' in workspace
+    assert 't("Debug options")' in workspace
+    assert "saveDeveloperState?.({ debug:" in workspace
+
     # api.js 客户端读写端点(功能持久化)
     assert "export function getDeveloperSettings" in api
     assert "export function saveDeveloperSettings" in api
     assert "/api/settings/developer" in api
+    # saveDeveloperSettings body 须带上 debug 字段(否则回访浏览器丢新偏好)
+    assert "debug: Boolean(debug)" in api
 
     # app.js 启动时按已保存设置应用标红 body class
     assert "applyDeveloperHighlightFromSettings" in app
     assert "api.getDeveloperSettings()" in app
+
+
+def test_general_panel_exposes_telemetry_share_content_toggle() -> None:
+    """「帮助改进 iac-code」开关:常规页开关 + 标题词条 + api 读写端点。"""
+    workspace = _source(WORKSPACE_JS)
+    api = _source(API_JS)
+
+    # 常规页开关(makeForeignSwitch)+ 标题词条(必须走 t(),i18n 强门)
+    assert 'makeForeignSwitch("workspace-telemetry-share-content")' in workspace
+    assert 't("Help improve iac-code")' in workspace
+    assert 't("Share full conversation content")' in workspace
+    # Bug5:说明须明确完整内容会发送到 iac-code 默认(或显式配置)遥测后端,
+    # 不得再用「仅在配置了端点时才上传」的误导措辞(隐去了默认远端后端)。
+    assert "default backend" in workspace
+    assert "only uploaded when a telemetry endpoint is configured" not in workspace
+    # activate() 回填与 persist 走遥测端点
+    assert "api.getTelemetrySettings()" in workspace
+    assert "api.saveTelemetrySettings(" in workspace
+
+    # api.js 客户端读写端点
+    assert "export function getTelemetrySettings" in api
+    assert "export function saveTelemetrySettings" in api
+    assert "/api/settings/telemetry" in api
+    # 保存 body 须带 shareContent 字段
+    assert "shareContent: Boolean(shareContent)" in api
 
 
 def test_failed_tool_highlight_gated_under_body_class() -> None:

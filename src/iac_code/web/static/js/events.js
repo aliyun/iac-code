@@ -785,6 +785,20 @@ export function reduceEvent(state = {}, event = {}) {
         }
         turnEntry.elapsedMs = elapsedMs;
         next.turns[turnId] = turnEntry;
+        // 实时助手消息不像重载转录那样自带 elapsedSeconds(后者由服务端落盘),折叠回合头的
+        // 时长实时只有 state.turns[turnId].elapsedMs 这一来源。resync/重连重建状态后,分组的
+        // turnId 可能落不回 state.turns(存档用户气泡无 turnId),此时既无 state.turns 命中、
+        // 实时消息又无 elapsedSeconds,「已处理」就丢时长(而手动重载因磁盘转录带 elapsedSeconds
+        // 又正常)。这里把本轮时长回写到本轮助手消息,让折叠渲染按消息取 elapsedSeconds 的兜底与
+        // 重载同源,任何状态重建路径都能显示时长。
+        if (typeof elapsedMs === "number" && Number.isFinite(elapsedMs) && elapsedMs >= 0) {
+          const elapsedSeconds = elapsedMs / 1000;
+          for (const message of Object.values(next.messages)) {
+            if (message && message.role === "assistant" && message.turnId === turnId) {
+              message.elapsedSeconds = elapsedSeconds;
+            }
+          }
+        }
       }
       next.lastTurn = {
         turnId,

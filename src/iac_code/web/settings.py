@@ -93,10 +93,11 @@ _DEVELOPER_SETTINGS_KEY = "developer"
 
 
 def developer_settings() -> dict[str, bool]:
-    """Return the developer-mode flags for the settings API (both default ``False``).
+    """Return the developer-mode flags for the settings API (all default ``False``).
 
     ``mode`` gates the Developer settings tab; ``highlightFailedTools`` controls
-    whether failed tool calls are painted red (off = rendered like any other tool).
+    whether failed tool calls are painted red (off = rendered like any other tool);
+    ``debug`` enables backend DEBUG-level logging to the log file (off = INFO).
     """
     settings = _load_yaml(get_settings_path())
     section = settings.get(_DEVELOPER_SETTINGS_KEY)
@@ -105,10 +106,11 @@ def developer_settings() -> dict[str, bool]:
     return {
         "mode": bool(section.get("mode", False)),
         "highlightFailedTools": bool(section.get("highlightFailedTools", False)),
+        "debug": bool(section.get("debug", False)),
     }
 
 
-def save_developer_settings(mode: bool, highlight_failed_tools: bool) -> dict[str, bool]:
+def save_developer_settings(mode: bool, highlight_failed_tools: bool, debug: bool) -> dict[str, bool]:
     """Persist the developer-mode flags, preserving other section keys."""
     settings_path = get_settings_path()
     settings = _load_yaml(settings_path)
@@ -117,9 +119,45 @@ def save_developer_settings(mode: bool, highlight_failed_tools: bool) -> dict[st
         section = {}
     section["mode"] = bool(mode)
     section["highlightFailedTools"] = bool(highlight_failed_tools)
+    section["debug"] = bool(debug)
     settings[_DEVELOPER_SETTINGS_KEY] = section
     _save_yaml(settings_path, settings)
-    return {"mode": bool(mode), "highlightFailedTools": bool(highlight_failed_tools)}
+    return {
+        "mode": bool(mode),
+        "highlightFailedTools": bool(highlight_failed_tools),
+        "debug": bool(debug),
+    }
+
+
+_TELEMETRY_SETTINGS_KEY = "telemetry"
+
+
+def telemetry_settings() -> dict[str, bool]:
+    """Return the telemetry content-sharing preference (default ``False``).
+
+    ``shareContent`` opts in to attaching full conversation content (prompts,
+    model responses, tool inputs/outputs) to emitted telemetry. Off by default;
+    an explicitly set ``OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT``
+    environment variable overrides this preference at runtime.
+    """
+    settings = _load_yaml(get_settings_path())
+    section = settings.get(_TELEMETRY_SETTINGS_KEY)
+    if not isinstance(section, dict):
+        section = {}
+    return {"shareContent": bool(section.get("shareContent", False))}
+
+
+def save_telemetry_settings(share_content: bool) -> dict[str, bool]:
+    """Persist the telemetry content-sharing preference, preserving other keys."""
+    settings_path = get_settings_path()
+    settings = _load_yaml(settings_path)
+    section = settings.get(_TELEMETRY_SETTINGS_KEY)
+    if not isinstance(section, dict):
+        section = {}
+    section["shareContent"] = bool(share_content)
+    settings[_TELEMETRY_SETTINGS_KEY] = section
+    _save_yaml(settings_path, settings)
+    return {"shareContent": bool(share_content)}
 
 
 _APPEARANCE_SETTINGS_KEY = "appearance"

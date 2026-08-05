@@ -14,6 +14,7 @@ from iac_code.services.permissions.rule_scope import scope_for_rule_source
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.tools.cloud.aliyun.ros_stack import RosStack
 from iac_code.tools.cloud.aliyun.template_source import is_remote_template_url
+from iac_code.tools.cloud.base_stack import stack_result_from_metadata
 from iac_code.tools.path_safety import check_read_path, resolve_read_path
 from iac_code.types.permissions import (
     PermissionAuditMetadata,
@@ -621,7 +622,7 @@ class RosDeployTool(Tool):
         return None
 
     def _record_result_stack(self, result: ToolResult, *, action: str) -> None:
-        parsed = _json_object(result.content)
+        parsed = stack_result_from_metadata(result.metadata) or _json_object(result.content)
         stack_id = _string_value(parsed.get("stack_id")) if parsed is not None else ""
         if not stack_id and isinstance(result.metadata, dict):
             stack_id = _string_value(result.metadata.get("stack_id"))
@@ -692,9 +693,7 @@ class RosDeployTool(Tool):
             wait_input = self._wait_stack_input(tool_input)
             if isinstance(wait_input, ToolResult):
                 return wait_input
-            result = await self._wait_stack(wait_input, context)
-            self._record_result_stack(result, action="wait")
-            return result
+            return await self._wait_stack(wait_input, context)
 
         create_input = self._create_stack_input(tool_input, context)
         if isinstance(create_input, ToolResult):

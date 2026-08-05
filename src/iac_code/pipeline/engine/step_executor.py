@@ -20,6 +20,7 @@ from iac_code.pipeline.engine.complete_step_tool import CompleteStepTool
 from iac_code.pipeline.engine.completion_guard_state import (
     ensure_completion_guard_state,
     record_completion_guard_tool_result,
+    record_ros_deploy_observed_stack,
 )
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.events import PipelineEvent
@@ -41,6 +42,7 @@ from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY
 from iac_code.types.stream_events import (
     ContextUsageEvent,
     MessageEndEvent,
+    ResourceObservedEvent,
     StreamEvent,
     ToolResultEvent,
     ToolUseEndEvent,
@@ -272,6 +274,16 @@ class StepExecutor:
                         }
                         if event.tool_use_id in complete_step_ids:
                             pending_complete_input[event.tool_use_id] = event.input
+                    elif isinstance(event, ResourceObservedEvent):
+                        tool_record = pending_tool_inputs.get(event.tool_use_id or "")
+                        if isinstance(tool_record, dict) and tool_record.get("tool_name") == "ros_deploy":
+                            tool_input = tool_record.get("input")
+                            if isinstance(tool_input, dict) and event.resource_type == "stack":
+                                record_ros_deploy_observed_stack(
+                                    completion_guard_state,
+                                    tool_input=tool_input,
+                                    stack_id=event.resource_id,
+                                )
                     elif isinstance(event, ToolResultEvent):
                         tool_record = pending_tool_inputs.get(event.tool_use_id)
                         if isinstance(tool_record, dict):
@@ -284,6 +296,7 @@ class StepExecutor:
                                 content=_completion_guard_tool_result_content(event),
                                 is_error=event.is_error,
                                 cwd=self._cwd,
+                                metadata=event.metadata,
                             )
                         if event.tool_use_id in complete_step_ids:
                             step_result = (event.metadata or {}).get("step_result")

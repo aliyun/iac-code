@@ -215,9 +215,11 @@ def create_app(
         save_provider_config,
         save_selling_review_step,
         save_session_defaults,
+        save_telemetry_settings,
         save_ui_language,
         selling_review_step_settings,
         set_active_provider,
+        telemetry_settings,
         ui_language_payload,
     )
     from iac_code.web.shell import WebShellEscapeRunner
@@ -3351,9 +3353,37 @@ def create_app(
             data = await json_object_body(request)
             mode = required_bool(data, "mode")
             highlight_failed_tools = required_bool(data, "highlightFailedTools")
+            debug = required_bool(data, "debug")
         except ValueError as exc:
             return json_error(str(exc), 400)
-        return JSONResponse(save_developer_settings(mode, highlight_failed_tools))
+        saved = save_developer_settings(mode, highlight_failed_tools, debug)
+        # 立即应用后端日志级别(进程级全局开关,与 REPL/ACP 的 /debug 同一机制)。复用 CLI 启动时
+        # setup_logging 选定的日志文件,避免切换 debug 时改写 Web 进程的日志 session_id。
+        from iac_code.utils.log import current_log_file, disable_debug_at_runtime, enable_debug_at_runtime
+
+        if debug:
+            log_file = current_log_file()
+            log_session_id = log_file.stem if log_file is not None else "web"
+            enable_debug_at_runtime(log_session_id, replace_startup_info_handler=True)
+        else:
+            disable_debug_at_runtime()
+        return JSONResponse(saved)
+
+    async def get_telemetry_settings(request):
+        return JSONResponse(telemetry_settings())
+
+    async def put_telemetry_settings(request):
+        try:
+            data = await json_object_body(request)
+            share_content = required_bool(data, "shareContent")
+        except ValueError as exc:
+            return json_error(str(exc), 400)
+        saved = save_telemetry_settings(share_content)
+        # 立即应用到遥测内容捕获(进程级运行时覆盖;显式设置的环境变量仍优先)。
+        from iac_code.services.telemetry.config import set_content_capture_optin
+
+        set_content_capture_optin(share_content)
+        return JSONResponse(saved)
 
     async def get_pipeline_review_step_settings(request):
         return JSONResponse(selling_review_step_settings())
@@ -4762,6 +4792,8 @@ def create_app(
             Route("/api/settings/foreign-sessions", put_foreign_settings, methods=["PUT"]),
             Route("/api/settings/developer", get_developer_settings, methods=["GET"]),
             Route("/api/settings/developer", put_developer_settings, methods=["PUT"]),
+            Route("/api/settings/telemetry", get_telemetry_settings, methods=["GET"]),
+            Route("/api/settings/telemetry", put_telemetry_settings, methods=["PUT"]),
             Route("/api/settings/pipeline-review-step", get_pipeline_review_step_settings, methods=["GET"]),
             Route("/api/settings/pipeline-review-step", put_pipeline_review_step_settings, methods=["PUT"]),
             Route(

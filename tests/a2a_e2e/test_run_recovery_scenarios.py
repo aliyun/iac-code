@@ -6,6 +6,7 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 
 def _load_runner():
@@ -1440,6 +1441,30 @@ def test_post_rollback_timeout_allows_step_regeneration_time() -> None:
     args = SimpleNamespace(event_timeout=300, stream_timeout=2400)
 
     assert runner._post_rollback_timeout(args) == 900
+
+
+def test_deterministic_fault_mode_still_runs_real_provider_preflight(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(
+        [
+            "--allow-real-cloud",
+            "--deterministic",
+            "--provider",
+            "dashscope",
+            "--run-dir",
+            str(tmp_path),
+            "--scenario",
+            "fault-after-snapshot",
+        ]
+    )
+    preflight = MagicMock(return_value={"ok": True, "summary": "ok"})
+    monkeypatch.setattr(runner, "run_llm_preflight", preflight)
+    harness = runner.ScenarioHarness(args, scenario="fault-after-snapshot")
+
+    harness.preflight()
+
+    preflight.assert_called_once()
+    assert harness.checks["LLM preflight succeeded"] is True
 
 
 def test_wait_any_ignores_finished_stream_when_another_stream_matches() -> None:

@@ -46,10 +46,13 @@ PATH="$HOME/.local/bin:$PATH" \
 uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --allow-real-cloud \
   --deterministic \
-  --skip-preflight \
+  --provider dashscope \
   --scenario fault-after-snapshot \
   --fault-at after_a2a_pipeline_snapshot_saved
 ```
+
+deterministic 模式只固定 crash 注入点；重启后的 pipeline 仍会使用真实 provider、
+工具和云 API。因此除非已单独验证 provider，否则不要跳过 preflight。
 
 如果想快速验证一条真实 provider / tool / 云路径，跑一个代表场景：
 

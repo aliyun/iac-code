@@ -284,6 +284,27 @@ class ResourceObservedEvent(ToolEmittedEvent):
 
 
 @dataclass
+class StackOperationStartedEvent(ToolEmittedEvent):
+    """A stack lifecycle operation has started, before its first poll.
+
+    Web-only t0 signal so the output panel shows ``*_IN_PROGRESS`` immediately for
+    non-create actions (delete/update/continue), instead of waiting for the first
+    poll (~POLL_INTERVAL). Deliberately separate from ResourceObservedEvent: the a2a
+    translator (which turns ResourceObservedEvent into ``stack_current_changed``) does
+    not recognize this type and ignores it, so current-stack semantics stay untouched.
+    """
+
+    provider: str
+    stack_id: str
+    stack_name: str = ""
+    region_id: str = ""
+    action: str = ""
+    tool_name: str = ""
+    tool_use_id: str | None = None
+    type: Literal["stack_operation_started"] = "stack_operation_started"
+
+
+@dataclass
 class StackProgressEvent(ToolEmittedEvent):
     """Real-time progress from a stack lifecycle operation."""
 
@@ -293,6 +314,10 @@ class StackProgressEvent(ToolEmittedEvent):
     progress_percentage: float
     resources: list[dict[str, Any]]
     elapsed_seconds: int
+    # 栈所在 region。轮询返回的 resources 只有 name/type/status,不含 region 字段,
+    # web 桥接无法从中推断 region;这里带上权威 region,使 live overlay 的去重键
+    # `region::name` 与服务端派生栈一致,建栈期不再出现同名双栈。
+    region_id: str = ""
     # 让 web 前端把进度关联到发起该栈操作的工具卡(与 ResourceObservedEvent/MCPProgressEvent 一致)。
     tool_use_id: str | None = None
     type: Literal["stack_progress"] = "stack_progress"
@@ -412,6 +437,7 @@ StreamEvent = Union[
     QueuedInputSubmittedEvent,
     SubAgentToolEvent,
     ResourceObservedEvent,
+    StackOperationStartedEvent,
     StackProgressEvent,
     StackInstancesProgressEvent,
     MCPProgressEvent,

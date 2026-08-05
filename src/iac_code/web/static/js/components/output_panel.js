@@ -75,7 +75,107 @@ export function diagramStateBadge(stateStr) {
   return null;
 }
 
-export function createOutputController({ getSessionId, api, onPayload = () => {}, getDiagramState = () => "none" }) {
+// 资源栈控制台 URL(与后端 outputs.build_ros_console_url 一致):region 与 stackId 均非空才生成。
+// 前端 live 进行中栈(普通对话 ros_stack 创建期间)由此补出控制台链接,与服务端派生栈观感一致。
+export function rosConsoleUrl(regionId, stackId) {
+  if (!regionId || !stackId) return null;
+  return `https://ros.console.aliyun.com/${regionId}/stacks/${stackId}`;
+}
+
+// 资源栈去重键(与后端 outputs.add_stack 一致):有栈名用「region::栈名」,否则退回 stackId。
+// live 进行中栈必须用同一套键与服务端权威栈对齐,终态 tool_result 落盘后服务端条目才能覆盖占位。
+function stackDedupKey(stack) {
+  const name = stack?.stackName || "";
+  const region = stack?.regionId || "";
+  return name ? `${region}::${name}` : stack?.stackId || "";
+}
+
+function normalizeLiveStack(stack) {
+  return {
+    stackId: stack.stackId || "",
+    stackName: stack.stackName || "",
+    status: stack.status || "",
+    statusReason: stack.statusReason || "",
+    isSuccess: stack.isSuccess === true,
+    regionId: stack.regionId || "",
+    consoleUrl: stack.consoleUrl || rosConsoleUrl(stack.regionId, stack.stackId),
+  };
+}
+
+// 判断是否为「进行中」状态(*_IN_PROGRESS / *_REQUESTED)。
+function isTransitionalStackStatus(status) {
+  const s = String(status || "").toUpperCase();
+  return s.endsWith("_IN_PROGRESS") || s.endsWith("_REQUESTED");
+}
+
+// 判断是否为删除态(DELETE_*)。删除是「离开」建栈/更新终态的状态迁移,live 的删除态(含终态
+// DELETE_COMPLETE)比服务端上一轮的建栈/更新终态更新,须覆盖之——否则删除刚完成、tool_result 尚未落盘
+// 的窗口里,面板会「删除完成却仍显示 CREATE_COMPLETE」。
+function isDeleteStackStatus(status) {
+  return String(status || "").toUpperCase().startsWith("DELETE");
+}
+
+// 合并服务端派生栈与 live 进行中栈供面板渲染。
+// live 进行中栈代表「当前回合正在执行」的栈操作(liveStacksFromState 已用 currentTurnActive +
+// 工具仍在运行 守卫),是该物理栈的最新真实状态;服务端派生栈可能仍是上一轮的旧终态——建栈的
+// CREATE_COMPLETE 尚未被本次 delete/update 的终态 tool_result 覆盖。故 live 的进行中态必须覆盖
+// 服务端旧终态,否则删除看不到 DELETE_IN_PROGRESS、更新停在 CREATE_COMPLETE(见回归用例)。
+// 工具结束后 live 清空,自然交还服务端权威终态(含 status_reason)。
+// 匹配同一物理栈:优先同 dedup 键;delete/update 常只带 StackId(无 StackName),先按 stackId
+// 借用服务端权威名称/region 再计算键；服务端也无名时才退回 stackId,避免同一栈并排两行。
+// live 非进行中(极少见:轮询末帧已是终态)时保留服务端权威态;delete_and_create 新建的另一个栈
+// (同名不同 stackId)因进行中态也会正确覆盖旧栈终态。
+export function mergeStacksForDisplay(serverStacks, liveStacks) {
+  const byKey = new Map();
+  const serverKeyByStackId = new Map();
+  const serverStackByStackId = new Map();
+  for (const stack of serverStacks || []) {
+    const key = stackDedupKey(stack);
+    byKey.set(key, stack);
+    if (stack?.stackId) {
+      serverKeyByStackId.set(stack.stackId, key);
+      serverStackByStackId.set(stack.stackId, stack);
+    }
+  }
+  for (const stack of liveStacks || []) {
+    const live = normalizeLiveStack(stack);
+    // DeleteStack 的真实请求通常只有 StackId，因此 reload/restart 后的 t0 live 条目可能没有栈名。
+    // 先按 StackId 用服务端权威条目回填名称/region，再计算 dedup key；否则 delete_and_create 的旧栈
+    // 会以裸 StackId 为键，与同名新栈的 region::name 键并排显示到工具结束。
+    const serverForId = live.stackId ? serverStackByStackId.get(live.stackId) : undefined;
+    if (serverForId) {
+      live.stackName = live.stackName || serverForId.stackName || "";
+      live.regionId = live.regionId || serverForId.regionId || "";
+      live.consoleUrl = live.consoleUrl || serverForId.consoleUrl || rosConsoleUrl(live.regionId, live.stackId);
+    }
+    const key = stackDedupKey(live);
+    // 找出服务端同一物理栈:先按 dedup 键;无名 t0 则按 stackId 回找其(可能不同的)键。
+    const serverKeyForId = live.stackId ? serverKeyByStackId.get(live.stackId) : undefined;
+    const matchKey = byKey.has(key) ? key : serverKeyForId;
+    const existing = matchKey != null ? byKey.get(matchKey) : undefined;
+    if (existing && !isTransitionalStackStatus(live.status)) {
+      // live 非进行中 → 保留服务端权威终态;仅当 live 属另一个栈(stackId 不同)才让它胜出。
+      // 例外:live 是删除终态而服务端非 delete 态(旧建栈/更新终态)——删除是更新的状态迁移,
+      // 即便同 stackId 也让 live 胜出,避免删除完成后面板闪回 CREATE_COMPLETE。
+      const existingId = existing.stackId || "";
+      const liveId = live.stackId || "";
+      const liveDeleteSupersedes = isDeleteStackStatus(live.status) && !isDeleteStackStatus(existing.status);
+      if (!liveDeleteSupersedes && (!existingId || !liveId || existingId === liveId)) continue;
+    }
+    // live 进行中态胜出:取代服务端旧终态。若匹配到的服务端行键不同(无名 t0),先删旧键,单行不重复。
+    if (matchKey != null && matchKey !== key) byKey.delete(matchKey);
+    byKey.set(key, live);
+  }
+  return [...byKey.values()];
+}
+
+export function createOutputController({
+  getSessionId,
+  api,
+  onPayload = () => {},
+  getDiagramState = () => "none",
+  getLiveStacks = () => [],
+}) {
   const toggle = byShell("output-toggle");
   const countBadge = byShell("output-count");
   const panel = byShell("output-panel");
@@ -194,8 +294,14 @@ export function createOutputController({ getSessionId, api, onPayload = () => {}
     return div;
   }
 
-  function total(payload) {
-    return (payload.stacks?.length || 0) + (payload.files?.length || 0) + (payload.diagrams?.length || 0);
+  // 面板实际展示的资源栈 = 服务端权威栈 + live 进行中栈(合并去重)。renderPanel / total 均以此为准,
+  // 故 live 进行中栈同样计入角标数与自动展开判定,创建一开始面板就带上「创建中」栈。
+  function displayStacks() {
+    return mergeStacksForDisplay(latestPayload.stacks, getLiveStacks());
+  }
+
+  function total() {
+    return displayStacks().length + (latestPayload.files?.length || 0) + (latestPayload.diagrams?.length || 0);
   }
 
   function setOpen(open) {
@@ -204,7 +310,7 @@ export function createOutputController({ getSessionId, api, onPayload = () => {}
   }
 
   function updateToggle() {
-    const count = total(latestPayload);
+    const count = total();
     if (!toggle) return;
     toggle.hidden = count === 0;
     if (countBadge) {
@@ -217,8 +323,9 @@ export function createOutputController({ getSessionId, api, onPayload = () => {}
   function renderPanel() {
     if (!body) return;
     const sections = [];
-    if (latestPayload.stacks?.length) {
-      sections.push(renderSection(t("Resource stacks"), latestPayload.stacks.map(renderStackRow)));
+    const stacks = displayStacks();
+    if (stacks.length) {
+      sections.push(renderSection(t("Resource stacks"), stacks.map(renderStackRow)));
     }
     if (latestPayload.files?.length) {
       sections.push(renderSection(t("Template files"), latestPayload.files.map(renderFileRow)));
@@ -319,7 +426,7 @@ export function createOutputController({ getSessionId, api, onPayload = () => {}
     }
     renderPanel();
     updateToggle();
-    if (total(latestPayload) > 0 && !autoOpenedOnce) {
+    if (total() > 0 && !autoOpenedOnce) {
       autoOpenedOnce = true;
       setOpen(true);
     }

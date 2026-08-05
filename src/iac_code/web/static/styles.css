@@ -10639,14 +10639,18 @@ body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-cell-sta
 .workspace-other-panel {
   gap: 0.4rem;
 }
-.workspace-other-panel .workspace-settings-group-head {
+.workspace-other-panel .workspace-settings-group-head,
+.workspace-developer-panel .workspace-settings-group-head {
   margin: 0 0 0.12rem;
 }
-/* 面板标题「常规」→ 首个分区标题(红箭头)与卡片 → 下一分区标题(蓝箭头)统一采用同一章节
+/* 面板标题「常规」/「开发者」→ 首个分区标题(红箭头)与卡片 → 下一分区标题(蓝箭头)统一采用同一章节
    间距,并较此前 1.5rem 再放大 1.5 倍到 2.25rem,让章节分隔更明确、首节不再紧贴标题。 */
 .workspace-other-panel > h3 + .workspace-settings-group-head,
 .workspace-other-panel .workspace-settings-group + .workspace-settings-group-head,
-.workspace-other-panel .workspace-field + .workspace-settings-group-head {
+.workspace-other-panel .workspace-field + .workspace-settings-group-head,
+.workspace-developer-panel > h3 + .workspace-settings-group-head,
+.workspace-developer-panel .workspace-settings-group + .workspace-settings-group-head,
+.workspace-developer-panel .workspace-field + .workspace-settings-group-head {
   margin-top: 2.25rem;
 }
 

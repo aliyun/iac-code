@@ -1,12 +1,12 @@
-import * as api from "./api.js?v=web-repl-ui-307";
+import * as api from "./api.js?v=web-repl-ui-309";
 import { createComposerController } from "./components/composer.js?v=session-model-v19";
 import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v5";
 import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v7";
 import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v23";
-import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v51";
-import { createOutputController } from "./components/output_panel.js?v=output-panel-v17";
+import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v55";
+import { createOutputController } from "./components/output_panel.js?v=output-panel-v22";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
-import { reduceEvent } from "./events.js?v=web-repl-ui-304";
+import { reduceEvent } from "./events.js?v=web-repl-ui-319";
 import { applyDomI18n, t } from "./i18n.js?v=web-repl-ui-277";
 
 const root = document.getElementById("iac-code-web-root");
@@ -624,8 +624,20 @@ function renderInlineSessionStatusPanel(currentState = {}) {
   if (!target) {
     return;
   }
-  target.replaceChildren();
   const status = currentState.inlineSessionStatus;
+  // 流水线会话:/status 展示与 composer 圈圈同源的每步上下文用量(文字版);其余会话保持单条会话级用量。
+  const contextWindows =
+    currentState.currentSession?.mode === "pipeline" ? deriveContextUsageWindows(currentState) : [];
+  const rows = status ? statusPanelRows(status, { contextWindows }) : [];
+  // 会话进行中每次流式 render 都会调到这里;内容未变仍 replaceChildren 重建,会销毁并重建光标下的
+  // 关闭按钮,令其 :hover 反复通断(用户反馈鼠标悬停时「一闪闪」)。内容签名一致时直接短路,完全不动
+  // DOM,hover 态得以保持。
+  const signature = status ? JSON.stringify(rows) : "";
+  if (target.dataset.statusSignature === signature) {
+    return;
+  }
+  target.dataset.statusSignature = signature;
+  target.replaceChildren();
   target.hidden = !status;
   if (!status) {
     return;
@@ -648,11 +660,8 @@ function renderInlineSessionStatusPanel(currentState = {}) {
 
   const list = document.createElement("dl");
   list.className = "session-status-list";
-  // 流水线会话:/status 展示与 composer 圈圈同源的每步上下文用量(文字版);其余会话保持单条会话级用量。
-  const contextWindows =
-    currentState.currentSession?.mode === "pipeline" ? deriveContextUsageWindows(currentState) : [];
   list.append(
-    ...statusPanelRows(status, { contextWindows }).map((row) =>
+    ...rows.map((row) =>
       makeSessionStatusRow(row.label, row.value, { copyValue: row.copyable ? row.value : "" }),
     ),
   );
@@ -730,8 +739,16 @@ function renderInlineMcpStatusPanel(currentState = {}) {
   if (!target) {
     return;
   }
-  target.replaceChildren();
   const mcp = currentState.inlineMcpStatus;
+  const servers = mcp ? mcpStatusServers(mcp) : [];
+  // 同 renderInlineSessionStatusPanel:内容未变时按签名短路,避免流式逐帧 replaceChildren 销毁并
+  // 重建光标下的关闭按钮,令其 :hover「一闪闪」。
+  const signature = mcp ? JSON.stringify(servers) : "";
+  if (target.dataset.mcpStatusSignature === signature) {
+    return;
+  }
+  target.dataset.mcpStatusSignature = signature;
+  target.replaceChildren();
   target.hidden = !mcp;
   if (!mcp) {
     return;
@@ -752,7 +769,6 @@ function renderInlineMcpStatusPanel(currentState = {}) {
   close.addEventListener("click", hideInlineMcpStatus);
   header.append(title, close);
 
-  const servers = mcpStatusServers(mcp);
   const list = document.createElement("div");
   list.className = "mcp-status-list";
   if (servers.length) {
@@ -4613,6 +4629,76 @@ function scheduleOutputsRefresh() {
     outputController?.refresh(state.currentSessionId);
   }, 400);
 }
+
+// 普通对话 ros_stack 创建期间,后端 outputs_payload 派生不出「创建中」栈(无流水线 envelope、
+// 终态 tool_result 尚未落盘),故输出面板在整个创建过程中为空——ros_deploy 走流水线路径由
+// stack_current_changed(进行中态)提前入栈,而 ros_stack 的进行中态只经 live SSE 到达前端。
+// 这里从 live 事件态派生进行中栈,交由 output_panel 与服务端权威栈按「region::栈名」合并(服务端
+// 有则以它为准),让资源栈在创建开始即出现,终态到达后由服务端条目自然取代。两个来源:
+//   1) resource.observed —— CreateStack 返回即到(t0 最早,且 region 可靠);
+//   2) 工具卡 stackProgress —— 每约 5s 轮询一帧,带真实栈状态。
+function liveStacksFromState() {
+  // 动作→进行中状态:每个写操作在 t0 应显示的 *_IN_PROGRESS(轮询到真实状态后被覆盖)。
+  const STACK_ACTION_STATUS = {
+    CreateStack: "CREATE_IN_PROGRESS",
+    UpdateStack: "UPDATE_IN_PROGRESS",
+    DeleteStack: "DELETE_IN_PROGRESS",
+    ContinueCreateStack: "CREATE_IN_PROGRESS",
+  };
+  // live 进行中栈只在「当前回合正进行 + 发起该操作的工具仍在运行」时有效。回合结束(turn.done →
+  // currentTurnActive=false,含取消/中断)或工具终止(tool.result/finished → status 非 running,含轮询失败)
+  // 后必须清空对应占位,交还服务端权威态,否则面板会永久停在 CREATE_IN_PROGRESS。
+  if (!state.currentTurnActive) return [];
+  const tools = state.tools || {};
+  const isToolRunning = (toolUseId) => !!toolUseId && tools[toolUseId]?.status === "running";
+
+  // resource.observed 的 region/栈名可靠(始终为本次操作 region;非 create 的 t0 也带名),用作
+  // stackProgress 早期缺 region 或无名时的回退。栈名回填尤为关键:delete_and_create 的 delete 相
+  // 轮询帧常只带 StackId、无名,若不回填则该相在合并层退回裸 stackId 键,与创建相的
+  // 「region::栈名」键分裂 → 面板瞬时并排两行同名栈;回填后两相凭同名在合并层折为单行。
+  const regionByStackId = new Map();
+  const nameByStackId = new Map();
+  for (const r of state.resources || []) {
+    if (r?.resourceType !== "stack" || !r.resourceId) continue;
+    if (r.regionId) regionByStackId.set(r.resourceId, r.regionId);
+    if (r.resourceName) nameByStackId.set(r.resourceId, r.resourceName);
+  }
+  // 去重键 stackId 优先:非 create 的 t0(如 DeleteStack 常只带 StackId、无名)与之后带名的
+  // stack.progress 凭同一 stackId 合并成一行,真实进度 last-wins 覆盖占位状态。
+  const keyOf = (region, name, id) => id || (name ? `${region || ""}::${name}` : "");
+  const byKey = new Map();
+  // resource.observed:创建一开始的最早占位(尚无真实状态,创建动作按 CREATE_IN_PROGRESS 记)。
+  // 仅当发起观测的工具仍在运行才保留——否则这只是已终止操作遗留的陈旧占位。
+  for (const r of state.resources || []) {
+    if (r?.resourceType !== "stack" || !r.resourceId) continue;
+    if (!isToolRunning(r.toolUseId)) continue;
+    const region = r.regionId || "";
+    byKey.set(keyOf(region, r.resourceName, r.resourceId), {
+      stackId: r.resourceId,
+      stackName: r.resourceName || "",
+      status: STACK_ACTION_STATUS[r.action] || "",
+      isSuccess: false,
+      regionId: region,
+    });
+  }
+  // stackProgress:轮询真实状态覆盖占位(同键 last-wins),region 缺失时回退 resource.observed 记录的可靠值。
+  // 同样只认仍在运行的工具卡进度;已完成/失败工具的最后一帧不再作为 live。
+  for (const [toolUseId, tool] of Object.entries(tools)) {
+    if (!isToolRunning(toolUseId)) continue;
+    const sp = tool?.stackProgress;
+    if (!sp || sp.kind !== "stack.progress" || (!sp.stackId && !sp.stackName)) continue;
+    const region = sp.regionId || regionByStackId.get(sp.stackId) || "";
+    const name = sp.stackName || nameByStackId.get(sp.stackId) || "";
+    byKey.set(keyOf(region, name, sp.stackId), {
+      stackId: sp.stackId || "",
+      stackName: name,
+      status: sp.status || "",
+      isSuccess: sp.deploymentComplete === true,
+      regionId: region,
+    });
+  }
+  return [...byKey.values()];
+}
 let sessionLoadGeneration = 0;
 let materializedDraftSession = null;
 let draftProjectMenuOpen = false;
@@ -5099,6 +5185,11 @@ async function handleStreamEvent(event, generation = sessionLoadGeneration) {
     if (kind === "stack.progress" || kind === "stack.instances.progress") {
       scheduleOutputsRefresh();
     }
+  }
+  // 普通对话 ros_stack 建栈:CreateStack 返回即发 resource.observed(t0 最早)。刷新输出面板让
+  // liveStacksFromState 派生的「创建中」栈立刻出现(服务端此刻还派生不出该栈),而非等首帧 stack.progress。
+  if (event.type === "resource.observed") {
+    scheduleOutputsRefresh();
   }
   // 合并渲染：高频流式事件下每帧只重建一次正文，避免逐 token 全量重排造成卡顿。
   scheduleStreamRender();
@@ -5773,6 +5864,8 @@ async function start() {
     api,
     // 架构图行/预览头的优化三态(待优化/优化中/已完成),按当前会话事件态计算。
     getDiagramState: (item) => diagramOptimizationState(item, state),
+    // 普通对话 ros_stack 创建期间的 live「创建中」栈,由 output_panel 与服务端权威栈合并去重后渲染。
+    getLiveStacks: liveStacksFromState,
     // /outputs 的架构图落到 state.webDiagrams,供 pipeline step4 候选卡内联折叠图消费;
     // pipeline 视图下触发一次重渲染(与 renderPipelineWorkspace 同一渲染入口)。
     onPayload: (payload) => {

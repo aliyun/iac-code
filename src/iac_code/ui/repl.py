@@ -3775,6 +3775,10 @@ class InlineREPL:
         terminal_event = None
         try:
             self.store.set_state(is_busy=True)
+            # The restored sidecar is waiting for the *old* ask answer. Once
+            # that answer is submitted, later steps must be free to render
+            # until they reach their own input boundary.
+            self._pipeline_waiting_input = False
             if pending_ask is not None:
                 terminal_event = await self._resume_pending_ask_user_question_from_sidecar(pending_ask)
             else:
@@ -3835,16 +3839,41 @@ class InlineREPL:
                 allow_free_text=bool(pending.get("allowFreeText", pending.get("allow_free_text", True))),
                 free_text_prompt=str(pending.get("freeTextPrompt") or pending.get("free_text_prompt") or ""),
             )
-            answer = await self.renderer.prompt_user_question(event)
+            supplemental_input = None
+            prompt_input = getattr(self, "_prompt_input", None)
+            if prompt_input is None:
+                answer = await self.renderer.prompt_user_question(event)
+            else:
+                captured_input: PromptInputResult | str | None = None
+
+                async def read_answer(prompt: str) -> str | None:
+                    nonlocal captured_input
+                    text = await prompt_input.get_input(prompt=prompt)
+                    if text is None:
+                        captured_input = None
+                        return None
+                    result = prompt_input.make_result()
+                    captured_input = result if result.pasted_contents else text
+                    return text
+
+                answer = await self.renderer.prompt_user_question(event, input_reader=read_answer)
+                if isinstance(captured_input, PromptInputResult):
+                    pipeline_input = self._pipeline_user_input_from_repl_input(captured_input)
+                    if pipeline_input.has_images:
+                        supplemental_input = pipeline_input
             if answer is None:
                 return None
             await self._persist_pending_ask_user_question_answer(tool_use_id, answer)
+        else:
+            supplemental_input = None
 
-        event_stream = resume(
-            answer,
-            tool_use_id=tool_use_id,
-            pending_input=pending,
-        )
+        resume_kwargs: dict[str, Any] = {
+            "tool_use_id": tool_use_id,
+            "pending_input": pending,
+        }
+        if supplemental_input is not None:
+            resume_kwargs["supplemental_input"] = supplemental_input
+        event_stream = resume(answer, **resume_kwargs)
         return await self._render_pipeline_stream(event_stream)
 
     async def _persist_pending_ask_user_question(self, event: AskUserQuestionEvent) -> None:

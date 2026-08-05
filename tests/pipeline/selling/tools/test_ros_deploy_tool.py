@@ -5,6 +5,7 @@ import os
 import pytest
 
 from iac_code.tools.base import ToolContext, ToolResult
+from iac_code.tools.cloud.base_stack import STACK_RESULT_METADATA_KEY
 from iac_code.types.permissions import PermissionMode, ToolPermissionContext
 from iac_code.types.stream_events import StackProgressEvent
 
@@ -96,6 +97,40 @@ async def test_create_records_failed_stack_as_owned_for_recovery(monkeypatch):
         },
         "region_id": "cn-hangzhou",
     }
+
+
+@pytest.mark.asyncio
+async def test_create_records_stack_from_metadata_when_diagnostics_follow_json(monkeypatch):
+    guard_state = {}
+    stack_result = {
+        "stack_id": "stack-failed",
+        "stack_name": "demo",
+        "status": "CREATE_FAILED",
+        "is_success": False,
+    }
+    tool, _fake_stack = _deploy_tool(
+        monkeypatch,
+        guard_state=guard_state,
+        results=[
+            ToolResult(
+                content=json.dumps(stack_result) + "\n---\nROS local preflight diagnostics:\n3 limitations",
+                is_error=True,
+                metadata={STACK_RESULT_METADATA_KEY: stack_result},
+            )
+        ],
+    )
+
+    result = await tool.execute(
+        tool_input={
+            "action": "create",
+            "stack_name": "demo",
+            "template_url": "templates/demo.yml",
+        },
+        context=ToolContext(cwd="/workspace", pipeline_mode=True),
+    )
+
+    assert result.is_error is True
+    assert guard_state["ros_deploy_owned_stack_ids"]["stack-failed"] == {"action": "create"}
 
 
 @pytest.mark.asyncio
@@ -322,6 +357,39 @@ async def test_wait_action_polls_existing_stack_without_starting_lifecycle_actio
         "cn-hangzhou",
         "stack-slow",
     )
+
+
+@pytest.mark.asyncio
+async def test_wait_does_not_adopt_an_unowned_stack(monkeypatch):
+    guard_state = {}
+    tool, _fake_stack = _deploy_tool(
+        monkeypatch,
+        guard_state=guard_state,
+        results=[
+            ToolResult.success(
+                json.dumps(
+                    {
+                        "stack_id": "stack-unowned",
+                        "stack_name": "demo",
+                        "status": "CREATE_FAILED",
+                        "is_success": False,
+                    }
+                )
+            )
+        ],
+    )
+
+    await tool.execute(
+        tool_input={"action": "wait", "stack_id": "stack-unowned", "region_id": "cn-hangzhou"},
+        context=ToolContext(cwd="/workspace", pipeline_mode=True),
+    )
+
+    assert guard_state.get("ros_deploy_owned_stack_ids", {}) == {}
+    permission = await tool.check_permissions(
+        {"action": "continue_create", "stack_id": "stack-unowned", "template_url": "templates/demo.yml"},
+        _permission_ctx(allow={"session": ["ros_deploy(continue_create:stack-unowned)"]}),
+    )
+    assert permission.behavior == "deny"
 
 
 @pytest.mark.asyncio

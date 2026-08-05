@@ -549,13 +549,6 @@ class ScenarioHarness:
         self.snapshots: dict[str, Any] = {}
 
     def preflight(self) -> None:
-        if self.args.deterministic:
-            self.checks["LLM preflight skipped for deterministic mode"] = True
-            self.notes.append(
-                "LLM preflight skipped because deterministic fault injection is enabled; "
-                "post-restart execution still uses the configured pipeline/provider."
-            )
-            return
         if self.args.skip_preflight:
             self.notes.append("LLM preflight skipped")
             return

@@ -405,18 +405,32 @@ export function saveForeignSessionsVisibility({ showPipeline = false, showNormal
   });
 }
 
-// 开发者模式:mode 控制「开发」设置分页是否出现;highlightFailedTools 控制失败工具是否标红。
+// 开发者模式:mode 控制「开发」设置分页是否出现;highlightFailedTools 控制失败工具是否标红;
+// debug 开启后端 DEBUG 级别日志(落 logs/web.log,默认关)。
 export function getDeveloperSettings() {
   return jsonFetch("/api/settings/developer");
 }
 
-export function saveDeveloperSettings({ mode = false, highlightFailedTools = false } = {}) {
+export function saveDeveloperSettings({ mode = false, highlightFailedTools = false, debug = false } = {}) {
   return jsonFetch("/api/settings/developer", {
     method: "PUT",
     body: JSON.stringify({
       mode: Boolean(mode),
       highlightFailedTools: Boolean(highlightFailedTools),
+      debug: Boolean(debug),
     }),
+  });
+}
+
+// 遥测内容共享:读取/保存是否附带完整对话内容(「帮助改进 iac-code」开关)。
+export function getTelemetrySettings() {
+  return jsonFetch("/api/settings/telemetry");
+}
+
+export function saveTelemetrySettings({ shareContent = false } = {}) {
+  return jsonFetch("/api/settings/telemetry", {
+    method: "PUT",
+    body: JSON.stringify({ shareContent: Boolean(shareContent) }),
   });
 }
 

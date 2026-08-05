@@ -2006,7 +2006,12 @@ class Renderer:
             return False
         return False
 
-    async def prompt_user_question(self, event: AskUserQuestionEvent) -> dict[str, str] | None:
+    async def prompt_user_question(
+        self,
+        event: AskUserQuestionEvent,
+        *,
+        input_reader: Callable[[str], Awaitable[str | None]] | None = None,
+    ) -> dict[str, str] | None:
         """Inline user question prompt that accepts either a choice or free text."""
         self.console.print(Text(event.question, style="bold"))
 
@@ -2027,10 +2032,15 @@ class Renderer:
 
         loop = asyncio.get_running_loop()
         while True:
-            try:
-                raw_answer = await loop.run_in_executor(None, self.console.input, "  > ")
-            except EOFError:
-                return None
+            if input_reader is None:
+                try:
+                    raw_answer = await loop.run_in_executor(None, self.console.input, "  > ")
+                except EOFError:
+                    return None
+            else:
+                raw_answer = await input_reader("  > ")
+                if raw_answer is None:
+                    return None
 
             answer = raw_answer.strip()
             if not answer:

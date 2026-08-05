@@ -78,6 +78,19 @@ async def test_prompt_user_question_accepts_direct_free_text_without_prior_selec
 
 
 @pytest.mark.asyncio
+async def test_prompt_user_question_uses_async_input_reader_when_provided():
+    renderer = _renderer()
+    renderer.console.input = MagicMock(side_effect=AssertionError("console.input must not be used"))
+    reader = AsyncMock(return_value="nginx 网站，日访问 1 万")
+
+    result = await renderer.prompt_user_question(_event(), input_reader=reader)
+
+    assert result == {"selected_id": "", "selected_label": "", "free_text": "nginx 网站，日访问 1 万"}
+    reader.assert_awaited_once_with("  > ")
+    renderer.console.input.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_prompt_user_question_does_not_require_free_text_placeholder_option():
     renderer = _renderer()
     renderer.console.input = MagicMock(return_value="1")

@@ -48,6 +48,21 @@ async def test_server_streams_a_tool_round_then_text(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_server_returns_json_for_non_streaming_title_request(tmp_path) -> None:
+    with DeterministicOpenAIServer(tmp_path / "requests.jsonl") as server:
+        client = AsyncOpenAI(api_key="test", base_url=server.base_url)
+        response = await client.chat.completions.create(
+            model="fixture",
+            messages=[{"role": "user", "content": "title this conversation"}],
+            stream=False,
+        )
+        await client.close()
+
+    assert response.choices[0].message.content == "E2E contract chat"
+    assert server.requests()[0].get("stream") is not True
+
+
+@pytest.mark.asyncio
 async def test_server_routes_pipeline_nudge_and_template_tools(tmp_path) -> None:
     with DeterministicOpenAIServer(tmp_path / "requests.jsonl") as server:
         client = AsyncOpenAI(api_key="test", base_url=server.base_url)

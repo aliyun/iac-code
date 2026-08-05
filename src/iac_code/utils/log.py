@@ -120,8 +120,15 @@ def _install_stdlib_bridge() -> None:
             stdlib_logger.setLevel(logging.DEBUG)
 
 
-def enable_debug_at_runtime(session_id: str) -> Path:
+def enable_debug_at_runtime(session_id: str, *, replace_startup_info_handler: bool = False) -> Path:
     """Enable debug logging mid-session (for /debug command).
+
+    Args:
+        session_id: Current session ID, used in the log filename.
+        replace_startup_info_handler: Web-only opt-in. When True, the startup INFO
+            handler on the same file is removed before the DEBUG handler is added, so
+            INFO+ lines are not written twice while debug is on. Defaults to False to
+            preserve the historical behavior for CLI/REPL/A2A/ACP callers unchanged.
 
     Returns:
         Path to the log file.
@@ -134,6 +141,17 @@ def enable_debug_at_runtime(session_id: str) -> Path:
 
     if _debug_enabled:
         return log_file
+
+    # The startup handler writes INFO to this same file. Leaving it in place while we
+    # add a DEBUG handler on the same path duplicates every INFO+ line (both handlers
+    # accept INFO). Web opts in to dropping it first; disable_debug_at_runtime re-adds an
+    # INFO handler on toggle-off. We keep _startup_handler_id (now stale) so that re-add
+    # branch still fires — disable's logger.remove of the stale id fails harmlessly.
+    if replace_startup_info_handler and _startup_handler_id is not None:
+        try:
+            logger.remove(_startup_handler_id)
+        except ValueError:
+            pass
 
     if _stdout_enabled:
         if _stdout_handler_id is not None:

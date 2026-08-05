@@ -103,9 +103,10 @@ def web(
     """Run iac-code as a local Web app."""
     from iac_code.services.telemetry import bootstrap_telemetry, graceful_shutdown
     from iac_code.web.server import run_web_server
+    from iac_code.web.settings import developer_settings
 
     session_id = "web-server-{}".format(uuid.uuid4())
-    setup_logging(session_id=session_id, debug=False)
+    setup_logging(session_id=session_id, debug=bool(developer_settings().get("debug")))
     bootstrap_telemetry(session_id=session_id)
     try:
         run_web_server(
