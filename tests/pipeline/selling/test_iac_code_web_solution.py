@@ -28,7 +28,10 @@ def test_solution_reference_is_shared_and_pipeline_prompts_are_minimal() -> None
     architecture = (SELLING / "skills/iac-aliyun-architecture/SKILL.md").read_text(encoding="utf-8")
     generating = (SELLING / "skills/iac-aliyun-template-generating/SKILL.md").read_text(encoding="utf-8")
     deploying = (SELLING / "skills/iac-aliyun-deploying/SKILL.md").read_text(encoding="utf-8")
-    assert "candidate.name = iac-code-web-single-ecs" in architecture
+    assert "`candidate.name` 固定为 `iac-code-web-single-ecs`" in architecture
+    assert "单 ECS + EIP" in architecture
+    assert "安全组仅开放 8766" in architecture
+    assert "不得增加其他入口资源" in architecture
     assert "references/solutions/iac-code-web.md" in generating
     assert "references/solutions/iac-code-web.ros.yml" in generating
     assert "iac-code-web-single-ecs" not in deploying
@@ -64,6 +67,9 @@ def test_golden_template_has_only_the_fixed_single_ecs_topology() -> None:
     template = _template()
     resources = template["Resources"]
 
+    assert template["Metadata"]["ALIYUN::ROS::Interface"]["TemplateTags"] == [
+        "acs:solution:iac-code:iac-code-web"
+    ]
     assert {name: resource["Type"] for name, resource in resources.items()} == {
         "Vpc": "ALIYUN::ECS::VPC",
         "VSwitch": "ALIYUN::ECS::VSwitch",
@@ -110,24 +116,30 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
     assert variables == {
         "BailianApiKeyB64": {"Fn::Base64Encode": {"Fn::GetAtt": ["BailianApiKey", "Key"]}},
         "MasterAccountId": {"Ref": "ALIYUN::TenantId"},
+        "StackRegion": {"Ref": "ALIYUN::Region"},
     }
-    assert "iac-code[http]==${IacCodeVersion}" in script
+    assert 'pip install --upgrade --index-url https://mirrors.aliyun.com/pypi/simple/ "iac-code[http]"' in script
+    assert "iac-code[http]==" not in script
     assert "--host 0.0.0.0 --port 8766 --access-token-file" in script
     assert "Restart=on-failure" in script
     assert "secrets.token_urlsafe(32)" in script
     assert 'exec >>"$LOG" 2>&1' in script
     assert "printf '%s' \"$TOKEN\" >&3" in script
     assert set(re.findall(r"\$\{([^}]+)\}", script)) == {
-        "IacCodeVersion",
         "BailianApiKeyB64",
         "MasterAccountId",
+        "StackRegion",
     }
     for expected in (
         "'activeProvider': 'dashscope'",
+        "root / '.cloud-credentials.yml'",
+        "'mode': 'OAuth'",
+        "'region_id': '${StackRegion}'",
+        "'oauth_site_type': 'CN'",
         "'memory': {'autoMemory': True}",
         "'pipeline': {'sellingReviewStep': False}",
         "'apiBase': 'https://dashscope.aliyuncs.com/compatible-mode/v1'",
-        "'model': 'qwen3.7-max'",
+        "'model': 'deepseek-v4-flash-0731'",
         "'name': 'DashScope'",
         "'mode': 'normal'",
         "'permissionMode': 'bypass_permissions'",
@@ -136,9 +148,10 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
         "'userID': '${MasterAccountId}'",
     ):
         assert expected in script
+    assert "'model': 'qwen3.7-max'" not in script
 
     outputs = template["Outputs"]
-    assert set(outputs) == {"PublicUrl", "WebAccessToken", "InstanceId", "EipAddress", "IacCodeVersion"}
+    assert set(outputs) == {"PublicUrl", "WebAccessToken", "InstanceId", "EipAddress"}
     assert all(set(output["Label"]) == {"en", "zh-cn"} for output in outputs.values())
     assert outputs["WebAccessToken"]["Value"] == {
         "Fn::Base64Decode": {"Fn::Jq": ["First", ".[0].Output", {"Fn::GetAtt": ["Bootstrap", "InvokeResults"]}]}

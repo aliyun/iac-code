@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from iac_code.agent.message import Message, ToolUseBlock
+from iac_code.tools.cloud.base_stack import stack_result_from_metadata
 from iac_code.web.session_manager import _tool_results_by_id
 
 TEMPLATE_SUFFIXES = {".json", ".yaml", ".yml", ".tf"}
@@ -111,10 +112,13 @@ def _leading_json_object(text: str) -> dict[str, Any] | None:
     return obj if isinstance(obj, dict) else None
 
 
-def _stack_result_dict(result: Any) -> dict[str, Any] | None:
+def _stack_result_dict(result: Any, metadata: Any = None) -> dict[str, Any] | None:
     """把单个 ros_stack 结果(str 或 dict)解析为含 stack_id 的字典,否则 None。"""
-    if isinstance(result, dict):
-        data: dict[str, Any] | None = result
+    structured = stack_result_from_metadata(metadata)
+    if structured is not None:
+        data = structured
+    elif isinstance(result, dict):
+        data = result
     elif isinstance(result, str):
         data = _leading_json_object(result)
     else:
@@ -126,7 +130,7 @@ def _stack_result_dict(result: Any) -> dict[str, Any] | None:
 
 def _stack_result_json(results: list[Any]) -> dict[str, Any] | None:
     for block in results:
-        data = _stack_result_dict(getattr(block, "content", None))
+        data = _stack_result_dict(getattr(block, "content", None), getattr(block, "metadata", None))
         if data:
             return data
     return None
@@ -344,7 +348,7 @@ def outputs_payload(manager: Any, session: Any, optimizing_indices: frozenset[in
         tool_name = data.get("toolName")
         tool_input = data.get("input") or {}
         if _is_stack_write_call(tool_name, tool_input.get("action")):
-            parsed = _stack_result_dict(data.get("result"))
+            parsed = _stack_result_dict(data.get("stackResult") or data.get("result"))
             if parsed:
                 add_stack(parsed, tool_input.get("region_id"))
         elif tool_name in {"write_file", "edit_file"}:

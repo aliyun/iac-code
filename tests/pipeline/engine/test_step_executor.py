@@ -21,6 +21,7 @@ from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     MessageEndEvent,
     MessageStartEvent,
+    ResourceObservedEvent,
     TextDeltaEvent,
     ToolResultEvent,
     ToolUseEndEvent,
@@ -432,6 +433,86 @@ class TestStepExecutor:
         collected = []
         with patch("iac_code.agent.agent_loop.AgentLoop", FakeAgentLoop):
             async for event in executor.execute(step, PipelineContext({"template": []}), "session"):
+                collected.append(event)
+
+        results = [event for event in collected if isinstance(event, StepResult)]
+        assert len(results) == 1
+        assert results[0].status == StepStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_resource_observed_event_records_create_but_not_wait_stack_ownership(self, tmp_path):
+        from iac_code.pipeline.selling.tools.ros_deploy_tool import RosDeployTool
+
+        (tmp_path / "prompts").mkdir()
+        (tmp_path / "prompts" / "intent_parsing.md").write_text("Parse intent.", encoding="utf-8")
+        pipeline = _make_pipeline()
+        pipeline.pipeline_tools["ros_deploy"] = RosDeployTool
+        step = _make_step()
+        step.inject_tools = ["ros_deploy"]
+
+        class FakeAgentLoop:
+            def __init__(self, **kwargs):
+                self.tool_registry = kwargs["tool_registry"]
+
+            async def run_streaming(self, user_input):
+                deploy_tool = self.tool_registry.get("ros_deploy")
+                assert isinstance(deploy_tool, RosDeployTool)
+
+                yield ToolUseStartEvent(tool_use_id="create_1", name="ros_deploy")
+                yield ToolUseEndEvent(
+                    tool_use_id="create_1",
+                    name="ros_deploy",
+                    input={"action": "create", "stack_name": "demo"},
+                )
+                yield ResourceObservedEvent(
+                    provider="ros",
+                    resource_type="stack",
+                    resource_id="stack-created",
+                    action="CreateStack",
+                    tool_name="ros_stack",
+                    tool_use_id="create_1",
+                )
+                assert deploy_tool._is_owned_stack("stack-created")
+
+                yield ToolUseStartEvent(tool_use_id="wait_1", name="ros_deploy")
+                yield ToolUseEndEvent(
+                    tool_use_id="wait_1",
+                    name="ros_deploy",
+                    input={"action": "wait", "stack_id": "stack-external"},
+                )
+                yield ResourceObservedEvent(
+                    provider="ros",
+                    resource_type="stack",
+                    resource_id="stack-external",
+                    action="CreateStack",
+                    tool_name="ros_stack",
+                    tool_use_id="wait_1",
+                )
+                assert not deploy_tool._is_owned_stack("stack-external")
+
+                conclusion = {"type": "iac-code-web"}
+                yield ToolUseStartEvent(tool_use_id="done_1", name="complete_step")
+                yield ToolUseEndEvent(
+                    tool_use_id="done_1",
+                    name="complete_step",
+                    input={"conclusion": conclusion},
+                )
+                yield ToolResultEvent(
+                    tool_use_id="done_1",
+                    tool_name="complete_step",
+                    result="ok",
+                )
+
+        executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+        )
+
+        collected = []
+        with patch("iac_code.agent.agent_loop.AgentLoop", FakeAgentLoop):
+            async for event in executor.execute(step, PipelineContext(SIMPLE_DEPS), "session"):
                 collected.append(event)
 
         results = [event for event in collected if isinstance(event, StepResult)]

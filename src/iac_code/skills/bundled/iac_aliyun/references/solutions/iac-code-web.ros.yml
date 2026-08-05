@@ -14,9 +14,10 @@ Metadata:
           - InstanceType
           - SystemDiskCategory
           - InternetBandwidth
-          - IacCodeVersion
         Label:
           default: iac-code Web
+    TemplateTags:
+      - acs:solution:iac-code:iac-code-web
 Parameters:
   ZoneId:
     Type: String
@@ -60,14 +61,6 @@ Parameters:
     Label:
       en: Web access CIDR
       zh-cn: Web 访问网段
-    AssociationProperty: String
-  IacCodeVersion:
-    Type: String
-    Default: 0.11.0
-    AllowedPattern: ^[0-9]+\.[0-9]+\.[0-9]+(?:[a-zA-Z0-9.-]*)?$
-    Label:
-      en: iac-code version
-      zh-cn: iac-code 版本
     AssociationProperty: String
 Resources:
   Vpc:
@@ -159,7 +152,7 @@ Resources:
             id iac-code >/dev/null 2>&1 || useradd --system --create-home --home-dir /var/lib/iac-code iac-code
             install -d -m 0700 -o iac-code -g iac-code /var/lib/iac-code
             python3.11 -m venv /opt/iac-code/venv
-            /opt/iac-code/venv/bin/pip install --index-url https://mirrors.aliyun.com/pypi/simple/ "iac-code[http]==${IacCodeVersion}"
+            /opt/iac-code/venv/bin/pip install --upgrade --index-url https://mirrors.aliyun.com/pypi/simple/ "iac-code[http]"
 
             TOKEN_FILE=/var/lib/iac-code/web-access.token
             if [ -f "$TOKEN_FILE" ]; then
@@ -188,6 +181,13 @@ Resources:
             root = pathlib.Path('/var/lib/iac-code')
             updates = {
                 root / '.credentials.yml': {'dashscope': os.environ['BAILIAN_API_KEY']},
+                root / '.cloud-credentials.yml': {
+                    'aliyun': {
+                        'mode': 'OAuth',
+                        'region_id': '${StackRegion}',
+                        'oauth_site_type': 'CN',
+                    }
+                },
                 root / 'settings.yml': {
                     'activeProvider': 'dashscope',
                     'memory': {'autoMemory': True},
@@ -195,7 +195,7 @@ Resources:
                     'providers': {
                         'dashscope': {
                             'apiBase': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-                            'model': 'qwen3.7-max',
+                            'model': 'deepseek-v4-flash-0731',
                             'name': 'DashScope',
                         }
                     },
@@ -272,6 +272,8 @@ Resources:
                   - Key
             MasterAccountId:
               Ref: ALIYUN::TenantId
+            StackRegion:
+              Ref: ALIYUN::Region
 Outputs:
   PublicUrl:
     Label:
@@ -310,9 +312,3 @@ Outputs:
       Fn::GetAtt:
         - Eip
         - EipAddress
-  IacCodeVersion:
-    Label:
-      en: iac-code version
-      zh-cn: iac-code 版本
-    Value:
-      Ref: IacCodeVersion

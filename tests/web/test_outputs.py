@@ -1,9 +1,11 @@
+import json
 from pathlib import Path
 
 import pytest
 from starlette.testclient import TestClient
 
 from iac_code.agent.message import Message, ToolResultBlock, ToolUseBlock
+from iac_code.tools.cloud.base_stack import STACK_RESULT_METADATA_KEY
 from iac_code.web import outputs
 from iac_code.web.app import create_app
 from iac_code.web.session_manager import WebSessionManager
@@ -90,11 +92,14 @@ class _FakeManager:
         return self._envelopes if context_id else []
 
 
-def _env_tool_result(tool_name, *, tool_input=None, result=None):
+def _env_tool_result(tool_name, *, tool_input=None, result=None, stack_result=None):
     """构造一个 pipeline A2A `tool_result` envelope(与真实日志同形)。"""
+    data = {"toolName": tool_name, "input": tool_input or {}, "result": result}
+    if stack_result is not None:
+        data["stackResult"] = stack_result
     return {
         "eventType": "tool_result",
-        "data": {"toolName": tool_name, "input": tool_input or {}, "result": result},
+        "data": data,
     }
 
 
@@ -122,11 +127,14 @@ def _tool_use(name, tool_id, **input_kwargs):
     return Message(role="assistant", content=[ToolUseBlock(id=tool_id, name=name, input=input_kwargs)])
 
 
-def _tool_result(tool_id, payload):
+def _tool_result(tool_id, payload, *, metadata=None):
     import json as _json
 
     body = payload if isinstance(payload, str) else _json.dumps(payload)
-    return Message(role="user", content=[ToolResultBlock(tool_use_id=tool_id, content=body)])
+    return Message(
+        role="user",
+        content=[ToolResultBlock(tool_use_id=tool_id, content=body, metadata=metadata or {})],
+    )
 
 
 ROS_JSON = '{"ROSTemplateFormatVersion": "2015-09-01", "Resources": {"v": {"Type": "ALIYUN::ECS::VPC"}}}'
@@ -422,6 +430,32 @@ def test_payload_pipeline_delete_and_create_shows_new_stack(tmp_path):
     assert stack["isSuccess"] is True
 
 
+def test_payload_pipeline_ros_deploy_prefers_structured_stack_result(tmp_path):
+    stack_result = {
+        "stack_id": "stack-failed",
+        "stack_name": "demo",
+        "status": "CREATE_FAILED",
+        "status_reason": "Bootstrap failed",
+        "is_success": False,
+    }
+    envelopes = [
+        _env_tool_result(
+            "ros_deploy",
+            tool_input={"action": "create", "region_id": "cn-hangzhou"},
+            result=json.dumps(stack_result) + "\n---\nROS local preflight diagnostics:\n3 limitations",
+            stack_result=stack_result,
+        )
+    ]
+
+    payload = outputs.outputs_payload(
+        _FakeManager([], envelopes),
+        _FakeSession(tmp_path, context_id="ctx-1"),
+    )
+
+    assert payload["stacks"][0]["stackId"] == "stack-failed"
+    assert payload["stacks"][0]["statusReason"] == "Bootstrap failed"
+
+
 def test_payload_pipeline_stack_appears_in_progress(tmp_path):
     # 部署开始:仅有进行中态 stack_current_changed(尚无终态 tool_result)时,资源栈就应出现,
     # 状态为 CREATE_IN_PROGRESS、isSuccess=False、带 console URL——让面板在创建开始即显示,而非完成后。
@@ -486,6 +520,29 @@ def test_payload_stack_ros_deploy_main_session():
     assert len(payload["stacks"]) == 1
     assert payload["stacks"][0]["stackId"] == "stk-d"
     assert payload["stacks"][0]["status"] == "CREATE_COMPLETE"
+
+
+def test_payload_stack_ros_deploy_main_session_uses_metadata():
+    stack_result = {
+        "stack_id": "stack-failed",
+        "stack_name": "app",
+        "status": "CREATE_FAILED",
+        "status_reason": "Bootstrap failed",
+        "is_success": False,
+    }
+    messages = [
+        _tool_use("ros_deploy", "t1", action="create", region_id="cn-hangzhou"),
+        _tool_result(
+            "t1",
+            json.dumps(stack_result) + "\n---\nROS local preflight diagnostics:\n3 limitations",
+            metadata={STACK_RESULT_METADATA_KEY: stack_result},
+        ),
+    ]
+
+    payload = outputs.outputs_payload(_FakeManager(messages), _FakeSession("/tmp/x"))
+
+    assert payload["stacks"][0]["stackId"] == "stack-failed"
+    assert payload["stacks"][0]["status"] == "CREATE_FAILED"
 
 
 def test_payload_pipeline_dedup_abs_and_relative_path(tmp_path):
