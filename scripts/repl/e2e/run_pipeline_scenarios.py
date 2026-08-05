@@ -2223,23 +2223,116 @@ def _expect_initial_prompt(pty: ReplPty, args: argparse.Namespace) -> None:
     pty.expect_any(REPL_INPUT_READY_PATTERNS, description="prompt input ready", timeout=args.timeout)
 
 
-def _expect_candidate_selection(pty: ReplPty, args: argparse.Namespace, *, description: str) -> None:
+def _expect_candidate_selection(
+    pty: ReplPty,
+    args: argparse.Namespace,
+    *,
+    description: str,
+    require_live_refresh: bool = False,
+) -> None:
     pty.expect_any(CANDIDATE_SELECTION_PATTERNS, description=description, timeout=args.stream_timeout)
+    _expect_candidate_selection_ready(pty, args, require_live_refresh=require_live_refresh)
+
+
+def _expect_candidate_selection_ready(
+    pty: ReplPty,
+    args: argparse.Namespace,
+    *,
+    require_live_refresh: bool = False,
+) -> None:
     controls_ready = pty.expect_optional(
         CANDIDATE_SELECTION_READY_PATTERNS,
         description="candidate selection controls ready",
         timeout=args.candidate_selection_ready_timeout,
     )
-    if not controls_ready:
+    if controls_ready and require_live_refresh:
+        # Startup replay prints the saved selection screen before the live raw
+        # key reader is active. Wait for a subsequent Live refresh so a choice
+        # cannot be consumed by the normal REPL prompt instead (a timing race
+        # that made identical reruns alternate between pass and timeout).
+        pty.expect_any(
+            CANDIDATE_SELECTION_READY_PATTERNS,
+            description="live candidate selection controls ready",
+            timeout=args.timeout,
+        )
+    elif not controls_ready:
         _expect_raw_input_ready(pty, args, description="candidate selection input ready")
 
 
-def _expect_raw_input_ready(pty: ReplPty, args: argparse.Namespace, *, description: str) -> None:
-    pty.expect_any(REPL_INPUT_READY_PATTERNS, description=description, timeout=args.timeout)
+def _expect_candidate_selection_after_optional_asks(
+    pty: ReplPty,
+    args: argparse.Namespace,
+    *,
+    description: str,
+) -> int:
+    """Reach candidate selection while answering legitimate intent clarifications."""
+    for ask_count in range(4):
+        matched = pty.expect_any(
+            CANDIDATE_SELECTION_PATTERNS + ASK_USER_QUESTION_HEADING_PATTERNS,
+            description=description,
+            timeout=args.stream_timeout,
+        )
+        if matched in CANDIDATE_SELECTION_PATTERNS:
+            _expect_candidate_selection_ready(pty, args)
+            return ask_count
+        _expect_ask_input_ready(pty, args, description="cleanup clarification input ready")
+        pty.sendline("1")
+    raise RuntimeError("too many cleanup clarification questions before candidate selection")
+
+
+def _expect_raw_input_ready(
+    pty: ReplPty,
+    args: argparse.Namespace,
+    *,
+    description: str,
+    since_offset: int | None = None,
+) -> None:
+    _expect_any_since(
+        pty,
+        args,
+        REPL_INPUT_READY_PATTERNS,
+        description=description,
+        timeout=args.timeout,
+        since_offset=since_offset,
+    )
+
+
+def _expect_any_since(
+    pty: ReplPty,
+    args: argparse.Namespace,
+    patterns: tuple[str, ...],
+    *,
+    description: str,
+    timeout: float,
+    since_offset: int | None = None,
+) -> str:
+    if since_offset is not None:
+        drain_output = getattr(pty, "drain_output", None)
+        if callable(drain_output):
+            drain_output()
+        suffix = pty.transcript[since_offset:]
+        for pattern in patterns:
+            if re.search(pattern, suffix):
+                pty.events.append(
+                    {
+                        "type": "expect",
+                        "description": description,
+                        "pattern": pattern,
+                        "passed": True,
+                        "buffered": True,
+                        "at": _utc_now(),
+                    }
+                )
+                return pattern
+    return pty.expect_any(patterns, description=description, timeout=timeout)
 
 
 def _expect_ask_input_ready(pty: ReplPty, args: argparse.Namespace, *, description: str) -> None:
-    pty.expect_any(ASK_INPUT_READY_PATTERNS, description=description, timeout=args.timeout)
+    pty.expect_any(
+        ASK_INPUT_READY_PATTERNS + REPL_INPUT_READY_PATTERNS,
+        description=description,
+        timeout=args.timeout,
+    )
 
 
 def _expect_interrupt_input_ready(
@@ -2261,14 +2354,25 @@ def _expect_parallel_interrupt_ready(pty: ReplPty, args: argparse.Namespace) -> 
     _expect_raw_input_ready(pty, args, description="parallel interrupt input ready")
 
 
-def _wait_for_cleanup_completed_and_ready(pty: ReplPty, args: argparse.Namespace, first_stack_id: str) -> None:
+def _wait_for_cleanup_completed_and_ready(
+    pty: ReplPty,
+    args: argparse.Namespace,
+    first_stack_id: str,
+    *,
+    prompt_ready_since: int | None = None,
+) -> None:
     _wait_for_cleanup_resource_status(pty, first_stack_id, {"completed"}, timeout=args.stream_timeout)
     pty.expect_optional(
         CLEANUP_COMPLETED_PATTERNS,
         description="cleanup completed",
         timeout=min(args.timeout, 5.0),
     )
-    _expect_raw_input_ready(pty, args, description="post-cleanup prompt input ready")
+    _expect_raw_input_ready(
+        pty,
+        args,
+        description="post-cleanup prompt input ready",
+        since_offset=prompt_ready_since,
+    )
 
 
 def _wait_for_cleanup_resume_summary_or_completion(
@@ -2460,7 +2564,12 @@ def run_image_selection_waiting_resume(args: argparse.Namespace, scenario: str) 
         pty.terminate(force=True)
         checks["first process killed"] = True
         pty.spawn(extra_args=["--continue"])
-        _expect_candidate_selection(pty, args, description="candidate selection replayed after image resume")
+        _expect_candidate_selection(
+            pty,
+            args,
+            description="candidate selection replayed after image resume",
+            require_live_refresh=True,
+        )
         checks["candidate selection replayed after resume"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent after resume"] = True
@@ -2763,7 +2872,11 @@ def _run_rollback_step5_cleanup(
         _ensure_cleanup_network_target(args, pty.run_dir)
         checks["cleanup network target prepared"] = True
         pty.sendline(_cleanup_pipeline_prompt(args, pty.run_dir))
-        _expect_candidate_selection(pty, args, description="initial candidate selection visible")
+        _expect_candidate_selection_after_optional_asks(
+            pty,
+            args,
+            description="initial candidate selection or clarification visible",
+        )
         checks["initial reached step4 selection"] = True
 
         _select_default_candidate(pty, args)
@@ -2789,7 +2902,11 @@ def _run_rollback_step5_cleanup(
 
         pty.sendline(_cleanup_rollback_prompt(args, pty.run_dir))
         checks["rollback prompt sent"] = True
-        _expect_candidate_selection(pty, args, description="post-rollback candidate selection visible")
+        _expect_candidate_selection_after_optional_asks(
+            pty,
+            args,
+            description="post-rollback candidate selection or clarification visible",
+        )
         checks["post-rollback candidate selection visible"] = True
 
         cleanup_stack_ids = _wait_for_cleanup_target_stack_ids(pty, exclude=set(), timeout=args.timeout)
@@ -2798,6 +2915,7 @@ def _run_rollback_step5_cleanup(
 
         _select_default_candidate(pty, args)
         checks["post-rollback candidate selected"] = True
+        second_deployment_offset = len(pty.transcript)
         pty.expect_any(
             PIPELINE_FULLY_COMPLETED_PATTERNS,
             description="pipeline completed after second deployment",
@@ -2822,18 +2940,32 @@ def _run_rollback_step5_cleanup(
             bool(second_stack_id) and _cleanup_resource_for_stack(pty, second_stack_id) is None
         )
 
-        _expect_raw_input_ready(pty, args, description="normal follow-up prompt input ready")
-        pty.sendline(args.normal_followup_prompt)
-        if kill_during_cleanup:
-            pty.expect_any(
+        cleanup_prompt_ready_offset = second_deployment_offset
+        cleanup_or_prompt = _expect_any_since(
+            pty,
+            args,
+            REPL_INPUT_READY_PATTERNS + CLEANUP_STARTED_PATTERNS,
+            description="cleanup start or normal follow-up prompt input ready",
+            timeout=args.stream_timeout,
+            since_offset=second_deployment_offset,
+        )
+        if cleanup_or_prompt in REPL_INPUT_READY_PATTERNS:
+            cleanup_prompt_ready_offset = len(pty.transcript)
+            pty.sendline(args.normal_followup_prompt)
+            _expect_any_since(
+                pty,
+                args,
                 CLEANUP_STARTED_PATTERNS,
-                description="cleanup started before kill",
+                description="cleanup started after normal follow-up",
                 timeout=args.stream_timeout,
+                since_offset=second_deployment_offset,
             )
+        if kill_during_cleanup:
             checks["cleanup started before kill"] = True
             pty.terminate(force=True)
             checks["cleanup process killed"] = True
             pty.spawn(extra_args=["--continue"])
+            cleanup_prompt_ready_offset = len(pty.transcript)
             resume_summary_visible = _wait_for_cleanup_resume_summary_or_completion(pty, args, first_stack_id)
             if _cleanup_resource_completed(_cleanup_resource_for_stack(pty, first_stack_id)):
                 checks["cleanup already completed after restart"] = True
@@ -2842,10 +2974,14 @@ def _run_rollback_step5_cleanup(
                 pty.sendline(args.cleanup_continue_prompt)
                 checks["cleanup continue prompt sent after restart"] = True
         else:
-            pty.expect_any(CLEANUP_STARTED_PATTERNS, description="cleanup started", timeout=args.stream_timeout)
             checks["cleanup started"] = True
 
-        _wait_for_cleanup_completed_and_ready(pty, args, first_stack_id)
+        _wait_for_cleanup_completed_and_ready(
+            pty,
+            args,
+            first_stack_id,
+            prompt_ready_since=cleanup_prompt_ready_offset,
+        )
         checks["first rollback stack cleanup completed in ledger"] = _cleanup_resource_completed(
             _cleanup_resource_for_stack(pty, first_stack_id)
         )

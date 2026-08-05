@@ -79,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
         "mode": "normal",
         "provider": "openai_compatible",
         "model": FIXTURE_MODEL,
-        "expected_provider_attempts": 3,
+        "expected_provider_attempts": 4,
         "process_epochs": [],
         "base_url": base_url,
     }
@@ -141,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
         _stop_web_server(server, timeout=args.timeout)
         server = None
         epoch1_records = observe.wait_for(
-            lambda records: _terminal_count(records) >= 2 and _has_request_metrics(records),
+            lambda records: _terminal_count(records) >= 3 and _has_request_metrics(records),
             timeout=args.timeout,
         )
         epoch1_end = len(epoch1_records)
@@ -175,12 +175,16 @@ def main(argv: list[str] | None = None) -> int:
             base_url,
             web_session_id,
             provider,
-            expected_requests=3,
+            expected_requests=4,
             expected_text=FINAL_RESPONSE,
             timeout=args.timeout,
         )
         public_payloads.append(final_transcript)
-        checks["reload follow-up used same session"] = len(provider.requests()) == 3
+        provider_requests = provider.requests()
+        checks["reload follow-up used same session"] = len(provider_requests) == 4
+        checks["Web title used one non-streaming provider request"] = sum(
+            request.get("stream") is not True for request in provider_requests
+        ) == 1
 
         _stop_web_server(server, timeout=args.timeout)
         server = None
@@ -195,7 +199,6 @@ def main(argv: list[str] | None = None) -> int:
 
         resumed_session_path, resumed_tool_result = find_latest_aliyun_tool_result(config_dir)
         checks["reload selected the same persisted session"] = resumed_session_path == session_path
-        provider_requests = provider.requests()
         public_payloads.append(provider_requests)
         contract = audit_aliyun_result_contract(
             expected_body=EXPECTED_BODY,
@@ -209,12 +212,27 @@ def main(argv: list[str] | None = None) -> int:
         )
         checks["Web Aliyun result contract"] = contract["passed"]
 
-        telemetry1 = audit_provider_attempts(
+        epoch1_normal_records = _records_for_request_spans(
             all_records[:epoch1_end],
+            required_attributes={"iac_code.mode": "normal"},
+        )
+        epoch1_title_records = _records_for_request_spans(
+            all_records[:epoch1_end],
+            required_attributes={"iac_code.mode": None},
+        )
+        telemetry1 = audit_provider_attempts(
+            epoch1_normal_records,
             expected_attempts=2,
             expected_provider="openai",
             expected_model=TELEMETRY_MODEL,
             expected_span_attributes={"iac_code.mode": "normal", "gen_ai.session.id": f"iac_sess_{session_id}"},
+        )
+        telemetry_title = audit_provider_attempts(
+            epoch1_title_records,
+            expected_attempts=1,
+            expected_provider="openai",
+            expected_model=TELEMETRY_MODEL,
+            expected_span_attributes={"gen_ai.session.id": f"iac_sess_{session_id}"},
         )
         telemetry2 = audit_provider_attempts(
             epoch2_records,
@@ -224,8 +242,8 @@ def main(argv: list[str] | None = None) -> int:
             expected_span_attributes={"iac_code.mode": "normal", "gen_ai.session.id": f"iac_sess_{session_id}"},
         )
         telemetry = {
-            "passed": telemetry1["passed"] and telemetry2["passed"],
-            "process_epochs": {"initial": telemetry1, "reload": telemetry2},
+            "passed": telemetry1["passed"] and telemetry_title["passed"] and telemetry2["passed"],
+            "process_epochs": {"initial": telemetry1, "initial_title": telemetry_title, "reload": telemetry2},
         }
         (run_dir / "telemetry-audit.json").write_text(
             json.dumps(telemetry, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -430,6 +448,25 @@ def _wait_for_provider_count_and_transcript(
             return latest
         time.sleep(0.1)
     raise TimeoutError("timed out waiting for the Web reload follow-up")
+
+
+def _records_for_request_spans(
+    records: list[dict[str, Any]],
+    *,
+    required_attributes: dict[str, Any],
+) -> list[dict[str, Any]]:
+    span_ids = {
+        str(record.get("span_id") or "")
+        for record in records
+        if record.get("kind") == "span"
+        and str(record.get("name") or "").startswith("chat ")
+        and all((record.get("attributes") or {}).get(key) == value for key, value in required_attributes.items())
+    }
+    return [
+        record
+        for record in records
+        if record.get("kind") == "metric" or str(record.get("span_id") or "") in span_ids
+    ]
 
 
 def _contains_text(value: Any, expected: str) -> bool:

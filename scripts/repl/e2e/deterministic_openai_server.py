@@ -117,6 +117,9 @@ class _Handler(BaseHTTPRequestHandler):
         response_delay = float(getattr(self.server, "response_delay", 0.0) or 0.0)
         if response_delay:
             time.sleep(response_delay)
+        if payload.get("stream") is not True:
+            self._write_non_streaming_response()
+            return
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -142,6 +145,32 @@ class _Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             # Cancellation scenarios intentionally close the streaming response.
             return
+
+    def _write_non_streaming_response(self) -> None:
+        body = json.dumps(
+            {
+                "id": "chatcmpl-e2e-title",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": FIXTURE_MODEL,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "E2E contract chat"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 120, "completion_tokens": 8, "total_tokens": 128},
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+        self.wfile.flush()
 
     def log_message(self, format: str, *args: object) -> None:
         return

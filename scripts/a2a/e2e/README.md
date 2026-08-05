@@ -32,10 +32,14 @@ PATH="$HOME/.local/bin:$PATH" \
 uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --allow-real-cloud \
   --deterministic \
-  --skip-preflight \
+  --provider dashscope \
   --scenario fault-after-snapshot \
   --fault-at after_a2a_pipeline_snapshot_saved
 ```
+
+Deterministic mode controls only the crash point. The restarted pipeline still
+uses the real configured provider, tools, and cloud APIs, so keep the provider
+preflight enabled unless it has already been verified separately.
 
 Run one representative real scenario when you want a quick provider/tool/cloud
 path check:

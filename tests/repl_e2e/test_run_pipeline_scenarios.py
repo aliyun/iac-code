@@ -2294,6 +2294,7 @@ def test_image_selection_waiting_resume_starts_with_image_and_recovers_selection
         ("terminate", "True"),
         ("spawn", "--continue"),
         ("expect", "candidate selection replayed after image resume"),
+        ("expect", "live candidate selection controls ready"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after image selection resume"),
         ("sendline", "/exit"),
@@ -2766,23 +2767,118 @@ def test_rollback_step5_cleanup_runs_expected_terminal_flow(monkeypatch, tmp_pat
         ("expect", "initial prompt"),
         ("expect", "prompt input ready"),
         ("sendline", runner._cleanup_pipeline_prompt(args, tmp_path)),
-        ("expect", "initial candidate selection visible"),
+        ("expect", "initial candidate selection or clarification visible"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "first stack create started"),
         ("send-esc", "\x1b"),
         ("expect", "deploying interrupt input visible"),
         ("expect", "deploying interrupt input ready"),
         ("sendline", runner._cleanup_rollback_prompt(args, tmp_path)),
-        ("expect", "post-rollback candidate selection visible"),
+        ("expect", "post-rollback candidate selection or clarification visible"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after second deployment"),
-        ("expect", "normal follow-up prompt input ready"),
+        ("expect", "cleanup start or normal follow-up prompt input ready"),
         ("sendline", args.normal_followup_prompt),
-        ("expect", "cleanup started"),
+        ("expect", "cleanup started after normal follow-up"),
         ("expect_optional", "cleanup completed"),
         ("expect", "post-cleanup prompt input ready"),
         ("sendline", "/exit"),
     ]
+
+
+def test_cleanup_ready_accepts_marker_already_drained_after_followup(monkeypatch) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    marker = "\x1b[>4;2m"
+
+    class FakePty:
+        transcript = "old prompt marker\n" + marker + "\nfollowup response\n" + marker
+        events: list[dict[str, object]] = []
+
+        def drain_output(self) -> None:
+            return None
+
+        def expect_optional(self, patterns, *, description, timeout):
+            return True
+
+        def expect_any(self, patterns, *, description, timeout):
+            raise AssertionError("buffered prompt marker should avoid another blocking expect")
+
+    pty = FakePty()
+    followup_offset = pty.transcript.index("followup response")
+    monkeypatch.setattr(runner, "_wait_for_cleanup_resource_status", lambda *_, **__: None)
+
+    runner._wait_for_cleanup_completed_and_ready(
+        pty,
+        args,
+        "stack-id",
+        prompt_ready_since=followup_offset,
+    )
+
+    assert pty.events[-1]["description"] == "post-cleanup prompt input ready"
+    assert pty.events[-1]["buffered"] is True
+
+
+def test_raw_input_ready_ignores_buffered_marker_before_requested_offset() -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    marker = "\x1b[>4;2m"
+
+    class FakePty:
+        transcript = "old prompt\n" + marker + "\nsecond deployment completed"
+        events: list[dict[str, object]] = []
+        expected = False
+
+        def drain_output(self) -> None:
+            return None
+
+        def expect_any(self, patterns, *, description, timeout):
+            self.expected = True
+            return patterns[0]
+
+    pty = FakePty()
+    second_deployment_offset = pty.transcript.index("second deployment")
+
+    runner._expect_raw_input_ready(
+        pty,
+        args,
+        description="normal follow-up prompt input ready",
+        since_offset=second_deployment_offset,
+    )
+
+    assert pty.expected is True
+    assert not pty.events
+
+
+def test_expect_any_since_accepts_buffered_cleanup_start_after_offset() -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    cleanup_marker = "DeleteStack"
+
+    class FakePty:
+        transcript = "old prompt\nsecond deployment completed\n" + cleanup_marker
+        events: list[dict[str, object]] = []
+
+        def drain_output(self) -> None:
+            return None
+
+        def expect_any(self, patterns, *, description, timeout):
+            raise AssertionError("buffered cleanup marker should avoid another blocking expect")
+
+    pty = FakePty()
+    second_deployment_offset = pty.transcript.index("second deployment")
+
+    matched = runner._expect_any_since(
+        pty,
+        args,
+        runner.REPL_INPUT_READY_PATTERNS + runner.CLEANUP_STARTED_PATTERNS,
+        description="cleanup start or normal follow-up prompt input ready",
+        timeout=args.stream_timeout,
+        since_offset=second_deployment_offset,
+    )
+
+    assert matched in runner.CLEANUP_STARTED_PATTERNS
+    assert pty.events[-1]["buffered"] is True
 
 
 def test_scenario_runtime_paths_override_shared_sandbox_state(tmp_path: Path) -> None:
@@ -2884,19 +2980,19 @@ def test_rollback_step5_cleanup_recovery_runs_expected_terminal_flow(monkeypatch
         ("expect", "initial prompt"),
         ("expect", "prompt input ready"),
         ("sendline", runner._cleanup_pipeline_prompt(args, tmp_path)),
-        ("expect", "initial candidate selection visible"),
+        ("expect", "initial candidate selection or clarification visible"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "first stack create started"),
         ("send-esc", "\x1b"),
         ("expect", "deploying interrupt input visible"),
         ("expect", "deploying interrupt input ready"),
         ("sendline", runner._cleanup_rollback_prompt(args, tmp_path)),
-        ("expect", "post-rollback candidate selection visible"),
+        ("expect", "post-rollback candidate selection or clarification visible"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after second deployment"),
-        ("expect", "normal follow-up prompt input ready"),
+        ("expect", "cleanup start or normal follow-up prompt input ready"),
         ("sendline", args.normal_followup_prompt),
-        ("expect", "cleanup started before kill"),
+        ("expect", "cleanup started after normal follow-up"),
         ("terminate", "True"),
         ("spawn", "--continue"),
         ("expect_optional", "cleanup resume summary"),
