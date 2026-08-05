@@ -41,6 +41,29 @@ class FailingPersistence:
             raise OSError("disk full")
 
 
+class CountingTaskPersistence(A2APersistenceStore):
+    def __init__(self, root) -> None:
+        super().__init__(root)
+        self.task_save_count = 0
+
+    def save_task(self, snapshot) -> None:
+        self.task_save_count += 1
+        super().save_task(snapshot)
+
+
+class FlakyTaskPersistence(CountingTaskPersistence):
+    def __init__(self, root) -> None:
+        super().__init__(root)
+        self.fail_next_task_save = True
+
+    def save_task(self, snapshot) -> None:
+        if self.fail_next_task_save:
+            self.task_save_count += 1
+            self.fail_next_task_save = False
+            raise OSError("temporary write failure")
+        super().save_task(snapshot)
+
+
 class NamedUser(User):
     def __init__(self, user_name: str) -> None:
         self._user_name = user_name
@@ -1018,6 +1041,69 @@ async def test_save_updates_existing_executor_record_state_in_persistence(tmp_pa
     assert record.state == "completed"
     assert snapshot is not None
     assert snapshot.state == "completed"
+
+
+@pytest.mark.asyncio
+async def test_save_skips_only_shared_task_snapshot_when_sdk_state_is_unchanged(monkeypatch, tmp_path) -> None:
+    config_dir = tmp_path / "config"
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    persistence = CountingTaskPersistence(config_dir / "a2a")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    context = await store.get_or_create_context(context_id="ctx-1", cwd=str(cwd), runtime_factory=lambda sid: object())
+    await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+
+    await store.save(sdk_task("task-1", context_id="ctx-1", state=TaskState.TASK_STATE_WORKING, updated_at=1))
+    await store.save(sdk_task("task-1", context_id="ctx-1", state=TaskState.TASK_STATE_WORKING, updated_at=2))
+
+    live_task = await store.get("task-1")
+    persisted_task = persistence.load_task("task-1")
+    session_task_path = SessionStorage().session_dir(str(cwd), context.session_id) / "a2a" / "task.json"
+    session_task = json.loads(session_task_path.read_text(encoding="utf-8"))
+    assert persistence.task_save_count == 2
+    assert live_task is not None
+    assert live_task.status.timestamp == timestamp(2)
+    assert persisted_task is not None
+    assert persisted_task.state == "working"
+    assert persisted_task.updated_at == 1
+    assert session_task["state"] == "working"
+    assert session_task["updated_at"] == 2
+
+
+@pytest.mark.asyncio
+async def test_save_persists_sdk_state_transitions_and_explicit_task_mirrors(tmp_path) -> None:
+    persistence = CountingTaskPersistence(tmp_path / "a2a")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+
+    await store.save(sdk_task("task-1", context_id="ctx-1", state=TaskState.TASK_STATE_WORKING, updated_at=1))
+    await store.save(sdk_task("task-1", context_id="ctx-1", state=TaskState.TASK_STATE_WORKING, updated_at=2))
+    record.output_text.append("delivered")
+    store.mirror_task(record)
+    await store.save(sdk_task("task-1", context_id="ctx-1", state=TaskState.TASK_STATE_COMPLETED, updated_at=3))
+
+    snapshot = persistence.load_task("task-1")
+    assert persistence.task_save_count == 4
+    assert snapshot is not None
+    assert snapshot.state == "completed"
+    assert snapshot.output_text == ["delivered"]
+    assert snapshot.updated_at == 3
+
+
+@pytest.mark.asyncio
+async def test_save_retries_failed_shared_task_snapshot_when_sdk_state_is_unchanged(tmp_path) -> None:
+    persistence = FlakyTaskPersistence(tmp_path / "a2a")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+
+    await store.save(sdk_task("task-1", context_id="ctx-1", updated_at=2))
+
+    snapshot = persistence.load_task("task-1")
+    assert persistence.task_save_count == 2
+    assert snapshot is not None
+    assert snapshot.state == "submitted"
+    assert snapshot.updated_at == 2
 
 
 @pytest.mark.asyncio
