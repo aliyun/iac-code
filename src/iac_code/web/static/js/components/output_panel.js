@@ -121,20 +121,33 @@ function isDeleteStackStatus(status) {
 // CREATE_COMPLETE 尚未被本次 delete/update 的终态 tool_result 覆盖。故 live 的进行中态必须覆盖
 // 服务端旧终态,否则删除看不到 DELETE_IN_PROGRESS、更新停在 CREATE_COMPLETE(见回归用例)。
 // 工具结束后 live 清空,自然交还服务端权威终态(含 status_reason)。
-// 匹配同一物理栈:优先同 dedup 键;delete/update 常只带 StackId(无 StackName),其无名 t0 用
-// stackId 作键,与服务端 region::栈名 键不同 —— 再按 stackId 找回服务端行并删除,避免同一栈并排两行。
+// 匹配同一物理栈:优先同 dedup 键;delete/update 常只带 StackId(无 StackName),先按 stackId
+// 借用服务端权威名称/region 再计算键；服务端也无名时才退回 stackId,避免同一栈并排两行。
 // live 非进行中(极少见:轮询末帧已是终态)时保留服务端权威态;delete_and_create 新建的另一个栈
 // (同名不同 stackId)因进行中态也会正确覆盖旧栈终态。
 export function mergeStacksForDisplay(serverStacks, liveStacks) {
   const byKey = new Map();
   const serverKeyByStackId = new Map();
+  const serverStackByStackId = new Map();
   for (const stack of serverStacks || []) {
     const key = stackDedupKey(stack);
     byKey.set(key, stack);
-    if (stack?.stackId) serverKeyByStackId.set(stack.stackId, key);
+    if (stack?.stackId) {
+      serverKeyByStackId.set(stack.stackId, key);
+      serverStackByStackId.set(stack.stackId, stack);
+    }
   }
   for (const stack of liveStacks || []) {
     const live = normalizeLiveStack(stack);
+    // DeleteStack 的真实请求通常只有 StackId，因此 reload/restart 后的 t0 live 条目可能没有栈名。
+    // 先按 StackId 用服务端权威条目回填名称/region，再计算 dedup key；否则 delete_and_create 的旧栈
+    // 会以裸 StackId 为键，与同名新栈的 region::name 键并排显示到工具结束。
+    const serverForId = live.stackId ? serverStackByStackId.get(live.stackId) : undefined;
+    if (serverForId) {
+      live.stackName = live.stackName || serverForId.stackName || "";
+      live.regionId = live.regionId || serverForId.regionId || "";
+      live.consoleUrl = live.consoleUrl || serverForId.consoleUrl || rosConsoleUrl(live.regionId, live.stackId);
+    }
     const key = stackDedupKey(live);
     // 找出服务端同一物理栈:先按 dedup 键;无名 t0 则按 stackId 回找其(可能不同的)键。
     const serverKeyForId = live.stackId ? serverKeyByStackId.get(live.stackId) : undefined;

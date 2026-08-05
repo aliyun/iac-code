@@ -2881,6 +2881,34 @@ def test_expect_any_since_accepts_buffered_cleanup_start_after_offset() -> None:
     assert pty.events[-1]["buffered"] is True
 
 
+def test_expect_any_since_prefers_earliest_buffered_event_over_pattern_order() -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    prompt_marker = "\x1b[>4;2m"
+
+    class FakePty:
+        # cleanup 先发生、prompt 后发生；调用方的 patterns 则故意把 prompt 放在前面。
+        transcript = "second deployment completed\nDeleteStack\n" + prompt_marker
+        events: list[dict[str, object]] = []
+
+        def drain_output(self) -> None:
+            return None
+
+        def expect_any(self, patterns, *, description, timeout):
+            raise AssertionError("buffered events should avoid another blocking expect")
+
+    matched = runner._expect_any_since(
+        FakePty(),
+        args,
+        runner.REPL_INPUT_READY_PATTERNS + runner.CLEANUP_STARTED_PATTERNS,
+        description="cleanup start or normal follow-up prompt input ready",
+        timeout=args.stream_timeout,
+        since_offset=0,
+    )
+
+    assert matched in runner.CLEANUP_STARTED_PATTERNS
+
+
 def test_scenario_runtime_paths_override_shared_sandbox_state(tmp_path: Path) -> None:
     runner = _load_runner()
     run_dir = tmp_path / "runs" / "case-run-1"

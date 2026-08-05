@@ -1163,7 +1163,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-314" in html
-    assert "/static/js/app.js?v=web-repl-ui-329" in html
+    assert "/static/js/app.js?v=web-repl-ui-330" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1197,7 +1197,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-329" in index_html
+    assert "web-repl-ui-330" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-319" in app_source
     assert "./components/workspace.js?v=cloud-creds-v55" in app_source
@@ -9902,8 +9902,8 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-329" in html
-    assert "web-repl-ui-327" not in html
+    assert "web-repl-ui-330" in html
+    assert "web-repl-ui-329" not in html
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:
@@ -10144,7 +10144,7 @@ def test_output_panel_module_exists_and_wired() -> None:
     assert "getOutputs" in source
     app_source = _source(APP_JS)
     assert "createOutputController" in app_source
-    assert "output_panel.js?v=output-panel-v21" in app_source
+    assert "output_panel.js?v=output-panel-v22" in app_source
 
 
 def test_output_panel_resets_on_new_session_draft() -> None:
@@ -10202,8 +10202,8 @@ def test_output_preview_and_highlight() -> None:
     assert "File no longer exists" in source
     assert "tok-" in source
     app_source = _source(APP_JS)
-    assert "output_panel.js?v=output-panel-v21" in app_source
-    assert "output_panel.js?v=output-panel-v20" not in app_source
+    assert "output_panel.js?v=output-panel-v22" in app_source
+    assert "output_panel.js?v=output-panel-v21" not in app_source
 
 
 def test_output_preview_tok_css() -> None:
@@ -10745,9 +10745,9 @@ def test_live_stacks_map_non_create_actions_and_merge_by_stack_id(tmp_path: Path
 
 def test_live_stacks_delete_and_create_collapse_to_single_row(tmp_path: Path) -> None:
     # delete_and_create:同一 ros_deploy 调用先删旧栈(id A,名 vpc-demo-stack),再建同名新栈
-    # (id B,新 stackId)。两相在 state.resources 各占一条(id 优先键不合并),而 delete 相的轮询
-    # 首帧常无名(仅 StackId A)——若不回填名字,该相在合并层退回裸 stackId 键,与创建相的
-    # 「region::栈名」键分裂 → 面板瞬时并排两行同名栈(用户实测撞见)。回填名字后两相凭同名折为单行。
+    # (id B,新 stackId)。reload/restart 后旧 create observation 已丢失，DeleteStack 的真实 t0
+    # 只有 StackId、没有 StackName；新栈首帧又会覆盖工具卡唯一的 stackProgress。若合并层不从
+    # 服务端旧栈 A 回填名称，A 会以裸 stackId 为键，与 B 的 region::name 键并排显示到工具结束。
     source = """
     import fs from "node:fs";
     const src = fs.readFileSync(new URL(__APP_MODULE__), "utf-8");
@@ -10767,14 +10767,14 @@ def test_live_stacks_delete_and_create_collapse_to_single_row(tmp_path: Path) ->
     const live = run({
       currentTurnActive: true,
       resources: [
-        { resourceType: "stack", resourceId: "A", resourceName: "vpc-demo-stack",
+        { resourceType: "stack", resourceId: "A", resourceName: "",
           regionId: "cn-hangzhou", action: "DeleteStack", toolUseId: "t1" },
         { resourceType: "stack", resourceId: "B", resourceName: "vpc-demo-stack",
           regionId: "cn-hangzhou", action: "CreateStack", toolUseId: "t1" },
       ],
       tools: { t1: { status: "running", stackProgress: {
-        kind: "stack.progress", stackId: "A", stackName: "",
-        regionId: "cn-hangzhou", status: "DELETE_IN_PROGRESS",
+        kind: "stack.progress", stackId: "B", stackName: "vpc-demo-stack",
+        regionId: "cn-hangzhou", status: "CREATE_IN_PROGRESS",
       } } },
     });
 
@@ -10789,13 +10789,17 @@ def test_live_stacks_delete_and_create_collapse_to_single_row(tmp_path: Path) ->
     console.log(JSON.stringify({
       delName: delEntry.stackName,
       mergedLen: merged.length,
+      mergedStackId: merged[0] && merged[0].stackId,
+      mergedStatus: merged[0] && merged[0].status,
     }));
     """
     result = _run_app_script(tmp_path, source)
-    # delete 相轮询帧无名,但由 resource.observed 记录的名字回填,不退回无名。
-    assert result["delName"] == "vpc-demo-stack"
-    # 同名两相折为单行,而非瞬时并排两行同名栈。
+    # 生产形态的 delete t0 确实无名；修复必须发生在与服务端权威栈合并时，而非依赖虚构的前端名字。
+    assert result["delName"] == ""
+    # 服务端 A 为无名 delete live 回填名称后，与同名新栈 B 折为一行，并由更新的创建态胜出。
     assert result["mergedLen"] == 1
+    assert result["mergedStackId"] == "B"
+    assert result["mergedStatus"] == "CREATE_IN_PROGRESS"
 
 
 def test_output_panel_diagram_preview_guard_uses_diagram_id() -> None:
@@ -10868,8 +10872,8 @@ def test_app_regroups_pipeline_messages_before_render() -> None:
 
 def test_app_output_panel_import_bumped_to_v11() -> None:
     js = _source(APP_JS)
-    assert "output-panel-v21" in js
-    assert "output-panel-v20" not in js
+    assert "output-panel-v22" in js
+    assert "output-panel-v21" not in js
 
 
 def test_appearance_theme_css_blocks_present() -> None:

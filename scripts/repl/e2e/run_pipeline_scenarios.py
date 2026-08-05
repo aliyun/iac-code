@@ -2311,19 +2311,23 @@ def _expect_any_since(
         if callable(drain_output):
             drain_output()
         suffix = pty.transcript[since_offset:]
-        for pattern in patterns:
-            if re.search(pattern, suffix):
-                pty.events.append(
-                    {
-                        "type": "expect",
-                        "description": description,
-                        "pattern": pattern,
-                        "passed": True,
-                        "buffered": True,
-                        "at": _utc_now(),
-                    }
-                )
-                return pattern
+        buffered_matches: list[tuple[int, int, str]] = []
+        for pattern_index, pattern in enumerate(patterns):
+            if match := re.search(pattern, suffix):
+                buffered_matches.append((match.start(), pattern_index, pattern))
+        if buffered_matches:
+            _, _, pattern = min(buffered_matches)
+            pty.events.append(
+                {
+                    "type": "expect",
+                    "description": description,
+                    "pattern": pattern,
+                    "passed": True,
+                    "buffered": True,
+                    "at": _utc_now(),
+                }
+            )
+            return pattern
     return pty.expect_any(patterns, description=description, timeout=timeout)
 
 
