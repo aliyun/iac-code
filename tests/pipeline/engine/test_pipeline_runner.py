@@ -1740,6 +1740,91 @@ async def test_session_meta_append_failure_is_best_effort_for_completed_pipeline
     assert "Failed to append pipeline session metadata" in caplog.text
 
 
+class JsonlFileSessionStorage(FakeSessionStorage):
+    """Fake storage backed by a real session.jsonl file for idempotency tests."""
+
+    def __init__(self, root: Path):
+        super().__init__()
+        self._root = root
+        self._root.mkdir(parents=True, exist_ok=True)
+
+    def session_path(self, cwd, session_id):
+        return self._root / f"{session_id}.jsonl"
+
+    def append_meta(self, cwd, session_id, meta):
+        super().append_meta(cwd, session_id, meta)
+        entry = dict(meta)
+        entry["session_id"] = session_id
+        with self.session_path(cwd, session_id).open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+class RaisingSessionPathStorage(FakeSessionStorage):
+    def session_path(self, cwd, session_id):
+        raise OSError("session path unavailable")
+
+
+def _completing_fake_execute(step, context, session_id, user_message=None, **kwargs):
+    async def _gen():
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    return _gen()
+
+
+@pytest.mark.asyncio
+async def test_second_run_for_same_session_emits_pipeline_restarted_instead_of_duplicate_init(tmp_path):
+    storage = JsonlFileSessionStorage(tmp_path / "sessions")
+
+    first_runner = _build_two_step_runner(tmp_path, storage=storage)
+    first_runner._step_executor.execute = _completing_fake_execute
+    async for _ in first_runner.run("start"):
+        pass
+
+    second_runner = _build_two_step_runner(tmp_path, storage=storage)
+    second_runner._step_executor.execute = _completing_fake_execute
+    async for _ in second_runner.run("start again"):
+        pass
+
+    init_metas = [meta for meta in storage.meta_entries if meta["type"] == "pipeline_init"]
+    restarted_metas = [meta for meta in storage.meta_entries if meta["type"] == "pipeline_restarted"]
+    assert len(init_metas) == 1
+    assert len(restarted_metas) == 1
+    assert restarted_metas[0]["pipeline_type"] == "test"
+    assert restarted_metas[0]["reason"] == "duplicate_pipeline_init_suppressed"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_restarted_detects_preexisting_init_meta_in_session_jsonl(tmp_path):
+    storage = JsonlFileSessionStorage(tmp_path / "sessions")
+    storage.session_path(str(tmp_path), "test").write_text(
+        '{"type": "pipeline_init", "pipeline_type": "test", "session_id": "test"}\n',
+        encoding="utf-8",
+    )
+
+    runner = _build_two_step_runner(tmp_path, storage=storage)
+    runner._step_executor.execute = _completing_fake_execute
+    async for _ in runner.run("start"):
+        pass
+
+    assert not any(meta["type"] == "pipeline_init" for meta in storage.meta_entries)
+    assert any(meta["type"] == "pipeline_restarted" for meta in storage.meta_entries)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_init_check_read_failure_falls_back_to_init(tmp_path):
+    storage = RaisingSessionPathStorage()
+
+    runner = _build_two_step_runner(tmp_path, storage=storage)
+    runner._step_executor.execute = _completing_fake_execute
+    async for _ in runner.run("start"):
+        pass
+
+    assert any(meta["type"] == "pipeline_init" for meta in storage.meta_entries)
+    assert not any(meta["type"] == "pipeline_restarted" for meta in storage.meta_entries)
+
+
 @pytest.mark.asyncio
 async def test_rollback_session_meta_append_failure_is_best_effort(tmp_path, caplog):
     storage = FailingAppendMetaSessionStorage(fail_types={"pipeline_rollback"})
