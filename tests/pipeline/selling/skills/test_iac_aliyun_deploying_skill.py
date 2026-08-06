@@ -62,11 +62,90 @@ class TestSkillFrontmatter:
         schema = fm["conclusion_schema"]
 
         jsonschema.validate({"status": "success", "stack_id": "stack-123"}, schema)
-        jsonschema.validate({"status": "failed", "error": "CREATE_FAILED"}, schema)
+        jsonschema.validate(
+            {"status": "failed", "error": "CREATE_FAILED", "error_message": "Resource CREATE failed"},
+            schema,
+        )
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate({"status": "success"}, schema)
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate({"status": "failed"}, schema)
+
+    def test_failed_conclusion_requires_structured_error_message(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        schema = fm["conclusion_schema"]
+
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({"status": "failed", "error": "CREATE_FAILED"}, schema)
+
+    def test_failed_conclusion_accepts_structured_error_details_and_recovery_attempts(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        schema = fm["conclusion_schema"]
+
+        conclusion = {
+            "status": "failed",
+            "error": "CreateStack 失败：安全组配额不足",
+            "error_code": "QuotaExceeded.SecurityGroup",
+            "error_message": "The maximum number of security groups is exceeded.",
+            "failed_stack_status": "CREATE_FAILED",
+            "recovery_attempts": [
+                {
+                    "action": "create",
+                    "error_code": "QuotaExceeded.SecurityGroup",
+                    "error_message": "The maximum number of security groups is exceeded.",
+                    "outcome": "failed",
+                },
+                {
+                    "action": "continue_create",
+                    "error_code": "QuotaExceeded.SecurityGroup",
+                    "error_message": "The maximum number of security groups is exceeded.",
+                    "outcome": "abandoned",
+                },
+            ],
+        }
+        jsonschema.validate(conclusion, schema)
+
+    def test_recovery_attempts_items_require_action_and_outcome(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        schema = fm["conclusion_schema"]
+
+        base = {
+            "status": "failed",
+            "error": "CREATE_FAILED",
+            "error_message": "Resource CREATE failed",
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(dict(base, recovery_attempts=[{"action": "create"}]), schema)
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(dict(base, recovery_attempts=[{"outcome": "failed"}]), schema)
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(
+                dict(base, recovery_attempts=[{"action": "create", "outcome": "unknown"}]),
+                schema,
+            )
+
+    def test_success_conclusion_can_record_recovery_attempts(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        schema = fm["conclusion_schema"]
+
+        conclusion = {
+            "status": "success",
+            "stack_id": "stack-123",
+            "recovery_attempts": [
+                {
+                    "action": "create",
+                    "error_code": "InvalidParameter",
+                    "error_message": "ZoneId is sold out",
+                    "outcome": "failed",
+                },
+                {"action": "continue_create", "outcome": "recovered"},
+            ],
+        }
+        jsonschema.validate(conclusion, schema)
 
 
 class TestSkillContentRosOnly:
@@ -220,6 +299,13 @@ class TestSkillContentRosOnly:
     def test_contains_error_handling(self, body):
         assert "部署失败" in body
 
+    def test_failed_conclusion_guidance_requires_distinguishable_retries(self, body):
+        assert "失败结论必须结构化、可区分" in body
+        assert "error_message" in body
+        assert "error_code" in body
+        assert "recovery_attempts" in body
+        assert "禁止照抄上一次的失败结论" in body
+
     def test_no_template_generation(self, body):
         assert "模板生成流程" not in body
         assert "参数化规则" not in body
@@ -316,6 +402,12 @@ class TestDeployingPrompt:
         assert "`selected_plan.preview_ready_for_create` 为 `true`" in body
         assert "快速创建路径见技能" in body
         assert "跳过例行 `ros_validate_template`" not in body
+
+    def test_prompt_requires_structured_failure_details_in_conclusion(self):
+        body = DEPLOYING_PROMPT_MD.read_text(encoding="utf-8")
+        assert "error_message" in body
+        assert "recovery_attempts" in body
+        assert "不得复用上一次的失败结论文案" in body
 
 
 class TestSkillDiscovery:

@@ -23,7 +23,37 @@ conclusion_schema:
       type: object
     error:
       type: string
-      description: 失败原因（status 为 failed 时必填）
+      description: 失败原因（status 为 failed 时必填）；必须包含本次尝试的具体错误信息，不得复用与上次重试相同的泛化文案
+    error_code:
+      type: string
+      description: 本次失败的结构化错误码（如 ROS CreateStack / ContinueCreateStack 返回的 Code 或资源事件 StatusReason 中的错误码）
+    error_message:
+      type: string
+      description: 本次失败的具体错误消息（如 ROS 返回的 Message 或失败资源事件的 StatusReason 原文）
+    failed_stack_status:
+      type: string
+      description: 失败时 Stack 的最终状态（如 CREATE_FAILED、ROLLBACK_COMPLETE）
+    recovery_attempts:
+      type: array
+      description: 按时间序记录每次失败与恢复动作，让重试路径在结论中可追溯
+      items:
+        type: object
+        required: [action, outcome]
+        additionalProperties: false
+        properties:
+          action:
+            type: string
+            description: 本次恢复动作（如 create、continue_create、delete_and_create、wait、fix_template、adjust_parameters）
+          error_code:
+            type: string
+            description: 该次尝试失败时的错误码
+          error_message:
+            type: string
+            description: 该次尝试失败时的具体错误消息
+          outcome:
+            type: string
+            enum: [failed, recovered, abandoned]
+            description: 该次尝试的结果
   allOf:
     - if:
         properties:
@@ -38,7 +68,7 @@ conclusion_schema:
             const: failed
         required: [status]
       then:
-        required: [error]
+        required: [error, error_message]
 ---
 
 # 阿里云 ROS 部署技能
@@ -132,6 +162,12 @@ conclusion_schema:
 > **template_url 支持本地文件路径**：`ros_deploy` 的创建类动作中，`template_url` 可传当前工作目录内的本地文件路径（如 `./template.yml`），工具会自动读取文件内容。避免将大模板内容直接作为参数传递。
 
 ## 错误处理
+
+### 失败结论必须结构化、可区分
+最终返回 `status: failed` 时，结论必须让人不看日志也能定位根因：
+- `error` 写本次失败的完整原因；`error_message` 写本次失败的具体错误消息（如 ROS 返回的 Message 或失败资源事件的 StatusReason 原文）；能拿到错误码时在 `error_code` 写结构化错误码（如 CreateStack/ContinueCreateStack 返回的 Code）；`failed_stack_status` 写 Stack 最终状态。
+- 每一次失败与恢复动作按时间序追加到 `recovery_attempts`（`action` + 该次的 `error_code`/`error_message` + `outcome`），让失败-重试-恢复路径在结论中可见。
+- 步骤被重试时，禁止照抄上一次的失败结论；必须写入本次尝试实际观察到的错误详情，确保每次重试的结论内容可区分。
 
 ### 部署失败
 分析错误原因：
