@@ -3686,6 +3686,26 @@ msgstr "デプロイ成功には、ros_deploy が CREATE_COMPLETE を返すま�
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"monthly_estimate must not be a bare zero amount. For pay-as-you-go "
+"resources (such as OSS storage or CDN traffic), report a usage-based "
+"range estimate labeled as pay-as-you-go, or report the pricing failure as"
+" \"询价失败\"; never present ¥0/月 as a comparable monthly cost."
+msgstr ""
+"monthly_estimate をゼロ金額のみで出力してはいけません。OSS ストレージや CDN "
+"トラフィックなどの従量課金リソースは、従量課金と明記した使用量ベースのレンジ見積もりを出力するか、見積もり失敗を「询价失败」として報告してください。¥0/月"
+" を比較可能な月額費用として提示しないでください。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"preview_validation.succeeded is false, so the conclusion must declare the"
+" parameter gaps in missing_deployment_parameters or explain the failure "
+"in error before completing this step."
+msgstr ""
+"preview_validation.succeeded が false のため、このステップを完了する前に "
+"missing_deployment_parameters でパラメータ不足を宣言するか、error で失敗理由を説明する必要があります。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -3745,6 +3765,12 @@ msgstr "<現在のステップ要件に従って入力>"
 #: src/iac_code/ui/renderer.py
 msgid "complete_step validation failed."
 msgstr "complete_step の検証に失敗しました。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"The current conclusion is not allowed to complete this step; fix it and "
+"retry."
+msgstr "現在の結論ではこのステップを完了できません。修正して再試行してください。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "Clarification is required before completing the current step."
@@ -11760,3 +11786,4 @@ msgstr "Bash を許可しますか？"
 #~ msgstr ""
 #~ "ツール呼び出しを承認: {tool}\n"
 #~ "入力サマリー: {summary}"
+

@@ -3846,6 +3846,29 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"monthly_estimate must not be a bare zero amount. For pay-as-you-go "
+"resources (such as OSS storage or CDN traffic), report a usage-based "
+"range estimate labeled as pay-as-you-go, or report the pricing failure as"
+" \"询价失败\"; never present ¥0/月 as a comparable monthly cost."
+msgstr ""
+"monthly_estimate não deve ser um valor zero puro. Para recursos pagos por"
+" uso (como armazenamento OSS ou tráfego CDN), informe uma estimativa em "
+"faixa baseada no uso rotulada como pagamento por uso, ou informe a falha "
+"de cotação como \"询价失败\"; nunca apresente ¥0/月 como um custo mensal "
+"comparável."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"preview_validation.succeeded is false, so the conclusion must declare the"
+" parameter gaps in missing_deployment_parameters or explain the failure "
+"in error before completing this step."
+msgstr ""
+"preview_validation.succeeded é false, então a conclusão deve declarar as "
+"lacunas de parâmetros em missing_deployment_parameters ou explicar a "
+"falha em error antes de concluir esta etapa."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -3908,6 +3931,14 @@ msgstr "<preencher conforme os requisitos da etapa atual>"
 #: src/iac_code/ui/renderer.py
 msgid "complete_step validation failed."
 msgstr "A validação de complete_step falhou."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"The current conclusion is not allowed to complete this step; fix it and "
+"retry."
+msgstr ""
+"A conclusão atual não pode concluir esta etapa; corrija-a e tente "
+"novamente."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "Clarification is required before completing the current step."
@@ -12562,3 +12593,4 @@ msgstr "Permitir Bash?"
 #~ msgstr ""
 #~ "Aprovar chamada de ferramenta: {tool}\n"
 #~ "Resumo da entrada: {summary}"
+

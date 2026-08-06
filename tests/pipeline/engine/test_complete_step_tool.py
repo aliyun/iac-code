@@ -1537,3 +1537,215 @@ class TestNullNormalization:
         valid, error = tool.validate_input(tool_input)
         assert not valid
         assert "name" in error
+
+
+class TestCostEstimatingGuards:
+    """Guards for the selling cost_estimating step: forbid bare-zero cost and undeclared preview failures."""
+
+    ZERO_AMOUNT_PATTERN = r"^[^0-9]*0(?:[.,]0+)?(?![0-9])[^1-9]*$"
+
+    def _cost_tool(self) -> CompleteStepTool:
+        config = StepConfig(step_id="cost_estimating", conclusion_field="cost", forward=None)
+        return CompleteStepTool(
+            config,
+            completion_guards=[
+                {
+                    "when_conclusion_field_matches": {"monthly_estimate": self.ZERO_AMOUNT_PATTERN},
+                    "forbid_completion": True,
+                    "message_key": "cost_zero_monthly_estimate_forbidden",
+                },
+                {
+                    "when_conclusion_field_equals": {"preview_validation.succeeded": False},
+                    "required_conclusion_any_of": ["missing_deployment_parameters", "error"],
+                    "message_key": "cost_preview_failed_requires_gap_declaration",
+                },
+            ],
+            completion_guard_state={"successful_tools": set(), "tool_results": {}},
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "monthly_estimate",
+        ["¥0/月", "¥0", "¥0.00/月", "0元/月", "¥0,00/月", "CNY 0/month"],
+    )
+    async def test_rejects_bare_zero_monthly_estimate(self, monthly_estimate):
+        tool = self._cost_tool()
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "monthly_estimate": monthly_estimate,
+                    "currency": "CNY",
+                    "resources": [],
+                    "template_fixed": False,
+                    "deployment_parameters": {},
+                    "preview_validation": {"succeeded": True, "template_url": "./t.yml", "parameters": {}},
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "pay-as-you-go" in result.content
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "monthly_estimate",
+        [
+            "¥96.80/月（列表价，合同优惠后约¥13.76/月）",
+            "约¥10~¥60/月（按量计费，按 50GB 存储 + 100GB CDN 流量估算）",
+            "询价失败",
+            "¥800/月",
+            "¥0.5/小时",
+            "¥1,024/月",
+        ],
+    )
+    async def test_accepts_non_zero_or_declared_estimates(self, monthly_estimate):
+        tool = self._cost_tool()
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "monthly_estimate": monthly_estimate,
+                    "currency": "CNY",
+                    "resources": [],
+                    "template_fixed": False,
+                    "deployment_parameters": {},
+                    "preview_validation": {"succeeded": True, "template_url": "./t.yml", "parameters": {}},
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_rejects_preview_failure_without_gap_declaration(self):
+        tool = self._cost_tool()
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "monthly_estimate": "¥58.00/月",
+                    "currency": "CNY",
+                    "resources": [],
+                    "template_fixed": False,
+                    "deployment_parameters": {},
+                    "preview_validation": {"succeeded": False},
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "missing_deployment_parameters" in result.content
+
+    @pytest.mark.asyncio
+    async def test_accepts_preview_failure_with_missing_parameters_declared(self):
+        tool = self._cost_tool()
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "monthly_estimate": "约¥10~¥60/月（按量计费，按 50GB 存储 + 100GB CDN 流量估算）",
+                    "currency": "CNY",
+                    "resources": [],
+                    "template_fixed": False,
+                    "deployment_parameters": {},
+                    "preview_validation": {"succeeded": False, "error": "CdnDomainName 缺失"},
+                    "missing_deployment_parameters": [
+                        {"name": "CdnDomainName", "reason": "需要用户提供已备案域名"}
+                    ],
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_accepts_preview_failure_with_error_declared(self):
+        tool = self._cost_tool()
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "monthly_estimate": "询价失败",
+                    "currency": "CNY",
+                    "resources": [],
+                    "template_fixed": False,
+                    "deployment_parameters": {},
+                    "preview_validation": {"succeeded": False, "error": "CdnDomainName 缺失"},
+                    "error": "PreviewStack 因 CdnDomainName 缺失失败",
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_preview_success_not_affected_by_gap_guard(self):
+        tool = self._cost_tool()
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "monthly_estimate": "¥96.80/月",
+                    "currency": "CNY",
+                    "resources": [{"type": "ALIYUN::ECS::Instance", "cost": "¥96.80/月"}],
+                    "template_fixed": False,
+                    "deployment_parameters": {"ZoneId": "cn-hangzhou-k"},
+                    "preview_validation": {
+                        "succeeded": True,
+                        "template_url": "./t.yml",
+                        "parameters": {"ZoneId": "cn-hangzhou-k"},
+                    },
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_when_conclusion_field_matches_ignores_non_string_values(self):
+        config = StepConfig(step_id="cost_estimating", conclusion_field="cost", forward=None)
+        tool = CompleteStepTool(
+            config,
+            completion_guards=[
+                {
+                    "when_conclusion_field_matches": {"monthly_estimate": self.ZERO_AMOUNT_PATTERN},
+                    "forbid_completion": True,
+                    "message_key": "cost_zero_monthly_estimate_forbidden",
+                }
+            ],
+        )
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"monthly_estimate": 0}},
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_forbid_completion_uses_default_message_without_key(self):
+        config = StepConfig(step_id="cost_estimating", conclusion_field="cost", forward=None)
+        tool = CompleteStepTool(
+            config,
+            completion_guards=[
+                {
+                    "when_conclusion_field_matches": {"monthly_estimate": self.ZERO_AMOUNT_PATTERN},
+                    "forbid_completion": True,
+                }
+            ],
+        )
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"monthly_estimate": "¥0/月"}},
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "not allowed to complete" in result.content

@@ -50,6 +50,15 @@
 
 不要使用 `evaluated_candidates[i].candidate.monthly_estimate`，该字段是架构规划阶段的粗略估算。不要重新询价，也不要重新估算价格。
 
+### 预览与成本状态警示（必须透传）
+
+对每个展示的方案检查 `evaluated_candidates[i].cost`：
+
+- `preview_validation.succeeded` 不为 `true` 时，`show_candidate_detail` 的 `summary` 和 `complete_step.conclusion.options[].summary` 必须以「⚠️ 预览未通过」开头并简述原因（取 `preview_validation.error`）。
+- `missing_deployment_parameters` 非空时，`summary` 必须标注「⚠️ 部署参数不完整」并列出缺失参数名。
+- `monthly_estimate` 为 `"询价失败"` 或为零金额（如 `¥0/月`）时，`total_monthly_cost` 不得展示为确定的 ¥0/月：如实展示「询价失败」或带假设用量说明的按量计费区间；`summary` 同步标注「成本为按量估算/询价失败，不可与包月列表价直接对比」。
+- 上述警示不得省略或弱化；带警示的方案仍可进入 `options` 供用户选择，但用户必须能看到这些状态。
+
 如果多个方案都需要展示，必须对每个方案都调用一次“架构图 + 方案详情”的并行展示；不要为了架构图优化额外阻塞方案详情展示。
 
 - 不要用文字输出对比表格或方案信息 — 所有展示数据通过上述工具传递

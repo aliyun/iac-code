@@ -29,8 +29,11 @@ API 调用完成后调用 `complete_step` 提交费用预估。
 - `TradeAmount` 是合同优惠后的最终价，按与原价相同的月度周期换算并汇总。
 - 两个字段都存在时，使用 `¥<原价>/月（列表价，合同优惠后约¥<最终价>/月）` 格式；即使数值相同也保留两个价格口径。
 - 任一字段缺失时只展示可用价格，并在 `api_raw_summary` 中说明缺失字段；询价失败时仍填写 `"询价失败"`。
+- `monthly_estimate` 不得为裸零金额（如 `¥0/月`）。OSS 存储、CDN 流量等按量付费资源询价返回 0 或不支持询价时，基于典型用量假设输出区间估算并标注按量计费口径（如 `约¥10~¥60/月（按量计费，按 50GB 存储 + 100GB CDN 流量估算）`）；无法形成合理假设时填 `"询价失败"` 并在 `error` 说明原因。
 
 若 `ros_preview_template` 成功，在 `complete_step.conclusion.preview_validation` 写入 PreviewStack 成功证明：`succeeded: true`、`template_url: "{template.file_path}"`、`parameters: <预览通过的同一参数字典>`；失败或未执行时写入 `succeeded: false`、`error: "<原因>"`。
+
+若 `ros_preview_template` 因参数缺失失败（如 `CdnDomainName` 等外部输入无法补齐），必须先尽量补齐可生成参数并重试预览；仍无法通过时，除 `preview_validation.succeeded: false` 外，必须把缺失参数逐项写入 `missing_deployment_parameters`（或在 `error` 说明失败原因），不得在预览失败且缺口未声明的情况下提交结论。
 
 ## 注意事项
 - 不要读取项目文件或记忆，所需的上下文已在上方提供。

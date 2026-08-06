@@ -3885,6 +3885,30 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"monthly_estimate must not be a bare zero amount. For pay-as-you-go "
+"resources (such as OSS storage or CDN traffic), report a usage-based "
+"range estimate labeled as pay-as-you-go, or report the pricing failure as"
+" \"询价失败\"; never present ¥0/月 as a comparable monthly cost."
+msgstr ""
+"monthly_estimate darf kein bloßer Nullbetrag sein. Für nutzungsbasierte "
+"Ressourcen (wie OSS-Speicher oder CDN-Traffic) geben Sie eine "
+"nutzungsbasierte Bereichsschätzung mit Pay-as-you-go-Kennzeichnung an "
+"oder melden Sie den Preisabruf-Fehler als \"询价失败\"; präsentieren Sie "
+"niemals ¥0/月 als vergleichbare Monatskosten."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"preview_validation.succeeded is false, so the conclusion must declare the"
+" parameter gaps in missing_deployment_parameters or explain the failure "
+"in error before completing this step."
+msgstr ""
+"preview_validation.succeeded ist false; die Schlussfolgerung muss vor "
+"Abschluss dieses Schritts die Parameterlücken in "
+"missing_deployment_parameters deklarieren oder den Fehler in error "
+"erläutern."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -3953,6 +3977,14 @@ msgstr "<gemäß den Anforderungen des aktuellen Schritts ausfüllen>"
 #: src/iac_code/ui/renderer.py
 msgid "complete_step validation failed."
 msgstr "Die Validierung von complete_step ist fehlgeschlagen."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"The current conclusion is not allowed to complete this step; fix it and "
+"retry."
+msgstr ""
+"Die aktuelle Schlussfolgerung darf diesen Schritt nicht abschließen; "
+"korrigieren Sie sie und versuchen Sie es erneut."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "Clarification is required before completing the current step."
@@ -12752,3 +12784,4 @@ msgstr "Bash zulassen?"
 #~ msgstr ""
 #~ "Tool-Aufruf genehmigen: {tool}\n"
 #~ "Eingabezusammenfassung: {summary}"
+

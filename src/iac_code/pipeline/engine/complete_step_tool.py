@@ -55,6 +55,15 @@ _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
         "or confirm that it should not be handled for now."
     ),
     "deploy_wait_create_complete": ("A successful deployment must wait until ros_deploy returns CREATE_COMPLETE."),
+    "cost_zero_monthly_estimate_forbidden": (
+        "monthly_estimate must not be a bare zero amount. For pay-as-you-go resources (such as OSS storage or "
+        "CDN traffic), report a usage-based range estimate labeled as pay-as-you-go, or report the pricing "
+        'failure as "询价失败"; never present ¥0/月 as a comparable monthly cost.'
+    ),
+    "cost_preview_failed_requires_gap_declaration": (
+        "preview_validation.succeeded is false, so the conclusion must declare the parameter gaps in "
+        "missing_deployment_parameters or explain the failure in error before completing this step."
+    ),
 }
 _COMPLETION_GUARD_MESSAGE_KEY_BY_TEXT = {text: key for key, text in _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY.items()}
 
@@ -91,6 +100,15 @@ def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
             "or confirm that it should not be handled for now."
         ),
         _("A successful deployment must wait until ros_deploy returns CREATE_COMPLETE."),
+        _(
+            "monthly_estimate must not be a bare zero amount. For pay-as-you-go resources (such as OSS storage or "
+            "CDN traffic), report a usage-based range estimate labeled as pay-as-you-go, or report the pricing "
+            'failure as "询价失败"; never present ¥0/月 as a comparable monthly cost.'
+        ),
+        _(
+            "preview_validation.succeeded is false, so the conclusion must declare the parameter gaps in "
+            "missing_deployment_parameters or explain the failure in error before completing this step."
+        ),
     )
 
 
@@ -317,6 +335,11 @@ class CompleteStepTool(Tool):
             required_field = guard.get("required_conclusion_field")
             required_any_of = guard.get("required_conclusion_any_of") or []
             successful_tools = self._completion_guard_state.get("successful_tools", set())
+            if guard.get("forbid_completion"):
+                return self._completion_guard_message(
+                    guard,
+                    _("The current conclusion is not allowed to complete this step; fix it and retry."),
+                )
             if required_tool and required_tool not in successful_tools:
                 message = self._completion_guard_message(
                     guard,
@@ -906,9 +929,14 @@ class CompleteStepTool(Tool):
 
         user_patterns = guard.get("when_user_message_matches_any") or []
         conclusion_equals = guard.get("when_conclusion_field_equals") or {}
+        conclusion_matches = guard.get("when_conclusion_field_matches") or {}
         applies = bool(user_patterns and any(self._matches(pattern, self._user_message) for pattern in user_patterns))
         applies = applies or any(
             self._resolve_dotted(conclusion, field) == value for field, value in conclusion_equals.items()
+        )
+        applies = applies or any(
+            self._conclusion_field_matches(conclusion, field, pattern)
+            for field, pattern in conclusion_matches.items()
         )
         if not applies:
             return False
@@ -972,6 +1000,13 @@ class CompleteStepTool(Tool):
             return re.search(pattern, value, flags=re.IGNORECASE) is not None
         except re.error:
             return pattern in value
+
+    @classmethod
+    def _conclusion_field_matches(cls, conclusion: dict, field: str, pattern: Any) -> bool:
+        value = cls._resolve_dotted(conclusion, field)
+        if not isinstance(value, str) or not isinstance(pattern, str) or not pattern:
+            return False
+        return cls._matches(pattern, value)
 
     @staticmethod
     def _resolve_dotted(value: dict, path: str) -> Any:
