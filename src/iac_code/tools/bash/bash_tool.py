@@ -6,6 +6,13 @@ import asyncio
 import sys
 from typing import TYPE_CHECKING, Any
 
+from iac_code.desktop.external_env import (
+    create_subprocess_exec,
+    create_subprocess_shell,
+    guarded_shell_command,
+    is_desktop_runtime,
+    spawn_env_kwargs,
+)
 from iac_code.i18n import _
 from iac_code.utils.platform import PlatformInfo, kill_process_tree
 
@@ -54,23 +61,37 @@ class BashTool(Tool):
 
         try:
             if sys.platform == "win32":
-                info = PlatformInfo.detect()
-                process = await asyncio.create_subprocess_exec(
+                info = (
+                    await asyncio.to_thread(PlatformInfo.detect) if is_desktop_runtime() else PlatformInfo.detect()
+                )
+                process = await create_subprocess_exec(
                     info.shell_path,
                     "-c",
                     command,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     cwd=context.cwd,
+                    **spawn_env_kwargs(),
                 )
             else:
-                process = await asyncio.create_subprocess_shell(
-                    command,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=context.cwd,
-                    start_new_session=True,
-                )
+                guarded = guarded_shell_command(command)
+                if guarded is not None:
+                    process = await create_subprocess_exec(
+                        *guarded,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        cwd=context.cwd,
+                        start_new_session=True,
+                        **spawn_env_kwargs(),
+                    )
+                else:
+                    process = await create_subprocess_shell(
+                        command,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        cwd=context.cwd,
+                        start_new_session=True,
+                    )
 
             try:
                 stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)

@@ -688,6 +688,67 @@ def test_api_stream_disconnect_is_transient_and_clears_after_reconnect(tmp_path:
     }
 
 
+def test_desktop_closing_event_closes_native_event_source(tmp_path: Path) -> None:
+    output = _run_api_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            const received = [];
+            class FakeEventSource {
+              constructor(url) {
+                this.url = url;
+                this.listeners = new Map();
+                this.closeCount = 0;
+                globalThis.lastSource = this;
+              }
+              addEventListener(type, handler) { this.listeners.set(type, handler); }
+              removeEventListener(type) { this.listeners.delete(type); }
+              close() { this.closeCount += 1; }
+            }
+            globalThis.window = {
+              location: { origin: "http://127.0.0.1:8766" },
+              __IAC_DESKTOP__: { runtime: "desktop" },
+            };
+            globalThis.EventSource = FakeEventSource;
+
+            const { openEventStream } = await import(__API_MODULE__);
+            openEventStream("session-1", 0, (event) => received.push(event.type));
+            const handler = globalThis.lastSource.listeners.get("desktop-closing");
+            handler({
+              data: JSON.stringify({
+                type: "desktop-closing",
+                sequence: 1,
+                sessionId: "session-1",
+                payload: { force: false },
+              }),
+            });
+            await Promise.resolve();
+
+            console.log(JSON.stringify({
+              received,
+              closeCount: globalThis.lastSource.closeCount,
+              hasListener: typeof handler === "function",
+            }));
+            """
+        ),
+    )
+
+    assert output == {
+        "received": ["desktop-closing"],
+        "closeCount": 1,
+        "hasListener": True,
+    }
+
+
+def test_app_desktop_closing_permanently_disables_stream_reconnect() -> None:
+    source = _source(APP_JS)
+
+    assert 'event.type === "desktop-closing" && DESKTOP_RUNTIME' in source
+    assert "desktopStreamClosed = true" in source
+    assert "if (desktopStreamClosed || !state.currentSessionId)" in source
+    assert "streamHandle?.close()" in source
+
+
 def test_api_exposes_pipeline_state_hydration_endpoint() -> None:
     source = _source(API_JS)
 
@@ -1162,14 +1223,14 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-314" in html
-    assert "/static/js/app.js?v=web-repl-ui-330" in html
+    assert "/static/styles.css?v=web-repl-ui-315" in html
+    assert "/static/js/app.js?v=web-repl-ui-331" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
     # 已归档面板复刻(archived tab)新增 listArchivedSessions/deleteArchivedSessions,
     # 同样需 bump api.js 版本位,否则回访浏览器拿不到新导出。
-    assert "./api.js?v=web-repl-ui-309" in app_source
+    assert "./api.js?v=web-repl-ui-310" in app_source
     assert "./components/composer.js?v=session-model-v19" in app_source
     # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
     assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
@@ -1197,10 +1258,10 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-330" in index_html
+    assert "web-repl-ui-331" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-319" in app_source
-    assert "./components/workspace.js?v=cloud-creds-v55" in app_source
+    assert "./components/workspace.js?v=cloud-creds-v56" in app_source
     assert "workspace-cloud-vendors" in workspace_source
     assert "Alibaba Cloud" in workspace_source
     assert "workspace-cloud-mode-fields" in workspace_source
@@ -6016,6 +6077,31 @@ def test_normalize_session_defaults_clamps_each_field(tmp_path) -> None:
     assert output["blank"] == {"permissionMode": "default", "mode": "normal", "pipelineName": "selling"}
 
 
+def test_desktop_git_bash_guide_only_opens_for_unavailable_status(tmp_path) -> None:
+    output = _run_app_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            globalThis.document = { getElementById() { return null; } };
+            const { desktopGitBashNeedsGuide } = await import(__APP_MODULE__);
+            console.log(JSON.stringify({
+              unavailable: desktopGitBashNeedsGuide({ status: "unavailable" }),
+              available: desktopGitBashNeedsGuide({ status: "available" }),
+              notRequired: desktopGitBashNeedsGuide({ status: "not_required" }),
+              empty: desktopGitBashNeedsGuide({}),
+            }));
+            """
+        ),
+    )
+
+    assert output == {
+        "unavailable": True,
+        "available": False,
+        "notRequired": False,
+        "empty": False,
+    }
+
+
 def test_apply_session_defaults_feeds_new_session_draft_without_reload(tmp_path) -> None:
     # 保存新默认后 applySessionDefaults 更新内存常量;无草稿时 makeNewSessionDraft 立即回落到新默认,
     # 无需刷新页面(修复「切换默认后返回新建会话不生效」)。
@@ -6460,7 +6546,7 @@ def test_app_preserves_backend_project_labels(tmp_path) -> None:
 
             const { applyProjectDisplayLabels } = await import(__APP_MODULE__);
             const groups = applyProjectDisplayLabels([
-              { key: "-Users-ehzyo-repo-empty-project", label: "empty-project", sessions: [], total: 0 },
+              { key: "-Users-test-user-repo-empty-project", label: "empty-project", sessions: [], total: 0 },
             ]);
 
             console.log(JSON.stringify(groups[0]));
@@ -7279,8 +7365,13 @@ def test_index_exposes_live_frontend_mount_points() -> None:
 
     assert "/static/styles.css?v=" in source
     assert "/static/js/app.js?v=" in source
+    assert 'aria-label="IaC Code"' in source
+    assert '<h1 class="sidebar-brand-name">IaC Code</h1>' in source
+    assert "qwen-p1r-transparent-v1" in source
+    assert 'rel="icon" type="image/svg+xml" href="/static/icons/iac-code-logo.svg?v=qwen-p1r-transparent-v1"' in source
 
     for hook in [
+        'data-app-shell="sidebar-brand"',
         'data-app-shell="session-list"',
         'data-app-shell="message-stack"',
         'data-app-shell="blocking-stack"',
@@ -7649,7 +7740,11 @@ def test_workspace_cloud_panel_prefills_secrets_and_resets_on_mode_switch() -> N
 def test_app_wires_workspace_controls_to_current_session() -> None:
     source = _source(APP_JS)
 
-    assert 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v55";' in source
+    workspace_import = (
+        'import { createWorkspaceController } from '
+        '"./components/workspace.js?v=cloud-creds-v56";'
+    )
+    assert workspace_import in source
     assert "workspace = createWorkspaceController" in source
     assert 'tabs: byShell("workspace-tabs")' in source
     assert 'content: byShell("workspace-content")' in source
@@ -9902,8 +9997,8 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-330" in html
-    assert "web-repl-ui-329" not in html
+    assert "web-repl-ui-331" in html
+    assert "web-repl-ui-330" not in html
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:
@@ -10084,7 +10179,7 @@ def test_api_exposes_review_step_prerequisite_helpers() -> None:
     # 只读探测 + 触发安装两个导出;缺任一,workspace 面板的前置依赖提示接线即失效。
     assert "export function getReviewStepPrerequisite()" in source
     assert "/api/settings/pipeline-review-step/prerequisite" in source
-    assert "export async function installReviewStepPrerequisite(onEvent)" in source
+    assert "export async function installReviewStepPrerequisite(onEvent, options = {})" in source
     assert "/api/settings/pipeline-review-step/install" in source
     # 安装走 NDJSON 逐行流:必须读 body reader 并按换行切分回调,而非一次性 json。
     assert "getReader()" in source
@@ -10106,6 +10201,18 @@ def test_workspace_wires_review_step_prerequisite_notice() -> None:
     assert "infraguard is installed; the review step is available." in source
 
 
+def test_desktop_errors_use_localized_public_messages() -> None:
+    app_source = _source(APP_JS)
+    workspace_source = _source(WORKSPACE_JS)
+
+    assert 'new Error(t("Desktop native bridge is unavailable."))' in app_source
+    assert 't("Could not check Git Bash. Try again.")' in app_source
+    assert 't("Git Bash installation failed. Try again or open diagnostics.")' in app_source
+    assert 't("Failed to start the update. Open diagnostics for details.")' in app_source
+    assert 't("InfraGuard installation failed. Open diagnostics for details.")' in workspace_source
+    assert 't("The local runtime could not restart. Open diagnostics for details.")' in workspace_source
+
+
 def test_styles_define_review_step_prerequisite_progress() -> None:
     css = _source(STYLES_CSS)
     # [hidden] 必须显式覆盖 display,否则 JS 的 el.hidden=true 在设了 display 的类上失效。
@@ -10125,7 +10232,7 @@ def test_styles_define_review_step_prerequisite_progress() -> None:
 
 def test_app_uses_bumped_api_version_for_outputs() -> None:
     source = _source(APP_JS)
-    assert "./api.js?v=web-repl-ui-309" in source
+    assert "./api.js?v=web-repl-ui-310" in source
     assert "./api.js?v=web-repl-ui-159" not in source
 
 
@@ -10144,7 +10251,33 @@ def test_output_panel_module_exists_and_wired() -> None:
     assert "getOutputs" in source
     app_source = _source(APP_JS)
     assert "createOutputController" in app_source
-    assert "output_panel.js?v=output-panel-v22" in app_source
+    assert "output_panel.js?v=output-panel-v23" in app_source
+
+
+def test_desktop_resource_stack_links_use_native_external_opener() -> None:
+    output_source = _source(OUTPUT_PANEL_JS)
+    app_source = _source(APP_JS)
+
+    # Web continues to use a normal new-tab link; Desktop prevents that
+    # unreliable WebView2 path and explicitly asks the native host to open it.
+    assert 'row.target = "_blank"' in output_source
+    assert 'typeof openExternal === "function"' in output_source
+    assert "event.preventDefault();" in output_source
+    assert "openExternal(stack.consoleUrl)" in output_source
+    assert 'invokeDesktop("open_external_url", { url })' in app_source
+
+
+def test_developer_panel_does_not_expose_internal_desktop_path_editor() -> None:
+    workspace_source = _source(WORKSPACE_JS)
+    app_source = _source(APP_JS)
+
+    # Tool-path overrides and raw diagnostic JSON remain backend diagnostics,
+    # not an end-user Developer settings form.
+    assert "desktop-tool-" not in workspace_source
+    assert "workspace-desktop-diagnostics" not in workspace_source
+    assert "loadDesktopToolPaths" not in workspace_source
+    assert 'fetch("/api/desktop/tool-paths"' not in app_source
+    assert 'fetch("/api/desktop/diagnostics"' not in app_source
 
 
 def test_output_panel_resets_on_new_session_draft() -> None:
@@ -10202,8 +10335,8 @@ def test_output_preview_and_highlight() -> None:
     assert "File no longer exists" in source
     assert "tok-" in source
     app_source = _source(APP_JS)
-    assert "output_panel.js?v=output-panel-v22" in app_source
-    assert "output_panel.js?v=output-panel-v21" not in app_source
+    assert "output_panel.js?v=output-panel-v23" in app_source
+    assert "output_panel.js?v=output-panel-v22" not in app_source
 
 
 def test_output_preview_tok_css() -> None:
@@ -10870,10 +11003,10 @@ def test_app_regroups_pipeline_messages_before_render() -> None:
     assert "const message = orderedMessages[messageIndex];" in js
 
 
-def test_app_output_panel_import_bumped_to_v11() -> None:
+def test_app_output_panel_import_bumped_for_desktop_external_links() -> None:
     js = _source(APP_JS)
-    assert "output-panel-v22" in js
-    assert "output-panel-v21" not in js
+    assert "output-panel-v23" in js
+    assert "output-panel-v22" not in js
 
 
 def test_appearance_theme_css_blocks_present() -> None:
@@ -10902,6 +11035,24 @@ def test_appearance_theme_swatch_styles_present() -> None:
     assert ".workspace-theme-grid" in styles
     assert ".workspace-theme-swatch" in styles
     assert ".workspace-theme-swatch.is-active" in styles
+    # macOS WKWebView 的原生 button 内部布局会把预览色带压成细竖线；显式关闭原生
+    # appearance 并拉满卡片/色带宽度，确保各平台看到完整三色色带。
+    assert "-webkit-appearance: none;" in styles
+    strip_rule = (
+        ".workspace-theme-swatch .workspace-theme-strip {\n"
+        "  display: flex;\n"
+        "  flex: 0 0 1.4rem;\n"
+        "  width: 100%;"
+    )
+    assert strip_rule in styles
+
+
+def test_workspace_select_uses_cross_platform_chevron() -> None:
+    styles = _source(STYLES_CSS)
+    # macOS WKWebView 不再显示系统旧式双箭头 select；仍保留原生 select 语义，只替换外观。
+    assert ".workspace-select {\n  -webkit-appearance: none;\n  appearance: none;" in styles
+    assert "linear-gradient(45deg, transparent 50%, var(--codex-muted) 50%)" in styles
+    assert "padding-right: 2rem;" in styles
 
 
 def test_appearance_frontend_wiring() -> None:
@@ -11204,12 +11355,29 @@ def test_restart_server_wired_across_frontend():
     assert "sawDown" in ws
     # 重启中显示转圈进度,而非静止文案。
     assert "server-restart-spinner" in ws
+    # The native callback must only exist in Desktop.  Passing a rejecting
+    # callback to the shared workspace prevents the Web API fallback from
+    # ever running.
+    app = _source(APP_JS)
+    assert 'restartService: DESKTOP_RUNTIME ? () => invokeDesktop("restart_sidecar") : null' in app
+    assert 'typeof options.restartService === "function"' in ws
+    assert ": () => api.restartServer()" in ws
 
     # styles.css 提供遮罩与危险按钮样式(遮罩用黑色背板,非被禁的白色 rgba 字面量)。
     css = _source(STYLES_CSS)
     assert ".server-restart-overlay" in css
     assert ".workspace-action.is-danger" in css
     assert ".server-restart-spinner" in css
+
+
+def test_secret_reveal_confirmation_is_desktop_only() -> None:
+    app = _source(APP_JS)
+    workspace = _source(WORKSPACE_JS)
+
+    assert "confirmSecretReveal: DESKTOP_RUNTIME" in app
+    assert '? (payload) => invokeDesktop("confirm_secret_reveal", payload)' in app
+    assert "confirmSecretReveal: options.confirmSecretReveal" in workspace
+    assert 'typeof reveal.confirm === "function"' in workspace
 
 
 def test_update_api_functions_exposed() -> None:
@@ -11230,6 +11398,7 @@ def test_update_banner_wired_across_frontend() -> None:
     # 三个控件:立即更新 / 不再提醒此版本(dismiss)/ 关闭。
     assert "api.applyUpdate()" in app_source
     assert "api.dismissUpdate()" in app_source
+    assert 'invokeDesktop("dismiss_update", { version: status.latestVersion })' in app_source
     assert "update-banner-close" in app_source
     # 成功后复用重启流程:调 restartServer + 两阶段 /health 轮询后刷新。
     assert "api.restartServer()" in app_source

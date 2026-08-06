@@ -23,6 +23,11 @@ MAX_SANITIZED_LENGTH = 200
 _HASH_LENGTH = 12
 _HASH_SUFFIX_LENGTH = 1 + _HASH_LENGTH
 _SANITIZED_PREFIX_LENGTH = MAX_SANITIZED_LENGTH - _HASH_SUFFIX_LENGTH
+# Session directories nest another two levels below the project component. A
+# 200-character component can therefore exceed the classic Windows MAX_PATH
+# limit. Keep the existing component length on other platforms and use a short
+# Windows-only write alias; the legacy candidate remains readable.
+WINDOWS_SESSION_PROJECT_DIR_MAX_LENGTH = 64
 _NON_ALNUM = re.compile(r"[^a-zA-Z0-9]")
 _WINDOWS_DRIVE_PATH = re.compile(r"^[a-zA-Z]:[\\/]")
 
@@ -44,12 +49,40 @@ def _legacy_sanitize_path(name: str) -> str:
     return sanitize_path(name)
 
 
-def _session_project_sanitize_path(name: str) -> str:
+def _previous_session_project_sanitize_path(name: str) -> str:
+    """Return the session component written before the Windows short alias.
+
+    The previous implementation capped the complete component (including the
+    hash suffix) at 200 characters.  Keep it as an explicit read candidate so
+    Windows upgrades do not hide sessions stored under that name.
+    """
     sanitized = _NON_ALNUM.sub("-", name)
     if len(sanitized) <= MAX_SANITIZED_LENGTH:
         return sanitized
     digest = blake2b(name.encode("utf-8"), digest_size=6).hexdigest()
     return f"{sanitized[:_SANITIZED_PREFIX_LENGTH]}-{digest}"
+
+
+def session_project_dir_max_length(*, platform: str | None = None) -> int:
+    return (
+        WINDOWS_SESSION_PROJECT_DIR_MAX_LENGTH if (platform or sys.platform).startswith("win") else MAX_SANITIZED_LENGTH
+    )
+
+
+def _session_project_sanitize_path(name: str, *, platform: str | None = None) -> str:
+    """Bounded per-project directory component used for new session storage.
+
+    Windows uses a shorter write component so the nested session layout stays
+    within ``MAX_PATH``. Other platforms retain the existing 200-character
+    component. The blake2b suffix matches :func:`sanitize_path`, so the current
+    and legacy aliases share a stable hash suffix.
+    """
+    max_length = session_project_dir_max_length(platform=platform)
+    sanitized = _NON_ALNUM.sub("-", name)
+    if len(sanitized) <= max_length:
+        return sanitized
+    digest = blake2b(name.encode("utf-8"), digest_size=6).hexdigest()
+    return f"{sanitized[: max_length - _HASH_SUFFIX_LENGTH]}-{digest}"
 
 
 def get_projects_dir() -> Path:
@@ -66,13 +99,17 @@ def get_project_dir(cwd: str) -> Path:
     return candidates[0]
 
 
-def project_dir_candidates(cwd: str, projects_dir: Path | None = None) -> tuple[Path, ...]:
+def project_dir_candidates(
+    cwd: str,
+    projects_dir: Path | None = None,
+    *,
+    platform: str | None = None,
+) -> tuple[Path, ...]:
     root = projects_dir or get_projects_dir()
-    current = root / _session_project_sanitize_path(cwd)
+    current = root / _session_project_sanitize_path(cwd, platform=platform)
+    previous = root / _previous_session_project_sanitize_path(cwd)
     legacy = root / _legacy_sanitize_path(cwd)
-    if current == legacy:
-        return (current,)
-    return (current, legacy)
+    return tuple(dict.fromkeys((current, previous, legacy)))
 
 
 def get_session_path(cwd: str, session_id: str) -> Path:

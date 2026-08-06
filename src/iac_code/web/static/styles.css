@@ -2176,6 +2176,81 @@ h3 {
   backdrop-filter: blur(2px);
 }
 
+.desktop-git-bash-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+}
+
+.desktop-git-bash-dialog {
+  display: grid;
+  gap: 0.9rem;
+  width: min(460px, calc(100vw - 2rem));
+  padding: 1.4rem;
+  border: 1px solid var(--codex-border-strong);
+  border-radius: 14px;
+  background: var(--codex-panel-raised);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.4);
+  color: var(--codex-text);
+}
+
+.desktop-git-bash-dialog h2,
+.desktop-git-bash-dialog p {
+  margin: 0;
+}
+
+.desktop-git-bash-dialog h2 {
+  font-size: 1.05rem;
+}
+
+.desktop-git-bash-dialog p {
+  color: var(--codex-muted);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.desktop-git-bash-status {
+  min-height: 1.35rem;
+}
+
+.desktop-git-bash-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.desktop-git-bash-button {
+  min-height: 2.1rem;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--codex-border-strong);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--codex-text);
+  cursor: pointer;
+}
+
+.desktop-git-bash-button.is-primary {
+  border-color: var(--codex-ink);
+  background: var(--codex-ink);
+  color: var(--codex-panel);
+}
+
+.desktop-git-bash-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.desktop-git-bash-button:focus-visible {
+  outline: 2px solid var(--codex-unread);
+  outline-offset: 2px;
+}
+
 /* 对话框跟随主题(codex 变量),否则暗色主题下是白框、浅色按钮隐形。 */
 .server-restart-box {
   display: grid;
@@ -5365,6 +5440,33 @@ body.is-resizing-sidebar {
 
 .session-rail .brand {
   padding: 0.08rem 0.42rem 0;
+}
+
+.session-rail .sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.62rem;
+  min-height: 2.35rem;
+  margin: 0;
+  padding: 0.08rem 0.48rem 0.34rem 0.22rem;
+}
+
+.sidebar-brand-logo {
+  display: block;
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+}
+
+.session-rail .sidebar-brand-name {
+  overflow: hidden;
+  color: var(--codex-text);
+  font-size: 1.04rem;
+  font-weight: 680;
+  line-height: 1;
+  letter-spacing: -0.018em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .session-rail h1 {
@@ -11852,9 +11954,13 @@ body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-cell-sta
   gap: 0.6rem;
 }
 .workspace-theme-swatch {
+  -webkit-appearance: none;
+  appearance: none;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
   padding: 0.6rem;
   border: 1px solid var(--codex-border);
   border-radius: 0.7rem;
@@ -11877,6 +11983,9 @@ body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-cell-sta
 }
 .workspace-theme-swatch .workspace-theme-strip {
   display: flex;
+  flex: 0 0 1.4rem;
+  width: 100%;
+  min-width: 0;
   height: 1.4rem;
   border-radius: 0.4rem;
   overflow: hidden;
@@ -11884,6 +11993,26 @@ body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-cell-sta
 }
 .workspace-theme-swatch .workspace-theme-strip > span {
   flex: 1;
+}
+
+/* macOS WKWebView 会给原生 select 套用系统旧式双箭头外观；关闭原生外观后用 CSS
+   绘制轻量 chevron，避免平台差异，同时保留 select 的键盘与辅助功能语义。 */
+.workspace-select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 2rem;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--codex-muted) 50%),
+    linear-gradient(135deg, var(--codex-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 0.88rem) 50%,
+    calc(100% - 0.6rem) 50%;
+  background-size: 0.3rem 0.3rem;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+.workspace-select:disabled {
+  cursor: not-allowed;
 }
 /* 架构图下方询价块:与图分隔,总价醒目,缺价用 muted 提示。 */
 .diagram-price {

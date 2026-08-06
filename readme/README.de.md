@@ -65,6 +65,18 @@ iac-code web
 
 Standardmäßig öffnet sie `http://127.0.0.1:8766` in Ihrem Browser (nur Loopback). Weitere Details finden Sie im [Web-App-Leitfaden](https://aliyun.github.io/iac-code/de/web-app).
 
+### Desktop-App
+
+Für die Nutzung als native Anwendung laden Sie das passende Paket von den [GitHub-Releases](https://github.com/aliyun/iac-code/releases) herunter:
+
+- Mac mit Apple-Chip: `.dmg`
+- Windows x64: `.exe`-Installationsprogramm
+- Linux x64: `.AppImage` oder `.deb`
+
+Die Desktop-App verwendet dieselbe IaC-Code-Engine und dieselben Modellanbieter, Cloud-Zugangsdaten, Einstellungen, Projekte und Sitzungen wie CLI und Web-App. Beim ersten Start wählen Sie den Projektordner aus, in dem IaC Code arbeiten soll. Unter Windows prüft die App außerdem, ob Git Bash installiert ist, und führt bei Bedarf durch die Installation.
+
+Die macOS-, Windows- und AppImage-Versionen können kryptografisch signierte Aktualisierungen direkt in der App suchen und installieren. Das deb-Paket wird durch die Installation einer neueren Paketversion aktualisiert. Die Installationspakete tragen derzeit noch keine kommerzielle Herausgebersignatur. Deshalb kann macOS oder Windows vor einem unbekannten Entwickler warnen; prüfen Sie vor der Installation die mit dem Release veröffentlichte Datei `SHA256SUMS`. Installationshinweise und Hilfe bei Problemen finden Sie im [Leitfaden zur Desktop-App](https://aliyun.github.io/iac-code/de/docs/desktop-app).
+
 ## Mitwirken
 
 Installieren Sie [uv](https://docs.astral.sh/uv/getting-started/installation/), dann:

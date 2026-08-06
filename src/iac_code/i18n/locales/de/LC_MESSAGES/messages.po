@@ -11514,6 +11514,10 @@ msgid "refusing to open non-regular file: {path}"
 msgstr "Öffnen einer nicht regulären Datei verweigert: {path}"
 
 #: src/iac_code/web/app.py
+msgid "Desktop runtime is closing"
+msgstr "Die Desktop-Laufzeit wird beendet"
+
+#: src/iac_code/web/app.py
 msgid "This session was created outside the web entry and is read-only."
 msgstr ""
 "Diese Sitzung wurde außerhalb des Web-Einstiegs erstellt und ist "
@@ -11600,6 +11604,14 @@ msgstr "Es läuft bereits ein Update."
 #, python-brace-format
 msgid "The update command exited with code {}."
 msgstr "Der Update-Befehl wurde mit Code {} beendet."
+
+#: src/iac_code/web/app.py
+msgid "A project directory is required."
+msgstr "Ein Projektverzeichnis ist erforderlich."
+
+#: src/iac_code/web/app.py
+msgid "The selected project directory is invalid."
+msgstr "Das ausgewählte Projektverzeichnis ist ungültig."
 
 #: src/iac_code/web/app.py src/iac_code/web/session_manager.py
 #: src/iac_code/web/settings.py

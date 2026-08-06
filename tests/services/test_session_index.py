@@ -622,7 +622,7 @@ print(json.dumps(sorted(name for name in sys.modules if name.startswith("iac_cod
 
     def test_list_for_cwd_merges_bounded_and_legacy_long_project_dirs(self, tmp_path):
         cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
-        current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+        current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
         legacy_project_dir.mkdir(parents=True)
         (legacy_project_dir / "legacy-long.jsonl").write_text(
             '{"role":"user","content":"old","cwd":"%s"}\n' % cwd,
@@ -639,11 +639,30 @@ print(json.dumps(sorted(name for name in sys.modules if name.startswith("iac_cod
             "new-long": "new",
         }
 
+    def test_windows_previous_200_character_project_dir_is_not_hidden_after_upgrade(self, tmp_path, monkeypatch):
+        cwd = "C:\\" + "nested-workspace\\" * 30
+        monkeypatch.setattr(project_paths.sys, "platform", "win32")
+        current_project_dir, previous_project_dir, _legacy_project_dir = project_paths.project_dir_candidates(
+            cwd, tmp_path, platform="win32"
+        )
+        previous_project_dir.mkdir(parents=True)
+        (previous_project_dir / "previous-windows.jsonl").write_text(
+            '{"role":"user","content":"old Windows session","cwd":"%s"}\n' % cwd.replace("\\", "\\\\"),
+            encoding="utf-8",
+        )
+
+        entries = SessionIndex(projects_dir=tmp_path).list_for_cwd(cwd)
+
+        assert not current_project_dir.exists()
+        assert [(entry.session_id, entry.title) for entry in entries] == [
+            ("previous-windows", "old Windows session")
+        ]
+
     def test_limited_page_reports_deduplicated_total_for_long_project_aliases(self, tmp_path):
         cwd = "/" + "long-project/" * 24
         storage = SessionStorage(projects_dir=tmp_path)
         storage.append(cwd, "same-session", Message(role="user", content="prompt"), git_branch=None)
-        current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+        current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
         shutil.copytree(current_project_dir, legacy_project_dir)
 
         entries, total = SessionIndex(projects_dir=tmp_path).list_all_projects_page(limit=1)
@@ -668,7 +687,7 @@ print(json.dumps(sorted(name for name in sys.modules if name.startswith("iac_cod
     @pytest.mark.parametrize("limit", [None, 1])
     def test_all_projects_prefers_current_long_project_alias_over_stale_legacy(self, tmp_path, limit):
         cwd = "/" + "long-project/" * 24
-        current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+        current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
         legacy_storage = SessionStorage(projects_dir=tmp_path)
         legacy_storage.append(cwd, "same-session", Message(role="user", content="stale"), git_branch=None)
         shutil.move(legacy_storage.project_dir(cwd), legacy_project_dir)
@@ -686,7 +705,7 @@ print(json.dumps(sorted(name for name in sys.modules if name.startswith("iac_cod
 
     def test_list_all_projects_ignores_metadata_only_shadow_with_stale_metadata_cwd(self, tmp_path):
         cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
-        current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+        current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
         legacy_project_dir.mkdir(parents=True)
         legacy_path = legacy_project_dir / "legacy-long-stale-shadow.jsonl"
         legacy_path.write_text(

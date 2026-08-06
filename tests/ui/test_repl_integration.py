@@ -1118,18 +1118,18 @@ def test_swap_session_refreshes_session_name_and_renders_banner():
     repl.console = SimpleNamespace(file=SimpleNamespace(write=Mock(), flush=Mock()), print=Mock())
     repl.renderer = SimpleNamespace(replay_history=Mock())
 
-    with patch("iac_code.ui.repl.render_welcome_banner", return_value="banner") as render_welcome_banner:
+    with patch("iac_code.ui.repl.print_welcome_banner") as print_welcome_banner:
         repl.swap_session("new-session")
 
     assert repl._session_name == "deploy-prod"
     repl._load_current_session_name.assert_called_once_with()
-    render_welcome_banner.assert_called_once_with(
+    print_welcome_banner.assert_called_once_with(
+        repl.console,
         "test-model",
         "/repo",
         session_id="new-session",
         session_name="deploy-prod",
     )
-    repl.console.print.assert_called_once_with("banner")
 
 
 def test_print_mcp_config_warnings_prints_each_warning_once():
@@ -2476,8 +2476,6 @@ def test_run_reads_pending_update_then_renders_banner_then_starts_background(moc
     import asyncio
     from unittest.mock import AsyncMock
 
-    from rich.text import Text
-
     from iac_code.ui.repl import ExitREPLError, InlineREPL
 
     repl = InlineREPL(model="test-model")
@@ -2489,9 +2487,8 @@ def test_run_reads_pending_update_then_renders_banner_then_starts_background(moc
         call_order.append("get_pending_update")
         return None
 
-    def _record_render_banner(*args, **kwargs):
-        call_order.append("render_welcome_banner")
-        return Text("welcome")
+    def _record_print_banner(*args, **kwargs):
+        call_order.append("print_welcome_banner")
 
     def _record_start_background():
         call_order.append("start_background_update_check")
@@ -2504,7 +2501,7 @@ def test_run_reads_pending_update_then_renders_banner_then_starts_background(moc
 
     with (
         patch("iac_code.ui.repl.get_pending_update", side_effect=_record_get_pending),
-        patch("iac_code.ui.repl.render_welcome_banner", side_effect=_record_render_banner),
+        patch("iac_code.ui.repl.print_welcome_banner", side_effect=_record_print_banner),
         patch("iac_code.ui.repl.start_background_update_check", side_effect=_record_start_background),
         patch("iac_code.ui.repl.start_background_housekeeping"),
     ):
@@ -2512,7 +2509,7 @@ def test_run_reads_pending_update_then_renders_banner_then_starts_background(moc
 
     assert call_order == [
         "get_pending_update",
-        "render_welcome_banner",
+        "print_welcome_banner",
         "start_background_update_check",
         "resume_pipeline_sidecar_on_startup",
     ]
@@ -2527,7 +2524,6 @@ def test_run_does_not_render_second_update_notice_after_startup_prompt(mock_mm, 
     from unittest.mock import AsyncMock
 
     from rich.console import Console
-    from rich.text import Text
 
     from iac_code.ui.repl import ExitREPLError, InlineREPL
 
@@ -2539,7 +2535,7 @@ def test_run_does_not_render_second_update_notice_after_startup_prompt(mock_mm, 
 
     with (
         patch("iac_code.ui.repl.get_pending_update", return_value=update),
-        patch("iac_code.ui.repl.render_welcome_banner", return_value=Text("welcome")),
+        patch("iac_code.ui.repl.print_welcome_banner"),
         patch("iac_code.ui.repl.Select") as select,
         patch("iac_code.ui.repl.start_background_housekeeping"),
         patch("iac_code.ui.repl.start_background_update_check"),

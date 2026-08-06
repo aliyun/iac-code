@@ -88,8 +88,13 @@ def save_project_instruction(cwd: Path, content: str) -> dict[str, Any]:
     return _saved_instruction_payload(path, content)
 
 
-def save_user_instruction(content: str) -> dict[str, Any]:
-    runtime = ProjectMemoryRuntime(str(Path.cwd()))
+def save_user_instruction(content: str, *, context_cwd: Path | None = None) -> dict[str, Any]:
+    """Save user instructions without making Desktop's private runtime a project.
+
+    ``context_cwd`` is Desktop-only.  Its default preserves the existing Web/CLI
+    behavior and the same shared user-instruction storage contract.
+    """
+    runtime = ProjectMemoryRuntime(str(context_cwd if context_cwd is not None else Path.cwd()))
     path = runtime.ensure_instruction_file("user")
     if path.is_symlink():
         raise ValueError(_("user memory path is invalid"))

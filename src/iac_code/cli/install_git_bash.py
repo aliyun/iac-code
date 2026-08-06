@@ -12,12 +12,9 @@ import subprocess
 import typer
 
 from iac_code.i18n import _
-from iac_code.utils.platform import (
-    _NPMMIRROR_CMD,
-    GitBashNotFoundError,
-    _clear_cache,
-    _find_git_bash_path,
-)
+from iac_code.services.git_bash import GitBashInstallError
+from iac_code.services.git_bash import install_git_bash as _install_git_bash
+from iac_code.utils.platform import GitBashNotFoundError, _clear_cache, _find_git_bash_path
 
 
 def install_git_bash() -> None:
@@ -43,42 +40,32 @@ def install_git_bash() -> None:
     typer.echo(_("Installing Git for Windows via npmmirror..."))
 
     try:
-        result = subprocess.run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                _NPMMIRROR_CMD,
-            ],
-            check=False,
+        path = _install_git_bash(
+            run=subprocess.run,
+            find=_find_git_bash_path,
+            clear_cache=_clear_cache,
+            check_existing=False,
         )
-    except FileNotFoundError:
-        typer.echo(
-            _("powershell.exe was not found on PATH; cannot run installer."),
-            err=True,
-        )
-        raise typer.Exit(1)
-
-    if result.returncode != 0:
-        typer.echo(
-            _("Installation failed (PowerShell exited with code {})").format(result.returncode),
-            err=True,
-        )
-        raise typer.Exit(1)
-
-    _clear_cache()
-    try:
-        path = _find_git_bash_path()
-    except GitBashNotFoundError:
-        typer.echo(
-            _(
-                "Installer exited but bash.exe was not found in common locations; "
-                "UAC may have been cancelled or the installer used a non-standard path."
-            ),
-            err=True,
-        )
+    except GitBashInstallError as exc:
+        reason = str(exc)
+        if reason == "powershell-not-found":
+            typer.echo(
+                _("powershell.exe was not found on PATH; cannot run installer."),
+                err=True,
+            )
+        elif reason.startswith("installer-exit:"):
+            typer.echo(
+                _("Installation failed (PowerShell exited with code {})").format(reason.partition(":")[2]),
+                err=True,
+            )
+        else:
+            typer.echo(
+                _(
+                    "Installer exited but bash.exe was not found in common locations; "
+                    "UAC may have been cancelled or the installer used a non-standard path."
+                ),
+                err=True,
+            )
         raise typer.Exit(1)
 
     typer.echo("✓ " + _("Git for Windows installed at {}").format(path))

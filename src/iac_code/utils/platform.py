@@ -8,6 +8,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -15,6 +16,7 @@ from typing import Literal
 from iac_code.i18n import _
 
 _cached_platform: PlatformInfo | None = None
+_desktop_cleanup_tasks: set[asyncio.Task[bool]] = set()
 
 
 class GitBashNotFoundError(RuntimeError):
@@ -62,13 +64,13 @@ class PlatformInfo:
     shell_name: Literal["bash", "sh"]
 
     @staticmethod
-    def detect() -> PlatformInfo:
+    def detect(*, desktop_deadline_monotonic: float | None = None) -> PlatformInfo:
         global _cached_platform
         if _cached_platform is not None:
             return _cached_platform
 
         if sys.platform == "win32":
-            shell_path = _find_git_bash_path()
+            shell_path = _find_git_bash_path(desktop_deadline_monotonic=desktop_deadline_monotonic)
             result = PlatformInfo(os_kind="Windows", shell_path=shell_path, shell_name="bash")
         else:
             os_kind = "macOS" if sys.platform == "darwin" else sys.platform.capitalize()
@@ -80,18 +82,26 @@ class PlatformInfo:
         return result
 
 
-def _find_git_bash_path() -> str:
+def _find_git_bash_path(*, desktop_deadline_monotonic: float | None = None) -> str:
     override = os.environ.get("IAC_CODE_GIT_BASH_PATH")
     if override and os.path.isfile(override):
         return override
 
+    timeout = 5.0
+    if desktop_deadline_monotonic is not None:
+        remaining = desktop_deadline_monotonic - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Desktop diagnostics deadline expired")
+        timeout = min(timeout, remaining)
     try:
-        result = subprocess.run(
+        from iac_code.desktop.external_env import run_external
+
+        result = run_external(
             ["where.exe", "git"],
             capture_output=True,
             text=True,
             check=False,
-            timeout=5,
+            timeout=timeout,
         )
         if result.returncode == 0:
             for line in result.stdout.splitlines():
@@ -100,7 +110,10 @@ def _find_git_bash_path() -> str:
                     candidate = str(Path(git_path).parent.parent / "bin" / "bash.exe")
                     if os.path.isfile(candidate):
                         return candidate
-    except (OSError, subprocess.TimeoutExpired):
+    except subprocess.TimeoutExpired:
+        if desktop_deadline_monotonic is not None and time.monotonic() >= desktop_deadline_monotonic:
+            raise TimeoutError("Desktop diagnostics deadline expired") from None
+    except OSError:
         pass
 
     for candidate in [
@@ -145,21 +158,83 @@ async def kill_process_tree(proc: asyncio.subprocess.Process) -> None:
 
     try:
         if sys.platform == "win32":
+            from iac_code.desktop.external_env import is_desktop_runtime
+
+            if is_desktop_runtime():
+                try:
+                    receipt = _submit_desktop_taskkill(pid)
+                except OSError:
+                    proc.kill()
+                    return
+                cleanup = asyncio.create_task(_desktop_taskkill_tree(receipt))
+                try:
+                    succeeded = await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    # The cleanup ticket is already irrevocably submitted. Keep
+                    # a strong reference so a second caller cancellation cannot
+                    # drop taskkill before it reaps the process tree.
+                    _desktop_cleanup_tasks.add(cleanup)
+                    cleanup.add_done_callback(_desktop_cleanup_tasks.discard)
+                    raise
+                if not succeeded:
+                    proc.kill()
+                return
             result = subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
-                capture_output=True,
-                check=False,
-                timeout=5,
+                ["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, check=False, timeout=5
             )
             if result.returncode != 0:
                 proc.kill()
         else:
+            from iac_code.desktop.external_env import is_desktop_runtime
+
+            if is_desktop_runtime():
+                # Guardian proxies own DRAIN and Host completion. Never signal a
+                # bare target PID/PGID from the Desktop cancellation path.
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(asyncio.shield(proc.wait()), timeout=3)
+                except (asyncio.TimeoutError, TimeoutError):
+                    proc.kill()
+                    await asyncio.wait_for(asyncio.shield(proc.wait()), timeout=2)
+                return
             os.killpg(pid, signal.SIGKILL)
-    except (OSError, subprocess.TimeoutExpired, ProcessLookupError):
+    except (OSError, subprocess.TimeoutExpired, ProcessLookupError, asyncio.TimeoutError, TimeoutError):
         try:
             proc.kill()
         except ProcessLookupError:
             pass
+
+
+def _submit_desktop_taskkill(pid: int):
+    from iac_code.desktop.external_env import popen_external, submit_windows_spawn
+
+    return submit_windows_spawn(
+        lambda: popen_external(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ),
+        cleanup=True,
+    )
+
+
+async def _desktop_taskkill_tree(receipt) -> bool:
+    try:
+        if receipt is None:
+            return False
+        process = await asyncio.to_thread(receipt.wait)
+        try:
+            await asyncio.wait_for(asyncio.to_thread(process.communicate), timeout=5)
+        except (asyncio.TimeoutError, TimeoutError, subprocess.TimeoutExpired):
+            process.kill()
+            try:
+                await asyncio.wait_for(asyncio.to_thread(process.wait), timeout=0.5)
+            except (asyncio.TimeoutError, TimeoutError, subprocess.TimeoutExpired):
+                return False
+        return process.returncode == 0
+    except (OSError, subprocess.SubprocessError, asyncio.TimeoutError, TimeoutError):
+        return False
 
 
 def normalize_user_path(raw: str) -> str:

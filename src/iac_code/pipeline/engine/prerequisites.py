@@ -22,14 +22,32 @@ import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
+from iac_code.desktop.external_env import guarded_command, popen_external, run_external, spawn_env, spawn_env_kwargs
 from iac_code.i18n import _
 
 CommandExists = Callable[[str], object]
 RunCommand = Callable[..., "CommandResult"]
 ChooseInstaller = Callable[[str, list["InstallerSpec"]], str | None]
 ProgressHandler = Callable[["PrerequisiteProgress"], None]
+
+
+class DesktopDownloadTransaction(Protocol):
+    def begin(
+        self,
+        installed_path: Path,
+        *,
+        installer_id: str,
+        expected_sha256: str,
+        platform_name: str,
+    ) -> Path: ...
+
+    def transition(self, phase: str) -> None: ...
+
+    def cancel_before_replace(self) -> None: ...
+
+    def complete(self) -> None: ...
 
 _MAX_FAILURE_MESSAGE_CHARS = 1200
 _MAX_FAILURE_MESSAGE_LINES = 14
@@ -215,7 +233,12 @@ def prepare_prerequisites(
     run_command: RunCommand | None = None,
     choose_installer: ChooseInstaller | None = None,
     progress_handler: ProgressHandler | None = None,
+    desktop_transaction: DesktopDownloadTransaction | None = None,
+    force_repair: bool = False,
+    desktop_cancel_event: threading.Event | None = None,
 ) -> PrerequisiteResolution:
+    if force_repair and desktop_transaction is None:
+        raise ValueError("force_repair is available only for a Desktop managed transaction")
     checker = command_exists or _default_command_exists
     runner = run_command or _default_run_command
     chooser = choose_installer or _default_choose_installer
@@ -240,7 +263,7 @@ def prepare_prerequisites(
 
         version_failure_message = ""
         exists, resolved_path = _check_command(command, checker)
-        if exists:
+        if exists and not force_repair:
             version_ok, version_message = _check_prerequisite_version(
                 raw_prerequisite,
                 name=name,
@@ -263,16 +286,18 @@ def prepare_prerequisites(
             version_failure_message = version_message
 
         available_installers = _available_installers(raw_prerequisite, current_platform, current_architecture, checker)
-        resolved_path, resolved_installer_id, hint_version_message = _resolve_path_hint_from_installers(
-            raw_prerequisite,
-            name,
-            command,
-            available_installers,
-            runner,
-            env_overrides,
-            current_platform,
-            progress_handler,
-        )
+        resolved_path, resolved_installer_id, hint_version_message = (None, None, "")
+        if not force_repair:
+            resolved_path, resolved_installer_id, hint_version_message = _resolve_path_hint_from_installers(
+                raw_prerequisite,
+                name,
+                command,
+                available_installers,
+                runner,
+                env_overrides,
+                current_platform,
+                progress_handler,
+            )
         if hint_version_message and not version_failure_message:
             version_failure_message = hint_version_message
         if resolved_path is not None:
@@ -319,6 +344,8 @@ def prepare_prerequisites(
             current_platform,
             current_architecture,
             progress_handler,
+            desktop_transaction,
+            desktop_cancel_event,
         )
         if install_result is not None:
             _disable_flags(resolved_flags, required_flags)
@@ -390,6 +417,9 @@ def prepare_prerequisites(
             )
             continue
 
+        if desktop_transaction is not None:
+            desktop_transaction.transition("validated_pending_post_install")
+
         post_install_result = _run_post_install(
             raw_prerequisite,
             name,
@@ -399,6 +429,12 @@ def prepare_prerequisites(
             runner,
             env_overrides,
             progress_handler,
+            # Windows resolves a bare executable before applying the child
+            # environment's updated PATH. Use the freshly installed Desktop
+            # binary directly for post-install commands in this process.
+            resolved_command_path=(
+                resolved_path if desktop_transaction is not None and current_platform == "windows" else None
+            ),
         )
         if post_install_result is not None:
             _disable_flags(resolved_flags, required_flags)
@@ -413,6 +449,9 @@ def prepare_prerequisites(
             )
             continue
 
+        if desktop_transaction is not None:
+            desktop_transaction.complete()
+
         decisions[name] = PrerequisiteDecision(
             name=name,
             command=command,
@@ -426,6 +465,16 @@ def prepare_prerequisites(
 
 
 def _default_command_exists(command: str) -> str | None:
+    # The Desktop runtime owns the InfraGuard binary installed from Settings.
+    # Prefer that canonical path over PATH: the frozen sidecar directory and a
+    # user's shell PATH may contain an older launcher/shim, and selecting it
+    # would make Settings and fresh Pipeline runs disagree with the installer.
+    if command.lower() in {"infraguard", "infraguard.exe"} and os.environ.get("IAC_CODE_DESKTOP_RUNTIME") == "1":
+        raw_managed_path = os.environ.get("IAC_CODE_DESKTOP_INFRAGUARD_PATH", "").strip()
+        if raw_managed_path:
+            managed_path = _expanded_path(raw_managed_path)
+            if _is_executable(managed_path):
+                return str(managed_path)
     return shutil.which(command)
 
 
@@ -434,22 +483,23 @@ def _default_run_command(
     env: Mapping[str, str] | None = None,
     on_output: Callable[[str, str], None] | None = None,
     timeout_seconds: float | None = None,
+    desktop_cancel_event: threading.Event | None = None,
 ) -> CommandResult:
     popen_kwargs: dict[str, Any] = {}
     if os.name == "nt":
         popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    else:
+    elif os.environ.get("IAC_CODE_DESKTOP_PROBE_CONTAINER") != "1":
         popen_kwargs["start_new_session"] = True
     try:
-        process = subprocess.Popen(
-            command,
+        process = popen_external(
+            guarded_command(command, kind="prerequisite"),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             encoding="utf-8",
             errors="replace",
             bufsize=1,
-            env=dict(env) if env is not None else None,
+            env=spawn_env(env),
             **popen_kwargs,
         )
     except OSError as exc:
@@ -473,6 +523,15 @@ def _default_run_command(
     reader_done = False
     try:
         while True:
+            if desktop_cancel_event is not None and desktop_cancel_event.is_set():
+                _terminate_process(process)
+                _drain_command_output(output_queue, output_parts, on_output)
+                return CommandResult(
+                    command=command,
+                    returncode=130,
+                    stdout="".join(output_parts),
+                    stderr="Desktop prerequisite installation canceled",
+                )
             if deadline is None:
                 wait_timeout = 0.1
             else:
@@ -551,6 +610,14 @@ def _terminate_process(process: subprocess.Popen[str]) -> None:
 
 
 def _terminate_posix_process_group(process: subprocess.Popen[str], *, force: bool = False) -> None:
+    from iac_code.desktop.external_env import is_guardian_process
+
+    if is_guardian_process(process):
+        if force:
+            process.kill()
+        else:
+            process.terminate()
+        return
     try:
         os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
     except ProcessLookupError:
@@ -567,7 +634,7 @@ def _terminate_windows_process_tree(process: subprocess.Popen[str], *, force: bo
     if force:
         command.insert(1, "/F")
     try:
-        subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        run_external(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
     except OSError:
         if force:
             process.kill()
@@ -786,6 +853,8 @@ def _run_installer(
     current_platform: str,
     current_architecture: str,
     progress_handler: ProgressHandler | None,
+    desktop_transaction: DesktopDownloadTransaction | None,
+    desktop_cancel_event: threading.Event | None,
 ) -> tuple[CommandResult | None, str | None]:
     installer_env = dict(env_overrides)
     installer_env.update(_expand_env_mapping(installer.env))
@@ -813,6 +882,8 @@ def _run_installer(
             current_platform,
             current_architecture,
             progress_handler,
+            desktop_transaction,
+            desktop_cancel_event,
         )
     return None, None
 
@@ -985,18 +1056,22 @@ def _github_ref_object_commit_sha(repo: str, raw_object: Mapping[str, Any], time
 
 def _latest_git_ls_remote_tag_commit_ref(repo: str, tag_prefix: str, timeout: float) -> str:
     try:
-        completed = subprocess.run(
-            [
+        completed = run_external(
+            guarded_command(
+                [
                 "git",
                 "ls-remote",
                 "--tags",
                 f"https://github.com/{repo}.git",
                 f"refs/tags/{tag_prefix}*",
-            ],
+                ],
+                kind="prerequisite",
+            ),
             capture_output=True,
             text=True,
             check=False,
             timeout=timeout,
+            **spawn_env_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -1040,11 +1115,17 @@ def _run_post_install(
     run_command: RunCommand,
     env_overrides: Mapping[str, str],
     progress_handler: ProgressHandler | None,
+    *,
+    resolved_command_path: str | None = None,
 ) -> CommandResult | None:
     post_install = raw_prerequisite.get("post_install") or {}
     if not isinstance(post_install, Mapping):
         return None
     commands = [list(command) for command in post_install.get("commands") or []]
+    if resolved_command_path:
+        for command in commands:
+            if command and command[0] == name:
+                command[0] = resolved_command_path
     timeout_seconds = _timeout_seconds(post_install.get("timeout_seconds"))
     return _run_commands(
         commands,
@@ -1253,6 +1334,8 @@ def _download_configured_asset(
     current_platform: str,
     current_architecture: str,
     progress_handler: ProgressHandler | None,
+    desktop_transaction: DesktopDownloadTransaction | None,
+    desktop_cancel_event: threading.Event | None,
 ) -> tuple[CommandResult | None, str | None]:
     asset = _select_download_asset(installer.download, current_platform, current_architecture)
     pseudo_command = ["download", installer.id]
@@ -1321,7 +1404,16 @@ def _download_configured_asset(
         )
 
     for url in urls:
-        tmp_path = installed_path.with_name(f".{installed_path.name}.download")
+        tmp_path = (
+            desktop_transaction.begin(
+                installed_path,
+                installer_id=installer.id,
+                expected_sha256=expected_sha256,
+                platform_name=current_platform,
+            )
+            if desktop_transaction is not None
+            else installed_path.with_name(f".{installed_path.name}.download")
+        )
         try:
             result = _download_url(
                 url,
@@ -1334,12 +1426,15 @@ def _download_configured_asset(
                 installer_display_name=installer.display_name,
                 filename=filename,
                 timeout_seconds=timeout_seconds,
+                desktop_cancel_event=desktop_cancel_event,
             )
         except KeyboardInterrupt:
             try:
                 tmp_path.unlink()
             except OSError:
                 pass
+            if desktop_transaction is not None:
+                desktop_transaction.cancel_before_replace()
             raise
         if result is not None:
             failures.append(_failure_message(result))
@@ -1349,10 +1444,41 @@ def _download_configured_asset(
                 pass
             continue
 
+        if desktop_cancel_event is not None and desktop_cancel_event.is_set():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+            if desktop_transaction is not None:
+                desktop_transaction.cancel_before_replace()
+            return (
+                CommandResult(
+                    command=pseudo_command,
+                    returncode=130,
+                    stdout="",
+                    stderr="Desktop prerequisite installation canceled",
+                ),
+                None,
+            )
+
         try:
+            if desktop_transaction is not None:
+                desktop_transaction.transition("replace_pending")
+            if desktop_transaction is not None and current_platform != "windows":
+                tmp_path.chmod(tmp_path.stat().st_mode | 0o755)
+            if desktop_transaction is not None:
+                # ``os.fsync`` maps to ``FlushFileBuffers`` on Windows, which
+                # rejects a read-only handle.  Recovery already uses ``r+b``
+                # for the same durability barrier; the normal install path
+                # must do so as well or every managed Windows download stops
+                # in ``replace_pending`` before the atomic replace.
+                with tmp_path.open("r+b") as downloaded:
+                    os.fsync(downloaded.fileno())
             tmp_path.replace(installed_path)
-            if current_platform != "windows":
+            if desktop_transaction is None and current_platform != "windows":
                 installed_path.chmod(installed_path.stat().st_mode | 0o755)
+            if desktop_transaction is not None:
+                desktop_transaction.transition("replaced_pending_validation")
         except OSError as exc:
             try:
                 tmp_path.unlink()
@@ -1373,6 +1499,9 @@ def _download_configured_asset(
             )
         _prepend_path(env_overrides, str(install_dir))
         return None, str(installed_path)
+
+    if desktop_transaction is not None:
+        desktop_transaction.cancel_before_replace()
 
     return (
         CommandResult(
@@ -1395,6 +1524,7 @@ def _download_url(
     installer_id: str | None,
     filename: str,
     timeout_seconds: float | None,
+    desktop_cancel_event: threading.Event | None = None,
     installer_display_key: str | None = None,
     installer_display_name: str | None = None,
 ) -> CommandResult | None:
@@ -1428,6 +1558,13 @@ def _download_url(
                 total=total,
             )
             while True:
+                if desktop_cancel_event is not None and desktop_cancel_event.is_set():
+                    return CommandResult(
+                        command=command,
+                        returncode=130,
+                        stdout="",
+                        stderr="Desktop prerequisite installation canceled",
+                    )
                 chunk = response.read(_DOWNLOAD_CHUNK_SIZE)
                 if not chunk:
                     break

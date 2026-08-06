@@ -87,6 +87,7 @@ _COMMITTED_BACKUP_VISIBILITY = "committed"
 _WAITING_INPUT_CANCEL_LOCKS = PathLockRegistry()
 _TERMINAL_PUBLICATION_UNAVAILABLE_KIND = "terminal_publication_unavailable"
 _HANDOFF_PUBLICATION_UNAVAILABLE_ACTION = "switch_to_normal_unavailable"
+_PREREQUISITE_METADATA_UNSET = object()
 _TERMINAL_EVENT_BY_SIDECAR_STATUS = {
     "completed": ("pipeline_completed", "completed"),
     "failed": ("pipeline_failed", "failed"),
@@ -420,12 +421,29 @@ class IacCodeA2APipelineExecutor:
                         iac_code_session_id=ctx.session_id,
                     )
                     self._configure_agent_runtime_for_request(agent_runtime)
-                    pipeline = self._create_pipeline(
-                        session_id=ctx.session_id,
-                        cwd=cwd,
-                        runtime=agent_runtime,
-                        session_storage=session_storage,
-                    )
+                    if os.environ.get("IAC_CODE_DESKTOP_RUNTIME") == "1":
+                        prerequisite_metadata = await asyncio.to_thread(
+                            self._inspect_pipeline_prerequisite_metadata,
+                            pipeline_name=get_pipeline_name(),
+                            cwd=cwd,
+                            session_id=ctx.session_id,
+                            session_storage=session_storage,
+                            resume_from_sidecar=True,
+                        )
+                        pipeline = self._create_pipeline(
+                            session_id=ctx.session_id,
+                            cwd=cwd,
+                            runtime=agent_runtime,
+                            session_storage=session_storage,
+                            prerequisite_metadata=prerequisite_metadata,
+                        )
+                    else:
+                        pipeline = self._create_pipeline(
+                            session_id=ctx.session_id,
+                            cwd=cwd,
+                            runtime=agent_runtime,
+                            session_storage=session_storage,
+                        )
                     self._set_pipeline_telemetry_correlation(pipeline, task_id=task_id, context_id=context_id)
                     publisher = self._publisher(
                         event_queue=event_queue,
@@ -451,13 +469,14 @@ class IacCodeA2APipelineExecutor:
                     ctx.runtime = pipeline_runtime
                     self._task_store.mirror_context(ctx)
 
-                    def fresh_pipeline_factory() -> Any:
+                    def create_fresh_pipeline(prerequisite_metadata: object = _PREREQUISITE_METADATA_UNSET) -> Any:
                         fresh_pipeline = self._create_pipeline(
                             session_id=ctx.session_id,
                             cwd=cwd,
                             runtime=agent_runtime,
                             session_storage=session_storage,
                             resume_from_sidecar=False,
+                            prerequisite_metadata=prerequisite_metadata,
                         )
                         self._set_pipeline_telemetry_correlation(
                             fresh_pipeline,
@@ -465,6 +484,22 @@ class IacCodeA2APipelineExecutor:
                             context_id=context_id,
                         )
                         return fresh_pipeline
+
+                    if os.environ.get("IAC_CODE_DESKTOP_RUNTIME") == "1":
+
+                        async def fresh_pipeline_factory() -> Any:
+                            prerequisite_metadata = await asyncio.to_thread(
+                                self._inspect_pipeline_prerequisite_metadata,
+                                pipeline_name=get_pipeline_name(),
+                                cwd=cwd,
+                                session_id=ctx.session_id,
+                                session_storage=session_storage,
+                                resume_from_sidecar=False,
+                            )
+                            return create_fresh_pipeline(prerequisite_metadata)
+
+                    else:
+                        fresh_pipeline_factory = create_fresh_pipeline
 
                     selected = await self._select_stream(
                         pipeline,
@@ -1156,17 +1191,20 @@ class IacCodeA2APipelineExecutor:
         runtime: Any,
         session_storage: SessionStorage,
         resume_from_sidecar: bool = True,
+        prerequisite_metadata: object = _PREREQUISITE_METADATA_UNSET,
     ) -> Any:
         pipeline_name = get_pipeline_name()
-        prerequisite_resolution = self._inspect_pipeline_prerequisite_metadata(
-            pipeline_name=pipeline_name,
-            cwd=cwd,
-            session_id=session_id,
-            session_storage=session_storage,
-            resume_from_sidecar=resume_from_sidecar,
-        )
+        prerequisite_resolution = prerequisite_metadata
+        if prerequisite_resolution is _PREREQUISITE_METADATA_UNSET:
+            prerequisite_resolution = self._inspect_pipeline_prerequisite_metadata(
+                pipeline_name=pipeline_name,
+                cwd=cwd,
+                session_id=session_id,
+                session_storage=session_storage,
+                resume_from_sidecar=resume_from_sidecar,
+            )
         create_kwargs: dict[str, Any] = {}
-        if prerequisite_resolution is not None:
+        if isinstance(prerequisite_resolution, dict):
             create_kwargs["prerequisite_resolution"] = prerequisite_resolution
         delegated_factory = self._aliyun_delegated_executor_factory
         if delegated_factory is None:
@@ -2100,7 +2138,7 @@ class IacCodeA2APipelineExecutor:
         if status in _TERMINAL_SIDECAR_STATUSES:
             if _terminal_sidecar_matches_task(publisher, status, task_id=task_id, context_id=context_id):
                 return _SelectedPipelineStream(pipeline=pipeline, stream=_empty_stream())
-            pipeline = self._fresh_pipeline_after_sidecar_mismatch(pipeline, fresh_pipeline_factory)
+            pipeline = await self._fresh_pipeline_after_sidecar_mismatch(pipeline, fresh_pipeline_factory)
             return _SelectedPipelineStream(
                 pipeline=pipeline,
                 stream=pipeline.run(_pipeline_runner_input(pipeline_input)),
@@ -2110,13 +2148,16 @@ class IacCodeA2APipelineExecutor:
             stream=pipeline.run(_pipeline_runner_input(pipeline_input)),
         )
 
-    def _fresh_pipeline_after_sidecar_mismatch(
+    async def _fresh_pipeline_after_sidecar_mismatch(
         self,
         pipeline: Any,
         fresh_pipeline_factory: Callable[[], Any],
     ) -> Any:
         self._clear_terminal_sidecar(pipeline)
-        return fresh_pipeline_factory()
+        fresh_pipeline = fresh_pipeline_factory()
+        if inspect.isawaitable(fresh_pipeline):
+            return await fresh_pipeline
+        return fresh_pipeline
 
     def _clear_terminal_sidecar(self, pipeline: Any) -> None:
         clear_sidecar = getattr(pipeline, "clear_sidecar", None)

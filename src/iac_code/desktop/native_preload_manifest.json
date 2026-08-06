@@ -1,0 +1,31 @@
+{
+  "modules": [
+    "keyring.backends.Windows",
+    "tiktoken_ext.openai_public",
+    "opentelemetry.sdk.trace.export",
+    "iac_code.services.telemetry.client",
+    "iac_code.tools.cloud.aliyun.oss_v4_adapter",
+    "alibabacloud_oss_v2.models.bucket_basic",
+    "alibabacloud_oss_v2.models.bucket_object_worm_configuration",
+    "alibabacloud_oss_v2.models.data_process",
+    "alibabacloud_oss_v2.models.object_basic",
+    "alibabacloud_oss_v2.models.object_worm",
+    "alibabacloud_oss_v2.models.region",
+    "alibabacloud_oss_v2.models.service",
+    "iac_code.providers.anthropic_provider",
+    "iac_code.providers.azure_openai_provider",
+    "iac_code.providers.dashscope_provider",
+    "iac_code.providers.deepseek_provider",
+    "iac_code.providers.gemini_provider",
+    "iac_code.providers.kimi_provider",
+    "iac_code.providers.lmstudio_provider",
+    "iac_code.providers.minimax_provider",
+    "iac_code.providers.modelscope_provider",
+    "iac_code.providers.ollama_provider",
+    "iac_code.providers.openai_provider",
+    "iac_code.providers.openrouter_provider",
+    "iac_code.providers.siliconflow_provider",
+    "iac_code.providers.volcengine_provider",
+    "iac_code.providers.zhipu_provider"
+  ]
+}

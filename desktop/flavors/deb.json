@@ -1,0 +1,18 @@
+{
+  "app": {
+    "security": {
+      "capabilities": ["desktop-local", "desktop-loopback-external"]
+    }
+  },
+  "bundle": {
+    "targets": ["deb"],
+    "category": "DeveloperTool",
+    "linux": {
+      "deb": {
+        "recommends": ["fonts-noto-cjk", "fonts-noto-color-emoji"],
+        "postInstallScript": "deb/postinst",
+        "postRemoveScript": "deb/postrm"
+      }
+    }
+  }
+}

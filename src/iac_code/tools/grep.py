@@ -11,6 +11,7 @@ import sys
 from functools import lru_cache
 from typing import Any
 
+from iac_code.desktop.external_env import create_subprocess_exec, guarded_command, spawn_env_kwargs
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.tools.path_safety import check_read_path, get_iac_code_application_root, resolve_read_path_with_source
@@ -180,11 +181,12 @@ async def _run_rg(
     cmd.append(pattern)
     cmd.append(search_path)
 
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
+    proc = await create_subprocess_exec(
+        *guarded_command(cmd),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=cwd,
+        **spawn_env_kwargs(),
     )
     stdout_bytes, stderr_bytes = await proc.communicate()
     stdout = stdout_bytes.decode(errors="replace")

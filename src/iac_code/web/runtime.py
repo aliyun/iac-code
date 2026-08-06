@@ -298,6 +298,7 @@ async def create_session_agent_runtime_in_thread(
     *,
     model_selection: WebModelSelection | None = None,
     disable_external_services: bool = False,
+    lifecycle_owner: set[asyncio.Future[Any]] | None = None,
 ) -> Any:
     """Create a session runtime off-loop and retain cleanup ownership across cancellation."""
     creation_task = asyncio.create_task(
@@ -309,30 +310,60 @@ async def create_session_agent_runtime_in_thread(
             disable_external_services=disable_external_services,
         )
     )
+    if lifecycle_owner is not None:
+        lifecycle_owner.add(creation_task)
     try:
-        return await asyncio.shield(creation_task)
+        runtime = await asyncio.shield(creation_task)
+        if lifecycle_owner is not None:
+            lifecycle_owner.discard(creation_task)
+        return runtime
     except asyncio.CancelledError:
-        creation_task.add_done_callback(_close_late_created_runtime)
+        creation_task.add_done_callback(
+            lambda task: _close_late_created_runtime(task, lifecycle_owner=lifecycle_owner)
+        )
+        raise
+    except BaseException:
+        if lifecycle_owner is not None:
+            lifecycle_owner.discard(creation_task)
         raise
 
 
-def _close_late_created_runtime(task: asyncio.Task[Any]) -> None:
+def _close_late_created_runtime(
+    task: asyncio.Task[Any],
+    *,
+    lifecycle_owner: set[asyncio.Future[Any]] | None = None,
+) -> None:
     try:
         runtime = task.result()
     except asyncio.CancelledError:
+        if lifecycle_owner is not None:
+            lifecycle_owner.discard(task)
         return
     except Exception:
+        if lifecycle_owner is not None:
+            lifecycle_owner.discard(task)
         logger.exception("Web agent runtime creation failed after its caller was cancelled")
         return
-    asyncio.create_task(close_agent_runtime(runtime))
+    close_task = asyncio.create_task(close_agent_runtime(runtime, lifecycle_owner=lifecycle_owner))
+    if lifecycle_owner is not None:
+        lifecycle_owner.add(close_task)
+        close_task.add_done_callback(lifecycle_owner.discard)
+        lifecycle_owner.discard(task)
 
 
-async def close_agent_runtime(runtime: Any | None) -> None:
+async def close_agent_runtime(
+    runtime: Any | None,
+    *,
+    lifecycle_owner: set[asyncio.Future[Any]] | None = None,
+) -> None:
     """Close an AgentRuntime without allowing cleanup failures to mask the turn."""
     close = getattr(runtime, "aclose", None)
     if not callable(close):
         return
     close_task = asyncio.create_task(close())
+    if lifecycle_owner is not None:
+        lifecycle_owner.add(close_task)
+        close_task.add_done_callback(lifecycle_owner.discard)
     try:
         done, _pending = await asyncio.wait({close_task}, timeout=WEB_RUNTIME_CLOSE_TIMEOUT_SECONDS)
     except asyncio.CancelledError:
@@ -432,9 +463,16 @@ class FakeStreamRuntime:
 class WebSessionRuntime:
     """Production runtime wrapper for normal Web chat turns."""
 
-    def __init__(self, session: WebSession, *, manager: WebSessionManager) -> None:
+    def __init__(
+        self,
+        session: WebSession,
+        *,
+        manager: WebSessionManager,
+        lifecycle_owner: set[asyncio.Future[Any]] | None = None,
+    ) -> None:
         self.session = session
         self.manager = manager
+        self.lifecycle_owner = lifecycle_owner
 
     async def start_turn(self, request: WebTurnRequest) -> dict[str, Any]:
         if self.session.turn_lock.locked():
@@ -459,6 +497,7 @@ class WebSessionRuntime:
                         self.session,
                         self.manager,
                         model_selection=model_selection,
+                        lifecycle_owner=self.lifecycle_owner,
                     )
                     self._attach_session_permission_context(agent_runtime)
                     await self._attach_mcp_status_updates(agent_runtime)
@@ -605,7 +644,7 @@ class WebSessionRuntime:
                     }
                 finally:
                     try:
-                        await close_agent_runtime(agent_runtime)
+                        await close_agent_runtime(agent_runtime, lifecycle_owner=self.lifecycle_owner)
                     finally:
                         try:
                             await flush_web_telemetry()
@@ -771,7 +810,12 @@ def _cache_session_context_overhead(session: Any, usage: dict[str, Any] | None) 
         session.context_tool_definition_tokens = tool_definition_tokens
 
 
-async def prime_session_context_overhead(session: WebSession, manager: WebSessionManager) -> None:
+async def prime_session_context_overhead(
+    session: WebSession,
+    manager: WebSessionManager,
+    *,
+    lifecycle_owner: set[asyncio.Future[Any]] | None = None,
+) -> None:
     """切换/打开会话时一次性算出系统提示 + 工具定义开销并缓存到会话。
 
     /status 与 get_session 据持久化消息重建上下文用量,拿不到系统提示与工具定义;服务器重启后、
@@ -791,7 +835,12 @@ async def prime_session_context_overhead(session: WebSession, manager: WebSessio
         return
     runtime: Any = None
     try:
-        runtime = await create_session_agent_runtime_in_thread(session, manager, disable_external_services=True)
+        runtime = await create_session_agent_runtime_in_thread(
+            session,
+            manager,
+            disable_external_services=True,
+            lifecycle_owner=lifecycle_owner,
+        )
         _cache_session_context_overhead(session, _live_context_usage(runtime))
     except asyncio.CancelledError:
         raise
@@ -799,7 +848,7 @@ async def prime_session_context_overhead(session: WebSession, manager: WebSessio
         logger.exception("Failed to prime session context overhead")
     finally:
         if runtime is not None:
-            await close_agent_runtime(runtime)
+            await close_agent_runtime(runtime, lifecycle_owner=lifecycle_owner)
 
 
 def _permission_request_payload(

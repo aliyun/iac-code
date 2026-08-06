@@ -56,16 +56,15 @@ async def test_clear_with_console_writes_ansi_and_banner(monkeypatch):
 
     calls = []
 
-    def fake_banner(model, cwd, *, session_id=None, session_name=None):
+    def fake_banner(console_arg, model, cwd, *, session_id=None, session_name=None):
+        assert console_arg is console
         calls.append((model, cwd, session_id, session_name))
-        return "BANNER"
 
-    monkeypatch.setattr("iac_code.ui.banner.render_welcome_banner", fake_banner)
+    monkeypatch.setattr("iac_code.ui.banner.print_welcome_banner", fake_banner)
     result = await clear_command(context=context)
     assert result == ""
     # ANSI escape written
     console.file.write.assert_called()
-    console.print.assert_called_with("BANNER")
     assert calls == [("claude-sonnet-4-6", "/tmp", None, None)]
 
 
@@ -82,14 +81,13 @@ async def test_clear_banner_preserves_repl_session_identity(monkeypatch):
 
     calls = []
 
-    def fake_banner(model, cwd, *, session_id=None, session_name=None):
+    def fake_banner(console_arg, model, cwd, *, session_id=None, session_name=None):
+        assert console_arg is console
         calls.append((model, cwd, session_id, session_name))
-        return "BANNER"
 
-    monkeypatch.setattr("iac_code.ui.banner.render_welcome_banner", fake_banner)
+    monkeypatch.setattr("iac_code.ui.banner.print_welcome_banner", fake_banner)
 
     result = await clear_command(context=context)
 
     assert result == ""
-    console.print.assert_called_with("BANNER")
     assert calls == [("claude-sonnet-4-6", "/tmp", "session-123", "deploy-prod")]

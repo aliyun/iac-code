@@ -276,7 +276,7 @@ def test_usage_direct_path_provider_refuses_symlinked_usage_leaf(tmp_path) -> No
 
 def test_usage_prefers_legacy_flat_over_metadata_shadow_across_project_dir_candidates(tmp_path) -> None:
     cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
-    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+    current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
     legacy_project_dir.mkdir(parents=True)
     legacy_session = legacy_project_dir / "long-shadow.jsonl"
     legacy_session.write_text('{"role":"user","content":"legacy","cwd":"%s"}\n' % cwd, encoding="utf-8")

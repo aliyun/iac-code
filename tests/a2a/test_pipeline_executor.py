@@ -882,7 +882,7 @@ def test_a2a_pipeline_dir_for_session_uses_long_cwd_legacy_sidecar_over_metadata
     config_dir = tmp_path / "config"
     cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
-    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, config_dir / "projects")
+    current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, config_dir / "projects")
     session_id = "legacy-a2a-sidecar-shadow"
     write_session_metadata(
         current_project_dir / session_id,

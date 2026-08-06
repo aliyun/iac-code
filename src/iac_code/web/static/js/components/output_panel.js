@@ -175,6 +175,7 @@ export function createOutputController({
   onPayload = () => {},
   getDiagramState = () => "none",
   getLiveStacks = () => [],
+  openExternal = null,
 }) {
   const toggle = byShell("output-toggle");
   const countBadge = byShell("output-count");
@@ -353,6 +354,14 @@ export function createOutputController({
       row.href = stack.consoleUrl;
       row.target = "_blank";
       row.rel = "noopener noreferrer";
+      if (typeof openExternal === "function") {
+        row.addEventListener("click", (event) => {
+          event.preventDefault();
+          Promise.resolve(openExternal(stack.consoleUrl)).catch((error) => {
+            console.warn("[outputs] open external URL failed", error);
+          });
+        });
+      }
     } else {
       row.classList.add("is-disabled");
     }

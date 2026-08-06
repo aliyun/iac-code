@@ -1,0 +1,51 @@
+#!/bin/sh
+
+set -eu
+
+desktop_entry=/usr/share/applications/iac-code.desktop
+
+if [ ! -f "$desktop_entry" ]; then
+  exit 0
+fi
+
+# Debian maintainer scripts run as root and do not reliably expose the user who
+# launched a graphical installer. Create the launcher for each existing regular
+# desktop user instead, while respecting their XDG desktop directory.
+getent passwd | while IFS=: read -r user password user_id group_id gecos home shell; do
+  case "$user_id" in
+    ""|*[!0-9]*) continue ;;
+  esac
+  if [ "$user_id" -lt 1000 ] || [ "$user_id" -ge 60000 ] || [ ! -d "$home" ]; then
+    continue
+  fi
+
+  desktop_dir="$home/Desktop"
+  if command -v xdg-user-dir >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1; then
+    detected_dir=$(runuser -u "$user" -- env HOME="$home" XDG_CONFIG_HOME="$home/.config" \
+      xdg-user-dir DESKTOP 2>/dev/null || true)
+    case "$detected_dir" in
+      "$home"/*) desktop_dir=$detected_dir ;;
+    esac
+  fi
+  if [ ! -d "$desktop_dir" ]; then
+    continue
+  fi
+
+  shortcut="$desktop_dir/iac-code.desktop"
+  install -m 0755 -o "$user_id" -g "$group_id" "$desktop_entry" "$shortcut"
+
+  # XFCE requires copied launchers to be marked trusted. GVfs stores this as
+  # per-user metadata, so set it in a short-lived user D-Bus session when the
+  # required desktop tools are available. Other desktops safely ignore it.
+  if command -v dbus-run-session >/dev/null 2>&1 && command -v gio >/dev/null 2>&1 \
+    && command -v runuser >/dev/null 2>&1; then
+    runtime_dir="/run/user/$user_id"
+    if [ ! -d "$runtime_dir" ]; then
+      runtime_dir=/tmp
+    fi
+    runuser -u "$user" -- env HOME="$home" XDG_RUNTIME_DIR="$runtime_dir" \
+      dbus-run-session -- gio set "$shortcut" metadata::trusted true >/dev/null 2>&1 || true
+  fi
+done
+
+exit 0

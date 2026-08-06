@@ -10657,6 +10657,10 @@ msgid "refusing to open non-regular file: {path}"
 msgstr "通常ファイルではないファイルを開くことを拒否しました: {path}"
 
 #: src/iac_code/web/app.py
+msgid "Desktop runtime is closing"
+msgstr "デスクトップランタイムを終了しています"
+
+#: src/iac_code/web/app.py
 msgid "This session was created outside the web entry and is read-only."
 msgstr "このセッションは web 以外のエントリーで作成されたため、読み取り専用です。"
 
@@ -10741,6 +10745,14 @@ msgstr "更新はすでに進行中です。"
 #, python-brace-format
 msgid "The update command exited with code {}."
 msgstr "更新コマンドは終了コード {} で終了しました。"
+
+#: src/iac_code/web/app.py
+msgid "A project directory is required."
+msgstr "プロジェクトディレクトリが必要です。"
+
+#: src/iac_code/web/app.py
+msgid "The selected project directory is invalid."
+msgstr "選択したプロジェクトディレクトリは無効です。"
 
 #: src/iac_code/web/app.py src/iac_code/web/session_manager.py
 #: src/iac_code/web/settings.py

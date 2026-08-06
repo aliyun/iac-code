@@ -344,6 +344,7 @@ def test_selling_declares_infraguard_prerequisite_installers_and_policy_update()
 
     assert loaded.prerequisites["infraguard"] == {
         "command": "infraguard",
+        "consumerImpact": "prerequisite",
         "required_by_flags": ["enable_reviewing"],
         "on_missing": {"repl": "prompt_install", "web": "prompt_install", "non_interactive": "disable_feature"},
         "version_check": {

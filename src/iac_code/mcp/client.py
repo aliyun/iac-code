@@ -16,6 +16,14 @@ from tempfile import TemporaryFile
 from typing import Any, Awaitable, Callable, Protocol, cast
 from urllib.parse import urlparse
 
+from iac_code.desktop.external_env import (
+    create_anyio_process,
+    create_external_process_async,
+    create_subprocess_exec,
+    guarded_command,
+    is_guardian_command,
+    spawn_env,
+)
 from iac_code.i18n import _
 from iac_code.mcp.errors import MCPConnectionError, MCPNeedsAuthError
 from iac_code.mcp.oauth import build_oauth_transport_auth_provider, has_oauth_state, needs_auth_error_from_exception
@@ -90,13 +98,25 @@ async def _stdio_client_with_process_fallback(params: Any, errlog: Any) -> Any:
     try:
         command = stdio_module._get_executable_command(params.command)
         default_env = stdio_module.get_default_environment()
-        process = await stdio_module._create_platform_compatible_process(
-            command=command,
-            args=params.args,
-            env=({**default_env, **params.env} if params.env is not None else default_env),
-            errlog=errlog,
-            cwd=params.cwd,
-        )
+        guarded = guarded_command([command, *params.args], kind="mcp")
+        child_env = spawn_env({**default_env, **params.env} if params.env is not None else default_env)
+        if not is_guardian_command(guarded):
+            process = await create_external_process_async(
+                stdio_module._create_platform_compatible_process,
+                command=guarded[0],
+                args=guarded[1:],
+                env=child_env,
+                errlog=errlog,
+                cwd=params.cwd,
+                add_creation_flags=False,
+            )
+        else:
+            process = await create_anyio_process(
+                guarded,
+                env=child_env,
+                stderr=errlog,
+                cwd=params.cwd,
+            )
     except OSError:
         await read_stream.aclose()
         await write_stream.aclose()
@@ -169,6 +189,12 @@ async def _stdio_client_with_process_fallback(params: Any, errlog: Any) -> Any:
 
 
 async def _terminate_stdio_process(stdio_module: Any, process: Any) -> None:
+    from iac_code.desktop.external_env import is_guardian_process
+
+    if is_guardian_process(process):
+        process.terminate()
+        await asyncio.shield(process.wait())
+        return
     target = getattr(process, "_iac_code_fallback_process", process)
     terminate_tree = getattr(stdio_module, "_terminate_process_tree", None)
     if callable(terminate_tree):
@@ -850,10 +876,10 @@ async def _run_headers_helper(config: MCPServerConfig, roots: list[Path]) -> dic
 
     cwd = _headers_helper_cwd(config, roots)
     try:
-        process = await asyncio.create_subprocess_exec(
-            *argv,
+        process = await create_subprocess_exec(
+            *guarded_command(argv, kind="mcp"),
             cwd=str(cwd),
-            env=_headers_helper_env(command),
+            env=spawn_env(_headers_helper_env(command)),
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

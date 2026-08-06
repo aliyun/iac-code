@@ -33,6 +33,7 @@ from iac_code.utils.project_paths import (
     get_projects_dir,
     is_conversation_session_file,
     project_dir_candidates,
+    session_project_dir_max_length,
 )
 
 LITE_READ_BUF_SIZE = 64 * 1024
@@ -413,18 +414,28 @@ def _long_project_alias_identities(project_dirs: list[Path]) -> dict[str, tuple[
             by_suffix.setdefault(suffix, []).append(project_dir)
 
     identities: dict[str, tuple[str, str]] = {}
-    legacy_length = MAX_SANITIZED_LENGTH + 13
+    recognized_lengths = {
+        session_project_dir_max_length(),
+        MAX_SANITIZED_LENGTH,
+        MAX_SANITIZED_LENGTH + 13,
+    }
     for suffix, candidates in by_suffix.items():
-        bounded = [candidate for candidate in candidates if len(candidate.name) == MAX_SANITIZED_LENGTH]
-        legacy = [candidate for candidate in candidates if len(candidate.name) == legacy_length]
-        for current in bounded:
-            current_prefix = current.name[:-13]
-            for old in legacy:
-                if not old.name[:-13].startswith(current_prefix):
-                    continue
-                identity = ("long-path-alias", current.name)
-                identities[current.name] = identity
-                identities[old.name] = identity
+        recognized = sorted(
+            (candidate for candidate in candidates if len(candidate.name) in recognized_lengths),
+            key=lambda candidate: len(candidate.name),
+        )
+        if len(recognized) < 2:
+            continue
+        current = recognized[0]
+        current_prefix = current.name[:-13]
+        aliases = [
+            candidate for candidate in recognized if candidate.name[:-13].startswith(current_prefix)
+        ]
+        if len(aliases) < 2:
+            continue
+        identity = ("long-path-alias", current.name)
+        for alias in aliases:
+            identities[alias.name] = identity
     return identities
 
 
@@ -438,7 +449,7 @@ def _project_storage_identity(
 
 def _project_alias_priority(project_dir: Path) -> int:
     """Prefer the bounded current alias over the pre-fix overlong alias."""
-    return int(len(project_dir.name) <= MAX_SANITIZED_LENGTH)
+    return max(0, MAX_SANITIZED_LENGTH + 13 - len(project_dir.name))
 
 
 def _session_file_priority(path: Path) -> int:

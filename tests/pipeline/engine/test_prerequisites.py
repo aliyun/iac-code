@@ -148,6 +148,33 @@ def test_inspect_keeps_flag_enabled_when_command_exists():
     assert decision.resolved_path == "/opt/bin/infraguard"
 
 
+def test_desktop_managed_infraguard_precedes_path_shim(tmp_path: Path, monkeypatch):
+    managed = tmp_path / "bin" / "infraguard"
+    managed.parent.mkdir()
+    managed.write_bytes(b"managed")
+    managed.chmod(0o755)
+    stale_shim = tmp_path / "sidecar" / "infraguard.cmd"
+    monkeypatch.setenv("IAC_CODE_DESKTOP_RUNTIME", "1")
+    monkeypatch.setenv("IAC_CODE_DESKTOP_INFRAGUARD_PATH", str(managed))
+    monkeypatch.setattr(prereq_module.shutil, "which", lambda _command: str(stale_shim))
+
+    resolution = inspect_prerequisites(
+        _infraguard_prereqs_with_version_check(),
+        feature_flags={"enable_reviewing": True},
+        run_command=lambda command, env=None, timeout_seconds=None: CommandResult(
+            command=command,
+            returncode=0,
+            stdout="InfraGuard: 0.10.1\n",
+            stderr="",
+        ),
+    )
+
+    decision = resolution.decisions["infraguard"]
+    assert decision.status == "available"
+    assert decision.resolved_path == str(managed)
+    assert resolution.feature_flags["enable_reviewing"] is True
+
+
 def test_inspect_disables_required_flag_when_existing_command_fails_version_check():
     resolution = inspect_prerequisites(
         _infraguard_prereqs_with_version_check(),
@@ -427,7 +454,9 @@ def test_default_run_command_timeout_terminates_descendant_process(tmp_path):
     try:
         result = prereq_module._default_run_command(
             [sys.executable, "-c", parent_code, str(ticks_path), str(pid_path), child_code],
-            timeout_seconds=5,
+            # This test validates descendant cleanup, so allow enough time for
+            # the child to start even when the full xdist suite saturates CI.
+            timeout_seconds=5.0,
         )
         assert result.returncode == 124
 
@@ -489,6 +518,95 @@ def test_prepare_direct_binary_installer_downloads_without_brew_or_go_and_runs_p
     assert post_install_paths == [resolution.env_overrides["PATH"]]
     assert any(event.phase == "download" and event.status == "output" for event in progress_events)
     assert any(event.phase == "post_install" and event.status == "succeeded" for event in progress_events)
+
+
+def test_prepare_managed_windows_binary_flushes_through_writable_handle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The normal managed install must not repeat the read-only fsync failure
+    already guarded in Desktop startup recovery."""
+    asset = tmp_path / "infraguard-v0.10.1-windows-amd64.exe"
+    payload = b"windows-infraguard"
+    asset.write_bytes(payload)
+    install_dir = tmp_path / "bin"
+    prerequisites = _direct_binary_prereqs(
+        asset.as_uri(),
+        str(install_dir),
+        hashlib.sha256(payload).hexdigest(),
+    )
+    prerequisites["infraguard"]["on_missing"]["web"] = "prompt_install"
+    download_asset = prerequisites["infraguard"]["installers"][0]["download"]["assets"][0]
+    download_asset.update(
+        {
+            "platforms": ["windows"],
+            "architectures": ["amd64"],
+            "filename": asset.name,
+        }
+    )
+
+    class Transaction:
+        def __init__(self) -> None:
+            self.phases: list[str] = []
+
+        def begin(self, installed_path, **_kwargs):
+            return installed_path.with_name(".managed-download")
+
+        def transition(self, phase):
+            self.phases.append(phase)
+
+        def cancel_before_replace(self):
+            self.phases.append("canceled")
+
+        def complete(self):
+            self.phases.append("complete")
+
+    if os.name != "nt":
+        import fcntl
+
+        real_os = prereq_module.os
+
+        class WindowsLikeOS:
+            name = "nt"
+
+            def __getattr__(self, item):
+                return getattr(real_os, item)
+
+            @staticmethod
+            def fsync(fd: int) -> None:
+                if fcntl.fcntl(fd, fcntl.F_GETFL) & real_os.O_ACCMODE == real_os.O_RDONLY:
+                    raise PermissionError("FlushFileBuffers rejects a read-only handle")
+                real_os.fsync(fd)
+
+        monkeypatch.setattr(prereq_module, "os", WindowsLikeOS())
+    transaction = Transaction()
+    observed_commands: list[list[str]] = []
+
+    def run_command(command, env=None):
+        observed_commands.append(command)
+        return CommandResult(command=command, returncode=0, stdout="", stderr="")
+
+    resolution = prepare_prerequisites(
+        prerequisites,
+        feature_flags={"enable_reviewing": True},
+        surface="web",
+        platform_system="windows",
+        platform_machine="amd64",
+        command_exists=lambda _command: None,
+        run_command=run_command,
+        choose_installer=lambda _name, _installers: "direct-binary",
+        desktop_transaction=transaction,
+    )
+
+    assert resolution.decisions["infraguard"].status == "available"
+    assert (install_dir / "infraguard.exe").read_bytes() == payload
+    assert [str(install_dir / "infraguard.exe"), "policy", "update"] in observed_commands
+    assert transaction.phases == [
+        "replace_pending",
+        "replaced_pending_validation",
+        "validated_pending_post_install",
+        "complete",
+    ]
 
 
 def test_prepare_finds_existing_direct_binary_install_dir_before_prompting(tmp_path):

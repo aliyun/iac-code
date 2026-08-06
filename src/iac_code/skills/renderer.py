@@ -9,6 +9,13 @@ import sys
 from dataclasses import dataclass
 from typing import Literal
 
+from iac_code.desktop.external_env import (
+    create_subprocess_exec,
+    create_subprocess_shell,
+    guarded_shell_command,
+    is_desktop_runtime,
+    spawn_env_kwargs,
+)
 from iac_code.skills.skill_definition import SkillContext, SkillDefinition
 
 # Shell command matching patterns
@@ -226,23 +233,37 @@ async def _run_shell(cmd: str, *, cwd: str = "", timeout: float = 30.0) -> str:
         if sys.platform == "win32":
             from iac_code.utils.platform import PlatformInfo
 
-            platform_info = PlatformInfo.detect()
-            proc = await asyncio.create_subprocess_exec(
+            platform_info = (
+                await asyncio.to_thread(PlatformInfo.detect) if is_desktop_runtime() else PlatformInfo.detect()
+            )
+            proc = await create_subprocess_exec(
                 platform_info.shell_path,
                 "-c",
                 cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd or None,
+                **spawn_env_kwargs(),
             )
         else:
-            proc = await asyncio.create_subprocess_shell(
-                cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd or None,
-                start_new_session=True,
-            )
+            guarded = guarded_shell_command(cmd, kind="renderer")
+            if guarded is not None:
+                proc = await create_subprocess_exec(
+                    *guarded,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=cwd or None,
+                    start_new_session=True,
+                    **spawn_env_kwargs(),
+                )
+            else:
+                proc = await create_subprocess_shell(
+                    cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=cwd or None,
+                    start_new_session=True,
+                )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         return stdout.decode("utf-8", errors="replace")
     except asyncio.TimeoutError as e:

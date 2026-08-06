@@ -1,4 +1,4 @@
-.PHONY: help install test coverage lint format translate run dev web pipeline clean publish
+.PHONY: help install desktop-install test desktop-test desktop-build coverage lint format translate run dev web pipeline clean publish
 
 .DEFAULT_GOAL := help
 
@@ -13,6 +13,25 @@ install: ## Install dependencies and pre-commit hooks
 	git config --local --unset-all core.hooksPath 2>/dev/null || true
 	git config --global --unset-all core.hooksPath 2>/dev/null || true
 	uv run pre-commit install
+
+desktop-install: ## Install Desktop build dependencies
+	uv sync --all-extras --group desktop
+	cd desktop && npm ci
+
+desktop-test: ## Run Desktop Python and Rust checks
+	uv run ruff check src/iac_code/desktop tests/desktop desktop/scripts
+	uv run pytest tests/desktop tests/web/test_frontend_static.py -q
+	cd desktop/src-tauri && cargo fmt --check
+	cd desktop/src-tauri && cargo clippy --all-targets --features updater -- -D warnings
+	cd desktop/src-tauri && cargo clippy --all-targets --no-default-features -- -D warnings
+	cd desktop/src-tauri && cargo test --features updater
+	cd desktop/src-tauri && cargo test --no-default-features
+	cd desktop/helpers && cargo fmt --check
+	cd desktop/helpers && cargo clippy --all-targets -- -D warnings
+	cd desktop/helpers && cargo test
+
+desktop-build: ## Build the native Desktop bundle for this platform
+	uv run --python 3.12 --group desktop python desktop/scripts/build_desktop.py
 
 PYTHON_VERSIONS := 3.10 3.11 3.12 3.13 3.14
 

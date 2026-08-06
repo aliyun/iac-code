@@ -291,6 +291,61 @@ msgid "Save"
 msgstr "保存"
 
 #: src/iac_code/web/static/js/app.js
+msgid "Desktop native bridge is unavailable."
+msgstr "桌面原生桥接不可用。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Git Bash is required"
+msgstr "需要 Git Bash"
+
+#: src/iac_code/web/static/js/app.js
+msgid ""
+"iac-code uses Git Bash to run commands on Windows. Install it now, or "
+"continue and install it later."
+msgstr "iac-code 在 Windows 上使用 Git Bash 执行命令。你可以立即安装，也可以继续使用并稍后安装。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Later"
+msgstr "稍后"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Refresh"
+msgstr "刷新"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Install Git Bash"
+msgstr "安装 Git Bash"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Git Bash is ready."
+msgstr "Git Bash 已可用。"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading…"
+msgstr "加载中…"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Git Bash is still unavailable."
+msgstr "Git Bash 仍不可用。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Could not check Git Bash. Try again."
+msgstr "无法检查 Git Bash。请重试。"
+
+#: src/iac_code/web/static/js/app.js
+msgid ""
+"Windows may request administrator approval. Keep iac-code open until "
+"installation finishes."
+msgstr "Windows 可能会请求管理员授权。请保持 iac-code 运行，直到安装完成。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Git Bash installation failed. Try again or open diagnostics."
+msgstr "Git Bash 安装失败。请重试或打开诊断目录。"
+
+#: src/iac_code/web/static/js/app.js
 msgid "Start a new working conversation."
 msgstr "开启一个新的工作对话。"
 
@@ -851,6 +906,10 @@ msgid "Updating…"
 msgstr "更新中…"
 
 #: src/iac_code/web/static/js/app.js
+msgid "Failed to start the update. Open diagnostics for details."
+msgstr "无法开始更新。请打开诊断目录查看详情。"
+
+#: src/iac_code/web/static/js/app.js
 #, python-brace-format
 msgid "Failed to start update: {error}"
 msgstr "更新启动失败:{error}"
@@ -1219,11 +1278,6 @@ msgstr "进行中/失败"
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "File no longer exists"
 msgstr "文件已不存在"
-
-#: src/iac_code/web/static/js/components/output_panel.js
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Loading…"
-msgstr "加载中…"
 
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "Resource stacks"
@@ -2433,6 +2487,10 @@ msgid "Show secret"
 msgstr "显示密钥"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "secret"
+msgstr "密钥"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Hide secret"
 msgstr "隐藏密钥"
 
@@ -2525,6 +2583,10 @@ msgid "Enter API key"
 msgstr "输入 API 密钥"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "API key"
+msgstr "API 密钥"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Leave blank to use model default"
 msgstr "留空使用模型默认"
 
@@ -2585,10 +2647,6 @@ msgstr "API 地址"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Custom API Base URL; leave blank to use default"
 msgstr "自定义 API Base URL,留空使用默认"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "API key"
-msgstr "API 密钥"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "The key required to call this provider; stored locally only"
@@ -2689,8 +2747,16 @@ msgid "Select or enter a region, e.g. cn-hangzhou"
 msgstr "选择或输入区域,如 cn-hangzhou"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "AccessKeySecret"
+msgstr "AccessKeySecret"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "STS token"
 msgstr "STS 令牌"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Temporary security token"
+msgstr "临时安全令牌"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Session name"
@@ -2730,20 +2796,12 @@ msgid "Alibaba Cloud access key ID"
 msgstr "阿里云访问密钥 ID"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "AccessKeySecret"
-msgstr "AccessKeySecret"
-
-#: src/iac_code/web/static/js/components/workspace.js
 msgid "Access key secret; stored locally only"
 msgstr "访问密钥 Secret,仅保存在本地"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "StsToken"
 msgstr "StsToken"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Temporary security token"
-msgstr "临时安全令牌"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "RamRoleArn"
@@ -3143,10 +3201,6 @@ msgstr "管理 MCP 服务器:新增/编辑/删除、启停、审批项目级配�
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Add server"
 msgstr "新增服务器"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Refresh"
-msgstr "刷新"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Check all connections"
@@ -3719,8 +3773,18 @@ msgid "Preparing…"
 msgstr "正在准备…"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Repair infraguard"
+msgstr "修复 infraguard"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "infraguard is installed; the review step is available."
 msgstr "infraguard 已安装,审查步骤可用。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"The previous infraguard installation was interrupted. Repair it before "
+"starting a review."
+msgstr "上一次 infraguard 安装被中断。请先修复，再开始审查。"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid ""
@@ -3728,6 +3792,10 @@ msgid ""
 "automatically in the current environment; please install it manually "
 "first."
 msgstr "未检测到 infraguard 工具,且当前环境无法自动安装,请先手动安装。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "InfraGuard installation failed. Open diagnostics for details."
+msgstr "InfraGuard 安装失败。请打开诊断目录查看详情。"
 
 #: src/iac_code/web/static/js/components/workspace.js
 #, python-brace-format
@@ -3792,6 +3860,10 @@ msgstr "重试刷新"
 msgid "Restarting; the page refreshes automatically once the service recovers…"
 msgstr "重启中,服务恢复后会自动刷新…"
 
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The local runtime could not restart. Open diagnostics for details."
+msgstr "本地运行时无法重新启动。请打开诊断目录查看详情。"
+
 #~ msgid "Completing step: {step}"
 #~ msgstr "正在完成步骤：{step}"
 
@@ -3818,4 +3890,16 @@ msgstr "重启中,服务恢复后会自动刷新…"
 
 #~ msgid "Control the verbosity of backend logs written to the log file."
 #~ msgstr "控制写入日志文件的后端日志详细程度。"
+
+#~ msgid "Installation failed: {error}"
+#~ msgstr "安装失败：{error}"
+
+#~ msgid ""
+#~ "Paths must be absolute and exist; "
+#~ "executable filenames must match their "
+#~ "command."
+#~ msgstr "路径必须是存在的绝对路径；可执行文件名必须与相应命令匹配。"
+
+#~ msgid "Changes take effect after restarting the Desktop local runtime."
+#~ msgstr "重新启动 Desktop 本地运行时后，更改才会生效。"
 

@@ -1,0 +1,10 @@
+{
+  "app": {
+    "security": {
+      "capabilities": ["desktop-local", "desktop-loopback-updater"]
+    }
+  },
+  "bundle": {
+    "targets": ["appimage"]
+  }
+}
