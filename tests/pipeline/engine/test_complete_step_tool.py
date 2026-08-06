@@ -568,6 +568,122 @@ class TestCompletionGuards:
 
         assert not result.is_error
 
+    @staticmethod
+    def _final_deploy_tool(result_records: list[dict]) -> CompleteStepTool:
+        config = StepConfig(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            conclusion_schema={
+                "type": "object",
+                "required": ["status"],
+                "additionalProperties": False,
+                "properties": {
+                    "stack_id": {"type": "string"},
+                    "status": {"type": "string", "enum": ["success", "failed", "cancelled"]},
+                    "error": {"type": "string"},
+                },
+            },
+        )
+        return CompleteStepTool(
+            config,
+            completion_guards=[
+                {
+                    "when_conclusion_field_equals": {"status": "success"},
+                    "required_conclusion_field": "stack_id",
+                    "require_tool_result": {
+                        "tool": "ros_deploy",
+                        "action_in": ["create", "continue_create", "delete_and_create", "wait"],
+                        "is_success": True,
+                        "status_in": ["CREATE_COMPLETE"],
+                        "match_conclusion_field": "stack_id",
+                        "latest_record_must_match": True,
+                    },
+                    "message_key": "deploy_wait_create_complete",
+                }
+            ],
+            completion_guard_state={
+                "successful_tools": {"ros_deploy"},
+                "tool_results": {},
+                "tool_result_records": list(result_records),
+            },
+        )
+
+    @staticmethod
+    def _ros_deploy_record(action: str, stack_id: str, status: str, *, is_success: bool) -> dict:
+        return {
+            "tool_name": "ros_deploy",
+            "input": {"action": action, "stack_id": stack_id},
+            "result": {"stack_id": stack_id, "status": status, "is_success": is_success},
+            "is_error": not is_success,
+        }
+
+    @pytest.mark.asyncio
+    async def test_final_record_guard_rejects_superseded_stack_id_paired_with_success(self):
+        tool = self._final_deploy_tool(
+            [
+                self._ros_deploy_record("create", "stack-old", "CREATE_COMPLETE", is_success=True),
+                self._ros_deploy_record("delete_and_create", "stack-new", "CREATE_COMPLETE", is_success=True),
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "success", "stack_id": "stack-old"}},
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "stack_id" in result.content
+        assert "stack-new" in result.content
+
+    @pytest.mark.asyncio
+    async def test_final_record_guard_accepts_final_stack_id(self):
+        tool = self._final_deploy_tool(
+            [
+                self._ros_deploy_record("create", "stack-old", "CREATE_COMPLETE", is_success=True),
+                self._ros_deploy_record("delete_and_create", "stack-new", "CREATE_COMPLETE", is_success=True),
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "success", "stack_id": "stack-new"}},
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_final_record_guard_rejects_success_when_final_deploy_failed(self):
+        tool = self._final_deploy_tool(
+            [
+                self._ros_deploy_record("create", "stack-old", "CREATE_COMPLETE", is_success=True),
+                self._ros_deploy_record("wait", "stack-old", "CREATE_FAILED", is_success=False),
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "success", "stack_id": "stack-old"}},
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "CREATE_COMPLETE" in result.content
+
+    @pytest.mark.asyncio
+    async def test_final_record_guard_still_allows_failed_conclusion(self):
+        tool = self._final_deploy_tool(
+            [
+                self._ros_deploy_record("create", "stack-old", "CREATE_FAILED", is_success=False),
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "failed", "error": "VPCResourceException"}},
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
     @pytest.mark.asyncio
     async def test_required_tool_result_rejects_non_matching_stack_action(self):
         tool = self._deploying_tool(

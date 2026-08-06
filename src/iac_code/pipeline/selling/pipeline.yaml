@@ -510,6 +510,7 @@ steps:
           is_success: true
           status_in: [CREATE_COMPLETE]
           match_conclusion_field: stack_id
+          latest_record_must_match: true
         message_key: deploy_wait_create_complete
     tools:
       include: []

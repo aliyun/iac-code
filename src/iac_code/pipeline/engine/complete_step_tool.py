@@ -456,6 +456,14 @@ class CompleteStepTool(Tool):
                 base_message,
                 after_index=after_index,
             )
+        if bool(requirement.get("latest_record_must_match")):
+            return self._validate_final_required_tool_result(
+                records,
+                requirement,
+                conclusion,
+                base_message,
+                after_index=after_index,
+            )
 
         mismatch_message: str | None = None
         field_mismatch_message: str | None = None
@@ -686,6 +694,151 @@ class CompleteStepTool(Tool):
         return _("{message} Call {tool} first and wait for a successful result.").format(
             message=base_message,
             tool=tool_name or _("the required tool"),
+        )
+
+    def _validate_final_required_tool_result(
+        self,
+        records: list[Any],
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        base_message: str,
+        *,
+        after_index: int,
+    ) -> str | None:
+        """Validate only the final matching tool call, so the conclusion tracks the last attempt.
+
+        Unlike the existence-based scan, an earlier satisfying record cannot rescue a
+        conclusion that contradicts the last call — e.g. a deploying conclusion may not
+        pair the stack_id of a superseded CREATE_FAILED stack with ``status: success``.
+        """
+        tool_name = str(requirement.get("tool") or "")
+        actions = self._expected_actions(requirement)
+        expected_product = requirement.get("product")
+        expected_success = requirement.get("is_success")
+        status_in = {str(status) for status in requirement.get("status_in") or [] if status is not None}
+        result_field_equals = requirement.get("result_field_equals") or {}
+        required_result_fields = requirement.get("required_result_fields") or []
+
+        final_index = self._final_matching_tool_result_index(
+            records,
+            tool_name=tool_name,
+            actions=actions,
+            expected_product=expected_product,
+            after_index=after_index,
+        )
+        if final_index is None:
+            return self._missing_final_tool_result_message(
+                base_message,
+                tool_name=tool_name,
+                actions=actions,
+                status_in=status_in,
+                expected_success=expected_success,
+            )
+
+        record = records[final_index]
+        tool_input = self._dict_value(record.get("input"))
+        raw_result = record.get("result")
+        result = self._dict_value(raw_result)
+        if record.get("is_error") or not isinstance(raw_result, dict):
+            return self._final_tool_result_failed_message(base_message, tool_name)
+        if expected_success is not None and self._bool_from_result(result) is not bool(expected_success):
+            return self._final_tool_result_failed_message(base_message, tool_name)
+        if status_in and self._status_from_result(result) not in status_in:
+            return self._final_tool_result_failed_message(base_message, tool_name)
+
+        field_mismatch = self._first_match_field_mismatch(requirement, conclusion, tool_input, result, tool_name)
+        if field_mismatch is not None:
+            return self._format_match_field_mismatch(base_message, field_mismatch)
+        if isinstance(result_field_equals, dict):
+            failed_field = self._first_failed_result_field(result, result_field_equals)
+            if failed_field is not None:
+                field, expected, actual = failed_field
+                return _(
+                    "{message} The final {tool} result field {field} must equal {expected}; actual value was {actual}."
+                ).format(
+                    message=base_message,
+                    tool=tool_name or _("tool"),
+                    field=field,
+                    expected=expected,
+                    actual=actual,
+                )
+        missing_required_field = self._first_missing_result_field(result, required_result_fields)
+        if missing_required_field is not None:
+            return _("{message} The final {tool} result must include non-empty field {field}.").format(
+                message=base_message,
+                tool=tool_name or _("tool"),
+                field=missing_required_field,
+            )
+        return self._validate_no_disallowed_tool_results_after_match(
+            records,
+            requirement,
+            conclusion,
+            base_message,
+            matched_index=final_index,
+        )
+
+    def _final_matching_tool_result_index(
+        self,
+        records: list[Any],
+        *,
+        tool_name: str,
+        actions: set[str],
+        expected_product: Any,
+        after_index: int,
+    ) -> int | None:
+        """Index of the last record matching tool/action/product, regardless of its outcome."""
+        for index in range(len(records) - 1, after_index, -1):
+            record = records[index]
+            if not isinstance(record, dict):
+                continue
+            if tool_name and record.get("tool_name") != tool_name:
+                continue
+            tool_input = self._dict_value(record.get("input"))
+            if expected_product and not self._strings_equal_ignore_case(
+                self._first_string(tool_input, ("product", "Product")),
+                str(expected_product),
+            ):
+                continue
+            if actions and self._first_string(tool_input, ("action", "Action")) not in actions:
+                continue
+            return index
+        return None
+
+    @staticmethod
+    def _final_tool_result_failed_message(base_message: str, tool_name: str) -> str:
+        return _(
+            "{message} The final {tool} result did not succeed; submit the conclusion that matches the final result "
+            "instead of an earlier attempt."
+        ).format(message=base_message, tool=tool_name or _("tool"))
+
+    def _missing_final_tool_result_message(
+        self,
+        base_message: str,
+        *,
+        tool_name: str,
+        actions: set[str],
+        status_in: set[str],
+        expected_success: Any,
+    ) -> str:
+        status_hint = ""
+        if status_in:
+            status_hint = _(" with status {statuses}").format(statuses=", ".join(sorted(status_in)))
+        success_hint = ""
+        if expected_success is not None:
+            success_hint = _(" and is_success={expected}").format(expected=str(bool(expected_success)).lower())
+        action_hint = ""
+        if len(actions) == 1:
+            action_hint = f" {next(iter(actions))}"
+        elif actions:
+            action_hint = _(" one of {actions}").format(actions=", ".join(sorted(actions)))
+        return _(
+            "{message} Call {tool}{action} first and wait for a successful result{status_hint}{success_hint}."
+        ).format(
+            message=base_message,
+            tool=tool_name or _("the required tool"),
+            action=action_hint,
+            status_hint=status_hint,
+            success_hint=success_hint,
         )
 
     def _validate_no_disallowed_tool_results_after_match(
