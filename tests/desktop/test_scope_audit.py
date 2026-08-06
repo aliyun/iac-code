@@ -124,3 +124,29 @@ def test_desktop_workflow_forces_scope_audit_for_desktop_labeled_pr() -> None:
     assert parsed["on"]["pull_request"]["types"] == ["opened", "synchronize", "reopened", "labeled"]
     assert "contains(github.event.pull_request.labels.*.name, 'desktop')" in workflow
     assert "scope_args+=(--enforce)" in workflow
+
+
+def test_scope_allowlist_covers_desktop_branding_and_terminal_integration() -> None:
+    from pathlib import Path
+
+    allowlist = set(
+        line.strip()
+        for line in (Path(__file__).parents[2] / "desktop/scope-allowlist.txt").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    )
+    assert {
+        "src/iac_code/commands/clear.py",
+        "src/iac_code/ui/assets/iac-code-terminal-logo.png",
+        "src/iac_code/ui/banner.py",
+        "src/iac_code/ui/repl.py",
+        "src/iac_code/ui/terminal_image.py",
+        "src/iac_code/web/static/icons/iac-code-logo.svg",
+        "tests/commands/test_clear.py",
+        "tests/ui/test_banner.py",
+        "tests/ui/test_repl_integration.py",
+        "tests/ui/test_terminal_image.py",
+        "website/docusaurus.config.ts",
+        "website/src/clientModules/docsNavigation.test.cjs",
+        "website/src/pages/index.module.css",
+        "website/static/img/iac-code-logo.svg",
+    } <= allowlist

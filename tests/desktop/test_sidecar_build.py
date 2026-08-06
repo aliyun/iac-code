@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -41,6 +44,54 @@ def test_sidecar_staging_materializes_resources_and_desktop_helper_instructions(
     assert all("tf2ros.py" not in path.read_text(encoding="utf-8") for path in markdown)
     assert any("iac-code-tf2ros" in path.read_text(encoding="utf-8") for path in markdown)
     assert not any(path.is_symlink() for path in package.rglob("*"))
+
+
+def test_sidecar_release_build_stamps_stable_published_date_only_in_staging(tmp_path: Path) -> None:
+    module = _build_module()
+    source_init = module.SOURCE_PACKAGE / "__init__.py"
+    source_before = source_init.read_text(encoding="utf-8")
+
+    package = module.prepare_staging(
+        tmp_path / "staging",
+        warm_tokenizers=False,
+        release_date="2026-08-04T12:00:00Z",
+    )
+
+    assert '__release_date__ = "2026-08-04"' in (package / "__init__.py").read_text(encoding="utf-8")
+    assert source_init.read_text(encoding="utf-8") == source_before
+
+
+@pytest.mark.parametrize("value", ("", "not-a-date", "2026-13-40"))
+def test_sidecar_release_date_rejects_invalid_values(value: str) -> None:
+    module = _build_module()
+
+    with pytest.raises(ValueError, match="release date"):
+        module.normalize_release_date(value)
+
+
+def test_release_sidecar_build_requires_release_date(tmp_path: Path) -> None:
+    script = Path(__file__).parents[2] / "desktop/scripts/build_sidecar.py"
+    environment = {**os.environ, "IAC_CODE_DESKTOP_RELEASE": "1"}
+    environment.pop("IAC_CODE_DESKTOP_RELEASE_DATE", None)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--prepare-only",
+            "--skip-tokenizers",
+            "--staging",
+            str(tmp_path / "staging"),
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "release sidecar builds require IAC_CODE_DESKTOP_RELEASE_DATE" in result.stderr
 
 
 def _fail_resolve_for(module, targets: set[Path]):

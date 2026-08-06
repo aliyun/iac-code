@@ -8440,7 +8440,11 @@ msgid ""
 "\n"
 "---\n"
 "ROS local preflight diagnostics:\n"
-msgstr "--- Diagnostic local avant vol ROS :"
+msgstr ""
+"\n"
+"\n"
+"---\n"
+"Diagnostic local avant exécution de ROS :\n"
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
 #, python-brace-format

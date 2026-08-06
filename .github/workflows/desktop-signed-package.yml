@@ -57,6 +57,8 @@ jobs:
         with:
           python-version: "3.12"
       - uses: dtolnay/rust-toolchain@stable
+      - name: Verify Desktop versions follow the Python package
+        run: python desktop/scripts/sync_version.py --check
       - name: Validate immutable release identity and handoff URL
         shell: bash
         env:

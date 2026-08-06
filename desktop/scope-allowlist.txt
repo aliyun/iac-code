@@ -74,6 +74,28 @@ tests/web/test_session_manager.py
 tests/a2a/test_pipeline_executor.py
 tests/pipeline/engine/test_pipeline_runner_sidecar_path.py
 
+# Shared iac-code branding and terminal rendering introduced with Desktop.
+src/iac_code/commands/clear.py
+src/iac_code/ui/assets/iac-code-terminal-logo.png
+src/iac_code/ui/banner.py
+src/iac_code/ui/repl.py
+src/iac_code/ui/terminal_image.py
+src/iac_code/web/static/icons/iac-code-logo.svg
+tests/commands/test_clear.py
+tests/ui/test_banner.py
+tests/ui/test_repl_integration.py
+tests/ui/test_terminal_image.py
+
+# Documentation-site branding shared by the Desktop launch assets.
+website/docusaurus.config.ts
+website/src/clientModules/docsNavigation.test.cjs
+website/src/pages/index.module.css
+website/static/img/iac-code-logo.svg
+
+# Desktop startup reuses Web telemetry preference initialization.
+src/iac_code/web/server.py
+tests/test_i18n.py
+
 # Explicitly authorized Windows Web-CLI prerequisite companion fix.
 src/iac_code/cli/main.py
 src/iac_code/cli/install_git_bash.py

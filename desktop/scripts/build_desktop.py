@@ -164,6 +164,9 @@ def verify_windows_release_helper(helper: Path, expected_publisher: str) -> None
 
 def main() -> int:
     args = _parse_args()
+    from sync_version import sync_desktop_versions
+
+    sync_desktop_versions()
     expected_system = {"macos": "Darwin", "windows": "Windows", "appimage": "Linux", "deb": "Linux"}[
         args.channel
     ]

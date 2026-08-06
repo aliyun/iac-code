@@ -42,6 +42,39 @@ def test_startup_failure_before_control_connection_is_captured(capsys: pytest.Ca
     )
 
 
+def test_desktop_startup_applies_persisted_debug_and_telemetry(monkeypatch: pytest.MonkeyPatch) -> None:
+    from iac_code.desktop.__main__ import _initialize_runtime_services
+    from iac_code.services import telemetry
+    from iac_code.utils import log
+    from iac_code.web import server, settings
+
+    calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(settings, "developer_settings", lambda: {"debug": True})
+    monkeypatch.setattr(
+        log,
+        "setup_logging",
+        lambda **kwargs: calls.append(("logging", kwargs)),
+    )
+    monkeypatch.setattr(
+        server,
+        "apply_persisted_telemetry_content_settings",
+        lambda: calls.append(("telemetry-settings",)),
+    )
+    monkeypatch.setattr(
+        telemetry,
+        "bootstrap_telemetry",
+        lambda **kwargs: calls.append(("telemetry", kwargs)),
+    )
+
+    _initialize_runtime_services(9, stdout=False)
+
+    assert calls == [
+        ("logging", {"session_id": "desktop-9", "stdout": False, "debug": True}),
+        ("telemetry-settings",),
+        ("telemetry", {"session_id": "desktop-9"}),
+    ]
+
+
 @pytest.mark.skipif(os.name == "nt", reason="the Windows sidecar uses a named-pipe carrier")
 @pytest.mark.parametrize("with_recovery_journal", [False, True])
 def test_sidecar_entry_serves_health_and_stops_over_control(

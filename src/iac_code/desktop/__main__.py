@@ -186,24 +186,36 @@ async def _dispatch_control(dispatcher: DesktopControlDispatcher, app: Any, serv
             return
 
 
+def _initialize_runtime_services(sidecar_generation: int, *, stdout: bool) -> None:
+    """Apply persisted Desktop settings before logging and telemetry start."""
+    from iac_code.services.telemetry import bootstrap_telemetry
+    from iac_code.utils.log import setup_logging
+    from iac_code.web.server import apply_persisted_telemetry_content_settings
+    from iac_code.web.settings import developer_settings
+
+    session_id = "desktop-{}".format(sidecar_generation)
+    setup_logging(session_id=session_id, stdout=stdout, debug=bool(developer_settings().get("debug")))
+    apply_persisted_telemetry_content_settings()
+    bootstrap_telemetry(session_id=session_id)
+
+
 async def _serve(args: argparse.Namespace, control: FramedControl, listener: Any) -> None:
     import uvicorn
 
     from iac_code.desktop.external_env import initialize_windows_creation_coordinator
     from iac_code.i18n import resolve_ui_language, set_language
-    from iac_code.services.telemetry import bootstrap_telemetry, graceful_shutdown
-    from iac_code.utils.log import current_log_file, setup_logging
+    from iac_code.services.telemetry import graceful_shutdown
+    from iac_code.utils.log import current_log_file
     from iac_code.web.app import create_app
     from iac_code.web.server import protect_loopback_app
     from iac_code.web.settings import get_ui_language
 
     initialize_windows_creation_coordinator()
     await asyncio.to_thread(
-        setup_logging,
-        session_id="desktop-{}".format(args.sidecar_generation),
+        _initialize_runtime_services,
+        args.sidecar_generation,
         stdout=sys.stdout is not None,
     )
-    await asyncio.to_thread(bootstrap_telemetry, session_id="desktop-{}".format(args.sidecar_generation))
     dispatcher = DesktopControlDispatcher(control, asyncio.get_running_loop(), args.sidecar_generation)
     install_control_dispatcher(dispatcher)
     dispatcher.start()

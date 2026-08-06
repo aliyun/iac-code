@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import date, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -157,9 +159,49 @@ def _warm_tokenizer_cache(package: Path) -> None:
             os.environ["TIKTOKEN_CACHE_DIR"] = previous
 
 
-def prepare_staging(staging_root: Path, *, warm_tokenizers: bool = True) -> Path:
+def normalize_release_date(value: str) -> str:
+    """Normalize a release date or ISO-8601 release timestamp to YYYY-MM-DD."""
+    candidate = value.strip()
+    if not candidate:
+        raise ValueError("Desktop release date must not be empty")
+    try:
+        if "T" in candidate:
+            parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00")).date()
+        else:
+            parsed = date.fromisoformat(candidate)
+    except ValueError as exc:
+        raise ValueError("invalid Desktop release date: {}".format(value)) from exc
+    return parsed.isoformat()
+
+
+def stamp_release_date(package: Path, value: str) -> str:
+    """Stamp the materialized sidecar package without modifying source files."""
+    release_date = normalize_release_date(value)
+    init_path = package / "__init__.py"
+    source = init_path.read_text(encoding="utf-8")
+    updated, count = re.subn(
+        r'^__release_date__\s*=\s*"[^"]*"',
+        '__release_date__ = "{}"'.format(release_date),
+        source,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if count != 1:
+        raise RuntimeError("could not stamp Desktop release date")
+    init_path.write_text(updated, encoding="utf-8")
+    return release_date
+
+
+def prepare_staging(
+    staging_root: Path,
+    *,
+    warm_tokenizers: bool = True,
+    release_date: str | None = None,
+) -> Path:
     package = staging_root / "iac_code"
     _copy_materialized(SOURCE_PACKAGE, package)
+    if release_date is not None:
+        stamp_release_date(package, release_date)
     _compile_translations(package)
     _rewrite_tf2ros_instructions(package)
     _verify_and_remove_canonical_selling_references(package)
@@ -198,11 +240,18 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--staging", type=Path)
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--skip-tokenizers", action="store_true")
+    parser.add_argument(
+        "--release-date",
+        default=os.environ.get("IAC_CODE_DESKTOP_RELEASE_DATE"),
+        help="stable release date or ISO-8601 publishedAt timestamp to stamp into the frozen package",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = _parse_args()
+    if os.environ.get("IAC_CODE_DESKTOP_RELEASE") == "1" and not args.release_date:
+        raise SystemExit("release sidecar builds require IAC_CODE_DESKTOP_RELEASE_DATE")
     temporary = None
     if args.staging is None:
         temporary = tempfile.TemporaryDirectory(prefix="iac-code-desktop-sidecar-")
@@ -212,7 +261,11 @@ def main() -> int:
         if staging.exists():
             shutil.rmtree(staging)
         staging.mkdir(parents=True)
-    prepare_staging(staging, warm_tokenizers=not args.skip_tokenizers)
+    prepare_staging(
+        staging,
+        warm_tokenizers=not args.skip_tokenizers,
+        release_date=args.release_date,
+    )
     if args.prepare_only:
         print(staging)
         return 0

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import re
 import sys
 from base64 import b64encode
 from pathlib import Path
@@ -46,9 +47,10 @@ def _fixture_artifacts(root: Path) -> dict[str, Path]:
 
 def test_release_tag_requires_all_desktop_versions_to_match() -> None:
     module = _load_script()
+    version = module.desktop_versions(ROOT)["python"]
 
-    assert module.validate_release_tag("v0.11.1", ROOT) == "0.11.1"
-    with pytest.raises(RuntimeError, match="must be v0.11.1"):
+    assert module.validate_release_tag("v{}".format(version), ROOT) == version
+    with pytest.raises(RuntimeError, match="must be v{}".format(re.escape(version))):
         module.validate_release_tag("desktop-v0.11.1", ROOT)
 
 
@@ -130,6 +132,7 @@ def test_github_workflows_only_prebuild_and_rebundle_verified_signed_components(
     assert "desktop-pre-linux-x64" in pre_workflow
     assert "desktop-pre-manifest" in pre_workflow
     assert "desktop-signing-input-${{ matrix.signing-platform }}" in pre_workflow
+    assert "IAC_CODE_DESKTOP_RELEASE_DATE: ${{ needs.prepare.outputs.published-at }}" in pre_workflow
     assert "create-pre-manifest" in pre_workflow
     assert "--verify-signatures" in pre_workflow
     assert "secrets.TAURI_SIGNING_PRIVATE_KEY" in pre_workflow

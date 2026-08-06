@@ -66,6 +66,8 @@ jobs:
           sudo apt-get update && sudo apt-get install -y
           libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - run: uv sync --all-extras --group desktop
+      - name: Verify Desktop versions follow the Python package
+        run: uv run python desktop/scripts/sync_version.py --check
       - run: npm ci
         working-directory: desktop
       - run: uv run ruff check src/iac_code/desktop tests/desktop desktop/scripts

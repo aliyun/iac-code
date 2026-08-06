@@ -40,6 +40,7 @@ jobs:
         shell: bash
         run: |
           git describe --tags --exact-match HEAD | grep -Fx "$RELEASE_TAG"
+          python3 desktop/scripts/sync_version.py --check
           version="$(python3 desktop/scripts/prepare_github_release.py validate-tag --tag "$RELEASE_TAG")"
           commit="$(git rev-parse HEAD)"
           published_at="$(gh release view "$RELEASE_TAG" --json isDraft,publishedAt --jq 'select(.isDraft == false) | .publishedAt')"
@@ -75,6 +76,9 @@ jobs:
   build:
     name: Pre-build ${{ matrix.label }}
     needs: prepare
+    env:
+      IAC_CODE_DESKTOP_RELEASE: "1"
+      IAC_CODE_DESKTOP_RELEASE_DATE: ${{ needs.prepare.outputs.published-at }}
     strategy:
       fail-fast: false
       matrix:
@@ -118,6 +122,8 @@ jobs:
           libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - name: Install locked build dependencies
         run: uv sync --all-extras --group desktop
+      - name: Verify Desktop versions follow the Python package
+        run: uv run python desktop/scripts/sync_version.py --check
       - name: Install locked Tauri dependencies
         run: npm ci
         working-directory: desktop

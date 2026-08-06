@@ -2318,27 +2318,27 @@ msgstr "sed 原地编辑需要确认"
 #: src/iac_code/i18n/__init__.py
 #, python-brace-format
 msgid "{n} day{s} ago"
-msgstr "{n} 天前"
+msgstr "{n} 天前{s:.0}"
 
 #: src/iac_code/i18n/__init__.py
 #, python-brace-format
 msgid "{n} hour{s} ago"
-msgstr "{n} 小时前"
+msgstr "{n} 小时前{s:.0}"
 
 #: src/iac_code/i18n/__init__.py
 #, python-brace-format
 msgid "{n} message{s}"
-msgstr "{n} 条消息"
+msgstr "{n} 条消息{s:.0}"
 
 #: src/iac_code/i18n/__init__.py
 #, python-brace-format
 msgid "{n} minute{s} ago"
-msgstr "{n} 分钟前"
+msgstr "{n} 分钟前{s:.0}"
 
 #: src/iac_code/i18n/__init__.py
 #, python-brace-format
 msgid "{n} more line{s}"
-msgstr "还有 {n} 行"
+msgstr "还有 {n} 行{s:.0}"
 
 #: src/iac_code/mcp/cli.py
 msgid "Manage MCP servers."

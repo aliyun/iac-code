@@ -7818,7 +7818,11 @@ msgid ""
 "\n"
 "---\n"
 "ROS local preflight diagnostics:\n"
-msgstr "--- ROSのローカルpreflightの診断:"
+msgstr ""
+"\n"
+"\n"
+"---\n"
+"ROS ローカル preflight 診断:\n"
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
 #, python-brace-format
