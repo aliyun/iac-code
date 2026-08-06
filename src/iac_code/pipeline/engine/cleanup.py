@@ -28,6 +28,15 @@ from iac_code.utils.state_io import atomic_write_text
 logger = logging.getLogger(__name__)
 
 CleanupStatus = Literal["pending", "started", "in_progress", "completed", "failed", "skipped"]
+CleanupAggregateStatus = Literal[
+    "pending",
+    "started",
+    "in_progress",
+    "completed",
+    "failed",
+    "skipped",
+    "partial",
+]
 _LOAD_FAILED_KEY = "_load_failed"
 _LOAD_ERROR_KEY = "_load_error"
 _RETRYABLE_CLEANUP_STATUSES = {"pending", "failed"}
@@ -152,6 +161,24 @@ class CleanupPrompt:
     resources: list[CleanupResource]
     prompt: str
     status_message: str
+
+
+@dataclass(frozen=True)
+class CleanupStateSummary:
+    """Auditable cleanup state derived from the ledger.
+
+    The summary reports the real cleanup outcome (``skipped`` / ``completed`` /
+    ``partial`` / ``failed`` / active statuses) so exporters never have to fall
+    back to a static placeholder message.
+    """
+
+    status: CleanupAggregateStatus
+    status_message: str
+    resource_count: int
+    pending_count: int
+    failed_count: int
+    completed_count: int
+    skipped: bool
 
 
 @dataclass(frozen=True)
@@ -535,6 +562,31 @@ class CleanupLedger:
             status_message=_("Detected {count} rollback cleanup resources; starting cleanup.").format(count=count),
         )
 
+    def build_state_summary(self) -> CleanupStateSummary:
+        """Summarize the real cleanup state so exporters can publish it verbatim."""
+
+        resources = [resource for resource in self.cleanup_resources() if resource.cleanup_required]
+        statuses = [resource.cleanup_status for resource in resources]
+        pending_count = sum(1 for status in statuses if status in _FOLLOWUP_CLEANUP_STATUSES)
+        failed_count = sum(1 for status in statuses if status == "failed")
+        completed_count = sum(1 for status in statuses if status in _TERMINAL_CLEANUP_STATUSES)
+        status = _aggregate_ledger_cleanup_status(statuses)
+        return CleanupStateSummary(
+            status=status,
+            status_message=_cleanup_state_message(
+                status,
+                resource_count=len(resources),
+                failed_count=failed_count,
+                completed_count=completed_count,
+                pending_count=pending_count,
+            ),
+            resource_count=len(resources),
+            pending_count=pending_count,
+            failed_count=failed_count,
+            completed_count=completed_count,
+            skipped=status == "skipped",
+        )
+
     def _load(self) -> dict[str, Any]:
         if not self.path.exists():
             return _empty_ledger_data()
@@ -910,6 +962,69 @@ def _cleanup_tool_input_summary(
 
 def _is_cleanup_stack_tool_name(tool_name: str) -> bool:
     return tool_name.lower() in {"ros_stack", "aliyun_api"}
+
+
+def cleanup_state_unavailable_message(*, reason: str, load_error: str | None = None) -> str:
+    """Auditable message for the only case where cleanup state is truly unknown."""
+
+    if reason == "ledger_missing":
+        return _("Cleanup ledger is missing, so cleanup state cannot be audited.")
+    if load_error:
+        return _("Cleanup ledger could not be read ({error}), so cleanup state cannot be audited.").format(
+            error=sanitize_strict_text(load_error),
+        )
+    return _("Cleanup ledger could not be read, so cleanup state cannot be audited.")
+
+
+def _aggregate_ledger_cleanup_status(statuses: list[CleanupStatus]) -> CleanupAggregateStatus:
+    if not statuses:
+        return "skipped"
+    if "failed" in statuses:
+        return "failed" if all(status == "failed" for status in statuses) else "partial"
+    if any(status in _ACTIVE_CLEANUP_STATUSES for status in statuses):
+        return "in_progress" if "in_progress" in statuses else "started"
+    if all(status in _TERMINAL_CLEANUP_STATUSES for status in statuses):
+        return "skipped" if all(status == "skipped" for status in statuses) else "completed"
+    if all(status == "pending" for status in statuses):
+        return "pending"
+    return "partial"
+
+
+def _cleanup_state_message(
+    status: CleanupAggregateStatus,
+    *,
+    resource_count: int,
+    failed_count: int,
+    completed_count: int,
+    pending_count: int,
+) -> str:
+    if status == "skipped":
+        if resource_count == 0:
+            return _("No cloud resources required cleanup.")
+        return _("Cleanup skipped for {count} tracked resources.").format(count=resource_count)
+    if status == "completed":
+        return _("Cleanup completed for {count} resources.").format(count=resource_count)
+    if status == "failed":
+        return _("Cleanup failed for {failed} of {count} resources.").format(
+            failed=failed_count,
+            count=resource_count,
+        )
+    if status == "partial":
+        return _(
+            "Cleanup partially completed: {completed} done, {failed} failed, {pending} still pending "
+            "out of {count} resources."
+        ).format(
+            completed=completed_count,
+            failed=failed_count,
+            pending=pending_count,
+            count=resource_count,
+        )
+    if status == "pending":
+        return _("Cleanup pending for {count} resources.").format(count=pending_count)
+    return _("Cleanup in progress for {pending} of {count} resources.").format(
+        pending=pending_count,
+        count=resource_count,
+    )
 
 
 def _cleanup_status_from_stack_status(status: str | None, is_error: bool) -> CleanupStatus:

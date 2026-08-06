@@ -6141,6 +6141,81 @@ def test_cleanup_handoff_missing_ledger_does_not_reconstruct_prompt_from_public_
     assert "prompt" not in cleanup
     assert "resources" not in cleanup
     assert "stack-public-only" not in repr(cleanup)
+    assert cleanup["unavailableReason"] == "ledger_missing"
+    assert "unavailable" not in cleanup["statusMessage"].lower()
+
+
+def test_cleanup_handoff_from_ledger_reports_skipped_when_nothing_needed_cleanup(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_executor import _pipeline_cleanup_handoff_data_from_ledger
+    from iac_code.pipeline.engine.cleanup import CleanupLedger, ObservedResource
+
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    ledger.record_observed(
+        ObservedResource(
+            provider="ros",
+            resource_type="stack",
+            resource_id="stack-delivered",
+            region_id="cn-hangzhou",
+            observed_action="CreateStack",
+            source_step_id="deploying",
+        )
+    )
+
+    cleanup = _pipeline_cleanup_handoff_data_from_ledger(ledger)
+
+    assert cleanup is not None
+    assert cleanup["status"] == "skipped"
+    assert cleanup["skipped"] is True
+    assert "unavailable" not in cleanup["statusMessage"].lower()
+
+
+def test_cleanup_handoff_from_ledger_reports_partial_state(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_executor import _pipeline_cleanup_handoff_data_from_ledger
+    from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource
+
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    ledger.mark_cleanup_required(
+        [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-done",
+                region_id="cn-hangzhou",
+                source_step_id="deploying",
+            ),
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-broken",
+                region_id="cn-hangzhou",
+                source_step_id="deploying",
+            ),
+        ],
+        source_step_id="deploying",
+        reason="rollback",
+    )
+    ledger.update_resource(
+        provider="ros",
+        resource_type="stack",
+        resource_id="stack-done",
+        region_id="cn-hangzhou",
+        cleanup_status="completed",
+    )
+    ledger.update_resource(
+        provider="ros",
+        resource_type="stack",
+        resource_id="stack-broken",
+        region_id="cn-hangzhou",
+        cleanup_status="failed",
+        last_error="DELETE_FAILED",
+    )
+
+    cleanup = _pipeline_cleanup_handoff_data_from_ledger(ledger)
+
+    assert cleanup is not None
+    assert cleanup["status"] == "partial"
+    assert cleanup["resourceCount"] == 1
+    assert "unavailable" not in cleanup["statusMessage"].lower()
 
 
 @pytest.mark.asyncio

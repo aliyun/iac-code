@@ -79,6 +79,7 @@ from iac_code.pipeline.engine.cleanup import (
     CleanupLedger,
     CleanupObserver,
     cleanup_prompt_ledger_path,
+    cleanup_state_unavailable_message,
     create_cleanup_prompt_message,
     is_active_cleanup_prompt_message,
     mark_cleanup_prompt_message_completed,
@@ -164,14 +165,32 @@ def _cleanup_payload_from_private_ledger_or_unavailable(
         ledger_exists = ledger_path.exists()
     except OSError:
         ledger_exists = False
-    if not ledger_exists or ledger.load_failed():
+    if not ledger_exists:
         return {
             "status": "unavailable",
-            "statusMessage": _("Cleanup state unavailable. Inspect the session file and cloud resources manually."),
+            "unavailableReason": "ledger_missing",
+            "statusMessage": cleanup_state_unavailable_message(reason="ledger_missing"),
+        }
+    if ledger.load_failed():
+        return {
+            "status": "unavailable",
+            "unavailableReason": "load_failed",
+            "statusMessage": cleanup_state_unavailable_message(
+                reason="load_failed",
+                load_error=ledger.load_error(),
+            ),
         }
     prompt = ledger.build_pending_prompt()
     if prompt is None:
-        return {"status": "completed", "resourceCount": 0}
+        summary = ledger.build_state_summary()
+        payload: dict[str, Any] = {
+            "status": summary.status,
+            "statusMessage": summary.status_message,
+            "resourceCount": summary.resource_count,
+        }
+        if summary.skipped:
+            payload["skipped"] = True
+        return payload
     return {
         "status": "pending",
         "resourceCount": len(prompt.resources),

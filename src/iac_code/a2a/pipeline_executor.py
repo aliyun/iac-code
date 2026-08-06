@@ -56,7 +56,7 @@ from iac_code.agent.message import Message as AgentMessage
 from iac_code.i18n import _
 from iac_code.pipeline import create_pipeline, discover_pipelines
 from iac_code.pipeline.config import get_pipeline_name, is_selling_review_step_enabled
-from iac_code.pipeline.engine.cleanup import CleanupLedger
+from iac_code.pipeline.engine.cleanup import CleanupLedger, cleanup_state_unavailable_message
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.handoff import build_handoff_summary, terminal_outcome_from_completed_event
 from iac_code.pipeline.engine.loader import _resolve_feature_flags, load_pipeline_dir
@@ -3943,7 +3943,7 @@ def _pipeline_cleanup_handoff_data_from_session(
     if not ledger_path.exists():
         snapshot_cleanup = public_snapshot.get("cleanup") if isinstance(public_snapshot, dict) else None
         if _public_cleanup_snapshot_has_pending_evidence(snapshot_cleanup):
-            return _cleanup_state_unavailable_payload()
+            return _cleanup_state_unavailable_payload(reason="ledger_missing")
         return None
     return _pipeline_cleanup_handoff_data_from_ledger(CleanupLedger(ledger_path))
 
@@ -3952,36 +3952,80 @@ def _pipeline_cleanup_handoff_data_from_ledger(ledger: Any) -> dict[str, Any] | 
     try:
         ledger_path = getattr(ledger, "path", None)
         if ledger_path is not None and not Path(ledger_path).exists():
-            return _cleanup_state_unavailable_payload()
+            return _cleanup_state_unavailable_payload(reason="ledger_missing")
         load_failed = getattr(ledger, "load_failed", None)
         if callable(load_failed) and load_failed():
-            return _cleanup_state_unavailable_payload()
+            return _cleanup_state_unavailable_payload(
+                reason="load_failed",
+                load_error=_cleanup_ledger_load_error(ledger),
+            )
         build_pending_prompt = getattr(ledger, "build_pending_prompt", None)
         if not callable(build_pending_prompt):
             return None
         prompt = build_pending_prompt()
+        summary = _cleanup_state_summary(ledger)
     except Exception:
         logger.warning("Failed to build A2A pipeline cleanup handoff data", exc_info=True)
-        return _cleanup_state_unavailable_payload()
-    if prompt is None:
-        return None
+        return _cleanup_state_unavailable_payload(reason="build_failed")
 
-    resources = list(getattr(prompt, "resources", []) or [])
+    resources = list(getattr(prompt, "resources", []) or []) if prompt is not None else []
     if not resources:
-        return None
+        return _cleanup_state_payload_from_summary(summary)
     return {
-        "status": "pending",
+        "status": _cleanup_pending_status(summary),
         "resourceCount": len(resources),
-        "statusMessage": str(getattr(prompt, "status_message", "") or ""),
+        "statusMessage": _cleanup_pending_status_message(summary, prompt),
         "resources": [_cleanup_resource_handoff_data(resource) for resource in resources],
     }
 
 
-def _cleanup_state_unavailable_payload() -> dict[str, Any]:
+def _cleanup_pending_status(summary: Any) -> str:
+    status = str(getattr(summary, "status", "") or "") if summary is not None else ""
+    return status or "pending"
+
+
+def _cleanup_pending_status_message(summary: Any, prompt: Any) -> str:
+    if _cleanup_pending_status(summary) == "pending":
+        return str(getattr(prompt, "status_message", "") or "")
+    return str(getattr(summary, "status_message", "") or "")
+
+
+def _cleanup_state_summary(ledger: Any) -> Any:
+    build_state_summary = getattr(ledger, "build_state_summary", None)
+    return build_state_summary() if callable(build_state_summary) else None
+
+
+def _cleanup_state_payload_from_summary(summary: Any) -> dict[str, Any] | None:
+    if summary is None:
+        return None
+    payload: dict[str, Any] = {
+        "status": str(getattr(summary, "status", "") or "skipped"),
+        "statusMessage": str(getattr(summary, "status_message", "") or ""),
+        "resourceCount": int(getattr(summary, "resource_count", 0) or 0),
+    }
+    if bool(getattr(summary, "skipped", False)):
+        payload["skipped"] = True
+    return payload
+
+
+def _cleanup_ledger_load_error(ledger: Any) -> str | None:
+    load_error = getattr(ledger, "load_error", None)
+    if not callable(load_error):
+        return None
+    try:
+        return load_error()
+    except Exception:
+        logger.warning("Failed to read A2A pipeline cleanup ledger load error", exc_info=True)
+        return None
+
+
+def _cleanup_state_unavailable_payload(*, reason: str, load_error: str | None = None) -> dict[str, Any]:
     return {
         "status": "unavailable",
-        "statusMessage": _("Cleanup state unavailable. Inspect the session file and cloud resources manually."),
+        "unavailableReason": reason,
+        "statusMessage": cleanup_state_unavailable_message(reason=reason, load_error=load_error),
     }
+
 
 
 def _public_cleanup_snapshot_has_pending_evidence(cleanup: Any) -> bool:
