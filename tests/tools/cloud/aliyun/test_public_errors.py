@@ -125,6 +125,11 @@ def test_aliyun_public_error_templates_are_directly_extractable(tmp_path: Path) 
         "Alibaba Cloud API {operation} received multiple template sources. Provide only one.",
         "Alibaba Cloud API {operation} requires a body source compatible with its API contract.",
         "Alibaba Cloud API {operation} requires parameter {parameter}.",
+        " Provide parameters as a key/value object; use ros_get_template_parameter_constraints to resolve"
+        " allowed values first.",
+        " Provide a unique stack_name; it is a tool argument, not a template parameter.",
+        " Provide template_url as a readable local template file path, OSS URL, or HTTP(S) URL.",
+        " Fix the input before calling again instead of repeating the same call.",
         "Alibaba Cloud API {operation} template file is invalid. Use a readable regular template file.",
         "Alibaba Cloud API {operation} template validation failed. Check the template syntax and resource definitions.",
         "Alibaba Cloud API {operation} was not found. Check the product, version, and action.",

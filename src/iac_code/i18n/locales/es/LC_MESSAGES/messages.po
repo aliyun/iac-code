@@ -6330,6 +6330,28 @@ msgstr ""
 "La API de Alibaba Cloud {operation} no se pudo preparar de forma segura. "
 "Compruebe la solicitud y vuelva a intentarlo."
 
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid ""
+" Provide parameters as a key/value object; use "
+"ros_get_template_parameter_constraints to resolve allowed values first."
+msgstr " Proporcione parameters como un objeto clave/valor; use ros_get_template_parameter_constraints para resolver primero los valores permitidos."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid ""
+" Provide a unique stack_name; it is a tool argument, not a template "
+"parameter."
+msgstr " Proporcione un stack_name único; es un argumento de la herramienta, no un parámetro de plantilla."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid ""
+" Provide template_url as a readable local template file path, OSS URL, or"
+" HTTP(S) URL."
+msgstr " Proporcione template_url como una ruta de archivo de plantilla local legible, una URL de OSS o una URL HTTP(S)."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid " Fix the input before calling again instead of repeating the same call."
+msgstr " Corrija la entrada antes de volver a llamar en lugar de repetir la misma llamada."
+
 #: src/iac_code/tools/cloud/aliyun/ros_stack.py
 msgid "ROS Stack"
 msgstr "ROS Stack"
@@ -6387,12 +6409,30 @@ msgstr ""
 "OSS/HTTP."
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "The local ROS template file is not valid UTF-8."
+msgstr "El archivo de plantilla local ROS no es válido UTF-8."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "Confirm that the file exists, is readable, and is saved as UTF-8."
+msgstr "Confirme que el archivo existe, es legible, y se guarda como UTF-8."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "The local ROS template file exceeds the maximum supported size."
+msgstr "El archivo de plantilla ROS local supera el tamaño máximo admitido."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "Use a smaller regular template file within the 32 MiB limit."
+msgstr "Use un archivo de plantilla normal más pequeño, dentro del límite de 32 MiB."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid "The local ROS template file cannot be read."
 msgstr "El archivo de plantilla local ROS no se puede leer."
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
-msgid "The local ROS template file is not valid UTF-8."
-msgstr "El archivo de plantilla local ROS no es válido UTF-8."
+msgid ""
+"Confirm that template_url points to an existing, readable regular file, "
+"then retry with the fixed path."
+msgstr "Confirme que template_url apunta a un archivo normal existente y legible, y vuelva a intentarlo con la ruta corregida."
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid ""
@@ -6401,10 +6441,6 @@ msgid ""
 msgstr ""
 "TemplateURL/local TemplateBody falló antes de entrar en el Parser; el ROS"
 " API no fue llamado."
-
-#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
-msgid "Confirm that the file exists, is readable, and is saved as UTF-8."
-msgstr "Confirme que el archivo existe, es legible, y se guarda como UTF-8."
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 #, python-brace-format
@@ -12667,3 +12703,4 @@ msgstr "¿Permitir Bash?"
 #~ msgstr ""
 #~ "Aprobar llamada de herramienta: {tool}\n"
 #~ "Resumen de entrada: {summary}"
+

@@ -216,11 +216,11 @@ class AliyunDelegatedExecutor:
             )
         from iac_code.tools.cloud.aliyun.ros_template_tools import (
             build_delegated_call_shape,
-            validate_delegated_tool_input,
+            delegated_tool_input_error,
         )
 
-        if not validate_delegated_tool_input(tool_input, action=self._action):
-            return PermissionResult(behavior="deny", message=self._public_error("invalid_tool_input", tool_input))
+        if input_error := delegated_tool_input_error(tool_input, action=self._action):
+            return PermissionResult(behavior="deny", message=self._public_error(input_error, tool_input))
         shape = build_delegated_call_shape(tool_input, action=self._action)
         return await self._public_tool.check_shape_permissions(shape, replace(context, pipeline_mode=False))
 
@@ -230,11 +230,11 @@ class AliyunDelegatedExecutor:
                 return ToolResult.error(self._public_error("aliyun_delegated_outer_binding_required", tool_input))
             from iac_code.tools.cloud.aliyun.ros_template_tools import (
                 build_delegated_call_shape,
-                validate_delegated_tool_input,
+                delegated_tool_input_error,
             )
 
-            if not validate_delegated_tool_input(tool_input, action=self._action):
-                return ToolResult.error(self._public_error("invalid_tool_input", tool_input))
+            if input_error := delegated_tool_input_error(tool_input, action=self._action):
+                return ToolResult.error(self._public_error(input_error, tool_input))
             shape = build_delegated_call_shape(tool_input, action=self._action)
             delegated_context = _delegated_tool_context(context)
             try:

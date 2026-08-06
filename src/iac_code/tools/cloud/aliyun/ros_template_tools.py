@@ -118,12 +118,30 @@ def delegated_input_schema(action: str) -> dict[str, Any]:
     raise ValueError("unsupported_delegated_action")
 
 
-def validate_delegated_tool_input(tool_input: Mapping[str, Any], *, action: str) -> bool:
+def delegated_tool_input_error(tool_input: Mapping[str, Any], *, action: str) -> str | None:
+    """Return a stable error code naming the offending fields, or None when valid.
+
+    Missing required fields become ``missing_required_parameters:<names>`` so the
+    public error message can name them and the caller can fix the input on the
+    next call instead of repeating the same failing call.
+    """
+
     try:
-        jsonschema.validate(instance=dict(tool_input), schema=delegated_input_schema(action))
-    except (jsonschema.ValidationError, ValueError):
-        return False
-    return True
+        schema = delegated_input_schema(action)
+    except ValueError:
+        return "invalid_tool_input"
+    try:
+        jsonschema.validate(instance=dict(tool_input), schema=schema)
+    except jsonschema.ValidationError:
+        missing = [name for name in schema["required"] if name not in tool_input]
+        if missing:
+            return "missing_required_parameters:" + ",".join(missing)
+        return "invalid_tool_input"
+    return None
+
+
+def validate_delegated_tool_input(tool_input: Mapping[str, Any], *, action: str) -> bool:
+    return delegated_tool_input_error(tool_input, action=action) is None
 
 
 def render_ros_template_tool_result_message(

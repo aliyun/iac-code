@@ -37,18 +37,29 @@ _FLAT_PARAMETER = re.compile(r"^Parameters\.(\d+)\.(ParameterKey|ParameterValue)
 def local_template_source_error(error: BaseException) -> RosPreflightOutcome:
     """Convert an allowed local-file read/decode failure into a normal ROS report."""
 
-    kind = "UTF-8" if isinstance(error, UnicodeError) else "READ"
+    if isinstance(error, UnicodeError):
+        kind = "UTF-8"
+        summary = _("The local ROS template file is not valid UTF-8.")
+        suggestion = _("Confirm that the file exists, is readable, and is saved as UTF-8.")
+    elif str(error) == "body_file_too_large":
+        kind = "SIZE"
+        summary = _("The local ROS template file exceeds the maximum supported size.")
+        suggestion = _("Use a smaller regular template file within the 32 MiB limit.")
+    else:
+        kind = "READ"
+        summary = _("The local ROS template file cannot be read.")
+        suggestion = _(
+            "Confirm that template_url points to an existing, readable regular file, then retry with the fixed path."
+        )
     diagnostic = make_diagnostic(
         code="ROS1202",
         severity=Severity.ERROR,
         category=Category.COMPATIBILITY,
-        summary=_("The local ROS template file cannot be read.")
-        if kind == "READ"
-        else _("The local ROS template file is not valid UTF-8."),
+        summary=summary,
         detail=_("TemplateURL/local TemplateBody failed before entering the Parser; the ROS API was not called."),
         subject="local-template-source",
         stable_args=(kind, type(error).__name__),
-        suggestion=_("Confirm that the file exists, is readable, and is saved as UTF-8."),
+        suggestion=suggestion,
     )
     return outcome_from_report(ValidationReport.build([diagnostic], analysis_incomplete=False))
 
