@@ -19,6 +19,31 @@ def terminal_outcome_from_completed_event(data: dict) -> TerminalOutcome:
     return "completed"
 
 
+def terminal_outcome_from_final_conclusion(conclusion: dict | None) -> TerminalOutcome | None:
+    """Map a terminal step's structured conclusion ``status`` to a terminal outcome.
+
+    Steps that report their own outcome (e.g. the deploying step's
+    ``status: success|failed|cancelled``) must drive the pipeline terminal
+    outcome. Otherwise a step that completed its agent turn but concluded with
+    ``status: failed`` (e.g. WAF blocked CreateStack, or ``statuses.failed>0``)
+    would be reported as a successful ``pipeline_completed``.
+
+    Returns ``None`` when the conclusion carries no recognizable failure/cancel
+    signal so callers keep the existing default ``completed`` behavior.
+    """
+    if not isinstance(conclusion, dict):
+        return None
+    status = conclusion.get("status")
+    if not isinstance(status, str):
+        return None
+    normalized = status.strip().lower()
+    if normalized == "failed":
+        return "failed"
+    if normalized in {"cancelled", "canceled"}:
+        return "canceled"
+    return None
+
+
 def build_handoff_summary(
     pipeline_name: str,
     outcome: TerminalOutcome,
