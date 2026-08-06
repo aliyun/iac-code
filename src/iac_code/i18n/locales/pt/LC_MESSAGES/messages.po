@@ -6304,6 +6304,42 @@ msgstr "CloudStackInstances"
 msgid "Calling ROS template tool for {template_url}..."
 msgstr "Chamando a ferramenta de modelo ROS para {template_url}..."
 
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+#, python-brace-format
+msgid ""
+"Repeated ROS validation blocked: the template at {template_url} has not "
+"changed since the last failed validation (result_digest={digest}, failed "
+"attempts={count}). Calling ros_validate_template again would return the "
+"same error. Diagnose the template syntax root cause from the error below,"
+" fix the template file first, and only revalidate after the file content "
+"changed.\n"
+"Last validation error:\n"
+"{error}"
+msgstr ""
+"Validação ROS repetida bloqueada: o modelo em {template_url} não mudou "
+"desde a última validação com falha (result_digest={digest}, tentativas "
+"com falha={count}). Chamar ros_validate_template novamente retornaria o "
+"mesmo erro. Diagnostique a causa raiz da sintaxe do modelo a partir do "
+"erro abaixo, corrija primeiro o arquivo do modelo e revalide somente após"
+" o conteúdo do arquivo mudar.\n"
+"Último erro de validação:\n"
+"{error}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+#, python-brace-format
+msgid ""
+"\n"
+"\n"
+"ros_validate_template failure result_digest={digest}. Locate and fix the "
+"template syntax root cause before revalidating; revalidating the "
+"unchanged template will be blocked."
+msgstr ""
+"\n"
+"\n"
+"Falha de ros_validate_template result_digest={digest}. Localize e corrija"
+" a causa raiz da sintaxe do modelo antes de revalidar; a revalidação do "
+"modelo inalterado será bloqueada."
+
 #: src/iac_code/tools/cloud/aliyun/template_source.py
 #, python-brace-format
 msgid ""
@@ -12562,3 +12598,4 @@ msgstr "Permitir Bash?"
 #~ msgstr ""
 #~ "Aprovar chamada de ferramenta: {tool}\n"
 #~ "Resumo da entrada: {summary}"
+

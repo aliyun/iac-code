@@ -20,6 +20,11 @@
 ## ROS 模板来源
 生成后的模板文件路径就是 `{candidate.output_path}`。调用 `ros_validate_template` 校验时，必须传 `template_url = "{candidate.output_path}"`。不要调用 `aliyun_api` 的 ROS `ValidateTemplate` 接口，不要传 `TemplateBody`、`TemplateId` 或 `TemplateScratchId`。
 
+## 校验重试纪律
+- 校验失败后，先根据错误信息定位模板语法根因并修复 `{candidate.output_path}`，再重新调用 `ros_validate_template`。
+- 禁止对未修改的模板重复调用 `ros_validate_template`：相同内容只会返回相同错误（相同 result_digest），并会被工具拦截。
+- 结论的 `validation_summary` 字段必须记录校验迭代摘要：校验次数、失败次数与首次成功前的失败原因摘要；一次通过时写明一次通过。
+
 ## 输出
 文件写入完成后调用 `complete_step` 提交结论。
 

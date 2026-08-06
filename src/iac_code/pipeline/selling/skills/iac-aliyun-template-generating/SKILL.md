@@ -20,6 +20,9 @@ conclusion_schema:
     description:
       type: string
       description: 模板简要描述
+    validation_summary:
+      type: string
+      description: 校验迭代摘要：校验总次数、失败次数，以及首次成功前的失败原因摘要（含 result_digest）；一次通过时写明一次通过
 ---
 
 # ROS 模板生成
@@ -47,8 +50,8 @@ conclusion_schema:
 4. 生成 ROS YAML 模板（库存相关属性按 [references/cloud-products/](references/cloud-products/) 与 [references/template-parameters.md](references/template-parameters.md) 定义为 Parameters，所有 Parameters 必须添加 AssociationProperty）并写入文件
    - 生成的模板默认放在当前工作目录；仅当用户指定其他路径时才写入该路径，不要默认使用 `/tmp` 等工作目录外路径
 5. 调用 `ros_validate_template` 校验；`template_url` 使用刚写入的模板文件路径，已有具体地域时传 `region_id`，否则使用工具默认地域
-6. 校验失败 → 分析错误 → 修复 → 重试（最多 5 轮）
-7. 校验通过 → 完成
+6. 校验失败 → 先定位模板语法根因（比对错误中的 result_digest，逐条分析错误信息，必要时查 GetResourceType Schema）→ 修复模板文件 → 重试（最多 5 轮）。**禁止在未修改模板文件的情况下重复调用 `ros_validate_template`**：同一失败模板的重复校验只会返回相同错误（相同 result_digest），且会被工具直接拦截
+7. 校验通过 → 完成，并在结论的 `validation_summary` 中记录校验迭代摘要（校验次数、失败原因摘要；一次通过时写明一次通过）
 
 > **模板路径支持本地文件**：`ros_validate_template` 的 `template_url` 可传当前工作目录内的本地文件路径（如 `./template.yml`）。避免将大模板内容直接作为参数传递。
 
@@ -96,7 +99,7 @@ conclusion_schema:
 ## 错误处理
 
 ### 校验失败
-分析错误原因 → 查 GetResourceType Schema（如需）→ 修复 → 重试（最多 5 轮）
+先定位语法根因：逐条阅读错误信息，比对 result_digest 判断是否与上次为同一错误 → 查 GetResourceType Schema（如需）→ 修复模板文件 → 重试（最多 5 轮）。模板文件未修改时不要重复校验：相同内容的重复校验会被拦截并返回上次的失败信息。
 
 ## 参考文件
 

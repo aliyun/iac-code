@@ -5867,6 +5867,38 @@ msgstr "云资源栈实例"
 msgid "Calling ROS template tool for {template_url}..."
 msgstr "正在为 {template_url} 调用 ROS 模板工具..."
 
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+#, python-brace-format
+msgid ""
+"Repeated ROS validation blocked: the template at {template_url} has not "
+"changed since the last failed validation (result_digest={digest}, failed "
+"attempts={count}). Calling ros_validate_template again would return the "
+"same error. Diagnose the template syntax root cause from the error below,"
+" fix the template file first, and only revalidate after the file content "
+"changed.\n"
+"Last validation error:\n"
+"{error}"
+msgstr ""
+"重复的 ROS 校验已被拦截：{template_url} "
+"的模板自上次校验失败以来没有变化（result_digest={digest}，失败次数={count}）。再次调用 "
+"ros_validate_template 只会返回相同错误。请根据下方错误定位模板语法根因，先修复模板文件，仅在文件内容变化后再重新校验。\n"
+"上次校验错误：\n"
+"{error}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+#, python-brace-format
+msgid ""
+"\n"
+"\n"
+"ros_validate_template failure result_digest={digest}. Locate and fix the "
+"template syntax root cause before revalidating; revalidating the "
+"unchanged template will be blocked."
+msgstr ""
+"\n"
+"\n"
+"ros_validate_template 失败 "
+"result_digest={digest}。请先定位并修复模板语法根因再重新校验；对未修改模板的重复校验将被拦截。"
+
 #: src/iac_code/tools/cloud/aliyun/template_source.py
 #, python-brace-format
 msgid ""
@@ -11543,3 +11575,4 @@ msgstr "允许 Bash?"
 #~ msgstr ""
 #~ "批准工具调用：{tool}\n"
 #~ "输入摘要：{summary}"
+

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from iac_code.tools.base import ToolContext, ToolResult
@@ -330,3 +332,119 @@ async def test_ros_template_tool_preserves_delegated_permission_result() -> None
     result = await tool.check_permissions(tool_input, _permission_context())
 
     assert result is expected
+
+
+class _SequencedDelegatedExecutor:
+    """Delegated executor returning queued results, tracking execution count."""
+
+    def __init__(self, results: list[ToolResult]) -> None:
+        self._results = list(results)
+        self.execution_calls: list[dict] = []
+
+    async def check_permissions(self, tool_input, context):
+        return PermissionResult(behavior="allow", execution_class="concurrent")
+
+    async def execute(self, tool_input, context):
+        self.execution_calls.append(dict(tool_input))
+        return self._results.pop(0)
+
+
+def _write_template(tmp_path, content: str) -> str:
+    template = tmp_path / "template.yml"
+    template.write_text(content, encoding="utf-8")
+    return str(template)
+
+
+@pytest.mark.asyncio
+async def test_ros_validate_template_blocks_repeat_validation_of_unchanged_template(tmp_path) -> None:
+    template_url = _write_template(tmp_path, "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n")
+    failure = ToolResult.error('{"Code":"InvalidTemplate","Message":"bad !Ref","RequestId":"AAA-111"}')
+    delegated = _SequencedDelegatedExecutor([failure])
+    tool = RosValidateTemplateTool(delegated_executor=delegated)
+    context = ToolContext(cwd=str(tmp_path), pipeline_mode=True)
+    tool_input = {"template_url": template_url}
+
+    first = await tool.execute(tool_input=tool_input, context=context)
+    second = await tool.execute(tool_input=tool_input, context=context)
+    third = await tool.execute(tool_input=tool_input, context=context)
+
+    assert first.is_error
+    assert "result_digest=" in first.content
+    assert len(delegated.execution_calls) == 1  # remote validation not repeated
+    for repeated in (second, third):
+        assert repeated.is_error
+        assert "Repeated ROS validation blocked" in repeated.content
+        assert "bad !Ref" in repeated.content  # last error is surfaced for root-cause analysis
+    assert "failed attempts=1" in second.content
+
+
+@pytest.mark.asyncio
+async def test_ros_validate_template_revalidates_after_template_change(tmp_path) -> None:
+    template_url = _write_template(tmp_path, "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n")
+    failure = ToolResult.error('{"Code":"InvalidTemplate","Message":"bad","RequestId":"AAA-111"}')
+    success = ToolResult.success('{"RequestId":"BBB-222"}')
+    delegated = _SequencedDelegatedExecutor([failure, success])
+    tool = RosValidateTemplateTool(delegated_executor=delegated)
+    context = ToolContext(cwd=str(tmp_path), pipeline_mode=True)
+    tool_input = {"template_url": template_url}
+
+    first = await tool.execute(tool_input=tool_input, context=context)
+    Path(template_url).write_text(
+        "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\nOutputs: {}\n",
+        encoding="utf-8",
+    )
+    second = await tool.execute(tool_input=tool_input, context=context)
+
+    assert first.is_error
+    assert not second.is_error
+    assert len(delegated.execution_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_ros_validate_template_clears_failure_state_after_success(tmp_path) -> None:
+    template_url = _write_template(tmp_path, "a: 1\n")
+    failure = ToolResult.error('{"Code":"InvalidTemplate","Message":"bad","RequestId":"AAA-111"}')
+    success = ToolResult.success('{"RequestId":"BBB-222"}')
+    failure_again = ToolResult.error('{"Code":"InvalidTemplate","Message":"other","RequestId":"CCC-333"}')
+    delegated = _SequencedDelegatedExecutor([failure, success, failure_again])
+    tool = RosValidateTemplateTool(delegated_executor=delegated)
+    context = ToolContext(cwd=str(tmp_path), pipeline_mode=True)
+    tool_input = {"template_url": template_url}
+
+    await tool.execute(tool_input=tool_input, context=context)
+    Path(template_url).write_text("a: 2\n", encoding="utf-8")
+    ok = await tool.execute(tool_input=tool_input, context=context)
+    # Same content revalidated after success must reach the remote API again.
+    third = await tool.execute(tool_input=tool_input, context=context)
+
+    assert not ok.is_error
+    assert third.is_error
+    assert len(delegated.execution_calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_ros_validate_template_guard_skips_remote_urls() -> None:
+    failure = ToolResult.error('{"Code":"InvalidTemplate","Message":"bad","RequestId":"AAA-111"}')
+    failure_two = ToolResult.error('{"Code":"InvalidTemplate","Message":"bad","RequestId":"DDD-444"}')
+    delegated = _SequencedDelegatedExecutor([failure, failure_two])
+    tool = RosValidateTemplateTool(delegated_executor=delegated)
+    context = ToolContext(cwd="/tmp", pipeline_mode=True)
+    tool_input = {"template_url": "oss://bucket/template.yml"}
+
+    first = await tool.execute(tool_input=tool_input, context=context)
+    second = await tool.execute(tool_input=tool_input, context=context)
+
+    assert first.is_error and second.is_error
+    assert "Repeated ROS validation blocked" not in second.content
+    assert len(delegated.execution_calls) == 2
+
+
+def test_validation_result_digest_ignores_request_ids() -> None:
+    from iac_code.tools.cloud.aliyun.ros_template_tools import validation_result_digest
+
+    same_a = validation_result_digest('{"Code":"InvalidTemplate","RequestId":"AAA-111","Message":"bad"}')
+    same_b = validation_result_digest('{"Code":"InvalidTemplate","RequestId":"BBB-222","Message":"bad"}')
+    other = validation_result_digest('{"Code":"InvalidTemplate","RequestId":"AAA-111","Message":"other"}')
+
+    assert same_a == same_b
+    assert same_a != other

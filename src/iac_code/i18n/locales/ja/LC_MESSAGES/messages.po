@@ -6016,6 +6016,40 @@ msgstr "CloudStackInstances"
 msgid "Calling ROS template tool for {template_url}..."
 msgstr "{template_url} の ROS テンプレートツールを呼び出しています..."
 
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+#, python-brace-format
+msgid ""
+"Repeated ROS validation blocked: the template at {template_url} has not "
+"changed since the last failed validation (result_digest={digest}, failed "
+"attempts={count}). Calling ros_validate_template again would return the "
+"same error. Diagnose the template syntax root cause from the error below,"
+" fix the template file first, and only revalidate after the file content "
+"changed.\n"
+"Last validation error:\n"
+"{error}"
+msgstr ""
+"繰り返しの ROS 検証をブロックしました：{template_url} "
+"のテンプレートは前回の検証失敗以降変更されていません（result_digest={digest}、失敗回数={count}）。ros_validate_template"
+" "
+"を再度呼び出しても同じエラーが返されます。以下のエラーからテンプレート構文の根本原因を特定し、先にテンプレートファイルを修正して、ファイル内容が変更された後にのみ再検証してください。"
+"\n"
+"前回の検証エラー：\n"
+"{error}"
+
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+#, python-brace-format
+msgid ""
+"\n"
+"\n"
+"ros_validate_template failure result_digest={digest}. Locate and fix the "
+"template syntax root cause before revalidating; revalidating the "
+"unchanged template will be blocked."
+msgstr ""
+"\n"
+"\n"
+"ros_validate_template 失敗 "
+"result_digest={digest}。再検証の前にテンプレート構文の根本原因を特定して修正してください。未変更のテンプレートの再検証はブロックされます。"
+
 #: src/iac_code/tools/cloud/aliyun/template_source.py
 #, python-brace-format
 msgid ""
@@ -11760,3 +11794,4 @@ msgstr "Bash を許可しますか？"
 #~ msgstr ""
 #~ "ツール呼び出しを承認: {tool}\n"
 #~ "入力サマリー: {summary}"
+
