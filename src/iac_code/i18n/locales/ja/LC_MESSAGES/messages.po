@@ -6056,8 +6056,20 @@ msgstr ""
 "params.TemplateURL として渡してください。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "The local ROS template file does not exist."
+msgstr "ローカルの ROS テンプレートファイルが存在しません。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "The local ROS template path is not a regular file."
+msgstr "ローカルの ROS テンプレートパスが通常ファイルではありません。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid "The local ROS template file cannot be read."
 msgstr "ローカルROSテンプレートファイルは読みません。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "The local ROS template file exceeds the 32 MiB limit."
+msgstr "ローカルの ROS テンプレートファイルが 32 MiB の上限を超えています。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid "The local ROS template file is not valid UTF-8."
@@ -6065,13 +6077,35 @@ msgstr "ローカルROSテンプレートファイルはUTF-8では有効では�
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid ""
-"TemplateURL/local TemplateBody failed before entering the Parser; the ROS"
-" API was not called."
-msgstr "TemplateURL/local TemplateBodyは、パーサを入力する前に失敗しました。 ROS APIは呼びませんでした。"
+"Check the template path for typos and write the template to that path "
+"before validating it again."
+msgstr "テンプレートパスの入力ミスを確認し、そのパスにテンプレートを書き込んでから再度検証してください。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid ""
+"Point TemplateURL at the template file itself rather than a directory or "
+"device."
+msgstr "TemplateURL はディレクトリやデバイスではなく、テンプレートファイル自体を指定してください。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid "Confirm that the file exists, is readable, and is saved as UTF-8."
 msgstr "ファイルが読みやすく、UTF-8として保存されていることを確認してください。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid ""
+"Reduce the template size, or upload it and pass an OSS/HTTP TemplateURL "
+"instead."
+msgstr "テンプレートのサイズを小さくするか、アップロードして OSS/HTTP の TemplateURL を渡してください。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "Save the template as UTF-8 text before validating it again."
+msgstr "テンプレートを UTF-8 テキストとして保存してから再度検証してください。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid ""
+"TemplateURL/local TemplateBody failed before entering the Parser; the ROS"
+" API was not called."
+msgstr "TemplateURL/local TemplateBodyは、パーサを入力する前に失敗しました。 ROS APIは呼びませんでした。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 #, python-brace-format
@@ -11760,3 +11794,4 @@ msgstr "Bash を許可しますか？"
 #~ msgstr ""
 #~ "ツール呼び出しを承認: {tool}\n"
 #~ "入力サマリー: {summary}"
+

@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import os
+import stat
 from pathlib import Path
 from typing import Any, Literal
 
 from iac_code.i18n import _
+from iac_code.tools.cloud.aliyun.api_contract import _MAX_BODY_BYTES
 from iac_code.tools.path_safety import check_read_path, resolve_read_path
 from iac_code.types.permissions import PermissionResult
 
 REMOTE_TEMPLATE_URL_PREFIXES = ("http://", "https://", "oss://")
+
+# Reuse the wire-layer request-body ceiling so this gate and the transport can
+# never disagree about which templates are too large.
+MAX_LOCAL_TEMPLATE_BYTES = _MAX_BODY_BYTES
+
+LocalTemplateSourceProblem = Literal["MISSING", "NOT_REGULAR", "UNREADABLE", "TOO_LARGE"]
 
 PIPELINE_TEMPLATE_URL_ACTIONS = frozenset(
     {
@@ -130,6 +139,48 @@ def read_local_template_url(
         relative_read_directories=relative_read_directories,
     )
     return Path(resolved).read_text(encoding="utf-8")
+
+
+def classify_local_template_source(path: str | Path) -> LocalTemplateSourceProblem | None:
+    """Return why a resolved local template cannot be read, or None when usable.
+
+    Runs before credentials, endpoints, and any network call so the first failed
+    attempt already tells the caller what to fix instead of surfacing a generic
+    wire-layer error after the request was assembled.
+    """
+    try:
+        info = os.stat(path)
+    except FileNotFoundError:
+        return "MISSING"
+    except OSError:
+        return "UNREADABLE"
+    if not stat.S_ISREG(info.st_mode):
+        return "NOT_REGULAR"
+    if info.st_size > MAX_LOCAL_TEMPLATE_BYTES:
+        return "TOO_LARGE"
+    if not os.access(path, os.R_OK):
+        return "UNREADABLE"
+    return None
+
+
+def check_local_template_url_source(
+    template_url: str,
+    context: Any,
+    *,
+    cwd: str | None = None,
+    relative_read_directories: list[str] | None = None,
+) -> LocalTemplateSourceProblem | None:
+    """Classify a local TemplateURL using the same resolution as the read path."""
+    if not template_url or not is_local_template_url(template_url):
+        return None
+    return classify_local_template_source(
+        resolve_template_url_for_api(
+            template_url,
+            context,
+            cwd=cwd,
+            relative_read_directories=relative_read_directories,
+        )
+    )
 
 
 def reject_pipeline_dedicated_ros_template_action(action: str, *, pipeline_mode: bool) -> str | None:

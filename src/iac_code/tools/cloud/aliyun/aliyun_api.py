@@ -72,11 +72,13 @@ from iac_code.tools.cloud.aliyun.runtime import (
 )
 from iac_code.tools.cloud.aliyun.template_source import (
     check_local_template_url_read_permission,
+    check_local_template_url_source,
     is_local_template_url,
     read_local_template_url,
     reject_pipeline_dedicated_ros_deployment_action,
     reject_pipeline_dedicated_ros_template_action,
     reject_pipeline_template_source_params,
+    resolve_template_url_for_api,
 )
 from iac_code.tools.cloud.aliyun.user_agent import build_user_agent
 from iac_code.tools.cloud.base_api import BaseCloudApi
@@ -1678,6 +1680,36 @@ class AliyunApi(BaseCloudApi):
             return None
         return check_local_template_url_read_permission(template_url, context)
 
+    def _local_template_source_gate(
+        self,
+        input: Mapping[str, Any],
+        context: ToolContext,
+    ) -> ToolResult | None:
+        """Reject an unusable local template before any request is assembled.
+
+        Without this gate a missing or non-regular template only fails while the
+        wire layer materializes the body, which reports it as an invalid
+        ``body_file`` even though the caller passed a template path. That message
+        names a parameter the caller never sent, so it cannot be acted on.
+        """
+        template_url = self._local_template_url(dict(input))
+        if template_url is None:
+            return None
+        problem = check_local_template_url_source(
+            template_url,
+            None,
+            cwd=context.cwd,
+            relative_read_directories=list(context.relative_read_directories),
+        )
+        if problem is None:
+            return None
+        from iac_code.tools.cloud.aliyun.hooks.ros_validate import local_template_source_error
+
+        outcome = local_template_source_error(problem)
+        context.ros_preflight_outcome = outcome
+        assert outcome.blocking_result is not None
+        return outcome.blocking_result
+
     @property
     def input_schema(self) -> dict[str, Any]:
         region_desc = "The region to call the action in."
@@ -2193,6 +2225,8 @@ class AliyunApi(BaseCloudApi):
                 for result in self._runtime_file_permission_results(normalized, context):
                     if result.behavior in {"ask", "deny"}:
                         raise ApiContractError(result.message or "aliyun_file_permission_required")
+            if blocking := self._local_template_source_gate(normalized, context):
+                return blocking
 
             observe("contract")
             recovery_metadata_contract: CanonicalWireContract | None = None
@@ -2281,10 +2315,10 @@ class AliyunApi(BaseCloudApi):
                 try:
                     template_bytes = await asyncio.to_thread(_read_body_file, resolved_template)
                     params["TemplateBody"] = template_bytes.decode("utf-8")
-                except (OSError, UnicodeError) as error:
+                except (ApiContractError, OSError, UnicodeError) as error:
                     from iac_code.tools.cloud.aliyun.hooks.ros_validate import local_template_source_error
 
-                    outcome = local_template_source_error(error)
+                    outcome = local_template_source_error(error, path=resolved_template)
                     context.ros_preflight_outcome = outcome
                     assert outcome.blocking_result is not None
                     return outcome.blocking_result
@@ -2552,10 +2586,13 @@ class AliyunApi(BaseCloudApi):
                         return ToolResult.error(path_result.message)
                 try:
                     params["TemplateBody"] = read_local_template_url(template_url, context)
-                except (OSError, UnicodeError) as error:
+                except (ApiContractError, OSError, UnicodeError) as error:
                     from iac_code.tools.cloud.aliyun.hooks.ros_validate import local_template_source_error
 
-                    outcome = local_template_source_error(error)
+                    outcome = local_template_source_error(
+                        error,
+                        path=resolve_template_url_for_api(template_url, context),
+                    )
                     context.ros_preflight_outcome = outcome
                     assert outcome.blocking_result is not None
                     return outcome.blocking_result

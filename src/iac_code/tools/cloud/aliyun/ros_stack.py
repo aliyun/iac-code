@@ -22,6 +22,7 @@ from iac_code.services.telemetry.sanitize import (
     sanitize_terraform_provider,
 )
 from iac_code.tools.base import ToolContext, ToolResult
+from iac_code.tools.cloud.aliyun.api_contract import ApiContractError
 from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
 from iac_code.tools.cloud.aliyun.template_source import (
     check_local_template_url_read_permission,
@@ -29,6 +30,7 @@ from iac_code.tools.cloud.aliyun.template_source import (
     read_local_template_url,
     reject_pipeline_dedicated_ros_deployment_action,
     reject_pipeline_template_source_params,
+    resolve_template_url_for_api,
 )
 from iac_code.tools.cloud.base_stack import BaseCloudStack
 from iac_code.tools.cloud.types import ResourceStatus, StackStatus
@@ -292,10 +294,18 @@ class RosStack(BaseCloudStack):
                         cwd=context.cwd,
                         relative_read_directories=context.relative_read_directories,
                     )
-                except (OSError, UnicodeError) as error:
+                except (ApiContractError, OSError, UnicodeError) as error:
                     from iac_code.tools.cloud.aliyun.hooks.ros_validate import local_template_source_error
 
-                    outcome = local_template_source_error(error)
+                    outcome = local_template_source_error(
+                        error,
+                        path=resolve_template_url_for_api(
+                            template_url,
+                            None,
+                            cwd=context.cwd,
+                            relative_read_directories=context.relative_read_directories,
+                        ),
+                    )
                     context.ros_preflight_outcome = outcome
                     assert outcome.blocking_result is not None
                     return outcome.blocking_result
@@ -628,10 +638,18 @@ class RosStack(BaseCloudStack):
                     cwd=cwd,
                     relative_read_directories=relative_read_directories,
                 )
-            except (OSError, UnicodeError) as error:
+            except (ApiContractError, OSError, UnicodeError) as error:
                 from iac_code.tools.cloud.aliyun.hooks.ros_validate import local_template_source_error
 
-                outcome = local_template_source_error(error)
+                outcome = local_template_source_error(
+                    error,
+                    path=resolve_template_url_for_api(
+                        template_url,
+                        None,
+                        cwd=cwd,
+                        relative_read_directories=relative_read_directories,
+                    ),
+                )
                 if tool_context is not None:
                     tool_context.ros_preflight_outcome = outcome
                 assert outcome.blocking_result is not None

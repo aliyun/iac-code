@@ -2088,9 +2088,11 @@ async def test_delegated_local_template_rejects_parent_symlink_swap_at_materiali
     runtime.execution_stage_observer = swap_parent
     result = await delegated.execute(outer_input, _execution_context(permission_context, permission))
 
-    assert result == ToolResult.error(
-        _expected_public_error("invalid_body_file", {"region_id": "cn-hangzhou"}, contract=contract)
-    )
+    assert result.is_error
+    # The caller passed template_url, so the failure must be reported against the
+    # template source rather than as an invalid body_file it never sent.
+    assert "body_file" not in result.content
+    assert (result.metadata or {}).get("ros_validation") is not None
     assert runtime.request_builder.inputs == []
 
 
@@ -3253,3 +3255,112 @@ async def test_runtime_services_own_one_delegated_factory_and_bound_internal_cal
         assert isinstance(services.internal_caller, AliyunInternalCaller)
     finally:
         await services.aclose()
+
+
+def _unusable_local_template(tmp_path: Path, kind: str) -> Path:
+    if kind == "missing":
+        return tmp_path / "absent.yml"
+    if kind == "directory":
+        directory = tmp_path / "template-dir"
+        directory.mkdir()
+        return directory
+    template = tmp_path / "bad.yml"
+    template.write_bytes(b"\xff\xfe\x00not-utf8")
+    return template
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ("missing", "directory", "not_utf8"))
+async def test_unusable_local_template_is_rejected_before_any_request(tmp_path: Path, kind: str) -> None:
+    """An unusable template must fail once, with a fix, and without a request.
+
+    Previously only the wire layer noticed, and it reported an invalid
+    ``body_file`` -- a parameter the caller never sent -- so the same template
+    input was retried across tools instead of being corrected.
+    """
+
+    template = _unusable_local_template(tmp_path, kind)
+    contract = _canonical_contract(product="ROS", version="2019-09-10", action="ValidateTemplate")
+    tool, runtime = _execution_runtime(contract)
+    tool_input = {
+        "product": "ros",
+        "version": contract.version,
+        "action": "ValidateTemplate",
+        "region_id": "cn-hangzhou",
+        "params": {"TemplateURL": str(template)},
+    }
+    permission_context = _bound_context(tool_input, cwd=str(tmp_path))
+    permission = await tool.check_permissions(tool_input, permission_context)
+
+    result = await tool.execute(tool_input=tool_input, context=_execution_context(permission_context, permission))
+
+    assert result.is_error
+    assert "body_file" not in result.content
+    report = (result.metadata or {}).get("ros_validation")
+    assert report is not None
+    assert report["counts_by_code"] == {"ROS1202": 1}
+    assert runtime.request_builder.inputs == []
+    assert runtime.transport_router.requests == []
+    assert "credential_network" not in runtime.transport_router.calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_name", "action", "extra_input"),
+    [
+        ("ros_validate_template", "ValidateTemplate", {}),
+        ("ros_preview_template", "PreviewStack", {"stack_name": "preview", "parameters": {}}),
+    ],
+)
+async def test_dedicated_ros_tools_report_the_template_source_not_body_file(
+    tmp_path: Path,
+    tool_name: str,
+    action: str,
+    extra_input: dict,
+) -> None:
+    from iac_code.tools.cloud.aliyun.runtime import AliyunDelegatedExecutor
+
+    template = tmp_path / "absent.yml"
+    contract = _canonical_contract(product="ROS", version="2019-09-10", action=action)
+    tool, runtime = _execution_runtime(contract)
+    delegated = AliyunDelegatedExecutor(tool, action=action)
+    outer_input = {"template_url": str(template), "region_id": "cn-hangzhou", **extra_input}
+    permission_context = _bound_context(
+        outer_input,
+        tool_name=tool_name,
+        cwd=str(tmp_path),
+        pipeline_mode=True,
+    )
+    permission = await delegated.check_permissions(outer_input, permission_context)
+
+    result = await delegated.execute(outer_input, _execution_context(permission_context, permission))
+
+    assert result.is_error
+    assert "body_file" not in result.content
+    assert (result.metadata or {}).get("ros_validation") is not None
+    assert runtime.request_builder.inputs == []
+
+
+@pytest.mark.asyncio
+async def test_binary_body_file_still_reports_invalid_body_file(tmp_path: Path) -> None:
+    """The template diagnostics must not leak into genuine body_file inputs."""
+
+    contract = _canonical_contract(request_body_type="byte")
+    tool, runtime = _execution_runtime(contract)
+    body_file = tmp_path / "payload.bin"
+    body_file.write_bytes(b"payload")
+    tool_input = {
+        "product": "ecs",
+        "version": contract.version,
+        "action": contract.action,
+        "region_id": "cn-hangzhou",
+        "body_file": str(body_file),
+    }
+    permission_context = _bound_context(tool_input, cwd=str(tmp_path))
+    permission = await tool.check_permissions(tool_input, permission_context)
+    body_file.unlink()
+
+    result = await tool.execute(tool_input=tool_input, context=_execution_context(permission_context, permission))
+
+    assert result == ToolResult.error(_expected_public_error("invalid_body_file", tool_input, contract=contract))
+    assert runtime.request_builder.inputs == []

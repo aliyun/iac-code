@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -30,25 +31,72 @@ from iac_code.tools.cloud.aliyun.ros_validation.outcome import (
 )
 from iac_code.tools.cloud.aliyun.ros_validation.parser import parse_template_source
 from iac_code.tools.cloud.aliyun.ros_validation.validator import validate_ros_template
+from iac_code.tools.cloud.aliyun.template_source import classify_local_template_source
 
 _FLAT_PARAMETER = re.compile(r"^Parameters\.(\d+)\.(ParameterKey|ParameterValue)$")
 
+_TEMPLATE_SOURCE_SUMMARIES: dict[str, Callable[[], str]] = {
+    "MISSING": lambda: _("The local ROS template file does not exist."),
+    "NOT_REGULAR": lambda: _("The local ROS template path is not a regular file."),
+    "UNREADABLE": lambda: _("The local ROS template file cannot be read."),
+    "TOO_LARGE": lambda: _("The local ROS template file exceeds the 32 MiB limit."),
+    "UTF-8": lambda: _("The local ROS template file is not valid UTF-8."),
+    "READ": lambda: _("The local ROS template file cannot be read."),
+}
 
-def local_template_source_error(error: BaseException) -> RosPreflightOutcome:
-    """Convert an allowed local-file read/decode failure into a normal ROS report."""
+_TEMPLATE_SOURCE_SUGGESTIONS: dict[str, Callable[[], str]] = {
+    "MISSING": lambda: _(
+        "Check the template path for typos and write the template to that path before validating it again."
+    ),
+    "NOT_REGULAR": lambda: _("Point TemplateURL at the template file itself rather than a directory or device."),
+    "UNREADABLE": lambda: _("Confirm that the file exists, is readable, and is saved as UTF-8."),
+    "TOO_LARGE": lambda: _("Reduce the template size, or upload it and pass an OSS/HTTP TemplateURL instead."),
+    "UTF-8": lambda: _("Save the template as UTF-8 text before validating it again."),
+    "READ": lambda: _("Confirm that the file exists, is readable, and is saved as UTF-8."),
+}
 
-    kind = "UTF-8" if isinstance(error, UnicodeError) else "READ"
+
+def _template_source_diagnostic_kind(error: BaseException | str) -> str:
+    if isinstance(error, str):
+        return error
+    if isinstance(error, UnicodeError):
+        return "UTF-8"
+    if isinstance(error, FileNotFoundError):
+        return "MISSING"
+    if isinstance(error, IsADirectoryError):
+        return "NOT_REGULAR"
+    return "READ"
+
+
+def local_template_source_error(
+    error: BaseException | str,
+    *,
+    path: str | Path | None = None,
+) -> RosPreflightOutcome:
+    """Convert a local template read/decode failure into a normal ROS report.
+
+    ``error`` may be the raised exception or a problem already classified by
+    ``classify_local_template_source``. Pass ``path`` when the exception itself
+    carries no filesystem cause -- ``_read_body_file`` raises a generic
+    ``ApiContractError``, so the path has to be re-inspected to report why the
+    template was unusable rather than emitting an unactionable message.
+    """
+
+    if path is not None and not isinstance(error, (str, OSError, UnicodeError)):
+        error = classify_local_template_source(path) or error
+    kind = _template_source_diagnostic_kind(error)
+    detail_arg = kind if isinstance(error, str) else type(error).__name__
+    summary = _TEMPLATE_SOURCE_SUMMARIES.get(kind, _TEMPLATE_SOURCE_SUMMARIES["READ"])()
+    suggestion = _TEMPLATE_SOURCE_SUGGESTIONS.get(kind, _TEMPLATE_SOURCE_SUGGESTIONS["READ"])()
     diagnostic = make_diagnostic(
         code="ROS1202",
         severity=Severity.ERROR,
         category=Category.COMPATIBILITY,
-        summary=_("The local ROS template file cannot be read.")
-        if kind == "READ"
-        else _("The local ROS template file is not valid UTF-8."),
+        summary=summary,
         detail=_("TemplateURL/local TemplateBody failed before entering the Parser; the ROS API was not called."),
         subject="local-template-source",
-        stable_args=(kind, type(error).__name__),
-        suggestion=_("Confirm that the file exists, is readable, and is saved as UTF-8."),
+        stable_args=(kind, detail_arg),
+        suggestion=suggestion,
     )
     return outcome_from_report(ValidationReport.build([diagnostic], analysis_incomplete=False))
 
