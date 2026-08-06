@@ -187,6 +187,16 @@ def test_intent_guidance_preserves_existing_resource_lifecycle():
     assert "forbidden_resources" not in body
 
 
+def test_intent_guidance_forbids_unwarranted_create_or_use_existing_marking():
+    body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "不要擅自把该资源标成 `action: \"use_existing\"`" in body
+    assert "不要擅自把该资源标成 `action: \"create\"`" in body
+    assert "“创建一个 VPC 和一个 VSwitch”" in body
+    assert "两个资源都要新建，不要把 VPC 标成 `use_existing`" in body
+    assert "误标会导致方案与用户需求偏离" in body
+
+
 def test_intent_skill_only_supports_aliyun_and_rejects_other_clouds():
     body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
     prompt = PROMPT_FILE.read_text(encoding="utf-8")
