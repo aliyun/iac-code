@@ -52,9 +52,9 @@ def test_bootstrap_logo_and_colors_follow_the_configured_theme() -> None:
     logo = (ROOT / "desktop/bootstrap/iac-code-logo.svg").read_text(encoding="utf-8")
 
     assert '<svg class="mark" viewBox="0 0 1024 1024"' in source
-    assert '>IaC</div>' not in source
+    assert ">IaC</div>" not in source
     assert 'bootstrap.theme || "graphite"' in source
-    assert 'document.documentElement.dataset.theme = theme;' in source
+    assert "document.documentElement.dataset.theme = theme;" in source
     for theme in ("midnight", "evergreen", "sepia", "ivory"):
         assert f':root[data-theme="{theme}"]' in source
     assert "background: var(--desktop-bg)" in source

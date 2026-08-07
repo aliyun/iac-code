@@ -30,8 +30,7 @@ def _fixture_artifacts(root: Path) -> dict[str, Path]:
         "macos_signature": root / "desktop-pre-macos-aarch64/macos/iac-code.app.tar.gz.sig",
         "windows_installer": root / "desktop-pre-windows-x64/nsis/iac-code_0.11.1_x64-setup.exe",
         "windows_updater": root / "desktop-pre-windows-x64/nsis/iac-code_0.11.1_x64-setup.nsis.zip",
-        "windows_signature": root
-        / "desktop-pre-windows-x64/nsis/iac-code_0.11.1_x64-setup.nsis.zip.sig",
+        "windows_signature": root / "desktop-pre-windows-x64/nsis/iac-code_0.11.1_x64-setup.nsis.zip.sig",
         "linux_installer": root / "desktop-pre-linux-x64/appimage/iac-code_0.11.1_amd64.AppImage",
         "linux_signature": root / "desktop-pre-linux-x64/appimage/iac-code_0.11.1_amd64.AppImage.sig",
         "linux_deb": root / "desktop-pre-linux-x64/deb/iac-code_0.11.1_amd64.deb",

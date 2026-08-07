@@ -49,6 +49,7 @@ class DesktopDownloadTransaction(Protocol):
 
     def complete(self) -> None: ...
 
+
 _MAX_FAILURE_MESSAGE_CHARS = 1200
 _MAX_FAILURE_MESSAGE_LINES = 14
 _DOWNLOAD_CHUNK_SIZE = 256 * 1024
@@ -1059,11 +1060,11 @@ def _latest_git_ls_remote_tag_commit_ref(repo: str, tag_prefix: str, timeout: fl
         completed = run_external(
             guarded_command(
                 [
-                "git",
-                "ls-remote",
-                "--tags",
-                f"https://github.com/{repo}.git",
-                f"refs/tags/{tag_prefix}*",
+                    "git",
+                    "ls-remote",
+                    "--tags",
+                    f"https://github.com/{repo}.git",
+                    f"refs/tags/{tag_prefix}*",
                 ],
                 kind="prerequisite",
             ),

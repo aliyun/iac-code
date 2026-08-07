@@ -654,9 +654,7 @@ print(json.dumps(sorted(name for name in sys.modules if name.startswith("iac_cod
         entries = SessionIndex(projects_dir=tmp_path).list_for_cwd(cwd)
 
         assert not current_project_dir.exists()
-        assert [(entry.session_id, entry.title) for entry in entries] == [
-            ("previous-windows", "old Windows session")
-        ]
+        assert [(entry.session_id, entry.title) for entry in entries] == [("previous-windows", "old Windows session")]
 
     def test_limited_page_reports_deduplicated_total_for_long_project_aliases(self, tmp_path):
         cwd = "/" + "long-project/" * 24

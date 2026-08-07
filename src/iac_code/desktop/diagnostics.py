@@ -83,9 +83,7 @@ def collect_desktop_diagnostics(
         deadline = None
     try:
         detected = (
-            PlatformInfo.detect(desktop_deadline_monotonic=deadline)
-            if deadline is not None
-            else PlatformInfo.detect()
+            PlatformInfo.detect(desktop_deadline_monotonic=deadline) if deadline is not None else PlatformInfo.detect()
         )
         platform_payload: dict[str, Any] = {
             "os": detected.os_kind,

@@ -173,7 +173,7 @@ def test_deb_installer_manages_user_desktop_shortcuts() -> None:
     remove_script = postrm.read_text(encoding="utf-8")
     assert "/usr/share/applications/iac-code.desktop" in install_script
     assert "xdg-user-dir DESKTOP" in install_script
-    assert 'install -m 0755' in install_script
+    assert "install -m 0755" in install_script
     assert 'shortcut="$desktop_dir/iac-code.desktop"' in install_script
     assert "metadata::trusted true" in install_script
     assert "remove|purge" in remove_script

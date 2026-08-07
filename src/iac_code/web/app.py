@@ -137,8 +137,7 @@ def create_app(
             install_context=desktop_install_context,
         )
     elif any(
-        value is not None
-        for value in (default_project_cwd, distribution_channel, update_mode, desktop_install_context)
+        value is not None for value in (default_project_cwd, distribution_channel, update_mode, desktop_install_context)
     ):
         raise ValueError("Desktop-only create_app arguments require desktop_runtime=True")
     try:
@@ -273,9 +272,7 @@ def create_app(
 
         manager.cwd = desktop_config.default_project_cwd
         desktop_controller = DesktopRuntimeController(manager, desktop_config.default_project_cwd)
-    desktop_runtime_lifecycle = (
-        desktop_controller.runtime_lifecycle if desktop_controller is not None else None
-    )
+    desktop_runtime_lifecycle = desktop_controller.runtime_lifecycle if desktop_controller is not None else None
     from iac_code.web.diagram_optimizer import DiagramOptimizationCoordinator
 
     diagram_optimization_coordinator = DiagramOptimizationCoordinator()
@@ -3618,6 +3615,7 @@ def create_app(
 
         set_content_capture_optin(share_content)
         return JSONResponse(saved)
+
     async def get_pipeline_review_step_settings(request):
         return JSONResponse(selling_review_step_settings())
 
@@ -3790,9 +3788,7 @@ def create_app(
             permission_mode = required_string(data, "permissionMode")
             mode = required_string(data, "mode")
             pipeline_name = optional_string(data, "pipelineName")
-            return JSONResponse(
-                await state_transaction(save_session_defaults, permission_mode, mode, pipeline_name)
-            )
+            return JSONResponse(await state_transaction(save_session_defaults, permission_mode, mode, pipeline_name))
         except ValueError as exc:
             return json_error(str(exc), 400)
 
@@ -5114,19 +5110,19 @@ def create_app(
         )
 
     routes = [
-            Route("/health", health, methods=["GET"]),
-            *(
-                []
-                if desktop_config is not None
-                else [
-                    Route("/api/server/restart", restart_server, methods=["POST"]),
-                    Route("/api/update/status", update_status, methods=["GET"]),
-                    Route("/api/update/apply", update_apply, methods=["POST"]),
-                    Route("/api/update/dismiss", update_dismiss, methods=["POST"]),
-                ]
-            ),
-            Route("/", index, methods=["GET"]),
-            Route("/api/sessions", create_session, methods=["POST"]),
+        Route("/health", health, methods=["GET"]),
+        *(
+            []
+            if desktop_config is not None
+            else [
+                Route("/api/server/restart", restart_server, methods=["POST"]),
+                Route("/api/update/status", update_status, methods=["GET"]),
+                Route("/api/update/apply", update_apply, methods=["POST"]),
+                Route("/api/update/dismiss", update_dismiss, methods=["POST"]),
+            ]
+        ),
+        Route("/", index, methods=["GET"]),
+        Route("/api/sessions", create_session, methods=["POST"]),
     ]
     if desktop_config is not None:
         routes.append(Route("/api/desktop/diagnostics", get_desktop_diagnostics, methods=["GET"]))

@@ -120,8 +120,7 @@ def _send_startup_failure(
 async def _publish_desktop_closing(controller: Any, *, force: bool) -> None:
     """Best-effort SSE notice with a strict, Host-independent deadline."""
     publications = [
-        session.events.publish("desktop-closing", {"force": force})
-        for session in controller.manager.loaded_sessions()
+        session.events.publish("desktop-closing", {"force": force}) for session in controller.manager.loaded_sessions()
     ]
     if publications:
         try:

@@ -23,9 +23,7 @@ def load_desktop_tool_paths() -> dict[str, Any]:
         if name in TOOLS and isinstance(value, str) and value
     }
     search_paths = (
-        [value for value in raw_search if isinstance(value, str) and value]
-        if isinstance(raw_search, list)
-        else []
+        [value for value in raw_search if isinstance(value, str) and value] if isinstance(raw_search, list) else []
     )
     return {"toolPaths": tool_paths, "searchPaths": search_paths}
 

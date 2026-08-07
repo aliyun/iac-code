@@ -61,9 +61,7 @@ class BashTool(Tool):
 
         try:
             if sys.platform == "win32":
-                info = (
-                    await asyncio.to_thread(PlatformInfo.detect) if is_desktop_runtime() else PlatformInfo.detect()
-                )
+                info = await asyncio.to_thread(PlatformInfo.detect) if is_desktop_runtime() else PlatformInfo.detect()
                 process = await create_subprocess_exec(
                     info.shell_path,
                     "-c",

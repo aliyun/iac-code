@@ -318,9 +318,7 @@ async def create_session_agent_runtime_in_thread(
             lifecycle_owner.discard(creation_task)
         return runtime
     except asyncio.CancelledError:
-        creation_task.add_done_callback(
-            lambda task: _close_late_created_runtime(task, lifecycle_owner=lifecycle_owner)
-        )
+        creation_task.add_done_callback(lambda task: _close_late_created_runtime(task, lifecycle_owner=lifecycle_owner))
         raise
     except BaseException:
         if lifecycle_owner is not None:

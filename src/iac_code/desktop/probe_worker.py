@@ -182,6 +182,7 @@ def worker_main(kind: str, raw_context: str) -> int:
         deadline = payload.get("hardDeadlineMonotonic")
         if isinstance(deadline, (float, int)):
             os.environ["IAC_CODE_DESKTOP_PROBE_DEADLINE"] = str(float(deadline))
+
         def write_frame(frame: dict[str, Any]) -> None:
             encoded = json.dumps(frame, ensure_ascii=False).encode("utf-8")
             if len(encoded) > _MAX_RESULT_BYTES:

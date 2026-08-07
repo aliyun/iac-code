@@ -7740,10 +7740,7 @@ def test_workspace_cloud_panel_prefills_secrets_and_resets_on_mode_switch() -> N
 def test_app_wires_workspace_controls_to_current_session() -> None:
     source = _source(APP_JS)
 
-    workspace_import = (
-        'import { createWorkspaceController } from '
-        '"./components/workspace.js?v=cloud-creds-v56";'
-    )
+    workspace_import = 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v56";'
     assert workspace_import in source
     assert "workspace = createWorkspaceController" in source
     assert 'tabs: byShell("workspace-tabs")' in source
@@ -11039,10 +11036,7 @@ def test_appearance_theme_swatch_styles_present() -> None:
     # appearance 并拉满卡片/色带宽度，确保各平台看到完整三色色带。
     assert "-webkit-appearance: none;" in styles
     strip_rule = (
-        ".workspace-theme-swatch .workspace-theme-strip {\n"
-        "  display: flex;\n"
-        "  flex: 0 0 1.4rem;\n"
-        "  width: 100%;"
+        ".workspace-theme-swatch .workspace-theme-strip {\n  display: flex;\n  flex: 0 0 1.4rem;\n  width: 100%;"
     )
     assert strip_rule in styles
 

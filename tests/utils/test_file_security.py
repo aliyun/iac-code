@@ -114,10 +114,9 @@ def test_windows_desktop_acl_does_not_block_event_loop(monkeypatch, tmp_path):
     monkeypatch.setattr(
         file_security,
         "submit_windows_acl",
-        lambda submitted_path, *, directory, username: submitted.append(
-            (submitted_path, directory, username)
-        )
-        or Receipt(),
+        lambda submitted_path, *, directory, username: (
+            submitted.append((submitted_path, directory, username)) or Receipt()
+        ),
     )
 
     async def exercise() -> None:

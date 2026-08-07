@@ -751,8 +751,10 @@ def windows_detached_creation_flags(existing: int = 0) -> int:
     flags = windows_creation_flags(existing)
     if not _windows_desktop_runtime():
         return flags
-    return flags | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000) | getattr(
-        subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
+    return (
+        flags
+        | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
+        | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
     )
 
 
@@ -806,9 +808,13 @@ def initialize_windows_native_preload(
     with _WINDOWS_PRELOAD_LOCK:
         if _WINDOWS_PRELOAD_READY:
             return
-        selected = tuple(modules) if modules is not None else _manifest_modules(
-            manifest_path
-            or Path(os.environ.get("IAC_CODE_DESKTOP_NATIVE_PRELOAD_MANIFEST", _DEFAULT_PRELOAD_MANIFEST))
+        selected = (
+            tuple(modules)
+            if modules is not None
+            else _manifest_modules(
+                manifest_path
+                or Path(os.environ.get("IAC_CODE_DESKTOP_NATIVE_PRELOAD_MANIFEST", _DEFAULT_PRELOAD_MANIFEST))
+            )
         )
         for module in selected:
             importlib.import_module(module)

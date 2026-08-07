@@ -33,9 +33,9 @@ def _fixture_tree(root: Path, platform_name: str) -> None:
         root / "desktop/dist/sidecar/iac-code-sidecar" / "library.dat": b"library",
     }
     if platform_name == "windows-x64":
-        files[
-            root / "desktop/dist/native-helpers/windows/release/iac-code-desktop-updater.manifest.json"
-        ] = json.dumps({"authenticodeRequired": False}).encode()
+        files[root / "desktop/dist/native-helpers/windows/release/iac-code-desktop-updater.manifest.json"] = json.dumps(
+            {"authenticodeRequired": False}
+        ).encode()
     for path, content in files.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)

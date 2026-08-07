@@ -31,9 +31,7 @@ def _write_version_fixture(root: Path) -> None:
             '[[package]]\nname = "iac-code-desktop"\nversion = "0.1.0"\n\n'
             '[[package]]\nname = "iac-code-desktop-helpers"\nversion = "0.1.0"\n'
         ),
-        "desktop/helpers/Cargo.lock": (
-            '[[package]]\nname = "iac-code-desktop-helpers"\nversion = "0.1.0"\n'
-        ),
+        "desktop/helpers/Cargo.lock": ('[[package]]\nname = "iac-code-desktop-helpers"\nversion = "0.1.0"\n'),
     }
     for relative, source in files.items():
         path = root / relative
@@ -51,9 +49,10 @@ def test_sync_version_uses_python_package_as_the_only_source(tmp_path: Path) -> 
     assert module.sync_desktop_versions(tmp_path, check=True) == []
 
     assert json.loads((tmp_path / "desktop/package.json").read_text(encoding="utf-8"))["version"] == "1.2.3"
-    assert json.loads((tmp_path / "desktop/package-lock.json").read_text(encoding="utf-8"))["packages"][""][
-        "version"
-    ] == "1.2.3"
+    assert (
+        json.loads((tmp_path / "desktop/package-lock.json").read_text(encoding="utf-8"))["packages"][""]["version"]
+        == "1.2.3"
+    )
     for relative in (
         "desktop/src-tauri/Cargo.toml",
         "desktop/helpers/Cargo.toml",

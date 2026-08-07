@@ -428,9 +428,7 @@ def _long_project_alias_identities(project_dirs: list[Path]) -> dict[str, tuple[
             continue
         current = recognized[0]
         current_prefix = current.name[:-13]
-        aliases = [
-            candidate for candidate in recognized if candidate.name[:-13].startswith(current_prefix)
-        ]
+        aliases = [candidate for candidate in recognized if candidate.name[:-13].startswith(current_prefix)]
         if len(aliases) < 2:
             continue
         identity = ("long-path-alias", current.name)

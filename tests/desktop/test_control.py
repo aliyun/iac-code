@@ -207,9 +207,7 @@ async def test_desktop_closing_notification_has_a_hard_deadline(monkeypatch) -> 
         async def publish(self, event_type, payload):
             await asyncio.Event().wait()
 
-    controller = SimpleNamespace(
-        manager=SimpleNamespace(loaded_sessions=lambda: (SimpleNamespace(events=Events()),))
-    )
+    controller = SimpleNamespace(manager=SimpleNamespace(loaded_sessions=lambda: (SimpleNamespace(events=Events()),)))
     monkeypatch.setattr(desktop_main, "_DESKTOP_CLOSING_PUBLISH_SECONDS", 0.01)
     monkeypatch.setattr(desktop_main, "_DESKTOP_CLOSING_FLUSH_SECONDS", 0)
 

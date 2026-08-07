@@ -156,6 +156,4 @@ def test_updater_signature_gate_requires_public_key_and_verifies_payload(
     monkeypatch.setattr(verifier, "_run", lambda command: commands.append(command))
     verifier.verify_updater_signature(artifact, "windows")
 
-    assert commands == [
-        ["minisign", "-Vm", str(payload), "-x", str(signature), "-P", "RW-public-key"]
-    ]
+    assert commands == [["minisign", "-Vm", str(payload), "-x", str(signature), "-P", "RW-public-key"]]
