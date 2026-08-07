@@ -155,6 +155,24 @@ class TestCompleteStepToolExecute:
         assert step_result.status == StepStatus.COMPLETED
         assert step_result.conclusion == {"intent_type": "e-commerce", "requirements": ["ECS", "RDS"]}
         assert step_result.rollback_request is None
+        assert result.metadata["complete_step_terminal"] is True
+
+    @pytest.mark.asyncio
+    async def test_marks_success_as_non_terminal_when_configured(self):
+        config = StepConfig(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            complete_step_terminal=False,
+        )
+
+        result = await CompleteStepTool(config).execute(
+            tool_input={"conclusion": {"status": "success", "outputs": {"url": "https://example.com"}}},
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+        assert result.metadata["complete_step_terminal"] is False
 
     @pytest.mark.asyncio
     async def test_with_rollback_request(self, tool):

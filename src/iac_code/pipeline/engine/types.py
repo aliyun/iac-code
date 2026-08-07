@@ -22,6 +22,7 @@ class StepConfig:
     conclusion_field: str
     forward: str | None
     auto_advance: bool = True
+    complete_step_terminal: bool = True
     max_agent_turns: int = 50
     conclusion_schema: dict | None = None
     rollback_targets: list[str] = field(default_factory=list)

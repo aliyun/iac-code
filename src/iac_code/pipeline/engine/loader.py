@@ -248,6 +248,7 @@ def _parse_steps(raw_steps: list[dict]) -> list[StepSpec]:
                 sub_pipeline_name=raw.get("sub_pipeline"),
                 tools=tools,
                 auto_advance=raw.get("auto_advance", True),
+                complete_step_terminal=raw.get("complete_step_terminal", True),
                 max_agent_turns=raw.get("max_agent_turns", 50),
                 context_fields=raw.get("context_fields", []),
                 enabled_when=raw.get("enabled_when"),

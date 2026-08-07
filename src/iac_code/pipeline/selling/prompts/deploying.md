@@ -48,6 +48,7 @@
 
 ## 输出
 部署完成后调用 `complete_step` 提交部署结果。
+`complete_step` 成功返回后，基于刚提交的 `complete_step.conclusion.outputs` 渲染 Stack Outputs，再结束本步骤；不要再次调用 `complete_step`。
 
 ## 错误处理
 - 模板校验失败 → 就地修复模板后重试（最多 5 轮）

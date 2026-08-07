@@ -498,6 +498,7 @@ steps:
     forward: null
     skill: iac-aliyun-deploying
     prompt: prompts/deploying.md
+    complete_step_terminal: false
     interrupt_judge_failure: pause
     context_fields: [intent, selected_plan, evaluated_candidates]
     hooks_file: hooks/deploying.py

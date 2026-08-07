@@ -75,3 +75,14 @@ def test_deploying_prompt_renders_concrete_template_url() -> None:
     assert 'params.TemplateURL = "templates/vswitch.yml"' not in prompt
     assert "<选中方案模板文件路径>" not in prompt
     assert "{selected_plan.template_url}" not in prompt
+
+
+def test_deploying_renders_stack_outputs_after_complete_step() -> None:
+    selling_dir = _selling_dir()
+    loaded = load_pipeline_dir(selling_dir)
+    deploying_step = next(step for step in loaded.steps if step.step_id == "deploying")
+    prompt = (selling_dir / deploying_step.prompt_file).read_text(encoding="utf-8")
+
+    assert deploying_step.complete_step_terminal is False
+    assert "`complete_step` 成功返回后" in prompt
+    assert "`complete_step.conclusion.outputs` 渲染 Stack Outputs" in prompt

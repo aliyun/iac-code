@@ -1120,5 +1120,8 @@ class CompleteStepTool(Tool):
             content=_("Step {step_id} completed. Conclusion submitted.").format(
                 step_id=display_step_name(self._step_config.step_id)
             ),
-            metadata={"step_result": step_result},
+            metadata={
+                "step_result": step_result,
+                "complete_step_terminal": self._step_config.complete_step_terminal,
+            },
         )

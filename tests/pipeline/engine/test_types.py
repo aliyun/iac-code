@@ -21,6 +21,7 @@ class TestStepConfig:
             forward="next_step",
         )
         assert config.auto_advance is True
+        assert config.complete_step_terminal is True
         assert config.max_agent_turns == 50
         assert config.rollback_targets == []
 
@@ -31,10 +32,12 @@ class TestStepConfig:
             forward=None,
             rollback_targets=["prev"],
             auto_advance=False,
+            complete_step_terminal=False,
             max_agent_turns=20,
         )
         assert config.forward is None
         assert config.auto_advance is False
+        assert config.complete_step_terminal is False
         assert config.max_agent_turns == 20
         assert config.rollback_targets == ["prev"]
 

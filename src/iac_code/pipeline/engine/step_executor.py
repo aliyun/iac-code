@@ -880,6 +880,7 @@ class StepExecutor:
             conclusion_field=step.conclusion_field,
             forward=step.forward,
             auto_advance=step.auto_advance,
+            complete_step_terminal=step.complete_step_terminal,
             max_agent_turns=step.max_agent_turns,
             conclusion_schema=step.conclusion_schema,
             rollback_targets=rollback_targets if rollback_targets is not None else [],
