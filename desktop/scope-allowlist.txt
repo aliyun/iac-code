@@ -67,6 +67,7 @@ src/iac_code/utils/project_paths.py
 src/iac_code/services/session_index.py
 tests/utils/test_file_security.py
 tests/utils/test_project_paths.py
+tests/agent/test_permission_audit_integration.py
 tests/services/test_session_index.py
 tests/services/test_session_storage.py
 tests/services/test_session_usage.py
