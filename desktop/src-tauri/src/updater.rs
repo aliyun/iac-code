@@ -439,7 +439,7 @@ pub async fn install(app: &AppHandle) -> Result<()> {
     #[cfg(windows)]
     {
         app.exit(0);
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(windows))]
     app.restart();
@@ -510,11 +510,12 @@ fn load_windows_updater_helper_manifest(app: &AppHandle) -> Result<WindowsUpdate
     if manifest.schema_version != 1 || manifest.file_name != "iac-code-desktop-updater.exe" {
         bail!("bundled updater helper manifest is incompatible");
     }
+    let compiled_sha256 = env!("IAC_CODE_DESKTOP_UPDATER_HELPER_SHA256");
     let compiled_publisher = match env!("IAC_CODE_DESKTOP_UPDATER_HELPER_PUBLISHER") {
         "" => None,
         value => Some(value),
     };
-    if manifest.sha256 != env!("IAC_CODE_DESKTOP_UPDATER_HELPER_SHA256")
+    if manifest.sha256 != compiled_sha256
         || manifest.authenticode_required
             != (env!("IAC_CODE_DESKTOP_UPDATER_HELPER_AUTHENTICODE_REQUIRED") == "1")
         || manifest.expected_publisher.as_deref() != compiled_publisher
