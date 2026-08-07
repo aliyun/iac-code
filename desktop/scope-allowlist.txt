@@ -111,3 +111,7 @@ tests/cli/test_process_mode.py
 Makefile
 pyproject.toml
 uv.lock
+
+# Canonical package version and its legacy packaging contract test.
+src/iac_code/__init__.py
+tests/test_setup_packaging.py

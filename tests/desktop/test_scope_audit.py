@@ -150,3 +150,17 @@ def test_scope_allowlist_covers_desktop_branding_and_terminal_integration() -> N
         "website/src/pages/index.module.css",
         "website/static/img/iac-code-logo.svg",
     } <= allowlist
+
+
+def test_scope_allowlist_covers_canonical_version_and_packaging_contract() -> None:
+    from pathlib import Path
+
+    allowlist = set(
+        line.strip()
+        for line in (Path(__file__).parents[2] / "desktop/scope-allowlist.txt").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    )
+    assert {
+        "src/iac_code/__init__.py",
+        "tests/test_setup_packaging.py",
+    } <= allowlist
