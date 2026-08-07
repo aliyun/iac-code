@@ -182,13 +182,33 @@ const DEFAULT_PIPELINE_NAME = "selling";
 const PIPELINE_OPTIONS = [
   { id: DEFAULT_PIPELINE_NAME, label: t("Sales pipeline"), detail: t("Pipeline planning, generation, and validation for sales scenarios") },
 ];
+
+export function configureMarkdownLinkTargets(renderer) {
+  const rules = renderer?.renderer?.rules;
+  if (!rules) {
+    return renderer;
+  }
+  const fallback = rules.link_open;
+  rules.link_open = (tokens, index, options, env, self) => {
+    tokens[index].attrSet("target", "_blank");
+    tokens[index].attrSet("rel", "noopener noreferrer");
+    if (typeof fallback === "function") {
+      return fallback(tokens, index, options, env, self);
+    }
+    return self.renderToken(tokens, index, options);
+  };
+  return renderer;
+}
+
 const markdownRenderer =
   typeof window !== "undefined" && typeof window.markdownit === "function"
-    ? window.markdownit({
-        html: false,
-        linkify: true,
-        typographer: false,
-      })
+    ? configureMarkdownLinkTargets(
+        window.markdownit({
+          html: false,
+          linkify: true,
+          typographer: false,
+        }),
+      )
     : null;
 
 function byShell(name) {

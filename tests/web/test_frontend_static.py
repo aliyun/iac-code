@@ -839,6 +839,7 @@ def test_app_renders_replayed_markdown_thinking_and_attached_tools() -> None:
     assert "/static/js/vendor/markdown-it.min.js" in html
     assert "window.markdownit" in source
     assert "renderMarkdownInto" in source
+    assert "configureMarkdownLinkTargets" in source
     assert "markdown-body" in source
     assert "message-thinking" in source
     assert 'document.createElement("details")' in source
@@ -861,6 +862,39 @@ def test_app_renders_replayed_markdown_thinking_and_attached_tools() -> None:
         ".markdown-body ul",
     ]:
         assert snippet in styles
+
+
+def test_markdown_links_open_in_new_tab_without_opener(tmp_path) -> None:
+    output = _run_app_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            globalThis.document = { getElementById() { return null; } };
+            const { configureMarkdownLinkTargets } = await import(__APP_MODULE__);
+            const attributes = {};
+            const renderer = { renderer: { rules: {} } };
+            configureMarkdownLinkTargets(renderer);
+            const token = {
+              attrSet(name, value) {
+                attributes[name] = value;
+              },
+            };
+            const rendered = renderer.renderer.rules.link_open(
+              [token],
+              0,
+              {},
+              {},
+              { renderToken() { return "<a>"; } },
+            );
+            console.log(JSON.stringify({ attributes, rendered }));
+            """
+        ),
+    )
+
+    assert output == {
+        "attributes": {"target": "_blank", "rel": "noopener noreferrer"},
+        "rendered": "<a>",
+    }
 
 
 def test_transcript_chat_flow_uses_codex_unboxed_message_layout() -> None:
@@ -1224,7 +1258,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-315" in html
-    assert "/static/js/app.js?v=web-repl-ui-331" in html
+    assert "/static/js/app.js?v=web-repl-ui-332" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1258,7 +1292,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-331" in index_html
+    assert "web-repl-ui-332" in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-319" in app_source
     assert "./components/workspace.js?v=cloud-creds-v56" in app_source
@@ -9994,8 +10028,8 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-331" in html
-    assert "web-repl-ui-330" not in html
+    assert "web-repl-ui-332" in html
+    assert "web-repl-ui-331" not in html
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:
