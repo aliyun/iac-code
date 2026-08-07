@@ -1,0 +1,262 @@
+name: Desktop pre-build
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing published vX.Y.Z release to pre-build Desktop assets for"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-pre-build-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
+
+jobs:
+  prepare:
+    name: Validate pre-build inputs
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      commit: ${{ steps.release.outputs.commit }}
+      published-at: ${{ steps.release.outputs.published-at }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+      - name: Verify tag, commit, release timestamp, and Desktop version
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          git describe --tags --exact-match HEAD | grep -Fx "$RELEASE_TAG"
+          python3 desktop/scripts/sync_version.py --check
+          version="$(python3 desktop/scripts/prepare_github_release.py validate-tag --tag "$RELEASE_TAG")"
+          commit="$(git rev-parse HEAD)"
+          published_at="$(gh release view "$RELEASE_TAG" --json isDraft,publishedAt --jq 'select(.isDraft == false) | .publishedAt')"
+          if [[ -z "$published_at" || "$published_at" == "null" ]]; then
+            echo "Desktop pre-build requires an existing published GitHub release" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "published-at=$published_at" >> "$GITHUB_OUTPUT"
+      - name: Require pre updater configuration
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          IAC_CODE_DESKTOP_UPDATER_PUBKEY: ${{ vars.IAC_CODE_DESKTOP_UPDATER_PUBKEY }}
+          IAC_CODE_DESKTOP_UPDATER_ENDPOINT: ${{ vars.IAC_CODE_DESKTOP_UPDATER_ENDPOINT }}
+        run: |
+          python3 - <<'PY'
+          import os
+
+          required = (
+              "TAURI_SIGNING_PRIVATE_KEY",
+              "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
+              "IAC_CODE_DESKTOP_UPDATER_PUBKEY",
+              "IAC_CODE_DESKTOP_UPDATER_ENDPOINT",
+          )
+          missing = [name for name in required if not os.environ.get(name, "").strip()]
+          if missing:
+              raise SystemExit("missing Desktop pre updater configuration: " + ", ".join(missing))
+          PY
+
+  build:
+    name: Pre-build ${{ matrix.label }}
+    needs: prepare
+    env:
+      IAC_CODE_DESKTOP_RELEASE: "1"
+      IAC_CODE_DESKTOP_RELEASE_DATE: ${{ needs.prepare.outputs.published-at }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS arm64
+            os: macos-latest
+            rust-target: aarch64-apple-darwin
+            pre-artifact: desktop-pre-macos-aarch64
+            signing-platform: macos-aarch64
+          - label: Windows x64
+            os: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+            pre-artifact: desktop-pre-windows-x64
+            signing-platform: windows-x64
+          - label: Linux x64
+            os: ubuntu-24.04
+            rust-target: x86_64-unknown-linux-gnu
+            pre-artifact: desktop-pre-linux-x64
+            signing-platform: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - name: Install locked build dependencies
+        run: uv sync --all-extras --group desktop
+      - name: Verify Desktop versions follow the Python package
+        run: uv run python desktop/scripts/sync_version.py --check
+      - name: Install locked Tauri dependencies
+        run: npm ci
+        working-directory: desktop
+      - name: Build frozen Desktop sidecar
+        run: uv run --project . --python 3.12 --group desktop python desktop/scripts/build_sidecar.py
+      - name: Smoke frozen Desktop sidecar
+        run: uv run --project . --python 3.12 --group desktop python desktop/scripts/smoke_sidecar.py
+      - name: Build macOS pre package
+        if: runner.os == 'macOS'
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+          IAC_CODE_DESKTOP_RELEASE: "1"
+          IAC_CODE_DESKTOP_UPDATER_ENDPOINT: ${{ vars.IAC_CODE_DESKTOP_UPDATER_ENDPOINT }}
+          IAC_CODE_DESKTOP_UPDATER_PUBKEY: ${{ vars.IAC_CODE_DESKTOP_UPDATER_PUBKEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: uv run --project . --python 3.12 --group desktop python desktop/scripts/build_desktop.py --channel macos --skip-sidecar
+      - name: Build Windows pre package
+        if: runner.os == 'Windows'
+        env:
+          IAC_CODE_DESKTOP_RELEASE: "1"
+          IAC_CODE_DESKTOP_UPDATER_ENDPOINT: ${{ vars.IAC_CODE_DESKTOP_UPDATER_ENDPOINT }}
+          IAC_CODE_DESKTOP_UPDATER_PUBKEY: ${{ vars.IAC_CODE_DESKTOP_UPDATER_PUBKEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: uv run --project . --python 3.12 --group desktop python desktop/scripts/build_desktop.py --channel windows --skip-sidecar
+      - name: Build Linux AppImage pre package
+        if: runner.os == 'Linux'
+        env:
+          IAC_CODE_DESKTOP_RELEASE: "1"
+          IAC_CODE_DESKTOP_UPDATER_ENDPOINT: ${{ vars.IAC_CODE_DESKTOP_UPDATER_ENDPOINT }}
+          IAC_CODE_DESKTOP_UPDATER_PUBKEY: ${{ vars.IAC_CODE_DESKTOP_UPDATER_PUBKEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: uv run --project . --python 3.12 --group desktop python desktop/scripts/build_desktop.py --channel appimage --skip-sidecar
+      - name: Build Linux deb pre package
+        if: runner.os == 'Linux'
+        env:
+          IAC_CODE_DESKTOP_RELEASE: "1"
+        run: uv run --project . --python 3.12 --group desktop python desktop/scripts/build_desktop.py --channel deb --skip-sidecar
+      - name: Generate compliance metadata
+        if: runner.os == 'Linux'
+        run: |
+          uv run --project . --python 3.12 python desktop/scripts/generate_release_metadata.py --output-dir desktop/dist/release-metadata
+          uv run --project . --python 3.12 python desktop/scripts/generate_release_metadata.py --output-dir desktop/dist/release-metadata --verify
+          uv run --project . --python 3.12 python desktop/scripts/verify_release.py --metadata-dir desktop/dist/release-metadata --metadata-only
+      - name: Export signable component handoff
+        if: matrix.signing-platform != ''
+        shell: bash
+        run: >-
+          uv run --project . --python 3.12 python desktop/scripts/signing_handoff.py export
+          --output "desktop/dist/signing-input/${{ matrix.signing-platform }}.zip"
+          --repository "${{ github.repository }}"
+          --tag "$RELEASE_TAG"
+          --version "${{ needs.prepare.outputs.version }}"
+          --commit "${{ needs.prepare.outputs.commit }}"
+          --platform "${{ matrix.signing-platform }}"
+      - name: Upload macOS pre packages
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.pre-artifact }}
+          path: |
+            desktop/src-tauri/target/release/bundle/dmg/*.dmg
+            desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz
+            desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload Windows pre packages
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.pre-artifact }}
+          path: |
+            desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+            desktop/src-tauri/target/release/bundle/nsis/*.nsis.zip
+            desktop/src-tauri/target/release/bundle/nsis/*.nsis.zip.sig
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload Linux pre packages and metadata
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.pre-artifact }}
+          path: |
+            desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+            desktop/src-tauri/target/release/bundle/appimage/*.AppImage.sig
+            desktop/src-tauri/target/release/bundle/deb/*.deb
+            desktop/dist/release-metadata/desktop-sbom.cdx.json
+            desktop/dist/release-metadata/THIRD_PARTY_NOTICES.txt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload signable component handoff
+        if: matrix.signing-platform != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-signing-input-${{ matrix.signing-platform }}
+          path: desktop/dist/signing-input/${{ matrix.signing-platform }}.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  manifest:
+    name: Verify and describe Desktop pre-build
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-pre-*
+          path: pre-input
+      - name: Install updater signature verifier
+        run: sudo apt-get update && sudo apt-get install -y minisign
+      - name: Create verified pre-build manifest
+        env:
+          IAC_CODE_DESKTOP_UPDATER_PUBKEY: ${{ vars.IAC_CODE_DESKTOP_UPDATER_PUBKEY }}
+        run: >-
+          python3 desktop/scripts/prepare_github_release.py create-pre-manifest
+          --input-dir pre-input
+          --output-dir pre-manifest
+          --repository "${{ github.repository }}"
+          --tag "$RELEASE_TAG"
+          --version "${{ needs.prepare.outputs.version }}"
+          --commit "${{ needs.prepare.outputs.commit }}"
+          --workflow-run-id "${{ github.run_id }}"
+          --published-at "${{ needs.prepare.outputs.published-at }}"
+          --verify-signatures
+      - name: Upload verified pre-build manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-pre-manifest
+          path: pre-manifest/*
+          if-no-files-found: error
+          retention-days: 30

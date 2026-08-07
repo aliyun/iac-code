@@ -293,6 +293,67 @@ msgid "Save"
 msgstr "Speichern"
 
 #: src/iac_code/web/static/js/app.js
+msgid "Desktop native bridge is unavailable."
+msgstr "Die native Desktop-Verbindung ist nicht verfügbar."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Git Bash is required"
+msgstr "Git Bash ist erforderlich"
+
+#: src/iac_code/web/static/js/app.js
+msgid ""
+"iac-code uses Git Bash to run commands on Windows. Install it now, or "
+"continue and install it later."
+msgstr ""
+"iac-code verwendet Git Bash, um Befehle unter Windows auszuführen. Jetzt "
+"installieren oder fortfahren und später installieren."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Later"
+msgstr "Später"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Refresh"
+msgstr "Aktualisieren"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Install Git Bash"
+msgstr "Git Bash installieren"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Git Bash is ready."
+msgstr "Git Bash ist bereit."
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading…"
+msgstr "Wird geladen…"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Git Bash is still unavailable."
+msgstr "Git Bash ist weiterhin nicht verfügbar."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Could not check Git Bash. Try again."
+msgstr "Git Bash konnte nicht überprüft werden. Versuchen Sie es erneut."
+
+#: src/iac_code/web/static/js/app.js
+msgid ""
+"Windows may request administrator approval. Keep iac-code open until "
+"installation finishes."
+msgstr ""
+"Windows fordert möglicherweise eine Administratorbestätigung an. Lassen "
+"Sie iac-code geöffnet, bis die Installation abgeschlossen ist."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Git Bash installation failed. Try again or open diagnostics."
+msgstr ""
+"Git Bash konnte nicht installiert werden. Versuchen Sie es erneut oder "
+"öffnen Sie die Diagnose."
+
+#: src/iac_code/web/static/js/app.js
 msgid "Start a new working conversation."
 msgstr "Eine neue Arbeitsunterhaltung beginnen."
 
@@ -860,6 +921,12 @@ msgid "Updating…"
 msgstr "Wird aktualisiert…"
 
 #: src/iac_code/web/static/js/app.js
+msgid "Failed to start the update. Open diagnostics for details."
+msgstr ""
+"Das Update konnte nicht gestartet werden. Öffnen Sie die Diagnose, um "
+"Details anzuzeigen."
+
+#: src/iac_code/web/static/js/app.js
 #, python-brace-format
 msgid "Failed to start update: {error}"
 msgstr "Update konnte nicht gestartet werden: {error}"
@@ -1242,11 +1309,6 @@ msgstr "In Bearbeitung / fehlgeschlagen"
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "File no longer exists"
 msgstr "Datei existiert nicht mehr"
-
-#: src/iac_code/web/static/js/components/output_panel.js
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Loading…"
-msgstr "Wird geladen…"
 
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "Resource stacks"
@@ -2456,6 +2518,10 @@ msgid "Show secret"
 msgstr "Geheimnis anzeigen"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "secret"
+msgstr "Geheimnis"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Hide secret"
 msgstr "Geheimnis ausblenden"
 
@@ -2548,6 +2614,10 @@ msgid "Enter API key"
 msgstr "API-Schlüssel eingeben"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "API key"
+msgstr "API-Schlüssel"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Leave blank to use model default"
 msgstr "Leer lassen, um den Modellstandard zu verwenden"
 
@@ -2618,10 +2688,6 @@ msgid "Custom API Base URL; leave blank to use default"
 msgstr ""
 "Benutzerdefinierte API-Basis-URL; leer lassen, um den Standard zu "
 "verwenden"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "API key"
-msgstr "API-Schlüssel"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "The key required to call this provider; stored locally only"
@@ -2730,8 +2796,16 @@ msgid "Select or enter a region, e.g. cn-hangzhou"
 msgstr "Region auswählen oder eingeben, z. B. cn-hangzhou"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "AccessKeySecret"
+msgstr "AccessKeySecret"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "STS token"
 msgstr "STS-Token"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Temporary security token"
+msgstr "Temporäres Sicherheitstoken"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Session name"
@@ -2771,20 +2845,12 @@ msgid "Alibaba Cloud access key ID"
 msgstr "Alibaba Cloud Access Key ID"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "AccessKeySecret"
-msgstr "AccessKeySecret"
-
-#: src/iac_code/web/static/js/components/workspace.js
 msgid "Access key secret; stored locally only"
 msgstr "Access Key Secret; wird nur lokal gespeichert"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "StsToken"
 msgstr "StsToken"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Temporary security token"
-msgstr "Temporäres Sicherheitstoken"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "RamRoleArn"
@@ -3218,10 +3284,6 @@ msgstr ""
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Add server"
 msgstr "Server hinzufügen"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Refresh"
-msgstr "Aktualisieren"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Check all connections"
@@ -3839,8 +3901,20 @@ msgid "Preparing…"
 msgstr "Wird vorbereitet…"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Repair infraguard"
+msgstr "infraguard reparieren"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "infraguard is installed; the review step is available."
 msgstr "infraguard ist installiert; der Prüfschritt ist verfügbar."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"The previous infraguard installation was interrupted. Repair it before "
+"starting a review."
+msgstr ""
+"Die vorherige infraguard-Installation wurde unterbrochen. Reparieren Sie "
+"sie vor einer Prüfung."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid ""
@@ -3851,6 +3925,12 @@ msgstr ""
 "Das infraguard-Tool wurde nicht erkannt und kann in der aktuellen "
 "Umgebung nicht automatisch installiert werden; bitte installieren Sie es "
 "zunächst manuell."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "InfraGuard installation failed. Open diagnostics for details."
+msgstr ""
+"InfraGuard konnte nicht installiert werden. Öffnen Sie die Diagnose, um "
+"Details anzuzeigen."
 
 #: src/iac_code/web/static/js/components/workspace.js
 #, python-brace-format
@@ -3925,6 +4005,12 @@ msgstr ""
 "Neustart läuft; die Seite wird automatisch aktualisiert, sobald der "
 "Dienst wiederhergestellt ist…"
 
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The local runtime could not restart. Open diagnostics for details."
+msgstr ""
+"Die lokale Laufzeit konnte nicht neu gestartet werden. Öffnen Sie die "
+"Diagnose, um Details anzuzeigen."
+
 #~ msgid "Completing step: {step}"
 #~ msgstr "Schritt wird abgeschlossen: {step}"
 
@@ -3959,4 +4045,21 @@ msgstr ""
 #~ msgstr ""
 #~ "Steuert die Ausführlichkeit der in die"
 #~ " Protokolldatei geschriebenen Backend-Protokolle."
+
+#~ msgid "Installation failed: {error}"
+#~ msgstr "Installation fehlgeschlagen: {error}"
+
+#~ msgid ""
+#~ "Paths must be absolute and exist; "
+#~ "executable filenames must match their "
+#~ "command."
+#~ msgstr ""
+#~ "Pfade müssen absolut sein und "
+#~ "existieren; die Namen ausführbarer Dateien "
+#~ "müssen ihrem Befehl entsprechen."
+
+#~ msgid "Changes take effect after restarting the Desktop local runtime."
+#~ msgstr ""
+#~ "Änderungen werden nach dem Neustart der"
+#~ " lokalen Desktop-Laufzeit wirksam."
 

@@ -67,6 +67,21 @@ def _piped_repl_requires_tty_message(piped_input: str) -> str:
     return _("Interactive REPL input requires a terminal. Use `iac-code --prompt -` for non-interactive stdin input.")
 
 
+def _require_windows_git_bash() -> None:
+    """Apply the same startup prerequisite check to interactive and Web modes."""
+    if sys.platform != "win32":
+        return
+    from iac_code.utils.platform import GitBashNotFoundError, PlatformInfo
+
+    try:
+        PlatformInfo.detect()
+    except GitBashNotFoundError as exc:
+        from rich.console import Console
+
+        Console(stderr=True).print("[red]✗[/red] {}".format(exc), soft_wrap=True)
+        raise SystemExit(1)
+
+
 # `install-git-bash` is a Windows-only helper that installs Git for Windows
 # via the npmmirror mirror. We register it conditionally so it does not
 # show up in --help on non-Windows platforms (where it could not work).
@@ -101,6 +116,7 @@ def web(
     ),
 ) -> None:
     """Run iac-code as a local Web app."""
+    _require_windows_git_bash()
     from iac_code.services.telemetry import bootstrap_telemetry, graceful_shutdown
     from iac_code.web.server import run_web_server
     from iac_code.web.settings import developer_settings
@@ -206,16 +222,7 @@ def main(
     enable_virtual_terminal()
 
     # On Windows, verify Git Bash is available before proceeding.
-    if sys.platform == "win32":
-        from iac_code.utils.platform import GitBashNotFoundError, PlatformInfo
-
-        try:
-            PlatformInfo.detect()
-        except GitBashNotFoundError as e:
-            from rich.console import Console
-
-            Console(stderr=True).print(f"[red]✗[/red] {e}", soft_wrap=True)
-            raise SystemExit(1)
+    _require_windows_git_bash()
 
     if resume and continue_session:
         typer.echo(_("Error: --resume and --continue cannot be used together."), err=True)

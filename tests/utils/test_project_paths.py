@@ -7,10 +7,12 @@ from unittest.mock import patch
 
 from iac_code.utils.project_paths import (
     MAX_SANITIZED_LENGTH,
+    WINDOWS_SESSION_PROJECT_DIR_MAX_LENGTH,
     find_git_worktree_root,
     format_resume_command,
     get_git_branch,
     get_project_dir,
+    project_dir_candidates,
     same_project_path,
     sanitize_path,
 )
@@ -50,9 +52,13 @@ def test_get_project_dir_prefers_existing_legacy_long_directory(tmp_path, monkey
 
     cwd = "x" * (MAX_SANITIZED_LENGTH + 50)
     legacy_name = project_paths._legacy_sanitize_path(cwd)
-    legacy_dir = tmp_path / "projects" / legacy_name
+    generated = project_dir_candidates(cwd, tmp_path / "projects", platform="win32")
+    assert generated[2].name == legacy_name
+
+    current_dir = tmp_path / "projects" / "current-bounded"
+    legacy_dir = tmp_path / "projects" / "legacy-existing"
     legacy_dir.mkdir(parents=True)
-    monkeypatch.setattr("iac_code.utils.project_paths.get_config_dir", lambda: tmp_path)
+    monkeypatch.setattr(project_paths, "project_dir_candidates", lambda _cwd: (current_dir, legacy_dir))
 
     assert get_project_dir(cwd) == legacy_dir
 
@@ -64,6 +70,63 @@ def test_get_project_dir_uses_bounded_component_for_new_long_directory(tmp_path,
     project_dir = get_project_dir(cwd)
 
     assert len(project_dir.name) <= MAX_SANITIZED_LENGTH
+
+
+def test_session_component_bounded_for_medium_cwd_below_legacy_threshold(tmp_path, monkeypatch):
+    """A cwd that is long for Windows but under ``MAX_SANITIZED_LENGTH`` must
+    still yield a bounded write component so the nested session layout fits
+    within ``MAX_PATH`` — while the untruncated legacy alias stays readable."""
+    cwd = "/" + "medium-project/" * 8  # ~120 chars, well under MAX_SANITIZED_LENGTH
+    assert WINDOWS_SESSION_PROJECT_DIR_MAX_LENGTH < len(cwd) <= MAX_SANITIZED_LENGTH
+    candidates = project_dir_candidates(cwd, tmp_path, platform="win32")
+    write_dir, legacy_dir = candidates
+
+    # New writes use the aggressively bounded component ...
+    assert len(write_dir.name) <= WINDOWS_SESSION_PROJECT_DIR_MAX_LENGTH
+    # ... but the pre-fix untruncated directory remains a read candidate, so
+    # sessions already stored there stay discoverable after upgrade.
+    assert legacy_dir.name == sanitize_path(cwd)
+    assert len(legacy_dir.name) == len(cwd)
+
+
+def test_windows_long_session_candidates_include_previous_200_character_alias(tmp_path):
+    cwd = "C:\\" + "nested-workspace\\" * 30
+
+    current_dir, previous_dir, legacy_dir = project_dir_candidates(cwd, tmp_path, platform="win32")
+
+    assert len(current_dir.name) == WINDOWS_SESSION_PROJECT_DIR_MAX_LENGTH
+    assert len(previous_dir.name) == MAX_SANITIZED_LENGTH
+    assert len(legacy_dir.name) == MAX_SANITIZED_LENGTH + 13
+    assert current_dir.name[-13:] == previous_dir.name[-13:] == legacy_dir.name[-13:]
+
+
+def test_session_component_keeps_windows_leaf_within_max_path(tmp_path, monkeypatch):
+    """Deepest realistic leaf under a typical Windows config root must fit in 260."""
+    cwd = "C:\\Users\\somebody\\" + "nested-workspace\\" * 12 + "service"
+    write_dir = project_dir_candidates(cwd, tmp_path, platform="win32")[0]
+
+    config_root = "C:\\Users\\somebody\\.iac-code\\projects"
+    session_id = "0123456789abcdef0123456789abcdef"  # 32-char uuid hex
+    # <root>\<component>\<session_id>.conflict-sidecars\session.jsonl is the deepest leaf.
+    leaf_len = (
+        len(config_root)
+        + 1
+        + len(write_dir.name)
+        + 1
+        + len(session_id)
+        + len(".conflict-sidecars")
+        + 1
+        + len("session.jsonl")
+    )
+    assert leaf_len < 260
+
+
+def test_non_windows_session_component_keeps_existing_length(tmp_path):
+    cwd = "/" + "medium-project/" * 8
+
+    write_dir = project_dir_candidates(cwd, tmp_path, platform="linux")[0]
+
+    assert write_dir.name == sanitize_path(cwd)
 
 
 class TestProjectPathComparison:

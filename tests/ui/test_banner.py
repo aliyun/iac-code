@@ -30,6 +30,42 @@ def render_to_str(panel: Any, width: int = 80) -> str:
     return console.file.getvalue()  # type: ignore[attr-defined]
 
 
+def test_print_welcome_banner_keeps_braille_for_unsupported_terminal(tmp_path):
+    from iac_code.ui.banner import BRAILLE_LOGO_LINES, print_welcome_banner
+
+    console = make_console(width=120)
+    with patch("iac_code.ui.terminal_image.detect_terminal_image_protocol", return_value=None):
+        print_welcome_banner(console, "model", str(tmp_path))
+
+    output = console.file.getvalue()  # type: ignore[attr-defined]
+    assert BRAILLE_LOGO_LINES[0].strip() in output
+    assert "\0337" not in output
+
+
+def test_print_welcome_banner_overlays_terminal_image_without_moving_prompt(tmp_path):
+    from iac_code.ui.banner import BRAILLE_LOGO_LINES, print_welcome_banner
+    from iac_code.ui.terminal_image import TerminalImageProtocol
+
+    console = make_console(width=120)
+    with (
+        patch(
+            "iac_code.ui.terminal_image.detect_terminal_image_protocol",
+            return_value=TerminalImageProtocol.KITTY,
+        ),
+        patch("iac_code.ui.terminal_image.load_terminal_logo_png", return_value=b"png"),
+        patch("iac_code.ui.terminal_image.build_terminal_image_escape", return_value="<IMAGE>"),
+        patch("iac_code.ui.terminal_image.terminal_cell_size", return_value=(8, 16)),
+    ):
+        print_welcome_banner(console, "model", str(tmp_path))
+
+    output = console.file.getvalue()  # type: ignore[attr-defined]
+    assert BRAILLE_LOGO_LINES[0].strip() not in output
+    assert "<IMAGE>" in output
+    assert "\0337\033[" in output
+    assert "A\033[5C<IMAGE>" in output
+    assert output.endswith("\0338")
+
+
 # ---------------------------------------------------------------------------
 # _get_provider_display
 # ---------------------------------------------------------------------------
@@ -289,11 +325,24 @@ class TestRenderWelcomeBanner:
         assert "Welcome back" in text or "!" in text
 
     def test_banner_contains_logo_chars(self):
-        """Logo block characters should appear in the rendered output."""
+        """Braille logo characters should appear in the output."""
         panel = self._call("model", str(Path.home()))
         text = render_to_str(panel)
-        # At least one logo line contains '▄' or '█'
-        assert "▄" in text or "█" in text
+        assert any("⠁" <= char <= "⣿" for char in text)
+
+    def test_braille_logo_uses_compact_brand_shape_and_gradient(self):
+        from iac_code.ui.banner import BRAILLE_LOGO_LINES, BRAND_GRADIENT, _render_pixel_logo
+
+        assert len(BRAILLE_LOGO_LINES) == 7
+        assert max(len(line) for line in BRAILLE_LOGO_LINES) == 14
+        assert BRAILLE_LOGO_LINES[2] != BRAILLE_LOGO_LINES[-3]
+        assert BRAND_GRADIENT[0] == "#45b4ff"
+        assert BRAND_GRADIENT[-1] == "#e778cb"
+
+        logo = _render_pixel_logo()
+        assert len(logo.plain.splitlines()) == 7
+        assert all(len(line) == 17 for line in logo.plain.splitlines())
+        assert "⢾" in logo.plain
 
     def test_panel_border_style(self):
         """Panel border_style should be 'bright_cyan'."""

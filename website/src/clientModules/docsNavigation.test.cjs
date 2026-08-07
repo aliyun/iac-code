@@ -22,6 +22,16 @@ test('global navigation exposes Pipeline documentation directly', () => {
   assert.equal((config.match(new RegExp(`to:\\s*'${pipelineDocPath}'`, 'g')) ?? []).length, 2);
 });
 
+test('documentation chrome uses the current IaC Code brand mark', () => {
+  const config = readWebsiteFile('docusaurus.config.ts');
+  const logo = readWebsiteFile('static', 'img', 'iac-code-logo.svg');
+
+  assert.match(config, /favicon:\s*'img\/iac-code-logo\.svg'/);
+  assert.match(config, /src:\s*'img\/iac-code-logo\.svg'/);
+  assert.match(logo, /linearGradient id="ink"/);
+  assert.match(logo, /aria-label="IaC Code"/);
+});
+
 test('localized navbar and footer include Pipeline documentation labels', () => {
   const expected = {
     'zh-Hans': {navbar: 'Pipeline', footer: 'Pipeline 模式'},

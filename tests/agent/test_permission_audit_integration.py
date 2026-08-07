@@ -33,7 +33,7 @@ from iac_code.types.stream_events import (
     ToolUseStartEvent,
     Usage,
 )
-from iac_code.utils.project_paths import sanitize_path
+from iac_code.utils.project_paths import project_dir_candidates
 
 
 class FakeProvider:
@@ -100,7 +100,8 @@ def _read_jsonl(path):
 
 
 def _session_audit_log_path(config_dir, cwd: str, session_id: str):
-    return config_dir / "projects" / sanitize_path(cwd) / session_id / "permission-audit.jsonl"
+    project_dir = project_dir_candidates(cwd, config_dir / "projects")[0]
+    return project_dir / session_id / "permission-audit.jsonl"
 
 
 def _tool_turn(

@@ -29,6 +29,10 @@ from mcp.client.auth.oauth2 import resource_url_from_server_url
 from mcp.shared.auth import OAuthClientMetadata
 from mcp.shared.auth import OAuthMetadata as SDKOAuthMetadata
 
+from iac_code.desktop.external_env import (
+    is_desktop_runtime,
+    open_desktop_browser,
+)
 from iac_code.i18n import _
 from iac_code.mcp.errors import MCPNeedsAuthError
 from iac_code.mcp.storage import MCPSecretStorage
@@ -2763,6 +2767,9 @@ def _open_browser(url: str) -> bool:
     if browser_result is not None:
         return browser_result
 
+    if is_desktop_runtime():
+        return open_desktop_browser(url)
+
     import webbrowser
 
     return bool(webbrowser.open(url))
@@ -2781,6 +2788,10 @@ def _open_browser_from_env(url: str) -> bool | None:
         if not command:
             continue
         try:
+            if is_desktop_runtime():
+                if open_desktop_browser(url, command=command):
+                    return True
+                continue
             process = subprocess.Popen(
                 command,
                 stdin=subprocess.DEVNULL,
@@ -2788,7 +2799,7 @@ def _open_browser_from_env(url: str) -> bool | None:
                 stderr=subprocess.DEVNULL,
             )
         except OSError:
-            if _open_registered_browser_entry(entry, url):
+            if not is_desktop_runtime() and _open_registered_browser_entry(entry, url):
                 return True
             continue
         try:

@@ -65,6 +65,18 @@ iac-code web
 
 デフォルトではブラウザで `http://127.0.0.1:8766` を開きます（ループバックのみ）。詳しくは [Web アプリガイド](https://aliyun.github.io/iac-code/ja/web-app)をご覧ください。
 
+### デスクトップアプリ
+
+ネイティブアプリとして利用する場合は、[GitHub Releases](https://github.com/aliyun/iac-code/releases) からお使いの環境に合ったパッケージをダウンロードしてください。
+
+- Apple シリコン搭載 Mac：`.dmg`
+- Windows x64：`.exe` インストーラー
+- Linux x64：`.AppImage` または `.deb`
+
+デスクトップアプリは CLI や Web アプリと同じ IaC Code エンジンを使用し、モデルプロバイダー、クラウド認証情報、設定、プロジェクト、セッションも共有します。初回起動時に、IaC Code で操作するプロジェクトフォルダーを選択してください。Windows 版では Git Bash の有無も確認し、未導入の場合はインストール手順を案内します。
+
+macOS 版、Windows 版、AppImage 版では、暗号署名された更新をアプリ内で確認して適用できます。deb パッケージは、新しいパッケージをインストールして更新します。現在のインストーラーには商用の発行元署名が付いていないため、macOS や Windows で「不明な開発元」に関する警告が表示されることがあります。インストール前に、リリースに添付された `SHA256SUMS` を確認してください。詳しい手順とトラブルシューティングについては、[デスクトップアプリガイド](https://aliyun.github.io/iac-code/ja/docs/desktop-app)をご覧ください。
+
 ## コントリビュート
 
 [uv](https://docs.astral.sh/uv/getting-started/installation/) をインストールしてから：

@@ -131,3 +131,25 @@ def test_web_command_gracefully_shuts_down_telemetry_when_server_fails(monkeypat
     assert result.exit_code == 1
     assert isinstance(result.exception, RuntimeError)
     assert lifecycle == ["bootstrap", "run", "shutdown"]
+
+
+def test_web_command_checks_git_bash_before_starting_on_windows(monkeypatch) -> None:
+    from iac_code.utils.platform import GitBashNotFoundError, PlatformInfo
+
+    server_calls: list[str] = []
+
+    def missing_git_bash() -> None:
+        raise GitBashNotFoundError("install with: iac-code install-git-bash")
+
+    monkeypatch.setattr("iac_code.cli.main.sys.platform", "win32")
+    monkeypatch.setattr(PlatformInfo, "detect", staticmethod(missing_git_bash))
+    monkeypatch.setattr(
+        "iac_code.web.server.run_web_server",
+        lambda **_kwargs: server_calls.append("run"),
+    )
+
+    result = CliRunner().invoke(app, ["web"])
+
+    assert result.exit_code == 1
+    assert "iac-code install-git-bash" in result.output
+    assert server_calls == []

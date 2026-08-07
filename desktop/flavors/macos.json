@@ -1,0 +1,6 @@
+{
+  "app": { "security": { "capabilities": ["desktop-local", "desktop-loopback-updater"] } },
+  "bundle": {
+    "targets": ["app", "dmg"]
+  }
+}

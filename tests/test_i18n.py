@@ -4,6 +4,8 @@ This module ensures all language translations are complete and cover
 all msgid entries from the .pot template file.
 """
 
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -625,6 +627,28 @@ def test_mo_compilation_valid():
 
     if errors:
         pytest.fail(".po files have compilation errors:\n" + "\n".join(errors))
+
+
+def test_message_catalogs_pass_gnu_msgfmt_checks():
+    """Catch strict GNU newline/format checks that Babel compilation omits."""
+    msgfmt = shutil.which("msgfmt")
+    if msgfmt is None:
+        pytest.skip("GNU msgfmt is unavailable")
+
+    errors = []
+    for lang_dir in _discover_language_dirs():
+        po_file = lang_dir / "LC_MESSAGES" / "messages.po"
+        result = subprocess.run(
+            [msgfmt, "--check", "--check-format", "-o", os.devnull, str(po_file)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        if result.returncode:
+            errors.append("{}: {}".format(lang_dir.name, result.stderr.strip()))
+    if errors:
+        pytest.fail("GNU msgfmt rejected message catalogs:\n" + "\n".join(errors))
 
 
 def test_translation_completeness():

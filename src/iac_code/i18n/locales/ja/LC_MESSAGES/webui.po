@@ -291,6 +291,63 @@ msgid "Save"
 msgstr "保存"
 
 #: src/iac_code/web/static/js/app.js
+msgid "Desktop native bridge is unavailable."
+msgstr "デスクトップのネイティブブリッジを利用できません。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Git Bash is required"
+msgstr "Git Bash が必要です"
+
+#: src/iac_code/web/static/js/app.js
+msgid ""
+"iac-code uses Git Bash to run commands on Windows. Install it now, or "
+"continue and install it later."
+msgstr ""
+"iac-code は Windows でコマンドを実行するために Git Bash "
+"を使用します。今すぐインストールするか、続行して後でインストールできます。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Later"
+msgstr "後で"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Refresh"
+msgstr "更新"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Install Git Bash"
+msgstr "Git Bash をインストール"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Git Bash is ready."
+msgstr "Git Bash を使用できます。"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Loading…"
+msgstr "読み込み中…"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Git Bash is still unavailable."
+msgstr "Git Bash はまだ使用できません。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Could not check Git Bash. Try again."
+msgstr "Git Bash を確認できませんでした。もう一度お試しください。"
+
+#: src/iac_code/web/static/js/app.js
+msgid ""
+"Windows may request administrator approval. Keep iac-code open until "
+"installation finishes."
+msgstr "Windows から管理者の承認を求められる場合があります。インストールが完了するまで iac-code を開いたままにしてください。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Git Bash installation failed. Try again or open diagnostics."
+msgstr "Git Bash のインストールに失敗しました。再試行するか、診断を開いてください。"
+
+#: src/iac_code/web/static/js/app.js
 msgid "Start a new working conversation."
 msgstr "新しい作業用の会話を開始します。"
 
@@ -851,6 +908,10 @@ msgid "Updating…"
 msgstr "更新しています…"
 
 #: src/iac_code/web/static/js/app.js
+msgid "Failed to start the update. Open diagnostics for details."
+msgstr "更新を開始できませんでした。詳細は診断を開いて確認してください。"
+
+#: src/iac_code/web/static/js/app.js
 #, python-brace-format
 msgid "Failed to start update: {error}"
 msgstr "更新の開始に失敗しました: {error}"
@@ -1219,11 +1280,6 @@ msgstr "進行中／失敗"
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "File no longer exists"
 msgstr "ファイルは存在しません"
-
-#: src/iac_code/web/static/js/components/output_panel.js
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Loading…"
-msgstr "読み込み中…"
 
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "Resource stacks"
@@ -2433,6 +2489,10 @@ msgid "Show secret"
 msgstr "シークレットを表示"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "secret"
+msgstr "シークレット"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Hide secret"
 msgstr "シークレットを非表示"
 
@@ -2525,6 +2585,10 @@ msgid "Enter API key"
 msgstr "API キーを入力"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "API key"
+msgstr "API キー"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Leave blank to use model default"
 msgstr "空欄の場合はモデルのデフォルトを使用します"
 
@@ -2585,10 +2649,6 @@ msgstr "API ベース URL"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Custom API Base URL; leave blank to use default"
 msgstr "カスタム API ベース URL。空欄の場合はデフォルトを使用します"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "API key"
-msgstr "API キー"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "The key required to call this provider; stored locally only"
@@ -2689,8 +2749,16 @@ msgid "Select or enter a region, e.g. cn-hangzhou"
 msgstr "リージョンを選択または入力してください（例: cn-hangzhou）"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "AccessKeySecret"
+msgstr "AccessKeySecret"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "STS token"
 msgstr "STS トークン"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Temporary security token"
+msgstr "一時セキュリティトークン"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Session name"
@@ -2730,20 +2798,12 @@ msgid "Alibaba Cloud access key ID"
 msgstr "Alibaba Cloud アクセスキー ID"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "AccessKeySecret"
-msgstr "AccessKeySecret"
-
-#: src/iac_code/web/static/js/components/workspace.js
 msgid "Access key secret; stored locally only"
 msgstr "アクセスキーシークレット。ローカルにのみ保存されます"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "StsToken"
 msgstr "StsToken"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Temporary security token"
-msgstr "一時セキュリティトークン"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "RamRoleArn"
@@ -3145,10 +3205,6 @@ msgstr "MCP サーバーを管理します: 追加／編集／削除、有効／
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Add server"
 msgstr "サーバーを追加"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Refresh"
-msgstr "更新"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Check all connections"
@@ -3725,8 +3781,18 @@ msgid "Preparing…"
 msgstr "準備しています…"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Repair infraguard"
+msgstr "infraguard を修復"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "infraguard is installed; the review step is available."
 msgstr "infraguard がインストールされています。レビューステップを利用できます。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"The previous infraguard installation was interrupted. Repair it before "
+"starting a review."
+msgstr "前回の infraguard インストールが中断されました。レビューを開始する前に修復してください。"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid ""
@@ -3734,6 +3800,10 @@ msgid ""
 "automatically in the current environment; please install it manually "
 "first."
 msgstr "infraguard ツールが検出されず、現在の環境では自動インストールできません。まず手動でインストールしてください。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "InfraGuard installation failed. Open diagnostics for details."
+msgstr "InfraGuard のインストールに失敗しました。詳細は診断を開いて確認してください。"
 
 #: src/iac_code/web/static/js/components/workspace.js
 #, python-brace-format
@@ -3798,6 +3868,10 @@ msgstr "再試行して更新"
 msgid "Restarting; the page refreshes automatically once the service recovers…"
 msgstr "再起動しています。サービスが復旧するとページが自動的に更新されます…"
 
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The local runtime could not restart. Open diagnostics for details."
+msgstr "ローカルランタイムを再起動できませんでした。詳細は診断を開いて確認してください。"
+
 #~ msgid "Completing step: {step}"
 #~ msgstr "ステップを完了しています: {step}"
 
@@ -3824,4 +3898,16 @@ msgstr "再起動しています。サービスが復旧するとページが自
 
 #~ msgid "Control the verbosity of backend logs written to the log file."
 #~ msgstr "ログファイルに書き込まれるバックエンドログの詳細度を制御します。"
+
+#~ msgid "Installation failed: {error}"
+#~ msgstr "インストールに失敗しました: {error}"
+
+#~ msgid ""
+#~ "Paths must be absolute and exist; "
+#~ "executable filenames must match their "
+#~ "command."
+#~ msgstr "パスは存在する絶対パスである必要があり、実行可能ファイル名は対応するコマンドと一致する必要があります。"
+
+#~ msgid "Changes take effect after restarting the Desktop local runtime."
+#~ msgstr "変更は Desktop ローカルランタイムの再起動後に反映されます。"
 

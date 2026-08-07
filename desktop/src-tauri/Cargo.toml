@@ -1,0 +1,65 @@
+[package]
+name = "iac-code-desktop"
+version = "0.12.0"
+description = "iac-code"
+authors = ["iac-code contributors"]
+license = "Apache-2.0"
+edition = "2021"
+rust-version = "1.77.2"
+autobins = false
+
+[lib]
+name = "iac_code_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "iac-code-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "=2.6.1", features = [] }
+
+[dependencies]
+anyhow = "1.0"
+fs2 = "0.4"
+hex = "0.4"
+parking_lot = "0.12"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+sha2 = "0.10"
+tauri = { version = "=2.11.1", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-updater = { version = "=2.10.1", optional = true }
+thiserror = "2"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+iac-code-desktop-helpers = { path = "../helpers" }
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Globalization",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_JobObjects",
+  "Win32_System_IO",
+  "Win32_System_Pipes",
+  "Win32_System_Threading",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.3.2", features = ["NSArray", "NSLocale", "NSString"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+updater = ["dep:tauri-plugin-updater"]
+[dev-dependencies]
+tempfile = "3"

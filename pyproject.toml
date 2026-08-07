@@ -89,6 +89,12 @@ dev = [
     "tomli>=2.0; python_version<\"3.11\"",
     "pexpect>=4.9.0",
 ]
+desktop = [
+    "a2a-sdk[http-server,signing]>=1.0.2,<2",
+    "pyinstaller==6.21.0",
+    "termaid>=0.1; python_version >= '3.11'",
+    "uvicorn[standard]>=0.30.0",
+]
 
 [build-system]
 requires = ["setuptools>=68.0"]
@@ -109,6 +115,7 @@ version = {attr = "iac_code.__version__"}
     "**/*.html",
     "**/*.css",
     "**/*.js",
+    "**/*.png",
     "**/*.svg",
     "**/*.LICENSE",
     "**/*.rego",

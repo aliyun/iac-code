@@ -85,7 +85,7 @@ from iac_code.types.stream_events import (
     ToolInputDeltaEvent,
     ToolUseStartEvent,
 )
-from iac_code.ui.banner import render_update_prompt_header, render_welcome_banner
+from iac_code.ui.banner import print_welcome_banner, render_update_prompt_header
 from iac_code.ui.components.select import InputOption, Select, SelectLayout, TextOption
 from iac_code.ui.core.in_place_render import InPlaceRenderer
 from iac_code.ui.core.input_history import InputHistory
@@ -1340,8 +1340,12 @@ class InlineREPL:
 
         self._handle_startup_update()
         state = self.store.get_state()
-        self.console.print(
-            render_welcome_banner(state.model, state.cwd, session_id=self._session_id, session_name=self._session_name)
+        print_welcome_banner(
+            self.console,
+            state.model,
+            state.cwd,
+            session_id=self._session_id,
+            session_name=self._session_name,
         )
         self._print_mcp_config_warnings()
         if self._resume_messages:
@@ -2150,8 +2154,12 @@ class InlineREPL:
         self.console.file.write("\033[H\033[2J\033[3J")
         self.console.file.flush()
         state = self.store.get_state()
-        self.console.print(
-            render_welcome_banner(state.model, state.cwd, session_id=self._session_id, session_name=self._session_name)
+        print_welcome_banner(
+            self.console,
+            state.model,
+            state.cwd,
+            session_id=self._session_id,
+            session_name=self._session_name,
         )
         self._print_mcp_config_warnings()
         messages = self._agent_loop.context_manager.get_messages()
@@ -6161,13 +6169,12 @@ class InlineREPL:
         # Clear screen + scrollback, redraw banner, replay history.
         self.console.file.write("\033[H\033[2J\033[3J")
         self.console.file.flush()
-        self.console.print(
-            render_welcome_banner(
-                state.model,
-                state.cwd,
-                session_id=new_session_id,
-                session_name=self._session_name,
-            )
+        print_welcome_banner(
+            self.console,
+            state.model,
+            state.cwd,
+            session_id=new_session_id,
+            session_name=self._session_name,
         )
         self._print_cleanup_resume_summary()
         self._prune_cleanup_prompts_if_no_pending_cleanup()

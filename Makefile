@@ -1,4 +1,4 @@
-.PHONY: help install test coverage lint format translate run dev web pipeline clean publish
+.PHONY: help install desktop-install desktop-sync-version test desktop-test desktop-build coverage lint format translate run dev web pipeline clean publish
 
 .DEFAULT_GOAL := help
 
@@ -13,6 +13,29 @@ install: ## Install dependencies and pre-commit hooks
 	git config --local --unset-all core.hooksPath 2>/dev/null || true
 	git config --global --unset-all core.hooksPath 2>/dev/null || true
 	uv run pre-commit install
+
+desktop-install: ## Install Desktop build dependencies
+	uv sync --all-extras --group desktop
+	cd desktop && npm ci
+
+desktop-sync-version: ## Synchronize Desktop package versions from the Python package
+	uv run python desktop/scripts/sync_version.py
+
+desktop-test: ## Run Desktop Python and Rust checks
+	uv run python desktop/scripts/sync_version.py --check
+	uv run ruff check src/iac_code/desktop tests/desktop desktop/scripts
+	uv run pytest tests/desktop tests/web/test_frontend_static.py -q
+	cd desktop/src-tauri && cargo fmt --check
+	cd desktop/src-tauri && cargo clippy --all-targets --features updater -- -D warnings
+	cd desktop/src-tauri && cargo clippy --all-targets --no-default-features -- -D warnings
+	cd desktop/src-tauri && cargo test --features updater
+	cd desktop/src-tauri && cargo test --no-default-features
+	cd desktop/helpers && cargo fmt --check
+	cd desktop/helpers && cargo clippy --all-targets -- -D warnings
+	cd desktop/helpers && cargo test
+
+desktop-build: ## Build the native Desktop bundle for this platform
+	uv run --python 3.12 --group desktop python desktop/scripts/build_desktop.py
 
 PYTHON_VERSIONS := 3.10 3.11 3.12 3.13 3.14
 
@@ -51,7 +74,7 @@ format: ## Format code
 LOCALES := zh es fr de ja pt
 VERSION := $(shell sed -n 's/^__version__ = "\(.*\)"/\1/p' src/iac_code/__init__.py)
 
-translate: ## Extract, update and compile translations
+translate: desktop-sync-version ## Extract, update and compile translations
 	@uv run pybabel extract -F babel.cfg --add-location=file --project=iac-code --version=$(VERSION) -o src/iac_code/i18n/messages.pot . > /dev/null 2>&1 && echo "Extract: OK" || (echo "Extract: FAILED"; exit 1)
 	@for lang in $(LOCALES); do \
 		uv run pybabel update --ignore-pot-creation-date -i src/iac_code/i18n/messages.pot -d src/iac_code/i18n/locales -l $$lang > /dev/null 2>&1 && echo "Update  $$lang: OK" || (echo "Update  $$lang: FAILED"; exit 1); \

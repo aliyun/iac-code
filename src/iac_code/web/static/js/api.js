@@ -57,7 +57,11 @@ export const WEB_EVENT_TYPES = [
   "turn.done",
 ];
 
-const WEB_EVENT_SOURCE_TYPES = [...WEB_EVENT_TYPES, "app.error"];
+const WEB_EVENT_SOURCE_TYPES = [
+  ...WEB_EVENT_TYPES,
+  "app.error",
+  ...(globalThis.window?.__IAC_DESKTOP__?.runtime === "desktop" ? ["desktop-closing"] : []),
+];
 
 function sessionUrl(sessionId, suffix = "") {
   return `/api/sessions/${encodeURIComponent(sessionId)}${suffix}`;
@@ -452,8 +456,11 @@ export function getReviewStepPrerequisite() {
 }
 
 // 触发 infraguard 安装,逐行读取 NDJSON 进度事件并回调 onEvent。
-export async function installReviewStepPrerequisite(onEvent) {
-  const response = await tokenFetch("/api/settings/pipeline-review-step/install", {
+export async function installReviewStepPrerequisite(onEvent, options = {}) {
+  const endpoint = options.repair === true
+    ? "/api/settings/pipeline-review-step/install?repair=1"
+    : "/api/settings/pipeline-review-step/install";
+  const response = await tokenFetch(endpoint, {
     method: "POST",
     cache: "no-store",
     headers: { Accept: "application/x-ndjson" },
@@ -951,6 +958,9 @@ export function openEventStream(sessionId, afterSequence = 0, onEvent = () => {}
         return;
       }
       try {
+        if (eventType === "desktop-closing" && globalThis.window?.__IAC_DESKTOP__?.runtime === "desktop") {
+          source.close();
+        }
         dispatchEvent(JSON.parse(messageEvent.data));
       } catch (error) {
         dispatchEvent(

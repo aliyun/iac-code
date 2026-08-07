@@ -787,6 +787,40 @@ def test_process_session_lock_rejects_concurrent_holder(tmp_path) -> None:
     second.release()
 
 
+def test_process_session_lock_keeps_windows_write_alias_during_upgrade(tmp_path, monkeypatch) -> None:
+    from iac_code.agent.message import Message
+    from iac_code.services.session_storage import SessionStorage
+    from iac_code.utils import project_paths
+
+    projects_dir = tmp_path / "projects"
+    cwd = "C:\\" + "nested-workspace\\" * 30
+    monkeypatch.setattr(project_paths, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(project_paths, "get_projects_dir", lambda: projects_dir)
+    current, previous, _legacy = project_paths.project_dir_candidates(cwd, projects_dir)
+    previous.mkdir(parents=True)
+
+    first = ProcessSessionLock(cwd=cwd, session_id="session-1")
+    second = None
+    assert first.acquire(blocking=False) is True
+    try:
+        SessionStorage(projects_dir=projects_dir).append(
+            cwd,
+            "session-1",
+            Message(role="user", content="first"),
+            git_branch=None,
+        )
+        second = ProcessSessionLock(cwd=cwd, session_id="session-1")
+
+        assert current.exists()
+        assert first._lock_path.parent == current
+        assert second._lock_path == first._lock_path
+        assert second.acquire(blocking=False) is False
+    finally:
+        if second is not None:
+            second.release()
+        first.release()
+
+
 @pytest.mark.asyncio
 async def test_process_runner_applies_environment_updates(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("IAC_CODE_PROCESS_TEST_ENV", raising=False)

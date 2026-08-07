@@ -1,0 +1,165 @@
+name: Desktop
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - ".github/workflows/desktop.yml"
+      - ".github/workflows/desktop-release.yml"
+      - ".github/workflows/desktop-signed-package.yml"
+      - "desktop/**"
+      - "docs/desktop-app-design.md"
+      - "src/**"
+      - "tests/**"
+      - "setup.py"
+      - "Makefile"
+      - "pyproject.toml"
+      - "uv.lock"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/desktop.yml"
+      - ".github/workflows/desktop-release.yml"
+      - ".github/workflows/desktop-signed-package.yml"
+      - "desktop/**"
+      - "src/**"
+      - "tests/**"
+      - "setup.py"
+      - "Makefile"
+      - "pyproject.toml"
+      - "uv.lock"
+
+permissions:
+  contents: read
+
+jobs:
+  desktop-checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            rust-target: aarch64-apple-darwin
+          - os: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+          - os: ubuntu-24.04
+            rust-target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+          components: rustfmt, clippy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: uv sync --all-extras --group desktop
+      - name: Verify Desktop versions follow the Python package
+        run: uv run python desktop/scripts/sync_version.py --check
+      - run: npm ci
+        working-directory: desktop
+      - run: uv run ruff check src/iac_code/desktop tests/desktop desktop/scripts
+      - run: uv run pytest tests/desktop tests/web/test_frontend_static.py -q
+      - run: cargo fmt --check
+        working-directory: desktop/src-tauri
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+        working-directory: desktop/src-tauri
+      - run: cargo clippy --all-targets --no-default-features -- -D warnings
+        working-directory: desktop/src-tauri
+      - run: cargo test --all-features
+        working-directory: desktop/src-tauri
+      - run: cargo test --no-default-features
+        working-directory: desktop/src-tauri
+      - run: cargo fmt --check
+        working-directory: desktop/helpers
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: desktop/helpers
+      - run: cargo test
+        working-directory: desktop/helpers
+      - name: Build frozen Desktop sidecar
+        run: uv run --python 3.12 --group desktop python desktop/scripts/build_sidecar.py
+      - name: Smoke frozen Desktop sidecar
+        run: uv run --python 3.12 --group desktop python desktop/scripts/smoke_sidecar.py
+      - name: Generate Desktop release SBOM and third-party notices
+        run: >-
+          uv run --python 3.12 python desktop/scripts/generate_release_metadata.py
+          --output-dir "desktop/dist/release-metadata/${{ runner.os }}"
+      - name: Verify reproducible Desktop release metadata
+        run: >-
+          uv run --python 3.12 python desktop/scripts/generate_release_metadata.py
+          --output-dir "desktop/dist/release-metadata/${{ runner.os }}" --verify
+      - name: Validate Desktop release metadata contract
+        run: >-
+          uv run --python 3.12 python desktop/scripts/verify_release.py
+          --metadata-dir "desktop/dist/release-metadata/${{ runner.os }}" --metadata-only
+      - name: Generate ephemeral updater signing configuration
+        shell: bash
+        run: |
+          key_dir="$RUNNER_TEMP/iac-code-desktop-updater"
+          mkdir -p "$key_dir"
+          npm run tauri -- signer generate --ci --password ci-only --write-keys "$key_dir/updater.key"
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY_PATH=$key_dir/updater.key"
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=ci-only"
+            echo "IAC_CODE_DESKTOP_UPDATER_ENDPOINT=https://updates.invalid/{{target}}/{{arch}}/{{current_version}}"
+            echo "IAC_CODE_DESKTOP_UPDATER_PUBKEY=$(tr -d '\r\n' < "$key_dir/updater.key.pub")"
+            echo "IAC_CODE_DESKTOP_RELEASE=1"
+          } >> "$GITHUB_ENV"
+        working-directory: desktop
+      - name: Build native macOS bundle
+        if: runner.os == 'macOS'
+        run: uv run --python 3.12 --group desktop python desktop/scripts/build_desktop.py --channel macos --skip-sidecar
+      - name: Build native Windows bundle
+        if: runner.os == 'Windows'
+        run: uv run --python 3.12 --group desktop python desktop/scripts/build_desktop.py --channel windows --skip-sidecar
+      - name: Build Linux AppImage flavor
+        if: runner.os == 'Linux'
+        run: uv run --python 3.12 --group desktop python desktop/scripts/build_desktop.py --channel appimage --skip-sidecar
+      - name: Build Linux deb flavor
+        if: runner.os == 'Linux'
+        run: uv run --python 3.12 --group desktop python desktop/scripts/build_desktop.py --channel deb --skip-sidecar
+      - name: Upload validated Desktop bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ runner.os }}-validation-bundles
+          path: |
+            desktop/src-tauri/target/release/bundle/**
+            desktop/dist/release-metadata/${{ runner.os }}/**
+          if-no-files-found: error
+          retention-days: 3
+
+  desktop-scope:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Enforce Desktop-only change boundary
+        env:
+          DESKTOP_SCOPE_ENFORCE: ${{ contains(github.event.pull_request.labels.*.name, 'desktop') }}
+        shell: bash
+        run: |
+          scope_args=(
+            --base "${{ github.event.pull_request.base.sha }}"
+            --head "${{ github.event.pull_request.head.sha }}"
+          )
+          if [[ "$DESKTOP_SCOPE_ENFORCE" == "true" ]]; then
+            scope_args+=(--enforce)
+          fi
+          uv run python desktop/scripts/scope_audit.py "${scope_args[@]}"

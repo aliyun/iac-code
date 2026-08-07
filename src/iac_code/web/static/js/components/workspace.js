@@ -209,24 +209,47 @@ function makePasswordInput(marker, placeholder = "") {
 }
 
 // 把密码输入框包成带「眼睛」查看/隐藏按钮的控件。返回 { wrap, toggle, conceal }。
-function withPasswordToggle(input) {
+function withPasswordToggle(input, reveal = {}) {
   const wrap = makeElement("div", { className: "workspace-password" });
   const toggle = makeElement("button", {
     className: "workspace-password-toggle",
     attributes: { type: "button", "aria-label": t("Show secret"), title: t("Show secret") },
   });
+  let concealTimer = null;
   const conceal = () => {
+    if (concealTimer !== null) {
+      clearTimeout(concealTimer);
+      concealTimer = null;
+    }
     input.type = "password";
     toggle.classList.toggle("is-revealed", false);
     toggle.setAttribute("aria-label", t("Show secret"));
     toggle.setAttribute("title", t("Show secret"));
   };
-  toggle.addEventListener("click", () => {
+  toggle.addEventListener("click", async () => {
     if (input.type === "password") {
+      if (typeof reveal.confirm === "function") {
+        toggle.disabled = true;
+        try {
+          const confirmed = await reveal.confirm({
+            kind: text(reveal.kind || "secret"),
+            id: text(typeof reveal.id === "function" ? reveal.id() : reveal.id || input.dataset.workspaceAction),
+            fieldLabel: text(reveal.fieldLabel || input.placeholder || t("secret")),
+          });
+          if (!confirmed) {
+            return;
+          }
+        } catch (_error) {
+          return;
+        } finally {
+          toggle.disabled = false;
+        }
+      }
       input.type = "text";
       toggle.classList.toggle("is-revealed", true);
       toggle.setAttribute("aria-label", t("Hide secret"));
       toggle.setAttribute("title", t("Hide secret"));
+      concealTimer = setTimeout(conceal, 30000);
     } else {
       conceal();
     }
@@ -630,7 +653,12 @@ function createModelPanel(api, context) {
   const effortChoice = makeChoiceField("workspace-model-effort", t("Enter or select reasoning effort"));
   const apiBaseInput = makeTextInput("workspace-model-api-base", "https://example.test/v1");
   const apiKeyInput = makePasswordInput("workspace-model-api-key", t("Enter API key"));
-  const apiKeyField = withPasswordToggle(apiKeyInput);
+  const apiKeyField = withPasswordToggle(apiKeyInput, {
+    confirm: context.confirmSecretReveal,
+    kind: "provider",
+    id: "api-key",
+    fieldLabel: t("API key"),
+  });
   // 高级设置(默认折叠):最大输出 tokens(全模型生效)、思考预算(仅支持独立预算的模型可见)。
   const maxTokensInput = makeNumberInput("workspace-model-max-tokens", t("Leave blank to use model default"));
   const thinkingBudgetInput = makeNumberInput("workspace-model-thinking-budget", t("Leave blank to use model default"));
@@ -1044,9 +1072,19 @@ function createCloudPanel(api, context) {
   // 持久输入(AK/Sts/Ram)
   const cloudAccessKeyIdInput = makeTextInput("workspace-cloud-access-key-id", "AccessKeyId");
   const cloudAccessKeySecretInput = makePasswordInput("workspace-cloud-access-key-secret", "AccessKeySecret");
-  const cloudAccessKeySecretField = withPasswordToggle(cloudAccessKeySecretInput);
+  const cloudAccessKeySecretField = withPasswordToggle(cloudAccessKeySecretInput, {
+    confirm: context.confirmSecretReveal,
+    kind: "aliyun",
+    id: "access-key-secret",
+    fieldLabel: t("AccessKeySecret"),
+  });
   const cloudStsTokenInput = makePasswordInput("workspace-cloud-sts-token", t("STS token"));
-  const cloudStsTokenField = withPasswordToggle(cloudStsTokenInput);
+  const cloudStsTokenField = withPasswordToggle(cloudStsTokenInput, {
+    confirm: context.confirmSecretReveal,
+    kind: "aliyun",
+    id: "sts-token",
+    fieldLabel: t("Temporary security token"),
+  });
   const cloudRamRoleArnInput = makeTextInput("workspace-cloud-ram-role-arn", "acs:ram::123:role/name");
   const cloudRamSessionNameInput = makeTextInput("workspace-cloud-ram-session-name", t("Session name"));
 
@@ -3922,6 +3960,7 @@ function createOtherPanel(api, context) {
   prereqBar.append(prereqFill);
   prereqProgress.append(prereqPhaseLabel, prereqBar);
   prereqNotice.append(prereqText, prereqInstallButton, prereqProgress);
+  let prereqRepairRequired = false;
   reviewStepCard.append(prereqNotice);
 
   // 帮助改进 iac-code:打开后向遥测附带完整对话内容(提示词/模型回复/工具输入输出),用于诊断与改进。
@@ -4338,11 +4377,15 @@ function createOtherPanel(api, context) {
     prereqProgress.hidden = true;
     const installed = detection.satisfied === true;
     const installable = detection.installable === true;
+    prereqRepairRequired = context.desktopRuntime && detection.status === "recovery_required";
     prereqNotice.classList.toggle("is-installed", installed);
     prereqNotice.classList.toggle("is-missing", !installed);
     prereqInstallButton.hidden = installed || !installable;
+    prereqInstallButton.textContent = prereqRepairRequired ? t("Repair infraguard") : t("Install infraguard");
     if (installed) {
       prereqText.textContent = t("infraguard is installed; the review step is available.");
+    } else if (prereqRepairRequired) {
+      prereqText.textContent = t("The previous infraguard installation was interrupted. Repair it before starting a review.");
     } else if (installable) {
       prereqText.textContent = t("The review step depends on the infraguard tool, which was not detected. Install it here with one click.");
     } else {
@@ -4369,10 +4412,13 @@ function createOtherPanel(api, context) {
           return;
         }
         applyPrereqProgress(event);
-      });
+      }, { repair: prereqRepairRequired });
     } catch (error) {
       setPrereqInstalling(false);
-      stamp(t("Install failed: {error}", { error: error instanceof Error ? error.message : String(error) }), true);
+      const message = context.desktopRuntime
+        ? t("InfraGuard installation failed. Open diagnostics for details.")
+        : t("Install failed: {error}", { error: error instanceof Error ? error.message : String(error) });
+      stamp(message, true);
       return;
     }
     setPrereqInstalling(false);
@@ -4383,7 +4429,12 @@ function createOtherPanel(api, context) {
       stampSaved(token);
     } else {
       const message = result && result.message ? result.message : t("Unknown error");
-      stamp(t("Install failed: {error}", { error: message }), true);
+      stamp(
+        context.desktopRuntime
+          ? t("InfraGuard installation failed. Open diagnostics for details.")
+          : t("Install failed: {error}", { error: message }),
+        true,
+      );
     }
   }
 
@@ -4573,6 +4624,7 @@ function createOtherPanel(api, context) {
       prereqNotice.hidden = true;
       prereqNotice.classList.remove("is-installed", "is-missing");
       prereqInstallButton.hidden = false;
+      prereqRepairRequired = false;
       setPrereqInstalling(false);
       permissionSelect.value = "default";
       modeSelection = { mode: "normal", pipelineName: fallbackPipelineName };
@@ -4763,8 +4815,18 @@ function createDeveloperPanel(api, context) {
       const spinner = makeElement("div", { className: "server-restart-spinner", attributes: { "aria-hidden": "true" } });
       actions.replaceChildren(spinner);
       try {
-        await api.restartServer();
-      } catch (_error) {
+        await context.restartService();
+      } catch (error) {
+        if (context.desktopRuntime) {
+          msg.textContent = t("The local runtime could not restart. Open diagnostics for details.");
+          const retryBtn = makeButton(t("Confirm restart"), "server-restart-retry", "workspace-action is-danger");
+          retryBtn.addEventListener("click", () => {
+            overlay.remove();
+            runRestartFlow();
+          });
+          actions.replaceChildren(retryBtn);
+          return;
+        }
         // 202 之后进程即将替换,响应可能在读取前中断;无论如何进入轮询恢复。
       }
       // 首轮延迟 > 后端 execv 的 0.4s,避免过早命中旧进程;20s 超时留足重新初始化余量。
@@ -4853,6 +4915,12 @@ export function createWorkspaceController({ tabs, content }, api, options = {}) 
     // 新会话默认保存成功后回写 app 内存 + 当前草稿(缺此透传则 persistSessionDefaults 的通知静默丢弃,
     // 表现为「改了默认要刷新页面才生效」)。
     onSessionDefaultsSaved: (payload) => options.onSessionDefaultsSaved?.(payload),
+    confirmSecretReveal: options.confirmSecretReveal,
+    restartService:
+      typeof options.restartService === "function"
+        ? () => options.restartService()
+        : () => api.restartServer(),
+    desktopRuntime: Boolean(options.desktopRuntime),
   };
 
   // 开发者状态的读改写入口,供两个面板共享,保证互不覆盖对方字段。

@@ -4,7 +4,7 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: iac-code 0.11.4\n"
+"Project-Id-Version: iac-code 0.12.0\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-06-04 15:58+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
@@ -8440,7 +8440,11 @@ msgid ""
 "\n"
 "---\n"
 "ROS local preflight diagnostics:\n"
-msgstr "--- Diagnostic local avant vol ROS :"
+msgstr ""
+"\n"
+"\n"
+"---\n"
+"Diagnostic local avant exécution de ROS :\n"
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
 #, python-brace-format
@@ -11500,6 +11504,10 @@ msgid "refusing to open non-regular file: {path}"
 msgstr "Refus d’ouvrir un fichier non ordinaire : {path}"
 
 #: src/iac_code/web/app.py
+msgid "Desktop runtime is closing"
+msgstr "L’environnement de bureau est en cours de fermeture"
+
+#: src/iac_code/web/app.py
 msgid "This session was created outside the web entry and is read-only."
 msgstr ""
 "Cette session a été créée en dehors de l’entrée web et est en lecture "
@@ -11586,6 +11594,14 @@ msgstr "Une mise à jour est déjà en cours."
 #, python-brace-format
 msgid "The update command exited with code {}."
 msgstr "La commande de mise à jour s’est terminée avec le code {}."
+
+#: src/iac_code/web/app.py
+msgid "A project directory is required."
+msgstr "Un répertoire de projet est requis."
+
+#: src/iac_code/web/app.py
+msgid "The selected project directory is invalid."
+msgstr "Le répertoire de projet sélectionné n’est pas valide."
 
 #: src/iac_code/web/app.py src/iac_code/web/session_manager.py
 #: src/iac_code/web/settings.py

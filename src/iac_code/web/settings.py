@@ -7,7 +7,7 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 from iac_code.config import (
@@ -678,12 +678,20 @@ def _save_aliyun_oauth_token(site: str, region: str, token: Any) -> dict[str, An
     return _aliyun_summary(credential)
 
 
-def login_aliyun_oauth(data: dict[str, Any]) -> dict[str, Any]:
+def login_aliyun_oauth(
+    data: dict[str, Any],
+    *,
+    browser_opener: Callable[[str], bool] | None = None,
+) -> dict[str, Any]:
     """Run the existing loopback browser flow and persist its credential."""
     site = _required_string(data, "site", "siteType", "oauthSiteType")
     region = _optional_string(data, "region", "regionId") or ""
     try:
-        token = run_browser_oauth_flow(site)
+        token = (
+            run_browser_oauth_flow(site, browser_opener=browser_opener)
+            if browser_opener is not None
+            else run_browser_oauth_flow(site)
+        )
     except AliyunOAuthError as exc:
         raise ValueError(str(exc)) from exc
     return _save_aliyun_oauth_token(site, region, token)

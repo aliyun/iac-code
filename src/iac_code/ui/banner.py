@@ -9,26 +9,77 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rich.align import Align
+from rich.color import Color
 from rich.console import Group
 from rich.panel import Panel
+from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
 from iac_code.i18n import _
 
 if TYPE_CHECKING:
+    from rich.console import Console
+
     from iac_code.services.update_checker import PendingUpdate
 
-# Cloud logo (same as components/logo.py)
-LOGO_LINES = [
-    "      ▄▄███▄▄      ",
-    "   ▄██████████▄▄   ",
-    " ▄█▀████████████▄  ",
-    "████████████████████",
-    " ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ",
-]
+# The app icon uses a broad stroke that turns into several parallel dot rows
+# when encoded directly as Braille. This terminal-specific trace uses a
+# single-dot stroke. Its outer modules are exact quarter-turns of one master,
+# so the right corners join cleanly without isolated or protruding dots.
+BRAILLE_LOGO_LINES = (
+    " ⢀⠴⠒⠒⠒⠂⡠⠒⠒⠒⠦⡀",
+    "⢰⠃   ⡠⠊     ⠘⡆",
+    "⢸   ⠊ ⢠  ⠑⢄  ⡇",
+    "⢀⠑⢄  ⢈⢾⡮⠤  ⠑⢄⠁",
+    "⢸  ⠑⢄ ⠘⠈ ⡠   ⡇",
+    "⠸⡄     ⡠⠊   ⢠⠇",
+    " ⠈⠲⠤⠤⠤⠊⠠⠤⠤⠤⠖⠁",
+)
+
+BRAND_GRADIENT = (
+    "#45b4ff",
+    "#4388ff",
+    "#5968f5",
+    "#7d63f4",
+    "#a969ef",
+    "#e778cb",
+)
 
 ACCENT = "bright_cyan"
+
+
+def _logo_color(row: int, column: int) -> Color:
+    """Pick the nearest brand-gradient stop for a terminal logo cell."""
+    width = max(len(line) for line in BRAILLE_LOGO_LINES)
+    extent = len(BRAILLE_LOGO_LINES) + width - 2
+    position = (row + column) / extent
+    index = round(position * (len(BRAND_GRADIENT) - 1))
+    return Color.parse(BRAND_GRADIENT[index])
+
+
+def _render_pixel_logo() -> Text:
+    """Render the compact Braille fallback logo."""
+    logo = Text()
+    width = max(len(line) for line in BRAILLE_LOGO_LINES)
+
+    for row, line in enumerate(BRAILLE_LOGO_LINES):
+        if row:
+            logo.append("\n")
+        logo.append("   ")
+        for column, cell in enumerate(line.ljust(width)):
+            if cell != " ":
+                logo.append(cell, Style(color=_logo_color(row, column)))
+            else:
+                logo.append(" ")
+
+    return logo
+
+
+def _render_image_placeholder() -> Text:
+    """Reserve the same terminal cells used by the Braille fallback."""
+    width = max(len(line) for line in BRAILLE_LOGO_LINES) + 3
+    return Text("\n".join(" " * width for _ in BRAILLE_LOGO_LINES))
 
 
 def _format_update_command(command: Iterable[str]) -> str:
@@ -90,6 +141,8 @@ def render_welcome_banner(
     cwd: str,
     session_id: str | None = None,
     session_name: str | None = None,
+    *,
+    _image_placeholder: bool = False,
 ) -> Panel:
     """Produce a Rich Panel for the welcome banner."""
     # Username
@@ -100,11 +153,7 @@ def render_welcome_banner(
         username = "User"
 
     # Logo
-    logo = Text()
-    for i, line in enumerate(LOGO_LINES):
-        if i > 0:
-            logo.append("\n")
-        logo.append(f"   {line}", style="bright_cyan")
+    logo = _render_image_placeholder() if _image_placeholder else _render_pixel_logo()
 
     # Description (centered vertically beside the logo)
     desc_text = Text(_("Your AI-powered Infrastructure as Code assistant"), style="italic white")
@@ -162,3 +211,64 @@ def render_welcome_banner(
         items.append(Text("  {}: {}".format(_("Log file"), log_path), style="dim yellow"))
 
     return Panel(Group(*items), border_style=ACCENT, expand=True)
+
+
+def print_welcome_banner(
+    console: Console,
+    model: str,
+    cwd: str,
+    session_id: str | None = None,
+    session_name: str | None = None,
+) -> None:
+    """Print the banner with a high-resolution logo when supported."""
+    from iac_code.ui.terminal_image import (
+        IMAGE_COLUMNS,
+        IMAGE_ROWS,
+        build_terminal_image_escape,
+        detect_terminal_image_protocol,
+        load_terminal_logo_png,
+        terminal_cell_size,
+    )
+
+    protocol = detect_terminal_image_protocol(console)
+    image_escape = ""
+    if protocol is not None:
+        try:
+            image_escape = build_terminal_image_escape(
+                protocol,
+                load_terminal_logo_png(),
+                columns=IMAGE_COLUMNS,
+                rows=IMAGE_ROWS,
+                cell_size=terminal_cell_size(console),
+            )
+        except (OSError, ValueError):
+            protocol = None
+
+    panel = render_welcome_banner(
+        model,
+        cwd,
+        session_id=session_id,
+        session_name=session_name,
+        _image_placeholder=protocol is not None,
+    )
+    rendered_height = len(console.render_lines(panel, console.options, pad=False)) if protocol is not None else 0
+    console.print(panel)
+
+    if protocol is None or not image_escape:
+        return
+
+    # After Console.print(), the cursor is one line below the panel. The image
+    # placeholder begins on panel row 4 and after five columns (border,
+    # padding, and the three-cell logo indent). Drawing between DECSC/DECRC
+    # keeps the prompt position unchanged for Kitty, iTerm2, and Sixel.
+    logo_top_row = 4
+    cursor_up = max(1, rendered_height - logo_top_row)
+    overlay = "\0337\033[{}A\033[5C{}\0338".format(cursor_up, image_escape)
+    try:
+        console.file.write(overlay)
+        console.file.flush()
+    except (AttributeError, OSError, UnicodeError):
+        # The text banner has already been printed. Output streams that reject
+        # control sequences remain usable; the next redraw will use detection
+        # again and can fall back to Braille.
+        return

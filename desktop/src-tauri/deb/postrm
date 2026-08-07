@@ -1,0 +1,32 @@
+#!/bin/sh
+
+set -eu
+
+case "${1:-}" in
+  remove|purge)
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+
+getent passwd | while IFS=: read -r user password user_id group_id gecos home shell; do
+  case "$user_id" in
+    ""|*[!0-9]*) continue ;;
+  esac
+  if [ "$user_id" -lt 1000 ] || [ "$user_id" -ge 60000 ] || [ ! -d "$home" ]; then
+    continue
+  fi
+
+  desktop_dir="$home/Desktop"
+  if command -v xdg-user-dir >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1; then
+    detected_dir=$(runuser -u "$user" -- env HOME="$home" XDG_CONFIG_HOME="$home/.config" \
+      xdg-user-dir DESKTOP 2>/dev/null || true)
+    case "$detected_dir" in
+      "$home"/*) desktop_dir=$detected_dir ;;
+    esac
+  fi
+  rm -f "$desktop_dir/iac-code.desktop"
+done
+
+exit 0

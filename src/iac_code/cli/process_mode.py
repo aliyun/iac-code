@@ -35,7 +35,7 @@ from iac_code.types.stream_events import (
     TextDeltaEvent,
     Usage,
 )
-from iac_code.utils.project_paths import get_session_path
+from iac_code.utils.project_paths import project_dir_candidates
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -75,7 +75,7 @@ class ProcessSessionLock:
     """Cross-process advisory lock for a single cwd/session_id pair."""
 
     def __init__(self, *, cwd: str, session_id: str) -> None:
-        session_path = get_session_path(cwd, session_id)
+        session_path = project_dir_candidates(cwd)[0] / f"{session_id}.jsonl"
         self._lock_path = session_path.with_name(f".{session_path.name}.process.lock")
         self._lock_file: IO[bytes] | None = None
 

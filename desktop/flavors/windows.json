@@ -1,0 +1,13 @@
+{
+  "app": { "security": { "capabilities": ["desktop-local", "desktop-loopback-updater"] } },
+  "bundle": {
+    "targets": ["nsis"],
+    "windows": {
+      "webviewInstallMode": { "type": "offlineInstaller" },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "nsis/installer-hooks.nsh"
+      }
+    }
+  }
+}

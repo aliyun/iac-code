@@ -13,11 +13,94 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from iac_code.desktop.external_env import create_subprocess_exec, guarded_command, spawn_env
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 
 _SCAN_TIMEOUT_SECONDS = 120
 _TOOL_TIMEOUT_BUFFER_SECONDS = 15
+
+
+async def _desktop_consumer_lease() -> tuple[Any | None, str | None]:
+    """Acquire the Desktop shared lease without changing non-Desktop scans."""
+    if os.environ.get("IAC_CODE_DESKTOP_RUNTIME") != "1":
+        return None, None
+    lock_dir = os.environ.get("IAC_CODE_DESKTOP_INSTALL_LOCK_DIR")
+    managed_path = os.environ.get("IAC_CODE_DESKTOP_INFRAGUARD_PATH")
+    if not lock_dir or not managed_path:
+        return None, "recovery_required"
+    from iac_code.desktop.download_journal import DesktopPrerequisiteConsumerLease
+
+    lease = DesktopPrerequisiteConsumerLease(
+        Path(lock_dir),
+        Path(managed_path),
+        prerequisite="infraguard",
+        timeout=5.0,
+    )
+    acquire = asyncio.create_task(asyncio.to_thread(lease.__enter__))
+    try:
+        await asyncio.shield(acquire)
+    except asyncio.CancelledError:
+        # A worker thread cannot be cancelled while it polls an OS lock.  Wait for
+        # its bounded result and release immediately so cancellation never leaks a
+        # reader that would block repair in another Desktop channel.
+        with suppress(Exception):
+            await asyncio.shield(acquire)
+            await asyncio.to_thread(lease.__exit__, None, None, None)
+        raise
+    except TimeoutError:
+        return None, "installing"
+    if lease.recovery_required():
+        await asyncio.to_thread(lease.__exit__, None, None, None)
+        return None, "recovery_required"
+    return lease, None
+
+
+def _desktop_prerequisite_error(status: str, file_path: str) -> ToolResult:
+    return ToolResult(
+        content=json.dumps(
+            {
+                "error": status,
+                "prerequisite": "infraguard",
+                "file_path": file_path,
+            },
+            ensure_ascii=False,
+        ),
+        is_error=True,
+    )
+
+
+async def _run_infraguard_with_desktop_lease(
+    command: list[str],
+    *,
+    cwd: str,
+    timeout_seconds: float,
+    env: dict[str, str] | None,
+) -> tuple[subprocess.CompletedProcess[str] | None, str | None]:
+    lease, blocked = await _desktop_consumer_lease()
+    if blocked is not None:
+        return None, blocked
+    try:
+        managed_command = command
+        if lease is not None and command and command[0] == "infraguard":
+            # On Windows, CreateProcess resolves a bare executable before the
+            # child process receives its overridden PATH. The Desktop lease is
+            # already scoped to the managed binary, so execute that exact path
+            # for every use-time InfraGuard command as well.
+            managed_path = os.environ["IAC_CODE_DESKTOP_INFRAGUARD_PATH"]
+            managed_command = [managed_path, *command[1:]]
+        return (
+            await _run_infraguard_command(
+                managed_command,
+                cwd=cwd,
+                timeout_seconds=timeout_seconds,
+                env=env,
+            ),
+            None,
+        )
+    finally:
+        if lease is not None:
+            await asyncio.to_thread(lease.__exit__, None, None, None)
 
 
 def _extract_findings(parsed: dict[str, Any]) -> list[dict[str, Any]]:
@@ -169,12 +252,12 @@ async def _run_infraguard_command(
     else:
         popen_kwargs["start_new_session"] = True
 
-    process = await asyncio.create_subprocess_exec(
-        *command,
+    process = await create_subprocess_exec(
+        *guarded_command(command, kind="infraguard"),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=cwd,
-        env=_environment_with_overrides(env),
+        env=spawn_env(_environment_with_overrides(env)),
         **popen_kwargs,
     )
     try:
@@ -208,17 +291,17 @@ def _environment_with_overrides(env_overrides: dict[str, str] | None) -> dict[st
 
 
 async def _terminate_infraguard_process(process: asyncio.subprocess.Process) -> tuple[bytes, bytes]:
-    _terminate_infraguard_process_tree(process)
+    await _terminate_infraguard_process_tree(process)
     try:
         return await asyncio.wait_for(process.communicate(), timeout=3)
     except asyncio.TimeoutError:
-        _terminate_infraguard_process_tree(process, force=True)
+        await _terminate_infraguard_process_tree(process, force=True)
         with suppress(Exception):
             return await asyncio.wait_for(process.communicate(), timeout=3)
     return b"", b""
 
 
-def _terminate_infraguard_process_tree(
+async def _terminate_infraguard_process_tree(
     process: asyncio.subprocess.Process,
     *,
     force: bool = False,
@@ -226,7 +309,16 @@ def _terminate_infraguard_process_tree(
     if process.returncode is not None:
         return
     if os.name == "nt":
-        _terminate_windows_process_tree(process.pid, force=force)
+        await _terminate_windows_process_tree(process.pid, force=force)
+        return
+    from iac_code.desktop.external_env import is_guardian_process
+
+    if is_guardian_process(process):
+        if force:
+            process.kill()
+        else:
+            process.terminate()
+        await asyncio.shield(process.wait())
         return
     try:
         os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
@@ -239,13 +331,19 @@ def _terminate_infraguard_process_tree(
             process.terminate()
 
 
-def _terminate_windows_process_tree(pid: int, *, force: bool = False) -> None:
+async def _terminate_windows_process_tree(pid: int, *, force: bool = False) -> None:
     command = ["taskkill", "/T", "/PID", str(pid)]
     if force:
         command.insert(1, "/F")
     try:
-        subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-    except OSError:
+        taskkill = await create_subprocess_exec(
+            *command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(taskkill.wait(), timeout=2)
+    except (OSError, asyncio.TimeoutError, TimeoutError):
         return
 
 
@@ -611,12 +709,15 @@ class InfraGuardScanTool(Tool):
             command.append("--no-waivers")
 
         try:
-            completed = await _run_infraguard_command(
+            completed, prerequisite_status = await _run_infraguard_with_desktop_lease(
                 command,
                 cwd=context.cwd,
                 timeout_seconds=_SCAN_TIMEOUT_SECONDS,
                 env=context.env_overrides,
             )
+            if prerequisite_status is not None:
+                return _desktop_prerequisite_error(prerequisite_status, file_path)
+            assert completed is not None
             if "--no-waivers" in command and _unsupported_no_waivers_flag(completed):
                 return ToolResult(
                     content=json.dumps(

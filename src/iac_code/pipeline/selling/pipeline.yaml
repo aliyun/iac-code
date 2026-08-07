@@ -43,6 +43,7 @@ feature_flags:
 prerequisites:
   infraguard:
     command: infraguard
+    consumerImpact: prerequisite
     required_by_flags: [enable_reviewing]
     on_missing:
       repl: prompt_install

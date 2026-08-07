@@ -1,14 +1,45 @@
 .home {
+  --home-blue: #428cff;
+  --home-indigo: #5f65f4;
+  --home-violet: #9368f2;
+  --home-pink: #e676ca;
+  --home-cyan: #9edff7;
   overflow: hidden;
-  background: #ffffff;
+  background:
+    radial-gradient(circle at 4% 36%, rgba(127, 211, 249, 0.13), transparent 23%),
+    radial-gradient(circle at 96% 62%, rgba(177, 117, 246, 0.1), transparent 24%),
+    #ffffff;
   color: #1f2026;
 }
 
 .hero {
-  background: #ffffff;
+  position: relative;
+  isolation: isolate;
+  background:
+    radial-gradient(ellipse 46% 34% at 16% 8%, rgba(143, 219, 249, 0.35), transparent 74%),
+    radial-gradient(ellipse 42% 34% at 78% 5%, rgba(102, 126, 255, 0.24), transparent 76%),
+    radial-gradient(ellipse 31% 30% at 92% 31%, rgba(222, 123, 222, 0.19), transparent 78%),
+    linear-gradient(180deg, #f8fbff 0%, #fcfaff 43%, #ffffff 100%);
+}
+
+.hero::before {
+  position: absolute;
+  z-index: -1;
+  top: 13%;
+  left: 50%;
+  width: min(76vw, 1080px);
+  height: 340px;
+  border-radius: 50%;
+  background: linear-gradient(100deg, rgba(89, 181, 255, 0.24), rgba(102, 99, 244, 0.2), rgba(230, 118, 202, 0.19));
+  content: '';
+  filter: blur(92px);
+  opacity: 0.72;
+  transform: translateX(-50%);
 }
 
 .heroInner {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -21,7 +52,9 @@
 .heroInner h1 {
   max-width: 1080px;
   margin: 0;
-  color: #1e1f25;
+  background: linear-gradient(105deg, #202533 4%, #315fbd 46%, #6556e7 73%, #a953c3 100%);
+  background-clip: text;
+  color: transparent;
   font-size: 60px;
   font-weight: 760;
   line-height: 1.08;
@@ -31,7 +64,7 @@
 .subtitle {
   max-width: 820px;
   margin: 28px 0 0;
-  color: #71727d;
+  color: #687083;
   font-size: 18px;
   line-height: 1.75;
 }
@@ -50,9 +83,13 @@
   align-items: center;
   width: 100%;
   min-height: 56px;
-  border: 1px solid #ececf4;
-  border-radius: 8px;
-  background: #f6f7fb;
+  border: 1px solid rgba(112, 124, 221, 0.2);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow:
+    0 16px 42px rgba(85, 97, 190, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(18px);
   padding: 0 13px 0 16px;
   text-align: left;
 }
@@ -62,7 +99,7 @@
 }
 
 .prompt {
-  color: #9a9ba8;
+  color: #696be8;
   font-family: var(--ifm-font-family-monospace);
   font-size: 15px;
   font-weight: 700;
@@ -107,33 +144,36 @@
 .copyButton::before {
   top: 8px;
   left: 11px;
-  background: #f6f7fb;
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .copyButton::after {
   top: 12px;
   left: 8px;
-  background: #f6f7fb;
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .copyButton:hover,
 .copyButtonCopied {
-  background: #d9fdfe;
+  background: linear-gradient(135deg, rgba(91, 180, 255, 0.18), rgba(145, 99, 241, 0.19));
 }
 
 .copyButtonCopied::before,
 .copyButtonCopied::after {
-  border-color: #0fb9bf;
+  border-color: #655fe7;
 }
 
 .demoShell {
   overflow: hidden;
   width: 100%;
   margin-top: 44px;
-  border: 1px solid #e3e4ee;
-  border-radius: 8px;
+  border: 1px solid rgba(119, 112, 225, 0.32);
+  border-radius: 20px;
   background: #101920;
-  box-shadow: 0 28px 80px rgba(32, 33, 42, 0.18);
+  box-shadow:
+    -34px 28px 90px rgba(72, 168, 255, 0.17),
+    38px 30px 100px rgba(166, 97, 236, 0.17),
+    0 26px 64px rgba(35, 42, 79, 0.2);
 }
 
 .demoToolbar {
@@ -511,7 +551,7 @@
 .rowsHeader h2,
 .ctaInner h2 {
   margin: 0;
-  color: #20212a;
+  color: #202432;
   font-size: 44px;
   line-height: 1.16;
   letter-spacing: 0;
@@ -519,18 +559,35 @@
 
 .featureRows {
   display: grid;
-  gap: 112px;
+  gap: 54px;
 }
 
 .featureRow {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(280px, 0.9fr) minmax(420px, 1.1fr);
   gap: 84px;
   align-items: center;
+  overflow: hidden;
+  min-height: 530px;
+  border: 1px solid rgba(111, 126, 213, 0.14);
+  border-radius: 30px;
+  background:
+    radial-gradient(circle at 82% 9%, rgba(83, 140, 255, 0.3), transparent 36%),
+    radial-gradient(circle at 96% 82%, rgba(210, 106, 230, 0.24), transparent 43%),
+    radial-gradient(circle at 52% 100%, rgba(137, 103, 245, 0.2), transparent 42%),
+    linear-gradient(128deg, rgba(244, 251, 255, 0.98), rgba(243, 242, 255, 0.96) 58%, rgba(252, 241, 252, 0.96));
+  box-shadow: 0 24px 70px rgba(70, 82, 155, 0.09);
+  padding: 48px;
 }
 
 .featureRowReverse {
   grid-template-columns: minmax(420px, 1.1fr) minmax(280px, 0.9fr);
+  background:
+    radial-gradient(circle at 8% 12%, rgba(114, 210, 248, 0.31), transparent 36%),
+    radial-gradient(circle at 21% 88%, rgba(100, 119, 246, 0.26), transparent 43%),
+    radial-gradient(circle at 89% 14%, rgba(219, 123, 226, 0.2), transparent 38%),
+    linear-gradient(232deg, rgba(250, 242, 253, 0.97), rgba(242, 244, 255, 0.96) 56%, rgba(239, 251, 255, 0.98));
 }
 
 .featureRowReverse .featureRowCopy {
@@ -544,12 +601,14 @@
 }
 
 .featureRowCopy {
+  position: relative;
+  z-index: 1;
   max-width: 560px;
 }
 
 .featureRow h3 {
   margin: 0;
-  color: #23242d;
+  color: #202432;
   font-size: 38px;
   line-height: 1.18;
   letter-spacing: 0;
@@ -558,7 +617,7 @@
 .featureRow p,
 .ctaInner p {
   margin: 24px 0 0;
-  color: #737684;
+  color: #687083;
   font-size: 18px;
   line-height: 1.72;
 }
@@ -566,7 +625,7 @@
 .rowCommandBar {
   margin-top: 34px;
   min-height: 72px;
-  border-color: #e1e4ee;
+  border-color: rgba(102, 111, 212, 0.2);
   padding-left: 20px;
 }
 
@@ -579,7 +638,16 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 48px 24px;
+  overflow: hidden;
+  border: 1px solid rgba(105, 116, 216, 0.16);
+  border-radius: 30px;
+  background:
+    radial-gradient(circle at 12% 8%, rgba(110, 211, 247, 0.34), transparent 34%),
+    radial-gradient(circle at 84% 16%, rgba(99, 117, 246, 0.27), transparent 36%),
+    radial-gradient(circle at 72% 112%, rgba(226, 116, 210, 0.25), transparent 42%),
+    linear-gradient(120deg, #f6fcff, #f3f2ff 54%, #fff5fc);
+  box-shadow: 0 24px 70px rgba(75, 86, 161, 0.1);
+  padding: 64px 24px;
   text-align: center;
 }
 
@@ -606,6 +674,8 @@
   .featureRowReverse {
     grid-template-columns: 1fr;
     gap: 36px;
+    min-height: auto;
+    padding: 36px;
   }
 
   .featureRowReverse .featureRowCopy,
@@ -672,7 +742,7 @@
   }
 
   .featureRows {
-    gap: 72px;
+    gap: 36px;
   }
 
   .featureRow h3 {
@@ -681,6 +751,16 @@
 
   .featureRow p {
     font-size: 16px;
+  }
+
+  .featureRow {
+    border-radius: 22px;
+    padding: 28px 20px;
+  }
+
+  .ctaInner {
+    border-radius: 22px;
+    padding: 48px 20px;
   }
 
 }

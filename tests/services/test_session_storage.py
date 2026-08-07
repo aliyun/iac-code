@@ -796,7 +796,7 @@ def test_ensure_v2_session_dir_marks_empty_precreated_directory(storage):
 
 def test_long_cwd_legacy_project_remains_readable_after_bounded_project_exists(tmp_path):
     cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
-    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+    current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
     legacy_project_dir.mkdir(parents=True)
     legacy_path = legacy_project_dir / "legacy-long.jsonl"
     legacy_path.write_text('{"role":"user","content":"old","cwd":"%s"}\n' % cwd, encoding="utf-8")
@@ -813,7 +813,7 @@ def test_delete_session_removes_all_long_project_aliases(tmp_path):
     cwd = "/" + "long-project/" * 24
     storage = SessionStorage(projects_dir=tmp_path)
     storage.append(cwd, "duplicate", Message(role="user", content="prompt"), git_branch=None)
-    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+    current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
     shutil.copytree(current_project_dir, legacy_project_dir)
 
     assert storage.delete_session(cwd, "duplicate") is True
@@ -938,7 +938,7 @@ def test_delete_session_ignores_reparse_point_project_alias(tmp_path, monkeypatc
 
 def test_long_cwd_legacy_directory_session_dir_not_shadowed_by_new_sidecar(tmp_path):
     cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
-    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+    current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
     current_sidecar_dir = current_project_dir / "legacy-dir"
     (current_sidecar_dir / "pipeline").mkdir(parents=True)
     (current_sidecar_dir / "pipeline" / "events.jsonl").write_text("", encoding="utf-8")
@@ -956,7 +956,7 @@ def test_long_cwd_legacy_directory_session_dir_not_shadowed_by_new_sidecar(tmp_p
 
 def test_long_cwd_legacy_sidecar_only_marked_before_bounded_project_shadow(tmp_path):
     cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
-    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+    current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
     legacy_session_dir = legacy_project_dir / "legacy-sidecar-only"
     (legacy_session_dir / "pipeline").mkdir(parents=True)
     (legacy_session_dir / "pipeline" / "events.jsonl").write_text("", encoding="utf-8")
@@ -971,7 +971,7 @@ def test_long_cwd_legacy_sidecar_only_marked_before_bounded_project_shadow(tmp_p
 
 def test_long_cwd_legacy_sidecar_state_wins_over_current_metadata_only_shadow(tmp_path):
     cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
-    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+    current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
     session_id = "legacy-sidecar-shadow"
     current_session_dir = current_project_dir / session_id
     legacy_session_dir = legacy_project_dir / session_id
@@ -991,7 +991,7 @@ def test_long_cwd_legacy_sidecar_state_wins_over_current_metadata_only_shadow(tm
 
 def test_long_cwd_legacy_sidecar_state_wins_over_empty_current_directory(tmp_path):
     cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
-    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+    current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
     session_id = "legacy-sidecar-empty-shadow"
     current_session_dir = current_project_dir / session_id
     legacy_session_dir = legacy_project_dir / session_id
@@ -1007,7 +1007,7 @@ def test_long_cwd_legacy_sidecar_state_wins_over_empty_current_directory(tmp_pat
 
 def test_new_session_dir_uses_bounded_project_even_when_legacy_long_project_exists(tmp_path):
     cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
-    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+    current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
     legacy_project_dir.mkdir(parents=True)
     storage = SessionStorage(projects_dir=tmp_path)
 
@@ -1019,7 +1019,7 @@ def test_new_session_dir_uses_bounded_project_even_when_legacy_long_project_exis
 
 def test_append_new_session_uses_bounded_project_even_when_legacy_long_project_exists(tmp_path):
     cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
-    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+    current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
     legacy_project_dir.mkdir(parents=True)
     storage = SessionStorage(projects_dir=tmp_path)
 
@@ -1049,7 +1049,7 @@ def test_metadata_only_shadow_does_not_hide_legacy_file_for_cross_project_lookup
 
 def test_cross_project_lookup_ignores_metadata_only_shadow_across_project_dir_candidates(storage):
     cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
-    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, storage._projects_dir)
+    current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, storage._projects_dir)
     legacy_project_dir.mkdir(parents=True)
     legacy_path = legacy_project_dir / "legacy-long-shadow.jsonl"
     legacy_path.write_text('{"role":"user","content":"legacy","cwd":"%s"}\n' % cwd, encoding="utf-8")
@@ -1069,7 +1069,7 @@ def test_cross_project_lookup_ignores_metadata_only_shadow_across_project_dir_ca
 
 def test_cross_project_lookup_ignores_metadata_only_shadow_with_stale_metadata_cwd(storage):
     cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
-    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, storage._projects_dir)
+    current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, storage._projects_dir)
     legacy_project_dir.mkdir(parents=True)
     legacy_path = legacy_project_dir / "legacy-long-stale-shadow.jsonl"
     legacy_path.write_text('{"role":"user","content":"legacy","cwd":"%s"}\n' % cwd, encoding="utf-8")
@@ -1113,7 +1113,7 @@ def test_latest_session_ignores_metadata_only_shadow_across_project_dir_candidat
     import os
 
     cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
-    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, storage._projects_dir)
+    current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, storage._projects_dir)
     legacy_project_dir.mkdir(parents=True)
     legacy_path = legacy_project_dir / "latest-long-shadow.jsonl"
     legacy_path.write_text('{"role":"user","content":"legacy","cwd":"%s"}\n' % cwd, encoding="utf-8")
@@ -1137,7 +1137,7 @@ def test_latest_session_ignores_metadata_only_shadow_with_stale_metadata_cwd(sto
     import os
 
     cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
-    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, storage._projects_dir)
+    current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, storage._projects_dir)
     legacy_project_dir.mkdir(parents=True)
     legacy_path = legacy_project_dir / "latest-long-stale-shadow.jsonl"
     legacy_path.write_text('{"role":"user","content":"legacy","cwd":"%s"}\n' % cwd, encoding="utf-8")
@@ -1310,7 +1310,7 @@ def test_write_refuses_symlinked_metadata_before_mutating(storage, tmp_path):
 
 def test_usage_load_reads_legacy_long_project_after_bounded_project_exists(tmp_path):
     cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
-    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+    current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
     usage_dir = legacy_project_dir / "sid"
     usage_dir.mkdir(parents=True)
     (usage_dir / "usage.jsonl").write_text(
@@ -1328,7 +1328,7 @@ def test_usage_load_reads_legacy_long_project_after_bounded_project_exists(tmp_p
 
 def test_usage_append_writes_existing_legacy_long_v2_session_dir_after_bounded_project_exists(tmp_path):
     cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
-    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+    current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
     session_dir = legacy_project_dir / "sid"
     session_dir.mkdir(parents=True)
     write_session_metadata(

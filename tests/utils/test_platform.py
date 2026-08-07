@@ -224,6 +224,61 @@ class TestKillProcessTree:
 
         proc.kill.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_windows_desktop_cleanup_survives_caller_cancellation(self, monkeypatch):
+        import asyncio
+
+        from iac_code.utils import platform
+
+        proc = MagicMock()
+        proc.pid = 12345
+        started = asyncio.Event()
+        release = asyncio.Event()
+        finished = asyncio.Event()
+
+        async def cleanup(receipt: int) -> bool:
+            assert receipt == 12345
+            started.set()
+            await release.wait()
+            finished.set()
+            return True
+
+        monkeypatch.setattr(platform.sys, "platform", "win32")
+        monkeypatch.setenv("IAC_CODE_DESKTOP_RUNTIME", "1")
+        monkeypatch.setattr(platform, "_submit_desktop_taskkill", lambda pid: pid)
+        monkeypatch.setattr(platform, "_desktop_taskkill_tree", cleanup)
+        task = asyncio.create_task(platform.kill_process_tree(proc))
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        release.set()
+        await asyncio.wait_for(finished.wait(), timeout=1)
+
+        proc.kill.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_windows_desktop_taskkill_swallows_python310_asyncio_timeout(self, monkeypatch):
+        from iac_code.utils import platform
+
+        class Python310AsyncioTimeoutError(Exception):
+            pass
+
+        process = MagicMock(returncode=None)
+        receipt = MagicMock()
+        receipt.wait.return_value = process
+
+        async def timeout(awaitable, *, timeout):
+            del timeout
+            awaitable.close()
+            raise Python310AsyncioTimeoutError
+
+        monkeypatch.setattr(platform.asyncio, "TimeoutError", Python310AsyncioTimeoutError)
+        monkeypatch.setattr(platform.asyncio, "wait_for", timeout)
+
+        assert await platform._desktop_taskkill_tree(receipt) is False
+        process.kill.assert_called_once()
+
     @pytest.mark.skipif(sys.platform == "win32", reason="os.killpg not available on Windows")
     @pytest.mark.asyncio
     async def test_unix_uses_killpg(self):

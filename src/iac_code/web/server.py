@@ -236,7 +236,7 @@ def protect_loopback_app(app: Any) -> Any:
     return _LoopbackRequestGuard(app)
 
 
-def _apply_persisted_telemetry_content_settings() -> None:
+def apply_persisted_telemetry_content_settings() -> None:
     """Apply the persisted telemetry content-sharing preference for the web process.
 
     Two decisions live here, kept separate on purpose:
@@ -254,6 +254,11 @@ def _apply_persisted_telemetry_content_settings() -> None:
 
     set_debug_content_capture_backdoor(False)
     set_content_capture_optin(bool(telemetry_settings().get("shareContent")))
+
+
+# Backwards-compatible private name for callers/tests written before Desktop
+# reused the same persisted Web preference at sidecar startup.
+_apply_persisted_telemetry_content_settings = apply_persisted_telemetry_content_settings
 
 
 def run_web_server(
@@ -283,7 +288,7 @@ def run_web_server(
 
     from iac_code.web.app import create_app
 
-    _apply_persisted_telemetry_content_settings()
+    apply_persisted_telemetry_content_settings()
 
     # 单用户本地进程:按持久化的 UI 语言重绑定进程级 gettext,使后端 _() 与前端 UI 语言一致。
     set_language(resolve_ui_language(get_ui_language()))

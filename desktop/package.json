@@ -1,0 +1,17 @@
+{
+  "name": "iac-code-desktop",
+  "private": true,
+  "version": "0.12.0",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev --features updater",
+    "build": "uv run --project .. --python 3.12 --group desktop python scripts/build_desktop.py",
+    "build:macos": "uv run --project .. --python 3.12 --group desktop python scripts/build_desktop.py --channel macos",
+    "build:windows": "uv run --project .. --python 3.12 --group desktop python scripts/build_desktop.py --channel windows",
+    "build:appimage": "uv run --project .. --python 3.12 --group desktop python scripts/build_desktop.py --channel appimage",
+    "build:deb": "uv run --project .. --python 3.12 --group desktop python scripts/build_desktop.py --channel deb"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.2"
+  }
+}

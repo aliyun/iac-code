@@ -4,7 +4,7 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: iac-code 0.11.4\n"
+"Project-Id-Version: iac-code 0.12.0\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-06-04 15:58+0800\n"
 "PO-Revision-Date: 2026-04-02 00:00+0000\n"
@@ -2318,27 +2318,27 @@ msgstr "sed 原地编辑需要确认"
 #: src/iac_code/i18n/__init__.py
 #, python-brace-format
 msgid "{n} day{s} ago"
-msgstr "{n} 天前"
+msgstr "{n} 天前{s:.0}"
 
 #: src/iac_code/i18n/__init__.py
 #, python-brace-format
 msgid "{n} hour{s} ago"
-msgstr "{n} 小时前"
+msgstr "{n} 小时前{s:.0}"
 
 #: src/iac_code/i18n/__init__.py
 #, python-brace-format
 msgid "{n} message{s}"
-msgstr "{n} 条消息"
+msgstr "{n} 条消息{s:.0}"
 
 #: src/iac_code/i18n/__init__.py
 #, python-brace-format
 msgid "{n} minute{s} ago"
-msgstr "{n} 分钟前"
+msgstr "{n} 分钟前{s:.0}"
 
 #: src/iac_code/i18n/__init__.py
 #, python-brace-format
 msgid "{n} more line{s}"
-msgstr "还有 {n} 行"
+msgstr "还有 {n} 行{s:.0}"
 
 #: src/iac_code/mcp/cli.py
 msgid "Manage MCP servers."
@@ -10478,6 +10478,10 @@ msgid "refusing to open non-regular file: {path}"
 msgstr "拒绝打开非常规文件：{path}"
 
 #: src/iac_code/web/app.py
+msgid "Desktop runtime is closing"
+msgstr "桌面运行时正在关闭"
+
+#: src/iac_code/web/app.py
 msgid "This session was created outside the web entry and is read-only."
 msgstr "此会话由非 web 入口产生,仅供只读查看。"
 
@@ -10562,6 +10566,14 @@ msgstr "更新已在进行中。"
 #, python-brace-format
 msgid "The update command exited with code {}."
 msgstr "更新命令以退出码 {} 结束。"
+
+#: src/iac_code/web/app.py
+msgid "A project directory is required."
+msgstr "需要项目目录。"
+
+#: src/iac_code/web/app.py
+msgid "The selected project directory is invalid."
+msgstr "所选项目目录无效。"
 
 #: src/iac_code/web/app.py src/iac_code/web/session_manager.py
 #: src/iac_code/web/settings.py

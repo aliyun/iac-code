@@ -754,7 +754,7 @@ def test_project_metadata_reads_legacy_long_path_candidate_and_migrates_on_write
     projects_dir = tmp_path / "projects"
     projects_dir.mkdir()
     cwd = "C:\\{}".format("long-project-" * 18)
-    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, projects_dir)
+    current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, projects_dir)
     current_project_dir.mkdir()
     legacy_project_dir.mkdir()
     (legacy_project_dir / "web-project.json").write_text(

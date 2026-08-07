@@ -266,7 +266,7 @@ def test_runner_restores_long_cwd_legacy_sidecar_despite_current_metadata_shadow
 
     cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
     projects_dir = tmp_path / "projects"
-    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, projects_dir)
+    current_project_dir, *_, legacy_project_dir = project_paths.project_dir_candidates(cwd, projects_dir)
     session_id = "sess123"
     write_session_metadata(
         current_project_dir / session_id,

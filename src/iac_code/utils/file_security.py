@@ -8,6 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from iac_code.desktop.external_env import run_external, submit_windows_acl, wait_windows_acl
 from iac_code.utils.state_io import atomic_write_text as durable_atomic_write_text
 from iac_code.utils.state_io import safe_replace as durable_safe_replace
 
@@ -55,9 +56,13 @@ def _restrict_windows(path: Path, *, directory: bool) -> None:
     username = os.environ.get("USERNAME", "")
     if not username:
         return
-    perm = f'"{username}":(F)' if directory else f'"{username}":(R,W)'
     try:
-        subprocess.run(
+        receipt = submit_windows_acl(path, directory=directory, username=username)
+        if receipt is not None:
+            wait_windows_acl(receipt)
+            return
+        perm = f'"{username}":(F)' if directory else f'"{username}":(R,W)'
+        run_external(
             ["icacls", str(path), "/inheritance:r", "/grant:r", perm],
             capture_output=True,
             check=False,

@@ -4,7 +4,7 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: iac-code 0.11.4\n"
+"Project-Id-Version: iac-code 0.12.0\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-06-04 15:58+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
@@ -8458,7 +8458,11 @@ msgid ""
 "\n"
 "---\n"
 "ROS local preflight diagnostics:\n"
-msgstr "--- ROS lokale Preflight-Diagnose:"
+msgstr ""
+"\n"
+"\n"
+"---\n"
+"ROS lokale Preflight-Diagnose:\n"
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/parser.py
 #, python-brace-format
@@ -11514,6 +11518,10 @@ msgid "refusing to open non-regular file: {path}"
 msgstr "Öffnen einer nicht regulären Datei verweigert: {path}"
 
 #: src/iac_code/web/app.py
+msgid "Desktop runtime is closing"
+msgstr "Die Desktop-Laufzeit wird beendet"
+
+#: src/iac_code/web/app.py
 msgid "This session was created outside the web entry and is read-only."
 msgstr ""
 "Diese Sitzung wurde außerhalb des Web-Einstiegs erstellt und ist "
@@ -11600,6 +11608,14 @@ msgstr "Es läuft bereits ein Update."
 #, python-brace-format
 msgid "The update command exited with code {}."
 msgstr "Der Update-Befehl wurde mit Code {} beendet."
+
+#: src/iac_code/web/app.py
+msgid "A project directory is required."
+msgstr "Ein Projektverzeichnis ist erforderlich."
+
+#: src/iac_code/web/app.py
+msgid "The selected project directory is invalid."
+msgstr "Das ausgewählte Projektverzeichnis ist ungültig."
 
 #: src/iac_code/web/app.py src/iac_code/web/session_manager.py
 #: src/iac_code/web/settings.py

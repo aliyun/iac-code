@@ -10,11 +10,14 @@ and exposes a read-only detection helper for the settings card.
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import AsyncIterator, Mapping
+from contextlib import ExitStack
 from typing import Any
 
 import yaml
 
+from iac_code.desktop.runtime import DesktopInstallContext
 from iac_code.pipeline import discover_pipelines
 from iac_code.pipeline.config import get_pipeline_name
 from iac_code.pipeline.engine.loader import _resolve_feature_flags
@@ -115,12 +118,19 @@ def _choose_first_installer(_name: str, installers: list[InstallerSpec]) -> str 
     return installers[0].id if installers else None
 
 
-async def stream_install_review_step_prerequisite() -> AsyncIterator[dict[str, Any]]:
+async def stream_install_review_step_prerequisite(
+    desktop_install_context: DesktopInstallContext | None = None,
+    *,
+    force_repair: bool = False,
+    desktop_cancel_event: threading.Event | None = None,
+) -> AsyncIterator[dict[str, Any]]:
     """Run the blocking installer in a worker thread, streaming progress events.
 
     Yields structured progress dicts as they arrive, then a terminal
     ``{"phase": "result", "status": "ok"|"error", "satisfied": bool, ...}`` event.
     """
+    if force_repair and desktop_install_context is None:
+        raise ValueError("force repair is available only in the Desktop runtime")
     async with _install_lock:
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[Any] = asyncio.Queue()
@@ -131,23 +141,106 @@ async def stream_install_review_step_prerequisite() -> AsyncIterator[dict[str, A
 
         def run_prepare() -> dict[str, Any]:
             prerequisites, flags = _review_config()
-            resolution = prepare_prerequisites(
-                prerequisites,
-                feature_flags=flags,
-                surface="web",
-                choose_installer=_choose_first_installer,
-                progress_handler=progress_handler,
-            )
-            decision = resolution.decisions.get(_REVIEW_PREREQUISITE_NAME)
-            status = decision.status if decision is not None else "unknown"
-            satisfied = status == "available"
-            return {
-                "phase": "result",
-                "status": "ok" if satisfied else "error",
-                "satisfied": satisfied,
-                "prerequisite_status": status,
-                "message": (decision.message if decision is not None else ""),
-            }
+            with ExitStack() as stack:
+                transaction = None
+                repair_snapshot = None
+                if desktop_install_context is not None:
+                    from iac_code.desktop.download_journal import (
+                        DesktopDownloadTransaction,
+                        DesktopPrerequisiteRepairLease,
+                        clear_repaired_records,
+                        has_recovery_required,
+                        infraguard_recovery_recipe,
+                        snapshot_repair_records,
+                    )
+
+                    raw = prerequisites.get(_REVIEW_PREREQUISITE_NAME)
+                    if not isinstance(raw, Mapping):
+                        raise ValueError("bundled infraguard prerequisite is missing")
+                    recipe = infraguard_recovery_recipe(raw)
+                    if force_repair:
+                        stack.enter_context(DesktopPrerequisiteRepairLease(desktop_install_context, recipe.final_path))
+                        repair_snapshot = snapshot_repair_records(desktop_install_context)
+                    transaction = stack.enter_context(
+                        DesktopDownloadTransaction(
+                            desktop_install_context,
+                            recipe.final_path,
+                            recipe=recipe,
+                            force_repair=force_repair,
+                            lease_already_held=force_repair,
+                        )
+                    )
+                    if not force_repair and has_recovery_required(
+                        desktop_install_context,
+                        prerequisite=_REVIEW_PREREQUISITE_NAME,
+                    ):
+                        return {
+                            "phase": "result",
+                            "status": "error",
+                            "satisfied": False,
+                            "prerequisite_status": "recovery_required",
+                            "message": "Desktop prerequisite repair is required",
+                        }
+                run_command = None
+                if desktop_cancel_event is not None:
+                    from iac_code.pipeline.engine.prerequisites import _default_run_command
+
+                    def run_command(
+                        command: list[str],
+                        env: Mapping[str, str] | None = None,
+                        on_output=None,
+                        timeout_seconds: float | None = None,
+                    ):
+                        return _default_run_command(
+                            command,
+                            env,
+                            on_output,
+                            timeout_seconds,
+                            desktop_cancel_event,
+                        )
+
+                desktop_kwargs: dict[str, Any] = {}
+                if desktop_cancel_event is not None:
+                    desktop_kwargs = {
+                        "run_command": run_command,
+                        "desktop_cancel_event": desktop_cancel_event,
+                    }
+                if transaction is None:
+                    resolution = prepare_prerequisites(
+                        prerequisites,
+                        feature_flags=flags,
+                        surface="web",
+                        choose_installer=_choose_first_installer,
+                        progress_handler=progress_handler,
+                        **desktop_kwargs,
+                    )
+                else:
+                    resolution = prepare_prerequisites(
+                        prerequisites,
+                        feature_flags=flags,
+                        surface="web",
+                        choose_installer=_choose_first_installer,
+                        progress_handler=progress_handler,
+                        desktop_transaction=transaction,
+                        force_repair=force_repair,
+                        **desktop_kwargs,
+                    )
+                decision = resolution.decisions.get(_REVIEW_PREREQUISITE_NAME)
+                status = decision.status if decision is not None else "unknown"
+                satisfied = status == "available"
+                if satisfied and repair_snapshot is not None and desktop_install_context is not None:
+                    clear_repaired_records(
+                        desktop_install_context,
+                        repair_snapshot,
+                        locks_already_held=True,
+                    )
+                return {
+                    "phase": "result",
+                    "status": "ok" if satisfied else "error",
+                    "satisfied": satisfied,
+                    "prerequisite_status": status,
+                    "message": (decision.message if decision is not None else ""),
+                }
 
         future = loop.run_in_executor(None, run_prepare)
         future.add_done_callback(lambda _f: loop.call_soon_threadsafe(queue.put_nowait, sentinel))

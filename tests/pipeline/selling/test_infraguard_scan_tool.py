@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import json
@@ -104,6 +105,20 @@ def _terminate_test_process(pid: int) -> None:
         os.kill(pid, signal.SIGKILL)
     except ProcessLookupError:
         return
+
+
+@pytest.mark.asyncio
+async def test_windows_process_tree_cleanup_swallows_asyncio_timeout(monkeypatch) -> None:
+    class SlowTaskkill:
+        async def wait(self):
+            raise asyncio.TimeoutError
+
+    async def fake_create_subprocess_exec(*_command, **_kwargs):
+        return SlowTaskkill()
+
+    monkeypatch.setattr(scan_module, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    await scan_module._terminate_windows_process_tree(1234, force=True)
 
 
 class TestInfraGuardScanToolRendering:

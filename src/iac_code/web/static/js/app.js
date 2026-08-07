@@ -1,15 +1,164 @@
-import * as api from "./api.js?v=web-repl-ui-309";
+import * as api from "./api.js?v=web-repl-ui-310";
 import { createComposerController } from "./components/composer.js?v=session-model-v19";
 import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v5";
 import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v7";
 import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v23";
-import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v55";
-import { createOutputController } from "./components/output_panel.js?v=output-panel-v22";
+import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v56";
+import { createOutputController } from "./components/output_panel.js?v=output-panel-v23";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
 import { reduceEvent } from "./events.js?v=web-repl-ui-319";
 import { applyDomI18n, t } from "./i18n.js?v=web-repl-ui-277";
 
 const root = document.getElementById("iac-code-web-root");
+const DESKTOP_RUNTIME =
+  typeof window !== "undefined" && window.__IAC_DESKTOP__?.runtime === "desktop"
+    ? window.__IAC_DESKTOP__
+    : null;
+const DESKTOP_GIT_BASH_DEFER_KEY = "iac-code.desktop.git-bash.defer-session";
+
+async function invokeDesktop(command, payload = {}) {
+  const invoke = typeof window !== "undefined" ? window.__TAURI__?.core?.invoke : null;
+  if (!DESKTOP_RUNTIME || typeof invoke !== "function") {
+    throw new Error(t("Desktop native bridge is unavailable."));
+  }
+  return invoke(command, payload);
+}
+
+export function desktopGitBashNeedsGuide(payload = {}) {
+  return text(payload?.status).toLowerCase() === "unavailable";
+}
+
+async function requestDesktopGitBash(method = "GET") {
+  const endpoint = method === "POST" ? "/api/desktop/git-bash/install" : "/api/desktop/git-bash";
+  const response = await fetch(endpoint, { method, cache: "no-store" });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || payload?.reason || `HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+function desktopGitBashDeferred() {
+  try {
+    return window.sessionStorage.getItem(DESKTOP_GIT_BASH_DEFER_KEY) === "1";
+  } catch (_error) {
+    return false;
+  }
+}
+
+function deferDesktopGitBashGuide() {
+  try {
+    window.sessionStorage.setItem(DESKTOP_GIT_BASH_DEFER_KEY, "1");
+  } catch (_error) {
+    /* A disabled storage backend should not prevent the user from continuing. */
+  }
+}
+
+function makeDesktopGitBashButton(label, className = "") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `desktop-git-bash-button ${className}`.trim();
+  button.textContent = label;
+  return button;
+}
+
+function openDesktopGitBashGuide() {
+  if (document.querySelector("[data-desktop-git-bash-guide]")) {
+    return;
+  }
+  const overlay = document.createElement("div");
+  overlay.className = "desktop-git-bash-overlay";
+  overlay.dataset.desktopGitBashGuide = "true";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-labelledby", "desktop-git-bash-title");
+
+  const dialog = document.createElement("section");
+  dialog.className = "desktop-git-bash-dialog";
+  const title = document.createElement("h2");
+  title.id = "desktop-git-bash-title";
+  title.textContent = t("Git Bash is required");
+  const description = document.createElement("p");
+  description.textContent = t(
+    "iac-code uses Git Bash to run commands on Windows. Install it now, or continue and install it later.",
+  );
+  const status = document.createElement("p");
+  status.className = "desktop-git-bash-status";
+  status.setAttribute("aria-live", "polite");
+  const actions = document.createElement("div");
+  actions.className = "desktop-git-bash-actions";
+  const later = makeDesktopGitBashButton(t("Later"));
+  const refresh = makeDesktopGitBashButton(t("Refresh"));
+  const install = makeDesktopGitBashButton(t("Install Git Bash"), "is-primary");
+  actions.append(later, refresh, install);
+  dialog.append(title, description, status, actions);
+  overlay.append(dialog);
+  document.body.append(overlay);
+
+  const setBusy = (busy) => {
+    later.disabled = busy;
+    refresh.disabled = busy;
+    install.disabled = busy;
+  };
+  const finishIfAvailable = (payload) => {
+    if (!desktopGitBashNeedsGuide(payload)) {
+      status.textContent = t("Git Bash is ready.");
+      install.hidden = true;
+      refresh.hidden = true;
+      later.textContent = t("Close");
+      later.disabled = false;
+      return true;
+    }
+    return false;
+  };
+
+  later.addEventListener("click", () => {
+    if (!install.hidden) {
+      deferDesktopGitBashGuide();
+    }
+    overlay.remove();
+  });
+  refresh.addEventListener("click", async () => {
+    setBusy(true);
+    status.textContent = t("Loading…");
+    try {
+      const payload = await requestDesktopGitBash();
+      if (!finishIfAvailable(payload)) {
+        status.textContent = t("Git Bash is still unavailable.");
+      }
+    } catch (error) {
+      status.textContent = t("Could not check Git Bash. Try again.");
+    } finally {
+      if (!install.hidden) {
+        setBusy(false);
+      }
+    }
+  });
+  install.addEventListener("click", async () => {
+    setBusy(true);
+    status.textContent = t("Windows may request administrator approval. Keep iac-code open until installation finishes.");
+    try {
+      finishIfAvailable(await requestDesktopGitBash("POST"));
+    } catch (error) {
+      status.textContent = t("Git Bash installation failed. Try again or open diagnostics.");
+      setBusy(false);
+    }
+  });
+  install.focus();
+}
+
+export async function checkDesktopGitBashPrerequisite() {
+  if (!DESKTOP_RUNTIME || desktopGitBashDeferred()) {
+    return;
+  }
+  try {
+    if (desktopGitBashNeedsGuide(await requestDesktopGitBash())) {
+      openDesktopGitBashGuide();
+    }
+  } catch (_error) {
+    // A prerequisite probe must never prevent the Desktop shell from starting.
+  }
+}
 const COMMAND_PALETTE_ITEMS = [
   { id: "new-thread", label: t("New chat"), detail: t("Start a new working conversation.") },
   // 「设置」拆成三条独立命令,分别直达常规/模型/云凭证配置页(对应 workspace tab id
@@ -1177,6 +1326,9 @@ function draftDefaultProjectKey(options = {}) {
   if (state.newSessionDraft?.active) {
     return text(state.newSessionDraft.cwd);
   }
+  if (DESKTOP_RUNTIME?.defaultProjectCwd) {
+    return text(DESKTOP_RUNTIME.defaultProjectCwd);
+  }
   return text(state.currentSession?.cwd || projectKeyFromGroup((state.projectGroups || [])[0]) || "");
 }
 
@@ -1196,6 +1348,19 @@ export function makeNewSessionDraft(options = {}) {
       options.pipelineName || state.newSessionDraft?.pipelineName || SESSION_DEFAULTS.pipelineName,
     ),
   };
+}
+
+async function selectDesktopProject() {
+  if (!DESKTOP_RUNTIME?.capabilities?.nativeProjectPicker) {
+    return null;
+  }
+  const selection = await invokeDesktop("select_project_directory");
+  const path = text(selection?.path).trim();
+  if (path) {
+    DESKTOP_RUNTIME.defaultProjectCwd = path;
+    setDraftSessionPatch({ cwd: path });
+  }
+  return path || null;
 }
 
 export function newSessionCreatePayload(draft = {}) {
@@ -4129,7 +4294,7 @@ function renderDraftProjectMenu(draft) {
   });
   const customPath = draftProjectQuery.trim();
   const customPathLooksUsable = Boolean(customPath) && (customPath.startsWith("/") || customPath.startsWith("~") || customPath.includes("\\"));
-  if (customPathLooksUsable) {
+  if (!DESKTOP_RUNTIME && customPathLooksUsable) {
     list.append(
       makeDraftMenuItem({
         iconClass: "is-project",
@@ -4193,10 +4358,14 @@ function renderDraftProjectMenu(draft) {
       label: t("No project"),
       active: !draft.cwd,
       onClick: () => {
-        draftProjectMenuOpen = false;
-        draftProjectNewMenuOpen = false;
-        draftProjectQuery = "";
-        setDraftSessionPatch({ cwd: "" });
+        if (DESKTOP_RUNTIME) {
+          void selectDesktopProject();
+        } else {
+          draftProjectMenuOpen = false;
+          draftProjectNewMenuOpen = false;
+          draftProjectQuery = "";
+          setDraftSessionPatch({ cwd: "" });
+        }
       },
     }),
   );
@@ -4219,19 +4388,27 @@ function renderDraftProjectNewMenu(draft) {
       iconClass: "is-new-project",
       label: t("New blank project"),
       onClick: () => {
-        draftProjectMenuOpen = false;
-        draftProjectNewMenuOpen = false;
-        setDraftSessionPatch({ cwd: "" });
+        if (DESKTOP_RUNTIME) {
+          void selectDesktopProject();
+        } else {
+          draftProjectMenuOpen = false;
+          draftProjectNewMenuOpen = false;
+          setDraftSessionPatch({ cwd: "" });
+        }
       },
     }),
     makeDraftMenuItem({
       iconClass: "is-folder",
       label: t("Use existing folder"),
       onClick: () => {
-        draftProjectNewMenuOpen = false;
-        draftProjectQuery = "/";
-        renderDraftSessionControls(state);
-        byShell("draft-project-menu")?.querySelector?.(".draft-session-menu-search")?.focus?.();
+        if (DESKTOP_RUNTIME) {
+          void selectDesktopProject();
+        } else {
+          draftProjectNewMenuOpen = false;
+          draftProjectQuery = "/";
+          renderDraftSessionControls(state);
+          byShell("draft-project-menu")?.querySelector?.(".draft-session-menu-search")?.focus?.();
+        }
       },
     }),
   );
@@ -4489,6 +4666,7 @@ function render(state) {
 
 let state = emptyState();
 let streamHandle = null;
+let desktopStreamClosed = false;
 // 手动 /compact 成功后 4826 会重载会话并重连 SSE 以拉回持久化的压缩分隔条。但 context_id 非空的
 // 会话(如流水线→normal 交接)重连时会从缓冲区底重放整段事件(见 compute_replay_sequence 的
 // is_pipeline 分支),包含那条 compaction.finished(success)——若每次重放都重载,就成了
@@ -5099,6 +5277,12 @@ async function loadSession(sessionId, options = {}) {
 }
 
 async function handleStreamEvent(event, generation = sessionLoadGeneration) {
+  if (event.type === "desktop-closing" && DESKTOP_RUNTIME) {
+    desktopStreamClosed = true;
+    streamHandle?.close();
+    streamHandle = null;
+    return;
+  }
   if (!isCurrentSessionEvent(event, activeSessionIdentifiers(), generation, sessionLoadGeneration)) {
     return;
   }
@@ -5196,7 +5380,7 @@ async function handleStreamEvent(event, generation = sessionLoadGeneration) {
 }
 
 function connectCurrentStream(generation = sessionLoadGeneration) {
-  if (!state.currentSessionId) {
+  if (desktopStreamClosed || !state.currentSessionId) {
     return;
   }
   streamHandle?.close();
@@ -5594,7 +5778,9 @@ function setupSidebarResize() {
 async function checkForUpdateBanner() {
   let status;
   try {
-    status = await api.getUpdateStatus();
+    status = DESKTOP_RUNTIME?.capabilities?.nativeUpdater
+      ? await invokeDesktop("check_update")
+      : await api.getUpdateStatus();
   } catch (_error) {
     return; // 检查失败不打扰用户
   }
@@ -5651,10 +5837,18 @@ async function checkForUpdateBanner() {
   // 不再提醒此版本:持久 suppress;同时置会话消抹兜底,避免后端状态未及时刷新时轮询重弹。
   skipBtn.addEventListener("click", async () => {
     updateBannerDismissedVersion = status.latestVersion || null;
-    try {
-      await api.dismissUpdate();
-    } catch (_error) {
-      // 忽略:移除 banner 优先
+    if (DESKTOP_RUNTIME?.capabilities?.nativeUpdater && status.latestVersion) {
+      try {
+        await invokeDesktop("dismiss_update", { version: status.latestVersion });
+      } catch (_error) {
+        // 忽略:移除 banner 优先
+      }
+    } else if (!DESKTOP_RUNTIME) {
+      try {
+        await api.dismissUpdate();
+      } catch (_error) {
+        // 忽略:移除 banner 优先
+      }
     }
     banner.remove();
   });
@@ -5748,9 +5942,18 @@ async function checkForUpdateBanner() {
     applySpinner.setAttribute("aria-hidden", "true");
     actions.prepend(applySpinner);
     try {
+      if (DESKTOP_RUNTIME?.capabilities?.nativeUpdater) {
+        msg.textContent = t("Updating…");
+        await invokeDesktop("download_update");
+        msg.textContent = t("Update complete. Restarting…");
+        await invokeDesktop("install_update");
+        return;
+      }
       await api.applyUpdate();
     } catch (error) {
-      msg.textContent = t("Failed to start update: {error}", { error: error instanceof Error ? error.message : String(error) });
+      msg.textContent = DESKTOP_RUNTIME
+        ? t("Failed to start the update. Open diagnostics for details.")
+        : t("Failed to start update: {error}", { error: error instanceof Error ? error.message : String(error) });
       msg.classList.add("is-error");
       applyBtn.disabled = false;
       applyBtn.textContent = t("Retry");
@@ -5857,11 +6060,17 @@ async function start() {
       pipelineOptions: PIPELINE_OPTIONS,
       // 设置面板保存新会话默认后同步前端内存 + 当前草稿,使返回后新建会话立即生效、无需刷新页面。
       onSessionDefaultsSaved: applySessionDefaults,
+      desktopRuntime: Boolean(DESKTOP_RUNTIME),
+      confirmSecretReveal: DESKTOP_RUNTIME
+        ? (payload) => invokeDesktop("confirm_secret_reveal", payload)
+        : null,
+      restartService: DESKTOP_RUNTIME ? () => invokeDesktop("restart_sidecar") : null,
     },
   );
   outputController = createOutputController({
     getSessionId: () => state.currentSessionId,
     api,
+    openExternal: DESKTOP_RUNTIME ? (url) => invokeDesktop("open_external_url", { url }) : null,
     // 架构图行/预览头的优化三态(待优化/优化中/已完成),按当前会话事件态计算。
     getDiagramState: (item) => diagramOptimizationState(item, state),
     // 普通对话 ros_stack 创建期间的 live「创建中」栈,由 output_panel 与服务端权威栈合并去重后渲染。
@@ -6012,11 +6221,16 @@ async function start() {
   void applyDeveloperHighlightFromSettings();
   // 打开 Web 页面时默认进入新会话界面，而非自动选中最近的已有会话。
   startNewSessionDraft();
+  // Windows Desktop can open without Git Bash, but command execution needs it.
+  // Probe after the shell is usable and let the user explicitly install or defer.
+  void checkDesktopGitBashPrerequisite();
   // 定时后台刷新侧边栏,让其它会话的运行转圈与相对时间保持新鲜。
   startSessionsAutoRefresh();
   // 顶部更新提醒(fire-and-forget,检查失败静默);随后周期轮询,让运行中发布的新版自动弹出。
-  void checkForUpdateBanner();
-  startUpdateAutoCheck();
+  if (!DESKTOP_RUNTIME || DESKTOP_RUNTIME.capabilities?.nativeUpdater) {
+    void checkForUpdateBanner();
+    startUpdateAutoCheck();
+  }
 }
 
 async function applyDeveloperHighlightFromSettings() {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -95,6 +96,36 @@ def test_windows_icacls_failure_silently_ignored(tmp_path):
         patch("subprocess.run", side_effect=OSError("not found")),
     ):
         restrict_file_permissions(f, directory=False)
+
+
+def test_windows_desktop_acl_does_not_block_event_loop(monkeypatch, tmp_path):
+    from iac_code.utils import file_security
+
+    path = tmp_path / "settings.yml"
+    path.write_text("model: test\n", encoding="utf-8")
+
+    class Receipt:
+        def wait(self) -> None:
+            raise AssertionError("the Desktop event loop must not wait for icacls")
+
+    submitted = []
+    monkeypatch.setattr(file_security, "_IS_WINDOWS", True)
+    monkeypatch.setenv("USERNAME", "desktop-user")
+    monkeypatch.setattr(
+        file_security,
+        "submit_windows_acl",
+        lambda submitted_path, *, directory, username: (
+            submitted.append((submitted_path, directory, username)) or Receipt()
+        ),
+    )
+
+    async def exercise() -> None:
+        file_security.restrict_file_permissions(path, directory=False)
+        await asyncio.sleep(0)
+
+    asyncio.run(exercise())
+
+    assert submitted == [(path, False, "desktop-user")]
 
 
 def test_unix_chmod_failure_silently_ignored(tmp_path):

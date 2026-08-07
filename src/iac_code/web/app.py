@@ -14,6 +14,7 @@ import time
 import uuid
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import datetime, timezone
 from functools import partial
 from html import escape
@@ -21,6 +22,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from iac_code import __version__ as _iac_version
+from iac_code.desktop.runtime import (
+    DesktopInstallContext,
+    DesktopRuntimeConfig,
+    DistributionChannel,
+    UpdateMode,
+)
 from iac_code.i18n import _, load_webui_catalog, resolve_ui_language
 from iac_code.services.update_checker import (
     get_pending_update,
@@ -105,6 +112,11 @@ def create_app(
     pipeline_action_runner_factory: WebPipelineActionRunnerFactory | None = None,
     expose_local_paths: bool = False,
     token_mode: bool = False,
+    desktop_runtime: bool = False,
+    default_project_cwd: Path | str | None = None,
+    distribution_channel: str | None = None,
+    update_mode: str | None = None,
+    desktop_install_context: DesktopInstallContext | None = None,
 ) -> Any:
     """Create the loopback-only Web workbench without generic user-data redaction.
 
@@ -112,6 +124,22 @@ def create_app(
     local Web sessions now use the same no-redaction policy.
     """
     del expose_local_paths
+    desktop_config: DesktopRuntimeConfig | None = None
+    if desktop_runtime:
+        if default_project_cwd is None:
+            raise ValueError("default_project_cwd is required for Desktop runtime")
+        if distribution_channel is None or update_mode is None or desktop_install_context is None:
+            raise ValueError("Desktop distribution and install context are required")
+        desktop_config = DesktopRuntimeConfig(
+            default_project_cwd=Path(default_project_cwd).expanduser().resolve(strict=False),
+            distribution_channel=cast(DistributionChannel, distribution_channel),
+            update_mode=cast(UpdateMode, update_mode),
+            install_context=desktop_install_context,
+        )
+    elif any(
+        value is not None for value in (default_project_cwd, distribution_channel, update_mode, desktop_install_context)
+    ):
+        raise ValueError("Desktop-only create_app arguments require desktop_runtime=True")
     try:
         from starlette.applications import Starlette
         from starlette.concurrency import run_in_threadpool
@@ -225,11 +253,36 @@ def create_app(
     from iac_code.web.shell import WebShellEscapeRunner
     from iac_code.web.skills import save_disabled_payload, skills_payload
 
-    manager: WebSessionManager = session_manager or WebSessionManager()
+    desktop_state_transaction_lock = asyncio.Lock() if desktop_runtime else None
+
+    async def state_transaction(function: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        """Keep Desktop ACL-before-write transactions off the Web event loop."""
+        if desktop_runtime:
+            assert desktop_state_transaction_lock is not None
+            async with desktop_state_transaction_lock:
+                return await asyncio.to_thread(function, *args, **kwargs)
+        return function(*args, **kwargs)
+
+    manager: WebSessionManager = session_manager or WebSessionManager(
+        cwd=desktop_config.default_project_cwd if desktop_config is not None else None
+    )
+    desktop_controller = None
+    if desktop_config is not None:
+        from iac_code.desktop.controller import DesktopRuntimeController
+
+        manager.cwd = desktop_config.default_project_cwd
+        desktop_controller = DesktopRuntimeController(manager, desktop_config.default_project_cwd)
+    desktop_runtime_lifecycle = desktop_controller.runtime_lifecycle if desktop_controller is not None else None
     from iac_code.web.diagram_optimizer import DiagramOptimizationCoordinator
 
     diagram_optimization_coordinator = DiagramOptimizationCoordinator()
-    make_runtime: WebRuntimeFactory = runtime_factory or (lambda session: WebSessionRuntime(session, manager=manager))
+    make_runtime: WebRuntimeFactory = runtime_factory or (
+        lambda session: WebSessionRuntime(
+            session,
+            manager=manager,
+            lifecycle_owner=desktop_runtime_lifecycle,
+        )
+    )
     make_shell_runner: WebShellRunnerFactory = shell_runner_factory or (lambda: WebShellEscapeRunner(manager))
     make_pipeline_action_runner: WebPipelineActionRunnerFactory = (
         pipeline_action_runner_factory or create_pipeline_action_runner
@@ -244,6 +297,15 @@ def create_app(
     # draining) can bail out instead of resurrecting turns during teardown.
     # Single-key dict avoids threading ``nonlocal`` through nested closures.
     shutdown_state = {"initiated": False}
+
+    def desktop_submission_blocked() -> bool:
+        return desktop_controller is not None and not desktop_controller.accepts_external_submission()
+
+    def desktop_closing_response() -> JSONResponse:
+        return JSONResponse(
+            {"accepted": False, "reason": _("Desktop runtime is closing")},
+            status_code=409,
+        )
 
     def request_task_cancellation(
         task: asyncio.Future[Any],
@@ -650,13 +712,20 @@ def create_app(
         runtime = None
         if session is not None:
             try:
-                runtime = await create_session_agent_runtime_in_thread(session, manager)
+                runtime = await create_session_agent_runtime_in_thread(
+                    session,
+                    manager,
+                    lifecycle_owner=desktop_runtime_lifecycle,
+                )
                 registry = getattr(runtime, "command_registry", None) or registry
                 mcp_status = runtime_mcp_status(runtime)
             except Exception:
                 logger.debug("Dynamic Web command discovery is unavailable")
             finally:
-                await close_agent_runtime(runtime)
+                await close_agent_runtime(
+                    runtime,
+                    lifecycle_owner=desktop_runtime_lifecycle,
+                )
 
         expires_at = time.monotonic() + dynamic_suggestion_cache_ttl_seconds
         dynamic_suggestion_cache[cache_key] = (expires_at, registry, mcp_status)
@@ -677,12 +746,20 @@ def create_app(
 
         task = dynamic_suggestion_tasks.get(cache_key)
         if task is None:
+            if desktop_submission_blocked():
+                if cached is not None:
+                    return cached[1], cached[2]
+                return await run_in_threadpool(command_registry_for_cwd, cwd), None
             task = asyncio.create_task(build_dynamic_suggestion_snapshot(session, cwd, cache_key))
             dynamic_suggestion_tasks[cache_key] = task
+            if desktop_controller is not None:
+                desktop_controller.dynamic_suggestions.add(task)
 
             def discard_finished(finished: asyncio.Task[Any]) -> None:
                 if dynamic_suggestion_tasks.get(cache_key) is finished:
                     dynamic_suggestion_tasks.pop(cache_key, None)
+                if desktop_controller is not None:
+                    desktop_controller.dynamic_suggestions.discard(finished)
 
             task.add_done_callback(discard_finished)
 
@@ -718,7 +795,11 @@ def create_app(
     ) -> tuple[PromptCommand, str, Any] | None:
         """Resolve one AgentFactory-provided MCP prompt without leaking its runtime."""
         try:
-            runtime = await create_session_agent_runtime_in_thread(session, manager)
+            runtime = await create_session_agent_runtime_in_thread(
+                session,
+                manager,
+                lifecycle_owner=desktop_runtime_lifecycle,
+            )
         except Exception:
             logger.debug("Dynamic Web command dispatch is unavailable")
             return None
@@ -737,7 +818,10 @@ def create_app(
                 return command, skill_args, None
             return command, skill_args, None
         finally:
-            await close_agent_runtime(runtime)
+            await close_agent_runtime(
+                runtime,
+                lifecycle_owner=desktop_runtime_lifecycle,
+            )
 
     def validate_turn_attachments(session: WebSession, image_ids: list[str], file_refs: list[str]) -> None:
         if image_ids:
@@ -798,12 +882,17 @@ def create_app(
                 return None
             return manager.delete_session(session.web_session_id)
 
-    async def reserve_agent_turn(session: WebSession) -> tuple[str, asyncio.Future[Any]] | None:
+    async def reserve_agent_turn(
+        session: WebSession,
+        *,
+        accepted_queue_drain: bool = False,
+    ) -> tuple[str, asyncio.Future[Any]] | None:
         await session.turn_admission_lock.acquire()
         if (
             manager.get_session(session.web_session_id) is not session
             or session.archived
             or active_turn_running(session)
+            or (not accepted_queue_drain and desktop_submission_blocked())
         ):
             session.turn_admission_lock.release()
             return None
@@ -827,7 +916,10 @@ def create_app(
         task.cancel()
 
     async def reserve_pipeline_action(
-        session: WebSession, *, wait_for_admission: bool = False
+        session: WebSession,
+        *,
+        wait_for_admission: bool = False,
+        accepted_queue_drain: bool = False,
     ) -> asyncio.Future[Any] | None:
         if session.turn_admission_lock.locked():
             if active_turn_running(session) or not wait_for_admission:
@@ -837,6 +929,7 @@ def create_app(
             manager.get_session(session.web_session_id) is not session
             or session.archived
             or active_turn_running(session)
+            or (not accepted_queue_drain and desktop_submission_blocked())
         ):
             session.turn_admission_lock.release()
             return None
@@ -1229,7 +1322,7 @@ def create_app(
         if not session.queued_inputs:
             return
         if session.mode == "pipeline":
-            placeholder = await reserve_pipeline_action(session)
+            placeholder = await reserve_pipeline_action(session, accepted_queue_drain=True)
             if placeholder is None:
                 return
             next_text = manager.pop_next_queued_input(session)
@@ -1249,7 +1342,7 @@ def create_app(
                 logger.exception("Failed to start queued pipeline turn")
             return
 
-        reservation = await reserve_agent_turn(session)
+        reservation = await reserve_agent_turn(session, accepted_queue_drain=True)
         if reservation is None:
             return
         next_text = manager.pop_next_queued_input(session)
@@ -1843,7 +1936,17 @@ def create_app(
         i18n_script = "<script>window.__IAC_I18N__ = {};</script>".format(
             json.dumps({"lang": lang, "messages": catalog}, ensure_ascii=False).replace("<", "\\u003c")
         )
-        html = html.replace("</head>", i18n_script + "\n  </head>", 1)
+        injected_scripts = i18n_script
+        if desktop_config is not None:
+            assert desktop_controller is not None
+            desktop_script = "<script>window.__IAC_DESKTOP__ = {};</script>".format(
+                json.dumps(
+                    desktop_config.bootstrap_payload(current_project_cwd=desktop_controller.default_project_cwd),
+                    ensure_ascii=False,
+                ).replace("<", "\\u003c")
+            )
+            injected_scripts += "\n  " + desktop_script
+        html = html.replace("</head>", injected_scripts + "\n  </head>", 1)
         # 把新会话默认(权限/模式)注入 <body>,让首屏创建的草稿即刻采用,避免异步拉取的闪烁。
         # 放在 <body> 而非 <html>,以免破坏对主题标签精确形态的既有断言。
         defaults = get_session_defaults()
@@ -1863,6 +1966,13 @@ def create_app(
         try:
             data = await json_object_body(request)
             cwd = optional_string(data, "cwd")
+            if desktop_config is not None:
+                if not cwd:
+                    raise ValueError(_("A project directory is required."))
+                resolved_cwd = Path(cwd).expanduser().resolve(strict=False)
+                if not resolved_cwd.is_absolute() or not resolved_cwd.is_dir():
+                    raise ValueError(_("The selected project directory is invalid."))
+                cwd = str(resolved_cwd)
             raw_mode = optional_string(data, "mode") if "mode" in data else os.environ.get("IAC_CODE_MODE", "normal")
             if raw_mode not in {"normal", "pipeline"}:
                 raise ValueError(_("mode must be normal or pipeline"))
@@ -1880,6 +1990,8 @@ def create_app(
             provider = optional_string(data, "provider")
             model = optional_string(data, "model")
             effort = optional_string(data, "effort")
+            if desktop_submission_blocked():
+                return desktop_closing_response()
             session = manager.create_session(
                 cwd=cwd,
                 mode=mode,
@@ -2245,7 +2357,8 @@ def create_app(
 
             image_id = uuid.uuid4().hex
             try:
-                cached_image = store_cached_image(
+                cached_image = await state_transaction(
+                    store_cached_image,
                     image_id,
                     image_bytes,
                     media_type=media_type,
@@ -2539,7 +2652,11 @@ def create_app(
             return json_error(_("session not found"), 404)
         # 切换会话时补齐系统提示 + 工具定义开销(重启后首个实时回合前 /status 会少算这约 13k),
         # 令切换即刻显示的用量与 composer 圆环口径一致;仅在开销未知时建一次 runtime,失败降级为 0。
-        await prime_session_context_overhead(session, manager)
+        await prime_session_context_overhead(
+            session,
+            manager,
+            lifecycle_owner=desktop_runtime_lifecycle,
+        )
         return JSONResponse(session_payload(session))
 
     async def patch_session(request):
@@ -2726,13 +2843,21 @@ def create_app(
             import subprocess
             import sys
 
+            from iac_code.desktop.external_env import popen_external_async, spawn_env_kwargs
+
             if sys.platform == "darwin":
                 command = ["open", str(target)]
             elif os.name == "nt":
                 command = ["explorer", str(target)]
             else:
                 command = ["xdg-open", str(target)]
-            subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            await popen_external_async(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                detached=True,
+                **spawn_env_kwargs(),
+            )
         except OSError as exc:
             return json_error(_("failed to reveal project: {}").format(exc), 500)
         return JSONResponse({"cwd": cwd, "revealed": True})
@@ -3035,13 +3160,20 @@ def create_app(
         try:
             with use_session_id(session.session_id):
                 try:
-                    runtime = await create_session_agent_runtime_in_thread(session, manager)
+                    runtime = await create_session_agent_runtime_in_thread(
+                        session,
+                        manager,
+                        lifecycle_owner=desktop_runtime_lifecycle,
+                    )
                     result = await runtime.agent_loop.compact()
                     payload = compaction_payload(result)
                 except Exception as exc:
                     payload = compaction_payload(None, status="failed", reason=public_exception_message(exc))
                 finally:
-                    await close_agent_runtime(runtime)
+                    await close_agent_runtime(
+                        runtime,
+                        lifecycle_owner=desktop_runtime_lifecycle,
+                    )
                     await flush_web_telemetry()
         finally:
             release_agent_turn_reservation(session, placeholder)
@@ -3145,7 +3277,7 @@ def create_app(
     async def put_provider_config(request):
         try:
             data = await json_object_body(request)
-            payload = save_provider_config(data)
+            payload = await state_transaction(save_provider_config, data)
         except ValueError as exc:
             return json_error(str(exc), 400)
         return JSONResponse(payload)
@@ -3153,7 +3285,7 @@ def create_app(
     async def delete_provider_config(request):
         try:
             data = await json_object_body(request)
-            payload = clear_provider_config(data)
+            payload = await state_transaction(clear_provider_config, data)
         except ValueError as exc:
             return json_error(str(exc), 400)
         return JSONResponse(payload)
@@ -3161,7 +3293,7 @@ def create_app(
     async def put_active_provider(request):
         try:
             data = await json_object_body(request)
-            payload = set_active_provider(data)
+            payload = await state_transaction(set_active_provider, data)
         except ValueError as exc:
             return json_error(str(exc), 400)
         return JSONResponse(payload)
@@ -3176,7 +3308,7 @@ def create_app(
     async def put_cloud_aliyun(request):
         try:
             data = await json_object_body(request)
-            payload = save_aliyun_cloud(data)
+            payload = await state_transaction(save_aliyun_cloud, data)
         except ValueError as exc:
             return json_error(str(exc), 400)
         return JSONResponse(payload)
@@ -3184,7 +3316,12 @@ def create_app(
     async def post_cloud_aliyun_oauth_login(request):
         try:
             data = await json_object_body(request)
-            payload = await run_in_threadpool(login_aliyun_oauth, data)
+            if desktop_config is not None:
+                from iac_code.desktop.external_env import open_desktop_browser
+
+                payload = await run_in_threadpool(login_aliyun_oauth, data, browser_opener=open_desktop_browser)
+            else:
+                payload = await run_in_threadpool(login_aliyun_oauth, data)
         except ValueError as exc:
             return json_error(str(exc), 400)
         return JSONResponse(payload)
@@ -3298,7 +3435,7 @@ def create_app(
             if cwd is None:
                 return json_error(_("session not found"), 404)
         try:
-            return JSONResponse(save_project_instruction(cwd, content))
+            return JSONResponse(await state_transaction(save_project_instruction, cwd, content))
         except OSError as exc:
             return json_error(str(exc), 400)
         except ValueError as exc:
@@ -3314,7 +3451,13 @@ def create_app(
         if session_id and cwd_for_session_id(session_id) is None:
             return json_error(_("session not found"), 404)
         try:
-            return JSONResponse(save_user_instruction(content))
+            return JSONResponse(
+                await state_transaction(
+                    save_user_instruction,
+                    content,
+                    context_cwd=desktop_controller.default_project_cwd if desktop_controller is not None else None,
+                )
+            )
         except OSError as exc:
             return json_error(str(exc), 400)
         except ValueError as exc:
@@ -3326,7 +3469,7 @@ def create_app(
             enabled = required_bool(data, "enabled")
         except ValueError as exc:
             return json_error(str(exc), 400)
-        return JSONResponse(save_auto_memory(enabled))
+        return JSONResponse(await state_transaction(save_auto_memory, enabled))
 
     async def get_foreign_settings(request):
         return JSONResponse(
@@ -3343,10 +3486,98 @@ def create_app(
             show_normal = required_bool(data, "showNormal")
         except ValueError as exc:
             return json_error(str(exc), 400)
-        return JSONResponse(save_foreign_sessions_visibility(show_pipeline, show_normal))
+        return JSONResponse(await state_transaction(save_foreign_sessions_visibility, show_pipeline, show_normal))
 
     async def get_developer_settings(request):
         return JSONResponse(developer_settings())
+
+    desktop_diagnostics_task: asyncio.Task[dict[str, Any]] | None = None
+    desktop_prerequisite_probe_task: asyncio.Task[dict[str, Any]] | None = None
+    desktop_git_bash_install_task: asyncio.Task[dict[str, Any]] | None = None
+    desktop_install_pump: asyncio.Task[None] | None = None
+    desktop_install_subscribers: set[asyncio.Queue[dict[str, Any] | None]] = set()
+
+    async def get_desktop_diagnostics(request):
+        nonlocal desktop_diagnostics_task
+        assert desktop_config is not None and desktop_controller is not None
+        existing = desktop_diagnostics_task
+        if existing is not None and not existing.done():
+            try:
+                return JSONResponse(await asyncio.shield(existing))
+            except Exception as exc:
+                return json_error(str(exc), 500)
+        if desktop_submission_blocked():
+            return desktop_closing_response()
+        from iac_code.desktop.probe_worker import run_desktop_probe
+
+        task = asyncio.create_task(
+            run_desktop_probe(
+                "diagnostics",
+                desktop_config,
+                desktop_controller.default_project_cwd,
+                timeout=30,
+            )
+        )
+        if not desktop_controller.reserve_slot("desktop_diagnostics", task):
+            task.cancel()
+            return desktop_closing_response()
+        desktop_diagnostics_task = task
+
+        def release(finished: asyncio.Task[Any]) -> None:
+            desktop_controller.release_slot("desktop_diagnostics", finished)
+
+        task.add_done_callback(release)
+        try:
+            return JSONResponse(await asyncio.shield(task))
+        except Exception as exc:
+            return json_error(str(exc), 500)
+
+    async def get_desktop_tool_paths(request):
+        from iac_code.desktop.tool_paths import load_desktop_tool_paths
+
+        return JSONResponse(await state_transaction(load_desktop_tool_paths))
+
+    async def get_desktop_git_bash(request):
+        from iac_code.desktop.git_bash import inspect_git_bash
+
+        return JSONResponse(await run_in_threadpool(inspect_git_bash))
+
+    async def install_desktop_git_bash(request):
+        nonlocal desktop_git_bash_install_task
+        assert desktop_controller is not None
+        existing = desktop_git_bash_install_task
+        if existing is not None and not existing.done():
+            try:
+                return JSONResponse(await asyncio.shield(existing))
+            except Exception as exc:
+                return json_error(str(exc), 500)
+        if desktop_submission_blocked():
+            return desktop_closing_response()
+
+        from iac_code.desktop.git_bash import install_git_bash_for_desktop
+
+        task = asyncio.create_task(
+            asyncio.to_thread(install_git_bash_for_desktop),
+            name="desktop-git-bash-install",
+        )
+        if not desktop_controller.reserve_slot("git_bash_install", task):
+            task.cancel()
+            return desktop_closing_response()
+        desktop_git_bash_install_task = task
+        task.add_done_callback(lambda finished: desktop_controller.release_slot("git_bash_install", finished))
+        try:
+            return JSONResponse(await asyncio.shield(task))
+        except Exception as exc:
+            return json_error(str(exc), 500)
+
+    async def put_desktop_tool_paths(request):
+        from iac_code.desktop.tool_paths import save_desktop_tool_paths
+
+        try:
+            data = await json_object_body(request)
+            return JSONResponse(await state_transaction(save_desktop_tool_paths, data))
+        except ValueError as exc:
+            return json_error(str(exc), 400)
 
     async def put_developer_settings(request):
         try:
@@ -3356,7 +3587,7 @@ def create_app(
             debug = required_bool(data, "debug")
         except ValueError as exc:
             return json_error(str(exc), 400)
-        saved = save_developer_settings(mode, highlight_failed_tools, debug)
+        saved = await state_transaction(save_developer_settings, mode, highlight_failed_tools, debug)
         # 立即应用后端日志级别(进程级全局开关,与 REPL/ACP 的 /debug 同一机制)。复用 CLI 启动时
         # setup_logging 选定的日志文件,避免切换 debug 时改写 Web 进程的日志 session_id。
         from iac_code.utils.log import current_log_file, disable_debug_at_runtime, enable_debug_at_runtime
@@ -3378,7 +3609,7 @@ def create_app(
             share_content = required_bool(data, "shareContent")
         except ValueError as exc:
             return json_error(str(exc), 400)
-        saved = save_telemetry_settings(share_content)
+        saved = await state_transaction(save_telemetry_settings, share_content)
         # 立即应用到遥测内容捕获(进程级运行时覆盖;显式设置的环境变量仍优先)。
         from iac_code.services.telemetry.config import set_content_capture_optin
 
@@ -3394,12 +3625,122 @@ def create_app(
             enabled = required_bool(data, "enabled")
         except ValueError as exc:
             return json_error(str(exc), 400)
-        return JSONResponse(save_selling_review_step(enabled))
+        return JSONResponse(await state_transaction(save_selling_review_step, enabled))
 
     async def get_pipeline_review_step_prerequisite(request):
+        nonlocal desktop_prerequisite_probe_task
+        if desktop_config is not None and desktop_controller is not None:
+            existing = desktop_prerequisite_probe_task
+            if existing is not None and not existing.done():
+                try:
+                    return JSONResponse(await asyncio.shield(existing))
+                except Exception as exc:
+                    return json_error(str(exc), 500)
+            if desktop_submission_blocked():
+                return desktop_closing_response()
+            from iac_code.desktop.probe_worker import run_desktop_probe
+
+            task = asyncio.create_task(
+                run_desktop_probe(
+                    "prerequisite",
+                    desktop_config,
+                    desktop_controller.default_project_cwd,
+                    timeout=10,
+                )
+            )
+            if not desktop_controller.reserve_slot("prerequisite_probe", task):
+                task.cancel()
+                return desktop_closing_response()
+            desktop_prerequisite_probe_task = task
+            task.add_done_callback(lambda finished: desktop_controller.release_slot("prerequisite_probe", finished))
+            try:
+                return JSONResponse(await asyncio.shield(task))
+            except Exception as exc:
+                return json_error(str(exc), 500)
         return JSONResponse(await inspect_review_step_prerequisite())
 
     async def install_pipeline_review_step_prerequisite(request):
+        nonlocal desktop_install_pump
+        if desktop_controller is not None:
+            force_repair = request.query_params.get("repair") == "1"
+            if desktop_submission_blocked():
+                return desktop_closing_response()
+
+            queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(maxsize=128)
+            desktop_install_subscribers.add(queue)
+
+            async def subscribe():
+                try:
+                    while True:
+                        item = await queue.get()
+                        if item is None:
+                            return
+                        yield (json.dumps(item, ensure_ascii=False) + "\n").encode("utf-8")
+                finally:
+                    desktop_install_subscribers.discard(queue)
+
+            if desktop_install_pump is None or desktop_install_pump.done():
+                install_cancel_event = threading.Event()
+
+                async def pump() -> None:
+                    nonlocal desktop_config
+                    try:
+                        async for event in stream_install_review_step_prerequisite(
+                            desktop_config.install_context if desktop_config is not None else None,
+                            force_repair=force_repair,
+                            desktop_cancel_event=install_cancel_event,
+                        ):
+                            if (
+                                force_repair
+                                and desktop_config is not None
+                                and event.get("phase") == "result"
+                                and event.get("status") == "ok"
+                                and event.get("satisfied") is True
+                            ):
+                                context = desktop_config.install_context
+                                desktop_config = replace(
+                                    desktop_config,
+                                    install_context=replace(
+                                        context,
+                                        degraded_prerequisites=tuple(
+                                            name for name in context.degraded_prerequisites if name != "infraguard"
+                                        ),
+                                    ),
+                                )
+                            for subscriber in tuple(desktop_install_subscribers):
+                                if subscriber.full():
+                                    try:
+                                        subscriber.get_nowait()
+                                    except asyncio.QueueEmpty:
+                                        pass
+                                subscriber.put_nowait(event)
+                    finally:
+                        for subscriber in tuple(desktop_install_subscribers):
+                            if subscriber.full():
+                                try:
+                                    subscriber.get_nowait()
+                                except asyncio.QueueEmpty:
+                                    pass
+                            subscriber.put_nowait(None)
+
+                task = asyncio.create_task(pump(), name="desktop-prerequisite-install")
+                if not desktop_controller.reserve_slot(
+                    "prerequisite_install",
+                    task,
+                    cancel=install_cancel_event.set,
+                ):
+                    task.cancel()
+                    desktop_install_subscribers.discard(queue)
+                    return desktop_closing_response()
+                desktop_install_pump = task
+                task.add_done_callback(
+                    lambda finished: desktop_controller.release_slot("prerequisite_install", finished)
+                )
+            return StreamingResponse(
+                subscribe(),
+                media_type="application/x-ndjson",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
         if install_in_progress():
             return json_error(_("Installation in progress"), 409)
 
@@ -3423,7 +3764,7 @@ def create_app(
         try:
             data = await json_object_body(request)
             theme = required_string(data, "theme")
-            return JSONResponse(save_appearance_theme(theme))
+            return JSONResponse(await state_transaction(save_appearance_theme, theme))
         except ValueError as exc:
             return json_error(str(exc), 400)
 
@@ -3434,7 +3775,7 @@ def create_app(
         try:
             data = await json_object_body(request)
             language = required_string(data, "language")
-            return JSONResponse(save_ui_language(language))
+            return JSONResponse(await state_transaction(save_ui_language, language))
         except ValueError as exc:
             return json_error(str(exc), 400)
 
@@ -3447,7 +3788,7 @@ def create_app(
             permission_mode = required_string(data, "permissionMode")
             mode = required_string(data, "mode")
             pipeline_name = optional_string(data, "pipelineName")
-            return JSONResponse(save_session_defaults(permission_mode, mode, pipeline_name))
+            return JSONResponse(await state_transaction(save_session_defaults, permission_mode, mode, pipeline_name))
         except ValueError as exc:
             return json_error(str(exc), 400)
 
@@ -3510,7 +3851,7 @@ def create_app(
             if cwd is None:
                 return json_error(_("session not found"), 404)
         try:
-            payload = save_disabled_payload(cwd, disabled)
+            payload = await state_transaction(save_disabled_payload, cwd, disabled)
             invalidate_dynamic_suggestions()
             return JSONResponse(payload)
         except OSError as exc:
@@ -4069,7 +4410,7 @@ def create_app(
                 if isinstance(api_base, str):
                     save_payload["apiBase"] = api_base
                 try:
-                    saved = save_active_provider(save_payload)
+                    saved = await state_transaction(save_active_provider, save_payload)
                 except ValueError as exc:
                     return await finish_direct_command(
                         {
@@ -4305,6 +4646,8 @@ def create_app(
                         return json_error(_("session not found"), 404)
                     if (archived := session_archived_response(session)) is not None:
                         return archived
+                    if desktop_submission_blocked():
+                        return desktop_closing_response()
                     session.active_local_tasks.add(shell_task)
                 try:
                     with observe_published_events(record_shell_event):
@@ -4457,12 +4800,16 @@ def create_app(
         # mutation, so accepting it here lets the owning action observe and drain the
         # follow-up without waiting for that action to release its reservation.
         if active_turn_running(session):
+            if desktop_submission_blocked():
+                return desktop_closing_response()
             return JSONResponse(manager.classify_queued_input(session, text))
         async with session.turn_admission_lock:
             if manager.get_session(session.web_session_id) is not session:
                 return json_error(_("session not found"), 404)
             if (archived := session_archived_response(session)) is not None:
                 return archived
+            if desktop_submission_blocked():
+                return desktop_closing_response()
             return JSONResponse(manager.classify_queued_input(session, text))
 
     def _parse_queued_index(request) -> int:
@@ -4617,7 +4964,14 @@ def create_app(
                     return archived
                 return turn_busy_response()
             await session.pipeline_interrupt_lock.acquire()
+            pipeline_interrupt_owner = None
             try:
+                if message.strip() and desktop_submission_blocked():
+                    return desktop_closing_response()
+                if message.strip():
+                    pipeline_interrupt_owner = asyncio.current_task()
+                    if pipeline_interrupt_owner is not None:
+                        session.active_local_tasks.add(pipeline_interrupt_owner)
                 if session.mode != "pipeline":
                     return json_error(_("session is not a pipeline session"), 409, code="pipeline_not_active")
                 model_selection = active_model_selection(session)
@@ -4657,6 +5011,8 @@ def create_app(
                 )
                 return JSONResponse(result.response, status_code=result.status_code)
             finally:
+                if pipeline_interrupt_owner is not None:
+                    session.active_local_tasks.discard(pipeline_interrupt_owner)
                 session.pipeline_interrupt_lock.release()
 
         active_turn_task = session.active_turn_task
@@ -4669,6 +5025,8 @@ def create_app(
         if pre_start_reservation:
             if (archived := session_archived_response(session)) is not None:
                 return archived
+            if message.strip() and desktop_submission_blocked():
+                return desktop_closing_response()
             manager.cancel_pending_requests_for_session(session)
             if not message.strip():
                 cancel_active_turn_task(active_turn_task)
@@ -4690,6 +5048,8 @@ def create_app(
                 return json_error(_("session not found"), 404)
             if (archived := session_archived_response(session)) is not None:
                 return archived
+            if message.strip() and desktop_submission_blocked():
+                return desktop_closing_response()
             manager.cancel_pending_requests_for_session(session)
             active_turn_task = session.active_turn_task
             if not message.strip() and active_turn_task is not None and not active_turn_task.done():
@@ -4749,17 +5109,29 @@ def create_app(
             },
         )
 
-    return Starlette(
-        lifespan=lifespan,
-        middleware=[Middleware(_SuppressAllRedactionMiddleware)],
-        routes=[
-            Route("/health", health, methods=["GET"]),
-            Route("/api/server/restart", restart_server, methods=["POST"]),
-            Route("/api/update/status", update_status, methods=["GET"]),
-            Route("/api/update/apply", update_apply, methods=["POST"]),
-            Route("/api/update/dismiss", update_dismiss, methods=["POST"]),
-            Route("/", index, methods=["GET"]),
-            Route("/api/sessions", create_session, methods=["POST"]),
+    routes = [
+        Route("/health", health, methods=["GET"]),
+        *(
+            []
+            if desktop_config is not None
+            else [
+                Route("/api/server/restart", restart_server, methods=["POST"]),
+                Route("/api/update/status", update_status, methods=["GET"]),
+                Route("/api/update/apply", update_apply, methods=["POST"]),
+                Route("/api/update/dismiss", update_dismiss, methods=["POST"]),
+            ]
+        ),
+        Route("/", index, methods=["GET"]),
+        Route("/api/sessions", create_session, methods=["POST"]),
+    ]
+    if desktop_config is not None:
+        routes.append(Route("/api/desktop/diagnostics", get_desktop_diagnostics, methods=["GET"]))
+        routes.append(Route("/api/desktop/git-bash", get_desktop_git_bash, methods=["GET"]))
+        routes.append(Route("/api/desktop/git-bash/install", install_desktop_git_bash, methods=["POST"]))
+        routes.append(Route("/api/desktop/tool-paths", get_desktop_tool_paths, methods=["GET"]))
+        routes.append(Route("/api/desktop/tool-paths", put_desktop_tool_paths, methods=["PUT"]))
+    routes.extend(
+        [
             Route("/api/sessions", list_sessions, methods=["GET"]),
             Route("/api/sessions/archived", list_archived_sessions, methods=["GET"]),
             Route("/api/sessions/archived", delete_archived_sessions_route, methods=["DELETE"]),
@@ -4877,6 +5249,15 @@ def create_app(
             Route("/api/sessions/{session_id}", get_session, methods=["GET"]),
             Route("/api/sessions/{session_id}", delete_session_route, methods=["DELETE"]),
             Mount("/static", NoCacheStaticFiles(directory=STATIC_DIR), name="static"),
-        ],
+        ]
+    )
+    starlette_app = Starlette(
+        lifespan=lifespan,
+        middleware=[Middleware(_SuppressAllRedactionMiddleware)],
+        routes=routes,
         exception_handlers={404: not_found},
     )
+    if desktop_config is not None:
+        starlette_app.state.desktop_config = desktop_config
+        starlette_app.state.desktop_controller = desktop_controller
+    return starlette_app

@@ -65,6 +65,18 @@ iac-code web
 
 默认会在浏览器中打开 `http://127.0.0.1:8766`（仅限回环地址）。详见 [Web 应用指南](https://aliyun.github.io/iac-code/zh-Hans/web-app)。
 
+### 桌面应用
+
+如需原生桌面体验，请从 [GitHub Releases](https://github.com/aliyun/iac-code/releases) 下载对应平台的安装包：
+
+- macOS Apple 芯片：`.dmg`
+- Windows x64：`.exe` 安装程序
+- Linux x64：`.AppImage` 或 `.deb`
+
+桌面应用运行与 CLI 和 Web 应用相同的 IaC Code 引擎，并共用模型服务、云凭证、设置、项目和会话。首次启动时，请选择希望 IaC Code 操作的项目目录。Windows 版还会检查 Git Bash；如果尚未安装，应用会提供安装引导。
+
+macOS、Windows 和 AppImage 版本可在应用内检查并安装经过加密签名的更新；deb 版本需要安装新版软件包来更新。目前发布的安装包尚未使用商业发布者证书签名，因此 macOS 或 Windows 可能显示“未知开发者”提示。安装前请核对随版本发布的 `SHA256SUMS`。安装方法和故障排查详见[桌面应用指南](https://aliyun.github.io/iac-code/zh-Hans/docs/desktop-app)。
+
 ## 贡献
 
 安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)，然后：

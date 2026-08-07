@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>iac-code</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --desktop-bg: #1a1a1a;
+        --desktop-panel: #2b2b2b;
+        --desktop-text: rgba(255, 255, 255, 0.92);
+        --desktop-muted: rgba(255, 255, 255, 0.56);
+        --desktop-border: rgba(255, 255, 255, 0.18);
+        --desktop-hover: rgba(255, 255, 255, 0.065);
+        --desktop-ink: #ffffff;
+        --desktop-accent: #4c8dff;
+        --desktop-danger: #fca5a5;
+      }
+      :root[data-theme="midnight"] {
+        --desktop-bg: #12161f;
+        --desktop-panel: #1e2534;
+        --desktop-text: rgba(230, 236, 245, 0.94);
+        --desktop-muted: rgba(206, 216, 235, 0.56);
+        --desktop-border: rgba(224, 232, 246, 0.2);
+        --desktop-hover: rgba(224, 232, 246, 0.07);
+        --desktop-ink: #e0e8f6;
+        --desktop-accent: #5b9cff;
+      }
+      :root[data-theme="evergreen"] {
+        --desktop-bg: #141a17;
+        --desktop-panel: #1f2a24;
+        --desktop-text: rgba(231, 239, 233, 0.94);
+        --desktop-muted: rgba(205, 224, 213, 0.56);
+        --desktop-border: rgba(224, 242, 231, 0.2);
+        --desktop-hover: rgba(224, 242, 231, 0.06);
+        --desktop-ink: #e0f2e7;
+        --desktop-accent: #58b98a;
+      }
+      :root[data-theme="sepia"] {
+        --desktop-bg: #1c1815;
+        --desktop-panel: #2a231d;
+        --desktop-text: rgba(240, 233, 223, 0.95);
+        --desktop-muted: rgba(226, 214, 197, 0.58);
+        --desktop-border: rgba(245, 236, 224, 0.2);
+        --desktop-hover: rgba(245, 236, 224, 0.06);
+        --desktop-ink: #f5ece0;
+        --desktop-accent: #d8aa70;
+      }
+      :root[data-theme="ivory"] {
+        color-scheme: light;
+        --desktop-bg: #f6f6f3;
+        --desktop-panel: #ffffff;
+        --desktop-text: rgba(28, 28, 26, 0.92);
+        --desktop-muted: rgba(60, 58, 54, 0.6);
+        --desktop-border: rgba(20, 22, 26, 0.2);
+        --desktop-hover: rgba(20, 22, 26, 0.05);
+        --desktop-ink: #1c1c1a;
+        --desktop-accent: #2f6fed;
+        --desktop-danger: #9f3530;
+      }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--desktop-bg); color: var(--desktop-text); visibility: hidden; }
+      main { width: min(32rem, calc(100vw - 3rem)); text-align: center; }
+      .mark { display: block; margin: 0 auto 1.25rem; width: 5rem; height: 5rem; }
+      h1 { margin: 0 0 .65rem; font-size: 1.35rem; }
+      p { margin: 0 0 1.5rem; color: var(--desktop-muted); line-height: 1.55; }
+      button { border: 1px solid var(--desktop-ink); border-radius: .65rem; padding: .7rem 1.15rem; background: var(--desktop-ink); color: var(--desktop-bg); font: inherit; cursor: pointer; }
+      button[hidden] { display: none; }
+      .actions { display: flex; justify-content: center; gap: .65rem; flex-wrap: wrap; }
+      .secondary { border-color: var(--desktop-border); background: transparent; color: var(--desktop-text); }
+      button:hover { background: color-mix(in srgb, var(--desktop-ink) 88%, transparent); }
+      .secondary:hover { background: var(--desktop-hover); }
+      button:focus-visible { outline: 2px solid var(--desktop-accent); outline-offset: 3px; }
+      .error { color: var(--desktop-danger); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <svg class="mark" viewBox="0 0 1024 1024" aria-hidden="true">
+        <defs>
+          <linearGradient id="iac-logo-tile" x1="140" y1="100" x2="880" y2="920" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#ffffff" />
+            <stop offset=".48" stop-color="#f8f8f7" />
+            <stop offset="1" stop-color="#e9ebef" />
+          </linearGradient>
+          <linearGradient id="iac-logo-ink" x1="180" y1="130" x2="850" y2="910" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#45b4ff" />
+            <stop offset=".22" stop-color="#4388ff" />
+            <stop offset=".46" stop-color="#5968f5" />
+            <stop offset=".68" stop-color="#7d63f4" />
+            <stop offset=".86" stop-color="#a969ef" />
+            <stop offset="1" stop-color="#e778cb" />
+          </linearGradient>
+        </defs>
+        <rect x="32" y="32" width="960" height="960" rx="224" fill="url(#iac-logo-tile)" />
+        <g fill="none" stroke="url(#iac-logo-ink)" stroke-width="80" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M464 128H320c-106 0-192 86-192 192v112l240 240" />
+          <path d="M896 464V320c0-106-86-192-192-192H592L352 368" />
+          <path d="M560 896h144c106 0 192-86 192-192V592L656 352" />
+          <path d="M128 560v144c0 106 86 192 192 192h112l240-240" />
+        </g>
+        <g fill="none" stroke="url(#iac-logo-ink)" stroke-linecap="round">
+          <path d="M504 406l6 66" stroke-width="42" />
+          <path d="M573 451l-35 36" stroke-width="26" />
+          <path d="M614 524l-63-8" stroke-width="36" />
+          <path d="M566 587l-32-44" stroke-width="29" />
+          <path d="M493 617l13-66" stroke-width="40" />
+          <path d="M443 559l39-23" stroke-width="23" />
+          <path d="M438 463l50 26" stroke-width="31" />
+        </g>
+        <circle cx="512" cy="518" r="35" fill="url(#iac-logo-ink)" />
+      </svg>
+      <h1 id="title">Starting iac-code…</h1>
+      <p id="status">Describe a task, command, or infrastructure change and let IaC Code handle it.</p>
+      <div class="actions">
+        <button id="project" type="button" hidden>Select project directory</button>
+        <button id="retry" type="button" hidden>Retry local runtime</button>
+        <button id="new-port" type="button" hidden>Use a new port</button>
+        <button id="diagnostics" class="secondary" type="button" hidden>Open diagnostics</button>
+      </div>
+    </main>
+    <script>
+      (() => {
+        const title = document.getElementById("title");
+        const status = document.getElementById("status");
+        const project = document.getElementById("project");
+        const retry = document.getElementById("retry");
+        const newPort = document.getElementById("new-port");
+        const diagnostics = document.getElementById("diagnostics");
+        const bootstrap = window.__IAC_BOOTSTRAP__ || {};
+        const parameters = new URLSearchParams(window.location.search);
+        const supportedThemes = new Set(["graphite", "midnight", "evergreen", "sepia", "ivory"]);
+        const requestedTheme = parameters.get("theme") || bootstrap.theme || "graphite";
+        const theme = supportedThemes.has(requestedTheme) ? requestedTheme : "graphite";
+        const bootstrapOperationId = parameters.get("bootstrapOperationId") || bootstrap.bootstrapOperationId;
+        const invoke = window.__TAURI__?.core?.invoke;
+        const messages = {
+          en: { starting: "Starting iac-code…", tagline: "Describe a task, command, or infrastructure change and let IaC Code handle it.", select: "Select project directory", retry: "Retry local runtime", newPort: "Use a new port", diagnostics: "Open diagnostics", waiting: "Waiting for a project directory…", continue: "Select a project to continue.", runtime: "Starting the local runtime…", webviewTitle: "System WebView update required", webview: "Update macOS/Safari before starting iac-code.", choose: "Choose a project", chooseHelp: "iac-code uses this directory as the working project.", stopped: "Local runtime stopped", stopping: "Stopping the local runtime…", bridge: "The native Desktop bridge is unavailable.", projectError: "The selected project could not be opened.", runtimeError: "The local runtime could not start. Retry or open diagnostics for details.", diagnosticsError: "The diagnostics directory could not be opened.", portBusy: "The local port is in use. Use a new port or open diagnostics." },
+          zh: { starting: "正在启动 iac-code…", tagline: "描述一个任务、命令或基础设施变更，交给 IaC Code。", select: "选择项目目录", retry: "重试本地运行时", newPort: "使用新端口", diagnostics: "打开诊断目录", waiting: "正在等待选择项目目录…", continue: "请选择项目以继续。", runtime: "正在启动本地运行时…", webviewTitle: "需要更新系统 WebView", webview: "请先更新 macOS/Safari，再启动 iac-code。", choose: "选择项目", chooseHelp: "iac-code 将使用此目录作为工作项目。", stopped: "本地运行时已停止", stopping: "正在停止本地运行时…", bridge: "桌面原生桥接不可用。", projectError: "无法打开所选项目。", runtimeError: "本地运行时无法启动。请重试或打开诊断目录查看详情。", diagnosticsError: "无法打开诊断目录。", portBusy: "本地端口已被占用。请使用新端口或打开诊断目录。" },
+          es: { starting: "Iniciando iac-code…", tagline: "Describe una tarea, un comando o un cambio de infraestructura y déjaselo a IaC Code.", select: "Seleccionar carpeta del proyecto", retry: "Reintentar entorno local", newPort: "Usar un puerto nuevo", diagnostics: "Abrir diagnósticos", waiting: "Esperando una carpeta de proyecto…", continue: "Selecciona un proyecto para continuar.", runtime: "Iniciando el entorno local…", webviewTitle: "Se requiere actualizar el WebView", webview: "Actualiza macOS/Safari antes de iniciar iac-code.", choose: "Elegir un proyecto", chooseHelp: "iac-code usará esta carpeta como proyecto de trabajo.", stopped: "El entorno local se detuvo", stopping: "Deteniendo el entorno local…", bridge: "El puente nativo de escritorio no está disponible.", projectError: "No se pudo abrir el proyecto seleccionado.", runtimeError: "No se pudo iniciar el entorno local. Inténtalo de nuevo o abre los diagnósticos.", diagnosticsError: "No se pudo abrir la carpeta de diagnósticos.", portBusy: "El puerto local está en uso. Usa un puerto nuevo o abre los diagnósticos." },
+          fr: { starting: "Démarrage d’iac-code…", tagline: "Décrivez une tâche, une commande ou une modification d’infrastructure, et confiez-la à IaC Code.", select: "Sélectionner le dossier du projet", retry: "Réessayer le service local", newPort: "Utiliser un nouveau port", diagnostics: "Ouvrir les diagnostics", waiting: "En attente d’un dossier de projet…", continue: "Sélectionnez un projet pour continuer.", runtime: "Démarrage du service local…", webviewTitle: "Mise à jour du WebView requise", webview: "Mettez à jour macOS/Safari avant de démarrer iac-code.", choose: "Choisir un projet", chooseHelp: "iac-code utilisera ce dossier comme projet de travail.", stopped: "Le service local s’est arrêté", stopping: "Arrêt du service local…", bridge: "Le pont natif de l’application n’est pas disponible.", projectError: "Impossible d’ouvrir le projet sélectionné.", runtimeError: "Le service local n’a pas pu démarrer. Réessayez ou ouvrez les diagnostics.", diagnosticsError: "Impossible d’ouvrir le dossier de diagnostics.", portBusy: "Le port local est utilisé. Utilisez un nouveau port ou ouvrez les diagnostics." },
+          de: { starting: "iac-code wird gestartet…", tagline: "Beschreiben Sie eine Aufgabe, einen Befehl oder eine Infrastrukturänderung und überlassen Sie sie IaC Code.", select: "Projektordner auswählen", retry: "Lokale Laufzeit erneut starten", newPort: "Neuen Port verwenden", diagnostics: "Diagnose öffnen", waiting: "Warten auf einen Projektordner…", continue: "Wählen Sie ein Projekt aus.", runtime: "Lokale Laufzeit wird gestartet…", webviewTitle: "System-WebView muss aktualisiert werden", webview: "Aktualisieren Sie macOS/Safari, bevor Sie iac-code starten.", choose: "Projekt auswählen", chooseHelp: "iac-code verwendet diesen Ordner als Arbeitsprojekt.", stopped: "Lokale Laufzeit wurde beendet", stopping: "Lokale Laufzeit wird beendet…", bridge: "Die native Desktop-Verbindung ist nicht verfügbar.", projectError: "Das ausgewählte Projekt konnte nicht geöffnet werden.", runtimeError: "Die lokale Laufzeit konnte nicht gestartet werden. Versuchen Sie es erneut oder öffnen Sie die Diagnose.", diagnosticsError: "Der Diagnoseordner konnte nicht geöffnet werden.", portBusy: "Der lokale Port wird verwendet. Verwenden Sie einen neuen Port oder öffnen Sie die Diagnose." },
+          ja: { starting: "iac-code を起動しています…", tagline: "タスク、コマンド、またはインフラストラクチャの変更を説明して、IaC Code に任せましょう。", select: "プロジェクトフォルダーを選択", retry: "ローカルランタイムを再試行", newPort: "新しいポートを使用", diagnostics: "診断を開く", waiting: "プロジェクトフォルダーの選択を待っています…", continue: "続行するにはプロジェクトを選択してください。", runtime: "ローカルランタイムを起動しています…", webviewTitle: "システム WebView の更新が必要です", webview: "iac-code を起動する前に macOS/Safari を更新してください。", choose: "プロジェクトを選択", chooseHelp: "iac-code はこのフォルダーを作業プロジェクトとして使用します。", stopped: "ローカルランタイムが停止しました", stopping: "ローカルランタイムを停止しています…", bridge: "デスクトップのネイティブブリッジを利用できません。", projectError: "選択したプロジェクトを開けませんでした。", runtimeError: "ローカルランタイムを起動できませんでした。再試行するか、診断を開いてください。", diagnosticsError: "診断フォルダーを開けませんでした。", portBusy: "ローカルポートが使用中です。新しいポートを使用するか、診断を開いてください。" },
+          pt: { starting: "Iniciando o iac-code…", tagline: "Descreva uma tarefa, um comando ou uma alteração de infraestrutura e deixe o IaC Code cuidar disso.", select: "Selecionar pasta do projeto", retry: "Tentar ambiente local novamente", newPort: "Usar uma nova porta", diagnostics: "Abrir diagnósticos", waiting: "Aguardando uma pasta de projeto…", continue: "Selecione um projeto para continuar.", runtime: "Iniciando o ambiente local…", webviewTitle: "Atualização do WebView necessária", webview: "Atualize o macOS/Safari antes de iniciar o iac-code.", choose: "Escolher um projeto", chooseHelp: "O iac-code usará esta pasta como projeto de trabalho.", stopped: "O ambiente local parou", stopping: "Parando o ambiente local…", bridge: "A ponte nativa do aplicativo não está disponível.", projectError: "Não foi possível abrir o projeto selecionado.", runtimeError: "Não foi possível iniciar o ambiente local. Tente novamente ou abra os diagnósticos.", diagnosticsError: "Não foi possível abrir a pasta de diagnósticos.", portBusy: "A porta local está em uso. Use uma nova porta ou abra os diagnósticos." },
+        };
+        const text = messages[bootstrap.language] || messages.en;
+        title.textContent = text.starting;
+        status.textContent = text.tagline;
+        project.textContent = text.select;
+        retry.textContent = text.retry;
+        newPort.textContent = text.newPort || messages.en.newPort;
+        diagnostics.textContent = text.diagnostics;
+        document.documentElement.lang = bootstrap.language || "en";
+        document.documentElement.dataset.theme = theme;
+        document.body.style.visibility = "visible";
+
+        function compatible() {
+          try {
+            return Boolean(
+              CSS.supports("color", "color-mix(in srgb, red, blue)") &&
+              CSS.supports("selector(:has(*))") &&
+              new RegExp("(?<!a)b")
+            );
+          } catch (_) {
+            return false;
+          }
+        }
+
+        async function selectProject() {
+          project.disabled = true;
+          status.textContent = text.waiting;
+          try {
+            const result = await invoke("select_project_directory", {
+              bootstrapOperationId,
+            });
+            if (!result) {
+              status.textContent = text.continue;
+              project.disabled = false;
+            } else {
+              status.textContent = text.runtime;
+            }
+          } catch (error) {
+            status.textContent = text.projectError;
+            status.className = "error";
+            project.disabled = false;
+          }
+        }
+
+        async function retryRuntime(replaceOccupiedPort = false) {
+          retry.disabled = true;
+          status.className = "";
+          status.textContent = text.runtime;
+          try {
+            await invoke("retry_start_sidecar", { replaceOccupiedPort });
+          } catch (error) {
+            const message = String(error);
+            status.className = "error";
+            retry.disabled = false;
+            newPort.disabled = false;
+            if (/port_in_use|port_draining/.test(message)) {
+              status.textContent = text.portBusy;
+              newPort.hidden = false;
+            } else if (/no Desktop project is selected/.test(message)) {
+              status.textContent = text.continue;
+              project.hidden = false;
+            } else {
+              status.textContent = text.runtimeError;
+            }
+          }
+        }
+
+        async function openDiagnostics() {
+          try {
+            await invoke("open_diagnostics_directory");
+          } catch (error) {
+            status.textContent = text.diagnosticsError;
+            status.className = "error";
+          }
+        }
+
+        function showRecovery(message) {
+          title.textContent = text.stopped;
+          status.textContent = String(message || text.runtimeError);
+          status.className = "error";
+          retry.hidden = false;
+          diagnostics.hidden = false;
+          if (/port_in_use|port_draining/.test(String(message))) {
+            newPort.hidden = false;
+          }
+        }
+
+        async function start() {
+          if (typeof invoke !== "function") {
+            showRecovery(text.bridge);
+            return;
+          }
+          const mode = parameters.get("mode");
+          if (mode === "stopping") {
+            title.textContent = text.stopping;
+            status.textContent = text.stopping;
+            return;
+          }
+          const isCompatible = compatible();
+          const runtimeStarted = await invoke("complete_bootstrap_check", {
+            bootstrapOperationId,
+            compatible: isCompatible,
+          });
+          if (!isCompatible) {
+            title.textContent = text.webviewTitle;
+            status.textContent = text.webview;
+            return;
+          }
+          if (mode === "recovery") {
+            showRecovery(parameters.get("error") || text.stopped);
+            project.hidden = false;
+            return;
+          }
+          if (bootstrap.startupRecoveryError) {
+            showRecovery(bootstrap.startupRecoveryError);
+            return;
+          }
+          // 已保存项目有效时，Host 已启动 sidecar 并安排导航。导航真正提交前仍会短暂
+          // 执行当前启动页脚本；此处保持加载态，避免把项目选择界面闪现一帧。
+          if (runtimeStarted) {
+            return;
+          }
+          title.textContent = text.choose;
+          status.textContent = text.chooseHelp;
+          project.hidden = false;
+        }
+
+        project.addEventListener("click", () => void selectProject());
+        retry.addEventListener("click", () => void retryRuntime(false));
+        newPort.addEventListener("click", () => void retryRuntime(true));
+        diagnostics.addEventListener("click", () => void openDiagnostics());
+        start().catch((error) => {
+          showRecovery(text.runtimeError);
+        });
+      })();
+    </script>
+  </body>
+</html>

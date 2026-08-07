@@ -5,7 +5,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 const config: Config = {
   title: 'iac-code',
   tagline: 'AI-powered Infrastructure as Code for cloud infrastructure',
-  favicon: 'img/favicon.png',
+  favicon: 'img/iac-code-logo.svg',
 
   url: process.env.SITE_URL ?? 'https://aliyun.github.io',
   baseUrl: process.env.BASE_URL ?? '/iac-code/',
@@ -96,7 +96,7 @@ const config: Config = {
       title: 'IaC Code',
       logo: {
         alt: 'IaC Code logo',
-        src: 'img/logo.png',
+        src: 'img/iac-code-logo.svg',
       },
       items: [
         {
