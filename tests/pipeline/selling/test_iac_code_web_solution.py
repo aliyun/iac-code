@@ -82,6 +82,7 @@ def test_golden_template_has_only_the_fixed_single_ecs_topology() -> None:
     assert ingress == [{"IpProtocol": "tcp", "PortRange": "8766/8766", "SourceCidrIp": {"Ref": "AccessCidr"}}]
     assert resources["Instance"]["Properties"]["AllocatePublicIP"] is False
     assert resources["BailianApiKey"]["Properties"] == {
+        "RegionId": "cn-beijing",
         "Description": "Managed by the iac-code Web ROS stack",
         "AuthSetModel": {
             "AuthSetMode": "Custom",
