@@ -122,6 +122,7 @@ Resources:
   BailianApiKey:
     Type: ALIYUN::Bailian::ApiKey
     Properties:
+      RegionId: cn-beijing
       Description: Managed by the iac-code Web ROS stack
       AuthSetModel:
         AuthSetMode: Custom
