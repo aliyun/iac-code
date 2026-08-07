@@ -368,8 +368,7 @@ def test_payload_pipeline_ros_deploy_stack(tmp_path):
 # ros_stack/ros_deploy 的结果 JSON 后可能被 attach_ros_validation 追加本地预检诊断块
 # (见 tools/cloud/aliyun/ros_validation/outcome.py),使整体结果内容不再是合法 JSON。
 _PREFLIGHT_SUFFIX = (
-    "\n\n---\nROS local preflight diagnostics:\n"
-    "ROS local validation completed: 0 errors, 0 warnings, 5 restrictions.\n"
+    "\n\n---\nROS local preflight diagnostics:\nROS local validation completed: 0 errors, 0 warnings, 5 restrictions.\n"
 )
 
 
@@ -382,8 +381,7 @@ def test_payload_pipeline_stack_result_with_preflight_diagnostics_suffix(tmp_pat
             tool_input={"action": "create", "region_id": "cn-hangzhou"},
             result=(
                 '{"stack_id": "stk-diag", "stack_name": "webapp", '
-                '"status": "CREATE_COMPLETE", "status_reason": "ok", "is_success": true}'
-                + _PREFLIGHT_SUFFIX
+                '"status": "CREATE_COMPLETE", "status_reason": "ok", "is_success": true}' + _PREFLIGHT_SUFFIX
             ),
         ),
     ]

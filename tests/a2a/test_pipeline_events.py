@@ -1986,12 +1986,7 @@ def test_stack_operation_started_event_produces_no_a2a_envelope() -> None:
     )
     assert translator.translate(started) == []
     # Also inert when wrapped in a sub-pipeline envelope (only ResourceObservedEvent is special-cased).
-    assert (
-        translator.translate(
-            SubPipelineStreamEvent(sub_pipeline_id="sp", candidate_index=0, inner=started)
-        )
-        == []
-    )
+    assert translator.translate(SubPipelineStreamEvent(sub_pipeline_id="sp", candidate_index=0, inner=started)) == []
 
 
 def test_stack_current_changed_keeps_current_stack_after_statusless_successful_delete() -> None:

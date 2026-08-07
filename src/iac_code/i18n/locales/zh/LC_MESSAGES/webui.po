@@ -3644,7 +3644,9 @@ msgid ""
 "model responses, and tool inputs and outputs) to the telemetry it sends "
 "to iac-code's default backend or an explicitly configured OTLP endpoint, "
 "to help diagnose issues and improve the product."
-msgstr "开启后,iac-code 会在发送的遥测数据中附带完整的对话内容(包括你的提示词、模型回复以及工具的输入与输出),发送到 iac-code 的默认遥测后端或你显式配置的 OTLP 端点,用于诊断问题和改进产品。"
+msgstr ""
+"开启后,iac-code 会在发送的遥测数据中附带完整的对话内容(包括你的提示词、模型回复以及工具的输入与输出),发送到 iac-code "
+"的默认遥测后端或你显式配置的 OTLP 端点,用于诊断问题和改进产品。"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "New session defaults"
