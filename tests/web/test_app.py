@@ -3263,6 +3263,7 @@ def test_session_prompt_route_returns_truthful_local_snapshot(tmp_path) -> None:
 
 
 def test_session_prompt_route_populates_available_local_sources(tmp_path, monkeypatch) -> None:
+    from iac_code.web import cleanup as cleanup_module
     from iac_code.web.app import create_app
     from iac_code.web.memory import save_project_instruction
     from iac_code.web.session_manager import WebSessionManager
@@ -3294,6 +3295,7 @@ def test_session_prompt_route_populates_available_local_sources(tmp_path, monkey
         }
 
     monkeypatch.setattr("iac_code.web.pipeline.pipeline_state_from_query", fake_pipeline_state)
+    monkeypatch.setattr(cleanup_module, "pipeline_state_from_query", fake_pipeline_state)
     save_active_provider(
         {
             "provider": "openai",
@@ -3332,6 +3334,7 @@ def test_session_prompt_route_populates_available_local_sources(tmp_path, monkey
 
 
 def test_status_and_debug_merge_recovered_pipeline_snapshot(tmp_path, monkeypatch) -> None:
+    from iac_code.web import cleanup as cleanup_module
     from iac_code.web.app import create_app
     from iac_code.web.session_manager import WebSessionManager
     from iac_code.web.settings import save_active_provider
@@ -3357,6 +3360,7 @@ def test_status_and_debug_merge_recovered_pipeline_snapshot(tmp_path, monkeypatc
         }
 
     monkeypatch.setattr("iac_code.web.pipeline.pipeline_state_from_query", fake_pipeline_state)
+    monkeypatch.setattr(cleanup_module, "pipeline_state_from_query", fake_pipeline_state)
     save_active_provider(
         {
             "provider": "openai",

@@ -312,9 +312,7 @@ class TestBaseCloudStackExecute:
         assert progress_index > 0
 
     @pytest.mark.asyncio
-    async def test_execute_does_not_emit_stack_operation_started_for_create(
-        self, stack: MockCloudStack
-    ) -> None:
+    async def test_execute_does_not_emit_stack_operation_started_for_create(self, stack: MockCloudStack) -> None:
         queue: asyncio.Queue = asyncio.Queue()
         context = ToolContext(event_queue=queue, tool_use_id="toolu-create")
 

@@ -3650,7 +3650,9 @@ msgid ""
 "model responses, and tool inputs and outputs) to the telemetry it sends "
 "to iac-code's default backend or an explicitly configured OTLP endpoint, "
 "to help diagnose issues and improve the product."
-msgstr "有効にすると、iac-code は送信するテレメトリに完全な会話内容(あなたのプロンプト、モデルの応答、ツールの入力と出力)を添付し、iac-code の既定のバックエンドまたは明示的に構成された OTLP エンドポイントに送信して、問題の診断と製品の改善に役立てます。"
+msgstr ""
+"有効にすると、iac-code は送信するテレメトリに完全な会話内容(あなたのプロンプト、モデルの応答、ツールの入力と出力)を添付し、iac-"
+"code の既定のバックエンドまたは明示的に構成された OTLP エンドポイントに送信して、問題の診断と製品の改善に役立てます。"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "New session defaults"

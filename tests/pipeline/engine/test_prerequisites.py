@@ -427,7 +427,7 @@ def test_default_run_command_timeout_terminates_descendant_process(tmp_path):
     try:
         result = prereq_module._default_run_command(
             [sys.executable, "-c", parent_code, str(ticks_path), str(pid_path), child_code],
-            timeout_seconds=0.5,
+            timeout_seconds=5,
         )
         assert result.returncode == 124
 

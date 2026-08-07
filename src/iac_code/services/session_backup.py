@@ -1373,8 +1373,7 @@ class SessionBackupService:
                 self._forget_prepared_dirs(path)
             else:
                 is_reparse_point = bool(
-                    getattr(path_stat, "st_file_attributes", 0)
-                    & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+                    getattr(path_stat, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
                 )
                 if stat.S_ISDIR(path_stat.st_mode) and not is_reparse_point:
                     self._prepared_dirs.pop(path)

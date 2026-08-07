@@ -51,9 +51,7 @@ def test_other_cloud_guard_does_not_match_provider_tokens_inside_aliyun_resource
     loaded = load_pipeline_dir(_selling_dir())
     intent_step = next(step for step in loaded.steps if step.step_id == "intent_parsing")
     guard = next(
-        guard
-        for guard in intent_step.completion_guards
-        if guard.get("message_key") == "intent_alibaba_cloud_only"
+        guard for guard in intent_step.completion_guards if guard.get("message_key") == "intent_alibaba_cloud_only"
     )
     pattern = guard["when_user_message_matches_any"][0]
 

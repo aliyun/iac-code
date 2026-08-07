@@ -954,12 +954,15 @@ async def test_removed_step_backup_does_not_record_success_metric(tmp_path):
 
     [event async for event in runner._continue_from_current()]
 
-    assert call(
-        step_id=None,
-        reason=BackupReason.TERMINAL.value,
-        critical=True,
-        retry_count=1,
-    ) in runner._observability.backup_succeeded.call_args_list
+    assert (
+        call(
+            step_id=None,
+            reason=BackupReason.TERMINAL.value,
+            critical=True,
+            retry_count=1,
+        )
+        in runner._observability.backup_succeeded.call_args_list
+    )
     assert all(
         item.kwargs["reason"] != BackupReason.PIPELINE_STEP_COMPLETED.value
         for item in runner._observability.backup_succeeded.call_args_list
@@ -1167,9 +1170,7 @@ async def test_interrupt_pause_backup_is_deferred_only_for_a2a(tmp_path, surface
     runner = _build_two_step_runner(tmp_path, backup_service=backup, surface=surface)
     runner.session = RecordingPipelineSession()
 
-    event = await runner.save_interrupt_pause(
-        InterruptVerdict(action="continue", reason="judge failed", paused=True)
-    )
+    event = await runner.save_interrupt_pause(InterruptVerdict(action="continue", reason="judge failed", paused=True))
 
     assert event.type == PipelineEventType.USER_INPUT_REQUIRED
     assert [backup_call["reason"] for backup_call in backup.calls] == expected_reasons
