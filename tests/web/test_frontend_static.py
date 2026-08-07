@@ -10605,7 +10605,7 @@ def test_app_wires_live_stacks_into_output_panel() -> None:
     assert "liveStacksFromState" in app_source
     # 两个 live 来源:resource.observed(t0 最早占位)与工具卡 stackProgress(轮询真实状态)。
     assert "stackProgress" in app_source
-    assert 'resourceType' in app_source
+    assert "resourceType" in app_source
     # resource.observed 到达即刷新输出面板,让「创建中」栈立即出现,而非等首个 stack.progress(约 5s 后)。
     assert 'event.type === "resource.observed"' in app_source
     # 非 create 写操作(delete/update/continue)也须在 t0 映射出对应 *_IN_PROGRESS,

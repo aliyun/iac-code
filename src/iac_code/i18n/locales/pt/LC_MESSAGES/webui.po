@@ -3733,7 +3733,12 @@ msgid ""
 "model responses, and tool inputs and outputs) to the telemetry it sends "
 "to iac-code's default backend or an explicitly configured OTLP endpoint, "
 "to help diagnose issues and improve the product."
-msgstr "Quando ativado, o iac-code anexa o conteúdo completo da conversa (seus prompts, respostas do modelo e entradas e saídas das ferramentas) à telemetria que envia ao backend padrão do iac-code ou a um endpoint OTLP configurado explicitamente, para ajudar a diagnosticar problemas e melhorar o produto."
+msgstr ""
+"Quando ativado, o iac-code anexa o conteúdo completo da conversa (seus "
+"prompts, respostas do modelo e entradas e saídas das ferramentas) à "
+"telemetria que envia ao backend padrão do iac-code ou a um endpoint OTLP "
+"configurado explicitamente, para ajudar a diagnosticar problemas e "
+"melhorar o produto."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "New session defaults"
@@ -3835,7 +3840,9 @@ msgstr "Opções de depuração"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Control local debug highlighting and backend log verbosity."
-msgstr "Controla o destaque de depuração local e o nível de detalhe dos logs do backend."
+msgstr ""
+"Controla o destaque de depuração local e o nível de detalhe dos logs do "
+"backend."
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Highlight failed tool calls in red"

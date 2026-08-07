@@ -45,6 +45,7 @@ def persisted_stack_metadata(metadata: Any) -> dict[str, Any]:
         persisted[STACK_RESULT_METADATA_KEY] = result
     return persisted
 
+
 POLL_INTERVAL = 5
 
 
