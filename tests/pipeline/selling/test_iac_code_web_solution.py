@@ -116,6 +116,13 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
         "BailianApiKeyB64": {"Fn::Base64Encode": {"Fn::GetAtt": ["BailianApiKey", "Key"]}},
         "MasterAccountId": {"Ref": "ALIYUN::TenantId"},
         "StackRegion": {"Ref": "ALIYUN::Region"},
+        "LocalInstanceId": {"Ref": "Instance"},
+        "LocalInstanceType": {"Ref": "InstanceType"},
+        "LocalZoneId": {"Ref": "ZoneId"},
+        "LocalVpcId": {"Ref": "Vpc"},
+        "LocalVSwitchId": {"Ref": "VSwitch"},
+        "LocalSecurityGroupId": {"Ref": "SecurityGroup"},
+        "LocalEipAddress": {"Fn::GetAtt": ["Eip", "EipAddress"]},
     }
     assert 'pip install --upgrade --index-url https://mirrors.aliyun.com/pypi/simple/ "iac-code[http]"' in script
     assert "iac-code[http]==" not in script
@@ -124,13 +131,43 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
     assert "secrets.token_urlsafe(32)" in script
     assert 'exec >>"$LOG" 2>&1' in script
     assert "printf '%s' \"$TOKEN\" >&3" in script
+    assert "User=root" in script
+    assert "Group=root" in script
+    assert "WorkingDirectory=/root" in script
+    assert "Environment=IAC_CODE_CONFIG_DIR=/root/.iac-code" in script
+    assert "--access-token-file /root/.iac-code/web-access.token" in script
+    assert "useradd" not in script
+    assert "/var/lib/iac-code" not in script
+    assert 'AGENTS_FILE=/root/AGENTS.md' in script
+    assert "用户提到的“本机”“这台机器”“当前服务器”“当前 ECS”均指此实例" in script
+    assert "- 实例 ID：`${LocalInstanceId}`" in script
+    assert "- 实例规格：`${LocalInstanceType}`" in script
+    assert "- 地域：`${StackRegion}`" in script
+    assert "- 可用区：`${LocalZoneId}`" in script
+    assert "- VPC ID：`${LocalVpcId}`" in script
+    assert "- VSwitch ID：`${LocalVSwitchId}`" in script
+    assert "- 安全组 ID：`${LocalSecurityGroupId}`" in script
+    assert "- 公网 EIP：`${LocalEipAddress}`" in script
+    assert (
+        "https://ecs.console.aliyun.com/#/server/region/${StackRegion}?instanceIds=${LocalInstanceId}" in script
+    )
+    assert "停止、重启、释放本 ECS" in script
+    assert 'chmod 0600 "$AGENTS_TMP"' in script
     assert set(re.findall(r"\$\{([^}]+)\}", script)) == {
         "BailianApiKeyB64",
+        "LocalEipAddress",
+        "LocalInstanceId",
+        "LocalInstanceType",
+        "LocalSecurityGroupId",
+        "LocalVpcId",
+        "LocalVSwitchId",
+        "LocalZoneId",
         "MasterAccountId",
         "StackRegion",
     }
     for expected in (
         "'activeProvider': 'dashscope'",
+        "root = pathlib.Path('/root/.iac-code')",
         "root / '.cloud-credentials.yml'",
         "'mode': 'OAuth'",
         "'region_id': '${StackRegion}'",
@@ -138,7 +175,7 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
         "'memory': {'autoMemory': True}",
         "'pipeline': {'sellingReviewStep': False}",
         "'apiBase': 'https://dashscope.aliyuncs.com/compatible-mode/v1'",
-        "'model': 'deepseek-v4-flash-0731'",
+        "'model': 'qwen3.8-max'",
         "'name': 'DashScope'",
         "'mode': 'normal'",
         "'permissionMode': 'bypass_permissions'",
@@ -147,7 +184,7 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
         "'userID': '${MasterAccountId}'",
     ):
         assert expected in script
-    assert "'model': 'qwen3.7-max'" not in script
+    assert "'model': 'deepseek-v4-flash-0731'" not in script
 
     outputs = template["Outputs"]
     assert set(outputs) == {"PublicUrl", "WebAccessToken", "InstanceId", "EipAddress"}

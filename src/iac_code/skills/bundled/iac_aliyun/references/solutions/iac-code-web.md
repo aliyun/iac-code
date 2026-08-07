@@ -18,11 +18,15 @@ API Key 参数。
 
 - 使用 Python 3.11 虚拟环境，并从阿里云 PyPI 镜像安装部署时最新的 `iac-code[http]`。
 - 生成 Web 访问 Token 并以 0600 权限保存到 ECS；systemd 使用 `--access-token-file`、
-  `--host 0.0.0.0 --port 8766 --no-open` 启动 iac-code Web。
-- `IAC_CODE_CONFIG_DIR` 固定为 `/var/lib/iac-code`。Bootstrap 将百炼 API Key 写入
-  `.credentials.yml`，并在 `settings.yml` 中配置 DashScope、自动 Memory、中文 UI、
-  `selling` Pipeline、普通会话模式和 `bypass_permissions`；`userID` 使用
-  `ALIYUN::TenantId`。
+  `--host 0.0.0.0 --port 8766 --no-open` 以 root 用户启动 iac-code Web。
+- `IAC_CODE_CONFIG_DIR` 固定为 `/root/.iac-code`。Bootstrap 将百炼 API Key 写入
+  `.credentials.yml`，并在 `settings.yml` 中配置 DashScope（默认模型 `qwen3.8-max`）、
+  自动 Memory、中文 UI、`selling` Pipeline、普通会话模式和 `bypass_permissions`；
+  `userID` 使用 `ALIYUN::TenantId`。
+- Bootstrap 在 `/root/AGENTS.md` 注入当前 ECS 的实例 ID、规格、地域、可用区、VPC、
+  VSwitch、安全组、EIP 和 ECS 控制台详情链接。iac-code 将未明确指定目标的 ECS 查询、
+  系统运维和负载检查理解为针对本机；可能中断当前 Web 的本机停机、重启、释放、网络和
+  安全组变更必须先由用户确认。
 - Bootstrap 必须同步等待本机 `/health` 成功；详细命令直接沿用 Golden YAML，不要重新生成。
 
 ## Stack Outputs
