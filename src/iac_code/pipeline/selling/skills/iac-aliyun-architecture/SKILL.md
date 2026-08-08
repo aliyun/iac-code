@@ -59,7 +59,7 @@ conclusion_schema:
                   description: 约束对象，如 ECS、RDS、Network、Stack 或具体资源角色
                 property:
                   type: string
-                  description: 规范化属性名，如 vcpu、memory、count、region、version、bandwidth、stack_name
+                  description: 规范化属性名，如 vcpu、memory、count、region、version、bandwidth
                 operator:
                   type: string
                   enum: [eq, ne, gt, gte, lt, lte, in, not_in, contains, not_contains]

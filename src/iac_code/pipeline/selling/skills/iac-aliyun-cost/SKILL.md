@@ -59,7 +59,7 @@ conclusion_schema:
                 description: 约束对象，如 ECS、RDS、Network、Stack 或具体资源角色
               property:
                 type: string
-                description: 被验证的规范化属性名，如 vcpu、memory、count、region、version、bandwidth、stack_name
+                description: 被验证的规范化属性名，如 vcpu、memory、count、region、version、bandwidth
               operator:
                 type: string
                 enum: [eq, ne, gt, gte, lt, lte, in, not_in, contains, not_contains]
@@ -187,7 +187,7 @@ conclusion_schema:
 
 使用专用 ROS 模板询价工具预估部署费用。
 
-前一步已完成模板校验；本步骤避免在成本预估前重复校验模板。首次询价前优先按参数推荐流程形成 Preview-Validated Pricing Parameter Set，再调用 `ros_estimate_template_cost`。PreviewStack 不是硬门禁；完整部署参数暂时无法自动形成时，仍可用当前已选参数调用 `ros_estimate_template_cost`，并把缺口留给后续步骤补充。只有在修复或改写模板后，才调用 `ros_validate_template` 校验改动。
+前一步已完成模板校验；本步骤避免在成本预估前重复校验模板。首次询价前必须先尝试按参数推荐流程形成 Preview-Validated Pricing Parameter Set，不得直接跳过 PreviewStack。PreviewStack 不是成本估算的硬门禁；完整部署参数暂时无法自动形成时，仍可用当前已选参数调用 `ros_estimate_template_cost`，并把缺口留给后续步骤补充。只有在修复或改写模板后，才调用 `ros_validate_template` 校验改动。
 
 ## 执行流程
 
@@ -226,11 +226,11 @@ ros_validate_template(
 
 ## 询价参数推荐与传递
 
-缺少 Default 或上下文值时，按 [references/template-parameter-recommendation.md](references/template-parameter-recommendation.md) 的参数推荐规则求解，并优先通过 `ros_preview_template` 形成 **Preview-Validated Pricing Parameter Set**。不要使用 `ros_stack` 执行 `PreviewStack`；本步骤只验证参数与模板可预览，不执行部署确认或 `CreateStack`。
+缺少 Default 或上下文值时，按 [references/template-parameter-recommendation.md](references/template-parameter-recommendation.md) 的参数推荐规则求解，并通过 `ros_preview_template` 形成 **Preview-Validated Pricing Parameter Set**。不要使用 `ros_stack` 执行 `PreviewStack`；本步骤只验证参数与模板可预览，不执行部署确认或 `CreateStack`。
 
 PreviewStack 必须传 StackName；调用 `ros_preview_template` 前，必须先确定唯一 `stack_name`。`stack_name` 使用候选方案或服务简名作为前缀，并追加时间或 6 位小写字母/数字随机串后缀（如 `ai-app-20260623-a1b2c3`），避免重名。该 `stack_name` 是预览工具参数，不写入模板 `parameters`，不放入 `deployment_parameters`。
 
-PreviewStack 不是硬门禁。它要求完整部署参数，常比询价工具需要更多外部输入；但在软降级到部分参数询价前，必须先尽量形成完整部署参数集，不要过早把可补齐参数列入 `missing_deployment_parameters`。如果完整部署参数无法自动补齐、或 PreviewStack 因外部参数缺口失败，但已有参数足以询价，则可以调用 `ros_estimate_template_cost` 估算费用。此时必须在 `parameter_set_summary` 说明 PreviewStack 状态，在 `missing_deployment_parameters` 列出缺口，后续选择阶段可通过 `parameter_overrides` 补充，deploying 也可继续补齐并做最终部署校验。
+完成上述 PreviewStack 尝试后，如果完整部署参数无法自动补齐、或预览因外部参数缺口失败，但已有参数足以询价，则可以调用 `ros_estimate_template_cost` 估算费用。软降级前必须先尽量形成完整部署参数集，不要过早把可补齐参数列入 `missing_deployment_parameters`。此时必须在 `parameter_set_summary` 说明 PreviewStack 状态，在 `missing_deployment_parameters` 列出缺口，后续选择阶段可通过 `parameter_overrides` 补充，deploying 也可继续补齐并做最终部署校验。
 
 本步骤的裁剪规则：
 - `candidate.hard_constraints` 是进入成本步骤时当前有效的完整用户硬约束快照，也是本步骤的唯一硬约束来源；不比较更早步骤的约束版本。硬约束优先级高于候选推荐、模板 Default、场景推荐和软偏好。

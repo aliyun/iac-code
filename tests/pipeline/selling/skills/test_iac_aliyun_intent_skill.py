@@ -211,10 +211,11 @@ def test_intent_schema_captures_stack_name_and_network_constraints_without_e2e_c
 
     assert non_functional["stack_name"]["type"] == "string"
     assert "资源栈名称" in non_functional["stack_name"]["description"]
+    assert "基础名" in non_functional["stack_name"]["description"]
     assert non_functional["network_constraints"]["type"] == "object"
     assert "deployment_hold" not in non_functional
-    assert "non_functional.stack_name" in prompt
-    assert "non_functional.network_constraints" in prompt
+    assert "non_functional.stack_name" not in prompt
+    assert "non_functional.network_constraints" not in prompt
     assert "deployment_hold" not in body
     assert "部署后等待用户继续" not in body
     assert "CreateStack 的 params.StackName" not in prompt

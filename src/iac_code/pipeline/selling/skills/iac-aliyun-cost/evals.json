@@ -112,9 +112,9 @@
         "region": "cn-hangzhou",
         "description": "PreviewStack 需要完整的已有网络参数，但 ECS 费用可先基于规格和磁盘参数估算"
       },
-      "expected_behavior": "优先尝试参数推荐和 PreviewStack；如果 VpcId/VSwitchId/SecurityGroupId 无法自动补齐，PreviewStack 不是硬门禁，不要直接终止。可用 ZoneId、InstanceType、ImageId、SystemDiskCategory 等当前可询价参数调用 ros_estimate_template_cost，并在 conclusion.missing_deployment_parameters 中列出仍需用户通过选择阶段 parameter_overrides 补充的完整部署参数缺口，同时将 conclusion.preview_validation.succeeded 置为 false",
+      "expected_behavior": "询价前必须先尝试参数推荐和 PreviewStack，不得直接跳过；如果 VpcId/VSwitchId/SecurityGroupId 无法自动补齐，PreviewStack 不是成本估算硬门禁，不要直接终止。可用 ZoneId、InstanceType、ImageId、SystemDiskCategory 等当前可询价参数调用 ros_estimate_template_cost，并在 conclusion.missing_deployment_parameters 中列出仍需用户通过选择阶段 parameter_overrides 补充的完整部署参数缺口，同时将 conclusion.preview_validation.succeeded 置为 false",
       "assertions": [
-        {"name": "preview_is_soft_gate", "check": "明确说明 PreviewStack 不是硬门禁，不能仅因完整部署参数暂缺就停止询价"},
+        {"name": "preview_is_attempted_soft_gate", "check": "不得直接跳过 PreviewStack；它不是成本估算硬门禁，不能仅因完整部署参数暂缺就停止询价"},
         {"name": "attempts_pricing_with_available_params", "check": "调用 ros_estimate_template_cost，用当前已选或可用于询价的参数估算费用"},
         {"name": "reports_missing_deployment_parameters", "check": "conclusion.missing_deployment_parameters 包含 VpcId、VSwitchId、SecurityGroupId 等缺口"},
         {"name": "outputs_partial_deployment_parameters", "check": "conclusion.deployment_parameters 保留已用于询价的 ZoneId、InstanceType、ImageId、SystemDiskCategory"},

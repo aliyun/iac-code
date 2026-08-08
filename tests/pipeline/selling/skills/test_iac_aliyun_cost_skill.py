@@ -336,7 +336,8 @@ class TestSkillContentRosOnly:
         assert "deploying" in body
 
     def test_preview_stack_is_not_hard_gate_for_pricing(self, body):
-        assert "PreviewStack 不是硬门禁" in body
+        assert "不得直接跳过 PreviewStack" in body
+        assert "PreviewStack 不是成本估算的硬门禁" in body
         assert "完整部署参数" in body
         assert "ros_estimate_template_cost" in body
         assert "missing_deployment_parameters" in body
@@ -494,7 +495,6 @@ class TestSkillDiscovery:
 class TestCostPrompt:
     def test_prompt_is_not_duplicate_output_reference(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")
-        assert "Preview-Validated Pricing Parameter Set" in body
         assert "`deployment_parameters`" in body
         assert "不得写入 `***`、`[REDACTED]` 或 `<redacted>`" in body
         assert "询价失败但 PreviewStack 已成功" not in body
@@ -505,15 +505,15 @@ class TestCostPrompt:
         assert "ros_preview_template" in body
         assert "不要使用 `ros_stack` 执行预览" in body
 
-    def test_prompt_treats_preview_stack_as_soft_gate(self):
+    def test_prompt_defers_preview_policy_to_skill(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")
-        assert "优先通过" in body
-        assert "不是硬门禁" in body
-        assert "参数缺口" in body
+        assert "PreviewStack 尝试和软降级规则按技能执行" in body
+        assert "不是硬门禁" not in body
+        assert "不得直接跳过" not in body
 
-    def test_prompt_asks_model_to_complete_parameters_before_pricing(self):
+    def test_prompt_keeps_generated_parameter_contract_without_repeating_solver_policy(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")
-        assert "尽量形成完整部署参数集" in body
+        assert "尽量形成完整部署参数集" not in body
         assert "可生成参数" in body
         assert "普通密码" in body
 
@@ -596,7 +596,8 @@ class TestEvalsJson:
         data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))
         eval_text = json.dumps(data, ensure_ascii=False)
         assert "preview-soft-gate-partial-pricing" in eval_text
-        assert "PreviewStack 不是硬门禁" in eval_text
+        assert "不得直接跳过 PreviewStack" in eval_text
+        assert "PreviewStack 不是成本估算硬门禁" in eval_text
         assert "missing_deployment_parameters" in eval_text
 
     def test_evals_cover_hard_constraints_across_products(self):

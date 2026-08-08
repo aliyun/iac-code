@@ -90,8 +90,6 @@ conclusion_schema:
 
 ## 生成要求
 
-- 对用户未指定的参数直接使用合理默认值，不反复询问
-- 库存相关属性必须参数化为 Parameters，不写死具体值
 - 模板格式为 YAML
 - 使用 `!Ref`、`!GetAtt` 等内置函数引用参数和资源属性，避免硬编码
 - Outputs 中所有输出变量必须定义 Label

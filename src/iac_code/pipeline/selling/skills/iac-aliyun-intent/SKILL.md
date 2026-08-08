@@ -46,7 +46,7 @@ conclusion_schema:
             description: 约束对象，如 ECS、RDS、Network、Stack 或具体资源角色
           property:
             type: string
-            description: 规范化属性名，如 vcpu、memory、count、region、version、bandwidth、stack_name
+            description: 规范化属性名，如 vcpu、memory、count、region、version、bandwidth
           operator:
             type: string
             enum: [eq, ne, gt, gte, lt, lte, in, not_in, contains, not_contains]
@@ -97,7 +97,7 @@ conclusion_schema:
           description: 用户指定或默认的阿里云地域，如 cn-hangzhou
         stack_name:
           type: string
-          description: 用户明确指定的 ROS 资源栈名称或 StackName，必须原样保留
+          description: 用户指定的 ROS 资源栈名称基础名
         naming_constraints:
           type: array
           items:
@@ -228,14 +228,14 @@ conclusion_schema:
 - `scale_hint`：根据上下文推断的业务规模，影响后续规格选择
 - `budget_constraint`：如用户提到预算则填写（如 "月预算500以内"），否则为 null
 - `region_preference`（在 `non_functional` 中）：如用户有地域偏好则填写，否则默认 "cn-hangzhou"
-- `stack_name`（在 `non_functional` 中）：如用户指定“资源栈名称”“StackName”或 ROS 资源栈名称，必须把精确名称写入该字段；不得把模板名、候选方案名或默认名称替代为 stack_name
+- `stack_name`（在 `non_functional` 中）：如用户指定“资源栈名称”“StackName”或 ROS 资源栈名称，把用户给出的名称作为基础名写入该字段
 - `network_constraints`（在 `non_functional` 中）：如用户指定 VPC ID、ZoneId、CidrBlock、已有网络资源或多个网段关系，必须原样保留
 
 ### 硬约束提取规则
 
 - “2 核 4 GiB”可提取为同一目标的 `vcpu eq 2 count` 与 `memory eq 4 GiB` 两条约束；它们需要把实际产品规格映射到具体部署参数，因此使用 `verification_mode: tool`。这里只负责忠实表达，不选择具体实例规格或 API。
 - 将用户口语单位规范化后写入 schema：CPU 的“核/核心/vCPU”统一为 `count`，内存语境中的 `g/G` 统一为 `GiB`、`m/M` 统一为 `MiB`；保留用户原始表达在 `source_text`，不要把内存单位误解为带宽单位。
-- “至少 100 GiB”“带宽不超过 20 Mbps”“只能用 8.0”“StackName 必须是 prod-web”“不要公网 IP”分别使用 `gte`、`lte`、`in/eq`、`eq`、`eq false` 等通用表达。
+- “至少 100 GiB”“带宽不超过 20 Mbps”“只能用 8.0”“不要公网 IP”分别使用 `gte`、`lte`、`in/eq`、`eq false` 等通用表达。
 - 实际值能从模板属性或最终部署参数直接定位时使用 `verification_mode: direct`；依赖云产品元数据、SKU 映射、库存或已有资源状态时使用 `verification_mode: tool`。该字段只描述验证方式，不得改变用户要求的值。
 - 同一属性的上下限拆成两条独立约束并使用不同 `id`；不要把自然语言范围压成模糊摘要。
 - 用户没有明确说出的数值、版本、地域或资源规格，不得根据场景推荐写成硬约束。
