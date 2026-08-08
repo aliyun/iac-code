@@ -106,7 +106,7 @@ conclusion_schema:
 
 判断标准：如果你需要添加用户完全没提到的产品来"制造"差异，那就不该有多个方案。
 
-若将 iac-code Web 部署到 ECS，只生成一个单 ECS + EIP 候选，安全组仅开放 8766，不得增加其他入口资源；
+若用户要求在 ECS 上部署 iac-code Agent（包括将其称为 iac-code Web），按 iac-code Web 方案处理：只生成一个单 ECS + EIP 候选，安全组仅开放 8766，不得增加其他入口资源；
 将其 `candidate.name` 固定为 `iac-code-web-single-ecs`。
 
 ## 差异化维度

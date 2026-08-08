@@ -156,6 +156,150 @@ def test_default_recovery_prompt_targets_previous_real_user_question() -> None:
     assert "更早的方案选择消息" in runner.DEFAULT_RECOVERY_PROMPT
 
 
+def test_iac_code_web_2c4g_evidence_requires_structured_cpu_and_memory() -> None:
+    runner = _load_runner()
+
+    assert runner.IAC_CODE_WEB_2C4G_PROMPT == "我要部署一台2核4G的ECS同时部署 iac-code Agent"
+    conclusion = {
+        "deployment_parameters": {"InstanceType": "ecs.c7.large"},
+        "hard_constraint_checks": [
+            {
+                "constraint": {"property": "vcpu", "value": 2, "unit": "count"},
+                "status": "satisfied",
+                "actual_value": "2",
+                "actual_unit": "count",
+                "parameter_values": {"InstanceType": "ecs.c7.large"},
+                "evidence": [
+                    {
+                        "type": "tool",
+                        "tool_name": "aliyun_api",
+                        "action": "DescribeInstanceTypes",
+                        "result_path": "InstanceTypes.InstanceType.0.CpuCoreCount",
+                        "actual_value": 2,
+                    }
+                ],
+            },
+            {
+                "constraint": {"property": "memory", "value": 4, "unit": "GiB"},
+                "status": "satisfied",
+                "actual_value": "4",
+                "actual_unit": "GiB",
+                "parameter_values": {"InstanceType": "ecs.c7.large"},
+                "evidence": [
+                    {
+                        "type": "tool",
+                        "tool_name": "aliyun_api",
+                        "action": "DescribeInstanceTypes",
+                        "result_path": "InstanceTypes.InstanceType.0.MemorySize",
+                        "actual_value": 4,
+                    }
+                ],
+            },
+        ],
+    }
+    snapshot = {
+        "display": {
+            "toolResults": [
+                {
+                    "sequence": 1,
+                    "toolName": "aliyun_api",
+                    "isError": False,
+                    "input": {"product": "ecs", "action": "DescribeInstanceTypes"},
+                    "result": {
+                        "InstanceTypes": {
+                            "InstanceType": [
+                                {"InstanceTypeId": "ecs.c7.large", "CpuCoreCount": 2, "MemorySize": 4}
+                            ]
+                        }
+                    },
+                },
+                {
+                    "sequence": 2,
+                    "toolName": "complete_step",
+                    "isError": False,
+                    "input": {"conclusion": conclusion},
+                },
+            ]
+        }
+    }
+
+    assert runner._has_2c4g_structured_evidence(snapshot) is True
+    snapshot["display"]["toolResults"][0]["result"]["InstanceTypes"]["InstanceType"][0]["MemorySize"] = 8
+    assert runner._has_2c4g_structured_evidence(snapshot) is False
+    snapshot["display"]["toolResults"][0]["result"]["InstanceTypes"]["InstanceType"][0]["MemorySize"] = 4
+    conclusion["hard_constraint_checks"][1]["actual_unit"] = "MiB"
+    assert runner._has_2c4g_structured_evidence(snapshot) is False
+
+
+def test_tool_results_use_sequence_and_ignore_other_display_buckets() -> None:
+    runner = _load_runner()
+
+    snapshot = {
+        "display": {
+            "permissions": [{"sequence": 1, "toolName": "ros_estimate_template_cost"}],
+            "toolResults": [
+                {"sequence": 20, "toolName": "ros_estimate_template_cost"},
+                {"sequence": 10, "toolName": "ros_preview_template"},
+            ],
+        }
+    }
+
+    assert [item["toolName"] for item in runner._ordered_tool_results(snapshot)] == [
+        "ros_preview_template",
+        "ros_estimate_template_cost",
+    ]
+
+
+def test_all_pipeline_event_types_keeps_events_before_intervening_answers() -> None:
+    runner = _load_runner()
+    original = runner.StreamSummary(
+        name="01-initial-2c4g",
+        prompt=runner.IAC_CODE_WEB_2C4G_PROMPT,
+        pipeline_event_types=["deployment_started", "input_required"],
+    )
+    answer = runner.StreamSummary(
+        name="01-initial-2c4g-answer-ask-1",
+        prompt=runner.INTERVENING_ASK_ANSWER,
+        pipeline_event_types=["input_required"],
+    )
+
+    assert original.prompt == runner.IAC_CODE_WEB_2C4G_PROMPT
+    assert runner._all_pipeline_event_types([original, answer]) == {"deployment_started", "input_required"}
+
+
+def test_golden_solution_requires_read_and_tagged_write() -> None:
+    runner = _load_runner()
+    snapshot = {
+        "display": {
+            "toolResults": [
+                {
+                    "sequence": 1,
+                    "toolName": "read_file",
+                    "isError": False,
+                    "input": {"path": "references/solutions/iac-code-web.ros.yml"},
+                },
+                {
+                    "sequence": 2,
+                    "toolName": "write_file",
+                    "isError": False,
+                    "input": {"path": "templates/web.yml", "content": "acs:solution:iac-code:iac-code-web"},
+                },
+            ]
+        }
+    }
+
+    assert runner._golden_solution_evidenced(snapshot) is True
+    snapshot["display"]["toolResults"][1]["input"]["content"] = "generic template"
+    assert runner._golden_solution_evidenced(snapshot) is False
+    snapshot["display"]["toolResults"][1] = {
+        "sequence": 2,
+        "toolName": "complete_step",
+        "isError": False,
+        "input": {"conclusion": {"template": "acs:solution:iac-code:iac-code-web"}},
+    }
+    assert runner._golden_solution_evidenced(snapshot) is True
+
+
 def test_normal_running_recovery_prompt_ignores_continue() -> None:
     runner = _load_runner()
 

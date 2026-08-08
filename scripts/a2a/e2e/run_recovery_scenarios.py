@@ -233,6 +233,8 @@ TERMINAL_STATES = {"TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANC
 ROS_STACK_DELETED_STATUSES = {"DELETE_COMPLETE"}
 REDACTION_PLACEHOLDERS = frozenset({"***", "[REDACTED]", "<redacted>"})
 REDACTION_STEP4_SCENARIO = "redaction-step4"
+IAC_CODE_WEB_2C4G_STEP4_SCENARIO = "iac-code-web-2c4g-step4"
+IAC_CODE_WEB_2C4G_PROMPT = "我要部署一台2核4G的ECS同时部署 iac-code Agent"
 
 
 @dataclass
@@ -1257,6 +1259,197 @@ def run_redaction_step4(args: argparse.Namespace, scenario: str) -> int:
         )
 
     return _run_with_harness(args, scenario, callback)
+
+
+def run_iac_code_web_2c4g_step4(args: argparse.Namespace, scenario: str) -> int:
+    """Verify the real iac-code Web 2C4G flow stops at candidate selection."""
+
+    def callback(h: ScenarioHarness) -> None:
+        original = h.stream(prompt=IAC_CODE_WEB_2C4G_PROMPT, name="01-initial-2c4g", context_id="", task_id="")
+        final = _answer_intervening_ask_inputs(h, original, name_prefix="01-initial-2c4g")
+        h.checks["exact 2C4G user prompt was sent"] = original.prompt == IAC_CODE_WEB_2C4G_PROMPT
+        h.checks["reached step4 candidate selection"] = final.last_input_required_step_id == "confirm_and_select"
+
+        state = h.fetch_state("step4")
+        h.checks["pipeline is waiting at step4"] = (
+            _snapshot_value(state, "status") == "waiting_input" and _pending_step_id(state) == "confirm_and_select"
+        )
+
+        canonical_snapshot = _load_canonical_pipeline_snapshot(h)
+        tool_results = _ordered_tool_results(canonical_snapshot)
+        event_types = _all_pipeline_event_types(h.summaries.values())
+        h.checks["golden iac-code Web solution is evidenced"] = _golden_solution_evidenced(canonical_snapshot)
+        h.checks["structured 2 vCPU and 4 GiB evidence"] = _has_2c4g_structured_evidence(canonical_snapshot)
+        tool_order = [str(item.get("toolName") or "") for item in tool_results]
+        preview_index = _first_index(tool_order, "ros_preview_template")
+        pricing_index = _first_index(tool_order, "ros_estimate_template_cost")
+        h.checks["PreviewStack was attempted before pricing"] = (
+            preview_index is not None and pricing_index is not None and preview_index < pricing_index
+        )
+        h.checks["no deployment was started"] = not event_types.intersection(
+            {"deploying_started", "deployment_started", "ros_deploy", "stack_created"}
+        ) and not any(item.get("toolName") == "ros_deploy" for item in tool_results)
+        h.notes.append("stopped at confirm_and_select; no candidate selection or deployment request was sent")
+
+    return _run_with_harness(args, scenario, callback)
+
+
+def _all_pipeline_event_types(summaries: Iterable[StreamSummary]) -> set[str]:
+    return {event_type for summary in summaries for event_type in summary.pipeline_event_types}
+
+
+def _ordered_tool_results(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    display = snapshot.get("display")
+    raw_results = display.get("toolResults") if isinstance(display, dict) else None
+    results = [item for item in raw_results or [] if isinstance(item, dict)]
+    return sorted(
+        results,
+        key=lambda item: float(item.get("sequence"))
+        if isinstance(item.get("sequence"), (int, float))
+        else float("inf"),
+    )
+
+
+def _golden_solution_evidenced(snapshot: dict[str, Any]) -> bool:
+    tool_results = _ordered_tool_results(snapshot)
+    golden_path = "references/solutions/iac-code-web.ros.yml"
+    read_golden = any(
+        item.get("toolName") == "read_file"
+        and item.get("isError") is False
+        and str((item.get("input") or {}).get("path") or "").replace("\\", "/").endswith(golden_path)
+        for item in tool_results
+        if isinstance(item.get("input"), dict)
+    )
+    produced_tagged_template = any(
+        item.get("toolName") in {"write_file", "complete_step"}
+        and item.get("isError") is False
+        and "acs:solution:iac-code:iac-code-web" in json.dumps(item.get("input"), ensure_ascii=False, default=str)
+        for item in tool_results
+        if isinstance(item.get("input"), dict)
+    )
+    return read_golden and produced_tagged_template
+
+
+def _has_2c4g_structured_evidence(snapshot: dict[str, Any]) -> bool:
+    """Require a verified final parameter plus matching DescribeInstanceTypes data."""
+
+    tool_results = _ordered_tool_results(snapshot)
+    for item in tool_results:
+        if (
+            item.get("toolName") != "complete_step"
+            or item.get("isError") is not False
+            or not isinstance(item.get("input"), dict)
+        ):
+            continue
+        conclusion = item["input"].get("conclusion")
+        instance_type = _verified_2c4g_instance_type(conclusion)
+        if instance_type and _instance_type_result_is_2c4g(tool_results, instance_type):
+            return True
+    return False
+
+
+def _verified_2c4g_instance_type(conclusion: Any) -> str:
+    if not isinstance(conclusion, dict):
+        return ""
+    parameters = conclusion.get("deployment_parameters")
+    checks = conclusion.get("hard_constraint_checks")
+    if not isinstance(parameters, dict) or not isinstance(checks, list):
+        return ""
+    instance_type = parameters.get("InstanceType")
+    if not isinstance(instance_type, str) or not instance_type:
+        return ""
+
+    expected = {"vcpu": (2.0, "count", "CpuCoreCount"), "memory": (4.0, "gib", "MemorySize")}
+    matched: set[str] = set()
+    for check in checks:
+        if not isinstance(check, dict) or check.get("status") != "satisfied":
+            continue
+        constraint = check.get("constraint")
+        parameter_values = check.get("parameter_values")
+        if not isinstance(constraint, dict) or not isinstance(parameter_values, dict):
+            continue
+        property_name = str(constraint.get("property") or "").casefold()
+        requirement = expected.get(property_name)
+        if requirement is None or parameter_values.get("InstanceType") != instance_type:
+            continue
+        value, unit, result_field = requirement
+        if _numeric(constraint.get("value")) != value or _numeric(check.get("actual_value")) != value:
+            continue
+        if str(check.get("actual_unit") or constraint.get("unit") or "").casefold() != unit:
+            continue
+        evidence = check.get("evidence")
+        if not isinstance(evidence, list) or not any(
+            isinstance(record, dict)
+            and record.get("type") == "tool"
+            and record.get("tool_name") == "aliyun_api"
+            and str(record.get("action") or "").casefold() == "describeinstancetypes"
+            and str(record.get("result_path") or "").endswith(result_field)
+            and _numeric(record.get("actual_value")) == value
+            for record in evidence
+        ):
+            continue
+        matched.add(property_name)
+    return instance_type if matched == set(expected) else ""
+
+
+def _instance_type_result_is_2c4g(tool_results: list[dict[str, Any]], instance_type: str) -> bool:
+    query_seen = False
+    parsed_result_seen = False
+    for item in tool_results:
+        tool_input = item.get("input")
+        if (
+            item.get("toolName") != "aliyun_api"
+            or item.get("isError") is not False
+            or not isinstance(tool_input, dict)
+            or str(tool_input.get("action") or "").casefold() != "describeinstancetypes"
+        ):
+            continue
+        query_seen = True
+        result = item.get("result")
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except json.JSONDecodeError:
+                continue
+        if not isinstance(result, (dict, list)):
+            continue
+        parsed_result_seen = True
+        for record in _mapping_values(result):
+            if (
+                record.get("InstanceTypeId") == instance_type
+                and _numeric(record.get("CpuCoreCount")) == 2
+                and _numeric(record.get("MemorySize")) == 4
+            ):
+                return True
+    # Successful complete_step already matched the structured result_path against the
+    # full tool-result registry. Snapshot display data can contain a truncated preview.
+    return query_seen and not parsed_result_seen
+
+
+def _mapping_values(value: Any) -> Iterable[dict[str, Any]]:
+    if isinstance(value, dict):
+        yield value
+        for item in value.values():
+            yield from _mapping_values(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _mapping_values(item)
+
+
+def _numeric(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _first_index(values: list[str], target: str) -> int | None:
+    try:
+        return values.index(target)
+    except ValueError:
+        return None
 
 
 def run_image_initial(args: argparse.Namespace, scenario: str) -> int:
@@ -3667,6 +3860,7 @@ _REAL_CLOUD_SCENARIOS = {
     "normal-running",
     "ask-waiting",
     REDACTION_STEP4_SCENARIO,
+    IAC_CODE_WEB_2C4G_STEP4_SCENARIO,
     "selection-waiting",
     "rollback-step5-cleanup",
     "rollback-step5-cleanup-recovery",
@@ -3688,6 +3882,7 @@ _SCENARIOS: dict[str, Callable[[argparse.Namespace, str], int]] = {
     "normal-running": run_normal_running,
     "ask-waiting": run_ask_waiting,
     REDACTION_STEP4_SCENARIO: run_redaction_step4,
+    IAC_CODE_WEB_2C4G_STEP4_SCENARIO: run_iac_code_web_2c4g_step4,
     "selection-waiting": run_selection_waiting,
     "fault-after-snapshot": run_fault_after_snapshot,
     "rollback-step5-cleanup": run_rollback_step5_cleanup,
