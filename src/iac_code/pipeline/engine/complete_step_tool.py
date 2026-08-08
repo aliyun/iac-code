@@ -13,6 +13,7 @@ import jsonschema
 
 from iac_code.i18n import _
 from iac_code.pipeline.display_names import display_step_name
+from iac_code.pipeline.engine.hard_constraints import collect_hard_constraints, validate_hard_constraint_checks
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.utils.public_errors import sanitize_strict_text
@@ -55,6 +56,10 @@ _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
         "or confirm that it should not be handled for now."
     ),
     "deploy_wait_create_complete": ("A successful deployment must wait until ros_deploy returns CREATE_COMPLETE."),
+    "hard_constraint_verification_required": (
+        "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
+        "and evidence."
+    ),
 }
 _COMPLETION_GUARD_MESSAGE_KEY_BY_TEXT = {text: key for key, text in _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY.items()}
 
@@ -91,6 +96,10 @@ def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
             "or confirm that it should not be handled for now."
         ),
         _("A successful deployment must wait until ros_deploy returns CREATE_COMPLETE."),
+        _(
+            "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
+            "and evidence."
+        ),
     )
 
 
@@ -314,6 +323,7 @@ class CompleteStepTool(Tool):
             required_tool = guard.get("require_tool")
             required_tool_result = guard.get("require_tool_result")
             required_conclusion_sha256 = guard.get("require_conclusion_sha256")
+            required_constraint_coverage = guard.get("require_context_constraint_coverage")
             required_field = guard.get("required_conclusion_field")
             required_any_of = guard.get("required_conclusion_any_of") or []
             successful_tools = self._completion_guard_state.get("successful_tools", set())
@@ -365,7 +375,57 @@ class CompleteStepTool(Tool):
                 )
                 if validation_error is not None:
                     return validation_error
+            if isinstance(required_constraint_coverage, dict):
+                validation_error = self._validate_context_constraint_coverage(
+                    required_constraint_coverage,
+                    conclusion,
+                    self._completion_guard_message(guard, None),
+                )
+                if validation_error is not None:
+                    return validation_error
         return None
+
+    def _validate_context_constraint_coverage(
+        self,
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        message: str | None,
+    ) -> str | None:
+        source_fields = requirement.get("source_fields") or []
+        if not isinstance(source_fields, list) or not all(isinstance(field, str) for field in source_fields):
+            return message or _("A completion guard is misconfigured.")
+        context_snapshot = self._completion_guard_state.get("context_snapshot")
+        if not isinstance(context_snapshot, dict):
+            context_snapshot = {}
+        constraints, source_issues = collect_hard_constraints(context_snapshot, source_fields)
+        checks = self._resolve_dotted(conclusion, str(requirement.get("checks_field") or "hard_constraint_checks"))
+        parameters = self._resolve_dotted(
+            conclusion,
+            str(requirement.get("deployment_parameters_field") or "deployment_parameters"),
+        )
+        issues = source_issues + validate_hard_constraint_checks(
+            constraints,
+            checks,
+            parameters,
+            tool_result_records=self._completion_guard_state.get("tool_result_records") or [],
+        )
+        if not issues:
+            return None
+        base_message = message or _(
+            "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
+            "and evidence."
+        )
+        issue_summaries = []
+        for issue in issues:
+            specifics = ", ".join(value for value in (issue.constraint_id, issue.detail) if value)
+            issue_summaries.append(f"{issue.code}[{specifics}]" if specifics else issue.code)
+        code = issues[0].code if len(issues) == 1 else "multiple_constraint_issues"
+        detail = "; ".join(issue_summaries)
+        return _("{message} Validation issue: {code} ({detail}).").format(
+            message=base_message,
+            code=code,
+            detail=detail,
+        )
 
     @staticmethod
     def _completion_guard_message(config: dict[str, Any], default: str | None) -> str | None:
@@ -906,7 +966,10 @@ class CompleteStepTool(Tool):
 
         user_patterns = guard.get("when_user_message_matches_any") or []
         conclusion_equals = guard.get("when_conclusion_field_equals") or {}
-        applies = bool(user_patterns and any(self._matches(pattern, self._user_message) for pattern in user_patterns))
+        applies = guard.get("always") is True
+        applies = applies or bool(
+            user_patterns and any(self._matches(pattern, self._user_message) for pattern in user_patterns)
+        )
         applies = applies or any(
             self._resolve_dotted(conclusion, field) == value for field, value in conclusion_equals.items()
         )
@@ -974,12 +1037,18 @@ class CompleteStepTool(Tool):
             return pattern in value
 
     @staticmethod
-    def _resolve_dotted(value: dict, path: str) -> Any:
+    def _resolve_dotted(value: Any, path: str) -> Any:
         current: Any = value
         for part in path.split("."):
-            if not isinstance(current, dict):
+            if isinstance(current, dict):
+                current = current.get(part)
+            elif isinstance(current, list) and part.isdigit():
+                index = int(part)
+                if index >= len(current):
+                    return None
+                current = current[index]
+            else:
                 return None
-            current = current.get(part)
             if current is None:
                 return None
         return current

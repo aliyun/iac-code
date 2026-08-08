@@ -11,7 +11,7 @@ conclusion_schema:
       minItems: 1
       items:
         type: object
-        required: [name, output_path, products, topology, monthly_estimate, pros, cons]
+        required: [name, output_path, products, hard_constraints, topology, monthly_estimate, pros, cons]
         properties:
           name:
             type: string
@@ -42,6 +42,43 @@ conclusion_schema:
                 notes:
                   type: string
             description: 本方案中每个资源的新建、复用、引用或禁止语义；从 intent.resource_intents 继承或收窄
+          hard_constraints:
+            type: array
+            description: 当前候选采用的用户硬约束完整快照；以进入本步骤后的最新用户要求为准，不得加入推断规格或方案推荐值
+            items:
+              type: object
+              required: [id, target, property, operator, value, verification_mode, source, source_text]
+              additionalProperties: false
+              properties:
+                id:
+                  type: string
+                  minLength: 1
+                  description: 当前请求内稳定且唯一的约束标识；用户修改同一约束时保持 ID，内容更新为最新要求
+                target:
+                  type: string
+                  description: 约束对象，如 ECS、RDS、Network、Stack 或具体资源角色
+                property:
+                  type: string
+                  description: 规范化属性名，如 vcpu、memory、count、region、version、bandwidth、stack_name
+                operator:
+                  type: string
+                  enum: [eq, ne, gt, gte, lt, lte, in, not_in, contains, not_contains]
+                  description: 比较操作；eq/ne 为等于/不等于，gt/gte/lt/lte 为数值范围，in/not_in 为集合包含关系，contains/not_contains 为内容包含关系
+                value:
+                  description: 用户当前明确要求的约束值；in/not_in 使用数组
+                unit:
+                  type: string
+                  description: 可选规范化单位，如 GiB、GB、Mbps、count；无单位时省略
+                verification_mode:
+                  type: string
+                  enum: [direct, tool]
+                  description: direct 表示可由模板或最终参数直接证明；tool 表示必须查询云产品元数据、库存或已有资源才能证明
+                source:
+                  const: user
+                  description: 约束来源；硬约束只能来自用户明确表达，因此固定为 user
+                source_text:
+                  type: string
+                  description: 产生当前约束版本的最新用户原文片段
           topology:
             type: string
           monthly_estimate:
@@ -107,6 +144,10 @@ conclusion_schema:
 - 将 `resource_intents` 原样或按方案收窄后写入每个 candidate，供模板生成步骤继续执行同一约束。
 
 示例：intent 表示“已有 VPC 中创建安全组”时，candidate 应包含 `resource_intents: [{"product": "VPC", "action": "use_existing"}, {"product": "SecurityGroup", "action": "create"}]`。不得生成 VSwitch，也不得设计成“创建 VPC + VSwitch + SecurityGroup”。
+
+## 用户硬约束
+
+以 `intent.hard_constraints` 为起点，并应用用户在进入或执行本步骤后明确提出的修改，将当前有效的完整约束快照写入每个 candidate 的 `hard_constraints`，包括 `verification_mode`。同一约束被用户修改时保留稳定 `id` 并更新其它字段；用户明确删除约束时从快照中删除。不得把推断规格或本方案推荐值新增为用户硬约束。方案差异只能发生在当前硬约束允许的空间内；某方案无法满足时不要生成该方案。
 
 ## 输出
 调用 `complete_step` 提交结论。字段定义见 tool schema。

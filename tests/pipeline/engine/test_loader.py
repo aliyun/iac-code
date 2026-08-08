@@ -741,6 +741,26 @@ class TestSkillSchemaExtraction:
         loaded = load_pipeline_dir(tmp_path)
         assert loaded.steps[0].max_conclusion_retries == 5
 
+    def test_rejects_unknown_completion_guard_key(self, tmp_path):
+        yaml_content = dedent("""\
+            name: test
+            context_dependencies:
+              intent: []
+            max_rollbacks: 1
+            steps:
+              - id: parse
+                conclusion_field: intent
+                forward: null
+                prompt: prompts/parse.md
+                completion_guards:
+                  - always: true
+                    require_context_contraint_coverage: {}
+        """)
+        _write_pipeline(tmp_path, yaml_content, {"parse.md": "P"})
+
+        with pytest.raises(ValueError, match="require_context_contraint_coverage"):
+            load_pipeline_dir(tmp_path)
+
     def test_interrupt_judge_failure_policy_from_yaml(self, tmp_path):
         yaml_content = dedent("""\
             name: test

@@ -3650,6 +3650,12 @@ msgstr "部署成功必须等待 ros_deploy 返回 CREATE_COMPLETE。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"Every explicit user hard constraint must be covered by a satisfied check "
+"with matching parameters and evidence."
+msgstr "每个用户明确提出的硬约束都必须由一条状态为满足的检查覆盖，且参数和证据一致。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr "调用此工具提交结论以完成当前步骤。如需回滚到较早步骤，请设置 rollback_request。"
@@ -3738,6 +3744,15 @@ msgid ""
 "{message} complete_step.conclusion must include one of these fields: "
 "{fields}."
 msgstr "{message} complete_step.conclusion 必须包含以下字段之一: {fields}。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A completion guard is misconfigured."
+msgstr "完成守卫配置错误。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "{message} Validation issue: {code} ({detail})."
+msgstr "{message} 校验问题：{code}（{detail}）。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A conclusion content hash is required before completing the current step."

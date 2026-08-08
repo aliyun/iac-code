@@ -36,6 +36,22 @@ _SELLING_IAC_ALIYUN_REFERENCE_SKILLS = {
 _SUPPORTED_ON_COMPLETE_ACTIONS = {"switch_to_normal"}
 _SUPPORTED_ON_COMPLETE_OUTCOMES = {"completed", "early_exit", "failed", "canceled"}
 _SUPPORTED_INTERRUPT_JUDGE_FAILURE_POLICIES = {"continue", "pause", "hard_interrupt"}
+_SUPPORTED_COMPLETION_GUARD_KEYS = {
+    "always",
+    "copy_tool_result_to_conclusion",
+    "message",
+    "message_key",
+    "require_conclusion_sha256",
+    "require_context_constraint_coverage",
+    "require_tool",
+    "require_tool_result",
+    "required_conclusion_any_of",
+    "required_conclusion_field",
+    "unless_user_message_matches_any",
+    "when_conclusion_field_equals",
+    "when_tool_result_exists",
+    "when_user_message_matches_any",
+}
 
 
 def load_pipeline_dir(
@@ -116,6 +132,26 @@ def _parse_mapping(raw: object, field_name: str, step_id: str | None = None) -> 
     if not all(isinstance(key, str) for key in raw):
         raise ValueError(f"{label} keys must be strings, got {raw!r}")
     return cast(dict[str, Any], raw)
+
+
+def _parse_completion_guards(raw: object, step_id: str) -> list[dict[str, Any]]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(f"Step '{step_id}': completion_guards must be a list, got {raw!r}")
+
+    guards: list[dict[str, Any]] = []
+    for index, guard in enumerate(raw):
+        if not isinstance(guard, dict):
+            raise ValueError(f"Step '{step_id}': completion_guards[{index}] must be a mapping, got {guard!r}")
+        unknown_keys = set(guard) - _SUPPORTED_COMPLETION_GUARD_KEYS
+        if unknown_keys:
+            formatted = ", ".join(sorted(str(key) for key in unknown_keys))
+            raise ValueError(
+                f"Step '{step_id}': completion_guards[{index}] has unsupported keys: {formatted}"
+            )
+        guards.append(cast(dict[str, Any], guard))
+    return guards
 
 
 def _resolve_feature_flags(raw_flags: dict | None) -> dict[str, bool]:
@@ -262,7 +298,7 @@ def _parse_steps(raw_steps: list[dict]) -> list[StepSpec]:
                     raw.get("interrupt_judge_failure", "continue"),
                     raw.get("id", "?"),
                 ),
-                completion_guards=raw.get("completion_guards", []),
+                completion_guards=_parse_completion_guards(raw.get("completion_guards"), step_id),
                 description=raw.get("description", ""),
                 exit_condition=_parse_exit_condition(raw.get("exit_condition"), step_id),
                 a2a_artifacts=_parse_a2a_artifacts(raw.get("a2a_artifacts"), step_id),

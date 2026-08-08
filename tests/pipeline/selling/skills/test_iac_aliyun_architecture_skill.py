@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
 SKILL_DIR = (
     Path(__file__).resolve().parents[4]
     / "src"
@@ -24,6 +26,28 @@ def test_architecture_consumes_intent_resource_lifecycle_contract():
     assert "use_existing/reference 必须作为已有资源引用" in body
     assert "不得生成 VSwitch" in body
     assert "forbidden_resources" not in body
+
+
+def test_architecture_carries_latest_user_hard_constraints_without_product_assumptions():
+    body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "intent.hard_constraints" in body
+    assert "最新用户要求" in body
+    assert "用户明确删除约束时从快照中删除" in body
+    assert "verification_mode" in body
+    assert "推断规格或本方案推荐值" in body
+
+
+def test_architecture_hard_constraint_schema_describes_every_field():
+    body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+    end = body.index("---", 3)
+    schema = yaml.safe_load(body[3:end])["conclusion_schema"]
+    properties = schema["properties"]["candidates"]["items"]["properties"]["hard_constraints"]["items"][
+        "properties"
+    ]
+
+    assert properties["id"]["minLength"] == 1
+    assert all(value.get("description") for value in properties.values())
 
 
 def test_architecture_prompt_guides_optional_memory_lookup_for_planning_context():

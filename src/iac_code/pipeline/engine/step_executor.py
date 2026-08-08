@@ -891,6 +891,7 @@ class StepExecutor:
         guard_state = ensure_completion_guard_state(
             completion_guard_state if completion_guard_state is not None else {}
         )
+        guard_state["context_snapshot"] = context.snapshot()
         registry.register(
             CompleteStepTool(
                 step_config,

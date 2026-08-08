@@ -276,6 +276,193 @@ class TestCompletionGuards:
     def _sha256(value: str) -> str:
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
+    def test_requires_generic_context_constraint_coverage_and_tool_evidence(self):
+        constraint = {
+            "id": "db-storage-min",
+            "target": "RDS",
+            "property": "storage",
+            "operator": "gte",
+            "value": 100,
+            "unit": "GiB",
+            "verification_mode": "tool",
+            "source": "user",
+            "source_text": "存储至少 100 GiB",
+        }
+        guard = {
+            "always": True,
+            "require_context_constraint_coverage": {
+                "source_fields": ["candidate.hard_constraints"],
+                "checks_field": "hard_constraint_checks",
+                "deployment_parameters_field": "deployment_parameters",
+            },
+        }
+        conclusion = {
+            "deployment_parameters": {"DBInstanceStorage": 120},
+            "hard_constraint_checks": [
+                {
+                    "constraint": constraint,
+                    "status": "satisfied",
+                    "actual_value": 120,
+                    "actual_unit": "GiB",
+                    "parameter_values": {"DBInstanceStorage": 120},
+                    "evidence": [
+                        {
+                            "type": "tool",
+                            "summary": "RDS storage",
+                            "tool_name": "aliyun_api",
+                            "product": "rds",
+                            "action": "DescribeDBInstanceAttribute",
+                            "result_path": "Items.0.Storage",
+                            "actual_value": 120,
+                        }
+                    ],
+                }
+            ],
+        }
+        tool = CompleteStepTool(
+            StepConfig(step_id="cost_estimating", conclusion_field="cost", forward=None),
+            completion_guards=[guard],
+            completion_guard_state={
+                "context_snapshot": {
+                    "candidate": {"hard_constraints": [constraint]},
+                },
+                "tool_result_records": [
+                    {
+                        "tool_name": "aliyun_api",
+                        "input": {"product": "rds", "action": "DescribeDBInstanceAttribute"},
+                        "result": {"Items": [{"Storage": 120}]},
+                        "is_error": False,
+                    }
+                ]
+            },
+        )
+
+        assert tool.validate_completion_input({"conclusion": conclusion}) is None
+
+        without_tool_evidence = dict(conclusion)
+        direct_check = dict(conclusion["hard_constraint_checks"][0])
+        direct_check["evidence"] = [
+            {"type": "context", "summary": "copied requirement", "actual_value": 120}
+        ]
+        without_tool_evidence["hard_constraint_checks"] = [direct_check]
+        error = tool.validate_completion_input({"conclusion": without_tool_evidence})
+        assert error is not None
+        assert "missing_tool_evidence" in error
+
+        mismatched = dict(conclusion)
+        mismatched["deployment_parameters"] = {"DBInstanceStorage": 80}
+        error = tool.validate_completion_input({"conclusion": mismatched})
+        assert error is not None
+        assert "constraint_parameter_mismatch" in error
+        assert "DBInstanceStorage" in error
+
+        second_constraint = {
+            **constraint,
+            "id": "db-engine-version",
+            "property": "version",
+            "operator": "eq",
+            "value": "8.0",
+            "unit": None,
+            "source_text": "MySQL 8.0",
+        }
+        multi_issue_tool = CompleteStepTool(
+            StepConfig(step_id="cost_estimating", conclusion_field="cost", forward=None),
+            completion_guards=[guard],
+            completion_guard_state={
+                "context_snapshot": {"candidate": {"hard_constraints": [constraint, second_constraint]}},
+                "tool_result_records": tool._completion_guard_state["tool_result_records"],
+            },
+        )
+        error = multi_issue_tool.validate_completion_input({"conclusion": mismatched})
+        assert error is not None
+        assert "multiple_constraint_issues" in error
+        assert "constraint_parameter_mismatch[db-storage-min, DBInstanceStorage]" in error
+        assert "missing_constraint_check[db-engine-version]" in error
+
+    @pytest.mark.asyncio
+    async def test_constraint_guard_returns_repairable_error_before_failing_step(self):
+        constraint = {
+            "id": "node-count",
+            "target": "Service",
+            "property": "count",
+            "operator": "eq",
+            "value": 2,
+            "unit": "count",
+            "verification_mode": "direct",
+            "source": "user",
+            "source_text": "部署两个节点",
+        }
+        tool = CompleteStepTool(
+            StepConfig(
+                step_id="cost_estimating",
+                conclusion_field="cost",
+                forward=None,
+                max_conclusion_retries=2,
+            ),
+            completion_guards=[
+                {
+                    "always": True,
+                    "require_context_constraint_coverage": {
+                        "source_fields": ["candidate.hard_constraints"],
+                        "checks_field": "hard_constraint_checks",
+                        "deployment_parameters_field": "deployment_parameters",
+                    },
+                }
+            ],
+            completion_guard_state={"context_snapshot": {"candidate": {"hard_constraints": [constraint]}}},
+        )
+        invalid_conclusion = {"deployment_parameters": {"NodeCount": 1}, "hard_constraint_checks": []}
+
+        first = await tool.execute(tool_input={"conclusion": invalid_conclusion}, context=ToolContext())
+        second = await tool.execute(tool_input={"conclusion": invalid_conclusion}, context=ToolContext())
+
+        assert first.is_error is True
+        assert first.metadata is None
+        assert "fix it and call complete_step again" in first.content
+        assert "missing_constraint_check" in first.content
+        assert second.is_error is True
+        assert second.metadata is None
+
+        valid_conclusion = {
+            "deployment_parameters": {"NodeCount": 2},
+            "hard_constraint_checks": [
+                {
+                    "constraint": constraint,
+                    "status": "satisfied",
+                    "actual_value": 2,
+                    "parameter_values": {"NodeCount": 2},
+                    "evidence": [
+                        {
+                            "type": "template",
+                            "summary": "NodeCount parameter",
+                            "actual_value": 2,
+                        }
+                    ],
+                }
+            ],
+        }
+        repaired = await tool.execute(tool_input={"conclusion": valid_conclusion}, context=ToolContext())
+
+        assert repaired.is_error is False
+        assert repaired.metadata["step_result"].conclusion == valid_conclusion
+
+        terminal_tool = CompleteStepTool(
+            StepConfig(
+                step_id="cost_estimating",
+                conclusion_field="cost",
+                forward=None,
+                max_conclusion_retries=1,
+            ),
+            completion_guards=tool._completion_guards,
+            completion_guard_state={"context_snapshot": {"candidate": {"hard_constraints": [constraint]}}},
+        )
+        await terminal_tool.execute(tool_input={"conclusion": invalid_conclusion}, context=ToolContext())
+        terminal = await terminal_tool.execute(tool_input={"conclusion": invalid_conclusion}, context=ToolContext())
+
+        assert terminal.is_error is True
+        assert terminal.metadata["step_result"].status is StepStatus.FAILED
+        assert "missing_constraint_check" in terminal.metadata["step_result"].error
+
     @staticmethod
     def _deploying_success_guard() -> dict:
         return {

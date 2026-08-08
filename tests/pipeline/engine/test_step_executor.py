@@ -2715,6 +2715,60 @@ class TestStepExecutorSchemaWiring:
 class TestSchemaIntegration:
     """Integration test: schema flows from StepSpec through StepExecutor to CompleteStepTool."""
 
+    def test_hard_constraint_guard_uses_live_pipeline_context_snapshot(self, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "cost.md").write_text("Estimate.", encoding="utf-8")
+        constraint = {
+            "id": "storage-min",
+            "target": "Database",
+            "property": "storage",
+            "operator": "gte",
+            "value": 100,
+            "unit": "GiB",
+            "verification_mode": "direct",
+            "source": "user",
+            "source_text": "存储至少 100 GiB",
+        }
+        step = StepSpec(
+            step_id="cost_estimating",
+            conclusion_field="cost",
+            forward=None,
+            prompt_file="prompts/cost.md",
+            completion_guards=[
+                {
+                    "always": True,
+                    "require_context_constraint_coverage": {
+                        "source_fields": ["candidate.hard_constraints"],
+                        "checks_field": "hard_constraint_checks",
+                        "deployment_parameters_field": "deployment_parameters",
+                    },
+                }
+            ],
+        )
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[step],
+            context_dependencies={"candidate": [], "cost": ["candidate"]},
+            max_rollbacks=3,
+            skills={},
+        )
+        executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+        )
+        context = PipelineContext(pipeline.context_dependencies)
+        context.set_conclusion("candidate", {"hard_constraints": [constraint]})
+
+        complete_step = executor._build_step_tools(step, context).get("complete_step")
+        error = complete_step.validate_completion_input(
+            {"conclusion": {"deployment_parameters": {"Storage": 120}, "hard_constraint_checks": []}}
+        )
+
+        assert error is not None
+        assert "missing_constraint_check" in error
+
     def test_conclusion_schema_and_rollback_targets_propagate(self, tmp_path):
         """Verify that conclusion_schema from StepSpec reaches the tool's input_schema,
         and explicit rollback targets produce correct enum constraint on rollback_request.target_step."""

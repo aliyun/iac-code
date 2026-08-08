@@ -1,6 +1,6 @@
 {
   "skill_name": "iac-aliyun-cost",
-  "description": "验证成本预估技能：正确调用专用 ROS 模板询价工具、parameters 字典格式、参数推荐传递、preview_validation 预览证明、模板按需校验修复、错误处理",
+  "description": "验证成本预估技能：正确调用专用 ROS 模板询价工具、parameters 字典格式、产品无关的用户硬约束验证、参数推荐传递、preview_validation 预览证明、模板按需校验修复、错误处理",
   "evals": [
     {
       "id": 1,
@@ -138,6 +138,44 @@
         {"name": "includes_ecs_and_slb", "check": "费用明细中包含 ECS 和 SLB 的费用"},
         {"name": "ecs_count_reflected", "check": "ECS 费用描述中体现了 2 台实例（MaxAmount=2）"},
         {"name": "no_terraform", "check": "整个过程不涉及 Terraform 相关内容"}
+      ]
+    },
+    {
+      "id": 8,
+      "name": "explicit-ecs-size-hard-constraint",
+      "prompt": "用户明确要求部署 2 核 4 GiB 的 iac-code Web，请预估这个模板的费用；模板默认规格不能覆盖用户要求",
+      "template_context": {
+        "template": "ROSTemplateFormatVersion: '2015-09-01'\nParameters:\n  ZoneId:\n    Type: String\n    Default: cn-hangzhou-k\n  InstanceType:\n    Type: String\n    Default: ecs.g7a.xlarge\n    AssociationProperty: ALIYUN::ECS::Instance::InstanceType\n  ImageId:\n    Type: String\n    Default: aliyun_4_x64_20G_alibase_20260527.vhd\nResources:\n  Ecs:\n    Type: ALIYUN::ECS::InstanceGroup\n    Properties:\n      ZoneId: !Ref ZoneId\n      InstanceType: !Ref InstanceType\n      ImageId: !Ref ImageId\n      MaxAmount: 1",
+        "file_path": "templates/8-iac-code-web.yml",
+        "region": "cn-hangzhou",
+        "description": "用户明确要求 2 核 4 GiB，但模板 Default 不是可信的规格来源"
+      },
+      "expected_behavior": "把 2 核 4 GiB 作为不可放宽的硬约束，通过 DescribeInstanceTypes 的 CpuCoreCount/MemorySize 验证候选，只将实际规格精确匹配的 InstanceType 用于预览、询价和部署参数；不得使用 4 核 16 GiB 的 ecs.g7a.xlarge",
+      "assertions": [
+        {"name": "queries_actual_instance_size", "check": "对最终候选调用 aliyun_api DescribeInstanceTypes，并使用 CpuCoreCount 和 MemorySize 判断实际规格"},
+        {"name": "does_not_use_wrong_default", "check": "不因模板 Default 或场景推荐而选择实际为 4 核 16 GiB 的 ecs.g7a.xlarge"},
+        {"name": "preserves_exact_user_size", "check": "最终 InstanceType 的实际规格精确为 2 核 4 GiB，不静默升级或降级"},
+        {"name": "outputs_generic_constraint_evidence", "check": "conclusion.hard_constraint_checks 逐条原样覆盖 vCPU 和内存约束，包含实际值、工具 result_path 与关联 InstanceType 参数，并通过 complete_step 的代码校验"},
+        {"name": "uses_verified_parameters_everywhere", "check": "预览、询价、deployment_parameters 和 preview_validation.parameters 使用同一个已验证 InstanceType"}
+      ]
+    },
+    {
+      "id": 9,
+      "name": "rds-range-and-version-hard-constraints",
+      "prompt": "用户要求 MySQL 8.0，存储至少 100 GiB 且不超过 200 GiB，请预估模板费用",
+      "template_context": {
+        "template": "ROSTemplateFormatVersion: '2015-09-01'\nParameters:\n  ZoneId:\n    Type: String\n    Default: cn-hangzhou-k\n  DBInstanceClass:\n    Type: String\n    Default: mysql.n2.medium.1\n  DBInstanceStorage:\n    Type: Number\n    Default: 20\nResources:\n  Database:\n    Type: ALIYUN::RDS::DBInstance\n    Properties:\n      ZoneId: !Ref ZoneId\n      DBInstanceClass: !Ref DBInstanceClass\n      DBInstanceStorage: !Ref DBInstanceStorage\n      Engine: MySQL\n      EngineVersion: '8.0'\n      DBInstanceStorageType: cloud_essd",
+        "file_path": "templates/9-rds.yml",
+        "region": "cn-hangzhou",
+        "description": "覆盖版本等值与存储上下限，默认存储违反用户下限"
+      },
+      "expected_behavior": "产品无关地逐条验证 version eq 8.0、storage gte 100 GiB、storage lte 200 GiB；将 DBInstanceStorage 调整到区间内，并在 hard_constraint_checks 中以稳定 ID 原样覆盖三条约束",
+      "assertions": [
+        {"name": "covers_all_constraint_ids", "check": "hard_constraint_checks 恰好覆盖版本、存储下限、存储上限三条约束 ID"},
+        {"name": "uses_generic_operators", "check": "分别按 eq、gte、lte 比较实际值，不把范围压成推荐描述"},
+        {"name": "binds_storage_parameter", "check": "存储约束的 parameter_values.DBInstanceStorage 与 deployment_parameters 中的最终值一致且位于 100~200 GiB"},
+        {"name": "does_not_keep_conflicting_default", "check": "不使用违反用户下限的模板 Default 20 GiB"},
+        {"name": "passes_code_validation", "check": "全部约束满足后 complete_step 的代码校验通过"}
       ]
     }
   ]
