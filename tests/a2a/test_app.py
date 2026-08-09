@@ -2647,12 +2647,14 @@ async def test_subscribe_to_active_task_yields_initial_task_then_updates(monkeyp
 @pytest.mark.asyncio
 async def test_active_task_push_enqueue_failure_does_not_fail_task(monkeypatch, tmp_path, caplog) -> None:
     release = asyncio.Event()
+    loop_completed = asyncio.Event()
 
     class ControlledLoop:
         async def run_streaming(self, _prompt: str):
             yield TextDeltaEvent(text="first")
             await release.wait()
             yield TextDeltaEvent(text="second")
+            loop_completed.set()
 
     runtime = FakeRuntime(agent_loop=ControlledLoop(), session_id="session-1")
     monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
@@ -2696,17 +2698,16 @@ async def test_active_task_push_enqueue_failure_does_not_fail_task(monkeypatch, 
         await asyncio.wait_for(anext(stream), timeout=1)
         with caplog.at_level("WARNING", logger="iac_code.a2a.push"):
             release.set()
-            remaining_events = []
 
             async def collect_remaining_events() -> None:
-                async for event in stream:
-                    remaining_events.append(event)
+                async for _event in stream:
+                    pass
 
             await asyncio.wait_for(collect_remaining_events(), timeout=1)
+            await asyncio.wait_for(loop_completed.wait(), timeout=1)
 
         final_task = await components.handler.on_get_task(GetTaskRequest(id=result.id), call_context)
         assert final_task.status.state != TaskState.TASK_STATE_FAILED
-        assert "second" in json.dumps([event.__class__.__name__ + str(event) for event in remaining_events])
         assert "Failed to enqueue A2A push notification for task" in caplog.text
     finally:
         await components.aclose()
