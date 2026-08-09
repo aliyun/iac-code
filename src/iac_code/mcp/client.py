@@ -305,7 +305,7 @@ class MCPClientAdapter:
                     worker_task.cancel()
                 return
             try:
-                await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(operations.put(None), loop))
+                loop.call_soon_threadsafe(operations.put_nowait, None)
             except RuntimeError:
                 pass
             if force_cancel and worker_task is not None and not worker_task.done():
