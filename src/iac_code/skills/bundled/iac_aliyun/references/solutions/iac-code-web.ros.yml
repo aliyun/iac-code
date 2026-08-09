@@ -1,7 +1,7 @@
 ROSTemplateFormatVersion: '2015-09-01'
 Description:
-  en: Deploy one iac-code Web instance with an EIP, encrypted token transport, and a ROS-managed Bailian API key.
-  zh-cn: 部署一套带 EIP、Token 加密通道和 ROS 托管百炼 API Key 的 iac-code Web。
+  en: Deploy one iac-code Web instance with an EIP, ECS RAM Role credentials, encrypted token transport, and a ROS-managed Bailian API key.
+  zh-cn: 部署一套带 EIP、ECS RAM Role 凭证、Token 加密通道和 ROS 托管百炼 API Key 的 iac-code Web。
 Metadata:
   ALIYUN::ROS::Interface:
     ParameterGroups:
@@ -119,6 +119,33 @@ Resources:
           - AllocationId
       InstanceId:
         Ref: Instance
+  InstanceRamRole:
+    Type: ALIYUN::RAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: iac-code-web-${ALIYUN::StackId}
+      Description: Managed by the iac-code Web ROS stack
+      DeletionForce: true
+      AssumeRolePolicyDocument:
+        Version: '1'
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - ecs.aliyuncs.com
+      PolicyAttachments:
+        System:
+          - AdministratorAccess
+  InstanceRamRoleAttachment:
+    Type: ALIYUN::ECS::RamRoleAttachment
+    Properties:
+      RamRoleName:
+        Fn::GetAtt:
+          - InstanceRamRole
+          - RoleName
+      InstanceIds:
+        - Ref: Instance
   BailianApiKey:
     Type: ALIYUN::Bailian::ApiKey
     Properties:
@@ -132,7 +159,9 @@ Resources:
               - EipAddress
   Bootstrap:
     Type: ALIYUN::ECS::RunCommand
-    DependsOn: EipAssociation
+    DependsOn:
+      - EipAssociation
+      - InstanceRamRoleAttachment
     Properties:
       InstanceIds:
         - Ref: Instance
@@ -180,9 +209,9 @@ Resources:
                 root / '.credentials.yml': {'dashscope': os.environ['BAILIAN_API_KEY']},
                 root / '.cloud-credentials.yml': {
                     'aliyun': {
-                        'mode': 'OAuth',
+                        'mode': 'EcsRamRole',
                         'region_id': '${StackRegion}',
-                        'oauth_site_type': 'CN',
+                        'ram_role_name': '${InstanceRamRoleName}',
                     }
                 },
                 root / 'settings.yml': {
@@ -310,6 +339,10 @@ Resources:
               Ref: ALIYUN::TenantId
             StackRegion:
               Ref: ALIYUN::Region
+            InstanceRamRoleName:
+              Fn::GetAtt:
+                - InstanceRamRole
+                - RoleName
             LocalInstanceId:
               Ref: Instance
             LocalInstanceType:

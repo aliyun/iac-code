@@ -42,7 +42,10 @@ def test_solution_reference_is_shared_and_pipeline_prompts_are_minimal() -> None
     assert "海外地域" not in reference
     for deployment_detail in (
         "AllocatePublicIP: false",
+        "ALIYUN::RAM::Role",
+        "ALIYUN::ECS::RamRoleAttachment",
         "ALIYUN::Bailian::ApiKey",
+        "EcsRamRole",
         "--access-token-file",
         "IAC_CODE_CONFIG_DIR",
         "PublicUrl",
@@ -75,6 +78,8 @@ def test_golden_template_has_only_the_fixed_single_ecs_topology() -> None:
         "Instance": "ALIYUN::ECS::Instance",
         "Eip": "ALIYUN::VPC::EIP",
         "EipAssociation": "ALIYUN::VPC::EIPAssociation",
+        "InstanceRamRole": "ALIYUN::RAM::Role",
+        "InstanceRamRoleAttachment": "ALIYUN::ECS::RamRoleAttachment",
         "BailianApiKey": "ALIYUN::Bailian::ApiKey",
         "Bootstrap": "ALIYUN::ECS::RunCommand",
     }
@@ -88,6 +93,26 @@ def test_golden_template_has_only_the_fixed_single_ecs_topology() -> None:
             "AuthSetMode": "Custom",
             "AccessIps": [{"Fn::GetAtt": ["Eip", "EipAddress"]}],
         },
+    }
+    assert resources["InstanceRamRole"]["Properties"] == {
+        "RoleName": {"Fn::Sub": "iac-code-web-${ALIYUN::StackId}"},
+        "Description": "Managed by the iac-code Web ROS stack",
+        "DeletionForce": True,
+        "AssumeRolePolicyDocument": {
+            "Version": "1",
+            "Statement": [
+                {
+                    "Action": "sts:AssumeRole",
+                    "Effect": "Allow",
+                    "Principal": {"Service": ["ecs.aliyuncs.com"]},
+                }
+            ],
+        },
+        "PolicyAttachments": {"System": ["AdministratorAccess"]},
+    }
+    assert resources["InstanceRamRoleAttachment"]["Properties"] == {
+        "RamRoleName": {"Fn::GetAtt": ["InstanceRamRole", "RoleName"]},
+        "InstanceIds": [{"Ref": "Instance"}],
     }
     assert "ExistingBailianApiKey" not in template["Parameters"]
 
@@ -105,7 +130,7 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
     assert all(set(parameter["Label"]) == {"en", "zh-cn"} for parameter in parameters.values())
 
     bootstrap = template["Resources"]["Bootstrap"]
-    assert bootstrap["DependsOn"] == "EipAssociation"
+    assert bootstrap["DependsOn"] == ["EipAssociation", "InstanceRamRoleAttachment"]
     properties = bootstrap["Properties"]
     assert properties["Type"] == "RunShellScript"
     assert properties["ContentEncoding"] == "PlainText"
@@ -116,6 +141,7 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
         "BailianApiKeyB64": {"Fn::Base64Encode": {"Fn::GetAtt": ["BailianApiKey", "Key"]}},
         "MasterAccountId": {"Ref": "ALIYUN::TenantId"},
         "StackRegion": {"Ref": "ALIYUN::Region"},
+        "InstanceRamRoleName": {"Fn::GetAtt": ["InstanceRamRole", "RoleName"]},
         "LocalInstanceId": {"Ref": "Instance"},
         "LocalInstanceType": {"Ref": "InstanceType"},
         "LocalZoneId": {"Ref": "ZoneId"},
@@ -155,6 +181,7 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
     assert 'chmod 0600 "$AGENTS_TMP"' in script
     assert set(re.findall(r"\$\{([^}]+)\}", script)) == {
         "BailianApiKeyB64",
+        "InstanceRamRoleName",
         "LocalEipAddress",
         "LocalInstanceId",
         "LocalInstanceType",
@@ -169,9 +196,9 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
         "'activeProvider': 'dashscope'",
         "root = pathlib.Path('/root/.iac-code')",
         "root / '.cloud-credentials.yml'",
-        "'mode': 'OAuth'",
+        "'mode': 'EcsRamRole'",
         "'region_id': '${StackRegion}'",
-        "'oauth_site_type': 'CN'",
+        "'ram_role_name': '${InstanceRamRoleName}'",
         "'memory': {'autoMemory': True}",
         "'pipeline': {'sellingReviewStep': False}",
         "'apiBase': 'https://dashscope.aliyuncs.com/compatible-mode/v1'",
@@ -184,6 +211,8 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
         "'userID': '${MasterAccountId}'",
     ):
         assert expected in script
+    assert "'mode': 'OAuth'" not in script
+    assert "'oauth_site_type': 'CN'" not in script
     assert "'model': 'deepseek-v4-flash-0731'" not in script
 
     outputs = template["Outputs"]
