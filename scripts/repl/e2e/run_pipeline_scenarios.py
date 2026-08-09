@@ -966,9 +966,14 @@ def _scenario_stack_name(run_dir: Path, scenario: str) -> str:
     return f"iac-e2e-{suffix[:12]}-{safe_scenario}"[:128]
 
 
+def _is_scenario_stack_name(run_dir: Path, scenario: str, stack_name: str) -> bool:
+    base_name = _scenario_stack_name(run_dir, scenario)
+    return stack_name == base_name or stack_name.startswith(f"{base_name}-")
+
+
 def _stack_name_constraint(run_dir: Path, scenario: str) -> str:
     stack_name = _scenario_stack_name(run_dir, scenario)
-    return f"本次 CreateStack 的 params.StackName 必须精确等于 `{stack_name}`，禁止使用默认或自动生成 StackName。"
+    return f"本次 ROS 资源栈名称基础名为 `{stack_name}`，最终 StackName 必须以该基础名开头。"
 
 
 def _stack_creating_prompt(text: str, run_dir: Path, scenario: str) -> str:
@@ -1741,13 +1746,13 @@ def _apply_stack_creating_acceptance_checks(scenario: str, pty: Any, checks: dic
     if scenario not in STACK_CREATING_SCENARIOS:
         return
     stack_ids = _observed_create_stack_ids(pty)
-    expected_stack_name = _scenario_stack_name(Path(getattr(pty, "run_dir", "")), scenario)
+    run_dir = Path(getattr(pty, "run_dir", ""))
     stack_names = _observed_create_stack_names(pty)
     _add_acceptance_check(checks, "ROS stack observed in cleanup ledger", bool(stack_ids))
     _add_acceptance_check(
         checks,
         "ROS stack name is test-owned",
-        bool(stack_ids) and expected_stack_name in stack_names,
+        bool(stack_ids) and any(_is_scenario_stack_name(run_dir, scenario, stack_name) for stack_name in stack_names),
     )
     ros_states = _ros_stack_states_for_acceptance(pty, stack_ids, "acceptance-before-teardown") if stack_ids else {}
     _add_acceptance_check(
@@ -1837,16 +1842,17 @@ def _teardown_real_cloud_scenario_resources(
 
     deletion_failures: list[str] = []
     deleted_stack_ids: list[str] = []
-    expected_scenario_stack_name = _scenario_stack_name(Path(getattr(pty, "run_dir", "")), scenario)
+    run_dir = Path(getattr(pty, "run_dir", ""))
+    expected_scenario_stack_name = _scenario_stack_name(run_dir, scenario)
     for resource in resources:
         stack_id = _string_from_mapping(resource, "resource_id", "resourceId", "stack_id", "stackId")
         if not stack_id:
             continue
         expected_stack_name = _string_from_mapping(resource, "resource_name", "resourceName", "stack_name", "stackName")
-        if expected_stack_name != expected_scenario_stack_name:
+        if not _is_scenario_stack_name(run_dir, scenario, expected_stack_name):
             deletion_failures.append(
                 f"{stack_id} has unexpected test-owned stack name {expected_stack_name or '<unknown>'}; "
-                f"expected {expected_scenario_stack_name}"
+                f"expected {expected_scenario_stack_name} or a generated suffix"
             )
             continue
         state = _fresh_ros_stack_state(pty, stack_id)
@@ -2660,7 +2666,12 @@ def run_selection_waiting_resume(args: argparse.Namespace, scenario: str) -> int
         pty.terminate(force=True)
         checks["first process killed"] = True
         pty.spawn(extra_args=["--continue"])
-        _expect_candidate_selection(pty, args, description="candidate selection replayed")
+        _expect_candidate_selection(
+            pty,
+            args,
+            description="candidate selection replayed",
+            require_live_refresh=True,
+        )
         checks["candidate selection replayed"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent after resume"] = True

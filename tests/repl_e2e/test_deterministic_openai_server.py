@@ -85,7 +85,33 @@ async def test_server_routes_pipeline_nudge_and_template_tools(tmp_path) -> None
         )
         intent_call = intent[0].choices[0].delta.tool_calls[0]
         assert intent_call.function.name == "complete_step"
-        assert json.loads(intent_call.function.arguments)["conclusion"]["is_infra_intent"] is True
+        intent_conclusion = json.loads(intent_call.function.arguments)["conclusion"]
+        assert intent_conclusion["is_infra_intent"] is True
+        assert intent_conclusion["hard_constraints"] == []
+
+        architecture = await _completion(
+            client,
+            [
+                {"role": "system", "content": "# 步骤：架构规划"},
+                {"role": "user", "content": PIPELINE_PROMPT_MARKER},
+            ],
+        )
+        architecture_call = architecture[0].choices[0].delta.tool_calls[0]
+        assert architecture_call.function.name == "complete_step"
+        architecture_conclusion = json.loads(architecture_call.function.arguments)["conclusion"]
+        assert architecture_conclusion["candidates"][0]["hard_constraints"] == []
+
+        cost = await _completion(
+            client,
+            [
+                {"role": "system", "content": "# 步骤：成本预估"},
+                {"role": "user", "content": PIPELINE_PROMPT_MARKER},
+            ],
+        )
+        cost_call = cost[0].choices[0].delta.tool_calls[0]
+        assert cost_call.function.name == "complete_step"
+        cost_conclusion = json.loads(cost_call.function.arguments)["conclusion"]
+        assert cost_conclusion["hard_constraint_checks"] == []
 
         template = await _completion(
             client,
