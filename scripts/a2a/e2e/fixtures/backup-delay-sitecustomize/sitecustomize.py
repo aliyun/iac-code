@@ -67,7 +67,9 @@ def _claim_delay(reason: Any) -> tuple[Path, float, float] | None:
             "reason": str(reason_value),
         },
     )
-    time.sleep(delay_seconds)
+    deadline = started_monotonic + delay_seconds
+    while (remaining := deadline - time.monotonic()) > 0:
+        time.sleep(remaining)
     return control, started_at, started_monotonic
 
 
