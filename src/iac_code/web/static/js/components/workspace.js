@@ -23,12 +23,13 @@ const NAV_GROUPS = [
 
 const CLOUD_VENDORS = [{ id: "aliyun", label: t("Alibaba Cloud") }];
 
-const CREDENTIAL_MODE_ORDER = ["AK", "StsToken", "RamRoleArn", "OAuth"];
+const CREDENTIAL_MODE_ORDER = ["AK", "StsToken", "RamRoleArn", "EcsRamRole", "OAuth"];
 
 const CLOUD_MODE_LABELS = {
   AK: t("AccessKey"),
   StsToken: t("STS Token"),
   RamRoleArn: t("RAM role"),
+  EcsRamRole: t("ECS RAM Role"),
   OAuth: t("OAuth browser login"),
 };
 
@@ -506,6 +507,7 @@ function aliyunCloudSummary(payload) {
     oauthAccessTokenExpire: payload?.oauthAccessTokenExpire ?? null,
     oauthRefreshTokenExpire: payload?.oauthRefreshTokenExpire ?? null,
     stsExpiration: payload?.stsExpiration ?? null,
+    ramRoleName: payload?.ramRoleName || null,
   };
 }
 
@@ -1087,6 +1089,7 @@ function createCloudPanel(api, context) {
   });
   const cloudRamRoleArnInput = makeTextInput("workspace-cloud-ram-role-arn", "acs:ram::123:role/name");
   const cloudRamSessionNameInput = makeTextInput("workspace-cloud-ram-session-name", t("Session name"));
+  const cloudRamRoleNameInput = makeTextInput("workspace-cloud-ram-role-name", t("ECS RAM Role Name"));
 
   // OAuth:站点 + 浏览器登录(无 token 输入)
   const cloudOauthSiteSelect = makeSelect("workspace-cloud-oauth-site");
@@ -1165,6 +1168,9 @@ function createCloudPanel(api, context) {
     if (mode === "RamRoleArn") {
       rows.push(makeField(t("RamRoleArn"), cloudRamRoleArnInput, t("The RAM role ARN to assume"), hintFor("ramRoleArn")));
       rows.push(makeField(t("RamSessionName"), cloudRamSessionNameInput, t("Role session name (optional)"), hintFor("ramSessionName")));
+    }
+    if (mode === "EcsRamRole") {
+      rows.push(makeField(t("ECS RAM Role Name"), cloudRamRoleNameInput, t("Leave blank to auto-detect from ECS metadata"), hintFor("ramRoleName")));
     }
     if (mode === "OAuth") {
       rows.push(makeField(t("Login site"), cloudOauthSiteSelect, t("Select the site your Alibaba Cloud account belongs to")));
@@ -1247,6 +1253,7 @@ function createCloudPanel(api, context) {
     cloudStsTokenInput.value = match ? savedCloud.stsToken || "" : "";
     cloudRamRoleArnInput.value = match ? savedCloud.ramRoleArn || "" : "";
     cloudRamSessionNameInput.value = match ? savedCloud.ramSessionName || "" : "";
+    cloudRamRoleNameInput.value = match ? savedCloud.ramRoleName || "" : "";
     cloudAccessKeySecretField.conceal();
     cloudStsTokenField.conceal();
   };
@@ -1272,6 +1279,8 @@ function createCloudPanel(api, context) {
       stsExpiration: "",
       ramRoleArn: mode === "RamRoleArn" ? cloudRamRoleArnInput.value.trim() : "",
       ramSessionName: mode === "RamRoleArn" ? cloudRamSessionNameInput.value.trim() : "",
+      // 空字符串是有意义的取值:表示清除显式角色名,改由 ECS 元数据自动发现。
+      ramRoleName: mode === "EcsRamRole" ? cloudRamRoleNameInput.value.trim() : "",
       oauthSiteType: mode === "OAuth" ? selectedValue(cloudOauthSiteSelect) : "",
       oauthAccessToken: "",
       oauthRefreshToken: "",
@@ -1297,6 +1306,7 @@ function createCloudPanel(api, context) {
       stsToken: (payload && payload.stsToken) || "",
       ramRoleArn: (payload && payload.ramRoleArn) || "",
       ramSessionName: (payload && payload.ramSessionName) || "",
+      ramRoleName: (payload && payload.ramRoleName) || "",
     };
     cloudModeSelect.value = summaryPayload.mode || "AK";
     // 回填已保存的 OAuth 登录站点(CN/INTL),否则站点选择框永远停在默认值。

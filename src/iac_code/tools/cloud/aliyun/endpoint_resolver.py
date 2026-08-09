@@ -141,38 +141,38 @@ class LocationResolver:
         return None
 
 
-async def _call_location_api(host: str, request: Mapping[str, Any]) -> Mapping[str, Any]:
-    from alibabacloud_tea_openapi import models as open_api_models
-    from alibabacloud_tea_openapi.client import Client as OpenApiClient
-    from darabonba.runtime import RuntimeOptions
+def _discovery_config_values(host: str, credential: Any, region_id: str) -> dict[str, Any]:
+    """Build the shared Tea config for Location and identity discovery calls.
 
+    Dynamic modes (`RamRoleArn`, `EcsRamRole`) get the credential runtime's shared
+    client; static modes keep the existing inline AK/STS values.
+    """
+    from iac_code.services.providers.aliyun_credentials_runtime import aliyun_credential_runtime
     from iac_code.tools.cloud.aliyun.user_agent import build_user_agent
 
-    credential = request["credential"]
-    region_id = str(request["region_id"])
     config_values: dict[str, Any] = {
         "endpoint": host,
         "region_id": region_id,
         "user_agent": build_user_agent(),
     }
-    mode = getattr(credential, "mode", "AK")
-    if mode == "RamRoleArn":
-        from alibabacloud_credentials import models as credential_models
-        from alibabacloud_credentials.client import Client as CredentialClient
+    dynamic_client = aliyun_credential_runtime().sdk_client(credential)
+    if dynamic_client is not None:
+        config_values["credential"] = dynamic_client
+        return config_values
+    config_values["access_key_id"] = getattr(credential, "access_key_id", "")
+    config_values["access_key_secret"] = getattr(credential, "access_key_secret", "")
+    if getattr(credential, "mode", "AK") in {"StsToken", "OAuth"}:
+        config_values["security_token"] = getattr(credential, "sts_token", "")
+    return config_values
 
-        credential_config = credential_models.Config(
-            type="ram_role_arn",
-            access_key_id=getattr(credential, "access_key_id", ""),
-            access_key_secret=getattr(credential, "access_key_secret", ""),
-            role_arn=getattr(credential, "ram_role_arn", ""),
-            role_session_name=getattr(credential, "ram_session_name", "") or "iac-code-session",
-        )
-        config_values["credential"] = CredentialClient(credential_config)
-    else:
-        config_values["access_key_id"] = getattr(credential, "access_key_id", "")
-        config_values["access_key_secret"] = getattr(credential, "access_key_secret", "")
-        if mode in {"StsToken", "OAuth"}:
-            config_values["security_token"] = getattr(credential, "sts_token", "")
+
+async def _call_location_api(host: str, request: Mapping[str, Any]) -> Mapping[str, Any]:
+    from alibabacloud_tea_openapi import models as open_api_models
+    from alibabacloud_tea_openapi.client import Client as OpenApiClient
+    from darabonba.runtime import RuntimeOptions
+
+    region_id = str(request["region_id"])
+    config_values = _discovery_config_values(host, request["credential"], region_id)
     client = OpenApiClient(open_api_models.Config(**config_values))
     params = open_api_models.Params(
         action=str(request["action"]),
@@ -196,33 +196,7 @@ async def _call_identity_api(host: str, request: Mapping[str, Any]) -> Mapping[s
     from alibabacloud_tea_openapi.client import Client as OpenApiClient
     from darabonba.runtime import RuntimeOptions
 
-    from iac_code.tools.cloud.aliyun.user_agent import build_user_agent
-
-    credential = request["credential"]
-    config_values: dict[str, Any] = {
-        "endpoint": host,
-        "region_id": str(request["region_id"]),
-        "user_agent": build_user_agent(),
-    }
-    mode = getattr(credential, "mode", "AK")
-    if mode == "RamRoleArn":
-        from alibabacloud_credentials import models as credential_models
-        from alibabacloud_credentials.client import Client as CredentialClient
-
-        config_values["credential"] = CredentialClient(
-            credential_models.Config(
-                type="ram_role_arn",
-                access_key_id=getattr(credential, "access_key_id", ""),
-                access_key_secret=getattr(credential, "access_key_secret", ""),
-                role_arn=getattr(credential, "ram_role_arn", ""),
-                role_session_name=getattr(credential, "ram_session_name", "") or "iac-code-session",
-            )
-        )
-    else:
-        config_values["access_key_id"] = getattr(credential, "access_key_id", "")
-        config_values["access_key_secret"] = getattr(credential, "access_key_secret", "")
-        if mode in {"StsToken", "OAuth"}:
-            config_values["security_token"] = getattr(credential, "sts_token", "")
+    config_values = _discovery_config_values(host, request["credential"], str(request["region_id"]))
     client = OpenApiClient(open_api_models.Config(**config_values))
     params = open_api_models.Params(
         action=str(request["action"]),

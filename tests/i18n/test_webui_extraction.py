@@ -26,6 +26,7 @@ _WEBUI_KEYWORD = "t"
 _COMPONENTS = Path(i18n.__file__).parent.parent / "web" / "static" / "js" / "components"
 _COMPOSER_JS = _COMPONENTS / "composer.js"
 _OUTPUT_PANEL_JS = _COMPONENTS / "output_panel.js"
+_WORKSPACE_JS = _COMPONENTS / "workspace.js"
 
 # Representative msgids from inside the historical dead zone. "Minimal"/"None"
 # are the two lowest effort tiers B4 added; the rest bracket the affected range.
@@ -47,6 +48,18 @@ _OUTPUT_PANEL_MSGIDS = {
     "Resource stacks",
     "Template files",
     "Architecture diagram",
+}
+
+
+# The Alibaba Cloud credential card in workspace.js is where the ECS instance RAM role
+# mode is offered, named and explained. All three strings sit far down the file (the
+# mode label table, the mode-field renderer and its hint), so they only extract while
+# the lexer is in sync — and if they stop extracting the Web settings UI silently shows
+# bare English while every locale catalog still looks complete.
+_WORKSPACE_ECS_MSGIDS = {
+    "ECS RAM Role",
+    "ECS RAM Role Name",
+    "Leave blank to auto-detect from ECS metadata",
 }
 
 
@@ -82,4 +95,16 @@ def test_output_panel_labels_are_extractable():
         "A bare quote inside a regex literal in escapeHtml (e.g. reverting to "
         "'/\"/g') desyncs the JS lexer and swallows every t() after it — use a "
         "unicode escape for the quote char to resync (see this module's docstring)."
+    )
+
+
+def test_workspace_ecs_ram_role_labels_are_extractable():
+    """The ECS RAM role mode label, field label and hint must survive babel extraction."""
+    extracted = _extract_msgids(_WORKSPACE_JS)
+    missing = sorted(_WORKSPACE_ECS_MSGIDS - extracted)
+    assert not missing, (
+        f"workspace.js ECS RAM role labels not extracted by babel: {missing}. "
+        "Wrap them in t() and check for a bare '/' in a regex character class or a "
+        "bare quote inside a regex literal earlier in the file (see this module's "
+        "docstring)."
     )

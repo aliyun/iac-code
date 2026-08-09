@@ -274,6 +274,7 @@ export function saveAliyunCloud({
   stsExpiration = "",
   ramRoleArn = "",
   ramSessionName = "",
+  ramRoleName = "",
   oauthSiteType = "",
   oauthAccessToken = "",
   oauthRefreshToken = "",
@@ -298,6 +299,11 @@ export function saveAliyunCloud({
     if (value) {
       payload[key] = value;
     }
+  }
+  // ECS RAM Role 的角色名必须无条件写入(包括空字符串):空值表示清除显式角色名并
+  // 切回 IMDS 自动发现,不能被 optionalFields 的 `if (value)` 过滤掉。
+  if (mode === "EcsRamRole") {
+    payload.ramRoleName = ramRoleName;
   }
   if (stsExpiration !== "") {
     payload.stsExpiration = Number(stsExpiration);

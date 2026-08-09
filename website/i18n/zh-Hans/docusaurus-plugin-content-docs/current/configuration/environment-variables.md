@@ -32,6 +32,11 @@ CLI 参数 > 环境变量 > 配置文件
 | `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | AccessKey Secret |
 | `ALIBABA_CLOUD_SECURITY_TOKEN` | STS token；设置后凭证模式切换为 STS |
 | `ALIBABA_CLOUD_REGION_ID` | 默认地域 |
+| `ALIBABA_CLOUD_ECS_METADATA` | 可选的 ECS RAM 角色名称；仅在模式已配置为 `EcsRamRole` 且未保存角色名称时使用，不会自行选择认证模式 |
+| `ALIBABA_CLOUD_ECS_METADATA_DISABLED` | 设为 `true` 可禁用 ECS 实例元数据凭证 |
+| `ALIBABA_CLOUD_IMDSV1_DISABLED` | 设为 `true` 可要求使用 IMDSv2，并禁止回退到 IMDSv1 |
+
+ECS 元数据相关变量仅在凭证模式已配置为 `EcsRamRole` 后生效。IaC Code 中保存的角色名称优先于 `ALIBABA_CLOUD_ECS_METADATA`；两者均未设置时，会通过 IMDS 自动发现角色名称。
 
 详见 [阿里云凭证](./alibaba-cloud-credentials.md)。
 

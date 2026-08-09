@@ -32,6 +32,11 @@ Consultez [Fournisseurs LLM](./llm-providers.md) pour les détails des fournisse
 | `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | AccessKey Secret |
 | `ALIBABA_CLOUD_SECURITY_TOKEN` | Jeton STS ; bascule le mode d'identification vers STS lorsqu'il est défini |
 | `ALIBABA_CLOUD_REGION_ID` | Région par défaut |
+| `ALIBABA_CLOUD_ECS_METADATA` | Nom facultatif du rôle RAM ECS ; utilisé lorsque le mode est déjà `EcsRamRole` et qu'aucun nom n'est enregistré, mais ne sélectionne pas le mode à lui seul |
+| `ALIBABA_CLOUD_ECS_METADATA_DISABLED` | Définir à `true` pour désactiver les identifiants issus des métadonnées de l'instance ECS |
+| `ALIBABA_CLOUD_IMDSV1_DISABLED` | Définir à `true` pour exiger IMDSv2 et interdire le fallback vers IMDSv1 |
+
+Les variables de métadonnées ECS ne s'appliquent qu'après la configuration du mode d'identification sur `EcsRamRole`. Le nom du rôle enregistré dans IaC Code est prioritaire sur `ALIBABA_CLOUD_ECS_METADATA` ; si aucun des deux n'est défini, le nom est détecté via IMDS.
 
 Consultez [Identifiants Alibaba Cloud](./alibaba-cloud-credentials.md) pour plus de détails.
 

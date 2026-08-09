@@ -16,7 +16,6 @@ from urllib.parse import parse_qsl
 
 import aiohttp
 import httpx
-from alibabacloud_credentials import models as credential_models
 from alibabacloud_credentials.client import Client as CredentialClient
 from alibabacloud_tea_openapi import exceptions as open_api_exceptions
 from alibabacloud_tea_openapi import models as open_api_models
@@ -37,6 +36,7 @@ from defusedxml.common import DefusedXmlException
 from yarl import URL
 
 from iac_code.services.providers.aliyun import AliyunCredential
+from iac_code.services.providers.aliyun_credentials_runtime import aliyun_credential_runtime
 from iac_code.tools.base import ToolContext
 from iac_code.tools.cloud.aliyun.api_contract import (
     ApiContractError,
@@ -45,6 +45,7 @@ from iac_code.tools.cloud.aliyun.api_contract import (
     ParsedContentType,
     parse_content_type,
 )
+from iac_code.tools.cloud.aliyun.ecs_credential_errors import ecs_credential_error_code
 from iac_code.tools.cloud.aliyun.endpoint_resolver import EndpointResolution
 from iac_code.tools.cloud.aliyun.retry_policy import (
     RetryBudget,
@@ -150,14 +151,13 @@ class PreparedTransportCall:
         )
 
 
-def _ram_role_credential_config(credential: AliyunCredential) -> Any:
-    return credential_models.Config(
-        type="ram_role_arn",
-        access_key_id=credential.access_key_id,
-        access_key_secret=credential.access_key_secret,
-        role_arn=credential.ram_role_arn,
-        role_session_name=credential.ram_session_name or "iac-code-session",
-    )
+def dynamic_credential_client(credential: AliyunCredential | None) -> Any | None:
+    """Return the shared Credentials-SDK client for dynamic modes, else `None`.
+
+    `RamRoleArn` keeps its existing per-call AssumeRole client; `EcsRamRole` gets the
+    process-wide IMDS provider adapter so no client construction creates a provider.
+    """
+    return aliyun_credential_runtime().sdk_client(credential)
 
 
 async def resolve_signing_credential(
@@ -165,28 +165,13 @@ async def resolve_signing_credential(
     *,
     client_factory: Callable[[Any], Any] = CredentialClient,
 ) -> AliyunCredential:
-    if credential.mode != "RamRoleArn":
-        return credential
-    model = await client_factory(_ram_role_credential_config(credential)).get_credential_async()
-    access_key_id = getattr(model, "access_key_id", None)
-    access_key_secret = getattr(model, "access_key_secret", None)
-    security_token = getattr(model, "security_token", None)
-    if (
-        not isinstance(access_key_id, str)
-        or not access_key_id
-        or not isinstance(access_key_secret, str)
-        or not access_key_secret
-        or not isinstance(security_token, str)
-        or not security_token
-    ):
-        raise ValueError("ram_role_credential_invalid")
-    return AliyunCredential(
-        mode="StsToken",
-        access_key_id=access_key_id,
-        access_key_secret=access_key_secret,
-        sts_token=security_token,
-        region_id=credential.region_id,
-    )
+    """Resolve a dynamic credential into a signable AK/STS triple.
+
+    `RamRoleArn` keeps its existing `get_credential_async()` path; `EcsRamRole` goes
+    through the runtime adapter, which offloads the blocking IMDS call with
+    `asyncio.to_thread()` instead of touching the raw provider's async interface.
+    """
+    return await aliyun_credential_runtime().resolve(credential, client_factory=client_factory)
 
 
 def filter_response_headers(
@@ -546,6 +531,12 @@ class TeaTransportAdapter:
                     declared_headers=request.response_policy.declared_headers,
                 )
             except BaseException as error:
+                if (credential_code := ecs_credential_error_code(error)) is not None:
+                    # The SPI gateway signs inside the SDK, so the credential runtime's
+                    # failure arrives wrapped in the SDK envelope. Nothing was sent, so it
+                    # must not become a transport outcome: keep the stable code the same
+                    # way the streaming path already surfaces it.
+                    raise ValueError(credential_code) from error
                 if (
                     spi_gateway
                     and (
@@ -825,8 +816,9 @@ def _tea_client(
     if endpoint.region_id:
         config_values["region_id"] = endpoint.region_id
     if credential is not None:
-        if credential.mode == "RamRoleArn":
-            config_values["credential"] = CredentialClient(_ram_role_credential_config(credential))
+        dynamic_client = dynamic_credential_client(credential)
+        if dynamic_client is not None:
+            config_values["credential"] = dynamic_client
         else:
             config_values.update(
                 access_key_id=credential.access_key_id,

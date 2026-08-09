@@ -2373,6 +2373,10 @@ msgid "RAM role"
 msgstr "Rol RAM"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "ECS RAM Role"
+msgstr "Rol RAM de ECS"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "OAuth browser login"
 msgstr "Inicio de sesión OAuth en el navegador"
 
@@ -2801,6 +2805,10 @@ msgid "Session name"
 msgstr "Nombre de la sesión"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "ECS RAM Role Name"
+msgstr "Nombre del rol RAM de ECS"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "China (aliyun.com)"
 msgstr "China (aliyun.com)"
 
@@ -2856,6 +2864,12 @@ msgstr "RamSessionName"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Role session name (optional)"
 msgstr "Nombre de sesión del rol (opcional)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Leave blank to auto-detect from ECS metadata"
+msgstr ""
+"Déjelo en blanco para detectarlo automáticamente desde los metadatos de "
+"ECS"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Login site"

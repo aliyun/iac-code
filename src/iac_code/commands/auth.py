@@ -640,8 +640,12 @@ def _input_masked(title: str, prompt: str, existing: str | None = None) -> str |
     return "".join(chars) if chars else None
 
 
-def _input_text(title: str, prompt: str) -> str | None | _BackSentinel:
-    """Full-screen text input. Returns str, None (Ctrl+C), or _BACK (Esc)."""
+def _input_text(title: str, prompt: str, *, allow_empty: bool = False) -> str | None | _BackSentinel:
+    """Full-screen text input. Returns str, None (Ctrl+C), or _BACK (Esc).
+
+    With `allow_empty=True`, confirming an empty buffer returns `""` instead of `None`,
+    which lets an optional field be left blank on purpose.
+    """
     chars: list[str] = []
     hints = "Enter {}  Esc {}".format(_("Confirm"), _("Back"))
 
@@ -725,6 +729,8 @@ def _input_text(title: str, prompt: str) -> str | None | _BackSentinel:
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
+    if not chars and allow_empty:
+        return ""
     return "".join(chars) if chars else None
 
 
@@ -1197,6 +1203,8 @@ def _aliyun_credential_mode_label(mode: str) -> str:
         return _("STS Token")
     if mode == "RamRoleArn":
         return _("RAM Role")
+    if mode == "EcsRamRole":
+        return _("ECS RAM Role")
     if mode == "OAuth":
         return _("OAuth Login (Browser)")
     return mode
@@ -1209,6 +1217,7 @@ def _aliyun_credential_field_label(label: str) -> str:
         "STS Token": _("STS Token"),
         "RAM Role ARN": _("RAM Role ARN"),
         "Session Name": _("Session Name"),
+        "ECS RAM Role Name": _("ECS RAM Role Name"),
         "OAuth Site Type": _("OAuth Site Type"),
         "OAuth Access Token": _("OAuth Access Token"),
         "OAuth Refresh Token": _("OAuth Refresh Token"),
@@ -1227,6 +1236,11 @@ def _format_aliyun_credential_field_value(
 ) -> str:
     if field_name in _ALIYUN_EPOCH_FIELDS:
         return _format_local_epoch(raw_value)
+
+    if field_name == "ram_role_name" and raw_value in ("", None):
+        # An empty role name is a valid configuration, not a missing value: the runtime
+        # discovers the bound role from ECS metadata.
+        return _("Auto-detect from ECS metadata")
 
     value = str(raw_value) if raw_value not in ("", None) else ""
     if value and sensitive:
@@ -1415,6 +1429,7 @@ def _aliyun_credential_flow() -> str | None | _BackSentinel:
     from iac_code.services.providers.aliyun import (
         CREDENTIAL_MODES,
         MODE_FIELDS,
+        MODE_REQUIRED_FIELDS,
         AliyunCredential,
         AliyunCredentials,
     )
@@ -1468,13 +1483,23 @@ def _aliyun_credential_flow() -> str | None | _BackSentinel:
             if existing_cred and existing_cred.mode == selected_mode:
                 existing_value = getattr(existing_cred, field_name, "") or None
 
+            # The ECS role name is optional: blank means auto-detect from instance metadata,
+            # so an empty buffer must be accepted both when configuring and when clearing.
+            optional_field = field_name == "ram_role_name"
+            field_label = label
+            if optional_field:
+                field_label = "{} ({})".format(
+                    _aliyun_credential_field_label(label),
+                    _("Leave blank to auto-detect from ECS metadata"),
+                )
+
             if sensitive:
-                value = _input_masked(title, f"{label}: ", existing=existing_value)
+                value = _input_masked(title, f"{field_label}: ", existing=existing_value)
             else:
                 if existing_value:
-                    value = _input_text_with_default(title, label, existing_value)
+                    value = _input_text_with_default(title, field_label, existing_value, allow_empty=optional_field)
                 else:
-                    value = _input_text(title, f"{label}: ")
+                    value = _input_text(title, f"{field_label}: ", allow_empty=optional_field)
 
             if value is _BACK:
                 break  # Go back to mode selection
@@ -1486,8 +1511,10 @@ def _aliyun_credential_flow() -> str | None | _BackSentinel:
         if len(field_values) != len(mode_fields):
             continue  # User pressed back during field input
 
-        # Validate that required fields are not empty
-        if not all(field_values.values()):
+        # Validate that required fields are not empty; optional fields such as the ECS
+        # role name may legitimately stay blank.
+        required_fields = MODE_REQUIRED_FIELDS.get(selected_mode, set())
+        if not all(field_values.get(field_name) for field_name in required_fields):
             continue
 
         # Build credential and save
@@ -1499,6 +1526,7 @@ def _aliyun_credential_flow() -> str | None | _BackSentinel:
             sts_token=field_values.get("sts_token", ""),
             ram_role_arn=field_values.get("ram_role_arn", ""),
             ram_session_name=field_values.get("ram_session_name", ""),
+            ram_role_name=field_values.get("ram_role_name", ""),
         )
         AliyunCredentials.save(cred)
         return _("Configured: Alibaba Cloud credentials saved to ~/.iac-code")
@@ -1537,8 +1565,14 @@ def _aliyun_region_flow() -> str | None | _BackSentinel:
     return _("Configured: Alibaba Cloud region saved to ~/.iac-code")
 
 
-def _input_text_with_default(title: str, label: str, default: str) -> str | None | _BackSentinel:
-    """Full-screen text input with a default value shown. Returns str, None (Ctrl+C), or _BACK (Esc)."""
+def _input_text_with_default(
+    title: str, label: str, default: str, *, allow_empty: bool = False
+) -> str | None | _BackSentinel:
+    """Full-screen text input with a default value shown. Returns str, None (Ctrl+C), or _BACK (Esc).
+
+    With `allow_empty=True`, confirming an emptied buffer returns `""` instead of `None`,
+    which lets a previously configured optional value be cleared.
+    """
     chars: list[str] = list(default)
     hints = "Enter {}  Esc {}".format(_("Confirm"), _("Back"))
 
@@ -1622,4 +1656,6 @@ def _input_text_with_default(title: str, label: str, default: str) -> str | None
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
+    if not chars and allow_empty:
+        return ""
     return "".join(chars) if chars else None

@@ -32,6 +32,11 @@ CLI 引数 > 環境変数 > 設定ファイル
 | `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | AccessKey Secret |
 | `ALIBABA_CLOUD_SECURITY_TOKEN` | STS トークン。設定すると認証モードが STS に切り替わります |
 | `ALIBABA_CLOUD_REGION_ID` | デフォルトリージョン |
+| `ALIBABA_CLOUD_ECS_METADATA` | 任意の ECS RAM ロール名。モードがすでに `EcsRamRole` で、保存済みのロール名がない場合に使用されます。この変数だけではモードは選択されません |
+| `ALIBABA_CLOUD_ECS_METADATA_DISABLED` | `true` に設定すると、ECS インスタンスメタデータ認証情報を無効にします |
+| `ALIBABA_CLOUD_IMDSV1_DISABLED` | `true` に設定すると IMDSv2 を必須とし、IMDSv1 へのフォールバックを無効にします |
+
+ECS メタデータ関連の環境変数は、認証モードを `EcsRamRole` に設定した後にのみ適用されます。IaC Code に保存されたロール名は `ALIBABA_CLOUD_ECS_METADATA` より優先され、どちらも設定されていない場合は IMDS からロール名を自動検出します。
 
 詳細は [Alibaba Cloud 認証情報](./alibaba-cloud-credentials.md) をご覧ください。
 

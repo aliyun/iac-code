@@ -26,6 +26,7 @@ from iac_code.tools.cloud.aliyun.endpoint_resolver import (
 )
 from iac_code.tools.cloud.aliyun.openmeta import ParameterMetadata
 from iac_code.tools.cloud.aliyun.runtime import create_aliyun_runtime_services
+from tests.tools.cloud.aliyun._ecs_ram_role_fakes import FakeEcsRuntime
 
 ROOT = Path(__file__).parents[4]
 PACKAGE = ROOT / "src/iac_code/tools/cloud/aliyun"
@@ -1876,3 +1877,56 @@ async def test_single_runtime_factory_owns_task_3_services(tmp_path: Path) -> No
         assert runtime.host_binding_resolver is not None
     finally:
         await runtime.aclose()
+
+
+def test_discovery_config_uses_the_dynamic_client_for_ecs_ram_role(fake_ecs_runtime: FakeEcsRuntime) -> None:
+    values = endpoint_resolver_module._discovery_config_values(
+        "location.aliyuncs.com", fake_ecs_runtime.credential(), "cn-hangzhou"
+    )
+
+    assert values["endpoint"] == "location.aliyuncs.com"
+    assert values["region_id"] == "cn-hangzhou"
+    assert type(values["credential"].cloud_credential.provider).__name__ == "EcsRamRoleProviderAdapter"
+    # Endpoint and identity discovery must not fall back to an empty static AccessKey.
+    assert "access_key_id" not in values
+    assert "access_key_secret" not in values
+    assert "security_token" not in values
+
+
+def test_discovery_config_keeps_static_values_for_access_key_mode(fake_ecs_runtime: FakeEcsRuntime) -> None:
+    from iac_code.services.providers.aliyun import AliyunCredential
+
+    values = endpoint_resolver_module._discovery_config_values(
+        "location.aliyuncs.com",
+        AliyunCredential(mode="AK", access_key_id="fake-ak", access_key_secret="fake-secret"),
+        "cn-hangzhou",
+    )
+
+    assert "credential" not in values
+    assert (values["access_key_id"], values["access_key_secret"]) == ("fake-ak", "fake-secret")
+    assert fake_ecs_runtime.providers == []
+
+
+def test_location_and_identity_discovery_share_one_ecs_provider(fake_ecs_runtime: FakeEcsRuntime) -> None:
+    credential = fake_ecs_runtime.credential()
+    location = endpoint_resolver_module._discovery_config_values("location.aliyuncs.com", credential, "cn-hangzhou")
+    identity = endpoint_resolver_module._discovery_config_values("sts.aliyuncs.com", credential, "cn-hangzhou")
+
+    assert location["credential"].cloud_credential.provider is identity["credential"].cloud_credential.provider
+    assert len(fake_ecs_runtime.providers) == 1
+
+
+def test_discovery_config_reports_metadata_disabled_before_any_request(
+    fake_ecs_runtime: FakeEcsRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from iac_code.services.providers.aliyun_credentials_runtime import ECS_METADATA_DISABLED
+
+    monkeypatch.setenv("ALIBABA_CLOUD_ECS_METADATA_DISABLED", "true")
+
+    with pytest.raises(ValueError) as raised:
+        endpoint_resolver_module._discovery_config_values(
+            "location.aliyuncs.com", fake_ecs_runtime.credential(), "cn-hangzhou"
+        )
+
+    assert str(raised.value) == ECS_METADATA_DISABLED
+    assert fake_ecs_runtime.providers == []

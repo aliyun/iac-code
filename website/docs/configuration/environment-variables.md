@@ -34,6 +34,11 @@ The effective provider Base URL precedence is: explicit runtime override, `IAC_C
 | `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | AccessKey Secret |
 | `ALIBABA_CLOUD_SECURITY_TOKEN` | STS token; switches the credential mode to STS when set |
 | `ALIBABA_CLOUD_REGION_ID` | Default region |
+| `ALIBABA_CLOUD_ECS_METADATA` | Optional ECS RAM role name used when the configured mode is `EcsRamRole` and no role name is saved; does not select the mode by itself |
+| `ALIBABA_CLOUD_ECS_METADATA_DISABLED` | Set to `true` to disable ECS instance metadata credentials |
+| `ALIBABA_CLOUD_IMDSV1_DISABLED` | Set to `true` to require IMDSv2 and disable fallback to IMDSv1 |
+
+The ECS metadata variables apply only after the credential mode has been configured as `EcsRamRole`. A role name saved in IaC Code takes precedence over `ALIBABA_CLOUD_ECS_METADATA`; if neither is set, the role name is discovered through IMDS.
 
 See [Alibaba Cloud Credentials](./alibaba-cloud-credentials.md) for more details.
 

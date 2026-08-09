@@ -13,6 +13,7 @@ import json
 import re
 import subprocess
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
@@ -52,6 +53,7 @@ from iac_code.tools.cloud.aliyun.openmeta import MetadataFetch, ParameterMetadat
 from iac_code.tools.cloud.aliyun.retry_policy import RetryBudget, TransportFailure
 from iac_code.tools.cloud.aliyun.runtime import TransportRouter, create_aliyun_runtime_services
 from iac_code.types.permissions import InvocationBinding, ToolPermissionContext
+from tests.tools.cloud.aliyun._ecs_ram_role_fakes import FakeEcsRuntime
 
 ROOT = Path(__file__).resolve().parents[4]
 CATALOG_PATH = ROOT / "src/iac_code/tools/cloud/aliyun/data/oss/operation_catalog.json"
@@ -1093,6 +1095,61 @@ async def test_oss_adapter_uses_assumed_role_credential_for_sdk_client(monkeypat
         "role-secret",
         "role-sts",
     )
+
+
+@pytest.mark.asyncio
+async def test_oss_adapter_uses_ecs_metadata_credential_for_sdk_client(fake_ecs_runtime: FakeEcsRuntime) -> None:
+    module = _adapter_module()
+    client = FakeSdkClient(module, [_sdk_result(status=200)])
+    adapter, factory = _oss_adapter(module, client)
+    loop_thread = threading.get_ident()
+
+    await adapter.execute(
+        contract=_oss_contract(action="HeadObject", method="HEAD", response_body_type="none"),
+        request=_oss_request(method="HEAD"),
+        endpoint=_oss_endpoint(),
+        credential=fake_ecs_runtime.credential(region_id="cn-hangzhou"),
+        context=ToolContext(),
+        budget=_budget(),
+    )
+
+    credentials = factory.calls[0][0].credentials_provider.get_credentials()
+    assert (credentials.access_key_id, credentials.access_key_secret, credentials.security_token) == (
+        "STS.fake-ecs-ak",
+        "fake-ecs-secret",
+        "fake-ecs-sts",
+    )
+    # The V4 signer needs the requested region, which must survive the credential swap.
+    assert factory.calls[0][0].region == "cn-hangzhou"
+    provider = fake_ecs_runtime.providers[0]
+    assert provider.call_threads and all(ident != loop_thread for ident in provider.call_threads)
+    assert provider.async_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_oss_adapter_fails_before_building_the_sdk_client_when_metadata_is_disabled(
+    fake_ecs_runtime: FakeEcsRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from iac_code.services.providers.aliyun_credentials_runtime import ECS_METADATA_DISABLED
+
+    module = _adapter_module()
+    client = FakeSdkClient(module, [_sdk_result(status=200)])
+    adapter, factory = _oss_adapter(module, client)
+    monkeypatch.setenv("ALIBABA_CLOUD_ECS_METADATA_DISABLED", "true")
+
+    with pytest.raises(ValueError) as raised:
+        await adapter.execute(
+            contract=_oss_contract(action="HeadObject", method="HEAD", response_body_type="none"),
+            request=_oss_request(method="HEAD"),
+            endpoint=_oss_endpoint(),
+            credential=fake_ecs_runtime.credential(),
+            context=ToolContext(),
+            budget=_budget(),
+        )
+
+    assert str(raised.value) == ECS_METADATA_DISABLED
+    assert factory.calls == []
+    assert client.calls == []
 
 
 @pytest.mark.asyncio

@@ -32,6 +32,11 @@ Siehe [LLM-Anbieter](./llm-providers.md) fuer Anbieterdetails.
 | `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | AccessKey-Secret |
 | `ALIBABA_CLOUD_SECURITY_TOKEN` | STS-Token; wechselt den Anmeldedatenmodus zu STS, wenn gesetzt |
 | `ALIBABA_CLOUD_REGION_ID` | Standardregion |
+| `ALIBABA_CLOUD_ECS_METADATA` | Optionaler Name der ECS-RAM-Rolle; wird verwendet, wenn der Modus bereits `EcsRamRole` ist und kein Rollenname gespeichert wurde, wählt den Modus aber nicht selbst aus |
+| `ALIBABA_CLOUD_ECS_METADATA_DISABLED` | Auf `true` setzen, um Anmeldedaten aus ECS-Instanzmetadaten zu deaktivieren |
+| `ALIBABA_CLOUD_IMDSV1_DISABLED` | Auf `true` setzen, um IMDSv2 zu verlangen und den Rückgriff auf IMDSv1 zu verhindern |
+
+Die ECS-Metadatenvariablen gelten erst, nachdem der Anmeldedatenmodus als `EcsRamRole` konfiguriert wurde. Ein in IaC Code gespeicherter Rollenname hat Vorrang vor `ALIBABA_CLOUD_ECS_METADATA`; wenn beide fehlen, wird der Rollenname über IMDS ermittelt.
 
 Siehe [Alibaba Cloud-Anmeldedaten](./alibaba-cloud-credentials.md) fuer weitere Details.
 
