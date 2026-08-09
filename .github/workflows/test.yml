@@ -135,4 +135,4 @@ jobs:
         run: uv sync --all-extras
 
       - name: Run tests
-        run: uv run pytest tests/ -v --no-header -n auto
+        run: uv run pytest tests/ -v --no-header -n 2
