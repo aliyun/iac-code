@@ -46,7 +46,19 @@ class TestLoadPipelineDir:
         assert loaded.steps[0].step_id == "step_a"
         assert loaded.steps[0].skill == "skill-x"
         assert loaded.steps[1].context_fields == ["intent"]
+        assert loaded.steps[0].complete_step_terminal is True
         assert loaded.max_rollbacks == 2
+
+    def test_loads_non_terminal_complete_step(self, tmp_path):
+        yaml_content = MINIMAL_YAML.replace(
+            "    skill: skill-x\n",
+            "    skill: skill-x\n    complete_step_terminal: false\n",
+        )
+        _write_pipeline(tmp_path, yaml_content, {"step_a.md": "Do A", "step_b.md": "Do B with {intent}"})
+
+        loaded = load_pipeline_dir(tmp_path)
+
+        assert loaded.steps[0].complete_step_terminal is False
 
     def test_ignores_legacy_step_rollback_section(self, tmp_path):
         yaml_content = dedent("""\
@@ -728,6 +740,26 @@ class TestSkillSchemaExtraction:
         _write_pipeline(tmp_path, yaml_content, {"parse.md": "P"})
         loaded = load_pipeline_dir(tmp_path)
         assert loaded.steps[0].max_conclusion_retries == 5
+
+    def test_rejects_unknown_completion_guard_key(self, tmp_path):
+        yaml_content = dedent("""\
+            name: test
+            context_dependencies:
+              intent: []
+            max_rollbacks: 1
+            steps:
+              - id: parse
+                conclusion_field: intent
+                forward: null
+                prompt: prompts/parse.md
+                completion_guards:
+                  - always: true
+                    require_context_contraint_coverage: {}
+        """)
+        _write_pipeline(tmp_path, yaml_content, {"parse.md": "P"})
+
+        with pytest.raises(ValueError, match="require_context_contraint_coverage"):
+            load_pipeline_dir(tmp_path)
 
     def test_interrupt_judge_failure_policy_from_yaml(self, tmp_path):
         yaml_content = dedent("""\

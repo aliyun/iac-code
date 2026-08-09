@@ -150,24 +150,21 @@ Resources:
             exec >>"$LOG" 2>&1
 
             dnf install -y python3.11 python3.11-pip
-            id iac-code >/dev/null 2>&1 || useradd --system --create-home --home-dir /var/lib/iac-code iac-code
-            install -d -m 0700 -o iac-code -g iac-code /var/lib/iac-code
+            install -d -m 0700 -o root -g root /root/.iac-code
             python3.11 -m venv /opt/iac-code/venv
             /opt/iac-code/venv/bin/pip install --upgrade --index-url https://mirrors.aliyun.com/pypi/simple/ "iac-code[http]"
 
-            TOKEN_FILE=/var/lib/iac-code/web-access.token
+            TOKEN_FILE=/root/.iac-code/web-access.token
             if [ -f "$TOKEN_FILE" ]; then
-              TOKEN=$(/opt/iac-code/venv/bin/python -c 'import base64,pathlib; p=pathlib.Path("/var/lib/iac-code/web-access.token"); t=p.read_text("ascii").strip(); d=base64.urlsafe_b64decode(t+"="*((4-len(t)%4)%4)); assert len(d)>=32 and base64.urlsafe_b64encode(d).decode().rstrip("=")==t; print(t,end="")')
+              TOKEN=$(/opt/iac-code/venv/bin/python -c 'import base64,pathlib; p=pathlib.Path("/root/.iac-code/web-access.token"); t=p.read_text("ascii").strip(); d=base64.urlsafe_b64decode(t+"="*((4-len(t)%4)%4)); assert len(d)>=32 and base64.urlsafe_b64encode(d).decode().rstrip("=")==t; print(t,end="")')
             else
               TOKEN=$(/opt/iac-code/venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(32),end="")')
               TOKEN_TMP="$TOKEN_FILE.tmp"
               umask 077
               printf '%s' "$TOKEN" >"$TOKEN_TMP"
-              chown iac-code:iac-code "$TOKEN_TMP"
               chmod 0600 "$TOKEN_TMP"
               mv -f "$TOKEN_TMP" "$TOKEN_FILE"
             fi
-            chown iac-code:iac-code "$TOKEN_FILE"
             chmod 0600 "$TOKEN_FILE"
 
             BAILIAN_API_KEY=$(printf '%s' '${BailianApiKeyB64}' | base64 -d)
@@ -175,11 +172,10 @@ Resources:
             /opt/iac-code/venv/bin/python <<'PY'
             import os
             import pathlib
-            import pwd
             import tempfile
             import yaml
 
-            root = pathlib.Path('/var/lib/iac-code')
+            root = pathlib.Path('/root/.iac-code')
             updates = {
                 root / '.credentials.yml': {'dashscope': os.environ['BAILIAN_API_KEY']},
                 root / '.cloud-credentials.yml': {
@@ -196,7 +192,7 @@ Resources:
                     'providers': {
                         'dashscope': {
                             'apiBase': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-                            'model': 'deepseek-v4-flash-0731',
+                            'model': 'qwen3.8-max',
                             'name': 'DashScope',
                         }
                     },
@@ -231,14 +227,53 @@ Resources:
                         stream.flush()
                         os.fsync(stream.fileno())
                     os.chmod(temporary, 0o600)
-                    account = pwd.getpwnam('iac-code')
-                    os.chown(temporary, account.pw_uid, account.pw_gid)
                     os.replace(temporary, path)
                 finally:
                     if os.path.exists(temporary):
                         os.unlink(temporary)
             PY
             unset BAILIAN_API_KEY
+
+            AGENTS_FILE=/root/AGENTS.md
+            AGENTS_TMP="$AGENTS_FILE.tmp"
+            umask 077
+            cat >"$AGENTS_TMP" <<'AGENTS'
+            # 本机 ECS 运行环境
+
+            iac-code Web 直接运行在下述阿里云 ECS 实例上。除非用户明确指定其他机器或资源，
+            用户提到的“本机”“这台机器”“当前服务器”“当前 ECS”均指此实例。
+
+            ## 实例身份
+
+            - 云产品：Alibaba Cloud ECS
+            - 实例 ID：`${LocalInstanceId}`
+            - 实例名称：`iac-code-web`
+            - 实例规格：`${LocalInstanceType}`
+            - 操作系统：Alibaba Cloud Linux 3
+            - 地域：`${StackRegion}`
+            - 可用区：`${LocalZoneId}`
+            - VPC ID：`${LocalVpcId}`
+            - VSwitch ID：`${LocalVSwitchId}`
+            - 安全组 ID：`${LocalSecurityGroupId}`
+            - 公网 EIP：`${LocalEipAddress}`
+            - 当前用户：`root`
+            - ECS 详情页：<https://ecs.console.aliyun.com/#/server/region/${StackRegion}?instanceIds=${LocalInstanceId}>
+
+            ## 操作约定
+
+            - “查询/查看 ECS 信息”默认查询上述实例。需要云上控制面属性时，使用地域 `${StackRegion}`
+              和实例 ID `${LocalInstanceId}` 精确查询；需要实时操作系统状态时，直接检查本机。
+            - “安装 nginx”或其他未指定目标的系统运维请求默认在本机执行。Alibaba Cloud Linux 3
+              使用 `dnf` 和 `systemctl`，执行后说明实际变更与服务状态。
+            - “查看机器负载”默认检查本机的 CPU、内存、磁盘和 load average，并报告采集时间。
+            - “跳转/打开 ECS 详情页”时，直接返回上面的 ECS 详情页链接，不要返回通用实例列表页。
+            - 实例 ID、地域和网络资源 ID 是部署时身份；负载、IP 绑定、运行状态等动态信息应实时核验。
+            - 不得输出 API Key、访问令牌、凭据文件内容或 ECS 元数据服务中的 RAM 角色临时凭据。
+            - 停止、重启、释放本 ECS，停止 `iac-code-web`，或者修改其网络与安全组可能中断当前 Web；
+              执行这些操作前必须获得用户明确确认。
+            AGENTS
+            chmod 0600 "$AGENTS_TMP"
+            mv -f "$AGENTS_TMP" "$AGENTS_FILE"
 
             cat >/etc/systemd/system/iac-code-web.service <<'UNIT'
             [Unit]
@@ -248,11 +283,11 @@ Resources:
 
             [Service]
             Type=simple
-            User=iac-code
-            Group=iac-code
-            WorkingDirectory=/var/lib/iac-code
-            Environment=IAC_CODE_CONFIG_DIR=/var/lib/iac-code
-            ExecStart=/opt/iac-code/venv/bin/iac-code web --host 0.0.0.0 --port 8766 --access-token-file /var/lib/iac-code/web-access.token --no-open
+            User=root
+            Group=root
+            WorkingDirectory=/root
+            Environment=IAC_CODE_CONFIG_DIR=/root/.iac-code
+            ExecStart=/opt/iac-code/venv/bin/iac-code web --host 0.0.0.0 --port 8766 --access-token-file /root/.iac-code/web-access.token --no-open
             Restart=on-failure
 
             [Install]
@@ -275,6 +310,22 @@ Resources:
               Ref: ALIYUN::TenantId
             StackRegion:
               Ref: ALIYUN::Region
+            LocalInstanceId:
+              Ref: Instance
+            LocalInstanceType:
+              Ref: InstanceType
+            LocalZoneId:
+              Ref: ZoneId
+            LocalVpcId:
+              Ref: Vpc
+            LocalVSwitchId:
+              Ref: VSwitch
+            LocalSecurityGroupId:
+              Ref: SecurityGroup
+            LocalEipAddress:
+              Fn::GetAtt:
+                - Eip
+                - EipAddress
 Outputs:
   PublicUrl:
     Label:

@@ -1602,7 +1602,11 @@ class AgentLoop:
                     for request, result in denied_results
                 ]
                 for req, result in zip(requests, results):
-                    if result.metadata and result.metadata.get("step_result") is not None:
+                    if (
+                        result.metadata
+                        and result.metadata.get("step_result") is not None
+                        and result.metadata.get("complete_step_terminal", True)
+                    ):
                         terminal_step_result = True
                     processed = self._result_storage.process(req.id, result.content)
                     self._mark_read_memory_tool_result(req, result)

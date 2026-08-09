@@ -201,6 +201,21 @@ def test_deploying_step_excludes_raw_ros_stack_from_base_registry(monkeypatch):
     assert deploying_registry.get("aliyun_api") is not None
 
 
+def test_cost_step_keeps_aliyun_api_for_external_hard_constraint_evidence(monkeypatch):
+    monkeypatch.setenv("IAC_CODE_PIPELINE_SELLING_ENABLE_REVIEWING", "true")
+    loaded = load_pipeline_dir(_selling_dir())
+    base_registry = ToolRegistry()
+    base_registry.register(_NamedTool("aliyun_api"))
+
+    cost_registry = _registry_for_step(
+        loaded,
+        _step_by_id(loaded.sub_pipelines["evaluate_candidate"].steps, "cost_estimating"),
+        base_registry=base_registry,
+    )
+
+    assert cost_registry.get("aliyun_api") is not None
+
+
 def test_deploying_step_excludes_write_file_but_keeps_shell_and_in_place_editing(monkeypatch):
     monkeypatch.setenv("IAC_CODE_PIPELINE_SELLING_ENABLE_REVIEWING", "true")
     loaded = load_pipeline_dir(_selling_dir())

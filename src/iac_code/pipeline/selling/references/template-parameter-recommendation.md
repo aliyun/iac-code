@@ -10,7 +10,8 @@
 ## 核心原则
 
 - 仅推荐 `CreateStack` 前的新建栈参数，由 skill 编排专用 ROS 模板工具和必要的只读资源查询。
-- `PreviewStack` 是预览验证门槛，不是部署成功保证。通过的参数集称为 **Preview-Validated Parameter Set**：表示指定模板来源在当时参数集下可预览。
+- `PreviewStack` 是成本估算前必须先尝试的预览验证步骤，但不是成本估算硬门禁，也不是部署成功保证。通过的参数集称为 **Preview-Validated Parameter Set**：表示指定模板来源在当时参数集下可预览。
+- `hard_constraints` 中用户明确给出的等值、范围、枚举和禁止项是硬约束，不是推荐偏好；模板 Default、场景推荐和“更稳妥”的替代都不得覆盖或放宽它们。`verification_mode: direct` 由模板/参数直接证明，`verification_mode: tool` 必须用产品 reference 指定的查询结果证明。
 - 原始约束快照与 API 响应只在 agent 上下文持有，不写额外文件；结构化步骤交接和用户结果保留完成任务所需的真实值。
 - 密码类参数可在用户要求时生成合规随机值；同一个真实值必须贯穿预览、询价、结构化步骤交接和部署，不得用脱敏占位符替换。
 - 不编造外部资源、账号资源、AccessKey/Secret/Token/Webhook/LicenseKey/证书/真实域名/已有资源 ID。
@@ -24,7 +25,7 @@
 |---|---|
 | 模板 | 本地/远程模板路径或对话中的产物；调用专用工具时传给 `template_url` |
 | 地域 | 用户指定 → 工具默认地域 → 询问用户 |
-| `StackName` | 用户指定 → 由模板描述/文件名生成安全名称 |
+| `StackName` | 用户指定基础名 → 由模板描述/文件名生成基础名；调用时追加唯一后缀 |
 | 共享操作参数 | 至少 `DisableRollback: true` |
 
 本流程输出的预览证明只用于说明模板来源已通过预览；后续选择或部署阶段可以调整部署参数，最终参数由 `CreateStack` 校验。
@@ -39,6 +40,8 @@ ROS Terraform 类型：顶层 `Transform` / `Workspace`、`.tf` 的 `variable`�
 
 ### 3. 提取用户偏好
 
+先把用户明确给出的等值、上限和下限规格提取为硬约束，再提取成本、高可用等软偏好。硬约束必须精确参与候选求交；软偏好只用于对满足硬约束的候选排序。
+
 | 关键词 | 倾向 |
 |---|---|
 | 低成本 / 测试 / 便宜点 | 小规格、按量付费、低档磁盘、减少可选付费资源 |
@@ -46,7 +49,7 @@ ROS Terraform 类型：顶层 `Transform` / `Workspace`、`.tf` 的 `variable`�
 | 已有资源 | 优先 API 返回或用户提供的已有 VPC/VSwitch/SG/Bucket/KeyPair |
 | 安全 / 不要公网 | 私网、私有权限、避免公网暴露 |
 
-偏好只能在合法候选内删减或排序，不能覆盖 API 硬约束。
+偏好只能在同时满足用户硬约束和 API 硬约束的合法候选内删减或排序，不能覆盖任何硬约束。
 
 ### 4. 调用 ros_get_template_parameter_constraints
 
@@ -70,9 +73,10 @@ ROS Terraform 类型模板若返回 `TerraformStackNotSupported` / `QueryErrors`
 
 ### 6. 对 AllowedValues 做偏好预筛选
 
+- 先按 `hard_constraints` 的 `operator/value/unit` 筛选。模板参数值不能直接证明实际产品属性时，按对应 [cloud-products/](cloud-products/) reference 调用产品 API 获取实际值，不得根据资源规格名或经验猜测。
 - 只能删除或排序 API 返回的值，不能创造新值。
 - 保留足够候选用于回溯；记录每个被删值的原因。
-- 预筛后为空时恢复原始候选并标记偏好冲突。
+- 仅软偏好预筛为空时才可恢复原始候选并标记偏好冲突；用户硬约束筛选为空时不得恢复不匹配候选，必须报告参数冲突。
 
 ### 7. 联动求解与回溯
 

@@ -234,5 +234,5 @@ def test_selling_cost_estimating_reads_template_without_reemitting_template_arti
     assert template_step.step_id == "template_generating"
     assert template_step.a2a_artifacts[0].role == "final"
     assert cost_step.step_id == "cost_estimating"
-    assert cost_step.context_fields == ["template"]
+    assert cost_step.context_fields == ["candidate", "template"]
     assert cost_step.a2a_artifacts == []

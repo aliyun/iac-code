@@ -96,6 +96,72 @@ class TestSkillFrontmatter:
         assert preview_schema["properties"]["template_url"]["type"] == "string"
         assert preview_schema["properties"]["parameters"]["type"] == "object"
 
+    def test_conclusion_schema_requires_generic_hard_constraint_checks(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        schema = _parse_frontmatter(content)["conclusion_schema"]
+        constraint = {
+            "id": "db-storage-min",
+            "target": "RDS",
+            "property": "storage",
+            "operator": "gte",
+            "value": 100,
+            "unit": "GiB",
+            "verification_mode": "direct",
+            "source": "user",
+            "source_text": "存储至少 100 GiB",
+        }
+        conclusion = {
+            "monthly_estimate": "¥100/月",
+            "currency": "CNY",
+            "resources": [{"type": "ALIYUN::RDS::DBInstance", "cost": "¥100/月"}],
+            "template_fixed": False,
+            "deployment_parameters": {"DBInstanceStorage": 120},
+            "hard_constraint_checks": [
+                {
+                    "constraint": constraint,
+                    "status": "satisfied",
+                    "actual_value": 120,
+                    "actual_unit": "GiB",
+                    "parameter_values": {"DBInstanceStorage": 120},
+                    "evidence": [{"type": "context", "summary": "parameter value", "actual_value": 120}],
+                }
+            ],
+            "preview_validation": {"succeeded": False, "error": "missing ZoneId"},
+        }
+
+        jsonschema.validate(conclusion, schema)
+        missing_verification = dict(conclusion)
+        del missing_verification["hard_constraint_checks"]
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(missing_verification, schema)
+
+        missing_evidence_value = json.loads(json.dumps(conclusion, ensure_ascii=False))
+        del missing_evidence_value["hard_constraint_checks"][0]["evidence"][0]["actual_value"]
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(missing_evidence_value, schema)
+
+        empty_constraint_id = json.loads(json.dumps(conclusion, ensure_ascii=False))
+        empty_constraint_id["hard_constraint_checks"][0]["constraint"]["id"] = ""
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(empty_constraint_id, schema)
+
+        llm_self_attestation = dict(conclusion, hard_constraints_verified=True)
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(llm_self_attestation, schema)
+
+    def test_hard_constraint_schema_describes_every_llm_supplied_field(self):
+        schema = _parse_frontmatter(SKILL_MD.read_text(encoding="utf-8"))["conclusion_schema"]
+        check_properties = schema["properties"]["hard_constraint_checks"]["items"]["properties"]
+        constraint_properties = check_properties["constraint"]["properties"]
+        evidence_properties = check_properties["evidence"]["items"]["properties"]
+
+        assert "hard_constraints_verified" not in schema["properties"]
+        assert "hard_constraint_conflicts" not in schema["properties"]
+        assert constraint_properties["id"]["minLength"] == 1
+        assert all(value.get("description") for value in constraint_properties.values())
+        assert all(value.get("description") for value in check_properties.values())
+        assert all(value.get("description") for value in evidence_properties.values())
+
     def test_monthly_estimate_schema_describes_list_and_discounted_prices(self):
         content = SKILL_MD.read_text(encoding="utf-8")
         fm = _parse_frontmatter(content)
@@ -116,6 +182,7 @@ class TestSkillFrontmatter:
             "resources": [{"type": "ALIYUN::ECS::InstanceGroup", "cost": "¥100/月"}],
             "template_fixed": False,
             "deployment_parameters": {"ZoneId": "cn-hangzhou-k"},
+            "hard_constraint_checks": [],
             "preview_validation": {
                 "succeeded": True,
                 "template_url": "templates/a.yml",
@@ -141,6 +208,7 @@ class TestSkillFrontmatter:
             "resources": [],
             "template_fixed": False,
             "deployment_parameters": {},
+            "hard_constraint_checks": [],
             "preview_validation": {"succeeded": False, "error": "missing VpcId"},
         }
 
@@ -214,6 +282,18 @@ class TestSkillContentRosOnly:
         assert "不执行 `PreviewStack`" not in body
         assert "写回模板的 Default 保持一致" not in body
 
+    def test_validates_all_user_hard_constraints_without_product_hardcoding(self, body):
+        assert "candidate.hard_constraints" in body
+        assert "operator/value/unit" in body
+        assert "hard_constraint_checks" in body
+        assert "parameter_values" in body
+        assert "result_path" in body
+        assert "代码会逐条检查约束覆盖" in body
+        assert "失败结果会包含具体校验码" in body
+        assert "不要输出 `hard_constraints_verified`" in body
+        assert "instance_type_verification" not in body
+        assert "DescribeInstanceTypes" not in body
+
     def test_existing_resource_parameters_can_use_api_candidates(self, body):
         assert "VpcId、VSwitchId、SecurityGroupId、KeyPairName" in body
         assert "API 返回候选不是编造" in body
@@ -256,7 +336,8 @@ class TestSkillContentRosOnly:
         assert "deploying" in body
 
     def test_preview_stack_is_not_hard_gate_for_pricing(self, body):
-        assert "PreviewStack 不是硬门禁" in body
+        assert "不得直接跳过 PreviewStack" in body
+        assert "PreviewStack 不是成本估算的硬门禁" in body
         assert "完整部署参数" in body
         assert "ros_estimate_template_cost" in body
         assert "missing_deployment_parameters" in body
@@ -380,6 +461,15 @@ class TestReferencesExist:
         assert "参数必须一致" not in content
         assert "最终参数由 `CreateStack` 校验" in content
 
+    def test_ecs_reference_verifies_explicit_size_without_closest_fallback(self):
+        reference = _direct_references_dir_or_skip() / "cloud-products" / "ecs.md"
+        content = reference.read_text(encoding="utf-8")
+
+        assert "DescribeInstanceTypes" in content
+        assert "CpuCoreCount" in content
+        assert "MemorySize" in content
+        assert "用户已明确 vCPU/内存时，不得选择最接近值" in content
+
 
 class TestSkillDiscovery:
     def test_discovered_by_pipeline_loader(self):
@@ -405,7 +495,6 @@ class TestSkillDiscovery:
 class TestCostPrompt:
     def test_prompt_is_not_duplicate_output_reference(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")
-        assert "Preview-Validated Pricing Parameter Set" in body
         assert "`deployment_parameters`" in body
         assert "不得写入 `***`、`[REDACTED]` 或 `<redacted>`" in body
         assert "询价失败但 PreviewStack 已成功" not in body
@@ -416,15 +505,15 @@ class TestCostPrompt:
         assert "ros_preview_template" in body
         assert "不要使用 `ros_stack` 执行预览" in body
 
-    def test_prompt_treats_preview_stack_as_soft_gate(self):
+    def test_prompt_defers_preview_policy_to_skill(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")
-        assert "优先通过" in body
-        assert "不是硬门禁" in body
-        assert "参数缺口" in body
+        assert "PreviewStack 尝试和软降级规则按技能执行" in body
+        assert "不是硬门禁" not in body
+        assert "不得直接跳过" not in body
 
-    def test_prompt_asks_model_to_complete_parameters_before_pricing(self):
+    def test_prompt_keeps_generated_parameter_contract_without_repeating_solver_policy(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")
-        assert "尽量形成完整部署参数集" in body
+        assert "尽量形成完整部署参数集" not in body
         assert "可生成参数" in body
         assert "普通密码" in body
 
@@ -449,6 +538,20 @@ class TestCostPrompt:
         assert "列表价" in body
         assert "合同优惠后" in body
         assert "monthly_estimate" in body
+
+    def test_prompt_receives_only_required_candidate_fields_without_repeating_skill_rules(self):
+        body = COST_PROMPT_MD.read_text(encoding="utf-8")
+
+        assert "{intent}" not in body
+        assert "{candidate}" not in body
+        assert "{candidate.name}" in body
+        assert "{candidate.resource_intents}" in body
+        assert "{candidate.hard_constraints}" in body
+        assert "更早步骤的约束版本" not in body
+        assert "operator/value/unit" not in body
+        assert "hard_constraint_checks" not in body
+        assert "不要输出自我声明的验证布尔值" not in body
+        assert "DescribeInstanceTypes" not in body
 
 
 class TestEvalsJson:
@@ -493,8 +596,21 @@ class TestEvalsJson:
         data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))
         eval_text = json.dumps(data, ensure_ascii=False)
         assert "preview-soft-gate-partial-pricing" in eval_text
-        assert "PreviewStack 不是硬门禁" in eval_text
+        assert "不得直接跳过 PreviewStack" in eval_text
+        assert "PreviewStack 不是成本估算硬门禁" in eval_text
         assert "missing_deployment_parameters" in eval_text
+
+    def test_evals_cover_hard_constraints_across_products(self):
+        data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))
+        eval_text = json.dumps(data, ensure_ascii=False)
+
+        assert "explicit-ecs-size-hard-constraint" in eval_text
+        assert "2 核 4 GiB" in eval_text
+        assert "DescribeInstanceTypes" in eval_text
+        assert "rds-range-and-version-hard-constraints" in eval_text
+        assert "eq、gte、lte" in eval_text
+        assert "hard_constraint_checks" in eval_text
+        assert "instance_type_verification" not in eval_text
 
     def test_has_required_fields(self):
         data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))

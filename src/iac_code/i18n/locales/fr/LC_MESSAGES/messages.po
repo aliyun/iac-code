@@ -3877,6 +3877,15 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"Every explicit user hard constraint must be covered by a satisfied check "
+"with matching parameters and evidence."
+msgstr ""
+"Chaque contrainte stricte explicitement définie par l’utilisateur doit "
+"être couverte par une vérification réussie avec des paramètres et des "
+"preuves concordants."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -3977,6 +3986,15 @@ msgid ""
 msgstr ""
 "{message} complete_step.conclusion doit inclure l’un de ces champs : "
 "{fields}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A completion guard is misconfigured."
+msgstr "Une garde de finalisation est mal configurée."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "{message} Validation issue: {code} ({detail})."
+msgstr "{message} Problème de validation : {code} ({detail})."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A conclusion content hash is required before completing the current step."

@@ -66,6 +66,7 @@ class StepSpec:
     sub_pipeline_name: str | None = None
     tools: IncludeExcludeConfig | None = None
     auto_advance: bool = True
+    complete_step_terminal: bool = True
     max_agent_turns: int = 50
     context_fields: list[str] = field(default_factory=list)
     enabled_when: str | None = None

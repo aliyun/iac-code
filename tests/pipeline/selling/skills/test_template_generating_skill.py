@@ -120,6 +120,19 @@ class TestSkillContentRosOnly:
         assert "已有 VPC 中创建安全组" in body
         assert "forbidden_resources" not in body
 
+    def test_preserves_product_neutral_user_hard_constraints(self, body):
+        assert "candidate" in body
+        assert "hard_constraints" in body
+        assert "原样贯穿" in body
+        assert "保持参数化" in body
+        assert "rollback_request" in body
+        assert "DescribeInstanceTypes" not in body
+
+    def test_inventory_values_stay_parameterized_and_defaults_are_scoped(self, body):
+        assert "库存相关属性**必须**定义为 Parameters" in body
+        assert "以下属性**不需要**参数化，直接使用合理默认值" in body
+        assert "对用户未指定的参数直接使用合理默认值" not in body
+
     def test_file_write_details_stay_in_step_prompt(self, body):
         assert "并写入文件" in body
         assert "生成的模板默认放在当前工作目录" in body
@@ -163,6 +176,14 @@ class TestSkillPromptRendering:
         assert "如果 `templates/` 目录不存在，先创建它" not in body
         assert "mkdir" not in body.lower()
         assert "bash" not in body.lower()
+
+    def test_prompt_passes_full_candidate_without_repeating_skill_constraints(self):
+        body = TEMPLATE_PROMPT_MD.read_text(encoding="utf-8")
+        assert "{candidate}" in body
+        assert "candidate.hard_constraints" not in body
+        assert "不要把候选推荐值当成用户硬约束" not in body
+        assert "查询可用区、实例规格" not in body
+        assert "对用户未指定的参数直接使用合理默认值" not in body
 
     def test_full_prompt_includes_skill_base_directory(self, tmp_path):
         from iac_code.pipeline.engine.context import PipelineContext

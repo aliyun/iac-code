@@ -1837,6 +1837,86 @@ class TestInjectTools:
         assert step_results[0].conclusion["clarification_choice"] == "not_deployment"
 
     @pytest.mark.asyncio
+    async def test_non_terminal_complete_step_allows_followup_rendering(self, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "deploy.md").write_text("Deploy.", encoding="utf-8")
+
+        step = StepSpec(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            prompt_file="prompts/deploy.md",
+            complete_step_terminal=False,
+            max_agent_turns=3,
+        )
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[step],
+            context_dependencies={"deployment": []},
+            max_rollbacks=3,
+            skills={},
+        )
+
+        class Provider:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.complete_result_seen = False
+
+            def get_model_name(self) -> str:
+                return "test-model"
+
+            async def stream(self, messages, system, tools=None):
+                self.calls += 1
+                if self.calls == 1:
+                    yield MessageStartEvent(message_id="m1")
+                    yield ToolUseStartEvent(tool_use_id="done_1", name="complete_step")
+                    yield ToolUseEndEvent(
+                        tool_use_id="done_1",
+                        name="complete_step",
+                        input={
+                            "conclusion": {
+                                "status": "success",
+                                "stack_id": "stack-1",
+                                "outputs": {"PublicUrl": "https://example.com"},
+                            }
+                        },
+                    )
+                    yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+                    return
+
+                self.complete_result_seen = any(
+                    getattr(block, "type", None) == "tool_result"
+                    and getattr(block, "tool_use_id", None) == "done_1"
+                    and "completed" in getattr(block, "content", "")
+                    for message in messages
+                    for block in (message.content if isinstance(message.content, list) else [])
+                )
+                yield MessageStartEvent(message_id="m2")
+                yield TextDeltaEvent(text="## Stack Outputs\n- PublicUrl: https://example.com")
+                yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        provider = Provider()
+        executor = StepExecutor(
+            provider_manager=provider,
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+        )
+
+        collected = []
+        async for event in executor.execute(step, PipelineContext({"deployment": []}), "test"):
+            collected.append(event)
+
+        assert provider.calls == 2
+        assert provider.complete_result_seen is True
+        assert [event.text for event in collected if isinstance(event, TextDeltaEvent)] == [
+            "## Stack Outputs\n- PublicUrl: https://example.com"
+        ]
+        step_results = [event for event in collected if isinstance(event, StepResult)]
+        assert len(step_results) == 1
+        assert step_results[0].conclusion["outputs"] == {"PublicUrl": "https://example.com"}
+
+    @pytest.mark.asyncio
     async def test_completion_guard_rejects_direct_complete_before_required_question(self, tmp_path):
         (tmp_path / "prompts").mkdir(exist_ok=True)
         (tmp_path / "prompts" / "parse.md").write_text("Parse.", encoding="utf-8")
@@ -2634,6 +2714,60 @@ class TestStepExecutorSchemaWiring:
 
 class TestSchemaIntegration:
     """Integration test: schema flows from StepSpec through StepExecutor to CompleteStepTool."""
+
+    def test_hard_constraint_guard_uses_live_pipeline_context_snapshot(self, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "cost.md").write_text("Estimate.", encoding="utf-8")
+        constraint = {
+            "id": "storage-min",
+            "target": "Database",
+            "property": "storage",
+            "operator": "gte",
+            "value": 100,
+            "unit": "GiB",
+            "verification_mode": "direct",
+            "source": "user",
+            "source_text": "存储至少 100 GiB",
+        }
+        step = StepSpec(
+            step_id="cost_estimating",
+            conclusion_field="cost",
+            forward=None,
+            prompt_file="prompts/cost.md",
+            completion_guards=[
+                {
+                    "always": True,
+                    "require_context_constraint_coverage": {
+                        "source_fields": ["candidate.hard_constraints"],
+                        "checks_field": "hard_constraint_checks",
+                        "deployment_parameters_field": "deployment_parameters",
+                    },
+                }
+            ],
+        )
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[step],
+            context_dependencies={"candidate": [], "cost": ["candidate"]},
+            max_rollbacks=3,
+            skills={},
+        )
+        executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+        )
+        context = PipelineContext(pipeline.context_dependencies)
+        context.set_conclusion("candidate", {"hard_constraints": [constraint]})
+
+        complete_step = executor._build_step_tools(step, context).get("complete_step")
+        error = complete_step.validate_completion_input(
+            {"conclusion": {"deployment_parameters": {"Storage": 120}, "hard_constraint_checks": []}}
+        )
+
+        assert error is not None
+        assert "missing_constraint_check" in error
 
     def test_conclusion_schema_and_rollback_targets_propagate(self, tmp_path):
         """Verify that conclusion_schema from StepSpec reaches the tool's input_schema,

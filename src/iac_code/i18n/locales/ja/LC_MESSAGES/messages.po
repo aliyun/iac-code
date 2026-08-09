@@ -3686,6 +3686,12 @@ msgstr "デプロイ成功には、ros_deploy が CREATE_COMPLETE を返すま�
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"Every explicit user hard constraint must be covered by a satisfied check "
+"with matching parameters and evidence."
+msgstr "ユーザーが明示した各ハード制約は、パラメーターと根拠が一致する「満たしている」チェックで網羅する必要があります。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -3776,6 +3782,15 @@ msgid ""
 "{message} complete_step.conclusion must include one of these fields: "
 "{fields}."
 msgstr "{message} complete_step.conclusion には次のいずれかのフィールドが必要です: {fields}。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A completion guard is misconfigured."
+msgstr "完了ガードの設定に誤りがあります。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "{message} Validation issue: {code} ({detail})."
+msgstr "{message} 検証上の問題: {code} ({detail})。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A conclusion content hash is required before completing the current step."

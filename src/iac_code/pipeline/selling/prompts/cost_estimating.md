@@ -1,8 +1,20 @@
 # 步骤：成本预估
 
-你正在为候选方案预估部署费用。优先通过 `ros_preview_template` 形成 Preview-Validated Pricing Parameter Set，并尽量形成完整部署参数集；不要使用 `ros_stack` 执行预览。PreviewStack 不是硬门禁，若完整部署参数暂时无法自动补齐，记录参数缺口后可用当前已选参数调用 `ros_estimate_template_cost` 获取费用预估。
+你正在为候选方案预估部署费用，具体参数求解、PreviewStack 尝试和软降级规则按技能执行。不要使用 `ros_stack` 执行预览。
 
 在记录参数缺口前，必须先尽量补齐可生成参数，尤其是普通密码；生成值须满足模板约束，并以同一个真实值写入预览、询价、`deployment_parameters`、`preview_validation.parameters` 和 `complete_step.conclusion`，不得写入 `***`、`[REDACTED]` 或 `<redacted>`。库存值和外部输入不得编造，仍按缺口记录。服务端日志由运行时单独脱敏，不要因此改写结构化交接数据。
+
+## 当前候选方案
+- 名称：`{candidate.name}`
+- 资源生命周期：
+```json
+{candidate.resource_intents}
+```
+
+## 当前有效硬约束
+```json
+{candidate.hard_constraints}
+```
 
 ## 模板信息
 - 文件路径：`{template.file_path}`

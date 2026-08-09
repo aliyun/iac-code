@@ -154,6 +154,55 @@ def test_intent_schema_captures_resource_lifecycle_fields():
     assert "forbidden_resources" not in properties
 
 
+def test_intent_schema_captures_product_neutral_user_hard_constraints():
+    body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+    schema = _parse_frontmatter(body)["conclusion_schema"]
+    hard_constraints = schema["properties"]["hard_constraints"]
+    item = hard_constraints["items"]
+
+    assert hard_constraints["type"] == "array"
+    assert set(item["required"]) == {
+        "id",
+        "target",
+        "property",
+        "operator",
+        "value",
+        "verification_mode",
+        "source",
+        "source_text",
+    }
+    assert item["properties"]["operator"]["enum"] == [
+        "eq",
+        "ne",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "in",
+        "not_in",
+        "contains",
+        "not_contains",
+    ]
+    assert item["properties"]["verification_mode"]["enum"] == ["direct", "tool"]
+    assert item["properties"]["source"]["const"] == "user"
+    assert item["properties"]["id"]["minLength"] == 1
+    assert all(value.get("description") for value in item["properties"].values())
+    assert "推断值和推荐值不得写入" in hard_constraints["description"]
+
+
+def test_intent_guidance_distinguishes_explicit_constraints_from_recommendations():
+    body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "硬约束提取规则" in body
+    assert "operator" in body
+    assert "source_text" in body
+    assert "verification_mode: direct" in body
+    assert "verification_mode: tool" in body
+    assert "CPU 的“核/核心/vCPU”统一为 `count`" in body
+    assert "内存语境中的 `g/G` 统一为 `GiB`" in body
+    assert "推断的业务规模、场景推荐和默认值不是硬约束" in body
+
+
 def test_intent_schema_captures_stack_name_and_network_constraints_without_e2e_controls():
     body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
     prompt = PROMPT_FILE.read_text(encoding="utf-8")
@@ -162,10 +211,11 @@ def test_intent_schema_captures_stack_name_and_network_constraints_without_e2e_c
 
     assert non_functional["stack_name"]["type"] == "string"
     assert "资源栈名称" in non_functional["stack_name"]["description"]
+    assert "基础名" in non_functional["stack_name"]["description"]
     assert non_functional["network_constraints"]["type"] == "object"
     assert "deployment_hold" not in non_functional
-    assert "non_functional.stack_name" in prompt
-    assert "non_functional.network_constraints" in prompt
+    assert "non_functional.stack_name" not in prompt
+    assert "non_functional.network_constraints" not in prompt
     assert "deployment_hold" not in body
     assert "部署后等待用户继续" not in body
     assert "CreateStack 的 params.StackName" not in prompt

@@ -31,7 +31,21 @@ def test_review_enabled_loads_infraguard_repair_step_before_cost() -> None:
     assert review_step.skill == "iac-aliyun-review"
     assert review_step.prompt_file == "prompts/reviewing.md"
     assert review_step.context_fields == ["intent", "candidate", "template"]
-    assert cost_step.context_fields == ["template"]
+    assert cost_step.context_fields == ["candidate", "template"]
+    assert cost_step.max_conclusion_retries == 4
+    assert cost_step.hooks_file is None
+    assert cost_step.on_exit is None
+    assert cost_step.completion_guards == [
+        {
+            "always": True,
+            "require_context_constraint_coverage": {
+                "source_fields": ["candidate.hard_constraints"],
+                "checks_field": "hard_constraint_checks",
+                "deployment_parameters_field": "deployment_parameters",
+            },
+            "message_key": "hard_constraint_verification_required",
+        }
+    ]
 
     assert review_step.tools is not None
     assert review_step.tools.include == [
@@ -231,7 +245,37 @@ def test_review_disabled_removes_review_step_and_generated_template_remains_fina
             supersedes_path="conclusion.file_path",
         )
     ]
-    assert cost_step.context_fields == ["template"]
+    assert cost_step.context_fields == ["candidate", "template"]
+
+
+def test_cost_prompt_injects_only_required_candidate_fields() -> None:
+    from iac_code.pipeline.engine.context import PipelineContext
+
+    loaded = _load_selling(enable_reviewing=False)
+    cost_step = loaded.sub_pipelines["evaluate_candidate"].steps[-1]
+    prompt = (_selling_dir() / cost_step.prompt_file).read_text(encoding="utf-8")
+    ctx = PipelineContext({"intent": [], "candidate": [], "template": []})
+    ctx.set_conclusion("intent", {"sentinel": "must-not-render-intent"})
+    ctx.set_conclusion(
+        "candidate",
+        {
+            "name": "selected-plan",
+            "resource_intents": [{"product": "VPC", "action": "use_existing"}],
+            "hard_constraints": [{"id": "ecs-vcpu", "operator": "eq", "value": 2}],
+            "topology": "must-not-render-candidate-topology",
+        },
+    )
+    ctx.set_conclusion("template", {"file_path": "templates/selected.yml", "region": "cn-hangzhou"})
+
+    rendered = render_prompt(prompt, ctx, cost_step.context_fields)
+
+    assert "selected-plan" in rendered
+    assert '"use_existing"' in rendered
+    assert '"ecs-vcpu"' in rendered
+    assert "templates/selected.yml" in rendered
+    assert "cn-hangzhou" in rendered
+    assert "must-not-render-intent" not in rendered
+    assert "must-not-render-candidate-topology" not in rendered
 
 
 def test_selling_completion_guards_use_message_keys_not_raw_messages() -> None:

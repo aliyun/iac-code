@@ -72,6 +72,8 @@ conclusion_schema:
 
 ## 部署前参数补全
 
+`selected_plan.parameter_overrides` 是用户在选择步骤给出的最新参数选择，首次创建时优先级最高，不得主动替换。只有真实的只读 API 或 `ros_deploy` 结果证明该值不可用，并且所有非用户指定参数的调整方案都已耗尽后，才可修改对应的用户参数；修改时必须向用户说明失败证据、原值、新值和调整原因，不得仅凭推荐、默认值或经验主动改写。
+
 快速创建标记不为 true，或 `selected_plan.selected_candidate_result.cost.missing_deployment_parameters` 非空时，不要把成本阶段的参数缺口当成最终结论。部署阶段可以继续使用 `ros_get_template_parameter_constraints` 补全参数，但不要调用询价工具，也不要向用户发起澄清问题。
 
 参数补全流程：
@@ -79,7 +81,7 @@ conclusion_schema:
 2. 仍缺少模板必填参数时，调用 `ros_get_template_parameter_constraints`，传当前 `parameters` 字典继续求解可用候选。
 3. 对可推断配置（名称、CIDR、布尔值、小整数、非敏感字符串、模板安全默认值）直接给出合规值；对普通密码（ECS/RDS/Redis/RocketMQ/WordPress 等密码，或参数名、`NoEcho`、AssociationProperty、描述/约束表明是密码）生成合规随机值，必须满足长度、复杂度、`AllowedPattern`、`ConstraintDescription`。同一个真实值必须贯穿参数补全、`parameters`、结构化结论和部署，不得替换为 `***`、`[REDACTED]` 或 `<redacted>`；服务端日志由运行时单独脱敏。
 4. 对库存相关参数只在工具/API 返回的合法候选内筛选或排序，不得编造库存值；对 LicenseKey、Token、证书、真实域名、已有资源 ID、VpcId、VSwitchId、SecurityGroupId、KeyPairName 等外部或账号特定输入，不得编造。
-5. 补齐后的参数不再调用预览工具；直接进入 `ros_deploy` 创建类动作，由部署调用做最终参数校验。部署错误指向可调整参数时，继续更换非用户指定参数并按 `ros_deploy` 恢复策略重试；错误指向模板时按模板校验/修复流程处理。
+5. 补齐后的参数不再调用预览工具；直接进入 `ros_deploy` 创建类动作，由部署调用做最终参数校验。部署错误指向参数时按上述优先级恢复；错误指向模板时按模板校验/修复流程处理。
 
 不得仅因部署参数缺失返回 `status: failed`。只有在已经先尽量补齐或生成参数、调用可用工具仍无法形成合法完整参数集，且剩余缺口属于不得编造的外部输入时，才允许失败或回滚；失败原因必须列出剩余缺口和为什么不能自动补齐。
 
@@ -98,7 +100,7 @@ conclusion_schema:
 1. 解析模板 Parameters，识别库存相关参数及对应产品
 2. 调用各产品可用性 API（具体 API 见 [references/cloud-products/](references/cloud-products/) 各产品文件的「可用性查询」节）
 3. 核对最终部署参数中的可用区和规格是否可用
-4. 参数不可用时先报告冲突详情并尝试调整非用户指定参数；仍无法成功创建资源栈时，才可调整用户指定参数
+4. 参数不可用时按「部署前参数补全」中的优先级恢复
 
 无法找到公共可用区时，告知用户冲突详情，建议换规格系列或换地域。
 
@@ -110,11 +112,11 @@ conclusion_schema:
 2. 否则使用 `selected_plan.selected_candidate_result.cost.deployment_parameters` 作为当前参数基础。
 3. `selected_plan.selected_candidate_result.cost.missing_deployment_parameters` 非空，或仍缺少模板必填参数时，按「部署前参数补全」先尽量补齐或生成参数，再交由 `ros_deploy` 做最终参数校验。
 
-装配参数时不得改写模板 `Default`，不得编造缺失的外部输入（LicenseKey、Token、证书、真实域名、已有资源 ID、VpcId、VSwitchId、SecurityGroupId、KeyPairName 等）。参数不可用或部署调用无法成功时，优先调整非用户指定参数；仍无法成功创建资源栈时，才可调整用户指定参数。部署步骤不计算费用。
+装配参数时不得改写模板 `Default`，不得编造缺失的外部输入（LicenseKey、Token、证书、真实域名、已有资源 ID、VpcId、VSwitchId、SecurityGroupId、KeyPairName 等）。部署步骤不计算费用。
 
 ## StackName
 
-新建 Stack 时，一开始就确定唯一 `StackName`，并作为 `stack_name` 传给 `ros_deploy` 的 `create`。`StackName` 使用方案或服务简名作为前缀，并追加时间或 6 位小写字母/数字随机串后缀（如 `ai-app-20260623-a1b2c3`），避免重名。
+新建 Stack 时，一开始就确定唯一 `StackName`，并作为 `stack_name` 传给 `ros_deploy` 的 `create`。用户指定名称时将其作为基础名，否则使用方案或服务简名；两者都追加时间或 6 位小写字母/数字随机串后缀（如 `ai-app-20260623-a1b2c3`），避免重名。
 
 - `ros_deploy` 的 `create` 必须传 `stack_name`，不要省略，不要使用容易重复的固定名称。
 - `ros_deploy` 的 `continue_create` 面向已有失败 Stack 时，使用 `create` 失败结果中的 Stack 标识，不要生成新的 StackName。

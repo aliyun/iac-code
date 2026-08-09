@@ -63,6 +63,15 @@ conclusion_schema:
 
 示例：`resource_intents: [{"product": "SecurityGroup", "action": "create"}, {"product": "VPC", "action": "use_existing"}]` 时，只生成 `ALIYUN::ECS::SecurityGroup`，不要生成 `ALIYUN::ECS::VPC` 或 `ALIYUN::ECS::VSwitch`。
 
+## 用户硬约束
+
+候选架构的 `hard_constraints` 必须原样贯穿模板生成：
+
+- 模板资源数量、固定属性、Parameters、Default、AllowedValues 和 Rules 不得与任何硬约束冲突。
+- 能直接表达的约束写入模板属性或参数规则；需要结合地域、库存、产品规格或已有资源才能求解的值保持参数化，由成本步骤使用产品 API 与 ROS 参数约束求解。
+- 场景推荐、默认值和候选方案描述只能在硬约束允许的范围内选择，不得替换、升级、降级或放宽用户明确值。
+- 模板结构无法满足某条硬约束时，通过 `rollback_request` 回到 `architecture_planning`，不得生成一个看似成功但违反约束的模板。
+
 ## 参数化规则
 
 生成模板时，库存相关属性**必须**定义为 Parameters（部署前通过 API 查询确定实际值）。具体字段按 [references/cloud-products/](references/cloud-products/) 的产品文件和 [references/template-parameters.md](references/template-parameters.md) 执行，不在本技能重复维护产品字段清单。
@@ -81,8 +90,6 @@ conclusion_schema:
 
 ## 生成要求
 
-- 对用户未指定的参数直接使用合理默认值，不反复询问
-- 库存相关属性必须参数化为 Parameters，不写死具体值
 - 模板格式为 YAML
 - 使用 `!Ref`、`!GetAtt` 等内置函数引用参数和资源属性，避免硬编码
 - Outputs 中所有输出变量必须定义 Label

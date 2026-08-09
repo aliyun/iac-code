@@ -332,6 +332,98 @@ def test_reconstruct_completion_guard_state_records_structured_tool_results_for_
     ]
 
 
+@pytest.mark.parametrize("state_source", ["live", "resume"])
+def test_hard_constraint_tool_evidence_round_trips_through_guard_state(state_source):
+    tool_input = {
+        "product": "ecs",
+        "action": "DescribeInstanceTypes",
+        "params": {"InstanceTypes": ["ecs.c7.large"]},
+    }
+    tool_result = {
+        "InstanceTypes": {"InstanceType": [{"InstanceTypeId": "ecs.c7.large", "CpuCoreCount": 2}]}
+    }
+    if state_source == "live":
+        state = {}
+        record_completion_guard_tool_result(
+            state,
+            tool_name="aliyun_api",
+            tool_input=tool_input,
+            content=json.dumps(tool_result),
+            is_error=False,
+        )
+    else:
+        state = reconstruct_completion_guard_state(
+            [
+                Message(
+                    role="assistant",
+                    content=[ToolUseBlock(id="tool-1", name="aliyun_api", input=tool_input)],
+                ),
+                Message(
+                    role="user",
+                    content=[
+                        ToolResultBlock(
+                            tool_use_id="tool-1",
+                            content=json.dumps(tool_result),
+                            is_error=False,
+                        )
+                    ],
+                ),
+            ]
+        )
+
+    constraint = {
+        "id": "ecs-vcpu",
+        "target": "ECS",
+        "property": "vcpu",
+        "operator": "eq",
+        "value": 2,
+        "unit": "count",
+        "verification_mode": "tool",
+        "source": "user",
+        "source_text": "使用 2 核 ECS",
+    }
+    state["context_snapshot"] = {"candidate": {"hard_constraints": [constraint]}}
+    complete_step = CompleteStepTool(
+        StepConfig(step_id="cost_estimating", conclusion_field="cost", forward=None),
+        completion_guards=[
+            {
+                "always": True,
+                "require_context_constraint_coverage": {
+                    "source_fields": ["candidate.hard_constraints"],
+                    "checks_field": "hard_constraint_checks",
+                    "deployment_parameters_field": "deployment_parameters",
+                },
+            }
+        ],
+        completion_guard_state=state,
+    )
+    conclusion = {
+        "deployment_parameters": {"InstanceType": "ecs.c7.large"},
+        "hard_constraint_checks": [
+            {
+                "constraint": constraint,
+                "status": "satisfied",
+                "actual_value": 2,
+                "actual_unit": "count",
+                "parameter_values": {"InstanceType": "ecs.c7.large"},
+                "evidence": [
+                    {
+                        "type": "tool",
+                        "summary": "DescribeInstanceTypes CpuCoreCount",
+                        "tool_name": "aliyun_api",
+                        "product": "ecs",
+                        "action": "DescribeInstanceTypes",
+                        "result_path": "InstanceTypes.InstanceType.0.CpuCoreCount",
+                        "actual_value": 2,
+                    }
+                ],
+            }
+        ],
+    }
+
+    assert complete_step.validate_completion_input({"conclusion": conclusion}) is None
+
+
 def test_reconstruct_completion_guard_state_reads_externalized_tool_result_metadata(tmp_path):
     stored_result_path = tmp_path / "scan.json"
     payload = {

@@ -66,6 +66,20 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --scenario scenario1
 ```
 
+验证 iac-code Web 的 2 vCPU / 4 GiB 需求时，使用固定用户原文运行到 step 4；场景不会提交候选方案，
+也不会进入 `deploying` 或调用 `ros_deploy`。它会把 canonical pipeline evidence 中的 golden solution
+、结构化 CPU/内存约束，以及 PreviewStack 在询价前被调用写入结果检查：
+
+```bash
+PATH="$HOME/.local/bin:$PATH" \
+uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
+  --allow-real-cloud \
+  --provider dashscope \
+  --stream-timeout 2400 \
+  --preflight-timeout 60 \
+  --scenario iac-code-web-2c4g-step4
+```
+
 如果要复现资源栈参数被错误替换为 `***` / `[REDACTED]` 的问题，运行真实的 step 4
 脱敏回归场景：
 

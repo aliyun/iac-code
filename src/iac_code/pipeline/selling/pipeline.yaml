@@ -338,7 +338,15 @@ sub_pipelines:
         forward: null
         skill: iac-aliyun-cost
         prompt: prompts/cost_estimating.md
-        context_fields: [template]
+        max_conclusion_retries: 4
+        context_fields: [candidate, template]
+        completion_guards:
+          - always: true
+            require_context_constraint_coverage:
+              source_fields: [candidate.hard_constraints]
+              checks_field: hard_constraint_checks
+              deployment_parameters_field: deployment_parameters
+            message_key: hard_constraint_verification_required
         tools:
           include: []
           exclude: [bash, write_memory, ros_stack, ros_stack_instances]
@@ -498,6 +506,7 @@ steps:
     forward: null
     skill: iac-aliyun-deploying
     prompt: prompts/deploying.md
+    complete_step_terminal: false
     interrupt_judge_failure: pause
     context_fields: [intent, selected_plan, evaluated_candidates]
     hooks_file: hooks/deploying.py

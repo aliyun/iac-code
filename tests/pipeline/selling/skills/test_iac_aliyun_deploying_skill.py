@@ -107,6 +107,7 @@ class TestSkillContentRosOnly:
 
     def test_create_stack_name_has_random_suffix(self, body):
         assert "StackName" in body
+        assert "用户指定名称时将其作为基础名" in body
         assert "随机串后缀" in body
         assert "避免重名" in body
 
@@ -125,10 +126,12 @@ class TestSkillContentRosOnly:
         assert "不发起澄清问题" in body
         assert "不要向用户发起澄清问题" in body
 
-    def test_availability_conflict_prefers_non_user_parameters_first(self, body):
-        assert "优先调整非用户指定参数" in body
-        assert "仍无法成功创建资源栈" in body
-        assert "才可调整用户指定参数" in body
+    def test_latest_user_overrides_are_relaxed_only_after_evidenced_failure(self, body):
+        assert "parameter_overrides` 是用户在选择步骤给出的最新参数选择" in body
+        assert "首次创建时优先级最高" in body
+        assert "真实的只读 API 或 `ros_deploy` 结果证明该值不可用" in body
+        assert "所有非用户指定参数的调整方案都已耗尽" in body
+        assert "失败证据、原值、新值和调整原因" in body
 
     def test_skill_omits_discussion_process_terms(self, body):
         forbidden = ["A2A", "前端", "客户端", "方案 A", "方案 B", "策略 A", "策略 B", "讨论"]
@@ -258,6 +261,7 @@ class TestDeployingPrompt:
         body = DEPLOYING_PROMPT_MD.read_text(encoding="utf-8")
         assert "selected_plan.selected_candidate_result.cost.deployment_parameters" not in body
         assert "部署参数按以下优先级装配" not in body
+        assert "冲突，以原始用户需求为准" not in body
         assert "部署参数装配规则见技能" in body
 
     def test_prompt_keeps_no_repricing_without_parameter_priority_duplication(self):

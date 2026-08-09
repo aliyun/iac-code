@@ -195,6 +195,9 @@ async def test_concurrent_dynamic_suggestions_share_one_runtime_snapshot(tmp_pat
             )
         )
 
+    deadline = time.monotonic() + 2.0
+    while (not runtimes or not runtimes[0].closed) and time.monotonic() < deadline:
+        await asyncio.sleep(0.01)
     assert all(response.status_code == 200 for response in responses)
     assert calls == 1
     assert len(runtimes) == 1
