@@ -57,6 +57,7 @@ from iac_code.tools.cloud.aliyun.contract_store import (
     ResolvedContractStore,
     canonical_input_sha256,
 )
+from iac_code.tools.cloud.aliyun.ecs_credential_errors import ecs_credential_error_code
 from iac_code.tools.cloud.aliyun.public_errors import normalize_api_identity, public_aliyun_error
 from iac_code.tools.cloud.aliyun.result_contract import (
     ALIYUN_HTTP_METADATA_KEY,
@@ -521,6 +522,11 @@ def _target_failure_message(error: Exception) -> str:
     code = str(error)
     if code in ALIYUN_API_TARGET_OUTCOMES | {"response_too_large", "error_response_too_large"}:
         return code
+    if (credential_code := ecs_credential_error_code(error)) is not None:
+        # Credential resolution fails before the request is signed; keep the exact
+        # stable code so public_aliyun_error() can render its actionable message
+        # instead of the generic "may have been sent" transport text.
+        return credential_code
     return "aliyun_target_transport_error"
 
 
@@ -1865,20 +1871,14 @@ class AliyunApi(BaseCloudApi):
                 user_agent=user_agent,
             )
 
-        if mode == "RamRoleArn":
-            from alibabacloud_credentials import models as credential_models
-            from alibabacloud_credentials.client import Client as CredentialClient
+        if mode in {"RamRoleArn", "EcsRamRole"}:
+            from iac_code.services.providers.aliyun_credentials_runtime import aliyun_credential_runtime
 
-            cred_config = credential_models.Config(
-                type="ram_role_arn",
-                access_key_id=credential.access_key_id,
-                access_key_secret=credential.access_key_secret,
-                role_arn=credential.ram_role_arn,
-                role_session_name=credential.ram_session_name or "iac-code-session",
-            )
-            cred_client = CredentialClient(cred_config)
+            # The runtime always returns a client for these two dynamic modes; the SDK
+            # client type is only available through a lazy import, hence the Any binding.
+            dynamic_client: Any = aliyun_credential_runtime().sdk_client(credential)
             return open_api_models.Config(
-                credential=cred_client,
+                credential=dynamic_client,
                 endpoint=endpoint,
                 region_id=region_id,
                 user_agent=user_agent,
@@ -2599,7 +2599,17 @@ class AliyunApi(BaseCloudApi):
             endpoint = await asyncio.to_thread(self._discover_endpoint, product, region, credential)
         if not endpoint:
             endpoint = self._get_endpoint_fallback(product, region)
-        config = self._build_config(credential, endpoint, region)
+        try:
+            config = self._build_config(credential, endpoint, region)
+        except ValueError as error:
+            # Only the credential runtime's stable ECS codes may be reinterpreted here;
+            # any other ValueError keeps its existing handling.
+            code = ecs_credential_error_code(error)
+            if code is None:
+                raise
+            return ToolResult.error(
+                public_aliyun_error(code, product=product, version=version, action=action, region_id=region)
+            )
         client = OpenApiClient(config)
 
         style = tool_input.get("style", "RPC")
@@ -2691,4 +2701,11 @@ class AliyunApi(BaseCloudApi):
             add_metric(Metrics.ALIYUN_API_CALLED_COUNT, 1, _aliyun_api_metric_attrs(product, outcome))
             add_metric(Metrics.ALIYUN_API_CALLED_DURATION, duration_ms)
 
+            if (code := ecs_credential_error_code(e)) is not None:
+                # The dynamic credential is fetched while signing, so an IMDS failure
+                # surfaces here — wrapped in the SDK envelope when `call_api` raised it;
+                # render it through the public error mapping.
+                return ToolResult.error(
+                    public_aliyun_error(code, product=product, version=version, action=action, region_id=region)
+                )
             return ToolResult.error(self._clean_error_message(error_str))

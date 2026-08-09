@@ -2347,6 +2347,10 @@ msgid "RAM role"
 msgstr "RAM 角色"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "ECS RAM Role"
+msgstr "ECS RAM 角色"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "OAuth browser login"
 msgstr "OAuth 浏览器登录"
 
@@ -2763,6 +2767,10 @@ msgid "Session name"
 msgstr "会话名称"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "ECS RAM Role Name"
+msgstr "ECS RAM 角色名称"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "China (aliyun.com)"
 msgstr "中国(aliyun.com)"
 
@@ -2818,6 +2826,10 @@ msgstr "RamSessionName"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Role session name (optional)"
 msgstr "角色会话名称(可选)"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Leave blank to auto-detect from ECS metadata"
+msgstr "留空则从 ECS 元数据自动发现"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Login site"

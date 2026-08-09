@@ -22,7 +22,7 @@ from iac_code.services.telemetry.sanitize import (
     sanitize_terraform_provider,
 )
 from iac_code.tools.base import ToolContext, ToolResult
-from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
+from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory, public_ecs_credential_message
 from iac_code.tools.cloud.aliyun.template_source import (
     check_local_template_url_read_permission,
     is_local_template_url,
@@ -651,18 +651,26 @@ class RosStack(BaseCloudStack):
 
         # Constructing the SDK client may resolve credentials.  Local template
         # validation must therefore complete before this point.
-        client = self._get_client(region)
-        if action == "CreateStack":
-            return await self._handle_create_stack(client, params, region)
-        elif action == "UpdateStack":
-            return await self._handle_update_stack(client, params, region)
-        elif action == "ContinueCreateStack":
-            _normalize_stack_parameters_for_sdk(params)
-            request = ros_models.ContinueCreateStackRequest().from_map(params)
-            response = await asyncio.to_thread(client.continue_create_stack, request)
-            return response.body.stack_id
-        elif action == "DeleteStack":
-            return await self._handle_delete_stack(client, params, region)
+        try:
+            client = self._get_client(region)
+            if action == "CreateStack":
+                return await self._handle_create_stack(client, params, region)
+            elif action == "UpdateStack":
+                return await self._handle_update_stack(client, params, region)
+            elif action == "ContinueCreateStack":
+                _normalize_stack_parameters_for_sdk(params)
+                request = ros_models.ContinueCreateStackRequest().from_map(params)
+                response = await asyncio.to_thread(client.continue_create_stack, request)
+                return response.body.stack_id
+            elif action == "DeleteStack":
+                return await self._handle_delete_stack(client, params, region)
+        except Exception as error:
+            # A dynamic credential is resolved when the client is built (a plain
+            # ValueError) and again while the SDK signs the request (the same failure
+            # inside the SDK envelope), so surface both as public, actionable text.
+            if message := public_ecs_credential_message(error, action=action, region=region):
+                raise ValueError(message) from error
+            raise
         raise ValueError(f"Unsupported: {action}")
 
     async def _handle_create_stack(self, client: Any, params: dict, region: str) -> str:
@@ -1008,11 +1016,20 @@ class RosStack(BaseCloudStack):
             raise
 
     async def get_stack_status(self, stack_id: str, region: str) -> StackStatus:
-        client = self._get_client(region)
         request = ros_models.GetStackRequest(
             stack_id=stack_id, region_id=region, show_resource_progress="PercentageOnly"
         )
-        response = await asyncio.to_thread(client.get_stack, request)
+        try:
+            client = self._get_client(region)
+            response = await asyncio.to_thread(client.get_stack, request)
+        except Exception as error:
+            # Polling re-resolves the credential when the client is built and re-signs on
+            # every round, so an IMDS failure can start here long after the stack
+            # operation was accepted. base_stack renders this error verbatim, so both
+            # stages must already carry public text.
+            if message := public_ecs_credential_message(error, action="GetStack", region=region):
+                raise ValueError(message) from error
+            raise
         data = response.body.to_map()
         return StackStatus(
             stack_id=data.get("StackId", stack_id),
@@ -1024,9 +1041,14 @@ class RosStack(BaseCloudStack):
         )
 
     async def get_stack_resources(self, stack_id: str, region: str) -> list[ResourceStatus]:
-        client = self._get_client(region)
         request = ros_models.ListStackResourcesRequest(stack_id=stack_id, region_id=region)
-        response = await asyncio.to_thread(client.list_stack_resources, request)
+        try:
+            client = self._get_client(region)
+            response = await asyncio.to_thread(client.list_stack_resources, request)
+        except Exception as error:
+            if message := public_ecs_credential_message(error, action="ListStackResources", region=region):
+                raise ValueError(message) from error
+            raise
         data = response.body.to_map()
         resources = []
         for r in data.get("Resources", []):

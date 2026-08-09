@@ -824,3 +824,244 @@ class TestPartnerSourceInLlmFlow:
 
         assert isinstance(result, str)
         assert "QwenPaw" in result
+
+
+class _EnterOnlyMsvcrt:
+    """Delivers a single Enter keypress so an input helper confirms immediately."""
+
+    def __init__(self) -> None:
+        self._sent = False
+
+    def kbhit(self) -> bool:
+        return not self._sent
+
+    def getch(self) -> bytes:
+        self._sent = True
+        return b"\r"
+
+
+def _run_input_helper(call):
+    """Run an auth input helper on the Windows branch with rendering suppressed."""
+    from unittest.mock import patch
+
+    from iac_code.commands import auth
+
+    with (
+        patch.object(auth, "_IS_WIN32", True),
+        patch.object(auth, "_get_msvcrt", return_value=_EnterOnlyMsvcrt()),
+        patch.object(auth, "_clear_screen"),
+        patch.object(auth, "_render_title"),
+        patch.object(auth, "_write"),
+        patch.object(auth, "_flush"),
+    ):
+        return call(auth)
+
+
+class TestAuthOptionalTextInput:
+    def test_input_text_allow_empty_confirms_an_empty_buffer(self):
+        assert _run_input_helper(lambda auth: auth._input_text("t", "p: ", allow_empty=True)) == ""
+
+    def test_input_text_defaults_to_cancel_semantics_on_an_empty_buffer(self):
+        # Other credential modes rely on an empty confirm meaning "cancel".
+        assert _run_input_helper(lambda auth: auth._input_text("t", "p: ")) is None
+
+    def test_input_text_with_default_allow_empty_clears_the_value(self):
+        result = _run_input_helper(lambda auth: auth._input_text_with_default("t", "label", "", allow_empty=True))
+        assert result == ""
+
+    def test_input_text_with_default_defaults_to_cancel_semantics(self):
+        assert _run_input_helper(lambda auth: auth._input_text_with_default("t", "label", "")) is None
+
+    def test_input_text_with_default_keeps_the_prefilled_value(self):
+        result = _run_input_helper(
+            lambda auth: auth._input_text_with_default("t", "label", "old-role", allow_empty=True)
+        )
+        assert result == "old-role"
+
+
+class TestAliyunEcsRamRoleCredentialFlow:
+    @staticmethod
+    def _stub_sources(monkeypatch, existing=None):
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config",
+            lambda: existing,
+        )
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun.AliyunCredentials.load_from_aliyun_cli",
+            lambda config_path=None: None,
+        )
+
+    @staticmethod
+    def _select_ecs_ram_role(monkeypatch):
+        from iac_code.commands.auth import _aliyun_credential_mode_label
+
+        def fake_select(title, options, default_index=0):
+            if "credential type" in title.lower():
+                return options.index(_aliyun_credential_mode_label("EcsRamRole"))
+            return None
+
+        monkeypatch.setattr("iac_code.commands.auth._select", fake_select)
+
+    def test_ecs_ram_role_is_offered_as_a_credential_type(self, monkeypatch):
+        self._stub_sources(monkeypatch)
+        options_seen = []
+
+        def fake_select(title, options, default_index=0):
+            if "credential type" in title.lower():
+                options_seen.extend(options)
+            return None
+
+        monkeypatch.setattr("iac_code.commands.auth._select", fake_select)
+
+        assert _aliyun_credential_flow() is _BACK
+        assert "ECS RAM Role" in options_seen
+
+    def test_blank_role_name_saves_an_empty_value_instead_of_cancelling(self, monkeypatch):
+        self._stub_sources(monkeypatch)
+        self._select_ecs_ram_role(monkeypatch)
+        prompts = []
+        saved = {}
+
+        def fake_input_text(title, prompt, *, allow_empty=False):
+            prompts.append((prompt, allow_empty))
+            return ""
+
+        monkeypatch.setattr("iac_code.commands.auth._input_text", fake_input_text)
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun.AliyunCredentials.save",
+            lambda credential: saved.setdefault("credential", credential),
+        )
+
+        result = _aliyun_credential_flow()
+
+        assert result == "Configured: Alibaba Cloud credentials saved to ~/.iac-code"
+        credential = saved["credential"]
+        assert credential.mode == "EcsRamRole"
+        assert credential.ram_role_name == ""
+        # The optional field must be requested with the blank-accepting semantics.
+        assert prompts[0][1] is True
+
+    def test_explicit_role_name_is_saved(self, monkeypatch):
+        self._stub_sources(monkeypatch)
+        self._select_ecs_ram_role(monkeypatch)
+        saved = {}
+
+        monkeypatch.setattr("iac_code.commands.auth._input_text", lambda *a, **kw: "  fake-ecs-role  ")
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun.AliyunCredentials.save",
+            lambda credential: saved.setdefault("credential", credential),
+        )
+
+        assert isinstance(_aliyun_credential_flow(), str)
+        assert saved["credential"].ram_role_name == "fake-ecs-role"
+
+    def test_clearing_an_existing_role_name_persists_empty(self, monkeypatch):
+        from iac_code.services.providers.aliyun import AliyunCredential
+
+        existing = AliyunCredential(mode="EcsRamRole", ram_role_name="old-role", region_id="cn-shanghai")
+        self._stub_sources(monkeypatch, existing)
+        saved = {}
+        defaults = []
+
+        def fake_select(title, options, default_index=0):
+            from iac_code.commands.auth import _aliyun_credential_mode_label
+
+            if "credential type" in title.lower():
+                return options.index(_aliyun_credential_mode_label("EcsRamRole"))
+            # The "Reconfigure credential" entry comes first for an existing credential.
+            return 0
+
+        def fake_select_with_info(title, options, info_renderer=None, default_index=0):
+            return 0
+
+        def fake_input_text_with_default(title, label, default, *, allow_empty=False):
+            defaults.append((label, default, allow_empty))
+            return ""
+
+        monkeypatch.setattr("iac_code.commands.auth._select", fake_select)
+        monkeypatch.setattr("iac_code.commands.auth._select_with_info", fake_select_with_info)
+        monkeypatch.setattr("iac_code.commands.auth._input_text_with_default", fake_input_text_with_default)
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun.AliyunCredentials.save",
+            lambda credential: saved.setdefault("credential", credential),
+        )
+
+        assert isinstance(_aliyun_credential_flow(), str)
+        credential = saved["credential"]
+        assert credential.ram_role_name == ""
+        # The existing region survives a credential-only reconfiguration.
+        assert credential.region_id == "cn-shanghai"
+        assert defaults[0][1] == "old-role"
+        assert defaults[0][2] is True
+
+    def test_role_name_prompt_carries_the_auto_detect_help_on_both_paths(self, monkeypatch):
+        from iac_code.services.providers.aliyun import AliyunCredential
+
+        seen: list[str] = []
+
+        def fake_input_text(title, prompt, *, allow_empty=False):
+            seen.append(prompt)
+            return ""
+
+        def fake_input_text_with_default(title, label, default, *, allow_empty=False):
+            seen.append(label)
+            return ""
+
+        monkeypatch.setattr("iac_code.commands.auth._input_text", fake_input_text)
+        monkeypatch.setattr("iac_code.commands.auth._input_text_with_default", fake_input_text_with_default)
+        monkeypatch.setattr("iac_code.commands.auth._select_with_info", lambda *a, **kw: 0)
+        monkeypatch.setattr("iac_code.services.providers.aliyun.AliyunCredentials.save", lambda credential: None)
+
+        for existing in (None, AliyunCredential(mode="EcsRamRole", ram_role_name="old-role")):
+            self._stub_sources(monkeypatch, existing)
+            self._select_ecs_ram_role(monkeypatch)
+            _aliyun_credential_flow()
+
+        assert len(seen) == 2
+        for rendered in seen:
+            assert "ECS RAM Role Name" in rendered
+            assert "Leave blank to auto-detect from ECS metadata" in rendered
+        # `_input_text` gets a ready-to-print prompt; `_input_text_with_default` adds its own colon.
+        assert seen[0].endswith(": ")
+        assert seen[0].count(":") == 1
+        assert not seen[1].endswith(":")
+        assert seen[1].count(":") == 0
+
+
+class TestRenderEcsRamRoleCredentialInfo:
+    def test_empty_role_name_reads_as_auto_detect(self, monkeypatch):
+        from iac_code.services.providers.aliyun import AliyunCredential
+
+        written: list[str] = []
+        monkeypatch.setattr("iac_code.commands.auth._write", written.append)
+
+        _render_credential_info(AliyunCredential(mode="EcsRamRole", ram_role_name=""), "iac-code")
+
+        rendered = "".join(written)
+        assert "ECS RAM Role" in rendered
+        assert "Auto-detect from ECS metadata" in rendered
+        assert "(not set)" not in rendered
+
+    def test_explicit_role_name_is_shown_verbatim(self, monkeypatch):
+        from iac_code.services.providers.aliyun import AliyunCredential
+
+        written: list[str] = []
+        monkeypatch.setattr("iac_code.commands.auth._write", written.append)
+
+        _render_credential_info(AliyunCredential(mode="EcsRamRole", ram_role_name="fake-ecs-role"), "iac-code")
+
+        rendered = "".join(written)
+        assert "fake-ecs-role" in rendered
+        assert "Auto-detect from ECS metadata" not in rendered
+
+    def test_other_modes_still_report_missing_values(self, monkeypatch):
+        from iac_code.services.providers.aliyun import AliyunCredential
+
+        written: list[str] = []
+        monkeypatch.setattr("iac_code.commands.auth._write", written.append)
+
+        _render_credential_info(AliyunCredential(mode="RamRoleArn", access_key_id="fake-ak"), "iac-code")
+
+        rendered = "".join(written)
+        assert "(not set)" in rendered
+        assert "Auto-detect from ECS metadata" not in rendered

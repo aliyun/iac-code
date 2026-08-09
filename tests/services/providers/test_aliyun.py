@@ -1209,3 +1209,270 @@ class TestAliyunCredentialsIsConfigured:
             os.environ.pop("ALIBABA_CLOUD_REGION_ID", None)
             result = AliyunCredentials.is_configured(config_path=str(config_file))
         assert result is False
+
+
+class TestAliyunCredentialsEcsRamRole:
+    """`EcsRamRole` config loading and saving.
+
+    Signing for this mode is decided by ``mode`` alone, so the loaders must both build a
+    credential that carries nothing but mode, Region and the optional role name — a
+    leftover AccessKey from an earlier mode must never be able to send an ECS-configured
+    process down a static-AK signing path. No test here may touch instance metadata.
+    """
+
+    ECS_ENVIRONMENT_VARIABLES = (
+        "ALIBABA_CLOUD_ACCESS_KEY_ID",
+        "ALIBABA_CLOUD_ACCESS_KEY_SECRET",
+        "ALIBABA_CLOUD_REGION_ID",
+        "ALIBABA_CLOUD_SECURITY_TOKEN",
+    )
+
+    @staticmethod
+    def _write_yaml(tmp_path, aliyun: dict):
+        cloud_creds_file = tmp_path / ".cloud-credentials.yml"
+        cloud_creds_file.write_text(yaml.dump({"aliyun": aliyun}), encoding="utf-8")
+        return cloud_creds_file
+
+    @staticmethod
+    def _write_cli(tmp_path, profile: dict):
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            json.dumps({"current": "default", "profiles": [{"name": "default", **profile}]}),
+            encoding="utf-8",
+        )
+        return config_file
+
+    def test_load_ecs_ram_role_with_explicit_role_name_from_iac_code_config(self, tmp_path):
+        cloud_creds_file = self._write_yaml(
+            tmp_path,
+            {"mode": "EcsRamRole", "region_id": "cn-shanghai", "ram_role_name": "MyEcsRole"},
+        )
+
+        with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
+            cred = AliyunCredentials._load_from_iac_code_config()
+
+        assert cred is not None
+        assert cred.mode == "EcsRamRole"
+        assert cred.ram_role_name == "MyEcsRole"
+        assert cred.region_id == "cn-shanghai"
+
+    @pytest.mark.parametrize("role_name", ["", "   ", None])
+    def test_load_ecs_ram_role_without_role_name_stays_a_valid_auto_discovery_config(self, tmp_path, role_name):
+        from iac_code.services.providers.aliyun_credentials_runtime import effective_role_name
+
+        aliyun = {"mode": "EcsRamRole", "region_id": "cn-hangzhou"}
+        if role_name is not None:
+            aliyun["ram_role_name"] = role_name
+        cloud_creds_file = self._write_yaml(tmp_path, aliyun)
+
+        with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
+            cred = AliyunCredentials._load_from_iac_code_config()
+
+        assert cred is not None
+        assert cred.mode == "EcsRamRole"
+        # A blank role name is legal: the runtime normalizes it to "discover from IMDS".
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ALIBABA_CLOUD_ECS_METADATA", None)
+            assert effective_role_name(cred) is None
+
+    def test_load_ecs_ram_role_from_aliyun_cli_default_profile(self, tmp_path):
+        config_file = self._write_cli(
+            tmp_path,
+            {"mode": "EcsRamRole", "ram_role_name": "cli-ecs-role", "region_id": "cn-beijing"},
+        )
+
+        cred = AliyunCredentials.load_from_aliyun_cli(config_path=str(config_file))
+
+        assert cred is not None
+        assert cred.mode == "EcsRamRole"
+        assert cred.ram_role_name == "cli-ecs-role"
+        assert cred.region_id == "cn-beijing"
+
+    @pytest.mark.parametrize("profile_extra", [{}, {"ram_role_name": ""}, {"ram_role_name": "  "}])
+    def test_load_ecs_ram_role_from_aliyun_cli_without_role_name(self, tmp_path, profile_extra):
+        """A CLI ECS profile without a role name must not become "configured with an empty AK"."""
+        from iac_code.services.providers.aliyun_credentials_runtime import effective_role_name
+
+        config_file = self._write_cli(tmp_path, {"mode": "EcsRamRole", "region_id": "cn-hangzhou", **profile_extra})
+
+        cred = AliyunCredentials.load_from_aliyun_cli(config_path=str(config_file))
+
+        assert cred is not None
+        assert cred.mode == "EcsRamRole"
+        assert cred.access_key_id == ""
+        assert cred.access_key_secret == ""
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ALIBABA_CLOUD_ECS_METADATA", None)
+            assert effective_role_name(cred) is None
+
+    def test_load_ecs_ram_role_from_iac_code_config_drops_stale_secrets(self, tmp_path):
+        cloud_creds_file = self._write_yaml(
+            tmp_path,
+            {
+                "mode": "EcsRamRole",
+                "region_id": "cn-shanghai",
+                "ram_role_name": "MyEcsRole",
+                "access_key_id": "stale-ak",
+                "access_key_secret": "stale-sk",
+                "sts_token": "stale-sts",
+                "sts_expiration": 1798794000,
+                "ram_role_arn": "acs:ram::456:role/dev",
+                "ram_session_name": "dev-session",
+                "oauth_site_type": "CN",
+                "oauth_access_token": "stale-oauth-access",
+                "oauth_refresh_token": "stale-oauth-refresh",
+                "oauth_access_token_expire": 1798790400,
+                "oauth_refresh_token_expire": 1801382400,
+            },
+        )
+
+        with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
+            cred = AliyunCredentials._load_from_iac_code_config()
+
+        assert cred == AliyunCredential(mode="EcsRamRole", region_id="cn-shanghai", ram_role_name="MyEcsRole")
+
+    def test_load_ecs_ram_role_from_aliyun_cli_drops_stale_secrets(self, tmp_path):
+        config_file = self._write_cli(
+            tmp_path,
+            {
+                "mode": "EcsRamRole",
+                "region_id": "cn-beijing",
+                "ram_role_name": "cli-ecs-role",
+                "access_key_id": "stale-ak",
+                "access_key_secret": "stale-sk",
+                "sts_token": "stale-sts",
+                "sts_expiration": 1798794000,
+                "ram_role_arn": "acs:ram::456:role/dev",
+                "ram_session_name": "dev-session",
+                "oauth_site_type": "CN",
+                "oauth_access_token": "stale-oauth-access",
+                "oauth_refresh_token": "stale-oauth-refresh",
+            },
+        )
+
+        cred = AliyunCredentials.load_from_aliyun_cli(config_path=str(config_file))
+
+        assert cred == AliyunCredential(mode="EcsRamRole", region_id="cn-beijing", ram_role_name="cli-ecs-role")
+
+    def test_aliyun_cli_loader_keeps_existing_behaviour_for_other_modes(self, tmp_path):
+        """Only `EcsRamRole` is special-cased; unsupported CLI modes keep loading as before."""
+        config_file = self._write_cli(
+            tmp_path,
+            {
+                "mode": "RamRoleArnWithEcs",
+                "region_id": "cn-hangzhou",
+                "access_key_id": "other-ak",
+                "access_key_secret": "other-sk",
+                "ram_role_name": "ignored-by-this-mode",
+            },
+        )
+
+        cred = AliyunCredentials.load_from_aliyun_cli(config_path=str(config_file))
+
+        assert cred is not None
+        assert cred.mode == "RamRoleArnWithEcs"
+        assert cred.access_key_id == "other-ak"
+        assert cred.access_key_secret == "other-sk"
+
+    def test_save_ecs_ram_role_writes_only_mode_region_and_role_name(self, tmp_path):
+        cloud_creds_file = tmp_path / ".cloud-credentials.yml"
+
+        with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
+            AliyunCredentials.save(
+                AliyunCredential(mode="EcsRamRole", region_id="cn-shanghai", ram_role_name="MyEcsRole")
+            )
+
+        data = yaml.safe_load(cloud_creds_file.read_text(encoding="utf-8"))
+        assert data["aliyun"] == {
+            "mode": "EcsRamRole",
+            "region_id": "cn-shanghai",
+            "ram_role_name": "MyEcsRole",
+        }
+
+    def test_save_ecs_ram_role_omits_an_empty_role_name(self, tmp_path):
+        cloud_creds_file = tmp_path / ".cloud-credentials.yml"
+
+        with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
+            AliyunCredentials.save(AliyunCredential(mode="EcsRamRole", region_id="cn-hangzhou"))
+
+        data = yaml.safe_load(cloud_creds_file.read_text(encoding="utf-8"))
+        assert data["aliyun"] == {"mode": "EcsRamRole", "region_id": "cn-hangzhou"}
+
+    def test_save_ecs_ram_role_after_another_mode_leaves_no_secret_residue(self, tmp_path):
+        cloud_creds_file = tmp_path / ".cloud-credentials.yml"
+
+        with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
+            AliyunCredentials.save(
+                AliyunCredential(
+                    mode="OAuth",
+                    region_id="cn-hangzhou",
+                    oauth_site_type="CN",
+                    oauth_access_token="oauth-access",
+                    oauth_refresh_token="oauth-refresh",
+                    oauth_access_token_expire=1798790400,
+                    oauth_refresh_token_expire=1801382400,
+                    access_key_id="old-ak",
+                    access_key_secret="old-sk",
+                    sts_token="old-sts",
+                    sts_expiration=1798794000,
+                )
+            )
+            AliyunCredentials.save(
+                AliyunCredential(mode="EcsRamRole", region_id="cn-shanghai", ram_role_name="MyEcsRole")
+            )
+
+        text = cloud_creds_file.read_text(encoding="utf-8")
+        data = yaml.safe_load(text)
+        assert data["aliyun"] == {
+            "mode": "EcsRamRole",
+            "region_id": "cn-shanghai",
+            "ram_role_name": "MyEcsRole",
+        }
+        for stale in ("old-ak", "old-sk", "old-sts", "oauth-access", "oauth-refresh"):
+            assert stale not in text
+
+    def test_save_ecs_ram_role_to_aliyun_cli_format_includes_the_role_name(self, tmp_path):
+        config_file = tmp_path / "config.json"
+
+        AliyunCredentials.save(
+            AliyunCredential(mode="EcsRamRole", region_id="cn-shanghai", ram_role_name="MyEcsRole"),
+            config_path=str(config_file),
+        )
+
+        profiles = {p["name"]: p for p in json.loads(config_file.read_text(encoding="utf-8"))["profiles"]}
+        assert profiles["default"]["mode"] == "EcsRamRole"
+        assert profiles["default"]["ram_role_name"] == "MyEcsRole"
+        assert profiles["default"]["region_id"] == "cn-shanghai"
+
+    def test_complete_access_key_environment_still_overrides_a_configured_ecs_mode(self, tmp_path):
+        cloud_creds_file = self._write_yaml(
+            tmp_path,
+            {"mode": "EcsRamRole", "region_id": "cn-shanghai", "ram_role_name": "MyEcsRole"},
+        )
+        env = {
+            "ALIBABA_CLOUD_ACCESS_KEY_ID": "env-ak",
+            "ALIBABA_CLOUD_ACCESS_KEY_SECRET": "env-sk",
+        }
+
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file),
+        ):
+            os.environ.pop("ALIBABA_CLOUD_REGION_ID", None)
+            os.environ.pop("ALIBABA_CLOUD_SECURITY_TOKEN", None)
+            cred = AliyunCredentials.load()
+
+        assert cred is not None
+        assert cred.mode == "AK"
+        assert cred.access_key_id == "env-ak"
+        # Region still walks the existing file fallback chain.
+        assert cred.region_id == "cn-shanghai"
+        assert cred.ram_role_name == ""
+
+    def test_ecs_ram_role_config_counts_as_configured(self, tmp_path):
+        config_file = self._write_cli(tmp_path, {"mode": "EcsRamRole", "region_id": "cn-hangzhou"})
+
+        with patch.dict(os.environ, {}, clear=False):
+            for name in self.ECS_ENVIRONMENT_VARIABLES:
+                os.environ.pop(name, None)
+            assert AliyunCredentials.is_configured(config_path=str(config_file)) is True

@@ -549,6 +549,7 @@ def aliyun_cloud_summary() -> dict[str, Any]:
             "stsToken": None,
             "ramRoleArn": None,
             "ramSessionName": None,
+            "ramRoleName": None,
         }
     else:
         summary = _aliyun_summary(credential)
@@ -601,6 +602,7 @@ def _detected_summary(credential: AliyunCredential | None, source: str | None) -
         "hasStsToken": bool((credential.sts_token or "").strip()),
         "ramRoleArn": credential.ram_role_arn or "",
         "ramSessionName": credential.ram_session_name or "",
+        "ramRoleName": credential.ram_role_name or "",
         "oauthSiteType": credential.oauth_site_type or "",
     }
 
@@ -622,6 +624,10 @@ def save_aliyun_cloud(data: dict[str, Any]) -> dict[str, Any]:
         sts_expiration=_merged_int(data, existing, "sts_expiration", "stsExpiration", "sts_expiration", "expiration"),
         ram_role_arn=_merged_string(data, existing, "ram_role_arn", "ramRoleArn", "ram_role_arn"),
         ram_session_name=_merged_string(data, existing, "ram_session_name", "ramSessionName", "ram_session_name"),
+        # `_merged_string()` only falls back to the stored value when both aliases are
+        # absent, so an explicitly empty `ramRoleName` clears the role name and switches
+        # the ECS RAM Role mode back to IMDS auto-discovery.
+        ram_role_name=_merged_string(data, existing, "ram_role_name", "ramRoleName", "ram_role_name"),
         oauth_site_type=_merged_string(data, existing, "oauth_site_type", "oauthSiteType", "oauth_site_type"),
         oauth_access_token=_merged_string(
             data,
@@ -993,6 +999,8 @@ def _aliyun_summary(credential: AliyunCredential) -> dict[str, Any]:
         "stsToken": credential.sts_token or None,
         "ramRoleArn": credential.ram_role_arn or None,
         "ramSessionName": credential.ram_session_name or None,
+        # ECS RAM Role 的显式角色名;留空表示由 IMDS 自动发现实例绑定的角色。
+        "ramRoleName": credential.ram_role_name or None,
     }
 
 
@@ -1165,6 +1173,9 @@ def _missing_aliyun_fields(credential: AliyunCredential) -> list[str]:
         "AK": ("access_key_id", "access_key_secret"),
         "StsToken": ("access_key_id", "access_key_secret", "sts_token"),
         "RamRoleArn": ("access_key_id", "access_key_secret", "ram_role_arn"),
+        # ECS RAM Role needs no stored secret: the role name is optional and the temporary
+        # credentials come from instance metadata at call time.
+        "EcsRamRole": (),
         "OAuth": ("oauth_site_type", "oauth_access_token", "oauth_refresh_token"),
     }
     required = required_by_mode.get(credential.mode, ())
@@ -1172,11 +1183,14 @@ def _missing_aliyun_fields(credential: AliyunCredential) -> list[str]:
 
 
 def _prune_aliyun_credential_for_mode(credential: AliyunCredential) -> None:
+    # Every branch also clears `ram_role_name` so switching away from ECS RAM Role does not
+    # leave a stale role name in the summary the settings form reads back.
     if credential.mode == "AK":
         credential.sts_token = ""
         credential.sts_expiration = 0
         credential.ram_role_arn = ""
         credential.ram_session_name = ""
+        credential.ram_role_name = ""
         credential.oauth_site_type = ""
         credential.oauth_access_token = ""
         credential.oauth_refresh_token = ""
@@ -1185,6 +1199,7 @@ def _prune_aliyun_credential_for_mode(credential: AliyunCredential) -> None:
     elif credential.mode == "StsToken":
         credential.ram_role_arn = ""
         credential.ram_session_name = ""
+        credential.ram_role_name = ""
         credential.oauth_site_type = ""
         credential.oauth_access_token = ""
         credential.oauth_refresh_token = ""
@@ -1193,6 +1208,21 @@ def _prune_aliyun_credential_for_mode(credential: AliyunCredential) -> None:
     elif credential.mode == "RamRoleArn":
         credential.sts_token = ""
         credential.sts_expiration = 0
+        credential.ram_role_name = ""
+        credential.oauth_site_type = ""
+        credential.oauth_access_token = ""
+        credential.oauth_refresh_token = ""
+        credential.oauth_access_token_expire = 0
+        credential.oauth_refresh_token_expire = 0
+    elif credential.mode == "EcsRamRole":
+        # The instance metadata service issues the temporary credentials, so no static
+        # secret, RamRoleArn field or OAuth token may survive in this mode.
+        credential.access_key_id = ""
+        credential.access_key_secret = ""
+        credential.sts_token = ""
+        credential.sts_expiration = 0
+        credential.ram_role_arn = ""
+        credential.ram_session_name = ""
         credential.oauth_site_type = ""
         credential.oauth_access_token = ""
         credential.oauth_refresh_token = ""
@@ -1205,3 +1235,4 @@ def _prune_aliyun_credential_for_mode(credential: AliyunCredential) -> None:
         credential.sts_expiration = 0
         credential.ram_role_arn = ""
         credential.ram_session_name = ""
+        credential.ram_role_name = ""

@@ -705,9 +705,9 @@ def test_stack_creating_prompt_includes_test_owned_stack_name(tmp_path: Path) ->
     prompt = runner._stack_creating_prompt("创建一个 VSwitch", tmp_path, "ask-waiting-resume")
 
     assert stack_name.startswith("iac-e2e-")
-    assert "CreateStack 的 params.StackName 必须精确等于" in prompt
+    assert "ROS 资源栈名称基础名" in prompt
+    assert "最终 StackName 必须以该基础名开头" in prompt
     assert stack_name in prompt
-    assert "禁止使用默认或自动生成 StackName" in prompt
 
 
 def test_cleanup_pipeline_prompt_includes_explicit_network_target(tmp_path: Path) -> None:
@@ -1591,6 +1591,43 @@ def test_stack_creating_acceptance_records_observed_ros_stack(tmp_path: Path) ->
     assert checks["acceptance: ROS stack observed in cleanup ledger"] is True
     assert checks["acceptance: ROS stack name is test-owned"] is True
     assert checks["acceptance: ROS created stack retained before teardown"] is True
+
+
+def test_stack_creating_acceptance_allows_generated_suffix_on_test_stack_name(tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    stack_name = f"{runner._scenario_stack_name(tmp_path, 'scenario1')}-20260809-a1b2c3"
+
+    class FakePty:
+        pass
+
+    FakePty.run_dir = tmp_path
+    FakePty.transcript = "● Confirm and select (4/5)\n✔ Pipeline completed\n交换机 ID   vsw-bp1234567890\n"
+    FakePty.events = []
+    FakePty.cleanup_ledger = {
+        "observed_resources": [
+            {
+                "provider": "ros",
+                "resource_type": "stack",
+                "resource_id": "stack-created-by-scenario1",
+                "resource_name": stack_name,
+                "observed_action": "CreateStack",
+            }
+        ]
+    }
+    FakePty.ros_stack_states = {
+        "stack-created-by-scenario1": {
+            "status": "CREATE_COMPLETE",
+            "not_found": False,
+            "stack_name": stack_name,
+        }
+    }
+
+    checks: dict[str, bool] = {}
+
+    runner._apply_acceptance_checks("scenario1", args, FakePty(), checks)
+
+    assert checks["acceptance: ROS stack name is test-owned"] is True
 
 
 def test_stack_creating_acceptance_rejects_non_test_owned_stack_name(tmp_path: Path) -> None:
@@ -2619,6 +2656,47 @@ def test_ask_waiting_resume_runs_expected_terminal_flow(monkeypatch, tmp_path: P
         ("expect", "pipeline continued after ask resume"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after ask resume"),
+        ("sendline", "/exit"),
+        ("terminate", "False"),
+    ]
+
+
+def test_selection_waiting_resume_waits_for_live_controls_before_selecting(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud", "--run-dir", str(tmp_path)])
+    actions: list[tuple[str, str]] = []
+    transcript = (
+        "● Confirm and select (4/5)\n"
+        "● Confirm and select (4/5)\n"
+        "✔ Pipeline completed\n"
+        "交换机 ID   vsw-bp1234567890\n"
+    )
+    _install_flow_fake_pty(monkeypatch, runner, transcript, actions, scenario="selection-waiting-resume")
+    stack_owned_initial = runner._stack_creating_prompt(
+        args.initial_prompt,
+        tmp_path,
+        "selection-waiting-resume",
+    )
+
+    assert runner.run_selection_waiting_resume(args, "selection-waiting-resume") == 0
+
+    ordered_actions = [
+        (kind, value)
+        for kind, value in actions
+        if kind in {"expect", "spawn", "terminate", "sendline", "select-default-candidate"}
+    ]
+    assert ordered_actions == [
+        ("spawn", ""),
+        ("expect", "initial prompt"),
+        ("expect", "prompt input ready"),
+        ("sendline", stack_owned_initial),
+        ("expect", "candidate selection visible"),
+        ("terminate", "True"),
+        ("spawn", "--continue"),
+        ("expect", "candidate selection replayed"),
+        ("expect", "live candidate selection controls ready"),
+        ("select-default-candidate", f"{args.selection_prompt}\r"),
+        ("expect", "pipeline completed after resume"),
         ("sendline", "/exit"),
         ("terminate", "False"),
     ]

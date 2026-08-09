@@ -12,7 +12,7 @@ from alibabacloud_ros20190910 import models as ros_models
 from iac_code.i18n import _
 from iac_code.services.cloud_credentials import CloudCredentials
 from iac_code.tools.base import Tool, ToolContext, ToolResult
-from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
+from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory, public_ecs_credential_message
 from iac_code.tools.cloud.types import InstanceStatus
 from iac_code.types.stream_events import StackInstancesProgressEvent
 
@@ -137,31 +137,36 @@ class RosStackInstances(Tool):
         return RosClientFactory.create(cred, region_id=region)
 
     async def _initiate(self, client: Any, action: str, params: dict) -> str:
-        """Start the stack instances operation and return the operation_id."""
+        """Start the stack instances operation and return the operation_id.
+
+        Every SDK call is blocking network I/O, and signing a dynamic credential reads
+        the instance metadata service on the calling thread, so it stays off the shared
+        event loop (web agent turns, SSE, and HTTP handlers run on it).
+        """
         if action == "CreateStackInstances":
             request = ros_models.CreateStackInstancesRequest().from_map(params)
-            response = client.create_stack_instances(request)
+            response = await asyncio.to_thread(client.create_stack_instances, request)
             return response.body.operation_id
         elif action == "UpdateStackInstances":
             request = ros_models.UpdateStackInstancesRequest().from_map(params)
-            response = client.update_stack_instances(request)
+            response = await asyncio.to_thread(client.update_stack_instances, request)
             return response.body.operation_id
         elif action == "DeleteStackInstances":
             request = ros_models.DeleteStackInstancesRequest().from_map(params)
-            response = client.delete_stack_instances(request)
+            response = await asyncio.to_thread(client.delete_stack_instances, request)
             return response.body.operation_id
         raise ValueError(f"Unsupported action: {action}")
 
     async def _get_operation_status(self, client: Any, operation_id: str, region: str) -> str:
         """Poll the current status of a stack group operation."""
         request = ros_models.GetStackGroupOperationRequest(operation_id=operation_id, region_id=region)
-        response = client.get_stack_group_operation(request)
+        response = await asyncio.to_thread(client.get_stack_group_operation, request)
         return response.body.to_map().get("Status", "RUNNING")
 
     async def _get_instances(self, client: Any, stack_group_name: str, region: str) -> list[InstanceStatus]:
         """Get the current list of stack instances for a stack group."""
         request = ros_models.ListStackInstancesRequest(stack_group_name=stack_group_name, region_id=region)
-        response = client.list_stack_instances(request)
+        response = await asyncio.to_thread(client.list_stack_instances, request)
         data = response.body.to_map()
         instances = []
         for item in data.get("StackInstances", []):
@@ -185,12 +190,16 @@ class RosStackInstances(Tool):
         region = self._resolve_region(tool_input)
         stack_group_name = params.get("StackGroupName", "")
 
-        client = self._get_client(region)
-
         try:
+            client = self._get_client(region)
             operation_id = await self._initiate(client, action, params)
-        except Exception as e:
-            return ToolResult.error(f"[{action}] {e}")
+        except Exception as error:
+            # A dynamic credential is resolved when the client is built (a plain
+            # ValueError) and again while the SDK signs the request (the same failure
+            # inside the SDK envelope), so surface both as public, actionable text.
+            if message := public_ecs_credential_message(error, action=action, region=region):
+                return ToolResult.error(message)
+            return ToolResult.error(f"[{action}] {error}")
 
         start_time = time.monotonic()
 
@@ -200,13 +209,17 @@ class RosStackInstances(Tool):
             try:
                 poll_client = self._get_client(region)
                 status = await self._get_operation_status(poll_client, operation_id, region)
-            except Exception as e:
-                return ToolResult.error(f"[GetStackGroupOperation] {e}")
+            except Exception as error:
+                if message := public_ecs_credential_message(error, action="GetStackGroupOperation", region=region):
+                    return ToolResult.error(message)
+                return ToolResult.error(f"[GetStackGroupOperation] {error}")
 
             try:
                 instances = await self._get_instances(poll_client, stack_group_name, region)
-            except Exception as e:
-                return ToolResult.error(f"[ListStackInstances] {e}")
+            except Exception as error:
+                if message := public_ecs_credential_message(error, action="ListStackInstances", region=region):
+                    return ToolResult.error(message)
+                return ToolResult.error(f"[ListStackInstances] {error}")
 
             elapsed = int(time.monotonic() - start_time)
 

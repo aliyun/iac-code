@@ -2,7 +2,8 @@ import pytest
 from alibabacloud_ros20190910.client import Client as RosClient
 
 from iac_code.services.providers.aliyun import AliyunCredential
-from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
+from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory, public_ecs_credential_message
+from tests.tools.cloud.aliyun._ecs_ram_role_fakes import FakeEcsRuntime
 
 
 @pytest.fixture
@@ -155,3 +156,55 @@ class TestRosClientFactoryModes:
         )
         # Should not raise; default session name applied internally
         _ = RosClientFactory._build_config(cred, "cn-hangzhou")
+
+
+class TestRosClientFactoryEcsRamRole:
+    def test_ecs_ram_role_mode_builds_dynamic_credential_config(self, fake_ecs_runtime: FakeEcsRuntime):
+        config = RosClientFactory._build_config(fake_ecs_runtime.credential(), "cn-hangzhou")
+
+        assert config.region_id == "cn-hangzhou"
+        # No static AccessKey may be attached; ROS must sign through the metadata provider.
+        assert config.access_key_id in (None, "")
+        assert config.access_key_secret in (None, "")
+        assert type(config.credential.cloud_credential.provider).__name__ == "EcsRamRoleProviderAdapter"
+        assert config.user_agent and config.user_agent.startswith("iac-code/")
+
+    def test_ecs_ram_role_config_reuses_the_shared_provider(self, fake_ecs_runtime: FakeEcsRuntime):
+        first = RosClientFactory._build_config(fake_ecs_runtime.credential(), "cn-hangzhou")
+        second = RosClientFactory._build_config(fake_ecs_runtime.credential(), "cn-beijing")
+
+        assert first.credential.cloud_credential.provider is second.credential.cloud_credential.provider
+        assert len(fake_ecs_runtime.providers) == 1
+
+    def test_create_client_for_ecs_ram_role(self, fake_ecs_runtime: FakeEcsRuntime):
+        client = RosClientFactory.create(fake_ecs_runtime.credential(), region_id="cn-hangzhou")
+
+        assert isinstance(client, RosClient)
+
+
+class TestPublicEcsCredentialMessage:
+    def test_stable_code_becomes_public_text(self):
+        from iac_code.services.providers.aliyun_credentials_runtime import ECS_METADATA_UNREACHABLE
+
+        message = public_ecs_credential_message(
+            ValueError(ECS_METADATA_UNREACHABLE), action="CreateStack", region="cn-hangzhou"
+        )
+
+        assert message is not None
+        assert ECS_METADATA_UNREACHABLE not in message
+        assert "CreateStack" in message
+
+    def test_unrelated_value_error_is_not_reclassified(self):
+        assert public_ecs_credential_message(ValueError("Region not configured"), action="X", region="r") is None
+        # A message that merely mentions a stable code must not match the exact allowlist.
+        assert (
+            public_ecs_credential_message(
+                ValueError("upstream said ecs_metadata_unreachable somewhere"), action="X", region="r"
+            )
+            is None
+        )
+
+    def test_non_value_error_is_not_reclassified(self):
+        from iac_code.services.providers.aliyun_credentials_runtime import ECS_METADATA_UNREACHABLE
+
+        assert public_ecs_credential_message(RuntimeError(ECS_METADATA_UNREACHABLE), action="X", region="r") is None

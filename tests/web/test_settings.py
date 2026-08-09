@@ -159,6 +159,7 @@ def test_get_cloud_aliyun_reports_unconfigured_without_secrets(monkeypatch, tmp_
         "stsToken": None,
         "ramRoleArn": None,
         "ramSessionName": None,
+        "ramRoleName": None,
         "detected": None,
     }
     # OAuth 访问/刷新令牌不参与回填,任何时候都不应出现在摘要里。
@@ -220,6 +221,7 @@ def test_put_cloud_aliyun_persists_fake_ak_and_exposes_saved_secret_for_local_vi
         "stsToken": None,
         "ramRoleArn": None,
         "ramSessionName": None,
+        "ramRoleName": None,
     }
     assert put_response.status_code == 200
     assert put_response.json() == expected
@@ -272,6 +274,7 @@ def test_put_cloud_aliyun_preserves_omitted_existing_secret_fields(monkeypatch, 
         "stsToken": None,
         "ramRoleArn": None,
         "ramSessionName": None,
+        "ramRoleName": None,
     }
     assert persisted["access_key_id"] == "LTAI-fake"
     assert persisted["access_key_secret"] == "fake-access-key-secret"
@@ -320,6 +323,7 @@ def test_put_cloud_aliyun_supports_fake_modes_and_reports_expiration(monkeypatch
                 "stsToken": "fake-sts-token",
                 "ramRoleArn": None,
                 "ramSessionName": None,
+                "ramRoleName": None,
                 # StsToken 模式保留 sts_expiration(由 expiration 键合并而来)。
                 "stsExpiration": 1798794000,
             },
@@ -343,7 +347,35 @@ def test_put_cloud_aliyun_supports_fake_modes_and_reports_expiration(monkeypatch
                 "stsToken": None,
                 "ramRoleArn": "acs:ram::123:role/fake",
                 "ramSessionName": "fake-session",
+                # RamRoleArn 模式反向裁剪 ram_role_name → None。
+                "ramRoleName": None,
                 # RamRoleArn 模式裁剪 sts_expiration → None。
+                "stsExpiration": None,
+            },
+        ),
+        (
+            {
+                "mode": "EcsRamRole",
+                "region": "cn-hangzhou",
+                "ramRoleName": "fake-ecs-role",
+                # ECS 模式下静态密钥必须被裁剪,不能残留在配置里。
+                "accessKeyId": "fake-ak",
+                "accessKeySecret": "fake-secret",
+                "stsToken": "fake-sts-token",
+                "stsExpiration": 1798794000,
+            },
+            "EcsRamRole",
+            None,
+            None,
+            None,
+            {
+                "accessKeyId": None,
+                "accessKeySecret": None,
+                "stsToken": None,
+                "ramRoleArn": None,
+                "ramSessionName": None,
+                # 显式角色名照常回填,供设置页编辑。
+                "ramRoleName": "fake-ecs-role",
                 "stsExpiration": None,
             },
         ),
@@ -373,6 +405,7 @@ def test_put_cloud_aliyun_supports_fake_modes_and_reports_expiration(monkeypatch
                 "stsToken": None,
                 "ramRoleArn": None,
                 "ramSessionName": None,
+                "ramRoleName": None,
                 # OAuth 模式(PUT 保存路径)裁剪 sts_expiration → None;
                 # 派生的 STS 由 oauth-login 路径持久化,不经此裁剪。
                 "stsExpiration": None,
@@ -422,6 +455,109 @@ def test_put_cloud_aliyun_supports_fake_modes_and_reports_expiration(monkeypatch
                 assert "fake-sts-token" not in response.text
                 assert "fake-secret" not in get_response.text
                 assert "fake-sts-token" not in get_response.text
+
+
+def test_put_cloud_aliyun_clears_a_saved_ecs_role_name(monkeypatch, tmp_path) -> None:
+    """空角色名是有效配置(回落 IMDS 自动发现),必须能覆盖已保存的显式角色名。"""
+    app = _app(monkeypatch, tmp_path)
+
+    with TestClient(app) as client:
+        client.put(
+            "/api/cloud/aliyun",
+            json={"mode": "EcsRamRole", "region": "cn-hangzhou", "ramRoleName": "fake-ecs-role"},
+        )
+        cleared = client.put(
+            "/api/cloud/aliyun",
+            json={"mode": "EcsRamRole", "region": "cn-hangzhou", "ramRoleName": ""},
+        )
+        reread = client.get("/api/cloud/aliyun")
+
+    assert cleared.status_code == 200
+    # 清空后仍是「已配置」:该模式没有必填字段。
+    assert cleared.json()["configured"] is True
+    assert cleared.json()["ramRoleName"] is None
+    assert reread.json()["ramRoleName"] is None
+    assert "fake-ecs-role" not in reread.text
+
+
+def test_put_cloud_aliyun_prunes_stale_ecs_role_name_across_mode_switches(monkeypatch, tmp_path) -> None:
+    app = _app(monkeypatch, tmp_path)
+
+    with TestClient(app) as client:
+        client.put(
+            "/api/cloud/aliyun",
+            json={"mode": "EcsRamRole", "region": "cn-hangzhou", "ramRoleName": "fake-ecs-role"},
+        )
+        to_ak = client.put(
+            "/api/cloud/aliyun",
+            json={
+                "mode": "AK",
+                "region": "cn-hangzhou",
+                "accessKeyId": "fake-ak",
+                "accessKeySecret": "fake-secret",
+            },
+        )
+        back_to_ecs = client.put(
+            "/api/cloud/aliyun",
+            json={"mode": "EcsRamRole", "region": "cn-hangzhou", "ramRoleName": "second-fake-role"},
+        )
+
+    # 切走后角色名不得残留。
+    assert to_ak.json()["ramRoleName"] is None
+    assert "fake-ecs-role" not in to_ak.text
+    # 切回后静态密钥不得残留。
+    assert back_to_ecs.json()["ramRoleName"] == "second-fake-role"
+    assert back_to_ecs.json()["accessKeyId"] is None
+    assert back_to_ecs.json()["accessKeySecret"] is None
+    assert "fake-secret" not in back_to_ecs.text
+
+
+def test_get_cloud_aliyun_detects_ecs_ram_role_from_aliyun_cli(monkeypatch, tmp_path) -> None:
+    import json
+
+    cli_config = tmp_path / "aliyun" / "config.json"
+    cli_config.parent.mkdir(parents=True, exist_ok=True)
+    cli_config.write_text(
+        json.dumps(
+            {
+                "current": "default",
+                "profiles": [
+                    {
+                        "name": "default",
+                        "mode": "EcsRamRole",
+                        "ram_role_name": "fake-cli-role",
+                        "region_id": "cn-shenzhen",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    app = _app(monkeypatch, tmp_path)
+    monkeypatch.setattr(aliyun_module, "DEFAULT_ALIYUN_CLI_CONFIG_PATH", str(cli_config))
+
+    with TestClient(app) as client:
+        body = client.get("/api/cloud/aliyun").json()
+
+    detected = body["detected"]
+    assert detected["source"] == "cli"
+    assert detected["mode"] == "EcsRamRole"
+    assert detected["ramRoleName"] == "fake-cli-role"
+    assert detected["region"] == "cn-shenzhen"
+    # aliyun CLI 的 EcsRamRole profile 没有静态密钥,不能被当成「有密钥」。
+    assert detected["accessKeyId"] == ""
+    assert detected["hasAccessKeySecret"] is False
+    assert detected["hasStsToken"] is False
+
+
+def test_ecs_ram_role_has_no_required_fields(monkeypatch, tmp_path) -> None:
+    from iac_code.services.providers.aliyun import AliyunCredential
+
+    # 空角色名不是缺字段:运行时会向 ECS 元数据服务自动发现绑定角色。
+    assert settings_module._missing_aliyun_fields(AliyunCredential(mode="EcsRamRole", ram_role_name="")) == []
+    assert (
+        settings_module._missing_aliyun_fields(AliyunCredential(mode="EcsRamRole", ram_role_name="fake-ecs-role")) == []
+    )
 
 
 def test_cloud_aliyun_rejects_bad_json_and_unknown_mode(monkeypatch, tmp_path) -> None:

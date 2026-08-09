@@ -1349,6 +1349,10 @@ msgid "RAM Role"
 msgstr "RAM 角色"
 
 #: src/iac_code/commands/auth.py
+msgid "ECS RAM Role"
+msgstr "ECS RAM 角色"
+
+#: src/iac_code/commands/auth.py
 msgid "OAuth Login (Browser)"
 msgstr "OAuth 登录（浏览器）"
 
@@ -1367,6 +1371,10 @@ msgstr "RAM 角色 ARN"
 #: src/iac_code/commands/auth.py
 msgid "Session Name"
 msgstr "会话名称"
+
+#: src/iac_code/commands/auth.py
+msgid "ECS RAM Role Name"
+msgstr "ECS RAM 角色名称"
 
 #: src/iac_code/commands/auth.py
 msgid "OAuth Site Type"
@@ -1391,6 +1399,10 @@ msgstr "OAuth 刷新令牌过期时间"
 #: src/iac_code/commands/auth.py
 msgid "STS Expiration"
 msgstr "STS 过期时间"
+
+#: src/iac_code/commands/auth.py
+msgid "Auto-detect from ECS metadata"
+msgstr "从 ECS 元数据自动发现"
 
 #: src/iac_code/commands/auth.py
 msgid "China"
@@ -1424,6 +1436,10 @@ msgstr "重新配置凭证"
 #: src/iac_code/commands/auth.py
 msgid "Select credential type"
 msgstr "选择凭证类型"
+
+#: src/iac_code/commands/auth.py
+msgid "Leave blank to auto-detect from ECS metadata"
+msgstr "留空则从 ECS 元数据自动发现"
 
 #: src/iac_code/commands/auth.py
 msgid "Configured: Alibaba Cloud credentials saved to ~/.iac-code"
@@ -5633,6 +5649,58 @@ msgid ""
 "Alibaba Cloud endpoint cache could not be updated for {operation} in "
 "{region}. Check local configuration storage and retry."
 msgstr "无法更新 {region} 中 {operation} 的阿里云 endpoint 缓存。请检查本地配置存储后重试。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud ECS instance metadata service is unreachable, so "
+"{operation} cannot be signed. Confirm this process runs on an ECS "
+"instance with a bound RAM role."
+msgstr "阿里云 ECS 实例元数据服务不可访问，无法为 {operation} 签名。请确认本进程运行在已绑定 RAM 角色的 ECS 实例上。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud ECS instance metadata credentials are disabled, so "
+"{operation} cannot be signed. Check the "
+"ALIBABA_CLOUD_ECS_METADATA_DISABLED environment variable."
+msgstr ""
+"阿里云 ECS 实例元数据凭证已被禁用，无法为 {operation} 签名。请检查 "
+"ALIBABA_CLOUD_ECS_METADATA_DISABLED 环境变量。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud ECS metadata token (IMDSv2) could not be obtained while "
+"IMDSv1 is disabled, so {operation} cannot be signed. Check the instance "
+"metadata settings and network."
+msgstr "IMDSv1 已禁用，且无法获取阿里云 ECS 元数据令牌（IMDSv2），因此无法为 {operation} 签名。请检查实例元数据设置和网络。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"No matching Alibaba Cloud ECS instance RAM role was found, so {operation}"
+" cannot be signed. Check the instance RAM role and the configured ECS RAM"
+" role name."
+msgstr ""
+"未找到匹配的阿里云 ECS 实例 RAM 角色，无法为 {operation} 签名。请检查实例 RAM 角色以及所配置的 ECS RAM "
+"角色名称。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud ECS instance metadata returned incomplete RAM role "
+"credentials, so {operation} cannot be signed. Retry and check the ECS "
+"metadata service."
+msgstr "阿里云 ECS 实例元数据返回的 RAM 角色凭证不完整，无法为 {operation} 签名。请重试并检查 ECS 元数据服务。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud ECS instance RAM role credentials could not be refreshed "
+"before they expired, so {operation} cannot be signed. Check ECS metadata "
+"availability."
+msgstr "阿里云 ECS 实例 RAM 角色凭证在过期前未能刷新，无法为 {operation} 签名。请检查 ECS 元数据服务是否可用。"
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format

@@ -8,6 +8,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from iac_code.services.providers.aliyun_credentials_runtime import (
+    ECS_CREDENTIAL_ERROR_CODES,
+    ECS_METADATA_UNREACHABLE,
+    ECS_RAM_ROLE_NOT_FOUND,
+)
 from iac_code.services.telemetry.names import Events, Metrics
 from iac_code.tools.base import ToolContext, ToolResult
 from iac_code.tools.cloud.aliyun.ros_stack import RosStack
@@ -2131,3 +2136,157 @@ class _FakeBody:
 
     def to_map(self):
         return {}
+
+
+def _sdk_envelope(inner: BaseException):
+    """Wrap `inner` the way the ROS SDK does when signing fails inside a call."""
+    from darabonba.exceptions import UnretryableException
+    from darabonba.policy.retry import RetryPolicyContext
+    from Tea.request import TeaRequest
+
+    return UnretryableException(RetryPolicyContext(http_request=TeaRequest(), exception=inner))
+
+
+class TestRosStackEcsCredentialErrors:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("code", sorted(ECS_CREDENTIAL_ERROR_CODES))
+    async def test_client_build_failure_becomes_public_text(self, tool: RosStack, mock_credentials, code: str) -> None:
+        from iac_code.tools.cloud.aliyun.public_errors import public_aliyun_error
+
+        with patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory:
+            mock_factory.create.side_effect = ValueError(code)
+            result = await tool.execute(
+                tool_input={
+                    "action": "CreateStack",
+                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
+                    "region_id": "cn-hangzhou",
+                },
+                context=ToolContext(),
+            )
+
+        assert result.is_error is True
+        expected = public_aliyun_error(code, product="ros", action="CreateStack", region_id="cn-hangzhou")
+        assert expected in result.content
+        # The internal token must not reach the user.
+        assert code not in result.content
+
+    @pytest.mark.asyncio
+    async def test_signing_failure_during_the_sdk_call_becomes_public_text(
+        self, tool: RosStack, mock_credentials
+    ) -> None:
+        mock_client = MagicMock()
+        mock_client.create_stack.side_effect = ValueError(ECS_METADATA_UNREACHABLE)
+
+        with patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory:
+            mock_factory.create.return_value = mock_client
+            result = await tool.execute(
+                tool_input={
+                    "action": "CreateStack",
+                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
+                    "region_id": "cn-hangzhou",
+                },
+                context=ToolContext(),
+            )
+
+        assert result.is_error is True
+        assert "instance metadata service is unreachable" in result.content
+        assert ECS_METADATA_UNREACHABLE not in result.content
+
+    @pytest.mark.asyncio
+    async def test_wrapped_signing_failure_during_the_sdk_call_becomes_public_text(
+        self, tool: RosStack, mock_credentials
+    ) -> None:
+        """The real SDK reports a signing failure through its own envelope, not a ValueError."""
+        mock_client = MagicMock()
+        mock_client.create_stack.side_effect = _sdk_envelope(ValueError(ECS_METADATA_UNREACHABLE))
+
+        with patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory:
+            mock_factory.create.return_value = mock_client
+            result = await tool.execute(
+                tool_input={
+                    "action": "CreateStack",
+                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
+                    "region_id": "cn-hangzhou",
+                },
+                context=ToolContext(),
+            )
+
+        assert result.is_error is True
+        assert "instance metadata service is unreachable" in result.content
+        assert ECS_METADATA_UNREACHABLE not in result.content
+
+    @pytest.mark.asyncio
+    async def test_polling_signing_failures_become_public_text(self, tool: RosStack, mock_credentials) -> None:
+        """Polling re-signs every round, so an IMDS failure can start after the stack call."""
+        mock_client = MagicMock()
+        mock_client.get_stack.side_effect = _sdk_envelope(ValueError(ECS_METADATA_UNREACHABLE))
+        mock_client.list_stack_resources.side_effect = _sdk_envelope(ValueError(ECS_RAM_ROLE_NOT_FOUND))
+
+        with patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory:
+            mock_factory.create.return_value = mock_client
+            with pytest.raises(ValueError) as status_error:
+                await tool.get_stack_status("stack-1", "cn-hangzhou")
+            with pytest.raises(ValueError) as resources_error:
+                await tool.get_stack_resources("stack-1", "cn-hangzhou")
+
+        assert "instance metadata service is unreachable" in str(status_error.value)
+        assert "GetStack" in str(status_error.value)
+        assert ECS_METADATA_UNREACHABLE not in str(status_error.value)
+        assert "ECS instance RAM role was found" in str(resources_error.value)
+        assert "ListStackResources" in str(resources_error.value)
+        assert ECS_RAM_ROLE_NOT_FOUND not in str(resources_error.value)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("code", sorted(ECS_CREDENTIAL_ERROR_CODES))
+    async def test_polling_client_build_failures_become_public_text(
+        self, tool: RosStack, mock_credentials, code: str
+    ) -> None:
+        """Each polling round rebuilds the client, so a build-time failure must also be public text."""
+        from iac_code.tools.cloud.aliyun.public_errors import public_aliyun_error
+
+        with patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory:
+            mock_factory.create.side_effect = ValueError(code)
+            with pytest.raises(ValueError) as status_error:
+                await tool.get_stack_status("stack-1", "cn-hangzhou")
+            with pytest.raises(ValueError) as resources_error:
+                await tool.get_stack_resources("stack-1", "cn-hangzhou")
+
+        assert public_aliyun_error(code, product="ros", action="GetStack", region_id="cn-hangzhou") == str(
+            status_error.value
+        )
+        assert public_aliyun_error(code, product="ros", action="ListStackResources", region_id="cn-hangzhou") == str(
+            resources_error.value
+        )
+        # base_stack renders these as "[GetStackStatus] {error}", so the raw stable code
+        # would be shown verbatim to the user.
+        assert code not in str(status_error.value)
+        assert code not in str(resources_error.value)
+
+    @pytest.mark.asyncio
+    async def test_unrelated_polling_failures_propagate_unchanged(self, tool: RosStack, mock_credentials) -> None:
+        mock_client = MagicMock()
+        mock_client.get_stack.side_effect = RuntimeError("Throttling.User")
+
+        with patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory:
+            mock_factory.create.return_value = mock_client
+            with pytest.raises(RuntimeError) as raised:
+                await tool.get_stack_status("stack-1", "cn-hangzhou")
+
+        assert str(raised.value) == "Throttling.User"
+
+    @pytest.mark.asyncio
+    async def test_unrelated_value_error_keeps_its_existing_message(self, tool: RosStack, mock_credentials) -> None:
+        with patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory:
+            mock_factory.create.side_effect = ValueError("Region not configured")
+            result = await tool.execute(
+                tool_input={
+                    "action": "CreateStack",
+                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
+                    "region_id": "cn-hangzhou",
+                },
+                context=ToolContext(),
+            )
+
+        assert result.is_error is True
+        assert "Region not configured" in result.content
+        assert "instance metadata" not in result.content

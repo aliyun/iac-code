@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from iac_code.services.providers.aliyun import AliyunCredential
+from iac_code.services.providers.aliyun_credentials_runtime import ECS_CREDENTIAL_ERROR_CODES
 from iac_code.services.providers.aliyun_oauth import AliyunOAuthError, AliyunOAuthReloginRequired
 from iac_code.services.telemetry import set_client
 from iac_code.services.telemetry.client import TelemetryClient
@@ -42,6 +43,7 @@ from iac_code.tools.cloud.aliyun.retry_policy import RetryBudget, RetryExhausted
 from iac_code.tools.tool_executor import ToolCallRequest, ToolExecutor
 from iac_code.types.permissions import InvocationBinding, ToolPermissionContext
 from iac_code.types.stream_events import ResourceObservedEvent
+from tests.tools.cloud.aliyun._ecs_ram_role_fakes import FakeEcsRuntime
 
 
 @pytest.fixture
@@ -1097,6 +1099,101 @@ class TestAliyunApiBuildConfig:
         assert config.access_key_id is None
         assert config.access_key_secret is None
         assert config.user_agent and config.user_agent.startswith("iac-code/")
+
+    def test_ecs_ram_role_mode_uses_the_shared_dynamic_client(self, fake_ecs_runtime: FakeEcsRuntime) -> None:
+        config = AliyunApi._build_config(fake_ecs_runtime.credential(), "ecs.aliyuncs.com", "cn-shanghai")
+
+        assert type(config.credential.cloud_credential.provider).__name__ == "EcsRamRoleProviderAdapter"
+        assert config.endpoint == "ecs.aliyuncs.com"
+        assert config.region_id == "cn-shanghai"
+        # Static AK fields must stay unset so no empty AccessKey can sign a request.
+        assert config.access_key_id is None
+        assert config.access_key_secret is None
+        assert config.security_token is None
+        assert config.user_agent and config.user_agent.startswith("iac-code/")
+
+    def test_ecs_ram_role_metadata_disabled_raises_the_stable_code(
+        self, fake_ecs_runtime: FakeEcsRuntime, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from iac_code.services.providers.aliyun_credentials_runtime import ECS_METADATA_DISABLED
+
+        monkeypatch.setenv("ALIBABA_CLOUD_ECS_METADATA_DISABLED", "true")
+
+        with pytest.raises(ValueError) as raised:
+            AliyunApi._build_config(fake_ecs_runtime.credential(), "ecs.aliyuncs.com", "cn-shanghai")
+
+        assert str(raised.value) == ECS_METADATA_DISABLED
+
+
+class TestAliyunApiEcsCredentialFailureMapping:
+    @pytest.mark.parametrize("code", sorted(ECS_CREDENTIAL_ERROR_CODES))
+    def test_stable_codes_survive_target_failure_classification(self, code: str) -> None:
+        assert aliyun_api_module._target_failure_message(ValueError(code)) == code
+        # The generic transport outcome is still reported for telemetry grouping.
+        assert aliyun_api_module._target_failure_outcome(ValueError(code)) == "target_transport_failure"
+
+    @pytest.mark.parametrize("code", sorted(ECS_CREDENTIAL_ERROR_CODES))
+    def test_stable_codes_survive_the_sdk_envelope(self, code: str) -> None:
+        """SDK clients sign inside their retry loop, so the failure arrives wrapped."""
+        from darabonba.exceptions import UnretryableException
+        from darabonba.policy.retry import RetryPolicyContext
+        from Tea.request import TeaRequest
+
+        wrapped = UnretryableException(RetryPolicyContext(http_request=TeaRequest(), exception=ValueError(code)))
+
+        assert aliyun_api_module._target_failure_message(wrapped) == code
+
+    def test_unrelated_value_error_stays_generic(self) -> None:
+        assert aliyun_api_module._target_failure_message(ValueError("boom")) == "aliyun_target_transport_error"
+
+    def test_non_value_error_with_a_code_like_message_stays_generic(self) -> None:
+        assert (
+            aliyun_api_module._target_failure_message(RuntimeError("ecs_metadata_unreachable"))
+            == "aliyun_target_transport_error"
+        )
+
+    def test_envelope_around_a_non_value_error_stays_generic(self) -> None:
+        from darabonba.exceptions import UnretryableException
+        from darabonba.policy.retry import RetryPolicyContext
+        from Tea.request import TeaRequest
+
+        wrapped = UnretryableException(
+            RetryPolicyContext(http_request=TeaRequest(), exception=RuntimeError("ecs_metadata_unreachable"))
+        )
+
+        assert aliyun_api_module._target_failure_message(wrapped) == "aliyun_target_transport_error"
+
+    @pytest.mark.asyncio
+    async def test_legacy_call_reports_a_wrapped_credential_failure_publicly(
+        self, api: AliyunApi, context: ToolContext, mock_credentials
+    ) -> None:
+        """The legacy client raises the SDK envelope, so the raw code must not be echoed."""
+        from darabonba.exceptions import UnretryableException
+        from darabonba.policy.retry import RetryPolicyContext
+        from Tea.request import TeaRequest
+
+        mock_client = MagicMock()
+        mock_client.call_api.side_effect = UnretryableException(
+            RetryPolicyContext(http_request=TeaRequest(), exception=ValueError("ecs_metadata_unreachable"))
+        )
+
+        with patch("iac_code.tools.cloud.aliyun.aliyun_api.OpenApiClient", return_value=mock_client):
+            result = await api.execute(
+                tool_input={"product": "ecs", "action": "DescribeInstances", "region_id": "cn-hangzhou"},
+                context=context,
+            )
+
+        assert result.is_error is True
+        assert "instance metadata service is unreachable" in result.content
+        assert "ecs_metadata_unreachable" not in result.content
+
+    @pytest.mark.parametrize("code", sorted(ECS_CREDENTIAL_ERROR_CODES))
+    def test_public_error_renders_every_stable_code(self, code: str) -> None:
+        message = public_aliyun_error(code, product="ecs", version="2014-05-26", action="DescribeRegions")
+
+        assert code not in message
+        assert "DescribeRegions" in message
+        assert "100.100.100.200" not in message
 
 
 def _production_raw_api(
@@ -2564,6 +2661,47 @@ async def test_shared_target_boundary_converts_transport_http_errors_to_sanitize
         Metrics.ALIYUN_API_CALLED_COUNT,
         Metrics.ALIYUN_API_CALLED_DURATION,
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", sorted(ECS_CREDENTIAL_ERROR_CODES))
+async def test_ecs_credential_failure_reaches_the_public_error_mapping(monkeypatch, code: str) -> None:
+    services, _, _, transport = _production_services()
+    legacy_events: list[tuple[str, dict[str, Any]]] = []
+    contract_events: list[dict[str, Any]] = []
+    monkeypatch.setattr(aliyun_api_module, "log_event", lambda name, fields: legacy_events.append((name, fields)))
+    monkeypatch.setattr(aliyun_api_module, "add_metric", lambda *args: None)
+    monkeypatch.setattr(aliyun_api_module, "emit_aliyun_api_called", lambda **fields: contract_events.append(fields))
+    # Credential resolution happens inside the transport, so it fails the same way here.
+    transport.errors["DescribeRegions"] = ValueError(code)
+    tool = AliyunApi(services=services)
+
+    result = await _production_execute(tool, _target_test_input("DescribeRegions"))
+
+    assert result.is_error is True
+    assert result.content == public_aliyun_error(
+        code, product="Ecs", version="2014-05-26", action="DescribeRegions", region_id="cn-hangzhou"
+    )
+    # The stable code is an internal token: it must not leak into user-visible text or telemetry.
+    assert code not in result.content
+    assert legacy_events == [(Events.ALIYUN_API_LEGACY_CALLED, {"outcome": "failure"})]
+    assert all(code not in json.dumps(fields, default=str) for fields in contract_events)
+
+
+@pytest.mark.asyncio
+async def test_unrelated_transport_value_error_is_not_reported_as_a_credential_problem(monkeypatch) -> None:
+    services, _, _, transport = _production_services()
+    monkeypatch.setattr(aliyun_api_module, "log_event", lambda name, fields: None)
+    monkeypatch.setattr(aliyun_api_module, "add_metric", lambda *args: None)
+    monkeypatch.setattr(aliyun_api_module, "emit_aliyun_api_called", lambda **fields: None)
+    transport.errors["DescribeRegions"] = ValueError("ecs metadata is fine, something else broke")
+    tool = AliyunApi(services=services)
+
+    result = await _production_execute(tool, _target_test_input("DescribeRegions"))
+
+    assert result.is_error is True
+    assert "instance metadata" not in result.content
+    assert "RAM role" not in result.content
 
 
 @pytest.mark.asyncio

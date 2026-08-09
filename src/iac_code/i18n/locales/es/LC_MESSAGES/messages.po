@@ -1417,6 +1417,10 @@ msgid "RAM Role"
 msgstr "Rol RAM"
 
 #: src/iac_code/commands/auth.py
+msgid "ECS RAM Role"
+msgstr "Rol RAM de ECS"
+
+#: src/iac_code/commands/auth.py
 msgid "OAuth Login (Browser)"
 msgstr "Inicio de sesión OAuth (navegador)"
 
@@ -1435,6 +1439,10 @@ msgstr "ARN del rol RAM"
 #: src/iac_code/commands/auth.py
 msgid "Session Name"
 msgstr "Nombre de sesión"
+
+#: src/iac_code/commands/auth.py
+msgid "ECS RAM Role Name"
+msgstr "Nombre del rol RAM de ECS"
 
 #: src/iac_code/commands/auth.py
 msgid "OAuth Site Type"
@@ -1459,6 +1467,10 @@ msgstr "Expiración del token de actualización OAuth"
 #: src/iac_code/commands/auth.py
 msgid "STS Expiration"
 msgstr "Expiración STS"
+
+#: src/iac_code/commands/auth.py
+msgid "Auto-detect from ECS metadata"
+msgstr "Detectar automáticamente desde los metadatos de ECS"
 
 #: src/iac_code/commands/auth.py
 msgid "China"
@@ -1492,6 +1504,12 @@ msgstr "Reconfigurar la credencial"
 #: src/iac_code/commands/auth.py
 msgid "Select credential type"
 msgstr "Seleccionar tipo de credencial"
+
+#: src/iac_code/commands/auth.py
+msgid "Leave blank to auto-detect from ECS metadata"
+msgstr ""
+"Déjelo en blanco para detectarlo automáticamente desde los metadatos de "
+"ECS"
 
 #: src/iac_code/commands/auth.py
 msgid "Configured: Alibaba Cloud credentials saved to ~/.iac-code"
@@ -6033,6 +6051,74 @@ msgstr ""
 "No se pudo actualizar la caché de endpoints de Alibaba Cloud para "
 "{operation} en {region}. Compruebe el almacenamiento de configuración "
 "local y vuelva a intentarlo."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud ECS instance metadata service is unreachable, so "
+"{operation} cannot be signed. Confirm this process runs on an ECS "
+"instance with a bound RAM role."
+msgstr ""
+"El servicio de metadatos de la instancia ECS de Alibaba Cloud no está "
+"accesible, por lo que no se puede firmar {operation}. Confirme que este "
+"proceso se ejecuta en una instancia ECS con un rol RAM vinculado."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud ECS instance metadata credentials are disabled, so "
+"{operation} cannot be signed. Check the "
+"ALIBABA_CLOUD_ECS_METADATA_DISABLED environment variable."
+msgstr ""
+"Las credenciales de metadatos de la instancia ECS de Alibaba Cloud están "
+"deshabilitadas, por lo que no se puede firmar {operation}. Compruebe la "
+"variable de entorno ALIBABA_CLOUD_ECS_METADATA_DISABLED."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud ECS metadata token (IMDSv2) could not be obtained while "
+"IMDSv1 is disabled, so {operation} cannot be signed. Check the instance "
+"metadata settings and network."
+msgstr ""
+"No se pudo obtener el token de metadatos de ECS de Alibaba Cloud (IMDSv2)"
+" mientras IMDSv1 está deshabilitado, por lo que no se puede firmar "
+"{operation}. Compruebe la configuración de metadatos de la instancia y la"
+" red."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"No matching Alibaba Cloud ECS instance RAM role was found, so {operation}"
+" cannot be signed. Check the instance RAM role and the configured ECS RAM"
+" role name."
+msgstr ""
+"No se encontró ningún rol RAM de instancia ECS de Alibaba Cloud "
+"coincidente, por lo que no se puede firmar {operation}. Compruebe el rol "
+"RAM de la instancia y el nombre del rol RAM de ECS configurado."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud ECS instance metadata returned incomplete RAM role "
+"credentials, so {operation} cannot be signed. Retry and check the ECS "
+"metadata service."
+msgstr ""
+"Los metadatos de la instancia ECS de Alibaba Cloud devolvieron "
+"credenciales de rol RAM incompletas, por lo que no se puede firmar "
+"{operation}. Vuelva a intentarlo y compruebe el servicio de metadatos de "
+"ECS."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud ECS instance RAM role credentials could not be refreshed "
+"before they expired, so {operation} cannot be signed. Check ECS metadata "
+"availability."
+msgstr ""
+"No se pudieron renovar las credenciales del rol RAM de la instancia ECS "
+"de Alibaba Cloud antes de que caducaran, por lo que no se puede firmar "
+"{operation}. Compruebe la disponibilidad de los metadatos de ECS."
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format

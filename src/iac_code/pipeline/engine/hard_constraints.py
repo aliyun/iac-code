@@ -52,7 +52,7 @@ def validate_hard_constraint_checks(
     tool_result_records: list[Any] | None = None,
     validate_tool_records: bool = True,
 ) -> list[ConstraintValidationIssue]:
-    """Validate complete coverage, comparisons, parameter bindings, and evidence."""
+    """Validate coverage and accept each constraint when either LLM or code verification succeeds."""
 
     issues: list[ConstraintValidationIssue] = []
     expected = {str(item.get("id") or ""): item for item in constraints if isinstance(item, dict)}
@@ -90,22 +90,21 @@ def validate_hard_constraint_checks(
         if verification_mode not in {"direct", "tool"}:
             issues.append(ConstraintValidationIssue("invalid_constraint_verification_mode", constraint_id))
             continue
-        if check.get("status") != "satisfied":
-            issues.append(ConstraintValidationIssue("constraint_not_satisfied", constraint_id))
-            continue
 
+        code_issues: list[ConstraintValidationIssue] = []
         actual_value = check.get("actual_value")
         actual_unit = check.get("actual_unit")
         if not constraint_satisfied(constraint, actual_value, actual_unit=actual_unit):
-            issues.append(ConstraintValidationIssue("constraint_comparison_failed", constraint_id))
+            code_issues.append(ConstraintValidationIssue("constraint_comparison_failed", constraint_id))
 
         parameter_values = check.get("parameter_values")
         if not isinstance(parameter_values, dict):
             issues.append(ConstraintValidationIssue("invalid_constraint_parameter_values", constraint_id))
+            continue
         else:
             for name, value in parameter_values.items():
                 if name not in deployment_parameters or not _values_equal(deployment_parameters[name], value):
-                    issues.append(
+                    code_issues.append(
                         ConstraintValidationIssue("constraint_parameter_mismatch", constraint_id, str(name))
                     )
 
@@ -119,15 +118,21 @@ def validate_hard_constraint_checks(
             if isinstance(item, dict) and _values_equal(item.get("actual_value"), actual_value)
         ]
         if not matching_evidence:
-            issues.append(ConstraintValidationIssue("constraint_evidence_value_mismatch", constraint_id))
+            code_issues.append(ConstraintValidationIssue("constraint_evidence_value_mismatch", constraint_id))
         tool_evidence = [item for item in evidence if isinstance(item, dict) and item.get("type") == "tool"]
         if verification_mode == "tool":
             if not tool_evidence:
-                issues.append(ConstraintValidationIssue("missing_tool_evidence", constraint_id))
+                code_issues.append(ConstraintValidationIssue("missing_tool_evidence", constraint_id))
             elif not any(_values_equal(item.get("actual_value"), actual_value) for item in tool_evidence):
-                issues.append(ConstraintValidationIssue("tool_evidence_value_mismatch", constraint_id))
+                code_issues.append(ConstraintValidationIssue("tool_evidence_value_mismatch", constraint_id))
         if validate_tool_records:
-            issues.extend(_validate_tool_evidence(constraint_id, tool_evidence, tool_result_records or []))
+            code_issues.extend(_validate_tool_evidence(constraint_id, tool_evidence, tool_result_records or []))
+
+        llm_passed = check.get("status") == "satisfied"
+        code_passed = not code_issues
+        if not (llm_passed or code_passed):
+            issues.append(ConstraintValidationIssue("constraint_not_satisfied", constraint_id))
+            issues.extend(code_issues)
 
     for constraint_id in checks_by_id.keys() - expected.keys():
         issues.append(ConstraintValidationIssue("unexpected_constraint_check", constraint_id))

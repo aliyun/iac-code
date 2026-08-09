@@ -54,6 +54,7 @@ from iac_code.tools.cloud.aliyun.openmeta import MetadataFetch, ProductMetadata,
 from iac_code.tools.cloud.aliyun.result_contract import serialize_business_result
 from iac_code.tools.cloud.aliyun.retry_policy import RetryBudget, RetryExhausted, RetryReason, TransportFailure
 from iac_code.tools.cloud.aliyun.runtime import create_aliyun_runtime_services
+from tests.tools.cloud.aliyun._ecs_ram_role_fakes import FakeEcsRuntime
 
 _UPSTREAM_OPENAPI_UTCNOW_WARNING = pytest.mark.filterwarnings(
     "ignore:datetime\\.datetime\\.utcnow\\(\\) is deprecated and scheduled for removal in a future version\\.:"
@@ -322,6 +323,131 @@ async def test_transport_credential_resolver_assumes_ram_role_asynchronously() -
         "role-secret",
         "role-sts",
     )
+
+
+def test_tea_client_uses_the_shared_dynamic_client_for_ecs_ram_role(fake_ecs_runtime: FakeEcsRuntime) -> None:
+    from iac_code.tools.cloud.aliyun import acs3_transport as transport_module
+
+    client = transport_module._tea_client(endpoint(), fake_ecs_runtime.credential())
+
+    provider = client._credential.cloud_credential.provider
+    assert type(provider).__name__ == "EcsRamRoleProviderAdapter"
+    assert provider.get_provider_name() == "ecs_ram_role"
+    # Signing material comes from metadata, not from a static (possibly empty) AccessKey.
+    signing = client._credential.get_credential()
+    assert (signing.access_key_id, signing.security_token) == ("STS.fake-ecs-ak", "fake-ecs-sts")
+    # The same process-wide provider backs a second client.
+    second = transport_module._tea_client(endpoint(), fake_ecs_runtime.credential())
+    assert second._credential.cloud_credential.provider is provider
+    assert len(fake_ecs_runtime.providers) == 1
+
+
+@pytest.mark.asyncio
+async def test_ecs_credential_resolution_runs_off_the_event_loop(fake_ecs_runtime: FakeEcsRuntime) -> None:
+    from iac_code.tools.cloud.aliyun import acs3_transport as transport_module
+
+    loop_thread = threading.get_ident()
+
+    resolved = await transport_module.resolve_signing_credential(fake_ecs_runtime.credential())
+
+    assert resolved.mode == "StsToken"
+    assert (resolved.access_key_id, resolved.access_key_secret, resolved.sts_token) == (
+        "STS.fake-ecs-ak",
+        "fake-ecs-secret",
+        "fake-ecs-sts",
+    )
+    # The requested region must survive the swap so endpoint binding stays correct.
+    assert resolved.region_id == "cn-shanghai"
+    provider = fake_ecs_runtime.providers[0]
+    assert provider.call_threads and all(ident != loop_thread for ident in provider.call_threads)
+    assert provider.async_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_ecs_metadata_failure_surfaces_a_stable_code_before_the_business_request(
+    fake_ecs_runtime: FakeEcsRuntime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from iac_code.services.providers import aliyun_credentials_runtime as runtime_module
+
+    monkeypatch.setenv("ALIBABA_CLOUD_ECS_METADATA_DISABLED", "true")
+    sent: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, headers={"content-type": "application/json"}, json={"ok": True})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=False)
+    try:
+        with pytest.raises(ValueError) as raised:
+            await Acs3StreamingTransport(client=client).execute(
+                contract=contract(),
+                request=built_request(),
+                endpoint=endpoint(),
+                credential=fake_ecs_runtime.credential(),
+                context=ToolContext(),
+                budget=budget(),
+            )
+    finally:
+        await client.aclose()
+
+    assert str(raised.value) == runtime_module.ECS_METADATA_DISABLED
+    # Resolution failed before anything was put on the wire.
+    assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_acs3_transport_signs_with_ecs_metadata_credential(fake_ecs_runtime: FakeEcsRuntime) -> None:
+    sent: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, headers={"content-type": "application/json"}, json={"ok": True})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=False)
+    try:
+        await Acs3StreamingTransport(client=client).execute(
+            contract=contract(),
+            request=built_request(),
+            endpoint=endpoint(),
+            credential=fake_ecs_runtime.credential(),
+            context=ToolContext(),
+            budget=budget(),
+        )
+    finally:
+        await client.aclose()
+
+    assert "Credential=STS.fake-ecs-ak" in sent[0].headers["authorization"]
+    assert sent[0].headers["x-acs-security-token"] == "fake-ecs-sts"
+    # An empty AccessKey must never reach the wire in this mode.
+    assert "Credential=," not in sent[0].headers["authorization"]
+
+
+@pytest.mark.asyncio
+async def test_acs1_transport_signs_with_ecs_metadata_credential(fake_ecs_runtime: FakeEcsRuntime) -> None:
+    built: list[AliyunCredential] = []
+
+    class FakeClient:
+        def do_action_with_exception(self, request: Any) -> bytes:
+            return b'{"Regions":[]}'
+
+    def client_factory(signing_credential: AliyunCredential, region_id: str) -> FakeClient:
+        built.append(signing_credential)
+        assert region_id == "cn-shanghai"
+        return FakeClient()
+
+    await Acs1Transport(client_factory=client_factory).execute(
+        contract=replace(contract(), signature_scheme="acs1"),
+        request=built_request(),
+        endpoint=endpoint(),
+        credential=fake_ecs_runtime.credential(),
+        context=ToolContext(),
+        budget=budget(),
+    )
+
+    assert built[0].mode == "StsToken"
+    assert built[0].sts_token == "fake-ecs-sts"
+    assert built[0].access_key_id == "STS.fake-ecs-ak"
 
 
 @pytest.mark.asyncio
@@ -2211,6 +2337,68 @@ async def test_tea_adapter_uses_oss_gateway_xml_contract_for_hcs_mgw() -> None:
     assert fake.params.req_body_type == "xml"
     assert fake.params.body_type == "xml"
     assert fake.request.host_map == {"userid": "xx"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", ["ecs_metadata_unreachable", "ecs_imdsv2_required"])
+async def test_tea_gateway_credential_failure_keeps_the_stable_code(code: str) -> None:
+    """A gateway signs inside the SDK, so the credential failure arrives wrapped.
+
+    Nothing was sent, so it must not be reported as a transport outcome: the stable code
+    has to survive for the tool's public error mapping.
+    """
+
+    class FakeSlsClient:
+        async def execute_async(self, params: Any, request: Any, runtime: Any) -> dict[str, Any]:
+            del params, request, runtime
+            raise UnretryableException(RetryPolicyContext(http_request=TeaRequest(), exception=ValueError(code)))
+
+    shared_budget = budget()
+    with pytest.raises(ValueError) as caught:
+        await TeaTransportAdapter(client_factory=lambda _endpoint, _credential: FakeSlsClient()).execute(
+            contract=replace(contract(), product="Sls", version="2020-12-30", action="ListProject", transport="tea"),
+            request=built_request(),
+            endpoint=EndpointResolution(
+                endpoint="cn-hangzhou.log.aliyuncs.com",
+                source="location",
+                host_template=None,
+                expected_host="cn-hangzhou.log.aliyuncs.com",
+                region_id="cn-hangzhou",
+            ),
+            credential=credential(),
+            context=ToolContext(),
+            budget=shared_budget,
+        )
+
+    assert type(caught.value) is ValueError
+    assert str(caught.value) == code
+    assert shared_budget.attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_tea_gateway_failure_with_a_code_shaped_message_stays_a_transport_failure() -> None:
+    class FakeSlsClient:
+        async def execute_async(self, params: Any, request: Any, runtime: Any) -> dict[str, Any]:
+            del params, request, runtime
+            raise UnretryableException(
+                RetryPolicyContext(http_request=TeaRequest(), exception=RuntimeError("ecs_metadata_unreachable"))
+            )
+
+    with pytest.raises(TransportFailure):
+        await TeaTransportAdapter(client_factory=lambda _endpoint, _credential: FakeSlsClient()).execute(
+            contract=replace(contract(), product="Sls", version="2020-12-30", action="ListProject", transport="tea"),
+            request=built_request(),
+            endpoint=EndpointResolution(
+                endpoint="cn-hangzhou.log.aliyuncs.com",
+                source="location",
+                host_template=None,
+                expected_host="cn-hangzhou.log.aliyuncs.com",
+                region_id="cn-hangzhou",
+            ),
+            credential=credential(),
+            context=ToolContext(),
+            budget=budget(),
+        )
 
 
 @pytest.mark.asyncio

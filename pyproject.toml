@@ -30,7 +30,11 @@ dependencies = [
     "alibabacloud-oss-v2>=1.2,<2",
     "aiohttp>=3.10,<4",
     "defusedxml>=0.7,<1",
-    "alibabacloud-credentials>=0.3.0",
+    # >=1.0.8 for EcsRamRoleCredentialsProvider(async_update_enabled=...) and
+    # refreshable Credentials.get_expiration(), both required by the ECS RAM Role runtime.
+    "alibabacloud-credentials>=1.0.8",
+    # ICredentialsProvider is implemented directly by EcsRamRoleProviderAdapter.
+    "alibabacloud-credentials-api>=1.0.0",
     "loguru>=0.7.0",
     "opentelemetry-distro>=0.48b0",
     "opentelemetry-exporter-otlp>=1.27.0",

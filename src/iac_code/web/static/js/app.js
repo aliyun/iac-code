@@ -1,9 +1,9 @@
-import * as api from "./api.js?v=web-repl-ui-310";
+import * as api from "./api.js?v=web-repl-ui-311";
 import { createComposerController } from "./components/composer.js?v=session-model-v19";
 import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v5";
 import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v7";
 import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v23";
-import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v56";
+import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v57";
 import { createOutputController } from "./components/output_panel.js?v=output-panel-v23";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
 import { reduceEvent } from "./events.js?v=web-repl-ui-319";

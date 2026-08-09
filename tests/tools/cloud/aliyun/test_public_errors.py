@@ -8,6 +8,15 @@ from pathlib import Path
 import pytest
 from babel.messages.pofile import read_po
 
+from iac_code.services.providers.aliyun_credentials_runtime import (
+    ECS_CREDENTIAL_ERROR_CODES,
+    ECS_IMDSV2_REQUIRED,
+    ECS_METADATA_DISABLED,
+    ECS_METADATA_UNREACHABLE,
+    ECS_RAM_ROLE_NOT_FOUND,
+    ECS_RAM_ROLE_REFRESH_FAILED,
+    ECS_RAM_ROLE_RESPONSE_INVALID,
+)
 from iac_code.tools.cloud.aliyun.api_contract import ApiContractError
 from iac_code.tools.cloud.aliyun.public_errors import public_aliyun_error
 
@@ -138,6 +147,18 @@ def test_aliyun_public_error_templates_are_directly_extractable(tmp_path: Path) 
         "No trusted Alibaba Cloud endpoint is available for {operation} in {region}. "
         "Check the region or endpoint configuration.",
         "Alibaba Cloud API authorization expired or changed. Run {operation} again to approve the current contract.",
+        "Alibaba Cloud ECS instance metadata service is unreachable, so {operation} cannot be signed. "
+        "Confirm this process runs on an ECS instance with a bound RAM role.",
+        "Alibaba Cloud ECS instance metadata credentials are disabled, so {operation} cannot be signed. "
+        "Check the ALIBABA_CLOUD_ECS_METADATA_DISABLED environment variable.",
+        "Alibaba Cloud ECS metadata token (IMDSv2) could not be obtained while IMDSv1 is disabled, "
+        "so {operation} cannot be signed. Check the instance metadata settings and network.",
+        "No matching Alibaba Cloud ECS instance RAM role was found, so {operation} cannot be signed. "
+        "Check the instance RAM role and the configured ECS RAM role name.",
+        "Alibaba Cloud ECS instance metadata returned incomplete RAM role credentials, "
+        "so {operation} cannot be signed. Retry and check the ECS metadata service.",
+        "Alibaba Cloud ECS instance RAM role credentials could not be refreshed before they expired, "
+        "so {operation} cannot be signed. Check ECS metadata availability.",
     }
     assert msgids == required
 
@@ -247,3 +268,71 @@ def test_product_not_found_suggestions_are_sanitized_and_bounded() -> None:
     )
     assert "unsafe/value" not in message
     assert "Rds" not in message
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        (
+            ECS_METADATA_UNREACHABLE,
+            "Alibaba Cloud ECS instance metadata service is unreachable, so Ros/CreateStack cannot be signed. "
+            "Confirm this process runs on an ECS instance with a bound RAM role.",
+        ),
+        (
+            ECS_METADATA_DISABLED,
+            "Alibaba Cloud ECS instance metadata credentials are disabled, so Ros/CreateStack cannot be signed. "
+            "Check the ALIBABA_CLOUD_ECS_METADATA_DISABLED environment variable.",
+        ),
+        (
+            ECS_IMDSV2_REQUIRED,
+            "Alibaba Cloud ECS metadata token (IMDSv2) could not be obtained while IMDSv1 is disabled, so "
+            "Ros/CreateStack cannot be signed. Check the instance metadata settings and network.",
+        ),
+        (
+            ECS_RAM_ROLE_NOT_FOUND,
+            "No matching Alibaba Cloud ECS instance RAM role was found, so Ros/CreateStack cannot be signed. "
+            "Check the instance RAM role and the configured ECS RAM role name.",
+        ),
+        (
+            ECS_RAM_ROLE_RESPONSE_INVALID,
+            "Alibaba Cloud ECS instance metadata returned incomplete RAM role credentials, so Ros/CreateStack "
+            "cannot be signed. Retry and check the ECS metadata service.",
+        ),
+        (
+            ECS_RAM_ROLE_REFRESH_FAILED,
+            "Alibaba Cloud ECS instance RAM role credentials could not be refreshed before they expired, so "
+            "Ros/CreateStack cannot be signed. Check ECS metadata availability.",
+        ),
+    ],
+)
+def test_ecs_credential_errors_are_actionable(code: str, expected: str) -> None:
+    assert public_aliyun_error(code, product="Ros", action="CreateStack", region_id="cn-hangzhou") == expected
+
+
+def test_every_ecs_credential_code_has_a_dedicated_public_message() -> None:
+    messages = {
+        code: public_aliyun_error(code, product="Ros", action="CreateStack") for code in ECS_CREDENTIAL_ERROR_CODES
+    }
+
+    # No code may fall through to a generic message, and no two codes may collide.
+    assert len(set(messages.values())) == len(ECS_CREDENTIAL_ERROR_CODES)
+    for code, message in messages.items():
+        assert code not in message
+        assert "Ros/CreateStack" in message
+        assert message.endswith(".")
+
+
+def test_ecs_credential_errors_never_echo_metadata_content() -> None:
+    """A metadata-bearing upstream failure must not reach the user through this mapping."""
+    sdk_error = ValueError(
+        "Failed to get RAM session credentials from ECS metadata service. "
+        "HttpCode=404, url=http://100.100.100.200/latest/meta-data/ram/security-credentials/secret-role-name, "
+        'ResponseBody={"AccessKeyId":"STS.leaked","AccessKeySecret":"leaked-secret","SecurityToken":"leaked-token"}'
+    )
+
+    message = public_aliyun_error(ECS_RAM_ROLE_NOT_FOUND, product="Ros", action="CreateStack")
+
+    for secret in ("100.100.100.200", "secret-role-name", "STS.leaked", "leaked-secret", "leaked-token", "404"):
+        assert secret not in message
+    # Sanity check: the redaction holds because the code, not the upstream text, drives the message.
+    assert str(sdk_error) not in message

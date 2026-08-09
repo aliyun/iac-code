@@ -269,6 +269,42 @@ def public_aliyun_error(
             "Alibaba Cloud endpoint cache could not be updated for {operation} in {region}. "
             "Check local configuration storage and retry."
         ).format(operation=operation, region=safe_region)
+    # ECS RAM Role credential failures. These must be registered before the generic
+    # credential and fallback branches: `ecs_*` matches neither "credential" in code
+    # nor code.startswith("auth_"), so each needs its own actionable message. Only an
+    # allowed carrier may reach them, so a code-shaped message on some unrelated
+    # exception keeps falling through to the generic text below.
+    ecs_code = _ecs_credential_code(error)
+    if ecs_code == "ecs_metadata_unreachable":
+        return _(
+            "Alibaba Cloud ECS instance metadata service is unreachable, so {operation} cannot be signed. "
+            "Confirm this process runs on an ECS instance with a bound RAM role."
+        ).format(operation=operation)
+    if ecs_code == "ecs_metadata_disabled":
+        return _(
+            "Alibaba Cloud ECS instance metadata credentials are disabled, so {operation} cannot be signed. "
+            "Check the ALIBABA_CLOUD_ECS_METADATA_DISABLED environment variable."
+        ).format(operation=operation)
+    if ecs_code == "ecs_imdsv2_required":
+        return _(
+            "Alibaba Cloud ECS metadata token (IMDSv2) could not be obtained while IMDSv1 is disabled, "
+            "so {operation} cannot be signed. Check the instance metadata settings and network."
+        ).format(operation=operation)
+    if ecs_code == "ecs_ram_role_not_found":
+        return _(
+            "No matching Alibaba Cloud ECS instance RAM role was found, so {operation} cannot be signed. "
+            "Check the instance RAM role and the configured ECS RAM role name."
+        ).format(operation=operation)
+    if ecs_code == "ecs_ram_role_response_invalid":
+        return _(
+            "Alibaba Cloud ECS instance metadata returned incomplete RAM role credentials, "
+            "so {operation} cannot be signed. Retry and check the ECS metadata service."
+        ).format(operation=operation)
+    if ecs_code == "ecs_ram_role_refresh_failed":
+        return _(
+            "Alibaba Cloud ECS instance RAM role credentials could not be refreshed before they expired, "
+            "so {operation} cannot be signed. Check ECS metadata availability."
+        ).format(operation=operation)
     if "endpoint" in code:
         return _(
             "No trusted Alibaba Cloud endpoint is available for {operation} in {region}. "
@@ -455,6 +491,24 @@ def public_aliyun_unsupported_reasons(
 
     messages = [public_aliyun_error(reason, product=product, action=action) for reason in reasons]
     return list(dict.fromkeys(messages))
+
+
+def _ecs_credential_code(error: BaseException | str) -> str | None:
+    """Return the ECS credential code only when `error` is an allowed carrier.
+
+    An explicit stable code string, and the exception carriers the credential runtime
+    actually uses (`ValueError`/`ApiContractError` whose message is exactly a stable code,
+    or the one Darabonba envelope directly around such a `ValueError`), may reach the
+    `ecs_*` branches. A `RuntimeError` or a bare `Exception` with the same message must
+    not, even though `str(error)` matches.
+    """
+
+    if isinstance(error, str):
+        return error
+    # Imported here so this module stays free of the credential runtime at import time.
+    from iac_code.tools.cloud.aliyun.ecs_credential_errors import ecs_credential_error_code
+
+    return ecs_credential_error_code(error)
 
 
 def _is_oss_unsupported_reason(code: str) -> bool:

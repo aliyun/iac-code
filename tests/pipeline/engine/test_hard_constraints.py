@@ -25,10 +25,18 @@ def _constraint(**overrides):
     return constraint
 
 
-def _check(constraint, *, actual_value=120, actual_unit="GiB", parameter_values=None, evidence=None):
+def _check(
+    constraint,
+    *,
+    status="satisfied",
+    actual_value=120,
+    actual_unit="GiB",
+    parameter_values=None,
+    evidence=None,
+):
     return {
         "constraint": constraint,
-        "status": "satisfied",
+        "status": status,
         "actual_value": actual_value,
         "actual_unit": actual_unit,
         "parameter_values": parameter_values or {"Storage": actual_value},
@@ -104,19 +112,64 @@ def test_validate_checks_covers_constraints_and_binds_final_parameters():
 
     issues = validate_hard_constraint_checks(
         [constraint],
-        [_check(constraint)],
+        [_check(constraint, status="unresolved")],
         {"Storage": 80},
     )
-    assert [issue.code for issue in issues] == ["constraint_parameter_mismatch"]
+    assert [issue.code for issue in issues] == ["constraint_not_satisfied", "constraint_parameter_mismatch"]
+
+
+def test_validate_checks_accepts_llm_pass_when_code_verification_fails():
+    constraint = _constraint(verification_mode="tool")
+    check = _check(
+        constraint,
+        evidence=[
+            {
+                "type": "tool",
+                "summary": "preview contains only a VSwitch",
+                "tool_name": "ros_preview_template",
+                "result_path": "Stack.Resources",
+                "actual_value": 0,
+            }
+        ],
+    )
+    records = [
+        {
+            "tool_name": "ros_preview_template",
+            "input": {},
+            "result": {"Stack": {"Resources": [{"ResourceType": "ALIYUN::ECS::VSwitch"}]}},
+            "is_error": False,
+        }
+    ]
+
+    assert validate_hard_constraint_checks(
+        [constraint],
+        [check],
+        {"Storage": 120},
+        tool_result_records=records,
+    ) == []
+
+
+def test_validate_checks_accepts_code_pass_when_llm_does_not_pass():
+    constraint = _constraint()
+    check = _check(constraint, status="unresolved")
+
+    assert validate_hard_constraint_checks([constraint], [check], {"Storage": 120}) == []
 
 
 def test_validate_checks_requires_actual_value_on_direct_evidence():
     constraint = _constraint()
-    check = _check(constraint, evidence=[{"type": "template", "summary": "resolved property"}])
+    check = _check(
+        constraint,
+        status="unresolved",
+        evidence=[{"type": "template", "summary": "resolved property"}],
+    )
 
     issues = validate_hard_constraint_checks([constraint], [check], {"Storage": 120})
 
-    assert [issue.code for issue in issues] == ["constraint_evidence_value_mismatch"]
+    assert [issue.code for issue in issues] == [
+        "constraint_not_satisfied",
+        "constraint_evidence_value_mismatch",
+    ]
 
 
 def test_validate_checks_accepts_empty_constraint_set_without_deployment_parameters():
@@ -125,9 +178,9 @@ def test_validate_checks_accepts_empty_constraint_set_without_deployment_paramet
 
 def test_tool_verification_mode_requires_evidence_backed_by_a_real_tool_result():
     constraint = _constraint(verification_mode="tool")
-    direct_check = _check(constraint)
+    direct_check = _check(constraint, status="unresolved")
     issues = validate_hard_constraint_checks([constraint], [direct_check], {"Storage": 120})
-    assert [issue.code for issue in issues] == ["missing_tool_evidence"]
+    assert [issue.code for issue in issues] == ["constraint_not_satisfied", "missing_tool_evidence"]
 
     tool_evidence = {
         "type": "tool",
@@ -154,7 +207,11 @@ def test_tool_verification_mode_requires_evidence_backed_by_a_real_tool_result()
         tool_result_records=records,
     ) == []
 
-    mismatched_check = _check(constraint, evidence=[{**tool_evidence, "actual_value": 80}])
+    mismatched_check = _check(
+        constraint,
+        status="unresolved",
+        evidence=[{**tool_evidence, "actual_value": 80}],
+    )
     issues = validate_hard_constraint_checks(
         [constraint],
         [mismatched_check],
@@ -162,16 +219,18 @@ def test_tool_verification_mode_requires_evidence_backed_by_a_real_tool_result()
         tool_result_records=records,
     )
     assert {issue.code for issue in issues} == {
+        "constraint_not_satisfied",
         "constraint_evidence_value_mismatch",
         "tool_evidence_value_mismatch",
         "tool_evidence_not_found",
     }
 
     records[0]["result"] = {"Items": [{"Storage": 80}]}
+    unresolved_tool_check = _check(constraint, status="unresolved", evidence=[tool_evidence])
     issues = validate_hard_constraint_checks(
         [constraint],
-        [tool_check],
+        [unresolved_tool_check],
         {"Storage": 120},
         tool_result_records=records,
     )
-    assert [issue.code for issue in issues] == ["tool_evidence_not_found"]
+    assert [issue.code for issue in issues] == ["constraint_not_satisfied", "tool_evidence_not_found"]

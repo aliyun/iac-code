@@ -338,6 +338,38 @@ SESSION_BACKUP_USER_VISIBLE_MSGIDS = {
     "unknown",
 }
 
+# ECS instance RAM role strings that gettext cannot be guarded for by the data-table
+# check below: the two REPL strings are free-standing literals, and the six public
+# error templates are the only user-facing explanation of an unsignable request.
+ECS_RAM_ROLE_USER_VISIBLE_MSGIDS = {
+    "Auto-detect from ECS metadata",
+    "Leave blank to auto-detect from ECS metadata",
+    (
+        "Alibaba Cloud ECS instance metadata service is unreachable, so {operation} cannot be signed. "
+        "Confirm this process runs on an ECS instance with a bound RAM role."
+    ),
+    (
+        "Alibaba Cloud ECS instance metadata credentials are disabled, so {operation} cannot be signed. "
+        "Check the ALIBABA_CLOUD_ECS_METADATA_DISABLED environment variable."
+    ),
+    (
+        "Alibaba Cloud ECS metadata token (IMDSv2) could not be obtained while IMDSv1 is disabled, "
+        "so {operation} cannot be signed. Check the instance metadata settings and network."
+    ),
+    (
+        "No matching Alibaba Cloud ECS instance RAM role was found, so {operation} cannot be signed. "
+        "Check the instance RAM role and the configured ECS RAM role name."
+    ),
+    (
+        "Alibaba Cloud ECS instance metadata returned incomplete RAM role credentials, "
+        "so {operation} cannot be signed. Retry and check the ECS metadata service."
+    ),
+    (
+        "Alibaba Cloud ECS instance RAM role credentials could not be refreshed before they expired, "
+        "so {operation} cannot be signed. Check ECS metadata availability."
+    ),
+}
+
 ROS_DEPLOYMENT_REJECTION_MSGID = (
     "ROS pipeline calls for {action} must use the dedicated ros_deploy tool instead of aliyun_api. "
     "Do not call the raw ROS deployment API directly."
@@ -1027,6 +1059,32 @@ def test_aliyun_credential_labels_are_translatable():
     assert not missing_or_empty_by_language, "Aliyun credential labels missing translations: {}".format(
         missing_or_empty_by_language
     )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
+def test_ecs_ram_role_user_visible_translations_are_complete():
+    """The ECS RAM role hint and credential failure messages must be localized everywhere."""
+    assert POT_FILE.exists(), f"POT file not found at {POT_FILE}"
+    pot_msgids = _get_all_msgids_from_pot(POT_FILE)
+    missing_from_pot = sorted(ECS_RAM_ROLE_USER_VISIBLE_MSGIDS - pot_msgids)
+    assert not missing_from_pot, "ECS RAM role msgids missing from messages.pot: {}".format(missing_from_pot)
+
+    errors = []
+    for lang_dir in _discover_language_dirs():
+        translations = _get_all_translations_from_po(lang_dir / "LC_MESSAGES" / "messages.po")
+        for msgid in sorted(ECS_RAM_ROLE_USER_VISIBLE_MSGIDS):
+            msgstr = translations.get(msgid, "").strip()
+            if not msgstr:
+                errors.append(f"{lang_dir.name}: missing translation for {msgid!r}")
+            elif msgstr == msgid:
+                errors.append(f"{lang_dir.name}: untranslated placeholder for {msgid!r}")
+            elif _format_fields(msgstr) != _format_fields(msgid):
+                errors.append(
+                    f"{lang_dir.name}: format fields changed for {msgid!r}: "
+                    f"expected {sorted(_format_fields(msgid))}, got {sorted(_format_fields(msgstr))}"
+                )
+
+    assert not errors, "\n".join(errors)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")

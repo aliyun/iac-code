@@ -253,6 +253,7 @@ class _Handler(BaseHTTPRequestHandler):
                         "cloud_platform": "aliyun",
                         "business_type": "network",
                         "core_requirements": [f"create one {product}"],
+                        "hard_constraints": [],
                         "resource_intents": [{"product": product, "action": "create", "source": "user"}],
                         "non_functional": {"region_preference": "cn-hangzhou"},
                     }
@@ -273,6 +274,7 @@ class _Handler(BaseHTTPRequestHandler):
                                 "resource_intents": [
                                     {"product": product, "action": "create", "source": "user"}
                                 ],
+                                "hard_constraints": [],
                                 "topology": (
                                     "One VSwitch in an existing VPC" if is_vswitch else "One isolated VPC"
                                 ),
@@ -322,6 +324,7 @@ class _Handler(BaseHTTPRequestHandler):
                         "resources": [{"type": product, "cost": "¥0/月"}],
                         "template_fixed": False,
                         "deployment_parameters": {},
+                        "hard_constraint_checks": [],
                         "preview_validation": {
                             "succeeded": False,
                             "error": f"not required for free {product}",

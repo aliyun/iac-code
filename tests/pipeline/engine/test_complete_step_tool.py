@@ -341,6 +341,7 @@ class TestCompletionGuards:
 
         without_tool_evidence = dict(conclusion)
         direct_check = dict(conclusion["hard_constraint_checks"][0])
+        direct_check["status"] = "unresolved"
         direct_check["evidence"] = [
             {"type": "context", "summary": "copied requirement", "actual_value": 120}
         ]
@@ -351,6 +352,9 @@ class TestCompletionGuards:
 
         mismatched = dict(conclusion)
         mismatched["deployment_parameters"] = {"DBInstanceStorage": 80}
+        mismatched_check = dict(conclusion["hard_constraint_checks"][0])
+        mismatched_check["status"] = "unresolved"
+        mismatched["hard_constraint_checks"] = [mismatched_check]
         error = tool.validate_completion_input({"conclusion": mismatched})
         assert error is not None
         assert "constraint_parameter_mismatch" in error

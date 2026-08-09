@@ -1258,13 +1258,13 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-315" in html
-    assert "/static/js/app.js?v=web-repl-ui-332" in html
+    assert "/static/js/app.js?v=web-repl-ui-333" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
     # 已归档面板复刻(archived tab)新增 listArchivedSessions/deleteArchivedSessions,
     # 同样需 bump api.js 版本位,否则回访浏览器拿不到新导出。
-    assert "./api.js?v=web-repl-ui-310" in app_source
+    assert "./api.js?v=web-repl-ui-311" in app_source
     assert "./components/composer.js?v=session-model-v19" in app_source
     # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
     assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
@@ -1292,10 +1292,13 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-332" in index_html
+    assert "web-repl-ui-333" in index_html
+    assert "web-repl-ui-332" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-319" in app_source
-    assert "./components/workspace.js?v=cloud-creds-v56" in app_source
+    assert "./components/workspace.js?v=cloud-creds-v57" in app_source
+    # ECS RAM Role 面板改动后旧 token 不得残留,否则回访浏览器仍加载旧缓存 workspace.js。
+    assert "./components/workspace.js?v=cloud-creds-v56" not in app_source
     assert "workspace-cloud-vendors" in workspace_source
     assert "Alibaba Cloud" in workspace_source
     assert "workspace-cloud-mode-fields" in workspace_source
@@ -7774,7 +7777,7 @@ def test_workspace_cloud_panel_prefills_secrets_and_resets_on_mode_switch() -> N
 def test_app_wires_workspace_controls_to_current_session() -> None:
     source = _source(APP_JS)
 
-    workspace_import = 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v56";'
+    workspace_import = 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v57";'
     assert workspace_import in source
     assert "workspace = createWorkspaceController" in source
     assert 'tabs: byShell("workspace-tabs")' in source
@@ -8945,6 +8948,7 @@ def test_workspace_cloud_save_uses_secret_inputs_and_redacted_summary(tmp_path) 
             "stsExpiration": "",
             "ramRoleArn": "",
             "ramSessionName": "",
+            "ramRoleName": "",
             "oauthSiteType": "",
             "oauthAccessToken": "",
             "oauthRefreshToken": "",
@@ -9132,11 +9136,229 @@ def test_workspace_cloud_save_gates_stale_secrets_after_mode_switch(tmp_path) ->
     assert payload["stsExpiration"] == ""
     assert payload["ramRoleArn"] == ""
     assert payload["ramSessionName"] == ""
-    # 恰好 13 个键
-    assert len(payload) == 13
+    assert payload["ramRoleName"] == ""
+    # 恰好 14 个键
+    assert len(payload) == 14
     # 旧的明文 AK 不得出现在任何字段中
     assert "fake-cloud-secret" not in str(payload)
     assert "LTAI-fake" not in str(payload)
+
+
+def test_workspace_cloud_ecs_ram_role_round_trips_the_role_name(tmp_path) -> None:
+    output = _run_workspace_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            import { createWorkspaceController } from __WORKSPACE_MODULE__;
+
+            class ClassList {
+              constructor(owner) {
+                this.owner = owner;
+              }
+              toggle(name, force) {
+                const items = new Set((this.owner.className || "").split(/\\s+/).filter(Boolean));
+                if (force) {
+                  items.add(name);
+                } else {
+                  items.delete(name);
+                }
+                this.owner.className = [...items].join(" ");
+              }
+              add(name) {
+                const items = new Set((this.owner.className || "").split(/\\s+/).filter(Boolean));
+                items.add(name);
+                this.owner.className = [...items].join(" ");
+              }
+              remove(name) {
+                const items = new Set((this.owner.className || "").split(/\\s+/).filter(Boolean));
+                items.delete(name);
+                this.owner.className = [...items].join(" ");
+              }
+            }
+
+            function selectorMatches(node, selector) {
+              const match = selector.match(/^(?:(\\w+))?\\[data-([\\w-]+)(?:="([^"]*)")?\\]$/);
+              if (!match) {
+                return false;
+              }
+              const [, tagName, dataName, expected] = match;
+              if (tagName && node.tagName !== tagName.toUpperCase()) {
+                return false;
+              }
+              const key = dataName.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
+              return key in node.dataset && (expected === undefined || node.dataset[key] === expected);
+            }
+
+            class Element {
+              constructor(tagName) {
+                this.tagName = tagName.toUpperCase();
+                this.children = [];
+                this.dataset = {};
+                this.attributes = {};
+                this.listeners = {};
+                this.textContent = "";
+                this.className = "";
+                this.value = "";
+                this.checked = false;
+                this.disabled = false;
+                this.hidden = false;
+                this.classList = new ClassList(this);
+              }
+              append(...children) {
+                this.children.push(...children);
+              }
+              replaceChildren(...children) {
+                this.children = children;
+              }
+              setAttribute(name, value) {
+                this.attributes[name] = String(value);
+              }
+              addEventListener(type, handler) {
+                this.listeners[type] = [...(this.listeners[type] || []), handler];
+              }
+              click() {
+                for (const handler of this.listeners.click || []) {
+                  handler({ type: "click", target: this });
+                }
+              }
+              querySelectorAll(selector) {
+                const matches = [];
+                const visit = (node) => {
+                  if (selectorMatches(node, selector)) {
+                    matches.push(node);
+                  }
+                  for (const child of node.children || []) {
+                    visit(child);
+                  }
+                };
+                visit(this);
+                return matches;
+              }
+              querySelector(selector) {
+                return this.querySelectorAll(selector)[0] || null;
+              }
+              get options() {
+                return this.children;
+              }
+            }
+
+            function required(selector, root) {
+              const node = root.querySelector(selector);
+              if (!node) {
+                throw new Error(`missing ${selector}`);
+              }
+              return node;
+            }
+
+            const tabs = new Element("nav");
+            const content = new Element("div");
+            globalThis.document = {
+              createElement(tagName) {
+                return new Element(tagName);
+              },
+            };
+
+            const saves = [];
+            const api = {
+              getProviders() {
+                return Promise.resolve({
+                  active: { provider: "openai", model: "gpt-5.5", effort: "high", apiBase: null, hasApiKey: false },
+                  providers: [{ key: "openai", name: "OpenAI", models: [{ id: "gpt-5.5", efforts: ["high"] }] }],
+                });
+              },
+              getAliyunCloud() {
+                return Promise.resolve({
+                  configured: true,
+                  mode: "EcsRamRole",
+                  region: "cn-hangzhou",
+                  expiration: null,
+                  ramRoleName: "fake-ecs-role",
+                  detected: {
+                    source: "cli",
+                    mode: "EcsRamRole",
+                    region: "cn-hangzhou",
+                    accessKeyId: "",
+                    hasAccessKeySecret: false,
+                    hasStsToken: false,
+                    ramRoleArn: "",
+                    ramSessionName: "",
+                    ramRoleName: "detected-fake-role",
+                    oauthSiteType: "",
+                  },
+                });
+              },
+              saveAliyunCloud(payload) {
+                saves.push(payload);
+                return Promise.resolve({
+                  configured: true,
+                  mode: payload.mode,
+                  region: payload.region,
+                  expiration: null,
+                  ramRoleName: payload.ramRoleName || null,
+                });
+              },
+              saveActiveProvider() {
+                return Promise.resolve({ active: {} });
+              },
+            };
+
+            const controller = createWorkspaceController({ tabs, content }, api);
+            controller.setSession("A", { webSessionId: "A", mode: "normal" });
+            controller.setActiveTab("cloud");
+            await new Promise((resolve) => setTimeout(resolve, 0));
+
+            const modeSelect = required('[data-workspace-action="workspace-cloud-mode"]', content);
+            const roleInput = required('[data-workspace-action="workspace-cloud-ram-role-name"]', content);
+            // 已保存的显式角色名经 savedCloud 回填输入框(与密钥字段同一约定)。
+            const prefilled = roleInput.value;
+            const modeLabels = modeSelect.children.map((option) => option.textContent);
+            const collectText = (node) => {
+              let text = node.textContent || "";
+              for (const child of node.children || []) {
+                text += collectText(child);
+              }
+              return text;
+            };
+            const hintText = collectText(content).includes("detected-fake-role");
+
+            // 清空角色名并保存:空值必须原样提交,代表切回 IMDS 自动发现。
+            roleInput.value = "";
+            required('[data-workspace-action="workspace-cloud-save"]', content).click();
+            await new Promise((resolve) => setTimeout(resolve, 0));
+
+            // 切到 AK 模式:持久输入框仍持有角色名,payload 不得把它带出 ECS 模式。
+            roleInput.value = "stale-fake-role";
+            modeSelect.value = "AK";
+            required('[data-workspace-action="workspace-cloud-save"]', content).click();
+            await new Promise((resolve) => setTimeout(resolve, 0));
+
+            console.log(JSON.stringify({ saves, prefilled, modeLabels, hintText, clearedInput: roleInput.value }));
+            """
+        ),
+    )
+
+    # 已保存的角色名回填到输入框,便于就地编辑。
+    assert output["prefilled"] == "fake-ecs-role"
+    # 认证方式下拉带 ECS RAM Role 选项,且排在 RAM Role 之后、OAuth 之前。
+    labels = output["modeLabels"]
+    assert "ECS RAM Role" in labels
+    assert labels.index("RAM role") < labels.index("ECS RAM Role") < labels.index("OAuth browser login")
+    # 探测到的 aliyun CLI 角色名作为字段提示出现。
+    assert output["hintText"] is True
+
+    saves = output["saves"]
+    assert isinstance(saves, list) and len(saves) == 2
+    # 清空后 ramRoleName 必须以空字符串提交,不能被「有值才写」的过滤吞掉。
+    assert saves[0]["mode"] == "EcsRamRole"
+    assert saves[0]["ramRoleName"] == ""
+    assert saves[0]["accessKeyId"] == ""
+    assert saves[0]["accessKeySecret"] == ""
+    assert len(saves[0]) == 14
+    # 切到 AK 后旧角色名不得残留。
+    assert saves[1]["mode"] == "AK"
+    assert saves[1]["ramRoleName"] == ""
+    assert "stale-fake-role" not in str(saves[1])
+    assert len(saves[1]) == 14
 
 
 def test_workspace_cloud_region_accepts_manual_free_text(tmp_path) -> None:
@@ -9517,6 +9739,61 @@ def test_api_cloud_region_only_save_omits_empty_secret_fields(tmp_path) -> None:
     )
 
     assert output == {"url": "/api/cloud/aliyun", "body": {"mode": "AK", "region": "cn-beijing"}}
+
+
+def test_api_ecs_ram_role_save_keeps_the_empty_role_name_on_the_wire(tmp_path) -> None:
+    """An emptied ECS RAM role name must reach the backend so it can clear the stored one.
+
+    `ramRoleName` is not an optional field: if it were filtered out like the secrets above,
+    clearing the role name in the Web/Desktop form would silently keep the old value
+    instead of switching back to IMDS auto-discovery.
+    """
+    output = _run_api_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            import { saveAliyunCloud } from __API_MODULE__;
+
+            const calls = [];
+            globalThis.fetch = async (url, options) => {
+              calls.push({ url, body: JSON.parse(options.body) });
+              return {
+                ok: true,
+                headers: { get: () => "application/json" },
+                json: async () => ({
+                  configured: true,
+                  mode: "EcsRamRole",
+                  region: "cn-beijing",
+                  expiration: null,
+                }),
+              };
+            };
+
+            await saveAliyunCloud({
+              mode: "EcsRamRole",
+              region: "cn-beijing",
+              ramRoleName: "",
+              accessKeyId: "",
+              accessKeySecret: "",
+              stsToken: "",
+              ramRoleArn: "",
+              ramSessionName: "",
+              oauthSiteType: "",
+              oauthAccessToken: "",
+              oauthRefreshToken: "",
+              oauthAccessTokenExpire: "",
+              oauthRefreshTokenExpire: "",
+            });
+
+            console.log(JSON.stringify(calls[0]));
+            """
+        ),
+    )
+
+    assert output == {
+        "url": "/api/cloud/aliyun",
+        "body": {"mode": "EcsRamRole", "region": "cn-beijing", "ramRoleName": ""},
+    }
 
 
 def test_workspace_legacy_memory_search_and_delete_use_dom_controls(tmp_path) -> None:
@@ -10028,8 +10305,8 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-332" in html
-    assert "web-repl-ui-331" not in html
+    assert "web-repl-ui-333" in html
+    assert "web-repl-ui-332" not in html
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:
@@ -10263,7 +10540,8 @@ def test_styles_define_review_step_prerequisite_progress() -> None:
 
 def test_app_uses_bumped_api_version_for_outputs() -> None:
     source = _source(APP_JS)
-    assert "./api.js?v=web-repl-ui-310" in source
+    assert "./api.js?v=web-repl-ui-311" in source
+    assert "./api.js?v=web-repl-ui-310" not in source
     assert "./api.js?v=web-repl-ui-159" not in source
 
 

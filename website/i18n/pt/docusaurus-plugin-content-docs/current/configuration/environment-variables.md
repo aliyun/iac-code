@@ -32,6 +32,11 @@ Consulte [Provedores de LLM](./llm-providers.md) para detalhes sobre os provedor
 | `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | AccessKey Secret |
 | `ALIBABA_CLOUD_SECURITY_TOKEN` | Token STS; muda o modo de credencial para STS quando definido |
 | `ALIBABA_CLOUD_REGION_ID` | Regiao padrao |
+| `ALIBABA_CLOUD_ECS_METADATA` | Nome opcional da função RAM do ECS; usado quando o modo já é `EcsRamRole` e nenhum nome foi salvo, mas não seleciona o modo por si só |
+| `ALIBABA_CLOUD_ECS_METADATA_DISABLED` | Defina como `true` para desabilitar as credenciais de metadados da instância ECS |
+| `ALIBABA_CLOUD_IMDSV1_DISABLED` | Defina como `true` para exigir IMDSv2 e impedir fallback para IMDSv1 |
+
+As variáveis de metadados do ECS só se aplicam depois que o modo de credencial for configurado como `EcsRamRole`. O nome da função salvo no IaC Code tem prioridade sobre `ALIBABA_CLOUD_ECS_METADATA`; se nenhum dos dois estiver definido, o nome será detectado por meio do IMDS.
 
 Consulte [Credenciais da Alibaba Cloud](./alibaba-cloud-credentials.md) para mais detalhes.
 

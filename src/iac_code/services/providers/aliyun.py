@@ -15,7 +15,7 @@ DEFAULT_REGION = "cn-hangzhou"
 DEFAULT_ALIYUN_CLI_CONFIG_PATH = os.path.expanduser("~/.aliyun/config.json")
 
 # Credential modes matching aliyun CLI
-CREDENTIAL_MODES = ["AK", "StsToken", "RamRoleArn", "OAuth"]
+CREDENTIAL_MODES = ["AK", "StsToken", "RamRoleArn", "EcsRamRole", "OAuth"]
 
 # Fields definition for each credential mode
 # Each field: (name, label, sensitive)
@@ -36,6 +36,11 @@ MODE_FIELDS: dict[str, list[tuple[str, str, bool]]] = {
         ("ram_role_arn", "RAM Role ARN", False),
         ("ram_session_name", "Session Name", False),
     ],
+    "EcsRamRole": [
+        # 角色名非敏感且可留空(留空时由 ECS 元数据服务自动发现),label 保持简洁字面量:
+        # 「留空自动发现」提示由 TUI/Web 作为独立可翻译文案单独追加。
+        ("ram_role_name", "ECS RAM Role Name", False),
+    ],
     "OAuth": [
         ("oauth_site_type", "OAuth Site Type", False),
         ("oauth_access_token", "OAuth Access Token", True),
@@ -54,7 +59,29 @@ MODE_DISPLAY_NAMES: dict[str, str] = {
     "AK": "AccessKey",
     "StsToken": "STS Token",
     "RamRoleArn": "RAM Role",
+    "EcsRamRole": "ECS RAM Role",
     "OAuth": "OAuth Login (Browser)",
+}
+
+# Required subset of MODE_FIELDS per mode. EcsRamRole's role name is optional
+# (empty means "auto-detect from ECS metadata"), so callers must not treat every
+# declared field as mandatory.
+MODE_REQUIRED_FIELDS: dict[str, set[str]] = {
+    "AK": {"access_key_id", "access_key_secret"},
+    "StsToken": {"access_key_id", "access_key_secret", "sts_token", "sts_expiration"},
+    "RamRoleArn": {"access_key_id", "access_key_secret", "ram_role_arn", "ram_session_name"},
+    "EcsRamRole": set(),
+    "OAuth": {
+        "oauth_site_type",
+        "oauth_access_token",
+        "oauth_refresh_token",
+        "oauth_access_token_expire",
+        "oauth_refresh_token_expire",
+        "access_key_id",
+        "access_key_secret",
+        "sts_token",
+        "sts_expiration",
+    },
 }
 
 
@@ -68,6 +95,8 @@ class AliyunCredential:
     sts_expiration: int = 0
     ram_role_arn: str = ""
     ram_session_name: str = ""
+    # ECS instance RAM role name; empty means "discover from ECS metadata".
+    ram_role_name: str = ""
     oauth_site_type: str = ""
     oauth_access_token: str = ""
     oauth_refresh_token: str = ""
@@ -94,6 +123,18 @@ def mask_sensitive(value: str) -> str:
     if not value:
         return ""
     return "*" * len(value)
+
+
+def _ecs_ram_role_credential(region_id: Any, ram_role_name: Any) -> AliyunCredential:
+    """Build an EcsRamRole credential carrying only mode, region and role name.
+
+    Signing for this mode is decided by ``mode`` alone: any AK/SK/STS/RamRoleArn/OAuth
+    leftovers in the source YAML or aliyun CLI profile are dropped here so downstream
+    call sites can never fall back to a static (possibly empty) AccessKey.
+    """
+    region = region_id if isinstance(region_id, str) and region_id else DEFAULT_REGION
+    role_name = ram_role_name if isinstance(ram_role_name, str) else ""
+    return AliyunCredential(mode="EcsRamRole", region_id=region, ram_role_name=role_name)
 
 
 def _is_short_lived_access_token_sts_exchange_error(error: Exception) -> bool:
@@ -228,6 +269,12 @@ class AliyunCredentials:
         if mode not in CREDENTIAL_MODES:
             return None
 
+        if mode == "EcsRamRole":
+            return _ecs_ram_role_credential(
+                aliyun_data.get("region_id", DEFAULT_REGION),
+                aliyun_data.get("ram_role_name", ""),
+            )
+
         return AliyunCredential(
             mode=mode,
             access_key_id=aliyun_data.get("access_key_id", ""),
@@ -278,6 +325,15 @@ class AliyunCredentials:
             return None
 
         mode = profile.get("mode", "AK")
+        # aliyun CLI 的 EcsRamRole profile 必须被显式识别:否则它会落入下面的通用分支,
+        # 被当成「已配置但 AK 为空」的凭证,后续请求用空 AK 签名。本期只特判该 mode,
+        # 其他未支持的 aliyun-cli mode 保持既有行为。
+        if mode == "EcsRamRole":
+            return _ecs_ram_role_credential(
+                profile.get("region_id", DEFAULT_REGION),
+                profile.get("ram_role_name", ""),
+            )
+
         try:
             sts_expiration = int(profile.get("sts_expiration") or 0)
             oauth_access_token_expire = int(profile.get("oauth_access_token_expire") or 0)
@@ -349,6 +405,12 @@ class AliyunCredentials:
         cloud_creds["aliyun"] = aliyun_data
         _save_yaml(path, cloud_creds)
 
+        # The dynamic-credential runtime caches one provider per (mode, role name, IMDSv1
+        # policy); a saved configuration change must not keep serving the old provider.
+        from iac_code.services.providers.aliyun_credentials_runtime import invalidate_aliyun_credential_runtime
+
+        invalidate_aliyun_credential_runtime()
+
     @staticmethod
     def _save_to_aliyun_cli_format(credential: AliyunCredential, config_path: str) -> None:
         """Save credentials in aliyun CLI JSON format (for testing)."""
@@ -376,6 +438,7 @@ class AliyunCredentials:
             "sts_expiration": credential.sts_expiration,
             "ram_role_arn": credential.ram_role_arn,
             "ram_session_name": credential.ram_session_name,
+            "ram_role_name": credential.ram_role_name,
             "oauth_site_type": credential.oauth_site_type,
             "oauth_access_token": credential.oauth_access_token,
             "oauth_refresh_token": credential.oauth_refresh_token,
