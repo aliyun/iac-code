@@ -392,6 +392,13 @@ def test_create_agent_runtime_a2a_safe_mode_filters_tools_and_skips_mcp(tmp_path
         "aliyun_doc_search",
         "aliyun_api_doc",
         "ros_stack",
+        "ros_stack_instances",
+        "ros_stack_group",
+        "ros_template",
+        "ros_template_scratch",
+        "ros_diagnostic",
+        "ros_resource_type_registration",
+        "ros_tag",
         "skill",
         "read_memory",
         "write_memory",
@@ -405,7 +412,6 @@ def test_create_agent_runtime_a2a_safe_mode_filters_tools_and_skips_mcp(tmp_path
         "task_list",
         "task_get",
         "task_stop",
-        "ros_stack_instances",
         "list_mcp_resources",
         "read_mcp_resource",
     }.intersection(names)
@@ -489,7 +495,13 @@ def test_a2a_safe_mode_keeps_cloud_tool_refresh_filtered(tmp_path, monkeypatch) 
     assert runtime.tool_registry.get("aliyun_api_doc") is not None
     assert runtime.tool_registry.get("aliyun_api") is not None
     assert runtime.tool_registry.get("ros_stack") is not None
-    assert runtime.tool_registry.get("ros_stack_instances") is None
+    assert runtime.tool_registry.get("ros_stack_instances") is not None
+    assert runtime.tool_registry.get("ros_stack_group") is not None
+    assert runtime.tool_registry.get("ros_template") is not None
+    assert runtime.tool_registry.get("ros_template_scratch") is not None
+    assert runtime.tool_registry.get("ros_diagnostic") is not None
+    assert runtime.tool_registry.get("ros_resource_type_registration") is not None
+    assert runtime.tool_registry.get("ros_tag") is not None
 
     refresh_runtime_cloud_tools(runtime)
 
@@ -497,7 +509,13 @@ def test_a2a_safe_mode_keeps_cloud_tool_refresh_filtered(tmp_path, monkeypatch) 
     assert runtime.tool_registry.get("aliyun_api_doc") is not None
     assert runtime.tool_registry.get("aliyun_api") is not None
     assert runtime.tool_registry.get("ros_stack") is not None
-    assert runtime.tool_registry.get("ros_stack_instances") is None
+    assert runtime.tool_registry.get("ros_stack_instances") is not None
+    assert runtime.tool_registry.get("ros_stack_group") is not None
+    assert runtime.tool_registry.get("ros_template") is not None
+    assert runtime.tool_registry.get("ros_template_scratch") is not None
+    assert runtime.tool_registry.get("ros_diagnostic") is not None
+    assert runtime.tool_registry.get("ros_resource_type_registration") is not None
+    assert runtime.tool_registry.get("ros_tag") is not None
 
 
 @pytest.mark.asyncio

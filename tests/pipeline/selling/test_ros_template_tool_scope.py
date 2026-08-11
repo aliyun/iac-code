@@ -19,6 +19,14 @@ ROS_TEMPLATE_TOOLS = {
     "ros_preview_template",
     "ros_estimate_template_cost",
 }
+ROS_CONSOLE_LIFECYCLE_TOOLS = {
+    "ros_stack_group",
+    "ros_template",
+    "ros_template_scratch",
+    "ros_diagnostic",
+    "ros_resource_type_registration",
+    "ros_tag",
+}
 
 
 def _selling_dir() -> Path:
@@ -199,6 +207,25 @@ def test_deploying_step_excludes_raw_ros_stack_from_base_registry(monkeypatch):
     assert deploying_registry.get("ros_deploy") is not None
     assert deploying_registry.get("ros_stack") is None
     assert deploying_registry.get("aliyun_api") is not None
+
+
+def test_full_base_selling_steps_exclude_ros_console_lifecycle_tools(monkeypatch):
+    monkeypatch.setenv("IAC_CODE_PIPELINE_SELLING_ENABLE_REVIEWING", "true")
+    loaded = load_pipeline_dir(_selling_dir())
+    evaluate_steps = loaded.sub_pipelines["evaluate_candidate"].steps
+    base_registry = ToolRegistry()
+    for tool_name in ROS_CONSOLE_LIFECYCLE_TOOLS:
+        base_registry.register(_NamedTool(tool_name))
+
+    steps = [
+        _step_by_id(evaluate_steps, "template_generating"),
+        _step_by_id(evaluate_steps, "cost_estimating"),
+        _step_by_id(loaded.steps, "deploying"),
+    ]
+
+    for step in steps:
+        registry = _registry_for_step(loaded, step, base_registry=base_registry)
+        assert {name for name in ROS_CONSOLE_LIFECYCLE_TOOLS if registry.get(name) is not None} == set()
 
 
 def test_cost_step_keeps_aliyun_api_for_external_hard_constraint_evidence(monkeypatch):

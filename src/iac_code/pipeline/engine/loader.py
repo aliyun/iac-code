@@ -147,9 +147,7 @@ def _parse_completion_guards(raw: object, step_id: str) -> list[dict[str, Any]]:
         unknown_keys = set(guard) - _SUPPORTED_COMPLETION_GUARD_KEYS
         if unknown_keys:
             formatted = ", ".join(sorted(str(key) for key in unknown_keys))
-            raise ValueError(
-                f"Step '{step_id}': completion_guards[{index}] has unsupported keys: {formatted}"
-            )
+            raise ValueError(f"Step '{step_id}': completion_guards[{index}] has unsupported keys: {formatted}")
         guards.append(cast(dict[str, Any], guard))
     return guards
 

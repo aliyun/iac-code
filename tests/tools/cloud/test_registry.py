@@ -13,17 +13,25 @@ from iac_code.tools.cloud.registry import (
 
 def runtime_services() -> SimpleNamespace:
     delegated: list[tuple[str, object]] = []
+    action_groups: list[tuple[object, object]] = []
 
     def delegated_executor_factory(action: str) -> object:
         executor = SimpleNamespace(action=action)
         delegated.append((action, executor))
         return executor
 
+    def action_group_executor_factory(spec: object) -> object:
+        executor = SimpleNamespace(spec=spec)
+        action_groups.append((spec, executor))
+        return executor
+
     return SimpleNamespace(
         openmeta=object(),
         contract_resolver=object(),
         delegated_executor_factory=delegated_executor_factory,
+        action_group_executor_factory=action_group_executor_factory,
         delegated=delegated,
+        action_groups=action_groups,
     )
 
 
@@ -47,6 +55,12 @@ def test_exact_anonymous_and_credential_gated_groups() -> None:
         "ros_estimate_template_cost",
         "ros_stack",
         "ros_stack_instances",
+        "ros_stack_group",
+        "ros_template",
+        "ros_template_scratch",
+        "ros_diagnostic",
+        "ros_resource_type_registration",
+        "ros_tag",
     )
 
 
@@ -81,6 +95,16 @@ def test_add_remove_and_repeated_refresh_preserve_anonymous_and_services_identit
         "PreviewStack",
         "GetTemplateEstimateCost",
     ]
+    assert [spec.public_tool_name for spec, _ in services.action_groups] == [
+        "ros_stack_group",
+        "ros_template",
+        "ros_template_scratch",
+        "ros_diagnostic",
+        "ros_resource_type_registration",
+        "ros_tag",
+    ]
+    for spec, executor in services.action_groups:
+        assert registry.get(spec.public_tool_name)._delegated_executor is executor
 
     register_cloud_tools(registry, present, services)
     assert names(registry) == set(ANONYMOUS_ALIYUN_TOOL_NAMES + CREDENTIAL_GATED_ALIYUN_TOOL_NAMES)

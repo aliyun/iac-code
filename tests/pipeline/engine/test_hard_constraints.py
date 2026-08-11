@@ -40,8 +40,7 @@ def _check(
         "actual_value": actual_value,
         "actual_unit": actual_unit,
         "parameter_values": parameter_values or {"Storage": actual_value},
-        "evidence": evidence
-        or [{"type": "template", "summary": "resolved property", "actual_value": actual_value}],
+        "evidence": evidence or [{"type": "template", "summary": "resolved property", "actual_value": actual_value}],
     }
 
 
@@ -87,9 +86,7 @@ def test_collect_hard_constraints_uses_latest_constraint_version_by_id():
         (_constraint(operator="ne", value=False, unit=None), 0, None, True),
     ],
 )
-def test_constraint_satisfied_uses_generic_operators_and_units(
-    constraint, actual_value, actual_unit, expected
-):
+def test_constraint_satisfied_uses_generic_operators_and_units(constraint, actual_value, actual_unit, expected):
     if constraint.get("unit") is None:
         constraint.pop("unit")
     assert constraint_satisfied(constraint, actual_value, actual_unit=actual_unit) is expected
@@ -141,12 +138,15 @@ def test_validate_checks_accepts_llm_pass_when_code_verification_fails():
         }
     ]
 
-    assert validate_hard_constraint_checks(
-        [constraint],
-        [check],
-        {"Storage": 120},
-        tool_result_records=records,
-    ) == []
+    assert (
+        validate_hard_constraint_checks(
+            [constraint],
+            [check],
+            {"Storage": 120},
+            tool_result_records=records,
+        )
+        == []
+    )
 
 
 def test_validate_checks_accepts_code_pass_when_llm_does_not_pass():
@@ -200,12 +200,15 @@ def test_tool_verification_mode_requires_evidence_backed_by_a_real_tool_result()
             "is_error": False,
         }
     ]
-    assert validate_hard_constraint_checks(
-        [constraint],
-        [tool_check],
-        {"Storage": 120},
-        tool_result_records=records,
-    ) == []
+    assert (
+        validate_hard_constraint_checks(
+            [constraint],
+            [tool_check],
+            {"Storage": 120},
+            tool_result_records=records,
+        )
+        == []
+    )
 
     mismatched_check = _check(
         constraint,

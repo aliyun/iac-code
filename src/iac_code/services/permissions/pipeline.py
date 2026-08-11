@@ -30,14 +30,20 @@ _STICKY_ASK_REASONS = frozenset(
 )
 
 
-def _is_explicit_aliyun_write_allow(result: PermissionResult, tool: Tool) -> bool:
+def _is_explicit_operation_write_allow(result: PermissionResult, tool: Tool) -> bool:
     return (
-        tool.name == "aliyun_api"
+        _uses_operation_scoped_permissions(tool)
         and result.behavior == "allow"
         and result.audit is not None
         and result.audit.is_read_only is not True
         and result.audit.reason_type == "rule"
     )
+
+
+def _uses_operation_scoped_permissions(tool: Tool) -> bool:
+    """Read the optional capability without breaking legacy duck-typed tools."""
+
+    return bool(getattr(tool, "uses_operation_scoped_permissions", False))
 
 
 def _get_tool_rule(tool_name: str, rules_by_source: dict[str, list[str]]) -> tuple[str, str] | None:
@@ -174,13 +180,13 @@ async def check_tool_permission(
             ),
         )
 
-    if tool.name == "aliyun_api" and _is_sticky_ask(result):
+    if _uses_operation_scoped_permissions(tool) and _is_sticky_ask(result):
         return _with_prompt_audit(tool, input, result)
 
     if (
         context.mode == PermissionMode.BYPASS_PERMISSIONS
         and not _is_safety_check_ask(result)
-        and not _is_explicit_aliyun_write_allow(result, tool)
+        and not _is_explicit_operation_write_allow(result, tool)
     ):
         return replace(
             result,

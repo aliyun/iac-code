@@ -17,6 +17,12 @@ CREDENTIAL_GATED_ALIYUN_TOOL_NAMES = (
     "ros_estimate_template_cost",
     "ros_stack",
     "ros_stack_instances",
+    "ros_stack_group",
+    "ros_template",
+    "ros_template_scratch",
+    "ros_diagnostic",
+    "ros_resource_type_registration",
+    "ros_tag",
 )
 ALIYUN_TOOL_NAMES = ANONYMOUS_ALIYUN_TOOL_NAMES + CREDENTIAL_GATED_ALIYUN_TOOL_NAMES
 
@@ -44,6 +50,14 @@ def register_cloud_tools(
         return
 
     from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
+    from iac_code.tools.cloud.aliyun.ros_lifecycle import (
+        RosDiagnosticTool,
+        RosResourceTypeRegistrationTool,
+        RosStackGroupTool,
+        RosTagTool,
+        RosTemplateScratchTool,
+        RosTemplateTool,
+    )
     from iac_code.tools.cloud.aliyun.ros_stack import RosStack
     from iac_code.tools.cloud.aliyun.ros_stack_instances import RosStackInstances
     from iac_code.tools.cloud.aliyun.ros_template_tools import (
@@ -54,6 +68,7 @@ def register_cloud_tools(
     )
 
     delegated = services.delegated_executor_factory
+    action_group = services.action_group_executor_factory
     registry.register(AliyunApi(services=services))
     registry.register(RosValidateTemplateTool(delegated_executor=delegated("ValidateTemplate")))
     registry.register(
@@ -63,3 +78,11 @@ def register_cloud_tools(
     registry.register(RosEstimateTemplateCostTool(delegated_executor=delegated("GetTemplateEstimateCost")))
     registry.register(RosStack())
     registry.register(RosStackInstances())
+    registry.register(RosStackGroupTool(delegated_executor=action_group(RosStackGroupTool.operation_spec)))
+    registry.register(RosTemplateTool(delegated_executor=action_group(RosTemplateTool.operation_spec)))
+    registry.register(RosTemplateScratchTool(delegated_executor=action_group(RosTemplateScratchTool.operation_spec)))
+    registry.register(RosDiagnosticTool(delegated_executor=action_group(RosDiagnosticTool.operation_spec)))
+    registry.register(
+        RosResourceTypeRegistrationTool(delegated_executor=action_group(RosResourceTypeRegistrationTool.operation_spec))
+    )
+    registry.register(RosTagTool(delegated_executor=action_group(RosTagTool.operation_spec)))

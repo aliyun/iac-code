@@ -12,6 +12,7 @@ from darabonba.policy.retry import RetryPolicyContext
 from Tea.exceptions import UnretryableException as LegacyTeaUnretryableException
 from Tea.request import TeaRequest
 
+import iac_code.tools.cloud.aliyun.retry_policy as retry_policy_module
 from iac_code.tools.cloud.aliyun.retry_policy import (
     RetryBudget,
     RetryExhausted,
@@ -32,6 +33,21 @@ class FakeClock:
 
     def __call__(self) -> float:
         return self.value
+
+
+class ControlledTimeoutAsyncio:
+    """Delegate asyncio operations except for one deterministic timeout."""
+
+    def __init__(self, operation_started: asyncio.Event) -> None:
+        self._operation_started = operation_started
+
+    def __getattr__(self, name: str):
+        return getattr(asyncio, name)
+
+    async def wait(self, futures, *, timeout):
+        del timeout
+        await self._operation_started.wait()
+        return set(), set(futures)
 
 
 def explicit_causes(error: BaseException) -> list[BaseException]:
@@ -250,10 +266,11 @@ async def test_retry_budget_chains_late_operation_error_to_timeout() -> None:
 
 
 @pytest.mark.asyncio
-async def test_retry_budget_preserves_timeout_before_later_parent_cancellation() -> None:
+async def test_retry_budget_preserves_timeout_before_later_parent_cancellation(monkeypatch) -> None:
     started = asyncio.Event()
     operation_cancelled = asyncio.Event()
     release_operation = asyncio.Event()
+    monkeypatch.setattr(retry_policy_module, "asyncio", ControlledTimeoutAsyncio(started))
 
     async def blocked_attempt() -> None:
         started.set()
@@ -263,7 +280,7 @@ async def test_retry_budget_preserves_timeout_before_later_parent_cancellation()
             operation_cancelled.set()
             await release_operation.wait()
 
-    budget = RetryBudget(deadline=time.monotonic() + 0.01)
+    budget = RetryBudget(deadline=time.monotonic() + 60.0)
     runner = asyncio.create_task(budget.run_attempt(blocked_attempt, retryable_call=True))
     await started.wait()
 

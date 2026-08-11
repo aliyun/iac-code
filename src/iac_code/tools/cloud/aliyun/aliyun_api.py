@@ -104,6 +104,25 @@ class _RuntimeFileAuthorization:
     permission: PermissionResult | None
 
 
+@dataclass(frozen=True)
+class AliyunPermissionRuleProfile:
+    """Public permission identity for one canonical Alibaba Cloud API call."""
+
+    public_tool_name: str = "aliyun_api"
+    fixed_product: str | None = None
+    inherit_aliyun_api_rules: bool = False
+
+
+@dataclass(frozen=True)
+class _AliyunPermissionRuleMatch:
+    source: str
+    rule_content: str
+    inherited: bool = False
+
+
+_ALIYUN_API_PERMISSION_PROFILE = AliyunPermissionRuleProfile()
+
+
 VERSION_MAP = {
     "ros": "2019-09-10",
     "ecs": "2014-05-26",
@@ -541,6 +560,31 @@ def _parse_aliyun_rule(rule: str) -> tuple[str, str] | None:
     if not (_SAFE_WILDCARD_SEGMENT.fullmatch(product_pattern) and _SAFE_WILDCARD_SEGMENT.fullmatch(action_pattern)):
         return None
     return product_pattern, action_pattern
+
+
+def _parse_profile_rule(
+    rule: str,
+    profile: AliyunPermissionRuleProfile,
+) -> tuple[str, str, str, bool] | None:
+    if profile.public_tool_name == "aliyun_api":
+        parsed = _parse_aliyun_rule(rule)
+        if parsed is None:
+            return None
+        product_pattern, action_pattern = parsed
+        return product_pattern, action_pattern, "{}:{}".format(product_pattern, action_pattern), False
+
+    prefix = "{}(".format(profile.public_tool_name)
+    if rule.startswith(prefix) and rule.endswith(")") and profile.fixed_product is not None:
+        action_pattern = rule[len(prefix) : -1]
+        if _SAFE_WILDCARD_SEGMENT.fullmatch(action_pattern):
+            return profile.fixed_product, action_pattern, action_pattern, False
+
+    if profile.inherit_aliyun_api_rules:
+        parsed = _parse_aliyun_rule(rule)
+        if parsed is not None:
+            product_pattern, action_pattern = parsed
+            return product_pattern, action_pattern, "{}:{}".format(product_pattern, action_pattern), True
+    return None
 
 
 def _literal_count(pattern: str) -> int:
@@ -1069,6 +1113,10 @@ class AliyunApi(BaseCloudApi):
     def supports_blanket_allow(self) -> bool:
         return False
 
+    @property
+    def uses_operation_scoped_permissions(self) -> bool:
+        return True
+
     def _get_default_region(self) -> str:
         if self._runtime_services is not None:
             provider = getattr(self._runtime_services, "default_region_provider", None)
@@ -1118,6 +1166,8 @@ class AliyunApi(BaseCloudApi):
         input: dict,
         *,
         contract: CanonicalWireContract | None = None,
+        permission_profile: AliyunPermissionRuleProfile = _ALIYUN_API_PERMISSION_PROFILE,
+        inherited_rule: bool = False,
     ) -> dict[str, object]:
         product = _string_value(input.get("product"))
         action = _string_value(input.get("action"))
@@ -1147,6 +1197,9 @@ class AliyunApi(BaseCloudApi):
                     "metadata_source": contract.metadata_source,
                 }
             )
+        if permission_profile.public_tool_name != self.name:
+            operation["public_tool"] = permission_profile.public_tool_name
+            operation["inherited_rule"] = inherited_rule
         return operation
 
     def _audit(
@@ -1159,6 +1212,8 @@ class AliyunApi(BaseCloudApi):
         reason: PermissionDecisionReason | None = None,
         is_read_only: bool | None = None,
         contract: CanonicalWireContract | None = None,
+        permission_profile: AliyunPermissionRuleProfile = _ALIYUN_API_PERMISSION_PROFILE,
+        inherited_rule: bool = False,
     ) -> PermissionAuditMetadata:
         return PermissionAuditMetadata(
             scope=scope,
@@ -1168,13 +1223,24 @@ class AliyunApi(BaseCloudApi):
             reason_type=reason.type if reason else None,
             reason_detail=reason.detail if reason else None,
             is_read_only=is_read_only,
-            operation=self._operation_metadata(input, contract=contract),
+            operation=self._operation_metadata(
+                input,
+                contract=contract,
+                permission_profile=permission_profile,
+                inherited_rule=inherited_rule,
+            ),
         )
 
     def _supports_persistent_allow(self, input: dict, *, is_read_only: bool) -> bool:
         return True
 
-    def _suggestion(self, input: dict, *, is_read_only: bool = False) -> list[PermissionRuleValue] | None:
+    def _suggestion(
+        self,
+        input: dict,
+        *,
+        is_read_only: bool = False,
+        permission_profile: AliyunPermissionRuleProfile = _ALIYUN_API_PERMISSION_PROFILE,
+    ) -> list[PermissionRuleValue] | None:
         if not self._supports_persistent_allow(input, is_read_only=is_read_only):
             return None
         product = _string_value(input.get("product"))
@@ -1184,7 +1250,16 @@ class AliyunApi(BaseCloudApi):
         product = _canonical_product(product)
         if not (_safe_exact_identifier(product) and _safe_exact_identifier(action)):
             return None
-        return [PermissionRuleValue(tool_name=self.name, rule_content="{}:{}".format(product, action))]
+        if permission_profile.fixed_product is not None:
+            if _canonical_product(permission_profile.fixed_product).casefold() != product.casefold():
+                return None
+            return [PermissionRuleValue(tool_name=permission_profile.public_tool_name, rule_content=action)]
+        return [
+            PermissionRuleValue(
+                tool_name=permission_profile.public_tool_name,
+                rule_content="{}:{}".format(product, action),
+            )
+        ]
 
     def _matching_rule(
         self,
@@ -1192,19 +1267,26 @@ class AliyunApi(BaseCloudApi):
         rules_by_source: dict[str, list[str]],
         *,
         require_exact: bool = False,
-    ) -> tuple[str, str] | None:
+        permission_profile: AliyunPermissionRuleProfile = _ALIYUN_API_PERMISSION_PROFILE,
+    ) -> _AliyunPermissionRuleMatch | None:
         operation = _safe_operation_identifiers(input)
         if operation is None:
             return None
         canonical_product, action = operation
-        best: tuple[tuple[tuple[int, int], tuple[int, int], int, int], str, str] | None = None
+        best: (
+            tuple[
+                tuple[tuple[int, int], tuple[int, int], int, int, int],
+                _AliyunPermissionRuleMatch,
+            ]
+            | None
+        ) = None
 
         for source, rules in rules_by_source.items():
             for index, rule in enumerate(rules):
-                parsed = _parse_aliyun_rule(rule)
+                parsed = _parse_profile_rule(rule, permission_profile)
                 if parsed is None:
                     continue
-                product_pattern, action_pattern = parsed
+                product_pattern, action_pattern, rule_content, inherited = parsed
                 if not fnmatch.fnmatchcase(canonical_product.lower(), product_pattern.lower()):
                     continue
                 if not fnmatch.fnmatchcase(action.lower(), action_pattern.lower()):
@@ -1217,15 +1299,22 @@ class AliyunApi(BaseCloudApi):
                     _side_specificity(product_pattern, canonical_product),
                     _side_specificity(action_pattern, action),
                     _RULE_SOURCE_ORDER.get(source, 0),
+                    0 if inherited else 1,
                     index,
                 )
-                rule_content = "{}:{}".format(product_pattern, action_pattern)
                 if best is None or score > best[0]:
-                    best = (score, source, rule_content)
+                    best = (
+                        score,
+                        _AliyunPermissionRuleMatch(
+                            source=source,
+                            rule_content=rule_content,
+                            inherited=inherited,
+                        ),
+                    )
 
         if best is None:
             return None
-        return best[1], best[2]
+        return best[1]
 
     async def check_permissions(self, input: dict, context=None) -> PermissionResult:
         if self._runtime_services is not None:
@@ -1248,7 +1337,7 @@ class AliyunApi(BaseCloudApi):
             match = self._matching_rule(input, rules_by_source, require_exact=behavior == "allow" and not is_read_only)
             if match is None:
                 continue
-            rule_source, rule = match
+            rule_source, rule = match.source, match.rule_content
             detail = _("matched {behavior} rule: {rule}").format(behavior=behavior, rule=rule)
             reason = PermissionDecisionReason(type="rule", detail=detail)
             return PermissionResult(
@@ -1289,6 +1378,8 @@ class AliyunApi(BaseCloudApi):
         self,
         shape: Mapping[str, Any],
         context: ToolPermissionContext,
+        *,
+        permission_profile: AliyunPermissionRuleProfile = _ALIYUN_API_PERMISSION_PROFILE,
     ) -> PermissionResult:
         """Check a model-side delegated shape against its outer invocation binding."""
 
@@ -1298,6 +1389,7 @@ class AliyunApi(BaseCloudApi):
             self.prepare_invocation_input(shape),
             context,
             allow_internal_shape=True,
+            permission_profile=permission_profile,
         )
 
     async def _check_runtime_permissions(
@@ -1306,6 +1398,7 @@ class AliyunApi(BaseCloudApi):
         context: Any,
         *,
         allow_internal_shape: bool = False,
+        permission_profile: AliyunPermissionRuleProfile = _ALIYUN_API_PERMISSION_PROFILE,
     ) -> PermissionResult:
         runtime = self._runtime_services
         if runtime is None:
@@ -1385,9 +1478,13 @@ class AliyunApi(BaseCloudApi):
                 pending_reasons.append(path_result.reason)
 
         observe("local_rules")
-        deny_match = self._matching_rule(normalized, context.deny_rules)
+        deny_match = self._matching_rule(
+            normalized,
+            context.deny_rules,
+            permission_profile=permission_profile,
+        )
         if deny_match is not None:
-            source, rule = deny_match
+            source, rule = deny_match.source, deny_match.rule_content
             detail = _("matched deny rule: {rule}").format(rule=rule)
             reason = PermissionDecisionReason(type="rule", detail=detail)
             return PermissionResult(
@@ -1402,13 +1499,19 @@ class AliyunApi(BaseCloudApi):
                     rule=rule,
                     reason=reason,
                     is_read_only=False,
+                    permission_profile=permission_profile,
+                    inherited_rule=deny_match.inherited,
                 ),
             )
         ask_source: str | None = None
         ask_rule: str | None = None
-        ask_match = self._matching_rule(normalized, context.ask_rules)
+        ask_match = self._matching_rule(
+            normalized,
+            context.ask_rules,
+            permission_profile=permission_profile,
+        )
         if ask_match is not None:
-            ask_source, ask_rule = ask_match
+            ask_source, ask_rule = ask_match.source, ask_match.rule_content
             pending_reasons.append(
                 PermissionDecisionReason(
                     type="rule",
@@ -1464,9 +1567,13 @@ class AliyunApi(BaseCloudApi):
                     return path_result
                 if path_result.behavior == "ask" and path_result.reason is not None:
                     pending_reasons.append(path_result.reason)
-            canonical_deny = self._matching_rule(canonical_normalized, context.deny_rules)
+            canonical_deny = self._matching_rule(
+                canonical_normalized,
+                context.deny_rules,
+                permission_profile=permission_profile,
+            )
             if canonical_deny is not None:
-                source, rule = canonical_deny
+                source, rule = canonical_deny.source, canonical_deny.rule_content
                 detail = _("matched deny rule: {rule}").format(rule=rule)
                 reason = PermissionDecisionReason(type="rule", detail=detail)
                 return PermissionResult(
@@ -1482,11 +1589,17 @@ class AliyunApi(BaseCloudApi):
                         reason=reason,
                         is_read_only=False,
                         contract=contract,
+                        permission_profile=permission_profile,
+                        inherited_rule=canonical_deny.inherited,
                     ),
                 )
-            canonical_ask = self._matching_rule(canonical_normalized, context.ask_rules)
+            canonical_ask = self._matching_rule(
+                canonical_normalized,
+                context.ask_rules,
+                permission_profile=permission_profile,
+            )
             if canonical_ask is not None:
-                ask_source, ask_rule = canonical_ask
+                ask_source, ask_rule = canonical_ask.source, canonical_ask.rule_content
                 pending_reasons.append(
                     PermissionDecisionReason(
                         type="rule",
@@ -1519,6 +1632,7 @@ class AliyunApi(BaseCloudApi):
             normalized,
             context.allow_rules,
             require_exact=not is_read_only,
+            permission_profile=permission_profile,
         )
         if not is_read_only and allow_match is None:
             pending_reasons.append(
@@ -1543,6 +1657,10 @@ class AliyunApi(BaseCloudApi):
                         reason=sanitized_reason,
                         is_read_only=is_read_only,
                         contract=contract,
+                        permission_profile=permission_profile,
+                        inherited_rule=bool(
+                            audit_reason.type == "rule" and ask_match is not None and ask_match.inherited
+                        ),
                     ),
                 )
             )
@@ -1579,7 +1697,11 @@ class AliyunApi(BaseCloudApi):
                 message=_("Allow {}?").format(self.user_facing_name(normalized)),
                 reason=primary,
                 reasons=reasons,
-                suggestions=self._suggestion(normalized, is_read_only=is_read_only),
+                suggestions=self._suggestion(
+                    normalized,
+                    is_read_only=is_read_only,
+                    permission_profile=permission_profile,
+                ),
                 audit=primary_audit,
                 audit_items=tuple(audit for _, audit in audit_items),
                 invocation_binding=context.invocation_binding,
@@ -1593,7 +1715,7 @@ class AliyunApi(BaseCloudApi):
         rule_source = None
         rule = None
         if allow_match is not None:
-            rule_source, rule = allow_match
+            rule_source, rule = allow_match.source, allow_match.rule_content
             scope = scope_for_rule_source(rule_source)
             reason = PermissionDecisionReason(type="rule", detail="matched allow rule: {}".format(rule))
         audit = self._audit(
@@ -1604,6 +1726,8 @@ class AliyunApi(BaseCloudApi):
             reason=reason,
             is_read_only=is_read_only,
             contract=contract,
+            permission_profile=permission_profile,
+            inherited_rule=allow_match.inherited if allow_match is not None else False,
         )
         return PermissionResult(
             behavior="allow",
@@ -2049,6 +2173,49 @@ class AliyunApi(BaseCloudApi):
             return ToolResult.error(
                 public_aliyun_error(
                     "invalid_tool_input",
+                    product=shape.get("product"),
+                    version=shape.get("version"),
+                    action=shape.get("action"),
+                    region_id=shape.get("region_id"),
+                )
+            )
+        return await self._execute_runtime(
+            api_input=self.prepare_invocation_input(shape),
+            binding_input=tool_input,
+            context=context,
+            trust_path="delegated",
+        )
+
+    async def execute_action_group(
+        self,
+        shape: Mapping[str, Any],
+        tool_input: Mapping[str, Any],
+        context: ToolContext,
+        *,
+        spec: Any,
+    ) -> ToolResult:
+        """Execute an approved multi-action specialized tool through the shared runtime."""
+
+        context.ros_preflight_outcome = None
+        if self._runtime_services is None:
+            return ToolResult.error(
+                public_aliyun_error(
+                    "aliyun_runtime_services_required",
+                    product=shape.get("product"),
+                    version=shape.get("version"),
+                    action=shape.get("action"),
+                    region_id=shape.get("region_id"),
+                )
+            )
+        if (
+            getattr(spec, "public_tool_name", None) != getattr(context.invocation_binding, "tool_name", None)
+            or not callable(getattr(spec, "validate_outer_input", None))
+            or not spec.validate_outer_input(tool_input)
+        ):
+            self._invalidate_runtime_handoff(context)
+            return ToolResult.error(
+                public_aliyun_error(
+                    "aliyun_delegated_outer_binding_required",
                     product=shape.get("product"),
                     version=shape.get("version"),
                     action=shape.get("action"),

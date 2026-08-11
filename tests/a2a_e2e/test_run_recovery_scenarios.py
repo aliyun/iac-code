@@ -207,9 +207,7 @@ def test_iac_code_web_2c4g_evidence_requires_structured_cpu_and_memory() -> None
                     "input": {"product": "ecs", "action": "DescribeInstanceTypes"},
                     "result": {
                         "InstanceTypes": {
-                            "InstanceType": [
-                                {"InstanceTypeId": "ecs.c7.large", "CpuCoreCount": 2, "MemorySize": 4}
-                            ]
+                            "InstanceType": [{"InstanceTypeId": "ecs.c7.large", "CpuCoreCount": 2, "MemorySize": 4}]
                         }
                     },
                 },

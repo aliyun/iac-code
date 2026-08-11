@@ -19,6 +19,7 @@ from iac_code.agent.message import (
 )
 from iac_code.pipeline.engine.cleanup import CLEANUP_PROMPT_METADATA_TYPE
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
+from iac_code.tools.cloud.aliyun.ros_lifecycle import RosTemplateTool
 from iac_code.tools.read_file import ReadFileTool
 from iac_code.types.stream_events import (
     TOOL_RENDER_METADATA_KEY,
@@ -426,6 +427,47 @@ class TestRendererHelpers:
         output = renderer.console.file.getvalue()
         assert "atomic compact summary" in output
         assert "mutable instance renderer" not in output
+
+    def test_ros_action_group_renders_localized_header_action_region_and_atomic_result(self):
+        registry = ToolRegistry()
+        registry.register(RosTemplateTool())
+        renderer = Renderer(make_console(), registry, status_callback=lambda: "ready")
+        metadata = {
+            "aliyun_http": {
+                "contract_version": "aliyun_body_v1",
+                "product": "ROS",
+                "version": "2019-09-10",
+                "action": "GetTemplate",
+                "status": 200,
+                "status_class": "2xx",
+                "response_mode": "json",
+                "body_format": "json",
+                "content_state": "inline_final",
+            },
+            TOOL_RENDER_METADATA_KEY: {
+                TOOL_RENDER_RESULT_COMPACT_KEY: "ROS GetTemplate succeeded (HTTP 200).",
+                TOOL_RENDER_RESULT_VERBOSE_KEY: "ROS GetTemplate succeeded (HTTP 200). RequestId: req-1.",
+            },
+        }
+        record = _ToolCallRecord(
+            tool_name="ros_template",
+            tool_input={
+                "action": "GetTemplate",
+                "params": {"TemplateId": "template-id"},
+                "region_id": "cn-hangzhou",
+            },
+            done=True,
+            result='{"RequestId":"req-1"}',
+            metadata=metadata,
+        )
+
+        header = renderer._render_tool_header(record)
+        result = renderer._render_tool_result(record)
+
+        assert "ROS Template" in header.plain
+        assert "GetTemplate cn-hangzhou" in header.plain
+        assert result is not None
+        assert "ROS GetTemplate succeeded (HTTP 200)." in result.plain
 
     @pytest.mark.asyncio
     async def test_concurrent_marked_aliyun_results_keep_atomic_render_metadata_isolated(self):

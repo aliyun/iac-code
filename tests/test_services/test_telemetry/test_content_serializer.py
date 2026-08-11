@@ -428,6 +428,34 @@ def test_serialize_tool_arguments_dict():
     assert result["cmd"] == "ls"
 
 
+def test_serialize_ros_console_lifecycle_arguments_keeps_only_presence():
+    expected = {
+        "action_present": True,
+        "params_present": True,
+        "region_id_present": True,
+    }
+    for tool_name in (
+        "ros_stack_group",
+        "ros_template",
+        "ros_template_scratch",
+        "ros_diagnostic",
+        "ros_resource_type_registration",
+        "ros_tag",
+    ):
+        result = json.loads(
+            serialize_tool_arguments(
+                {
+                    "action": "CreateSomething",
+                    "params": {"TemplateBody": "secret business body"},
+                    "region_id": "cn-hangzhou",
+                },
+                tool_name=tool_name,
+            )
+        )
+
+        assert result == expected
+
+
 def test_serialize_tool_result_object():
     result = serialize_tool_result(FakeToolResult(content="output"))
     assert "output" in result

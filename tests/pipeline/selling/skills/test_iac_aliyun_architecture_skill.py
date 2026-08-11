@@ -42,9 +42,7 @@ def test_architecture_hard_constraint_schema_describes_every_field():
     body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
     end = body.index("---", 3)
     schema = yaml.safe_load(body[3:end])["conclusion_schema"]
-    properties = schema["properties"]["candidates"]["items"]["properties"]["hard_constraints"]["items"][
-        "properties"
-    ]
+    properties = schema["properties"]["candidates"]["items"]["properties"]["hard_constraints"]["items"]["properties"]
 
     assert properties["id"]["minLength"] == 1
     assert all(value.get("description") for value in properties.values())

@@ -1,7 +1,7 @@
 import asyncio
 import threading
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
@@ -637,21 +637,32 @@ def test_web_session_runtime_exposes_session_permission_context_to_agent_loop(tm
             self.tool_registry = Mock()
             self.tool_registry.get.return_value = None
 
-    monkeypatch.setattr("iac_code.web.runtime.create_agent_runtime", lambda _options: FakeAgentRuntime())
+    monkeypatch.setattr(
+        "iac_code.web.runtime.create_session_agent_runtime_in_thread",
+        AsyncMock(return_value=FakeAgentRuntime()),
+    )
     monkeypatch.setattr("iac_code.web.runtime.load_saved_model", lambda: "fake-model")
+    monkeypatch.setattr("iac_code.web.runtime.flush_web_telemetry", AsyncMock())
 
     async def run_turn() -> tuple[dict[str, object], object]:
         manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=tmp_path / "project")
         session = manager.create_session(session_id="session-1")
+        permission_registered = asyncio.Event()
+        add_permission_request = manager.add_permission_request
+
+        def add_permission_request_with_signal(*args, **kwargs):
+            request_id = add_permission_request(*args, **kwargs)
+            permission_registered.set()
+            return request_id
+
+        monkeypatch.setattr(manager, "add_permission_request", add_permission_request_with_signal)
         runtime = WebSessionRuntime(session, manager=manager)
         turn_task = asyncio.create_task(runtime.start_turn(WebTurnRequest(text="Deploy", image_ids=[], file_refs=[])))
-        deadline = asyncio.get_running_loop().time() + 1
-        while not session.pending_permissions and asyncio.get_running_loop().time() < deadline:
-            await asyncio.sleep(0.01)
+        await asyncio.wait_for(permission_registered.wait(), timeout=5)
         assert len(session.pending_permissions) == 1
         request_id = next(iter(session.pending_permissions))
         manager.resolve_permission(request_id, {"choice": "always_allow"}, session_id=session.session_id)
-        result = await asyncio.wait_for(turn_task, timeout=1)
+        result = await asyncio.wait_for(turn_task, timeout=5)
         return result, session
 
     result, session = asyncio.run(run_turn())
@@ -785,23 +796,34 @@ def test_web_session_runtime_applies_tool_level_always_allow_for_blanket_tool(tm
             self.agent_loop = FakeAgentLoop()
             self.tool_registry = FakeRegistry()
 
-    monkeypatch.setattr("iac_code.web.runtime.create_agent_runtime", lambda _options: FakeAgentRuntime())
+    monkeypatch.setattr(
+        "iac_code.web.runtime.create_session_agent_runtime_in_thread",
+        AsyncMock(return_value=FakeAgentRuntime()),
+    )
     monkeypatch.setattr("iac_code.web.runtime.load_saved_model", lambda: "fake-model")
+    monkeypatch.setattr("iac_code.web.runtime.flush_web_telemetry", AsyncMock())
 
     async def run_turn() -> tuple[object, str]:
         manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=tmp_path / "project")
         session = manager.create_session(session_id="session-1")
+        permission_registered = asyncio.Event()
+        add_permission_request = manager.add_permission_request
+
+        def add_permission_request_with_signal(*args, **kwargs):
+            request_id = add_permission_request(*args, **kwargs)
+            permission_registered.set()
+            return request_id
+
+        monkeypatch.setattr(manager, "add_permission_request", add_permission_request_with_signal)
         runtime = WebSessionRuntime(session, manager=manager)
         turn_task = asyncio.create_task(runtime.start_turn(WebTurnRequest(text="Deploy", image_ids=[], file_refs=[])))
-        deadline = asyncio.get_running_loop().time() + 1
-        while not session.pending_permissions and asyncio.get_running_loop().time() < deadline:
-            await asyncio.sleep(0.01)
+        await asyncio.wait_for(permission_registered.wait(), timeout=5)
         permission_event = next(
             event for event in session.events.replay_after(0) if event["type"] == "permission.request"
         )
         request_id = str(permission_event["payload"]["requestId"])
         manager.resolve_permission(request_id, {"choice": "always_allow"}, session_id=session.session_id)
-        await asyncio.wait_for(turn_task, timeout=1)
+        await asyncio.wait_for(turn_task, timeout=5)
         return session, request_id
 
     session, request_id = asyncio.run(run_turn())

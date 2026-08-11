@@ -1184,6 +1184,82 @@ def test_frontend_tool_cards_group_aliyun_api_separately_and_show_product_action
     assert output["toolIds"] == ["api-1", "api-2", "shell-1"]
 
 
+def test_frontend_tool_cards_render_all_ros_action_groups_as_aliyun_apis(tmp_path) -> None:
+    output = _run_reducer_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            import { renderToolCards } from __TOOL_CARDS_MODULE__;
+
+            class Element {
+              constructor(tagName) {
+                this.tagName = tagName.toUpperCase();
+                this.children = [];
+                this.dataset = {};
+                this.textContent = "";
+                this.className = "";
+              }
+              append(...children) {
+                this.children.push(...children);
+              }
+            }
+
+            function collect(node, result = { text: [], classNames: [], toolIds: [] }) {
+              if (node.textContent) result.text.push(node.textContent);
+              if (node.className) result.classNames.push(node.className);
+              if (node.dataset?.toolUseId) result.toolIds.push(node.dataset.toolUseId);
+              for (const child of node.children || []) collect(child, result);
+              return result;
+            }
+
+            globalThis.document = {
+              createElement(tagName) {
+                return new Element(tagName);
+              },
+            };
+
+            const definitions = [
+              ["ros_stack_group", "GetStackGroup"],
+              ["ros_template", "GetTemplate"],
+              ["ros_template_scratch", "ListTemplateScratches"],
+              ["ros_diagnostic", "ListDiagnostics"],
+              ["ros_resource_type_registration", "GetResourceType"],
+              ["ros_tag", "ListTagResources"],
+            ];
+            const state = {
+              tools: Object.fromEntries(definitions.map(([toolName, action], index) => [
+                `ros-${index}`,
+                {
+                  toolUseId: `ros-${index}`,
+                  toolName,
+                  input: { action, params: {}, region_id: "cn-hangzhou" },
+                  status: "completed",
+                  result: JSON.stringify({ RequestId: `req-${index}` }),
+                },
+              ])),
+              localShell: {},
+            };
+
+            console.log(JSON.stringify(collect(renderToolCards(state, { grouped: true }))));
+            """
+        ),
+    )
+
+    rendered_text = " ".join(output["text"])
+    rendered_classes = " ".join(output["classNames"])
+    assert "Called 6 Alibaba Cloud APIs" in rendered_text
+    for action in (
+        "GetStackGroup",
+        "GetTemplate",
+        "ListTemplateScratches",
+        "ListDiagnostics",
+        "GetResourceType",
+        "ListTagResources",
+    ):
+        assert "Called ROS {}".format(action) in rendered_text
+    assert rendered_classes.count("tool-card-aliyun-api") == 6
+
+
 def test_frontend_tool_cards_render_single_shell_without_outer_group(tmp_path) -> None:
     output = _run_reducer_script(
         tmp_path,

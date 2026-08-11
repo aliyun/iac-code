@@ -151,7 +151,16 @@ sub_pipelines:
         context_fields: [candidate]
         tools:
           include: []
-          exclude: [write_memory, ros_stack, ros_stack_instances]
+          exclude:
+            - write_memory
+            - ros_stack
+            - ros_stack_instances
+            - ros_stack_group
+            - ros_template
+            - ros_template_scratch
+            - ros_diagnostic
+            - ros_resource_type_registration
+            - ros_tag
         inject_tools: [ros_validate_template]
 
       - id: reviewing
@@ -349,7 +358,17 @@ sub_pipelines:
             message_key: hard_constraint_verification_required
         tools:
           include: []
-          exclude: [bash, write_memory, ros_stack, ros_stack_instances]
+          exclude:
+            - bash
+            - write_memory
+            - ros_stack
+            - ros_stack_instances
+            - ros_stack_group
+            - ros_template
+            - ros_template_scratch
+            - ros_diagnostic
+            - ros_resource_type_registration
+            - ros_tag
         inject_tools:
           - ros_validate_template
           - ros_get_template_parameter_constraints
@@ -523,5 +542,15 @@ steps:
         message_key: deploy_wait_create_complete
     tools:
       include: []
-      exclude: [write_memory, write_file, ros_stack, ros_stack_instances]
+      exclude:
+        - write_memory
+        - write_file
+        - ros_stack
+        - ros_stack_instances
+        - ros_stack_group
+        - ros_template
+        - ros_template_scratch
+        - ros_diagnostic
+        - ros_resource_type_registration
+        - ros_tag
     inject_tools: [ros_validate_template, ros_get_template_parameter_constraints, ros_deploy]

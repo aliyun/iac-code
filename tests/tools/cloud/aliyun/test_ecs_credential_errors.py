@@ -139,9 +139,7 @@ def test_the_async_openapi_sdk_wraps_the_credential_failure(fake_ecs_runtime: Fa
     ("sdk_call", "action"),
     [
         (
-            lambda client: client.get_stack(
-                ros_models.GetStackRequest(stack_id="stack-1", region_id="cn-shanghai")
-            ),
+            lambda client: client.get_stack(ros_models.GetStackRequest(stack_id="stack-1", region_id="cn-shanghai")),
             "GetStack",
         ),
         (

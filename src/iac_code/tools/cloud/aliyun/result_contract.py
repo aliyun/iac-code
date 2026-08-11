@@ -20,6 +20,12 @@ ALIYUN_MIGRATED_RESULT_TOOLS = frozenset(
         "ros_get_template_parameter_constraints",
         "ros_preview_template",
         "ros_estimate_template_cost",
+        "ros_stack_group",
+        "ros_template",
+        "ros_template_scratch",
+        "ros_diagnostic",
+        "ros_resource_type_registration",
+        "ros_tag",
     }
 )
 

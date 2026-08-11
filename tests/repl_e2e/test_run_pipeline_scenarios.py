@@ -2666,10 +2666,7 @@ def test_selection_waiting_resume_waits_for_live_controls_before_selecting(monke
     args = runner.parse_args(["--allow-real-cloud", "--run-dir", str(tmp_path)])
     actions: list[tuple[str, str]] = []
     transcript = (
-        "● Confirm and select (4/5)\n"
-        "● Confirm and select (4/5)\n"
-        "✔ Pipeline completed\n"
-        "交换机 ID   vsw-bp1234567890\n"
+        "● Confirm and select (4/5)\n● Confirm and select (4/5)\n✔ Pipeline completed\n交换机 ID   vsw-bp1234567890\n"
     )
     _install_flow_fake_pty(monkeypatch, runner, transcript, actions, scenario="selection-waiting-resume")
     stack_owned_initial = runner._stack_creating_prompt(
