@@ -292,6 +292,11 @@ class Tool(ABC):
         return True
 
     @property
+    def uses_operation_scoped_permissions(self) -> bool:
+        """Whether this tool applies operation-level cloud permission rules."""
+        return False
+
+    @property
     def timeout(self) -> float | None:
         """Per-tool timeout in seconds. None means use the global default."""
         return None

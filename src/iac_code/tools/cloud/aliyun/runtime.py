@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import random as random_module
 import re
 from collections.abc import Awaitable, Callable, Mapping
@@ -249,6 +250,130 @@ class AliyunDelegatedExecutor:
             self._public_tool._invalidate_runtime_handoff(context)
 
 
+@dataclass(frozen=True)
+class AliyunActionGroupSpec:
+    """Immutable contract for one model-visible Alibaba Cloud action group."""
+
+    public_tool_name: str
+    product: str
+    version: str
+    actions: frozenset[str]
+    write_actions: frozenset[str]
+
+    def action(self, tool_input: Mapping[str, Any]) -> str | None:
+        value = tool_input.get("action")
+        return value if isinstance(value, str) and value in self.actions else None
+
+    def validate_outer_input(self, tool_input: Mapping[str, Any]) -> bool:
+        if set(tool_input) - {"action", "params", "region_id"}:
+            return False
+        if self.action(tool_input) is None or not isinstance(tool_input.get("params"), Mapping):
+            return False
+        region = tool_input.get("region_id")
+        return region is None or (isinstance(region, str) and bool(region))
+
+    def pipeline_write_forbidden(self, tool_input: Mapping[str, Any], *, pipeline_mode: bool) -> bool:
+        action = self.action(tool_input)
+        return pipeline_mode and action in self.write_actions
+
+    def build_call_shape(self, tool_input: Mapping[str, Any]) -> dict[str, Any]:
+        action = self.action(tool_input)
+        if action is None or not self.validate_outer_input(tool_input):
+            raise ValueError("invalid_action_group_input")
+        shape: dict[str, Any] = {
+            "product": self.product,
+            "version": self.version,
+            "action": action,
+            "params": copy.deepcopy(dict(tool_input["params"])),
+        }
+        region = tool_input.get("region_id")
+        if isinstance(region, str) and region:
+            shape["region_id"] = region
+        return shape
+
+    @property
+    def permission_profile(self):
+        from iac_code.tools.cloud.aliyun.aliyun_api import AliyunPermissionRuleProfile
+
+        return AliyunPermissionRuleProfile(
+            public_tool_name=self.public_tool_name,
+            fixed_product=self.product,
+            inherit_aliyun_api_rules=True,
+        )
+
+
+class AliyunActionGroupExecutor:
+    """Delegate one allowlisted action group through the shared Aliyun runtime."""
+
+    def __init__(self, public_tool: Any, *, spec: AliyunActionGroupSpec) -> None:
+        self._public_tool = public_tool
+        self._spec = spec
+
+    def _public_error(self, code: str, tool_input: Mapping[str, Any]) -> str:
+        return public_aliyun_error(
+            code,
+            product=self._spec.product,
+            action=tool_input.get("action"),
+            region_id=tool_input.get("region_id"),
+        )
+
+    def _valid_binding(self, tool_input: Mapping[str, Any], binding: Any) -> bool:
+        return (
+            self._spec.validate_outer_input(tool_input)
+            and isinstance(binding, InvocationBinding)
+            and binding.tool_name == self._spec.public_tool_name
+            and binding.canonical_input_sha256 == canonical_input_sha256(tool_input)
+        )
+
+    async def check_permissions(
+        self,
+        tool_input: Mapping[str, Any],
+        context: ToolPermissionContext,
+    ) -> PermissionResult:
+        if not self._valid_binding(tool_input, context.invocation_binding):
+            return PermissionResult(
+                behavior="deny",
+                message=self._public_error("aliyun_delegated_outer_binding_required", tool_input),
+            )
+        if self._spec.pipeline_write_forbidden(tool_input, pipeline_mode=context.pipeline_mode):
+            return PermissionResult(
+                behavior="deny",
+                message=self._public_error("aliyun_pipeline_write_forbidden", tool_input),
+            )
+        try:
+            shape = self._spec.build_call_shape(tool_input)
+        except (TypeError, ValueError):
+            return PermissionResult(behavior="deny", message=self._public_error("invalid_tool_input", tool_input))
+        return await self._public_tool.check_shape_permissions(
+            shape,
+            context,
+            permission_profile=self._spec.permission_profile,
+        )
+
+    async def execute(self, tool_input: Mapping[str, Any], context: ToolContext) -> ToolResult:
+        try:
+            if not self._valid_binding(tool_input, context.invocation_binding):
+                return ToolResult.error(self._public_error("aliyun_delegated_outer_binding_required", tool_input))
+            if self._spec.pipeline_write_forbidden(tool_input, pipeline_mode=context.pipeline_mode):
+                return ToolResult.error(self._public_error("aliyun_pipeline_write_forbidden", tool_input))
+            try:
+                shape = self._spec.build_call_shape(tool_input)
+            except (TypeError, ValueError):
+                return ToolResult.error(self._public_error("invalid_tool_input", tool_input))
+            delegated_context = _delegated_tool_context(context, pipeline_mode=context.pipeline_mode)
+            try:
+                return await self._public_tool.execute_action_group(
+                    shape,
+                    tool_input,
+                    delegated_context,
+                    spec=self._spec,
+                )
+            finally:
+                context.ros_preflight_outcome = delegated_context.ros_preflight_outcome
+        finally:
+            self._public_tool._invalidate_runtime_handoff(context)
+
+
 class AliyunInternalCaller:
     """Possession-based internal caller whose capability remains closure-held."""
 
@@ -302,7 +427,7 @@ def _valid_delegated_binding(tool_input: Mapping[str, Any], binding: Any, *, act
     )
 
 
-def _delegated_tool_context(context: ToolContext) -> ToolContext:
+def _delegated_tool_context(context: ToolContext, *, pipeline_mode: bool = False) -> ToolContext:
     return ToolContext(
         cwd=context.cwd,
         event_queue=context.event_queue,
@@ -312,7 +437,7 @@ def _delegated_tool_context(context: ToolContext) -> ToolContext:
         relative_read_directories=list(context.relative_read_directories),
         strict_read_directories=list(context.strict_read_directories),
         read_path_violation_behavior=context.read_path_violation_behavior,
-        pipeline_mode=False,
+        pipeline_mode=pipeline_mode,
         env_overrides=dict(context.env_overrides),
         telemetry_attributes=dict(context.telemetry_attributes),
         permission_context=context.permission_context,
@@ -344,6 +469,10 @@ class AliyunRuntimeServices:
     execution_stage_observer: Callable[[str], None] | None = None
     target_outcome_observer: Callable[[Mapping[str, Any]], None] | None = None
     delegated_executor_factory: Callable[[str], AliyunDelegatedExecutor] = field(init=False, repr=False)
+    action_group_executor_factory: Callable[[AliyunActionGroupSpec], AliyunActionGroupExecutor] = field(
+        init=False,
+        repr=False,
+    )
     internal_caller: AliyunInternalCaller = field(init=False, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
     _close_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
@@ -353,6 +482,7 @@ class AliyunRuntimeServices:
 
         public_tool = AliyunApi(services=self)
         self.delegated_executor_factory = lambda action: AliyunDelegatedExecutor(public_tool, action=action)
+        self.action_group_executor_factory = lambda spec: AliyunActionGroupExecutor(public_tool, spec=spec)
         self.internal_caller = bind_aliyun_internal_caller(public_tool)
 
     async def aclose(self) -> None:

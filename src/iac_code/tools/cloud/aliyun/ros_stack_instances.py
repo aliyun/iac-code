@@ -161,7 +161,9 @@ class RosStackInstances(Tool):
         """Poll the current status of a stack group operation."""
         request = ros_models.GetStackGroupOperationRequest(operation_id=operation_id, region_id=region)
         response = await asyncio.to_thread(client.get_stack_group_operation, request)
-        return response.body.to_map().get("Status", "RUNNING")
+        data = response.body.to_map()
+        operation = data.get("StackGroupOperation") or {}
+        return operation.get("Status") or data.get("Status", "RUNNING")
 
     async def _get_instances(self, client: Any, stack_group_name: str, region: str) -> list[InstanceStatus]:
         """Get the current list of stack instances for a stack group."""
@@ -186,8 +188,10 @@ class RosStackInstances(Tool):
         if action not in self.supported_actions:
             return ToolResult.error(f"Invalid action '{action}'. Supported actions: {self.supported_actions}")
 
-        params = tool_input.get("params") or {}
+        params = dict(tool_input.get("params") or {})
         region = self._resolve_region(tool_input)
+        if region:
+            params.setdefault("RegionId", region)
         stack_group_name = params.get("StackGroupName", "")
 
         try:

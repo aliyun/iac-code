@@ -164,7 +164,7 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
     assert "--access-token-file /root/.iac-code/web-access.token" in script
     assert "useradd" not in script
     assert "/var/lib/iac-code" not in script
-    assert 'AGENTS_FILE=/root/AGENTS.md' in script
+    assert "AGENTS_FILE=/root/AGENTS.md" in script
     assert "用户提到的“本机”“这台机器”“当前服务器”“当前 ECS”均指此实例" in script
     assert "- 实例 ID：`${LocalInstanceId}`" in script
     assert "- 实例规格：`${LocalInstanceType}`" in script
@@ -174,9 +174,7 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
     assert "- VSwitch ID：`${LocalVSwitchId}`" in script
     assert "- 安全组 ID：`${LocalSecurityGroupId}`" in script
     assert "- 公网 EIP：`${LocalEipAddress}`" in script
-    assert (
-        "https://ecs.console.aliyun.com/#/server/region/${StackRegion}?instanceIds=${LocalInstanceId}" in script
-    )
+    assert "https://ecs.console.aliyun.com/#/server/region/${StackRegion}?instanceIds=${LocalInstanceId}" in script
     assert "停止、重启、释放本 ECS" in script
     assert 'chmod 0600 "$AGENTS_TMP"' in script
     assert set(re.findall(r"\$\{([^}]+)\}", script)) == {

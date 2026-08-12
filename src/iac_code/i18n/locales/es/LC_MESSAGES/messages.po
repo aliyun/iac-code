@@ -6186,6 +6186,16 @@ msgstr ""
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
 msgid ""
+"Alibaba Cloud API {operation} cannot modify cloud resources from a "
+"pipeline step. Use a pipeline-specific tool for this operation."
+msgstr ""
+"La API de Alibaba Cloud {operation} no puede modificar recursos en la "
+"nube desde un paso del pipeline. Use una herramienta específica del "
+"pipeline para esta operación."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
 "Alibaba Cloud API authorization expired or changed. Run {operation} again"
 " to approve the current contract."
 msgstr ""
@@ -6432,6 +6442,35 @@ msgid ""
 msgstr ""
 "La API de Alibaba Cloud {operation} no se pudo preparar de forma segura. "
 "Compruebe la solicitud y vuelva a intentarlo."
+
+#: src/iac_code/tools/cloud/aliyun/ros_lifecycle.py
+#, python-brace-format
+msgid "Calling {tool} action {action}..."
+msgstr "Llamando a la acción {action} de {tool}..."
+
+#: src/iac_code/tools/cloud/aliyun/ros_lifecycle.py
+msgid "ROS Stack Group"
+msgstr "Grupo de pilas ROS"
+
+#: src/iac_code/tools/cloud/aliyun/ros_lifecycle.py
+msgid "ROS Template"
+msgstr "Plantilla ROS"
+
+#: src/iac_code/tools/cloud/aliyun/ros_lifecycle.py
+msgid "ROS Template Scratch"
+msgstr "Borrador de plantilla ROS"
+
+#: src/iac_code/tools/cloud/aliyun/ros_lifecycle.py
+msgid "ROS Diagnostic"
+msgstr "Diagnóstico ROS"
+
+#: src/iac_code/tools/cloud/aliyun/ros_lifecycle.py
+msgid "ROS Resource Type"
+msgstr "Tipo de recurso ROS"
+
+#: src/iac_code/tools/cloud/aliyun/ros_lifecycle.py
+msgid "ROS Tags"
+msgstr "Etiquetas ROS"
 
 #: src/iac_code/tools/cloud/aliyun/ros_stack.py
 msgid "ROS Stack"

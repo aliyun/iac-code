@@ -236,6 +236,12 @@ _ALIYUN_PRESENCE_FIELDS = {
     "ros_estimate_template_cost": ("template_url", "region_id", "parameters", "stack_name"),
     "ros_stack": ("action", "params", "region_id"),
     "ros_stack_instances": ("action", "params", "region_id"),
+    "ros_stack_group": ("action", "params", "region_id"),
+    "ros_template": ("action", "params", "region_id"),
+    "ros_template_scratch": ("action", "params", "region_id"),
+    "ros_diagnostic": ("action", "params", "region_id"),
+    "ros_resource_type_registration": ("action", "params", "region_id"),
+    "ros_tag": ("action", "params", "region_id"),
 }
 
 

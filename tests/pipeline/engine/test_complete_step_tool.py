@@ -333,7 +333,7 @@ class TestCompletionGuards:
                         "result": {"Items": [{"Storage": 120}]},
                         "is_error": False,
                     }
-                ]
+                ],
             },
         )
 
@@ -342,9 +342,7 @@ class TestCompletionGuards:
         without_tool_evidence = dict(conclusion)
         direct_check = dict(conclusion["hard_constraint_checks"][0])
         direct_check["status"] = "unresolved"
-        direct_check["evidence"] = [
-            {"type": "context", "summary": "copied requirement", "actual_value": 120}
-        ]
+        direct_check["evidence"] = [{"type": "context", "summary": "copied requirement", "actual_value": 120}]
         without_tool_evidence["hard_constraint_checks"] = [direct_check]
         error = tool.validate_completion_input({"conclusion": without_tool_evidence})
         assert error is not None

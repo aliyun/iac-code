@@ -1268,7 +1268,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     assert "./components/composer.js?v=session-model-v19" in app_source
     # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
     assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
-    assert "./components/tool_cards.js?v=live-inline-tools-v23" in app_source
+    assert "./components/tool_cards.js?v=live-inline-tools-v24" in app_source
     assert "./components/blocking.js?v=blocking-keys-v5" in app_source
     # events.js 承载队列/消息 reducer,历次修复都在此;它的 import 必须带版本位,
     # 否则回访浏览器会加载「新 app.js + 旧缓存 events.js」,让队列行为与当前代码不一致。

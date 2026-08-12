@@ -80,6 +80,37 @@ class RuntimeAliyunResultTool(RuntimeResultTool):
         return "aliyun_api"
 
 
+class RuntimeOperationScopedResultTool(RuntimeResultTool):
+    @property
+    def name(self):
+        return "ros_template"
+
+    @property
+    def uses_operation_scoped_permissions(self):
+        return True
+
+    @property
+    def supports_blanket_allow(self):
+        return False
+
+
+class LegacyDuckTypedTool:
+    name = "legacy_tool"
+    supports_blanket_allow = False
+
+    async def check_permissions(self, input, context=None):
+        return PermissionResult(behavior="ask")
+
+    def is_read_only(self, input=None):
+        return False
+
+    def permission_audit_operation(self, input=None):
+        return {}
+
+    def user_facing_name(self, input=None):
+        return "Legacy tool"
+
+
 def _ctx(mode=PermissionMode.DEFAULT, deny=None, allow=None, ask=None):
     return ToolPermissionContext(
         mode=mode,
@@ -91,6 +122,12 @@ def _ctx(mode=PermissionMode.DEFAULT, deny=None, allow=None, ask=None):
 
 
 class TestPipeline:
+    @pytest.mark.asyncio
+    async def test_legacy_duck_typed_tool_without_operation_capability_remains_supported(self):
+        result = await check_tool_permission(LegacyDuckTypedTool(), {}, _ctx())
+
+        assert result.behavior == "ask"
+
     @pytest.mark.parametrize(
         ("result", "context", "expected_behavior"),
         [
@@ -666,6 +703,38 @@ class TestPipeline:
         assert r.audit.reason_type == "rule"
         assert r.audit.operation["action"] == "CreateStack"
         assert r.audit.is_read_only is False
+
+    @pytest.mark.asyncio
+    async def test_operation_scoped_bypass_preserves_explicit_write_rule_audit(self):
+        rule_audit = PermissionAuditMetadata(
+            scope="settings_rule",
+            source="permission_pipeline",
+            rule_source="user_settings",
+            rule="UpdateTemplate",
+            reason_type="rule",
+            is_read_only=False,
+            operation={"product": "ros", "action": "UpdateTemplate"},
+        )
+        r = await check_tool_permission(
+            RuntimeOperationScopedResultTool(PermissionResult(behavior="allow", audit=rule_audit)),
+            {"action": "UpdateTemplate"},
+            _ctx(mode=PermissionMode.BYPASS_PERMISSIONS),
+        )
+
+        assert r.behavior == "allow"
+        assert r.audit is rule_audit
+
+    @pytest.mark.asyncio
+    async def test_operation_scoped_bypass_preserves_sticky_safety_ask(self):
+        reason = PermissionDecisionReason(type="path_constraint", detail="path_constraint")
+        r = await check_tool_permission(
+            RuntimeOperationScopedResultTool(PermissionResult(behavior="ask", reason=reason)),
+            {"action": "UpdateTemplate"},
+            _ctx(mode=PermissionMode.BYPASS_PERMISSIONS),
+        )
+
+        assert r.behavior == "ask"
+        assert r.reason is reason
 
     @pytest.mark.parametrize(
         ("tool", "tool_input"),

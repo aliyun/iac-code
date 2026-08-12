@@ -16,12 +16,24 @@ from iac_code.tools.cloud.aliyun.api_contract import (
 )
 from iac_code.tools.cloud.aliyun.result_contract import (
     ALIYUN_BODY_CONTRACT_VERSION,
+    ALIYUN_MIGRATED_RESULT_TOOLS,
     build_aliyun_http_metadata,
     render_aliyun_result,
     sanitize_aliyun_http_metadata,
     serialize_business_result,
     with_aliyun_content_state,
 )
+
+
+def test_dedicated_ros_action_groups_use_shared_aliyun_result_rendering() -> None:
+    assert {
+        "ros_stack_group",
+        "ros_template",
+        "ros_template_scratch",
+        "ros_diagnostic",
+        "ros_resource_type_registration",
+        "ros_tag",
+    }.issubset(ALIYUN_MIGRATED_RESULT_TOOLS)
 
 
 def _contract(*, transport: str = "tea") -> CanonicalWireContract:

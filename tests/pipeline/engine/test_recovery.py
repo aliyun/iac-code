@@ -339,9 +339,7 @@ def test_hard_constraint_tool_evidence_round_trips_through_guard_state(state_sou
         "action": "DescribeInstanceTypes",
         "params": {"InstanceTypes": ["ecs.c7.large"]},
     }
-    tool_result = {
-        "InstanceTypes": {"InstanceType": [{"InstanceTypeId": "ecs.c7.large", "CpuCoreCount": 2}]}
-    }
+    tool_result = {"InstanceTypes": {"InstanceType": [{"InstanceTypeId": "ecs.c7.large", "CpuCoreCount": 2}]}}
     if state_source == "live":
         state = {}
         record_completion_guard_tool_result(

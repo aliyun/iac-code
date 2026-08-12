@@ -40,7 +40,11 @@ class _ThreadRecordingClient:
         self.threads[name] = threading.get_ident()
         response = MagicMock()
         response.body.operation_id = "op-1"
-        response.body.to_map.return_value = {"Status": "SUCCEEDED", "StackInstances": []}
+        response.body.to_map.return_value = (
+            {"StackGroupOperation": {"Status": "SUCCEEDED"}}
+            if name == "get_stack_group_operation"
+            else {"StackInstances": []}
+        )
         return response
 
     def create_stack_instances(self, request: Any) -> Any:
@@ -129,7 +133,7 @@ class TestRosStackInstancesProperties:
         client.delete_stack_instances.return_value = delete_response
 
         op_response = MagicMock()
-        op_response.body.to_map.return_value = {"Status": "RUNNING"}
+        op_response.body.to_map.return_value = {"StackGroupOperation": {"Status": "SUCCEEDED"}}
         client.get_stack_group_operation.return_value = op_response
 
         list_response = MagicMock()
@@ -148,7 +152,7 @@ class TestRosStackInstancesProperties:
 
         assert await tool._initiate(client, "UpdateStackInstances", {"StackGroupName": "demo"}) == "op-update"
         assert await tool._initiate(client, "DeleteStackInstances", {"StackGroupName": "demo"}) == "op-delete"
-        assert await tool._get_operation_status(client, "op-1", "cn-hz") == "RUNNING"
+        assert await tool._get_operation_status(client, "op-1", "cn-hz") == "SUCCEEDED"
         instances = await tool._get_instances(client, "demo", "cn-hz")
         assert instances == [
             InstanceStatus(
@@ -187,7 +191,7 @@ class TestRosStackInstancesExecute:
 
         # get_stack_group_operation returns SUCCEEDED status
         get_operation_response = MagicMock()
-        get_operation_response.body.to_map.return_value = {"Status": "SUCCEEDED"}
+        get_operation_response.body.to_map.return_value = {"StackGroupOperation": {"Status": "SUCCEEDED"}}
         mock_client.get_stack_group_operation.return_value = get_operation_response
 
         # list_stack_instances returns one instance
@@ -225,6 +229,8 @@ class TestRosStackInstancesExecute:
 
         assert result.is_error is False
         mock_client.create_stack_instances.assert_called_once()
+        create_request = mock_client.create_stack_instances.call_args.args[0]
+        assert create_request.region_id == "cn-hangzhou"
         mock_client.get_stack_group_operation.assert_called()
         mock_client.list_stack_instances.assert_called()
 
@@ -508,7 +514,7 @@ class TestRosStackInstancesEcsCredentialErrors:
         create_response.body.operation_id = "op-1"
         client.create_stack_instances.return_value = create_response
         status_response = MagicMock()
-        status_response.body.to_map.return_value = {"Status": "RUNNING"}
+        status_response.body.to_map.return_value = {"StackGroupOperation": {"Status": "RUNNING"}}
         client.get_stack_group_operation.return_value = status_response
         list_response = MagicMock()
         list_response.body.to_map.return_value = {"StackInstances": []}

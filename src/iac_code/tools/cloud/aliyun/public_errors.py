@@ -346,6 +346,11 @@ def public_aliyun_error(
         return _("Alibaba Cloud API execution is unavailable for {operation}. Retry from an active runtime.").format(
             operation=operation
         )
+    if code == "aliyun_pipeline_write_forbidden":
+        return _(
+            "Alibaba Cloud API {operation} cannot modify cloud resources from a pipeline step. "
+            "Use a pipeline-specific tool for this operation."
+        ).format(operation=operation)
     if (
         code.startswith("snapshot_")
         or "handoff" in code

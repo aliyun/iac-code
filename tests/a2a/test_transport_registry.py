@@ -97,7 +97,16 @@ def test_a2a_safe_mode_preserves_existing_aliyun_tools_and_adds_api_doc() -> Non
 
     names = {tool.name for tool in registry.list_tools()}
     assert set(ANONYMOUS_ALIYUN_TOOL_NAMES).issubset(names)
-    assert {"aliyun_api", "ros_stack"}.issubset(names)
-    assert "ros_stack_instances" not in names
+    assert {
+        "aliyun_api",
+        "ros_stack",
+        "ros_stack_instances",
+        "ros_stack_group",
+        "ros_template",
+        "ros_template_scratch",
+        "ros_diagnostic",
+        "ros_resource_type_registration",
+        "ros_tag",
+    }.issubset(names)
     assert "ros_future_execution_tool" not in names
     assert {"read_file", "skill"}.issubset(names)

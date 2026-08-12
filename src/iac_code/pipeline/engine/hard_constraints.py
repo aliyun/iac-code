@@ -200,9 +200,10 @@ def _matching_tool_evidence_exists(evidence: dict[str, Any], records: list[Any])
         if record.get("tool_name") != evidence.get("tool_name"):
             continue
         tool_input = record.get("input") if isinstance(record.get("input"), dict) else {}
-        if evidence.get("product") and str(tool_input.get("product") or "").casefold() != str(
-            evidence["product"]
-        ).casefold():
+        if (
+            evidence.get("product")
+            and str(tool_input.get("product") or "").casefold() != str(evidence["product"]).casefold()
+        ):
             continue
         if evidence.get("action") and tool_input.get("action") != evidence.get("action"):
             continue

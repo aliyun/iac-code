@@ -50,6 +50,8 @@ def test_aliyun_public_error_templates_are_directly_extractable(tmp_path: Path) 
         "Alibaba Cloud API action must contain only letters, numbers, underscores, or hyphens.",
         "Alibaba Cloud API authorization expired or changed. Run {operation} again to approve the current contract.",
         "Alibaba Cloud API execution is unavailable for {operation}. Retry from an active runtime.",
+        "Alibaba Cloud API {operation} cannot modify cloud resources from a pipeline step. "
+        "Use a pipeline-specific tool for this operation.",
         "Alibaba Cloud API input is invalid for {operation}. Check product, action, version, region, and parameters.",
         "Alibaba Cloud returned the target response, but its headers are too large to display safely. "
         "Verify the cloud resource state before retrying.",
@@ -213,6 +215,17 @@ def test_location_cache_failure_uses_endpoint_context_and_remediation() -> None:
     ) == (
         "Alibaba Cloud endpoint cache could not be updated for FC/GetFunction in cn-hangzhou. "
         "Check local configuration storage and retry."
+    )
+
+
+def test_pipeline_write_forbidden_error_requires_pipeline_specific_tool() -> None:
+    assert public_aliyun_error(
+        "aliyun_pipeline_write_forbidden",
+        product="ros",
+        action="UpdateTemplate",
+    ) == (
+        "Alibaba Cloud API ros/UpdateTemplate cannot modify cloud resources from a pipeline step. "
+        "Use a pipeline-specific tool for this operation."
     )
 
 

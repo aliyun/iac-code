@@ -1019,6 +1019,12 @@ def test_tool_kind_mapping_covers_extension_tools() -> None:
     assert _tool_kind("ros_stack") == "execute"
     assert _tool_kind("ros_deploy") == "execute"
     assert _tool_kind("ros_stack_instances") == "execute"
+    assert _tool_kind("ros_stack_group") == "execute"
+    assert _tool_kind("ros_template") == "execute"
+    assert _tool_kind("ros_template_scratch") == "execute"
+    assert _tool_kind("ros_diagnostic") == "execute"
+    assert _tool_kind("ros_resource_type_registration") == "execute"
+    assert _tool_kind("ros_tag") == "execute"
     assert _tool_kind("aliyun_doc_search") == "fetch"
 
 

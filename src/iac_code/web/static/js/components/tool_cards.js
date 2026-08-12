@@ -131,16 +131,28 @@ function lowerToolName(tool = {}) {
   return toolName(tool).toLowerCase();
 }
 
+const ROS_ACTION_GROUP_TOOLS = new Set([
+  "ros_stack_group",
+  "ros_template",
+  "ros_template_scratch",
+  "ros_diagnostic",
+  "ros_resource_type_registration",
+  "ros_tag",
+]);
+
 export function isAliyunApiTool(tool = {}) {
   const name = lowerToolName(tool);
-  return name === "aliyun_api" || name === "aliyun-api";
+  return name === "aliyun_api" || name === "aliyun-api" || ROS_ACTION_GROUP_TOOLS.has(name);
 }
 
 function aliyunApiProduct(tool = {}) {
   const input = inputObject(tool);
   const product = firstTextField(tool, ["product", "Product", "service", "Service"]) ||
     firstTextField(input, ["product", "Product", "service", "Service"]);
-  return product ? product.toUpperCase() : "";
+  if (product) {
+    return product.toUpperCase();
+  }
+  return ROS_ACTION_GROUP_TOOLS.has(lowerToolName(tool)) ? "ROS" : "";
 }
 
 function aliyunApiAction(tool = {}) {

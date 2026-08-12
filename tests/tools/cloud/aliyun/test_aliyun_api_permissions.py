@@ -36,6 +36,7 @@ from iac_code.tools.cloud.aliyun.result_contract import (
     ALIYUN_HTTP_METADATA_KEY,
 )
 from iac_code.tools.cloud.aliyun.retry_policy import RetryBudget
+from iac_code.tools.cloud.aliyun.ros_lifecycle import RosTemplateTool
 from iac_code.tools.path_safety import get_iac_code_application_root
 from iac_code.types.permissions import InvocationBinding, PermissionMode, ToolPermissionContext
 
@@ -467,6 +468,389 @@ def _bound_context(
     }
     values.update(changes)
     return ToolPermissionContext(**values)
+
+
+def _ros_template_permission_profile():
+    profile_type = getattr(aliyun_api_module, "AliyunPermissionRuleProfile", None)
+    assert profile_type is not None, "specialized Aliyun permission profiles must be implemented"
+    return profile_type(
+        public_tool_name="ros_template",
+        fixed_product="ros",
+        inherit_aliyun_api_rules=True,
+    )
+
+
+def _ros_template_permission_inputs() -> tuple[dict[str, Any], dict[str, Any]]:
+    outer_input = {
+        "action": "UpdateTemplate",
+        "params": {"TemplateId": "template-id"},
+        "region_id": "cn-hangzhou",
+    }
+    shape = {
+        "product": "ros",
+        "version": "2019-09-10",
+        **outer_input,
+    }
+    return outer_input, shape
+
+
+@pytest.mark.asyncio
+async def test_specialized_permission_profile_suggests_public_tool_action_rule() -> None:
+    outer_input, shape = _ros_template_permission_inputs()
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action="UpdateTemplate",
+        operation_type="write",
+    )
+    tool, _runtime = _runtime_tool(contract)
+
+    result = await tool.check_shape_permissions(
+        shape,
+        _bound_context(outer_input, tool_name="ros_template"),
+        permission_profile=_ros_template_permission_profile(),
+    )
+
+    assert result.behavior == "ask"
+    assert [(item.tool_name, item.rule_content) for item in result.suggestions or []] == [
+        ("ros_template", "UpdateTemplate")
+    ]
+    assert result.audit is not None
+    assert result.audit.operation["public_tool"] == "ros_template"
+
+
+@pytest.mark.parametrize(
+    ("rule", "expected_rule", "expected_inherited"),
+    [
+        ("ros_template(UpdateTemplate)", "UpdateTemplate", False),
+        ("aliyun_api(ros:UpdateTemplate)", "ros:UpdateTemplate", True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_specialized_permission_profile_accepts_direct_and_ancestor_exact_write_rules(
+    rule: str,
+    expected_rule: str,
+    expected_inherited: bool,
+) -> None:
+    outer_input, shape = _ros_template_permission_inputs()
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action="UpdateTemplate",
+        operation_type="write",
+    )
+    tool, _runtime = _runtime_tool(contract)
+
+    result = await tool.check_shape_permissions(
+        shape,
+        _bound_context(
+            outer_input,
+            tool_name="ros_template",
+            allow_rules={"user_settings": [rule]},
+        ),
+        permission_profile=_ros_template_permission_profile(),
+    )
+
+    assert result.behavior == "allow"
+    assert result.audit is not None
+    assert result.audit.rule == expected_rule
+    assert result.audit.operation["inherited_rule"] is expected_inherited
+
+
+@pytest.mark.asyncio
+async def test_specialized_write_rule_does_not_authorize_generic_aliyun_api() -> None:
+    _outer_input, shape = _ros_template_permission_inputs()
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action="UpdateTemplate",
+        operation_type="write",
+    )
+    tool, _runtime = _runtime_tool(contract)
+
+    result = await tool.check_permissions(
+        shape,
+        _bound_context(
+            shape,
+            allow_rules={"user_settings": ["ros_template(UpdateTemplate)"]},
+        ),
+    )
+
+    assert result.behavior == "ask"
+
+
+@pytest.mark.asyncio
+async def test_specialized_write_allow_requires_exact_action() -> None:
+    outer_input, shape = _ros_template_permission_inputs()
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action="UpdateTemplate",
+        operation_type="write",
+    )
+    tool, _runtime = _runtime_tool(contract)
+
+    result = await tool.check_shape_permissions(
+        shape,
+        _bound_context(
+            outer_input,
+            tool_name="ros_template",
+            allow_rules={"user_settings": ["ros_template(Update*)"]},
+        ),
+        permission_profile=_ros_template_permission_profile(),
+    )
+
+    assert result.behavior == "ask"
+
+
+@pytest.mark.parametrize(
+    ("rule_bucket", "rule", "expected_behavior", "expected_rule", "expected_inherited"),
+    [
+        ("deny_rules", "ros_template(UpdateTemplate)", "deny", "UpdateTemplate", False),
+        ("deny_rules", "aliyun_api(ros:UpdateTemplate)", "deny", "ros:UpdateTemplate", True),
+        ("ask_rules", "ros_template(UpdateTemplate)", "ask", "UpdateTemplate", False),
+        ("ask_rules", "aliyun_api(ros:UpdateTemplate)", "ask", "ros:UpdateTemplate", True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_specialized_permission_profile_applies_direct_and_ancestor_deny_or_ask_rules(
+    rule_bucket: str,
+    rule: str,
+    expected_behavior: str,
+    expected_rule: str,
+    expected_inherited: bool,
+) -> None:
+    outer_input, shape = _ros_template_permission_inputs()
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action="UpdateTemplate",
+        operation_type="write",
+    )
+    tool, _runtime = _runtime_tool(contract)
+
+    result = await tool.check_shape_permissions(
+        shape,
+        _bound_context(
+            outer_input,
+            tool_name="ros_template",
+            **{rule_bucket: {"user_settings": [rule]}},
+        ),
+        permission_profile=_ros_template_permission_profile(),
+    )
+
+    assert result.behavior == expected_behavior
+    assert result.audit is not None
+    matching_audits = [audit for audit in (result.audit, *result.audit_items) if audit.rule == expected_rule]
+    assert matching_audits
+    assert matching_audits[0].operation["inherited_rule"] is expected_inherited
+
+
+def _ros_template_action_group(public_tool: AliyunApi):
+    import iac_code.tools.cloud.aliyun.runtime as runtime_module
+
+    spec_type = getattr(runtime_module, "AliyunActionGroupSpec", None)
+    executor_type = getattr(runtime_module, "AliyunActionGroupExecutor", None)
+    assert spec_type is not None, "Aliyun action-group specs must be implemented"
+    assert executor_type is not None, "Aliyun action-group execution must be implemented"
+    spec = spec_type(
+        public_tool_name="ros_template",
+        product="ros",
+        version="2019-09-10",
+        actions=frozenset({"GetTemplate", "UpdateTemplate"}),
+        write_actions=frozenset({"UpdateTemplate"}),
+    )
+    return spec, executor_type(public_tool, spec=spec)
+
+
+@pytest.mark.asyncio
+async def test_action_group_permission_builds_fixed_canonical_shape_without_mutating_outer_input() -> None:
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action="UpdateTemplate",
+        operation_type="write",
+    )
+    public_tool, runtime = _runtime_tool(contract)
+    _spec, delegated = _ros_template_action_group(public_tool)
+    outer_input = {
+        "action": "UpdateTemplate",
+        "params": {"TemplateId": "template-id"},
+        "region_id": "cn-hangzhou",
+    }
+    original = copy.deepcopy(outer_input)
+
+    result = await delegated.check_permissions(
+        outer_input,
+        _bound_context(outer_input, tool_name="ros_template"),
+    )
+
+    assert result.behavior == "ask"
+    assert outer_input == original
+    resolved_call = runtime.contract_resolver.calls[0][0]
+    assert resolved_call.product == "ros"
+    assert resolved_call.version == "2019-09-10"
+    assert resolved_call.action == "UpdateTemplate"
+    assert resolved_call.parameter_names_by_location == {"unknown": ("TemplateId",)}
+
+
+@pytest.mark.parametrize(
+    ("action", "operation_type", "rules", "mode", "expected_behavior", "expected_rule"),
+    [
+        ("GetTemplate", "read", {}, PermissionMode.DEFAULT, "allow", None),
+        ("UpdateTemplate", "write", {}, PermissionMode.DEFAULT, "ask", None),
+        (
+            "UpdateTemplate",
+            "write",
+            {"user_settings": ["ros_template(UpdateTemplate)"]},
+            PermissionMode.DEFAULT,
+            "allow",
+            "UpdateTemplate",
+        ),
+        (
+            "UpdateTemplate",
+            "write",
+            {"user_settings": ["aliyun_api(ros:UpdateTemplate)"]},
+            PermissionMode.DEFAULT,
+            "allow",
+            "ros:UpdateTemplate",
+        ),
+        ("UpdateTemplate", "write", {}, PermissionMode.DONT_ASK, "deny", None),
+        ("UpdateTemplate", "write", {}, PermissionMode.BYPASS_PERMISSIONS, "allow", None),
+    ],
+)
+@pytest.mark.asyncio
+async def test_ros_template_action_group_integrates_default_modes_and_one_way_rules(
+    action: str,
+    operation_type: str,
+    rules: dict[str, list[str]],
+    mode: PermissionMode,
+    expected_behavior: str,
+    expected_rule: str | None,
+) -> None:
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action=action,
+        operation_type=operation_type,
+    )
+    public_tool, _runtime = _runtime_tool(contract)
+    _spec, delegated = _ros_template_action_group(public_tool)
+    tool = RosTemplateTool(delegated_executor=delegated)
+    outer_input = {
+        "action": action,
+        "params": {"TemplateId": "template-id"},
+        "region_id": "cn-hangzhou",
+    }
+
+    result = await check_tool_permission(
+        tool,
+        outer_input,
+        _bound_context(
+            outer_input,
+            tool_name="ros_template",
+            allow_rules=rules,
+            mode=mode,
+        ),
+    )
+
+    assert result.behavior == expected_behavior
+    assert result.audit is not None
+    assert result.audit.rule == expected_rule
+    if expected_behavior == "ask":
+        assert [(item.tool_name, item.rule_content) for item in result.suggestions or []] == [
+            ("ros_template", "UpdateTemplate")
+        ]
+
+
+@pytest.mark.asyncio
+async def test_action_group_pipeline_write_rejects_bypass_and_inherited_allow_before_contract_resolution() -> None:
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action="UpdateTemplate",
+        operation_type="write",
+    )
+    public_tool, runtime = _runtime_tool(contract)
+    _spec, delegated = _ros_template_action_group(public_tool)
+    tool = RosTemplateTool(delegated_executor=delegated)
+    outer_input = {
+        "action": "UpdateTemplate",
+        "params": {"TemplateId": "template-id"},
+        "region_id": "cn-hangzhou",
+    }
+
+    result = await check_tool_permission(
+        tool,
+        outer_input,
+        _bound_context(
+            outer_input,
+            tool_name="ros_template",
+            pipeline_mode=True,
+            mode=PermissionMode.BYPASS_PERMISSIONS,
+            allow_rules={"user_settings": ["aliyun_api(ros:UpdateTemplate)"]},
+        ),
+    )
+
+    assert result.behavior == "deny"
+    assert runtime.contract_resolver.calls == []
+
+
+@pytest.mark.asyncio
+async def test_action_group_read_preserves_pipeline_mode_for_shared_permission_guard() -> None:
+    from iac_code.tools.cloud.aliyun.runtime import AliyunActionGroupExecutor, AliyunActionGroupSpec
+
+    action = "GetTemplateEstimateCost"
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action=action,
+        operation_type="read",
+    )
+    public_tool, runtime = _runtime_tool(contract)
+    spec = AliyunActionGroupSpec(
+        public_tool_name="ros_template",
+        product="ros",
+        version="2019-09-10",
+        actions=frozenset({action}),
+        write_actions=frozenset(),
+    )
+    delegated = AliyunActionGroupExecutor(public_tool, spec=spec)
+    outer_input = {
+        "action": action,
+        "params": {"TemplateURL": "https://example.com/template.yaml"},
+        "region_id": "cn-hangzhou",
+    }
+
+    result = await delegated.check_permissions(
+        outer_input,
+        _bound_context(outer_input, tool_name="ros_template", pipeline_mode=True),
+    )
+
+    assert result.behavior == "deny"
+    assert "ros_estimate_template_cost" in result.message
+    assert runtime.contract_resolver.calls == []
+
+
+@pytest.mark.asyncio
+async def test_action_group_rejects_non_allowlisted_action_before_contract_resolution() -> None:
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action="DeleteTemplate",
+        operation_type="write",
+    )
+    public_tool, runtime = _runtime_tool(contract)
+    _spec, delegated = _ros_template_action_group(public_tool)
+    outer_input = {"action": "DeleteTemplate", "params": {}, "region_id": "cn-hangzhou"}
+
+    result = await delegated.check_permissions(
+        outer_input,
+        _bound_context(outer_input, tool_name="ros_template"),
+    )
+
+    assert result.behavior == "deny"
+    assert runtime.contract_resolver.calls == []
 
 
 def _expected_public_error(
@@ -1590,6 +1974,151 @@ async def test_delegated_ros_tools_propagate_business_body_and_internal_http_met
     assert http_metadata["action"] == action
     assert http_metadata["status"] == 200
     assert http_metadata["body_format"] == "json"
+
+
+@pytest.mark.asyncio
+async def test_action_group_executes_approved_outer_input_through_shared_runtime() -> None:
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action="GetTemplate",
+        operation_type="read",
+    )
+    public_tool, runtime = _execution_runtime(contract)
+    _spec, delegated = _ros_template_action_group(public_tool)
+    outer_input = {
+        "action": "GetTemplate",
+        "params": {"TemplateId": "template-id"},
+        "region_id": "cn-hangzhou",
+    }
+    permission_context = _bound_context(outer_input, tool_name="ros_template")
+
+    permission = await delegated.check_permissions(outer_input, permission_context)
+    assert permission.behavior == "allow"
+    result = await delegated.execute(outer_input, _execution_context(permission_context, permission))
+
+    assert result.is_error is False
+    assert json.loads(result.content) == {"RequestId": "request", "Business": "value"}
+    assert len(runtime.transport_router.requests) == 1
+    assert runtime.contract_store.size == 0
+
+
+@pytest.mark.asyncio
+async def test_action_group_execution_rechecks_pipeline_write_before_target_transport() -> None:
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action="UpdateTemplate",
+        operation_type="write",
+    )
+    public_tool, runtime = _execution_runtime(contract)
+    _spec, delegated = _ros_template_action_group(public_tool)
+    outer_input = {
+        "action": "UpdateTemplate",
+        "params": {"TemplateId": "template-id"},
+        "region_id": "cn-hangzhou",
+    }
+    permission_context = _bound_context(
+        outer_input,
+        tool_name="ros_template",
+        allow_rules={"user_settings": ["ros_template(UpdateTemplate)"]},
+    )
+    permission = await delegated.check_permissions(outer_input, permission_context)
+    assert permission.behavior == "allow"
+    execution_context = _execution_context(permission_context, permission)
+    execution_context.pipeline_mode = True
+
+    result = await delegated.execute(outer_input, execution_context)
+
+    assert result.is_error is True
+    assert runtime.transport_router.requests == []
+    assert runtime.contract_store.size == 0
+
+
+@pytest.mark.asyncio
+async def test_action_group_read_preserves_pipeline_mode_for_shared_execution_guard() -> None:
+    from iac_code.tools.cloud.aliyun.runtime import AliyunActionGroupExecutor, AliyunActionGroupSpec
+
+    action = "GetTemplateEstimateCost"
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action=action,
+        operation_type="read",
+    )
+    public_tool, runtime = _execution_runtime(contract)
+    spec = AliyunActionGroupSpec(
+        public_tool_name="ros_template",
+        product="ros",
+        version="2019-09-10",
+        actions=frozenset({action}),
+        write_actions=frozenset(),
+    )
+    delegated = AliyunActionGroupExecutor(public_tool, spec=spec)
+    outer_input = {
+        "action": action,
+        "params": {"TemplateURL": "https://example.com/template.yaml"},
+        "region_id": "cn-hangzhou",
+    }
+    permission_context = _bound_context(outer_input, tool_name="ros_template")
+    permission = await delegated.check_permissions(outer_input, permission_context)
+    assert permission.behavior == "allow"
+    execution_context = _execution_context(permission_context, permission)
+    execution_context.pipeline_mode = True
+
+    result = await delegated.execute(outer_input, execution_context)
+
+    assert result.is_error is True
+    assert runtime.transport_router.requests == []
+    assert runtime.contract_store.size == 0
+
+
+@pytest.mark.parametrize(
+    "mutated_input",
+    [
+        {
+            "action": "UpdateTemplate",
+            "params": {"TemplateId": "template-id"},
+            "region_id": "cn-hangzhou",
+        },
+        {
+            "action": "GetTemplate",
+            "params": {"TemplateId": "other-template"},
+            "region_id": "cn-hangzhou",
+        },
+        {
+            "action": "GetTemplate",
+            "params": {"TemplateId": "template-id"},
+            "region_id": "cn-shanghai",
+        },
+    ],
+)
+@pytest.mark.asyncio
+async def test_action_group_rejects_outer_input_mutation_before_target_transport(
+    mutated_input: dict[str, Any],
+) -> None:
+    contract = _canonical_contract(
+        product="ROS",
+        version="2019-09-10",
+        action="GetTemplate",
+        operation_type="read",
+    )
+    public_tool, runtime = _execution_runtime(contract)
+    _spec, delegated = _ros_template_action_group(public_tool)
+    approved_input = {
+        "action": "GetTemplate",
+        "params": {"TemplateId": "template-id"},
+        "region_id": "cn-hangzhou",
+    }
+    permission_context = _bound_context(approved_input, tool_name="ros_template")
+    permission = await delegated.check_permissions(approved_input, permission_context)
+    assert permission.behavior == "allow"
+
+    result = await delegated.execute(mutated_input, _execution_context(permission_context, permission))
+
+    assert result.is_error is True
+    assert runtime.transport_router.requests == []
+    assert runtime.contract_store.size == 0
 
 
 async def _approved_execution_context(

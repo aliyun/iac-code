@@ -75,6 +75,12 @@ _TOOL_KIND_MAP: dict[str, ToolKind] = {
     "ros_stack": "execute",
     "ros_deploy": "execute",
     "ros_stack_instances": "execute",
+    "ros_stack_group": "execute",
+    "ros_template": "execute",
+    "ros_template_scratch": "execute",
+    "ros_diagnostic": "execute",
+    "ros_resource_type_registration": "execute",
+    "ros_tag": "execute",
     # Fetch operations
     "web_fetch": "fetch",
     "aliyun_doc_search": "fetch",
