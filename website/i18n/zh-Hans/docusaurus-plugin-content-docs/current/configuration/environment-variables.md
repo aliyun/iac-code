@@ -73,3 +73,4 @@ ECS 元数据相关变量仅在凭证模式已配置为 `EcsRamRole` 后生效�
 | 变量 | 说明 |
 |---|---|
 | `IAC_CODE_CONFIG_BACKUP_DIR` | 可选的会话备份目录，支持 `~` 和 `$VAR` 展开，在 Windows 上也支持 `%VAR%` 展开。PowerShell 中请传入具体路径，或在启动 `iac-code` 前让 shell 展开 `$env:VAR`。在 sandbox 部署中通常指向 OSS 挂载路径，但必须独立于 `IAC_CODE_CONFIG_DIR` 和任何 session 源目录且不能互相重叠，并且关键检查点需要足够低延迟。UNC 路径、映射盘和 OSS 挂载路径必须保留 `.backup-lock` 文件锁、原子替换和文件元数据语义，才能支持增量镜像；活动 session 源目录、备份根目录和镜像 session 路径都应避免符号链接、junction 或 reparse point 祖先路径。启用后，检查点会把每个 v2 会话按原目录结构镜像到 `<backup>/projects/<project>/<session_id>/`；`.backup-state.json` 和 `.backup-lock` 只保留在本地，不会复制。普通对话轮次结束备份使用 `normal_turn_end` 且不阻塞响应；只有 `critical=true` 检查点失败才会阻塞发布。共享 A2A task/context 索引可以单独挂载。 |
+| `IAC_CODE_CONFIG_BACKUP_TMP_DIR` | `iac-code a2a` 可选的本地临时备份目录，必须同时配置 `IAC_CODE_CONFIG_BACKUP_DIR`。A2A 备份只阻塞到本地不可变快照 `<session_id>_vX` 完成，随后由独立进程按版本顺序复制到最终备份目录，成功后删除本地快照。两个目录必须是互不重叠的绝对路径，且临时目录必须位于 `IAC_CODE_CONFIG_DIR` 之外。其他运行模式忽略此配置。 |

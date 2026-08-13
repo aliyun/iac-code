@@ -90,6 +90,10 @@ from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.i18n import _
 from iac_code.pipeline.config import RunMode, get_run_mode
 from iac_code.services.session_backup import SessionBackupService
+from iac_code.services.session_backup_staging import (
+    SessionBackupStagingProcess,
+    create_a2a_session_backup_runtime,
+)
 from iac_code.services.session_storage import SessionStorage
 from iac_code.utils.public_errors import sanitize_strict_text
 
@@ -270,6 +274,11 @@ class A2ARuntimeComponents:
     push_worker: Any | None = None
     push_queue: Any | None = None
     runtime_registration: A2ARuntimeRegistration | None = None
+    backup_staging_process: SessionBackupStagingProcess | None = None
+
+    def start_background_services(self) -> None:
+        if self.backup_staging_process is not None:
+            self.backup_staging_process.start()
 
     async def aclose(self) -> None:
         if self.runtime_registration is not None:
@@ -299,6 +308,8 @@ class A2ARuntimeComponents:
                 if inspect.isawaitable(result):
                     await result
         await self._exit_stack.aclose()
+        if self.backup_staging_process is not None:
+            self.backup_staging_process.close()
 
 
 def create_runtime_components(
@@ -332,7 +343,11 @@ def create_runtime_components(
 ) -> A2ARuntimeComponents:
     metrics = NoOpA2AMetrics()
     thinking_exposure_types = normalize_a2a_exposure_types(thinking_exposure)
-    backup_service = backup_service or SessionBackupService()
+    backup_staging_process = None
+    if backup_service is None:
+        backup_runtime = create_a2a_session_backup_runtime()
+        backup_service = backup_runtime.service
+        backup_staging_process = backup_runtime.staging_process
     persistence = A2APersistenceStore(persistence_dir) if persistence_dir is not None else None
     artifact_store = A2AArtifactStore(artifact_dir) if artifact_dir is not None else None
     push_config_store = None
@@ -344,7 +359,7 @@ def create_runtime_components(
         from iac_code.config import get_config_dir
 
         persistence = A2APersistenceStore(get_config_dir() / "a2a")
-    task_store = A2ATaskStore(metrics=metrics, persistence=persistence)
+    task_store = A2ATaskStore(metrics=metrics, persistence=persistence, backup_service=backup_service)
     if push_notifications:
         assert persistence is not None
         push_secret_keyring = A2APushSecretKeyring(Path(persistence.root) / "push_keys.json")
@@ -433,6 +448,7 @@ def create_runtime_components(
         push_worker=push_worker,
         push_queue=push_queue_instance,
         runtime_registration=runtime_registration,
+        backup_staging_process=backup_staging_process,
     )
 
 

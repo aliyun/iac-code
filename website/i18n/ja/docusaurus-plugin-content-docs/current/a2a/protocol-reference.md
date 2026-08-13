@@ -334,6 +334,8 @@ iac-code は A2A コンテキストを内部エージェントランタイムに
 
 コンテキストがフォローアップメッセージで利用可能なまま残るため、iac-code は通常の完了状態として `TASK_STATE_INPUT_REQUIRED` を使用します。通常の A2A turn は `TASK_STATE_INPUT_REQUIRED` をこの通常完了状態として扱い、成功した turn-end backup は非ブロッキングの `normal_turn_end` checkpoint です。通常の A2A terminal または cancellation publication が重要なバックアップ制御でブロックされた場合、task metadata の `metadata.iac_code.backupBlocked` に `reason`、`error`、`recoverable` が公開されます。クライアントは復旧を待ってから次の turn を送ってください。Pipeline mode では backup 失敗を pipeline event として公開するため、`metadata.iac_code.pipeline.eventType == "backup_blocked"` と event data を確認してください。Pipeline mode は step 完了時の backup を作成しません。`pipeline_step_completed` は従来の復旧用にのみ保持されます。`IAC_CODE_CONFIG_BACKUP_DIR` が有効な場合、`input_required` と `waiting_input` を先に公開してから、唯一の重要 backup を実行します。`terminal` は引き続き terminal publication を保護し、`handoff_ready` は引き続き `pipeline_handoff_ready` を保護します。terminal および `pipeline_handoff_ready` の committed publication では、iac-code は `committedEventId`、`committedEventType`、`committedSequence` を含む `backup_committed` pipeline event を永続化します。クライアントは再起動後に publication を復旧可能と扱う前に、保護された event と対応付けられます。
 
+A2A server で `IAC_CODE_CONFIG_BACKUP_TMP_DIR` を使用する場合、`backup_committed` はローカルの不変 snapshot を確認し、同じ sandbox 内での復旧を可能にします。最終 backup ディレクトリの更新を確認するものではありません。別の sandbox での復旧は、background process が snapshot を `IAC_CODE_CONFIG_BACKUP_DIR` へコピーした後に可能になります。ローカル準備を使わない場合、`backup_committed` は引き続き最終 backup ディレクトリを確認します。
+
 ## ストリーミング更新
 
 実行中、iac-code は `TaskStatusUpdateEvent` 更新を出力します。

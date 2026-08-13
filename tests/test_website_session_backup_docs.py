@@ -27,6 +27,8 @@ def test_website_documents_session_backup_in_all_locales() -> None:
     checks = {
         "configuration/environment-variables.md": [
             "IAC_CODE_CONFIG_BACKUP_DIR",
+            "IAC_CODE_CONFIG_BACKUP_TMP_DIR",
+            "<session_id>_vX",
             "<backup>/projects/<project>/<session_id>/",
             "normal_turn_end",
             "critical",
@@ -62,6 +64,7 @@ def test_website_documents_session_backup_in_all_locales() -> None:
             "tool-results/",
         ],
         "a2a/protocol-reference.md": [
+            "IAC_CODE_CONFIG_BACKUP_TMP_DIR",
             "backup_blocked",
             "backupBlocked",
             "metadata.iac_code.pipeline.eventType",
@@ -91,6 +94,7 @@ def test_website_documents_session_backup_in_all_locales() -> None:
             ".backup-state.json",
         ],
         "automation/pipeline-mode.md": [
+            "IAC_CODE_CONFIG_BACKUP_TMP_DIR",
             "backup_blocked",
             "backup_committed",
             "committedEventId",

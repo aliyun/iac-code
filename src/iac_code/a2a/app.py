@@ -370,11 +370,12 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: Starlette):
-        await components.task_store.start_cleanup_loop()
         push_worker_task: asyncio.Task[None] | None = None
-        if components.push_worker is not None:
-            push_worker_task = asyncio.create_task(components.push_worker.serve_forever())
+        components.start_background_services()
         try:
+            await components.task_store.start_cleanup_loop()
+            if components.push_worker is not None:
+                push_worker_task = asyncio.create_task(components.push_worker.serve_forever())
             yield
         finally:
             if push_worker_task is not None:
@@ -701,12 +702,15 @@ def run_server(
 
 
 async def _serve_async_transport(server, *, components) -> None:
-    await components.task_store.start_cleanup_loop()
     push_worker_task: asyncio.Task[None] | None = None
-    if components.push_worker is not None:
-        push_worker_task = asyncio.create_task(components.push_worker.serve_forever())
-        await asyncio.sleep(0)
+    start_background_services = getattr(components, "start_background_services", None)
+    if start_background_services is not None:
+        start_background_services()
     try:
+        await components.task_store.start_cleanup_loop()
+        if components.push_worker is not None:
+            push_worker_task = asyncio.create_task(components.push_worker.serve_forever())
+            await asyncio.sleep(0)
         await server.serve()
     finally:
         if push_worker_task is not None:
