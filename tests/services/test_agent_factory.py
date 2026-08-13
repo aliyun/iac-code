@@ -719,6 +719,7 @@ class _LifecycleAliyunServices:
         self.contract_resolver = object()
         self.internal_caller = object()
         self.delegated_executor_factory = lambda action: SimpleNamespace(action=action)
+        self.action_group_executor_factory = lambda spec: SimpleNamespace(spec=spec)
         self.aclose = AsyncMock()
 
 
