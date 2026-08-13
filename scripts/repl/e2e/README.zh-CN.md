@@ -49,6 +49,205 @@ E5 会把当前配置目录中的 `.credentials.yml`、`.cloud-credentials.yml` 
 metadata，以及每个 provider attempt 恰有一个 started 和一个 terminal。各 run 目录中的
 `summary.json`、`aliyun-contract-audit.json`、`telemetry-audit.json` 和 transcript 是最终证据。
 
+## A2A 临时备份并发同步 E2E
+
+该场景验证 `IAC_CODE_CONFIG_BACKUP_TMP_DIR`：A2A 请求先阻塞地把会话复制到本地临时目录，单个后台
+进程再把不同会话并发同步到最终备份目录；同一会话的多个版本仍按版本号串行。临时备份只在
+`iac-code a2a` 中启用，因此这个用例虽然记录在本目录，但不会通过 REPL runner 启动。
+
+前置条件：当前用户已配置可用的真实 LLM provider；`IAC_CODE_E2E_OSS_DIR` 必须指向一个专用于本轮测试、
+初始为空且支持 POSIX 权限的 OSS 挂载目录。不要指向已有备份目录，也不要使用 root 用户运行。
+
+先准备隔离目录并启动真实 A2A Server：
+
+```bash
+set -euo pipefail
+: "${IAC_CODE_E2E_OSS_DIR:?请设置为本轮测试专用的空 OSS 挂载目录}"
+
+export E2E_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/iac-code-backup-staging-e2e.XXXXXX")"
+export BACKUP_TMP="$E2E_ROOT/backup-tmp"
+export BACKUP_OSS="$(cd "$IAC_CODE_E2E_OSS_DIR" && pwd)"
+export A2A_URL="http://127.0.0.1:41249"
+mkdir -p "$E2E_ROOT/config" "$E2E_ROOT/workspace" "$BACKUP_TMP"
+
+if find "$BACKUP_OSS" -mindepth 1 -print -quit | grep -q .; then
+  echo "IAC_CODE_E2E_OSS_DIR 必须为空" >&2
+  exit 1
+fi
+
+for name in .credentials.yml .cloud-credentials.yml settings.yml; do
+  if [ -f "$HOME/.iac-code/$name" ]; then
+    cp "$HOME/.iac-code/$name" "$E2E_ROOT/config/$name"
+    chmod 600 "$E2E_ROOT/config/$name"
+  fi
+done
+
+# 先临时关闭最终目录的写权限，确定性地让三个完整版本都留在本地待同步队列中。
+chmod 500 "$BACKUP_OSS"
+if mkdir "$BACKUP_OSS/permission-probe" 2>/dev/null; then
+  rmdir "$BACKUP_OSS/permission-probe"
+  echo "OSS 挂载未执行 POSIX 写权限，本测试无法建立同步闸门" >&2
+  exit 1
+fi
+
+cleanup_backup_staging_e2e() {
+  chmod 700 "$BACKUP_OSS" 2>/dev/null || true
+  if [ -n "${SERVER_PID:-}" ]; then
+    kill -TERM "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup_backup_staging_e2e EXIT
+
+IAC_CODE_MODE=normal \
+IAC_CODE_CONFIG_DIR="$E2E_ROOT/config" \
+IAC_CODE_CONFIG_BACKUP_DIR="$BACKUP_OSS" \
+IAC_CODE_CONFIG_BACKUP_TMP_DIR="$BACKUP_TMP" \
+IACCODE_A2A_ALLOWED_CWDS="$E2E_ROOT/workspace" \
+uv run iac-code a2a \
+  --host 127.0.0.1 \
+  --port 41249 \
+  --debug \
+  --log-to-stdout \
+  >"$E2E_ROOT/server.log" 2>&1 &
+SERVER_PID=$!
+
+uv run python - <<'PY'
+import os
+from scripts.a2a.e2e.common import wait_for_server
+
+wait_for_server(os.environ["A2A_URL"], timeout=60)
+PY
+```
+
+在同一个 workspace 中同时发起两个不同会话，再给会话 A 发送第二轮消息。前两次调用必须并发，第三次调用
+必须复用会话 A 的 `contextId` 和 `taskId`：
+
+```bash
+uv run python - <<'PY'
+import json
+import os
+import re
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
+from pathlib import Path
+
+from scripts.a2a.e2e.common import stream_message
+
+root = Path(os.environ["E2E_ROOT"])
+tmp = Path(os.environ["BACKUP_TMP"])
+url = os.environ["A2A_URL"]
+
+def call(name: str, workspace: str, prompt: str, context_id: str = "", task_id: str = ""):
+    return stream_message(
+        server_url=url,
+        cwd=str(root / workspace),
+        prompt=prompt,
+        name=name,
+        run_dir=root,
+        timeout=120,
+        context_id=context_id,
+        task_id=task_id,
+    )
+
+with ThreadPoolExecutor(max_workers=2) as executor:
+    future_a = executor.submit(call, "session-a-v1", "workspace", "只回复 A，不调用工具。")
+    future_b = executor.submit(call, "session-b-v1", "workspace", "只回复 B，不调用工具。")
+    first_a = future_a.result()
+    first_b = future_b.result()
+
+assert first_a.context_id and first_a.task_id
+assert first_b.context_id and first_b.task_id
+assert first_a.context_id != first_b.context_id
+second_a = call(
+    "session-a-v2",
+    "workspace",
+    "只回复 A2，不调用工具。",
+    first_a.context_id,
+    first_a.task_id,
+)
+
+snapshots = sorted(
+    path for path in tmp.glob("projects/*/*")
+    if path.is_dir() and re.search(r"_v[1-9][0-9]*$", path.name)
+)
+names = [path.name for path in snapshots]
+assert len(snapshots) == 3, names
+assert sum(name.endswith("_v1") for name in names) == 2, names
+assert sum(name.endswith("_v2") for name in names) == 1, names
+assert not list(tmp.rglob("*.copying"))
+
+(root / "client-summary.json").write_text(
+    json.dumps(
+        {"sessionAV1": asdict(first_a), "sessionBV1": asdict(first_b), "sessionAV2": asdict(second_a)},
+        ensure_ascii=False,
+        indent=2,
+    ) + "\n",
+    encoding="utf-8",
+)
+PY
+```
+
+此时三次请求都已成功，但最终目录仍不可写，因此三个版本必须完整保留在 `BACKUP_TMP`。打开 OSS 写权限，
+等待后台进程完成同步，再执行自动验收：
+
+```bash
+chmod 700 "$BACKUP_OSS"
+
+uv run python - <<'PY'
+import json
+import os
+import time
+from pathlib import Path
+
+tmp = Path(os.environ["BACKUP_TMP"])
+backup = Path(os.environ["BACKUP_OSS"])
+deadline = time.monotonic() + 300
+while any(tmp.iterdir()) and time.monotonic() < deadline:
+    time.sleep(0.2)
+
+assert not any(tmp.iterdir()), "临时备份目录未在 300 秒内清空"
+states = [json.loads(path.read_text(encoding="utf-8")) for path in backup.glob("projects/*/*/.backup-state.json")]
+assert len(states) == 2, states
+assert len({path.parent.parent.name for path in backup.glob("projects/*/*/.backup-state.json")}) == 1
+assert sorted(state["generation"] for state in states) == [1, 2], states
+assert all(state["status"] == "succeeded" for state in states), states
+
+lines = (Path(os.environ["E2E_ROOT"]) / "server.log").read_text(encoding="utf-8", errors="replace").splitlines()
+active_starts = {}
+starts = {}
+finishes = {}
+for index, line in enumerate(lines):
+    for marker in ("Publishing", "Published"):
+        token = f"{marker} staged session backup session_id="
+        if token not in line:
+            continue
+        tail = line.split(token, 1)[1]
+        session_id, generation_text = tail.split(" generation=", 1)
+        key = (session_id, int(generation_text.split()[0]))
+        if marker == "Publishing":
+            active_starts[key] = index
+        else:
+            starts[key] = active_starts[key]
+            finishes[key] = index
+
+generation_two = next(state for state in states if state["generation"] == 2)
+session_a = generation_two["session_id"]
+session_b = next(state["session_id"] for state in states if state["session_id"] != session_a)
+assert max(starts[(session_a, 1)], starts[(session_b, 1)]) < min(
+    finishes[(session_a, 1)], finishes[(session_b, 1)]
+), "两个会话没有形成并发同步窗口"
+assert finishes[(session_a, 1)] < starts[(session_a, 2)], "同一会话的 v2 早于 v1 完成"
+
+print("PASS: A2A 本地临时备份、跨会话并发同步、同会话版本顺序均符合预期")
+PY
+```
+
+验收证据包括 `$E2E_ROOT/client-summary.json`、三份 `*.events.jsonl`、`server.log` 和最终 OSS 中两个会话的
+`.backup-state.json`。失败条件是：OSS 不可写时请求失败、临时目录不是两个 `v1` 加一个 `v2`、出现
+`.copying`、开放 OSS 后临时目录未清空、最终 generation 不是 `[1, 2]`、两个会话没有同步重叠，或同一
+会话在 `v1` 完成前开始同步 `v2`。
+
 ## 快速开始
 
 ```bash

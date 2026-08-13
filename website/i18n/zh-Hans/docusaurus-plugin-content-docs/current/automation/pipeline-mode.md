@@ -111,4 +111,4 @@ ACP 目前不支持 Pipeline 模式。`--prompt` / [非交互模式](./non-inter
 
 ## 备份检查点
 
-Pipeline 模式不再为完成的 agent loop step 执行备份。它会先发布 `input_required` 或 `waiting_input`，再执行一次关键备份；如果备份失败，pipeline 随后发送 `backup_blocked` 并停在可恢复状态。`pipeline_handoff_ready` 和终态仍然会在发布前受到关键备份保护。对 A2A 观察者来说，terminal 和 `pipeline_handoff_ready` 受保护发布在镜像持久化后，会跟随一个包含 `committedEventId`、`committedEventType` 和 `committedSequence` 的 `backup_committed` 事件。`parallel_sub_pipeline` 的子 step 进度由下一次等待输入、handoff 或终态备份捕获，不再创建逐步检查点。
+Pipeline 模式不再为完成的 agent loop step 执行备份。它会先发布 `input_required` 或 `waiting_input`，再执行一次关键备份；如果备份失败，pipeline 随后发送 `backup_blocked` 并停在可恢复状态。`pipeline_handoff_ready` 和终态仍然会在发布前受到关键备份保护。对 A2A 观察者来说，当前模式的备份边界持久化后，terminal 和 `pipeline_handoff_ready` 受保护发布会跟随一个包含 `committedEventId`、`committedEventType` 和 `committedSequence` 的 `backup_committed` 事件。配置 `IAC_CODE_CONFIG_BACKUP_TMP_DIR` 时，该边界是本地不可变快照，可用于同一 sandbox 内恢复；跨 sandbox 恢复要等后台进程将其复制到 `IAC_CODE_CONFIG_BACKUP_DIR`。未启用临时目录时，该边界仍是最终备份目录。`parallel_sub_pipeline` 的子 step 进度由下一次等待输入、handoff 或终态备份捕获，不再创建逐步检查点。

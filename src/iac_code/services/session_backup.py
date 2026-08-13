@@ -74,6 +74,7 @@ class BackupResult:
     generation: int | None = None
     commit_id: str | None = None
     shared_committed: bool = False
+    staged_committed: bool = False
     requires_reconcile: bool = False
 
 
@@ -147,7 +148,15 @@ class SessionRestoreResult:
 @dataclass(frozen=True)
 class SessionReconcileResult:
     enabled: bool
-    action: Literal["disabled", "current", "initialized", "restored", "repaired", "metadata_repaired"]
+    action: Literal[
+        "disabled",
+        "current",
+        "initialized",
+        "restored",
+        "repaired",
+        "metadata_repaired",
+        "staged_current",
+    ]
     source: Path | None = None
     state: SessionBackupState | None = None
     copied_files: int = 0

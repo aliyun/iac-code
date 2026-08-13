@@ -53,6 +53,7 @@ class A2ATaskStore(TaskStore):
         cleanup_interval_seconds: float = 300,
         persistence: A2APersistenceStore | None = None,
         owner_resolver: Callable[[ServerCallContext], str] = default_owner_resolver,
+        backup_service: Any | None = None,
     ) -> None:
         self._sdk_tasks: dict[str, dict[str, Task]] = {}
         self._sdk_tasks_by_context: dict[str, dict[str, set[str]]] = {}
@@ -74,6 +75,7 @@ class A2ATaskStore(TaskStore):
         self._context_reconciliation_waiters: dict[str, set[str]] = {}
         self._context_execution_starts: dict[str, dict[str, asyncio.Task[Any]]] = {}
         self._owner_resolver = owner_resolver
+        self._backup_service = backup_service or SessionBackupService()
 
     async def get(self, task_id: str, context: ServerCallContext | None = None) -> Task | None:
         owner = self._owner(context)
@@ -283,7 +285,7 @@ class A2ATaskStore(TaskStore):
 
                 if session_id is None:
                     session_id = str(uuid.uuid4())
-                    _ensure_new_a2a_session_layout(cwd, session_id)
+                    _ensure_new_a2a_session_layout(cwd, session_id, self._backup_service)
                 record = A2AContextRecord(
                     context_id=context_id,
                     session_id=session_id,
@@ -1021,7 +1023,7 @@ def _session_paths_for_a2a_snapshot(snapshot: A2AContextSnapshot) -> SessionPath
     return SessionPaths.require_supported(session_dir)
 
 
-def _ensure_new_a2a_session_layout(cwd: str, session_id: str) -> None:
+def _ensure_new_a2a_session_layout(cwd: str, session_id: str, backup_service: Any) -> None:
     try:
         SessionStorage().ensure_v2_session_dir_for_new_session(cwd, session_id)
     except Exception as exc:
@@ -1031,7 +1033,7 @@ def _ensure_new_a2a_session_layout(cwd: str, session_id: str) -> None:
         )
         return
     try:
-        SessionBackupService().initialize_session(cwd, session_id)
+        backup_service.initialize_session(cwd, session_id)
     except Exception as exc:
         logger.error(
             "Failed to initialize A2A session backup state error_type=%s",
