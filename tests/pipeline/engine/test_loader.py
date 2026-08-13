@@ -99,6 +99,7 @@ class TestLoadPipelineDir:
         assert skill_root != skill_dir.resolve()
         assert (skill_root / "references" / "ros-template.md").is_file()
         assert (skill_root / "references" / "cloud-products" / "ecs.md").is_file()
+        assert (skill_root / "references" / "cloud-products" / "ga.md").is_file()
 
     def test_rejects_context_dependency_cycle(self, tmp_path):
         yaml_content = dedent("""\

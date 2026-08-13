@@ -275,7 +275,7 @@ ros_estimate_template_cost(
 
 | 文件 | 内容 | 何时查阅 |
 |------|------|----------|
-| [references/cloud-products/](references/cloud-products/) | 云产品选型文件（ecs.md、rds.md、redis.md、slb.md、vpc.md、oss.md） | 需要了解产品属性、规格选型、库存相关字段时 |
+| [references/cloud-products/](references/cloud-products/) | 云产品选型文件（ecs.md、rds.md、redis.md、slb.md、vpc.md、oss.md、ga.md） | 需要了解产品属性、规格选型、库存相关字段时 |
 | [references/template-parameters.md](references/template-parameters.md) | 模板参数规范：AssociationProperty、Label、分组 | 修复 Parameters 定义（缺少 AssociationProperty、Label 等）时 |
 | [references/ros-template.md](references/ros-template.md) | ROS 模板最佳实践：RunCommand、嵌套栈、条件部署 | 修复资源定义、内置函数用法等模板结构问题时 |
 

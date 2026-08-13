@@ -31,6 +31,13 @@ _ALIYUN_SCOPE_PATTERNS = [
     r"云资源",
 ]
 
+_GA_FULL_NAME_PATTERNS = [r"全球加速", r"\bglobal\s+accelerator\b"]
+_GA_ABBREVIATION_PATTERN = (
+    r"(?:\bga\b\s*(?:\bros\b|\bterraform\b|模[板版]|资源栈)|"
+    r"(?:\bros\b|\bterraform\b|模[板版]|资源栈)\s*\bga\b)"
+)
+_NON_ALIYUN_GA_PATTERNS = [r"\baws\b", r"\bamazon\s+web\s+services\b", r"\bcloudformation\b"]
+
 _ES_TEMPLATE_ACTIONS = r"genera|generar|crea|crear|despliega|desplegar|explica|explicar|valida|validar|mejora|mejorar"
 _FR_TEMPLATE_ACTIONS = (
     r"cr[eé]e|cr[eé]er|g[eé]n[eé]re|g[eé]n[eé]rer|d[eé]ploie|d[eé]ployer|"
@@ -91,7 +98,17 @@ def should_trigger(prompt: str) -> bool:
 
 
 def has_aliyun_scope(text: str) -> bool:
-    return any(re.search(pattern, text, re.IGNORECASE) for pattern in _ALIYUN_SCOPE_PATTERNS)
+    if any(re.search(pattern, text, re.IGNORECASE) for pattern in _ALIYUN_SCOPE_PATTERNS):
+        return True
+    return has_ga_product_scope(text)
+
+
+def has_ga_product_scope(text: str) -> bool:
+    if any(re.search(pattern, text, re.IGNORECASE) for pattern in _NON_ALIYUN_GA_PATTERNS):
+        return False
+    if any(re.search(pattern, text, re.IGNORECASE) for pattern in _GA_FULL_NAME_PATTERNS):
+        return True
+    return re.search(_GA_ABBREVIATION_PATTERN, text, re.IGNORECASE) is not None
 
 
 def has_iac_workflow(text: str) -> bool:
