@@ -2253,15 +2253,16 @@ def test_project_reveal_requires_existing_directory(tmp_path) -> None:
 
 
 def test_session_list_is_limited_by_default_and_reports_more(tmp_path) -> None:
+    from iac_code.agent.message import Message
     from iac_code.web.app import create_app
     from iac_code.web.session_manager import WebSessionManager
 
     cwd = str(tmp_path / "project")
     manager = WebSessionManager(projects_dir=tmp_path / "projects")
     for index in range(55):
-        session = manager.create_session(cwd=cwd, session_id="session-{:02d}".format(index))
-        session.title = "Session {:02d}".format(index)
-        manager.persist_web_metadata(session)
+        session_id = "session-{:02d}".format(index)
+        manager.storage.append(cwd, session_id, Message(role="user", content="Session {:02d}".format(index)))
+        _mark_web_session(manager, cwd, session_id)
     app = create_app(session_manager=manager)
 
     with TestClient(app) as client:

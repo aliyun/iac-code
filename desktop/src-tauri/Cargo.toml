@@ -1,6 +1,6 @@
 [package]
 name = "iac-code-desktop"
-version = "0.12.0"
+version = "0.12.1"
 description = "iac-code"
 authors = ["iac-code contributors"]
 license = "Apache-2.0"

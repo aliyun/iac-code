@@ -71,6 +71,8 @@ tests/agent/test_permission_audit_integration.py
 tests/services/test_session_index.py
 tests/services/test_session_storage.py
 tests/services/test_session_usage.py
+tests/services/test_agent_factory.py
+tests/web/test_app.py
 tests/web/test_session_manager.py
 tests/a2a/test_pipeline_executor.py
 tests/pipeline/engine/test_pipeline_runner_sidecar_path.py
