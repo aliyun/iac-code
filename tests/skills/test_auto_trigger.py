@@ -172,6 +172,22 @@ def test_iac_aliyun_trigger_matches_alicloud_provider_prompt():
     assert should_trigger('用 provider "alicloud" 写一个 ECS 安全组模板')
 
 
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "生成一个全球加速 ROS 模板",
+        "生成一个 GA ROS 模板",
+        "生成一个 GA Terraform 模板",
+        "GA\nROS 模板生成",
+        "Write a Global Accelerator Terraform template",
+    ],
+)
+def test_iac_aliyun_trigger_matches_ga_template_prompts(prompt):
+    from iac_code.skills.bundled.iac_aliyun.auto_trigger import should_trigger
+
+    assert should_trigger(prompt)
+
+
 def test_iac_aliyun_trigger_rejects_infraguard_policy_generation():
     from iac_code.skills.bundled.iac_aliyun.auto_trigger import should_trigger
 
@@ -291,6 +307,10 @@ def test_iac_aliyun_trigger_matches_supported_languages(prompt):
         "阿里云 ECS 价格怎么样？",
         "阿里云 ECS 部署失败了，帮我排查 SSH 登录",
         "ROS 机器人导航怎么做？",
+        "Create a Terraform template after this feature reaches GA",
+        "这个 ROS 资源栈功能 GA 了吗？",
+        "Create an AWS Global Accelerator Terraform template",
+        "Write a Global Accelerator CloudFormation template",
     ],
 )
 def test_iac_aliyun_trigger_rejects_non_iac_prompts(prompt):

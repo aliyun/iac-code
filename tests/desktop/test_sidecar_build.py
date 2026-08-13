@@ -34,6 +34,7 @@ def test_sidecar_staging_materializes_resources_and_desktop_helper_instructions(
             "slb.md",
             "vpc.md",
             "oss.md",
+            "ga.md",
         }
     assert list((package / "i18n/locales").glob("*/LC_MESSAGES/messages.mo"))
     assert list((package / "i18n/locales").glob("*/LC_MESSAGES/webui.mo"))

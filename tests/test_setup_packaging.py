@@ -33,6 +33,7 @@ def _assert_expanded_selling_references(package_root: Path, skill_names: tuple[s
         assert (references / "ros-template.md").is_file()
         assert (references / "template-parameters.md").is_file()
         assert (references / "cloud-products" / "ecs.md").is_file()
+        assert (references / "cloud-products" / "ga.md").is_file()
         assert (references / "solutions" / "iac-code-web.md").is_file()
         assert (references / "solutions" / "iac-code-web.ros.yml").is_file()
         recommendation = (references / "template-parameter-recommendation.md").read_text(encoding="utf-8")
@@ -71,6 +72,7 @@ def test_selling_skill_references_expand_windows_symlink_placeholder_files(monke
     (bundled_refs / "ros-template.md").write_text("real ros template reference", encoding="utf-8")
     (bundled_refs / "template-parameters.md").write_text("real parameter reference", encoding="utf-8")
     (cloud_products / "ecs.md").write_text("real ecs reference", encoding="utf-8")
+    (cloud_products / "ga.md").write_text("real ga reference", encoding="utf-8")
     (solutions / "iac-code-web.md").write_text("real solution reference", encoding="utf-8")
     (solutions / "iac-code-web.ros.yml").write_text("ROSTemplateFormatVersion: '2015-09-01'", encoding="utf-8")
     (selling_refs / "template-parameter-recommendation.md").write_text(

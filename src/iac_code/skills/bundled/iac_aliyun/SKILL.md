@@ -66,6 +66,7 @@ auto_trigger:
 | RDS | ZoneId, DBInstanceClass, DBInstanceStorageType |
 | Redis | ZoneId, InstanceClass |
 | SLB/ALB | ZoneId |
+| GA | `IpSets.AccelerateRegion[].AccelerateRegionId`（标准型 EIP）/ `BasicIpSet.AccelerateRegionId`（基础型）, EndpointGroupRegion |
 
 以下属性**不需要**参数化，直接使用合理默认值：
 - 网络：VPC CIDR、VSwitch CIDR
@@ -171,7 +172,7 @@ auto_trigger:
 |------|------|
 | [references/template-parameters.md](references/template-parameters.md) | 模板参数规范：AssociationProperty、Label、分组（ROS/Terraform 共用） |
 | [references/template-parameter-recommendation.md](references/template-parameter-recommendation.md) | 已有 ROS 可部署模板的部署前参数推荐流程 |
-| [references/cloud-products/](references/cloud-products/) | 云产品选型文件（ecs.md、rds.md、redis.md、slb.md、vpc.md、oss.md） |
+| [references/cloud-products/](references/cloud-products/) | 云产品选型文件（ecs.md、rds.md、redis.md、slb.md、vpc.md、oss.md、ga.md） |
 | [references/ros-template.md](references/ros-template.md) | ROS 原生模板最佳实践：RunCommand、嵌套栈、条件部署 |
 | [references/terraform-template.md](references/terraform-template.md) | Terraform 最佳实践：文件组织、变量、Data Source、ROS 集成 |
 

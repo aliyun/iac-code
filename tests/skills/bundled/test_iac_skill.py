@@ -3,6 +3,11 @@ from pathlib import Path
 from iac_code.skills.bundled import _bundled_skills, get_bundled_skills, init_bundled_skills
 
 IAC_SKILL_ROOT = Path("src/iac_code/skills/bundled/iac_aliyun")
+SELLING_IAC_SKILLS = [
+    Path("src/iac_code/pipeline/selling/skills/iac-aliyun-cost/SKILL.md"),
+    Path("src/iac_code/pipeline/selling/skills/iac-aliyun-deploying/SKILL.md"),
+    Path("src/iac_code/pipeline/selling/skills/iac-aliyun-template-generating/SKILL.md"),
+]
 
 
 def _iac_aliyun_asset_text() -> str:
@@ -103,3 +108,23 @@ class TestIacSkill:
         assert "纯 Terraform" in content
         assert "IaCService" in content
         assert "脱敏后的摘要" in content
+
+    def test_cloud_product_catalogs_list_all_bundled_product_references(self):
+        product_names = {path.name for path in (IAC_SKILL_ROOT / "references" / "cloud-products").glob("*.md")}
+
+        for skill_path in [IAC_SKILL_ROOT / "SKILL.md", *SELLING_IAC_SKILLS]:
+            content = skill_path.read_text(encoding="utf-8")
+            missing = sorted(name for name in product_names if name not in content)
+            assert not missing, f"{skill_path} is missing cloud product references: {missing}"
+
+    def test_ga_reference_keeps_ros_and_terraform_boundaries_explicit(self):
+        content = (IAC_SKILL_ROOT / "references" / "cloud-products" / "ga.md").read_text(encoding="utf-8")
+
+        assert "每次生成前必须查询当前 Schema 和可用性 API" in content
+        assert "不得根据经验猜测 `Type`、`ListenerType` 或 `listener_type`" in content
+        assert '`payment_type = "PayAsYouGo"`' in content
+        assert "`IpSets.AccelerateRegion[].AccelerateRegionId`" in content
+        assert "未返回 Anycast 接入属性" in content
+        assert "完整资源链" in content
+        assert "只生成该 Schema 当前返回的资源、属性、枚举和必填字段" in content
+        assert "VSwitch ID（`vsw-...`）" in content
