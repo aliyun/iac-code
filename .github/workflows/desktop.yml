@@ -5,6 +5,8 @@ on:
     types: [opened, synchronize, reopened, labeled]
     paths:
       - ".github/workflows/desktop.yml"
+      # Retired release workflows stay listed so a PR cannot restore them
+      # without running the Desktop boundary checks below.
       - ".github/workflows/desktop-release.yml"
       - ".github/workflows/desktop-signed-package.yml"
       - "desktop/**"
@@ -130,16 +132,6 @@ jobs:
       - name: Build Linux deb flavor
         if: runner.os == 'Linux'
         run: uv run --python 3.12 --group desktop python desktop/scripts/build_desktop.py --channel deb --skip-sidecar
-      - name: Upload validated Desktop bundles
-        uses: actions/upload-artifact@v4
-        with:
-          name: desktop-${{ runner.os }}-validation-bundles
-          path: |
-            desktop/src-tauri/target/release/bundle/**
-            desktop/dist/release-metadata/${{ runner.os }}/**
-          if-no-files-found: error
-          retention-days: 3
-
   desktop-scope:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04

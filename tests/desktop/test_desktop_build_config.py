@@ -234,7 +234,7 @@ def test_development_build_without_updater_does_not_expose_native_updater() -> N
     assert "plugins" not in overlay
 
 
-def test_second_stage_bundle_embeds_updater_without_generating_unsigned_payloads() -> None:
+def test_local_publisher_build_embeds_updater_without_generating_payloads() -> None:
     module = _build_module()
 
     overlay = module.compose_overlay(

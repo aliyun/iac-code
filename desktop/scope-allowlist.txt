@@ -4,6 +4,8 @@ src/iac_code/desktop/**
 tests/desktop/**
 docs/desktop-app-design.md
 .github/workflows/desktop.yml
+# Retired workflow paths remain guarded so their deletion is auditable and a
+# future attempt to restore them triggers the Desktop boundary tests.
 .github/workflows/desktop-release.yml
 .github/workflows/desktop-signed-package.yml
 AGENTS.md

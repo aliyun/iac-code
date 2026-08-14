@@ -128,6 +128,8 @@ def test_linux_checksum_parser_and_hash_gate(tmp_path: Path, monkeypatch: pytest
     checksums.write_text("{}  {}\n".format(digest, payload.name), encoding="utf-8")
 
     assert verifier._parse_checksums(checksums) == {payload.name: digest}
+    monkeypatch.delenv("IAC_CODE_LINUX_SIGNATURE_MODE", raising=False)
+    verifier.verify_linux(artifact)
     payload.write_bytes(b"tampered")
     monkeypatch.setenv("IAC_CODE_LINUX_SIGNATURE_MODE", "unsupported")
     with pytest.raises(RuntimeError, match="checksum mismatch"):

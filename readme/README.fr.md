@@ -14,6 +14,11 @@
 </p>
 
 > **Documentation** : [https://aliyun.github.io/iac-code/](https://aliyun.github.io/iac-code/fr/)
+
+<p align="center">
+  <a href="https://github.com/aliyun/iac-code/releases/latest"><img src="https://img.shields.io/badge/T%C3%A9l%C3%A9charger-IaC%20Code%20Desktop-5268f2?style=for-the-badge" alt="Télécharger IaC Code Desktop"></a>
+</p>
+
 <p align="center">
   <img src="../website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
 </p>
@@ -67,7 +72,7 @@ Par défaut, elle ouvre `http://127.0.0.1:8766` dans votre navigateur (bouclage 
 
 ### Application de bureau
 
-Pour utiliser IaC Code comme une application native, téléchargez le paquet correspondant à votre plateforme depuis les [versions GitHub](https://github.com/aliyun/iac-code/releases) :
+Pour utiliser IaC Code comme une application native, téléchargez le paquet correspondant à votre plateforme depuis la [dernière version GitHub](https://github.com/aliyun/iac-code/releases/latest) :
 
 - Mac avec puce Apple : `.dmg`
 - Windows x64 : programme d'installation `.exe`
@@ -75,7 +80,7 @@ Pour utiliser IaC Code comme une application native, téléchargez le paquet cor
 
 L'application de bureau utilise le même moteur IaC Code et partage les fournisseurs de modèles, les identifiants cloud, les réglages, les projets et les sessions avec la CLI et l'application web. Au premier lancement, sélectionnez le dossier de projet dans lequel IaC Code doit travailler. Sous Windows, l'application vérifie également la présence de Git Bash et propose de vous guider dans son installation si nécessaire.
 
-Les versions macOS, Windows et AppImage peuvent rechercher et appliquer dans l'application des mises à jour signées cryptographiquement. Le paquet deb se met à jour en installant une version plus récente. Les programmes d'installation ne portent pas encore de signature commerciale d'éditeur ; macOS ou Windows peut donc afficher un avertissement relatif à un développeur inconnu. Vérifiez le fichier `SHA256SUMS` fourni avec la version avant l'installation. Consultez le [guide de l'application de bureau](https://aliyun.github.io/iac-code/fr/docs/desktop-app) pour les instructions et le dépannage.
+Les versions macOS, Windows et AppImage peuvent rechercher et appliquer dans l'application des mises à jour signées cryptographiquement. Le paquet deb se met à jour en installant une version plus récente. Les paquets macOS stables sont signés avec Apple Developer ID et notariés par Apple ; les paquets Windows stables portent une signature d'éditeur Authenticode. Téléchargez toujours les paquets depuis la page officielle de la version et vérifiez le fichier `SHA256SUMS` fourni. Consultez le [guide de l'application de bureau](https://aliyun.github.io/iac-code/fr/docs/desktop-app) pour les instructions et le dépannage.
 
 ## Contribuer
 

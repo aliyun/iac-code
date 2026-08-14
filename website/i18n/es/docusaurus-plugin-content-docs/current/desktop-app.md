@@ -26,12 +26,12 @@ Cada versión también incluye `SHA256SUMS`, una lista de materiales de software
 
 1. Descarga y abre el `.dmg`, y arrastra **IaC Code** a **Aplicaciones**.
 2. Abre IaC Code desde Aplicaciones.
-3. El paquete actual aún no tiene una firma de Apple Developer ID ni está notarizado, por lo que macOS puede bloquear el primer inicio. Después de comprobar la suma de verificación, haz clic en la aplicación mientras mantienes pulsada la tecla Control y elige **Abrir**, o autorízala en **Ajustes del Sistema > Privacidad y seguridad**.
+3. Los paquetes estables están firmados con Apple Developer ID y notarizados por Apple. Si macOS aún indica que no puede verificar el paquete, comprueba la información del editor y la suma de verificación.
 
 ### Windows
 
 1. Descarga y ejecuta el instalador `.exe`. IaC Code se instala para el usuario actual y crea accesos directos.
-2. Si Microsoft Defender SmartScreen indica que el editor es desconocido, comprueba `SHA256SUMS`, selecciona **Más información** y continúa únicamente si la suma coincide con la publicada.
+2. Los paquetes estables llevan una firma de editor Authenticode. Si Microsoft Defender SmartScreen aún muestra una advertencia, comprueba el editor y `SHA256SUMS` antes de continuar.
 3. El paquete incluye el soporte de arranque de WebView2 que necesita la interfaz. En el primer inicio, IaC Code también comprueba si Git Bash está instalado y, si falta, muestra una guía para instalarlo.
 
 ### Linux AppImage
@@ -67,7 +67,7 @@ La interfaz está disponible en inglés, chino simplificado, japonés, francés,
 
 Las versiones para macOS, Windows y AppImage consultan periódicamente la información de la versión estable y pueden descargar e instalar una versión nueva. Antes de instalarla, cada actualización se verifica con la clave pública de actualización de IaC Code. El paquete deb sigue el procedimiento habitual de paquetes de Linux.
 
-La firma de una actualización no equivale a la firma del editor que comprueba el sistema operativo. La primera confirma que IaC Code produjo la actualización; la notarización de macOS y la firma de código de Windows identifican al editor ante el sistema. Los instaladores actuales aún no tienen una firma comercial de editor, por lo que los avisos del sistema son previsibles. Descarga siempre los paquetes desde la página oficial y verifica `SHA256SUMS`.
+La firma de una actualización no equivale a la firma del editor que comprueba el sistema operativo. La primera confirma que IaC Code produjo la actualización; la firma y notarización de Apple Developer ID y Windows Authenticode identifican al editor ante el sistema. Los paquetes estables de macOS y Windows superan ambas capas de verificación. Descarga siempre los paquetes desde la página oficial y verifica `SHA256SUMS`.
 
 ## Solución de problemas
 

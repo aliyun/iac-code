@@ -41,6 +41,11 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--channel", choices=("macos", "windows", "appimage", "deb"), default=_default_channel())
     parser.add_argument("--skip-sidecar", action="store_true")
+    parser.add_argument(
+        "--skip-updater-artifacts",
+        action="store_true",
+        help="embed updater configuration but leave payload creation/signing to the private local publisher",
+    )
     return parser.parse_args()
 
 
@@ -184,10 +189,14 @@ def main() -> int:
     environment = dict(os.environ)
     environment["IAC_CODE_DESKTOP_CHANNEL"] = args.channel
     environment["IAC_CODE_DESKTOP_UPDATER_CONFIGURED"] = "1" if updater_configured else "0"
-    if updater_configured:
+    create_updater_artifacts = not args.skip_updater_artifacts
+    if updater_configured and create_updater_artifacts:
         configure_updater_signing_environment(environment)
-    if os.environ.get("IAC_CODE_DESKTOP_RELEASE") == "1" and updater_configured and not environment.get(
-        "TAURI_SIGNING_PRIVATE_KEY"
+    if (
+        os.environ.get("IAC_CODE_DESKTOP_RELEASE") == "1"
+        and updater_configured
+        and create_updater_artifacts
+        and not environment.get("TAURI_SIGNING_PRIVATE_KEY")
     ):
         raise SystemExit("release updater builds require a Tauri updater signing private key")
     if not args.skip_sidecar:
@@ -253,6 +262,7 @@ def main() -> int:
         resources=resources,
         updater_endpoint=endpoint,
         updater_public_key=public_key,
+        create_updater_artifacts=create_updater_artifacts,
     )
     with tempfile.NamedTemporaryFile(
         mode="w",

@@ -26,12 +26,12 @@ Cada versão também inclui o arquivo `SHA256SUMS`, uma lista de materiais de so
 
 1. Baixe e abra o arquivo `.dmg`, depois arraste o **IaC Code** para **Aplicativos**.
 2. Abra o IaC Code pela pasta Aplicativos.
-3. O pacote atual ainda não tem assinatura Apple Developer ID nem reconhecimento de firma da Apple. Por isso, o macOS pode bloquear a primeira execução. Depois de conferir a soma de verificação, clique no aplicativo mantendo a tecla Control pressionada e escolha **Abrir**, ou permita a execução em **Ajustes do Sistema > Privacidade e Segurança**.
+3. Os pacotes estáveis são assinados com Apple Developer ID e notarizados pela Apple. Se o macOS ainda informar que não consegue verificar o pacote, confira os dados do editor e a soma de verificação.
 
 ### Windows
 
 1. Baixe e execute o instalador `.exe`. O IaC Code é instalado para o usuário atual e cria os atalhos do aplicativo.
-2. Se o Microsoft Defender SmartScreen informar que o editor é desconhecido, confira o arquivo `SHA256SUMS`, selecione **Mais informações** e só prossiga se a soma for igual à publicada na versão.
+2. Os pacotes estáveis têm assinatura de editor Authenticode. Se o Microsoft Defender SmartScreen ainda exibir um aviso, confira o editor e o arquivo `SHA256SUMS` antes de prosseguir.
 3. O pacote inclui o suporte de inicialização do WebView2 necessário para a interface. Na primeira execução, o IaC Code também verifica se o Git Bash está instalado e, caso não esteja, apresenta as instruções de instalação.
 
 ### Linux AppImage
@@ -67,7 +67,7 @@ A interface está disponível em inglês, chinês simplificado, japonês, franc�
 
 As versões para macOS, Windows e AppImage consultam periodicamente as informações da versão estável e podem baixar e instalar uma nova versão. Antes da instalação, cada atualização é validada com a chave pública de atualização do IaC Code. O pacote deb segue o processo convencional de pacotes do Linux.
 
-A assinatura de atualização não é a mesma assinatura de editor verificada pelo sistema operacional. A primeira confirma que a atualização foi produzida pelo IaC Code; o reconhecimento de firma do macOS e a assinatura de código do Windows identificam o editor para o sistema. Os instaladores atuais ainda não têm assinatura comercial de editor, portanto os avisos da plataforma são esperados. Sempre baixe os pacotes da página oficial da versão e confira o arquivo `SHA256SUMS`.
+A assinatura de atualização não é a mesma assinatura de editor verificada pelo sistema operacional. A primeira confirma que a atualização foi produzida pelo IaC Code; a assinatura e notarização Apple Developer ID e o Windows Authenticode identificam o editor para o sistema. Os pacotes estáveis para macOS e Windows passam pelas duas camadas de verificação. Sempre baixe os pacotes da página oficial da versão e confira o arquivo `SHA256SUMS`.
 
 ## Solução de problemas
 
