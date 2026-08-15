@@ -76,6 +76,10 @@ iac-code web
 
 Par défaut, elle ouvre `http://127.0.0.1:8766` dans votre navigateur (bouclage uniquement). Consultez le [guide de l'application web](https://aliyun.github.io/iac-code/fr/web-app) pour plus de détails.
 
+<p align="center">
+  <img src="../website/static/img/screenshots/iac-code-web-en.jpg" alt="Application web IaC Code" width="100%">
+</p>
+
 ### Application de bureau
 
 Pour utiliser IaC Code comme une application native, téléchargez le paquet correspondant à votre plateforme depuis la [dernière version GitHub](https://github.com/aliyun/iac-code/releases/latest) :
@@ -85,6 +89,10 @@ Pour utiliser IaC Code comme une application native, téléchargez le paquet cor
 - Linux x64 : `.AppImage` ou `.deb`
 
 L'application de bureau utilise le même moteur IaC Code et partage les fournisseurs de modèles, les identifiants cloud, les réglages, les projets et les sessions avec la CLI et l'application web. Au premier lancement, sélectionnez le dossier de projet dans lequel IaC Code doit travailler. Sous Windows, l'application vérifie également la présence de Git Bash et propose de vous guider dans son installation si nécessaire.
+
+<p align="center">
+  <img src="../website/static/img/screenshots/iac-code-desktop-en.jpg" alt="Application de bureau IaC Code" width="100%">
+</p>
 
 Les versions macOS, Windows et AppImage peuvent rechercher et appliquer dans l'application des mises à jour signées cryptographiquement. Le paquet deb se met à jour en installant une version plus récente. Les paquets macOS stables sont signés avec Apple Developer ID et notariés par Apple ; les paquets Windows stables portent une signature d'éditeur Authenticode. Téléchargez toujours les paquets depuis la page officielle de la version et vérifiez le fichier `SHA256SUMS` fourni. Consultez le [guide de l'application de bureau](https://aliyun.github.io/iac-code/fr/docs/desktop-app) pour les instructions et le dépannage.
 

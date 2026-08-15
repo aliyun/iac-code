@@ -76,6 +76,10 @@ iac-code web
 
 デフォルトではブラウザで `http://127.0.0.1:8766` を開きます（ループバックのみ）。詳しくは [Web アプリガイド](https://aliyun.github.io/iac-code/ja/web-app)をご覧ください。
 
+<p align="center">
+  <img src="../website/static/img/screenshots/iac-code-web-en.jpg" alt="IaC Code Web アプリ" width="100%">
+</p>
+
 ### デスクトップアプリ
 
 ネイティブアプリとして利用する場合は、[最新の GitHub リリース](https://github.com/aliyun/iac-code/releases/latest) からお使いの環境に合ったパッケージをダウンロードしてください。
@@ -85,6 +89,10 @@ iac-code web
 - Linux x64：`.AppImage` または `.deb`
 
 デスクトップアプリは CLI や Web アプリと同じ IaC Code エンジンを使用し、モデルプロバイダー、クラウド認証情報、設定、プロジェクト、セッションも共有します。初回起動時に、IaC Code で操作するプロジェクトフォルダーを選択してください。Windows 版では Git Bash の有無も確認し、未導入の場合はインストール手順を案内します。
+
+<p align="center">
+  <img src="../website/static/img/screenshots/iac-code-desktop-en.jpg" alt="IaC Code デスクトップアプリ" width="100%">
+</p>
 
 macOS 版、Windows 版、AppImage 版では、暗号署名された更新をアプリ内で確認して適用できます。deb パッケージは、新しいパッケージをインストールして更新します。安定版 macOS パッケージは Apple Developer ID で署名され、Apple の公証を受けています。安定版 Windows パッケージには Authenticode の発行元署名が付いています。必ず公式リリースページから入手し、添付された `SHA256SUMS` を確認してください。詳しい手順とトラブルシューティングについては、[デスクトップアプリガイド](https://aliyun.github.io/iac-code/ja/docs/desktop-app)をご覧ください。
 

@@ -76,6 +76,10 @@ iac-code web
 
 By default it opens `http://127.0.0.1:8766` in your browser (loopback only). See the [Web App guide](https://aliyun.github.io/iac-code/web-app) for details.
 
+<p align="center">
+  <img src="website/static/img/screenshots/iac-code-web-en.jpg" alt="IaC Code Web app" width="100%">
+</p>
+
 ### Desktop App
 
 For an installed native experience, download the package for your platform from the [latest GitHub Release](https://github.com/aliyun/iac-code/releases/latest):
@@ -85,6 +89,10 @@ For an installed native experience, download the package for your platform from 
 - Linux x64: `.AppImage` or `.deb`
 
 The Desktop app runs the same IaC Code engine and uses the same providers, cloud credentials, settings, projects, and sessions as the CLI and Web app. On first launch, select the project directory you want IaC Code to work in. Windows also checks for Git Bash and guides you through installation if it is missing.
+
+<p align="center">
+  <img src="website/static/img/screenshots/iac-code-desktop-en.jpg" alt="IaC Code Desktop app" width="100%">
+</p>
 
 macOS, Windows, and AppImage builds can check for and apply cryptographically signed updates in the app. The deb package is updated by installing a newer package. Stable macOS packages are signed with Apple Developer ID and notarized by Apple; stable Windows packages carry an Authenticode publisher signature. Always download from the official release page and verify the accompanying `SHA256SUMS`. See the [Desktop App guide](https://aliyun.github.io/iac-code/docs/desktop-app) for installation and troubleshooting details.
 

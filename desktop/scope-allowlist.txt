@@ -98,7 +98,12 @@ tests/ui/test_terminal_image.py
 website/docusaurus.config.ts
 website/src/clientModules/docsNavigation.test.cjs
 website/src/pages/index.module.css
+website/src/pages/index.tsx
 website/static/img/iac-code-logo.svg
+website/static/img/screenshots/iac-code-desktop-cn.jpg
+website/static/img/screenshots/iac-code-desktop-en.jpg
+website/static/img/screenshots/iac-code-web-cn.jpg
+website/static/img/screenshots/iac-code-web-en.jpg
 
 # Desktop startup reuses Web telemetry preference initialization.
 src/iac_code/web/server.py
