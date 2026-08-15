@@ -38,6 +38,9 @@ src/iac_code/web/static/js/app.js
 src/iac_code/web/static/js/components/workspace.js
 src/iac_code/web/static/js/components/output_panel.js
 tests/web/test_frontend_static.py
+# Desktop reuses the Web command suggestion endpoint; keep its non-blocking
+# dynamic MCP snapshot regression test inside the explicit shared boundary.
+tests/web/test_dynamic_mcp_commands.py
 src/iac_code/i18n/locales/de/LC_MESSAGES/webui.po
 src/iac_code/i18n/locales/es/LC_MESSAGES/webui.po
 src/iac_code/i18n/locales/fr/LC_MESSAGES/webui.po
