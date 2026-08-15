@@ -14,6 +14,17 @@
 </p>
 
 > **Dokumentation**: [https://aliyun.github.io/iac-code/](https://aliyun.github.io/iac-code/de/)
+
+<p align="center">
+  <a href="https://github.com/aliyun/iac-code/releases/latest"><img src="https://img.shields.io/badge/Herunterladen-IaC%20Code%20Desktop-5268f2?style=for-the-badge" alt="IaC Code Desktop herunterladen"></a>
+  <br>
+  <a href="https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-macos-arm64.dmg">macOS Apple Silicon</a> ·
+  <a href="https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-windows-x64.exe">Windows x64</a> ·
+  <a href="https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.AppImage">Linux AppImage</a> ·
+  <a href="https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.deb">Linux deb</a> ·
+  <a href="https://github.com/aliyun/iac-code/releases/latest">Alle Veröffentlichungsdateien</a>
+</p>
+
 <p align="center">
   <img src="../website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
 </p>
@@ -65,9 +76,13 @@ iac-code web
 
 Standardmäßig öffnet sie `http://127.0.0.1:8766` in Ihrem Browser (nur Loopback). Weitere Details finden Sie im [Web-App-Leitfaden](https://aliyun.github.io/iac-code/de/web-app).
 
+<p align="center">
+  <img src="../website/static/img/screenshots/iac-code-web-en.jpg" alt="IaC Code Web-App" width="100%">
+</p>
+
 ### Desktop-App
 
-Für die Nutzung als native Anwendung laden Sie das passende Paket von den [GitHub-Releases](https://github.com/aliyun/iac-code/releases) herunter:
+Für die Nutzung als native Anwendung laden Sie das passende Paket aus der [neuesten GitHub-Version](https://github.com/aliyun/iac-code/releases/latest) herunter:
 
 - Mac mit Apple-Chip: `.dmg`
 - Windows x64: `.exe`-Installationsprogramm
@@ -75,7 +90,11 @@ Für die Nutzung als native Anwendung laden Sie das passende Paket von den [GitH
 
 Die Desktop-App verwendet dieselbe IaC-Code-Engine und dieselben Modellanbieter, Cloud-Zugangsdaten, Einstellungen, Projekte und Sitzungen wie CLI und Web-App. Beim ersten Start wählen Sie den Projektordner aus, in dem IaC Code arbeiten soll. Unter Windows prüft die App außerdem, ob Git Bash installiert ist, und führt bei Bedarf durch die Installation.
 
-Die macOS-, Windows- und AppImage-Versionen können kryptografisch signierte Aktualisierungen direkt in der App suchen und installieren. Das deb-Paket wird durch die Installation einer neueren Paketversion aktualisiert. Die Installationspakete tragen derzeit noch keine kommerzielle Herausgebersignatur. Deshalb kann macOS oder Windows vor einem unbekannten Entwickler warnen; prüfen Sie vor der Installation die mit dem Release veröffentlichte Datei `SHA256SUMS`. Installationshinweise und Hilfe bei Problemen finden Sie im [Leitfaden zur Desktop-App](https://aliyun.github.io/iac-code/de/docs/desktop-app).
+<p align="center">
+  <img src="../website/static/img/screenshots/iac-code-desktop-en.jpg" alt="IaC Code Desktop-App" width="100%">
+</p>
+
+Die macOS-, Windows- und AppImage-Versionen können kryptografisch signierte Aktualisierungen direkt in der App suchen und installieren. Das deb-Paket wird durch die Installation einer neueren Paketversion aktualisiert. Stabile macOS-Pakete sind mit einer Apple Developer ID signiert und von Apple notarisiert; stabile Windows-Pakete tragen eine Authenticode-Herausgebersignatur. Beziehen Sie Pakete immer von der offiziellen Release-Seite und prüfen Sie die dort veröffentlichte Datei `SHA256SUMS`. Installationshinweise und Hilfe bei Problemen finden Sie im [Leitfaden zur Desktop-App](https://aliyun.github.io/iac-code/de/docs/desktop-app).
 
 ## Mitwirken
 

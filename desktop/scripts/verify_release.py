@@ -261,8 +261,8 @@ def verify_linux(artifact_dir: Path) -> None:
                 str(checksum_path),
             ]
         )
-    else:
-        raise RuntimeError("Linux stable verification requires IAC_CODE_LINUX_SIGNATURE_MODE=gpg|sigstore")
+    elif mode:
+        raise RuntimeError("unsupported Linux signature mode: {}".format(mode))
 
 
 def verify_updater_signature(artifact_dir: Path, channel: str) -> None:

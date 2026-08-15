@@ -13,6 +13,8 @@ DESKTOP_ANCHORS = (
     "desktop/**",
     "src/iac_code/desktop/**",
     ".github/workflows/desktop.yml",
+    # Keep retired workflows as anchors so reintroducing either one always
+    # enforces the Desktop boundary. Tests require both files to stay absent.
     ".github/workflows/desktop-release.yml",
     ".github/workflows/desktop-signed-package.yml",
     "docs/desktop-app-design.md",

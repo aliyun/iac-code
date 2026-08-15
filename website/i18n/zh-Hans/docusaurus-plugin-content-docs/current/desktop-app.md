@@ -9,14 +9,14 @@ IaC Code 桌面应用把 CLI 和 Web 应用中的同一套智能体、模型服�
 
 ## 支持的安装包
 
-请从 [GitHub Releases](https://github.com/aliyun/iac-code/releases) 下载与你的平台对应的安装包。
+可通过下方稳定版直链下载各平台的最新安装包；如需全部文件或历史版本，请访问 [GitHub Releases](https://github.com/aliyun/iac-code/releases)。
 
 | 操作系统 | 架构 | 安装包 | 更新方式 |
 |---|---|---|---|
-| macOS | Apple 芯片 | `.dmg` | 应用内更新 |
-| Windows | x64 | `.exe` 安装程序 | 应用内更新 |
-| Linux | x64 | `.AppImage` | 应用内更新 |
-| Debian / Ubuntu | x64 | `.deb` | 安装新版软件包 |
+| macOS | Apple 芯片 | [`.dmg`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-macos-arm64.dmg) | 应用内更新 |
+| Windows | x64 | [`.exe` 安装程序](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-windows-x64.exe) | 应用内更新 |
+| Linux | x64 | [`.AppImage`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.AppImage) | 应用内更新 |
+| Debian / Ubuntu | x64 | [`.deb`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.deb) | 安装新版软件包 |
 
 每个版本还会提供 `SHA256SUMS`、软件物料清单（SBOM）和第三方软件声明。
 
@@ -26,12 +26,12 @@ IaC Code 桌面应用把 CLI 和 Web 应用中的同一套智能体、模型服�
 
 1. 下载并打开 `.dmg`，将 **IaC Code** 拖入**应用程序**目录。
 2. 从“应用程序”中打开 IaC Code。
-3. 当前安装包尚未使用 Apple Developer ID 签名，也未经过公证，因此 macOS 可能阻止首次启动。核对校验和后，可以按住 Control 键点按应用并选择**打开**，或前往**系统设置 > 隐私与安全性**允许打开。
+3. 稳定版安装包使用 Apple Developer ID 签名并经过 Apple 公证。如果 macOS 仍提示无法验证安装包，请核对发布者信息和校验和。
 
 ### Windows
 
 1. 下载并运行 `.exe` 安装程序。IaC Code 会安装到当前用户，并创建应用快捷方式。
-2. 如果 Microsoft Defender SmartScreen 提示发布者未知，请先核对 `SHA256SUMS`，然后选择**更多信息**；只有校验和与版本页面一致时才继续安装。
+2. 稳定版安装包带有 Authenticode 发布者签名。如果 Microsoft Defender SmartScreen 仍显示警告，请先核对发布者信息和 `SHA256SUMS` 再继续。
 3. 安装包带有界面运行所需的 WebView2 引导支持。IaC Code 首次启动时还会检查 Git Bash；如果尚未安装，会提供安装引导。
 
 ### Linux AppImage
@@ -67,7 +67,7 @@ IaC Code 首次启动时会要求选择项目目录。该目录将作为文件�
 
 macOS、Windows 和 AppImage 版本会定期读取稳定版更新信息，并可下载和安装新版本。每个更新包在安装前都会使用 IaC Code 的更新公钥进行验证。deb 版本则沿用 Linux 常规的软件包更新方式。
 
-更新签名与操作系统的发布者签名并不是一回事：前者用于确认更新确实由 IaC Code 发布；macOS 公证和 Windows 代码签名则用于向操作系统表明发布者身份。目前发布的安装包尚未使用商业发布者证书签名，因此出现平台警告属于预期情况。请始终从官方版本页面下载安装包，并核对 `SHA256SUMS`。
+更新签名与操作系统的发布者签名并不是一回事：前者用于确认更新确实由 IaC Code 发布；Apple Developer ID 签名/公证和 Windows Authenticode 则用于向操作系统表明发布者身份。稳定版 macOS 和 Windows 安装包会同时通过这两层验证。请始终从官方版本页面下载安装包，并核对 `SHA256SUMS`。
 
 ## 故障排查
 

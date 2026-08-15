@@ -68,14 +68,21 @@ async def test_suggestions_use_dynamic_mcp_registry_and_close_ephemeral_runtimes
     app = create_app(session_manager=manager)
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
-        slash = await client.get(
-            "/api/suggestions",
-            params={"kind": "command", "q": "mcp", "sessionId": session.session_id},
-        )
-        skill = await client.get(
-            "/api/suggestions",
-            params={"kind": "skill", "q": "mcp", "sessionId": session.session_id},
-        )
+
+        async def wait_for_dynamic_suggestion(kind: str, expected: str) -> httpx.Response:
+            deadline = time.monotonic() + 2.0
+            while True:
+                response = await client.get(
+                    "/api/suggestions",
+                    params={"kind": kind, "q": "mcp", "sessionId": session.session_id},
+                )
+                values = [item["value"] for item in response.json()["suggestions"]]
+                if expected in values or time.monotonic() >= deadline:
+                    return response
+                await asyncio.sleep(0.01)
+
+        slash = await wait_for_dynamic_suggestion("command", "/mcp__remote__review")
+        skill = await wait_for_dynamic_suggestion("skill", "$mcp__remote__review")
 
     assert slash.status_code == 200
     assert skill.status_code == 200

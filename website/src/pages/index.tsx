@@ -5,6 +5,10 @@ import Layout from '@theme/Layout';
 import styles from './index.module.css';
 import demoEnGif from '@site/static/img/demo_en.gif';
 import demoZhGif from '@site/static/img/demo_zh.gif';
+import desktopCnScreenshot from '@site/static/img/screenshots/iac-code-desktop-cn.jpg';
+import desktopEnScreenshot from '@site/static/img/screenshots/iac-code-desktop-en.jpg';
+import webCnScreenshot from '@site/static/img/screenshots/iac-code-web-cn.jpg';
+import webEnScreenshot from '@site/static/img/screenshots/iac-code-web-en.jpg';
 
 type Locale = 'en' | 'zh-Hans' | 'ja' | 'fr' | 'de' | 'es' | 'pt';
 type InstallTarget = 'shell' | 'windows';
@@ -51,10 +55,12 @@ type TerminalScene = {
 };
 
 type HomepageItem = {
-  visual: VisualKey;
+  visual?: VisualKey;
+  screenshot?: 'web' | 'desktop';
   title: string;
   body: string;
   command?: string;
+  alt?: string;
 };
 
 type HomepageDraft = {
@@ -140,6 +146,19 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
         body: 'Pass a single prompt to IaC Code for scripts, pipelines, and automation systems.',
         command: 'iac-code --prompt "Create a VPC" --output-format stream-json',
       },
+      {
+        screenshot: 'web',
+        title: 'Web app',
+        body: 'Launch the local Web app from the CLI and work in a browser with the full conversational IaC workspace.',
+        command: 'iac-code web',
+        alt: 'IaC Code Web app',
+      },
+      {
+        screenshot: 'desktop',
+        title: 'Desktop app',
+        body: 'Install the native app on macOS, Windows, or Linux for an integrated desktop experience and signed updates.',
+        alt: 'IaC Code Desktop app',
+      },
     ],
     ctaTitle: 'Start using IaC Code',
     ctaBody: 'Install once, then use interactive mode or run IaC Code headlessly in automation.',
@@ -181,6 +200,19 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
         title: '无头模式',
         body: '把单次提示词交给 IaC Code，适合脚本、流水线和自动化系统调用。',
         command: 'iac-code --prompt "创建一个 VPC" --output-format stream-json',
+      },
+      {
+        screenshot: 'web',
+        title: 'Web 应用',
+        body: '通过 CLI 启动本地 Web 应用，在浏览器中使用完整的对话式 IaC 工作空间。',
+        command: 'iac-code web',
+        alt: 'IaC Code Web 应用',
+      },
+      {
+        screenshot: 'desktop',
+        title: '桌面应用',
+        body: '在 macOS、Windows 或 Linux 上安装原生应用，获得一体化桌面体验和签名更新。',
+        alt: 'IaC Code 桌面应用',
       },
     ],
     ctaTitle: '开始使用 IaC Code',
@@ -224,6 +256,19 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
         body: '単発プロンプトを IaC Code に渡し、スクリプト、パイプライン、自動化システムから実行できます。',
         command: 'iac-code --prompt "VPCを作成" --output-format stream-json',
       },
+      {
+        screenshot: 'web',
+        title: 'Web アプリ',
+        body: 'CLI からローカル Web アプリを起動し、ブラウザーで対話型 IaC ワークスペースの全機能を利用できます。',
+        command: 'iac-code web',
+        alt: 'IaC Code Web アプリ',
+      },
+      {
+        screenshot: 'desktop',
+        title: 'デスクトップアプリ',
+        body: 'macOS、Windows、Linux にネイティブアプリをインストールし、統合された操作環境と署名付き更新を利用できます。',
+        alt: 'IaC Code デスクトップアプリ',
+      },
     ],
     ctaTitle: 'IaC Code を使い始める',
     ctaBody: 'インストール後は、インタラクティブモードでも自動化内のヘッドレス実行でも利用できます。',
@@ -265,6 +310,19 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
         title: 'Mode headless',
         body: 'Transmettez un prompt unique à IaC Code pour les scripts, les pipelines et les systèmes d’automatisation.',
         command: 'iac-code --prompt "Créer un VPC" --output-format stream-json',
+      },
+      {
+        screenshot: 'web',
+        title: 'Application web',
+        body: 'Lancez l’application web locale depuis la CLI et retrouvez dans le navigateur tout l’espace de travail IaC conversationnel.',
+        command: 'iac-code web',
+        alt: 'Application web IaC Code',
+      },
+      {
+        screenshot: 'desktop',
+        title: 'Application de bureau',
+        body: 'Installez l’application native sur macOS, Windows ou Linux pour une expérience intégrée et des mises à jour signées.',
+        alt: 'Application de bureau IaC Code',
       },
     ],
     ctaTitle: 'Commencer avec IaC Code',
@@ -308,6 +366,19 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
         body: 'Übergeben Sie IaC Code einen einzelnen Prompt für Skripte, Pipelines und Automatisierungssysteme.',
         command: 'iac-code --prompt "VPC erstellen" --output-format stream-json',
       },
+      {
+        screenshot: 'web',
+        title: 'Web-App',
+        body: 'Starten Sie die lokale Web-App über die CLI und nutzen Sie den vollständigen dialogorientierten IaC-Arbeitsbereich im Browser.',
+        command: 'iac-code web',
+        alt: 'IaC Code Web-App',
+      },
+      {
+        screenshot: 'desktop',
+        title: 'Desktop-App',
+        body: 'Installieren Sie die native App unter macOS, Windows oder Linux für eine integrierte Desktop-Umgebung und signierte Updates.',
+        alt: 'IaC Code Desktop-App',
+      },
     ],
     ctaTitle: 'Mit IaC Code starten',
     ctaBody: 'Einmal installieren, dann interaktiv nutzen oder IaC Code headless in Automatisierung ausführen.',
@@ -350,6 +421,19 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
         body: 'Envía un único prompt a IaC Code para scripts, pipelines y sistemas de automatización.',
         command: 'iac-code --prompt "Crear una VPC" --output-format stream-json',
       },
+      {
+        screenshot: 'web',
+        title: 'Aplicación web',
+        body: 'Inicia la aplicación web local desde la CLI y utiliza en el navegador todo el espacio de trabajo conversacional de IaC.',
+        command: 'iac-code web',
+        alt: 'Aplicación web de IaC Code',
+      },
+      {
+        screenshot: 'desktop',
+        title: 'Aplicación de escritorio',
+        body: 'Instala la aplicación nativa en macOS, Windows o Linux para disfrutar de una experiencia integrada y actualizaciones firmadas.',
+        alt: 'Aplicación de escritorio de IaC Code',
+      },
     ],
     ctaTitle: 'Empieza a usar IaC Code',
     ctaBody: 'Instálalo una vez y úsalo en modo interactivo o ejecuta IaC Code en modo headless dentro de tu automatización.',
@@ -391,6 +475,19 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
         title: 'Modo headless',
         body: 'Envie um único prompt ao IaC Code para scripts, pipelines e sistemas de automação.',
         command: 'iac-code --prompt "Criar uma VPC" --output-format stream-json',
+      },
+      {
+        screenshot: 'web',
+        title: 'Aplicativo web',
+        body: 'Inicie o aplicativo web local pela CLI e use no navegador todo o espaço de trabalho conversacional de IaC.',
+        command: 'iac-code web',
+        alt: 'Aplicativo web do IaC Code',
+      },
+      {
+        screenshot: 'desktop',
+        title: 'Aplicativo para desktop',
+        body: 'Instale o aplicativo nativo no macOS, Windows ou Linux para ter uma experiência integrada e atualizações assinadas.',
+        alt: 'Aplicativo para desktop do IaC Code',
       },
     ],
     ctaTitle: 'Comece a usar IaC Code',
@@ -1404,7 +1501,7 @@ function WhySection() {
               <h3>{item.title}</h3>
               <p>{item.body}</p>
             </div>
-            <TerminalMockup scene={terminalScenes[item.visual]} />
+            <TerminalMockup scene={terminalScenes[item.visual ?? 'interactiveMode']} />
           </article>
         ))}
       </div>
@@ -1415,7 +1512,12 @@ function WhySection() {
 function UsageSection() {
   const t = useHomeCopy();
   const draft = useHomepageDraft();
+  const locale = useCurrentLocale();
   const terminalScenes = useTerminalScenes();
+  const screenshots =
+    locale === 'zh-Hans'
+      ? {web: webCnScreenshot, desktop: desktopCnScreenshot}
+      : {web: webEnScreenshot, desktop: desktopEnScreenshot};
 
   return (
     <section className={styles.featureRowsSection}>
@@ -1430,15 +1532,28 @@ function UsageSection() {
             <div className={styles.featureRowCopy}>
               <h3>{item.title}</h3>
               <p>{item.body}</p>
-              <InstallCommandBar
-                command={item.command ?? ''}
-                copyCommand={t.copyCommand}
-                copiedCommand={t.copiedCommand}
-                className={styles.rowCommandBar}
-                showPrompt={false}
-              />
+              {item.command && (
+                <InstallCommandBar
+                  command={item.command}
+                  copyCommand={t.copyCommand}
+                  copiedCommand={t.copiedCommand}
+                  className={styles.rowCommandBar}
+                  showPrompt={false}
+                />
+              )}
             </div>
-            <TerminalMockup scene={terminalScenes[item.visual]} />
+            {item.screenshot ? (
+              <div className={styles.usageScreenshotShell}>
+                <img
+                  src={screenshots[item.screenshot]}
+                  alt={item.alt ?? item.title}
+                  className={styles.usageScreenshot}
+                  loading="lazy"
+                />
+              </div>
+            ) : (
+              <TerminalMockup scene={terminalScenes[item.visual ?? 'interactiveMode']} />
+            )}
           </article>
         ))}
       </div>

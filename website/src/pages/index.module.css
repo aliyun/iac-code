@@ -603,9 +603,25 @@
   grid-row: 1;
 }
 
-.featureRowReverse .terminalMockup {
+.featureRowReverse .terminalMockup,
+.featureRowReverse .usageScreenshotShell {
   grid-column: 1;
   grid-row: 1;
+}
+
+.usageScreenshotShell {
+  overflow: hidden;
+  align-self: center;
+  border: 1px solid rgba(75, 81, 126, 0.22);
+  border-radius: 18px;
+  background: #17191f;
+  box-shadow: 0 24px 70px rgba(54, 59, 105, 0.22);
+}
+
+.usageScreenshot {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
 .featureRowCopy {
@@ -687,7 +703,8 @@
   }
 
   .featureRowReverse .featureRowCopy,
-  .featureRowReverse .terminalMockup {
+  .featureRowReverse .terminalMockup,
+  .featureRowReverse .usageScreenshotShell {
     grid-column: auto;
     grid-row: auto;
   }

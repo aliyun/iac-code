@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "minimumPublisherContract": 1,
+  "capabilities": [
+    "privacy-notice-rendering",
+    "release-date-sidecar",
+    "skip-updater-artifacts",
+    "windows-signed-updater-helper"
+  ]
+}

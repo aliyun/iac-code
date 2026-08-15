@@ -9,14 +9,14 @@ The IaC Code Desktop app provides the same agent, providers, cloud integrations,
 
 ## Supported packages
 
-Download the package for your platform from [GitHub Releases](https://github.com/aliyun/iac-code/releases).
+Use the stable platform links below for the latest installers, or browse [GitHub Releases](https://github.com/aliyun/iac-code/releases) for all files and previous versions.
 
 | Operating system | Architecture | Package | Update method |
 |---|---|---|---|
-| macOS | Apple Silicon | `.dmg` | In-app updater |
-| Windows | x64 | setup `.exe` | In-app updater |
-| Linux | x64 | `.AppImage` | In-app updater |
-| Debian / Ubuntu | x64 | `.deb` | Install a newer package |
+| macOS | Apple Silicon | [`.dmg`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-macos-arm64.dmg) | In-app updater |
+| Windows | x64 | [setup `.exe`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-windows-x64.exe) | In-app updater |
+| Linux | x64 | [`.AppImage`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.AppImage) | In-app updater |
+| Debian / Ubuntu | x64 | [`.deb`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.deb) | Install a newer package |
 
 Release assets also include `SHA256SUMS`, a software bill of materials (SBOM), and third-party notices.
 
@@ -26,12 +26,12 @@ Release assets also include `SHA256SUMS`, a software bill of materials (SBOM), a
 
 1. Download the `.dmg`, open it, and drag **IaC Code** to **Applications**.
 2. Open IaC Code from Applications.
-3. Because the current package does not yet have an Apple Developer ID signature or notarization, macOS may block the first launch. Control-click the app and choose **Open**, or allow it in **System Settings > Privacy & Security** after verifying the checksum.
+3. Stable packages are signed with Apple Developer ID and notarized by Apple. Confirm the publisher information and checksum if macOS reports that the package cannot be verified.
 
 ### Windows
 
 1. Download and run the setup `.exe`. The installer installs IaC Code for the current user and creates application shortcuts.
-2. If Microsoft Defender SmartScreen reports an unknown publisher, verify `SHA256SUMS`, choose **More info**, and continue only when the checksum matches the release.
+2. Stable packages carry an Authenticode publisher signature. Confirm the displayed publisher and verify `SHA256SUMS` before continuing if Microsoft Defender SmartScreen displays a warning.
 3. The package includes the WebView2 bootstrap support needed by the interface. On first launch, IaC Code also checks for Git Bash and offers an installation guide if it is unavailable.
 
 ### Linux AppImage
@@ -67,7 +67,7 @@ The interface supports English, Simplified Chinese, Japanese, French, German, Sp
 
 The macOS, Windows, and AppImage builds periodically read the stable release metadata and can download and apply a newer package. Every updater payload is verified with the IaC Code updater public key before installation. The deb package follows the normal Linux package workflow instead.
 
-An updater signature is not the same as an operating-system publisher signature. The updater verifies that an update was produced by IaC Code, while macOS notarization and Windows code signing identify a publisher to the operating system. Current release installers are not commercially publisher-signed, so platform warnings are expected. Always obtain packages from the official release page and verify `SHA256SUMS`.
+An updater signature is not the same as an operating-system publisher signature. The updater verifies that an update was produced by IaC Code, while Apple Developer ID signing/notarization and Windows Authenticode identify the publisher to the operating system. Stable macOS and Windows packages pass both layers of verification. Always obtain packages from the official release page and verify `SHA256SUMS`.
 
 ## Troubleshooting
 

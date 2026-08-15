@@ -9,14 +9,14 @@ L'application de bureau IaC Code propose le même agent, les mêmes fournisseurs
 
 ## Paquets pris en charge
 
-Téléchargez le paquet adapté à votre plateforme depuis les [versions GitHub](https://github.com/aliyun/iac-code/releases).
+Utilisez les liens stables ci-dessous pour télécharger les derniers programmes d'installation, ou consultez les [versions GitHub](https://github.com/aliyun/iac-code/releases) pour accéder à tous les fichiers et aux versions antérieures.
 
 | Système d'exploitation | Architecture | Paquet | Mode de mise à jour |
 |---|---|---|---|
-| macOS | Puce Apple | `.dmg` | Mise à jour dans l'application |
-| Windows | x64 | programme d'installation `.exe` | Mise à jour dans l'application |
-| Linux | x64 | `.AppImage` | Mise à jour dans l'application |
-| Debian / Ubuntu | x64 | `.deb` | Installation d'un paquet plus récent |
+| macOS | Puce Apple | [`.dmg`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-macos-arm64.dmg) | Mise à jour dans l'application |
+| Windows | x64 | [programme d'installation `.exe`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-windows-x64.exe) | Mise à jour dans l'application |
+| Linux | x64 | [`.AppImage`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.AppImage) | Mise à jour dans l'application |
+| Debian / Ubuntu | x64 | [`.deb`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.deb) | Installation d'un paquet plus récent |
 
 Chaque version contient également `SHA256SUMS`, une nomenclature logicielle (SBOM) et les mentions relatives aux logiciels tiers.
 
@@ -26,12 +26,12 @@ Chaque version contient également `SHA256SUMS`, une nomenclature logicielle (SB
 
 1. Téléchargez et ouvrez le fichier `.dmg`, puis faites glisser **IaC Code** dans **Applications**.
 2. Ouvrez IaC Code depuis le dossier Applications.
-3. Le paquet actuel ne possède pas encore de signature Apple Developer ID et n'est pas notarié. macOS peut donc bloquer le premier lancement. Après avoir vérifié la somme de contrôle, cliquez sur l'application tout en maintenant la touche Contrôle enfoncée, puis choisissez **Ouvrir**. Vous pouvez aussi l'autoriser dans **Réglages Système > Confidentialité et sécurité**.
+3. Les paquets stables sont signés avec Apple Developer ID et notariés par Apple. Si macOS indique malgré tout qu'il ne peut pas vérifier le paquet, contrôlez l'identité de l'éditeur et la somme de contrôle.
 
 ### Windows
 
 1. Téléchargez et exécutez le programme d'installation `.exe`. IaC Code s'installe pour l'utilisateur actuel et crée les raccourcis de l'application.
-2. Si Microsoft Defender SmartScreen signale un éditeur inconnu, vérifiez `SHA256SUMS`, sélectionnez **Informations complémentaires** et ne continuez que si la somme correspond à celle de la version publiée.
+2. Les paquets stables portent une signature d'éditeur Authenticode. Si Microsoft Defender SmartScreen affiche malgré tout un avertissement, vérifiez l'éditeur et `SHA256SUMS` avant de continuer.
 3. Le paquet comprend la prise en charge du programme d'amorçage WebView2 nécessaire à l'interface. Au premier lancement, IaC Code vérifie également la présence de Git Bash et propose un guide d'installation s'il est absent.
 
 ### Linux AppImage
@@ -67,7 +67,7 @@ L'interface est disponible en anglais, chinois simplifié, japonais, français, 
 
 Les versions macOS, Windows et AppImage consultent périodiquement les informations de la version stable et peuvent télécharger et installer une nouvelle version. Avant l'installation, chaque mise à jour est vérifiée au moyen de la clé publique de mise à jour IaC Code. Le paquet deb suit quant à lui la procédure habituelle des paquets Linux.
 
-La signature d'une mise à jour n'est pas la signature d'éditeur contrôlée par le système d'exploitation. La première confirme que la mise à jour a été produite par IaC Code ; la notarisation macOS et la signature de code Windows identifient l'éditeur auprès du système. Les programmes d'installation actuels ne possèdent pas encore de signature commerciale d'éditeur : les avertissements de la plateforme sont donc prévisibles. Téléchargez toujours les paquets depuis la page officielle et vérifiez `SHA256SUMS`.
+La signature d'une mise à jour n'est pas la signature d'éditeur contrôlée par le système d'exploitation. La première confirme que la mise à jour a été produite par IaC Code ; la signature et la notarisation Apple Developer ID ainsi que Windows Authenticode identifient l'éditeur auprès du système. Les paquets stables macOS et Windows passent ces deux niveaux de vérification. Téléchargez toujours les paquets depuis la page officielle et vérifiez `SHA256SUMS`.
 
 ## Dépannage
 
