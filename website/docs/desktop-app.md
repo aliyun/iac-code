@@ -9,14 +9,14 @@ The IaC Code Desktop app provides the same agent, providers, cloud integrations,
 
 ## Supported packages
 
-Download the package for your platform from [GitHub Releases](https://github.com/aliyun/iac-code/releases).
+Use the stable platform links below for the latest installers, or browse [GitHub Releases](https://github.com/aliyun/iac-code/releases) for all files and previous versions.
 
 | Operating system | Architecture | Package | Update method |
 |---|---|---|---|
-| macOS | Apple Silicon | `.dmg` | In-app updater |
-| Windows | x64 | setup `.exe` | In-app updater |
-| Linux | x64 | `.AppImage` | In-app updater |
-| Debian / Ubuntu | x64 | `.deb` | Install a newer package |
+| macOS | Apple Silicon | [`.dmg`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-macos-arm64.dmg) | In-app updater |
+| Windows | x64 | [setup `.exe`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-windows-x64.exe) | In-app updater |
+| Linux | x64 | [`.AppImage`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.AppImage) | In-app updater |
+| Debian / Ubuntu | x64 | [`.deb`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.deb) | Install a newer package |
 
 Release assets also include `SHA256SUMS`, a software bill of materials (SBOM), and third-party notices.
 

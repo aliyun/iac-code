@@ -17,6 +17,12 @@
 
 <p align="center">
   <a href="https://github.com/aliyun/iac-code/releases/latest"><img src="https://img.shields.io/badge/T%C3%A9l%C3%A9charger-IaC%20Code%20Desktop-5268f2?style=for-the-badge" alt="Télécharger IaC Code Desktop"></a>
+  <br>
+  <a href="https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-macos-arm64.dmg">macOS Apple Silicon</a> ·
+  <a href="https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-windows-x64.exe">Windows x64</a> ·
+  <a href="https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.AppImage">Linux AppImage</a> ·
+  <a href="https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.deb">Linux deb</a> ·
+  <a href="https://github.com/aliyun/iac-code/releases/latest">Tous les fichiers de la version</a>
 </p>
 
 <p align="center">

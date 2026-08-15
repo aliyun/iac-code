@@ -9,14 +9,14 @@ IaC Code 桌面应用把 CLI 和 Web 应用中的同一套智能体、模型服�
 
 ## 支持的安装包
 
-请从 [GitHub Releases](https://github.com/aliyun/iac-code/releases) 下载与你的平台对应的安装包。
+可通过下方稳定版直链下载各平台的最新安装包；如需全部文件或历史版本，请访问 [GitHub Releases](https://github.com/aliyun/iac-code/releases)。
 
 | 操作系统 | 架构 | 安装包 | 更新方式 |
 |---|---|---|---|
-| macOS | Apple 芯片 | `.dmg` | 应用内更新 |
-| Windows | x64 | `.exe` 安装程序 | 应用内更新 |
-| Linux | x64 | `.AppImage` | 应用内更新 |
-| Debian / Ubuntu | x64 | `.deb` | 安装新版软件包 |
+| macOS | Apple 芯片 | [`.dmg`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-macos-arm64.dmg) | 应用内更新 |
+| Windows | x64 | [`.exe` 安装程序](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-windows-x64.exe) | 应用内更新 |
+| Linux | x64 | [`.AppImage`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.AppImage) | 应用内更新 |
+| Debian / Ubuntu | x64 | [`.deb`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.deb) | 安装新版软件包 |
 
 每个版本还会提供 `SHA256SUMS`、软件物料清单（SBOM）和第三方软件声明。
 

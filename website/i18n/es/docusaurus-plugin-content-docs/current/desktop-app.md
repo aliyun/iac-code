@@ -9,14 +9,14 @@ La aplicación de escritorio ofrece el mismo agente, proveedores, integraciones 
 
 ## Paquetes compatibles
 
-Descarga el paquete de tu plataforma desde [GitHub Releases](https://github.com/aliyun/iac-code/releases).
+Utiliza los enlaces estables de cada plataforma para descargar los instaladores más recientes, o consulta [GitHub Releases](https://github.com/aliyun/iac-code/releases) para ver todos los archivos y versiones anteriores.
 
 | Sistema operativo | Arquitectura | Paquete | Método de actualización |
 |---|---|---|---|
-| macOS | Apple Silicon | `.dmg` | Actualización desde la aplicación |
-| Windows | x64 | instalador `.exe` | Actualización desde la aplicación |
-| Linux | x64 | `.AppImage` | Actualización desde la aplicación |
-| Debian / Ubuntu | x64 | `.deb` | Instalación de un paquete más reciente |
+| macOS | Apple Silicon | [`.dmg`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-macos-arm64.dmg) | Actualización desde la aplicación |
+| Windows | x64 | [instalador `.exe`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-windows-x64.exe) | Actualización desde la aplicación |
+| Linux | x64 | [`.AppImage`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.AppImage) | Actualización desde la aplicación |
+| Debian / Ubuntu | x64 | [`.deb`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.deb) | Instalación de un paquete más reciente |
 
 Cada versión también incluye `SHA256SUMS`, una lista de materiales de software (SBOM) y los avisos de terceros.
 

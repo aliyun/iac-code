@@ -9,14 +9,14 @@ IaC Code デスクトップアプリでは、CLI や Web アプリと同じエ�
 
 ## 対応パッケージ
 
-[GitHub Releases](https://github.com/aliyun/iac-code/releases) から、お使いの環境に合ったパッケージをダウンロードしてください。
+下記の安定版リンクから各環境向けの最新インストーラーをダウンロードできます。すべてのファイルや過去のバージョンは [GitHub Releases](https://github.com/aliyun/iac-code/releases) で確認できます。
 
 | OS | アーキテクチャ | パッケージ | 更新方法 |
 |---|---|---|---|
-| macOS | Apple シリコン | `.dmg` | アプリ内更新 |
-| Windows | x64 | `.exe` インストーラー | アプリ内更新 |
-| Linux | x64 | `.AppImage` | アプリ内更新 |
-| Debian / Ubuntu | x64 | `.deb` | 新しいパッケージをインストール |
+| macOS | Apple シリコン | [`.dmg`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-macos-arm64.dmg) | アプリ内更新 |
+| Windows | x64 | [`.exe` インストーラー](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-windows-x64.exe) | アプリ内更新 |
+| Linux | x64 | [`.AppImage`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.AppImage) | アプリ内更新 |
+| Debian / Ubuntu | x64 | [`.deb`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.deb) | 新しいパッケージをインストール |
 
 各リリースには `SHA256SUMS`、ソフトウェア部品表（SBOM）、サードパーティーソフトウェアに関する通知も含まれます。
 

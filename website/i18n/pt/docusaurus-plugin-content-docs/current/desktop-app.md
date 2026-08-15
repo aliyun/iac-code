@@ -9,14 +9,14 @@ O aplicativo para desktop oferece o mesmo agente, provedores, integrações com 
 
 ## Pacotes compatíveis
 
-Baixe o pacote da sua plataforma em [GitHub Releases](https://github.com/aliyun/iac-code/releases).
+Use os links estáveis abaixo para baixar os instaladores mais recentes de cada plataforma ou consulte [GitHub Releases](https://github.com/aliyun/iac-code/releases) para ver todos os arquivos e versões anteriores.
 
 | Sistema operacional | Arquitetura | Pacote | Forma de atualização |
 |---|---|---|---|
-| macOS | Apple Silicon | `.dmg` | Atualização pelo aplicativo |
-| Windows | x64 | instalador `.exe` | Atualização pelo aplicativo |
-| Linux | x64 | `.AppImage` | Atualização pelo aplicativo |
-| Debian / Ubuntu | x64 | `.deb` | Instalação de um pacote mais recente |
+| macOS | Apple Silicon | [`.dmg`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-macos-arm64.dmg) | Atualização pelo aplicativo |
+| Windows | x64 | [instalador `.exe`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-windows-x64.exe) | Atualização pelo aplicativo |
+| Linux | x64 | [`.AppImage`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.AppImage) | Atualização pelo aplicativo |
+| Debian / Ubuntu | x64 | [`.deb`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.deb) | Instalação de um pacote mais recente |
 
 Cada versão também inclui o arquivo `SHA256SUMS`, uma lista de materiais de software (SBOM) e os avisos de componentes de terceiros.
 

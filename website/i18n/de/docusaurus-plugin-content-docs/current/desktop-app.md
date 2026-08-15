@@ -9,14 +9,14 @@ Die IaC-Code-Desktop-App bietet denselben Agenten, dieselben Modellanbieter, Clo
 
 ## Unterstützte Pakete
 
-Laden Sie das Paket für Ihre Plattform von den [GitHub-Releases](https://github.com/aliyun/iac-code/releases) herunter.
+Verwenden Sie die stabilen Plattformlinks für die neuesten Installationspakete oder öffnen Sie die [GitHub-Releases](https://github.com/aliyun/iac-code/releases), um alle Dateien und ältere Versionen anzuzeigen.
 
 | Betriebssystem | Architektur | Paket | Aktualisierung |
 |---|---|---|---|
-| macOS | Apple-Chip | `.dmg` | Aktualisierung in der App |
-| Windows | x64 | `.exe`-Installationsprogramm | Aktualisierung in der App |
-| Linux | x64 | `.AppImage` | Aktualisierung in der App |
-| Debian / Ubuntu | x64 | `.deb` | Installation eines neueren Pakets |
+| macOS | Apple-Chip | [`.dmg`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-macos-arm64.dmg) | Aktualisierung in der App |
+| Windows | x64 | [`.exe`-Installationsprogramm](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-windows-x64.exe) | Aktualisierung in der App |
+| Linux | x64 | [`.AppImage`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.AppImage) | Aktualisierung in der App |
+| Debian / Ubuntu | x64 | [`.deb`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.deb) | Installation eines neueren Pakets |
 
 Zu jedem Release gehören außerdem `SHA256SUMS`, eine Software-Stückliste (SBOM) und Hinweise zu Drittanbieterkomponenten.
 

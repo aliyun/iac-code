@@ -9,14 +9,14 @@ L'application de bureau IaC Code propose le même agent, les mêmes fournisseurs
 
 ## Paquets pris en charge
 
-Téléchargez le paquet adapté à votre plateforme depuis les [versions GitHub](https://github.com/aliyun/iac-code/releases).
+Utilisez les liens stables ci-dessous pour télécharger les derniers programmes d'installation, ou consultez les [versions GitHub](https://github.com/aliyun/iac-code/releases) pour accéder à tous les fichiers et aux versions antérieures.
 
 | Système d'exploitation | Architecture | Paquet | Mode de mise à jour |
 |---|---|---|---|
-| macOS | Puce Apple | `.dmg` | Mise à jour dans l'application |
-| Windows | x64 | programme d'installation `.exe` | Mise à jour dans l'application |
-| Linux | x64 | `.AppImage` | Mise à jour dans l'application |
-| Debian / Ubuntu | x64 | `.deb` | Installation d'un paquet plus récent |
+| macOS | Puce Apple | [`.dmg`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-macos-arm64.dmg) | Mise à jour dans l'application |
+| Windows | x64 | [programme d'installation `.exe`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-windows-x64.exe) | Mise à jour dans l'application |
+| Linux | x64 | [`.AppImage`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.AppImage) | Mise à jour dans l'application |
+| Debian / Ubuntu | x64 | [`.deb`](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.deb) | Installation d'un paquet plus récent |
 
 Chaque version contient également `SHA256SUMS`, une nomenclature logicielle (SBOM) et les mentions relatives aux logiciels tiers.
 
