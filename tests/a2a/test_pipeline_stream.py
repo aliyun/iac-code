@@ -720,7 +720,7 @@ async def test_publish_sub_pipeline_permission_resolves_inner_future_and_publish
     assert permission["permissionId"] == "perm-toolu-1"
     assert permission["toolName"] == "bash"
     assert permission["toolUseId"] == "toolu-1"
-    assert permission["safeSummary"] == "bash permission request (fields: cmd)"
+    assert permission["safeSummary"] == 'bash: {"cmd":"pwd"}'
     assert permission["toolInput"] == {"cmd": {"type": "str", "length": 3, "fingerprint": fingerprint_text("pwd")}}
     assert permission["approved"] is True
     assert permission["decision"] == "allow_once"
@@ -1180,7 +1180,9 @@ async def test_publish_permission_omits_tool_input_when_tool_trace_disabled(tmp_
     )
 
     permission = dump(queue.events[0])["metadata"]["iac_code"]["pipeline"]["permission"]
-    assert permission["safeSummary"] == "bash permission request (fields: [redacted], cmd)"
+    assert '"cmd":"pwd"' in permission["safeSummary"]
+    assert '"redacted":true' in permission["safeSummary"]
+    assert "secret-value" not in permission["safeSummary"]
     assert "toolInput" not in permission
     assert "secret-value" not in str(publisher.journal.read_all()[0])
 

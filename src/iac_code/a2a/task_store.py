@@ -57,6 +57,7 @@ class A2ATaskStore(TaskStore):
     ) -> None:
         self._sdk_tasks: dict[str, dict[str, Task]] = {}
         self._sdk_tasks_by_context: dict[str, dict[str, set[str]]] = {}
+        self._pending_permissions: dict[str, list[dict[str, Any]]] = {}
         self._tasks: dict[str, A2ATaskRecord] = {}
         self._task_persistence_dirty: set[str] = set()
         self._contexts: dict[str, A2AContextRecord] = {}
@@ -95,6 +96,7 @@ class A2ATaskStore(TaskStore):
         task_id = validate_protocol_id(task.id)
         async with self._mutation_lock:
             self._attach_context_metadata(task)
+            self._attach_pending_permissions(task)
             owner_tasks = self._sdk_tasks.setdefault(owner, {})
             previous = owner_tasks.get(task_id)
             if previous is not None:
@@ -138,6 +140,36 @@ class A2ATaskStore(TaskStore):
         if metadata is not None:
             ParseDict(metadata, task.metadata)
 
+    def _attach_pending_permissions(self, task: Task) -> None:
+        metadata = MessageToDict(task.metadata, preserving_proto_field_name=False) if task.metadata.fields else {}
+        iac_code = metadata.get("iac_code")
+        if not isinstance(iac_code, dict):
+            iac_code = {}
+            metadata["iac_code"] = iac_code
+        pending = self._pending_permissions.get(task.id)
+        if pending:
+            iac_code["pendingPermissions"] = [dict(envelope) for envelope in pending]
+        else:
+            iac_code.pop("pendingPermissions", None)
+            if not iac_code:
+                metadata.pop("iac_code", None)
+        task.metadata.Clear()
+        if metadata:
+            ParseDict(metadata, task.metadata)
+
+    async def set_pending_permissions(self, task_id: str, permissions: builtins.list[dict[str, Any]]) -> None:
+        task_id = validate_protocol_id(task_id)
+        async with self._mutation_lock:
+            if permissions:
+                self._pending_permissions[task_id] = [dict(envelope) for envelope in permissions]
+            else:
+                self._pending_permissions.pop(task_id, None)
+            for owner_tasks in self._sdk_tasks.values():
+                task = owner_tasks.get(task_id)
+                if task is not None:
+                    self._attach_pending_permissions(task)
+            self._task_persistence_dirty.add(task_id)
+
     async def delete(self, task_id: str, context: ServerCallContext | None = None) -> None:
         owner = self._owner(context)
         task_id = validate_protocol_id(task_id)
@@ -147,6 +179,7 @@ class A2ATaskStore(TaskStore):
             if existing is not None:
                 self._remove_sdk_task_from_index(owner, task_id, existing.context_id)
             owner_tasks.pop(task_id, None)
+            self._pending_permissions.pop(task_id, None)
             self._tasks.pop(task_id, None)
             self._task_persistence_dirty.discard(task_id)
             self._expired_task_tombstones.pop(task_id, None)

@@ -45,7 +45,14 @@ from iac_code.services.session_storage import SessionStorage
 from iac_code.skills.frontmatter import SkillFrontmatter
 from iac_code.skills.skill_definition import SkillDefinition
 from iac_code.types.skill_source import SkillSource
-from iac_code.types.stream_events import PermissionRequestEvent, TextDeltaEvent, ToolResultEvent
+from iac_code.types.stream_events import (
+    MessageEndEvent,
+    MessageStartEvent,
+    PermissionRequestEvent,
+    TextDeltaEvent,
+    ToolResultEvent,
+    Usage,
+)
 
 from .fakes import FakeAgentLoop, FakeEventQueue, FakeRequestContext, FakeRuntime, pending_future
 
@@ -897,6 +904,48 @@ async def test_executor_runs_prompt_and_finishes_input_required(
     assert states[-1] == "TASK_STATE_INPUT_REQUIRED"
     record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
     assert "".join(record.output_text) == "hi"
+    final_events = [
+        dump(event)
+        for event in queue.events
+        if isinstance(event, TaskStatusUpdateEvent)
+        and dump(event).get("metadata", {}).get("iac_code", {}).get("assistantFinal", {}).get("complete") is True
+    ]
+    assert final_events[0]["status"]["message"]["parts"][0]["text"] == "hi"
+
+
+@pytest.mark.asyncio
+async def test_executor_publishes_only_last_assistant_message_as_authoritative_final(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    loop = FakeAgentLoop(
+        [
+            MessageStartEvent(message_id="planning"),
+            TextDeltaEvent(text="I will inspect the VPC first."),
+            MessageEndEvent(stop_reason="tool_use", usage=Usage()),
+            ToolResultEvent(tool_use_id="tool-1", tool_name="aliyun_api", result="done"),
+            MessageStartEvent(message_id="final"),
+            TextDeltaEvent(text="VSwitch deployment completed."),
+            MessageEndEvent(stop_reason="end_turn", usage=Usage()),
+        ]
+    )
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+    queue = FakeEventQueue()
+
+    await IacCodeA2AExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+    ).execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    final_events = [
+        dump(event)
+        for event in queue.events
+        if isinstance(event, TaskStatusUpdateEvent)
+        and dump(event).get("metadata", {}).get("iac_code", {}).get("assistantFinal", {}).get("complete") is True
+    ]
+    assert len(final_events) == 1
+    assert final_events[0]["status"]["message"]["parts"][0]["text"] == "VSwitch deployment completed."
 
 
 @pytest.mark.asyncio
@@ -1816,11 +1865,13 @@ async def test_executor_passes_artifact_store_to_stream_event_publisher(
         event,
         artifact_store=None,
         permission_resolver=None,
+        permission_input_registry=None,
         auto_approve_permissions=False,
         exposure_types=None,
         iac_code_session_id=None,
     ):
         seen_artifact_stores.append(artifact_store)
+        assert permission_input_registry is not None
         seen_auto_approve_permissions.append(auto_approve_permissions)
         seen_exposure_types.append(exposure_types)
         return None
@@ -3643,6 +3694,48 @@ class TestResolveUserId:
     def test_returns_none_for_non_string_value(self) -> None:
         executor = self._make_executor()
         assert executor._resolve_user_id({"iac_code": {"user_id": 12345}}) is None
+
+
+class TestResolvePreferredLanguage:
+    def _make_executor(self) -> IacCodeA2AExecutor:
+        store = A2ATaskStore(metrics=NoOpA2AMetrics())
+        return IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    def test_accepts_supported_language_and_normalizes_region(self) -> None:
+        executor = self._make_executor()
+
+        assert executor._resolve_preferred_language({"iac_code": {"preferredLanguage": "zh-CN"}}) == "zh"
+        assert executor._resolve_preferred_language({"iac_code": {"preferred_language": "JA_jp"}}) == "ja"
+
+    def test_rejects_unknown_or_missing_language(self) -> None:
+        executor = self._make_executor()
+
+        assert executor._resolve_preferred_language({"iac_code": {"preferredLanguage": "xx"}}) is None
+        assert executor._resolve_preferred_language({}) is None
+
+
+class TestResolveCandidatePresentation:
+    def _make_executor(self) -> IacCodeA2AExecutor:
+        store = A2ATaskStore(metrics=NoOpA2AMetrics())
+        return IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    def test_accepts_skill_rich_presentation_metadata(self) -> None:
+        executor = self._make_executor()
+
+        assert (
+            executor._resolve_candidate_presentation({"iac_code": {"candidatePresentation": " rich-v1 "}})
+            == "rich-v1"
+        )
+        assert (
+            executor._resolve_candidate_presentation({"iac_code": {"candidate_presentation": "RICH-V1"}})
+            == "rich-v1"
+        )
+
+    def test_rejects_unknown_or_missing_presentation(self) -> None:
+        executor = self._make_executor()
+
+        assert executor._resolve_candidate_presentation({"iac_code": {"candidatePresentation": "unknown"}}) is None
+        assert executor._resolve_candidate_presentation({}) is None
 
 
 class TestResolveAliyunCredential:

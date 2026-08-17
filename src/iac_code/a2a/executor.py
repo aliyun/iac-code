@@ -26,6 +26,12 @@ from iac_code.a2a.events import (
     with_iac_code_session_metadata,
 )
 from iac_code.a2a.exposure import normalize_a2a_exposure_types
+from iac_code.a2a.input_required import (
+    PermissionInputRegistry,
+    PermissionResponse,
+    parse_permission_response,
+    permission_ack_message,
+)
 from iac_code.a2a.metadata_redaction import A2AMetadataEchoRedactor
 from iac_code.a2a.metrics import A2AMetrics, NoOpA2AMetrics
 from iac_code.a2a.parts import (
@@ -36,7 +42,11 @@ from iac_code.a2a.parts import (
     resolve_workspace_path,
 )
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
-from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor, recoverable_task_id_from_sidecar
+from iac_code.a2a.pipeline_executor import (
+    RICH_CANDIDATE_PRESENTATION,
+    IacCodeA2APipelineExecutor,
+    recoverable_task_id_from_sidecar,
+)
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_paths import existing_a2a_pipeline_dir_for_session
 from iac_code.a2a.pipeline_snapshot import (
@@ -64,7 +74,7 @@ from iac_code.agent.message import ContentBlock
 from iac_code.agent.message import Message as AgentMessage
 from iac_code.commands.registry import PromptCommand
 from iac_code.config import get_active_provider_key, get_provider_config, load_credentials
-from iac_code.i18n import _
+from iac_code.i18n import SUPPORTED_LANGUAGES, _
 from iac_code.mcp.errors import MCPConnectionError
 from iac_code.mcp.prompt_dispatch import is_mcp_prompt_file_path
 from iac_code.pipeline.config import RunMode, get_run_mode
@@ -100,7 +110,7 @@ from iac_code.services.session_backup_state import (
     SessionBackupState,
 )
 from iac_code.services.session_storage import SessionStorage
-from iac_code.types.stream_events import TextDeltaEvent
+from iac_code.types.stream_events import MessageEndEvent, MessageStartEvent, TextDeltaEvent
 from iac_code.utils.file_security import atomic_write_text, ensure_private_dir, ensure_private_file
 from iac_code.utils.public_errors import sanitize_strict_text
 from iac_code.utils.public_paths import build_public_path_roots
@@ -110,6 +120,7 @@ _CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS = 1
 _CANCEL_ACTIVE_TASK_DRAIN_TIMEOUT_SECONDS = 30
 _ERROR_TEXT_MAX_CHARS = 1000
 _DEFERRED_CLEANUP_PROMPTS_FILENAME = "cleanup-deferred-prompts.json"
+_CLEANUP_ONLY_METADATA_KEY = "cleanupOnly"
 
 
 def _format_exception(exc: BaseException) -> str:
@@ -247,6 +258,47 @@ def _cleanup_ledger_for_a2a_normal_chat(*, cwd: str, session_id: str) -> Cleanup
     if ledger.load_failed():
         return None
     return ledger if ledger.pending_resources() else None
+
+
+def _cleanup_only_summary(ledger: CleanupLedger | None) -> dict[str, Any]:
+    """Return a bounded, non-secret result for an internal cleanup-only turn."""
+    if ledger is None:
+        return {"requested": True, "status": "unavailable", "resourceCount": 0, "resources": []}
+    if ledger.load_failed():
+        return {"requested": True, "status": "unavailable", "resourceCount": 0, "resources": []}
+    try:
+        resources = ledger.cleanup_resources()
+        pending = ledger.pending_resources()
+    except Exception:
+        logger.warning("Failed to summarize A2A cleanup-only result", exc_info=True)
+        return {"requested": True, "status": "unavailable", "resourceCount": 0, "resources": []}
+
+    pending_statuses = {str(getattr(resource, "cleanup_status", "") or "pending") for resource in pending}
+    if not pending:
+        status = "completed"
+    elif pending_statuses and pending_statuses <= {"failed"}:
+        status = "failed"
+    else:
+        status = "pending"
+    public_resources = []
+    for resource in resources[:24]:
+        item = {
+            "provider": getattr(resource, "provider", None),
+            "resourceType": getattr(resource, "resource_type", None),
+            "resourceId": getattr(resource, "resource_id", None),
+            "resourceName": getattr(resource, "resource_name", None),
+            "regionId": getattr(resource, "region_id", None),
+            "sourceStepId": getattr(resource, "source_step_id", None),
+            "cleanupStatus": getattr(resource, "cleanup_status", None),
+            "progressStatus": getattr(resource, "progress_status", None),
+        }
+        public_resources.append({key: value for key, value in item.items() if value is not None})
+    return {
+        "requested": True,
+        "status": status,
+        "resourceCount": len(pending),
+        "resources": public_resources,
+    }
 
 
 def _default_cleanup_ledger_path(*, cwd: str, session_id: str) -> Path:
@@ -753,11 +805,16 @@ async def _stream_a2a_normal_events(
     prompt_text: str,
     cleanup_ledger: CleanupLedger | None,
     cleanup_publisher: PipelineA2AEventPublisher | None,
+    cleanup_only: bool,
     cwd: str,
     session_id: str,
 ) -> AsyncIterator[Any]:
     if _a2a_cleanup_ledger_unavailable(cleanup_ledger, runtime=runtime, cwd=cwd, session_id=session_id):
-        if not _append_a2a_deferred_cleanup_prompt(cwd=cwd, session_id=session_id, prompt=prompt_text):
+        if not cleanup_only and not _append_a2a_deferred_cleanup_prompt(
+            cwd=cwd,
+            session_id=session_id,
+            prompt=prompt_text,
+        ):
             yield TextDeltaEvent(
                 text=_("Rollback cleanup deferred prompt state is unavailable. Please repair it before continuing.")
             )
@@ -769,7 +826,11 @@ async def _stream_a2a_normal_events(
 
     if cleanup_ledger is not None and cleanup_ledger.load_failed():
         if _runtime_has_cleanup_prompt(runtime) or _session_has_cleanup_prompt(cwd=cwd, session_id=session_id):
-            if not _append_a2a_deferred_cleanup_prompt(cwd=cwd, session_id=session_id, prompt=prompt_text):
+            if not cleanup_only and not _append_a2a_deferred_cleanup_prompt(
+                cwd=cwd,
+                session_id=session_id,
+                prompt=prompt_text,
+            ):
                 yield TextDeltaEvent(
                     text=_("Rollback cleanup deferred prompt state is unavailable. Please repair it before continuing.")
                 )
@@ -795,6 +856,11 @@ async def _stream_a2a_normal_events(
         async for event in cleanup_stream:
             yield event
         if cleanup_ledger.pending_resources():
+            if cleanup_only:
+                yield TextDeltaEvent(
+                    text=_("Rollback cleanup is still in progress. Please continue after cleanup completes.")
+                )
+                return
             if not _append_a2a_deferred_cleanup_prompt(cwd=cwd, session_id=session_id, prompt=prompt_text):
                 yield TextDeltaEvent(
                     text=_("Rollback cleanup deferred prompt state is unavailable. Please repair it before continuing.")
@@ -806,6 +872,12 @@ async def _stream_a2a_normal_events(
             return
         _mark_completed_cleanup_prompts(runtime=runtime, cwd=cwd, session_id=session_id, ledger=cleanup_ledger)
         _prune_completed_cleanup_prompt_from_runtime(runtime, cleanup_ledger)
+
+    if cleanup_only:
+        # This A2A turn exists only to drain rollback cleanup after a proven
+        # Pipeline-to-normal handoff. Never consume a synthetic prompt or
+        # generate an unrelated normal-chat answer.
+        return
 
     prompts_after_cleanup = _a2a_prompts_after_cleanup(cwd=cwd, session_id=session_id, prompt=prompt_text)
     if prompts_after_cleanup is None:
@@ -931,6 +1003,7 @@ class IacCodeA2AExecutor(AgentExecutor):
         artifact_store: Any | None = None,
         push_notifier: Any | None = None,
         permission_resolver: A2APermissionResolver | None = None,
+        permission_input_registry: PermissionInputRegistry | None = None,
         auto_approve_permissions: bool = False,
         thinking_exposure_types: Any = None,
         backup_service: Any | None = None,
@@ -941,15 +1014,42 @@ class IacCodeA2AExecutor(AgentExecutor):
         self._artifact_store = artifact_store
         self._push_notifier = push_notifier
         self._permission_resolver = permission_resolver
+        self._permission_input_registry = permission_input_registry or PermissionInputRegistry()
         self._auto_approve_permissions = auto_approve_permissions
         self._thinking_exposure_types = normalize_a2a_exposure_types(thinking_exposure_types)
         self._metadata_echo_redactor = A2AMetadataEchoRedactor()
         self._backup_service = backup_service or SessionBackupService()
 
+    async def resolve_sideband_permission(self, response: PermissionResponse) -> Message | None:
+        if not await self._permission_input_registry.is_sideband_response(response):
+            return None
+        approved = await self._permission_input_registry.answer(response)
+        return permission_ack_message(response, approved=approved)
+
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         requested_task_id = context.task_id or None
         task_id = requested_task_id or "task-" + uuid.uuid4().hex[:12]
         context_id = context.context_id or "ctx-" + uuid.uuid4().hex[:12]
+        permission_response = parse_permission_response(getattr(context, "message", None))
+        if permission_response is not None:
+            approved = await self._permission_input_registry.answer(permission_response)
+            await self._publish_status(
+                event_queue,
+                task_id=permission_response.task_id,
+                context_id=permission_response.context_id,
+                state=TaskState.TASK_STATE_WORKING,
+                metadata={
+                    "iac_code": {
+                        "inputReceived": {
+                            "kind": "permission",
+                            "inputId": permission_response.input_id,
+                            "toolUseId": permission_response.tool_use_id,
+                            "decision": "allow_once" if approved else "deny",
+                        }
+                    }
+                },
+            )
+            return
         task = None
         initial_task_published = False
         public_path_roots: list[dict[str, str]] | None = None
@@ -1004,6 +1104,9 @@ class IacCodeA2AExecutor(AgentExecutor):
                 except TimeoutError as exc:
                     raise ValueError(_("Task is already working.")) from exc
             user_id = self._resolve_user_id(metadata)
+            preferred_language = self._resolve_preferred_language(metadata)
+            candidate_presentation = self._resolve_candidate_presentation(metadata)
+            cleanup_only = self._resolve_cleanup_only(metadata)
             metadata_model = self._resolve_model(metadata)
             metadata_api_key = self._resolve_api_key(metadata)
             request_policy_override = self._resolve_request_policy(metadata)
@@ -1015,6 +1118,8 @@ class IacCodeA2AExecutor(AgentExecutor):
                     context_id=context_id,
                     cwd=cwd,
                 )
+            if cleanup_only and pipeline_mode and not route_pipeline_handoff_to_normal:
+                raise InvalidParamsError("Cleanup-only continuation requires a completed Pipeline handoff.")
             pipeline_input: PipelineUserInput | None = None
             normal_input: PipelineUserInput | None = None
             if pipeline_mode and not route_pipeline_handoff_to_normal:
@@ -1108,10 +1213,13 @@ class IacCodeA2AExecutor(AgentExecutor):
                 artifact_store=self._artifact_store,
                 push_notifier=self._push_notifier,
                 permission_resolver=self._permission_resolver,
+                permission_input_registry=self._permission_input_registry,
                 auto_approve_permissions=self._auto_approve_permissions,
                 thinking_exposure_types=self._thinking_exposure_types,
                 user_id=user_id,
                 aliyun_credential=aliyun_credential,
+                preferred_language=preferred_language,
+                candidate_presentation=candidate_presentation,
                 model_from_metadata=metadata_model is not None,
                 metadata_api_key=metadata_api_key,
                 request_policy_override=request_policy_override,
@@ -1184,7 +1292,11 @@ class IacCodeA2AExecutor(AgentExecutor):
             )
 
         try:
-            with a2a_request_context(user_id=user_id, aliyun_credential=aliyun_credential):
+            with a2a_request_context(
+                user_id=user_id,
+                aliyun_credential=aliyun_credential,
+                preferred_language=preferred_language,
+            ):
                 ctx = await self._task_store.get_or_create_context(
                     context_id=context_id,
                     cwd=cwd,
@@ -1322,6 +1434,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     session_id=ctx.session_id,
                     user_id=user_id,
                     aliyun_credential=aliyun_credential,
+                    preferred_language=preferred_language,
                 ):
                     configure_runtime_model(
                         runtime,
@@ -1351,10 +1464,21 @@ class IacCodeA2AExecutor(AgentExecutor):
                         prompt_text=normal_input.display_text,
                         cleanup_ledger=cleanup_ledger,
                         cleanup_publisher=cleanup_publisher,
+                        cleanup_only=cleanup_only,
                         cwd=cwd,
                         session_id=ctx.session_id,
                     )
+                    current_assistant_text: list[str] = []
+                    final_assistant_text = ""
                     async for event in stream:
+                        if isinstance(event, MessageStartEvent):
+                            current_assistant_text = []
+                        elif isinstance(event, TextDeltaEvent):
+                            current_assistant_text.append(event.text)
+                        elif isinstance(event, MessageEndEvent):
+                            if event.stop_reason not in {"tool_use", "tool_calls"}:
+                                final_assistant_text = "".join(current_assistant_text)
+                            current_assistant_text = []
                         await publish_mcp_warnings(
                             event_queue,
                             task_id=task_id,
@@ -1376,12 +1500,15 @@ class IacCodeA2AExecutor(AgentExecutor):
                             event=event,
                             artifact_store=self._artifact_store,
                             permission_resolver=self._permission_resolver,
+                            permission_input_registry=self._permission_input_registry,
                             auto_approve_permissions=self._auto_approve_permissions,
                             exposure_types=self._thinking_exposure_types,
                             iac_code_session_id=ctx.session_id,
                         )
                         if text_chunk:
                             task.output_text.append(text_chunk)
+                    if current_assistant_text:
+                        final_assistant_text = "".join(current_assistant_text)
                     await publish_mcp_warnings(
                         event_queue,
                         task_id=task_id,
@@ -1394,6 +1521,18 @@ class IacCodeA2AExecutor(AgentExecutor):
                         task_id=task_id,
                         context_id=context_id,
                         runtime=runtime,
+                        session_id=ctx.session_id,
+                    )
+                    final_metadata: dict[str, Any] = {"assistantFinal": {"complete": True}}
+                    if cleanup_only:
+                        final_metadata[_CLEANUP_ONLY_METADATA_KEY] = _cleanup_only_summary(cleanup_ledger)
+                    await self._publish_status(
+                        event_queue,
+                        task_id=task_id,
+                        context_id=context_id,
+                        state=TaskState.TASK_STATE_WORKING,
+                        text=final_assistant_text or None,
+                        metadata={"iac_code": final_metadata},
                         session_id=ctx.session_id,
                     )
                 task.state = TASK_STATE_INPUT_REQUIRED
@@ -1410,11 +1549,17 @@ class IacCodeA2AExecutor(AgentExecutor):
                     critical=False,
                     metrics=self._metrics,
                 )
+                terminal_metadata = None
+                if cleanup_only:
+                    terminal_metadata = {
+                        "iac_code": {_CLEANUP_ONLY_METADATA_KEY: _cleanup_only_summary(cleanup_ledger)}
+                    }
                 await self._publish_status(
                     event_queue,
                     task_id=task_id,
                     context_id=context_id,
                     state=TaskState.TASK_STATE_INPUT_REQUIRED,
+                    metadata=terminal_metadata,
                     session_id=ctx.session_id,
                 )
                 await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
@@ -1530,6 +1675,8 @@ class IacCodeA2AExecutor(AgentExecutor):
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         task_id = context.task_id
         context_id = context.context_id or "unknown"
+        if task_id:
+            await self._permission_input_registry.cancel_task(task_id)
         if task_id and await self._task_store.cancel_task_and_wait(
             task_id,
             timeout=_CANCEL_ACTIVE_TASK_DRAIN_TIMEOUT_SECONDS,
@@ -1589,6 +1736,42 @@ class IacCodeA2AExecutor(AgentExecutor):
         if isinstance(raw_user_id, str) and raw_user_id.strip():
             return raw_user_id.strip()
         return None
+
+    def _resolve_preferred_language(self, metadata: Any | None) -> str | None:
+        if metadata is not None and hasattr(metadata, "DESCRIPTOR"):
+            metadata = MessageToDict(metadata, preserving_proto_field_name=False)
+        if not isinstance(metadata, Mapping):
+            return None
+        raw_iac_meta = metadata.get("iac_code")
+        if not isinstance(raw_iac_meta, Mapping):
+            return None
+        raw_language = raw_iac_meta.get("preferredLanguage") or raw_iac_meta.get("preferred_language")
+        if not isinstance(raw_language, str):
+            return None
+        language = raw_language.strip().lower().split("-", 1)[0].split("_", 1)[0]
+        return language if language in SUPPORTED_LANGUAGES else None
+
+    def _resolve_candidate_presentation(self, metadata: Any | None) -> str | None:
+        if metadata is not None and hasattr(metadata, "DESCRIPTOR"):
+            metadata = MessageToDict(metadata, preserving_proto_field_name=False)
+        if not isinstance(metadata, Mapping):
+            return None
+        raw_iac_meta = metadata.get("iac_code")
+        if not isinstance(raw_iac_meta, Mapping):
+            return None
+        value = raw_iac_meta.get("candidatePresentation") or raw_iac_meta.get("candidate_presentation")
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip().lower()
+        return RICH_CANDIDATE_PRESENTATION if normalized == RICH_CANDIDATE_PRESENTATION else None
+
+    def _resolve_cleanup_only(self, metadata: Any | None) -> bool:
+        if metadata is not None and hasattr(metadata, "DESCRIPTOR"):
+            metadata = MessageToDict(metadata, preserving_proto_field_name=False)
+        if not isinstance(metadata, Mapping):
+            return False
+        raw_iac_meta = metadata.get("iac_code")
+        return isinstance(raw_iac_meta, Mapping) and raw_iac_meta.get(_CLEANUP_ONLY_METADATA_KEY) is True
 
     def _resolve_model(self, metadata: Any | None) -> str | None:
         if metadata is not None and hasattr(metadata, "DESCRIPTOR"):

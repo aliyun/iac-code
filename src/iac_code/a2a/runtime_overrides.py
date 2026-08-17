@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import contextvars
 from collections.abc import Iterator
 from typing import Any
 
@@ -9,6 +10,15 @@ from iac_code.services.providers.aliyun import AliyunCredential, use_aliyun_cred
 from iac_code.services.telemetry import use_session_id, use_user_id
 
 _RUNTIME_OVERRIDE_UNSET = object()
+_preferred_language: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "iac_code_a2a_preferred_language",
+    default=None,
+)
+
+
+def get_a2a_preferred_language() -> str | None:
+    """Return the request-local language requested by the A2A caller."""
+    return _preferred_language.get()
 
 
 @contextlib.contextmanager
@@ -17,8 +27,12 @@ def a2a_request_context(
     session_id: str | None = None,
     user_id: str | None = None,
     aliyun_credential: AliyunCredential | None = None,
+    preferred_language: str | None = None,
 ) -> Iterator[None]:
     with contextlib.ExitStack() as stack:
+        if preferred_language:
+            token = _preferred_language.set(preferred_language)
+            stack.callback(_preferred_language.reset, token)
         if session_id:
             stack.enter_context(use_session_id(session_id))
         if user_id:

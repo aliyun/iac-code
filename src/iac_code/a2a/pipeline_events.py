@@ -10,7 +10,14 @@ from typing import Any
 
 from iac_code.a2a.artifacts import UnsafeArtifactNameError, artifact_filename_from_path
 from iac_code.a2a.events import _truncate
+from iac_code.a2a.input_required import (
+    permission_display_fields,
+    permission_options,
+    permission_prompt,
+    permission_safe_summary,
+)
 from iac_code.a2a.pipeline_journal import to_json_safe
+from iac_code.a2a.runtime_overrides import get_a2a_preferred_language
 from iac_code.mcp.progress import mcp_progress_metadata
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.services.permissions.audit import build_input_summary, build_redacted_tool_input, fingerprint_text
@@ -88,46 +95,6 @@ _TOP_LEVEL_DATA_KEY_ALIASES = {
 _NESTED_DATA_KEY_ALIASES = {
     "error_id": "errorId",
 }
-_PERMISSION_SUMMARY_MAX_FIELDS = 20
-_PERMISSION_SUMMARY_MAX_CHARS = 256
-_SAFE_PERMISSION_SUMMARY_FIELDS = {
-    "action",
-    "body",
-    "cmd",
-    "command",
-    "content",
-    "cwd",
-    "input",
-    "method",
-    "params",
-    "path",
-    "pathname",
-    "product",
-    "query",
-    "region",
-    "region_id",
-    "timeout",
-    "url",
-}
-_SECRET_KEY_FRAGMENTS = (
-    "api_key",
-    "apikey",
-    "access_key",
-    "accesskey",
-    "auth",
-    "cookie",
-    "passphrase",
-    "pwd",
-    "secret",
-    "session",
-    "token",
-    "password",
-    "passwd",
-    "credential",
-    "authorization",
-    "private_key",
-    "signature",
-)
 _STACK_TOOL_ACTIONS = {"CreateStack", "UpdateStack", "ContinueCreateStack", "DeleteStack"}
 _STACK_CLEAR_ACTIONS = {"DeleteStack"}
 
@@ -140,6 +107,7 @@ class PipelineA2AContext:
     pipeline_name: str
     iac_code_session_id: str | None = None
     parent_step_order: list[str] = field(default_factory=list)
+    parent_step_ui_modes: dict[str, str] = field(default_factory=dict)
     candidate_step_order: list[str] = field(default_factory=list)
     emit_stack_events: bool = False
     a2a_artifacts_by_step_id: dict[str, list[Any]] = field(default_factory=dict)
@@ -1431,11 +1399,17 @@ def safe_permission_metadata(
     *,
     include_tool_input: bool = True,
 ) -> dict[str, Any]:
+    display = permission_display_fields(event)
+    language = get_a2a_preferred_language() or "en"
     metadata: dict[str, Any] = {
         "permissionId": f"perm-{event.tool_use_id}",
         "toolName": event.tool_name,
         "toolUseId": event.tool_use_id,
         "safeSummary": _permission_safe_summary(event),
+        "prompt": permission_prompt(display["title"], language=language),
+        "options": permission_options(language=language),
+        "language": language,
+        **display,
     }
     if include_tool_input:
         if event.tool_name == "aliyun_api":
@@ -1446,38 +1420,7 @@ def safe_permission_metadata(
 
 
 def _permission_safe_summary(event: PermissionRequestEvent) -> str:
-    fields = (
-        sorted({_safe_permission_field_name(key) for key in event.tool_input})
-        if isinstance(event.tool_input, dict)
-        else []
-    )
-    if not fields:
-        return f"{event.tool_name} permission request"
-    if len(fields) > _PERMISSION_SUMMARY_MAX_FIELDS:
-        remaining_field_count = len(fields) - _PERMISSION_SUMMARY_MAX_FIELDS
-        visible_fields = [
-            *fields[:_PERMISSION_SUMMARY_MAX_FIELDS],
-            f"+{remaining_field_count} more",
-        ]
-    else:
-        visible_fields = fields
-    summary = f"{event.tool_name} permission request (fields: {', '.join(visible_fields)})"
-    if len(summary) <= _PERMISSION_SUMMARY_MAX_CHARS:
-        return summary
-    return summary[: _PERMISSION_SUMMARY_MAX_CHARS - 3] + "..."
-
-
-def _is_secret_key(key: Any) -> bool:
-    normalized = str(key).lower().replace("-", "_")
-    compact = normalized.replace("_", "")
-    return any(fragment in normalized or fragment.replace("_", "") in compact for fragment in _SECRET_KEY_FRAGMENTS)
-
-
-def _safe_permission_field_name(key: Any) -> str:
-    if _is_secret_key(key):
-        return "[redacted]"
-    text = str(key)
-    return text if text in _SAFE_PERMISSION_SUMMARY_FIELDS else fingerprint_text(text)
+    return permission_safe_summary(event)
 
 
 def _tool_result_data(event: ToolResultEvent) -> dict[str, Any]:

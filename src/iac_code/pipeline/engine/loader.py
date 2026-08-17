@@ -320,9 +320,9 @@ def _parse_surface_overrides(raw: object, step_id: str) -> dict[str, StepSurface
         if not isinstance(raw_override, dict):
             raise ValueError(f"Step '{step_id}': surface_overrides.{surface} must be a mapping, got {raw_override!r}")
         override = cast(dict[str, Any], raw_override)
-        unsupported = set(override) - {"prompt", "inject_tools"}
+        unsupported = set(override) - {"prompt", "inject_tools", "conclusion_schema"}
         if unsupported:
-            supported = "inject_tools, prompt"
+            supported = "conclusion_schema, inject_tools, prompt"
             unknown = ", ".join(sorted(unsupported))
             raise ValueError(
                 f"Step '{step_id}': surface_overrides.{surface} contains unsupported key(s): "
@@ -341,9 +341,16 @@ def _parse_surface_overrides(raw: object, step_id: str) -> dict[str, StepSurface
                 )
             inject_tools = cast(list[str], inject_tools)
 
+        conclusion_schema = override.get("conclusion_schema")
+        if conclusion_schema is not None and not isinstance(conclusion_schema, dict):
+            raise ValueError(
+                f"Step '{step_id}': surface_overrides.{surface}.conclusion_schema must be a mapping"
+            )
+
         overrides[surface] = StepSurfaceOverride(
             prompt_file=prompt,
             inject_tools=list(inject_tools) if inject_tools is not None else None,
+            conclusion_schema=cast(dict[str, Any], conclusion_schema) if conclusion_schema is not None else None,
         )
     return overrides
 

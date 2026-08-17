@@ -581,7 +581,7 @@ class TestInjectToolsParsing:
 
 
 class TestSurfaceOverridesParsing:
-    def test_surface_overrides_parse_prompt_and_inject_tools(self, tmp_path):
+    def test_surface_overrides_parse_prompt_tools_and_conclusion_schema(self, tmp_path):
         yaml_content = dedent("""\
             name: test
             context_dependencies:
@@ -593,10 +593,25 @@ class TestSurfaceOverridesParsing:
                 forward: null
                 prompt: prompts/confirm.md
                 inject_tools: [show_architecture_diagram, show_candidate_detail]
+                conclusion_schema:
+                  type: object
+                  required: [name]
+                  properties:
+                    name:
+                      type: string
                 surface_overrides:
                   a2a:
                     prompt: prompts/confirm.a2a.md
                     inject_tools: []
+                  a2a_rich:
+                    conclusion_schema:
+                      type: object
+                      required: [name, architecture_diagram]
+                      properties:
+                        name:
+                          type: string
+                        architecture_diagram:
+                          type: string
         """)
         _write_pipeline(tmp_path, yaml_content, {"confirm.md": "C", "confirm.a2a.md": "A2A"})
 
@@ -605,7 +620,14 @@ class TestSurfaceOverridesParsing:
 
         assert step.surface_overrides["a2a"].prompt_file == "prompts/confirm.a2a.md"
         assert step.surface_overrides["a2a"].inject_tools == []
+        assert step.surface_overrides["a2a_rich"].conclusion_schema == {
+            "type": "object",
+            "required": ["name", "architecture_diagram"],
+            "properties": {"name": {"type": "string"}, "architecture_diagram": {"type": "string"}},
+        }
         assert step.inject_tools == ["show_architecture_diagram", "show_candidate_detail"]
+        assert step.conclusion_schema_for_surface("a2a")["required"] == ["name"]
+        assert step.conclusion_schema_for_surface("a2a_rich")["required"] == ["name", "architecture_diagram"]
 
 
 class TestUiMode:

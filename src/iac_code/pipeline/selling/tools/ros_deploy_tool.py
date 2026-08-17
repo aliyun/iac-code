@@ -319,17 +319,91 @@ class RosDeployTool(Tool):
         return _("Delete failed ROS stack and create replacement: {target}").format(target=target)
 
     def _operation_metadata(self, input: dict) -> dict[str, object]:
-        operation: dict[str, object] = {}
+        operation: dict[str, object] = {"product": "ros"}
         action = _string_value(input.get("action"))
         target = self._rule_target(input)
         region = _string_value(input.get("region_id"))
         if action:
-            operation["action"] = action
-        if target and _safe_rule_segment(target):
-            operation["stack_id" if action != "create" else "stack_name"] = target
+            operation["action"] = {
+                "create": "CreateStack",
+                "continue_create": "ContinueCreateStack",
+                "delete_and_create": "CreateStack",
+                "wait": "GetStackStatus",
+            }.get(action, action)
+            operation["deployAction"] = action
+        stack_id = _string_value(input.get("stack_id"))
+        stack_name = _string_value(input.get("stack_name"))
+        if action == "create" and _safe_rule_segment(stack_name):
+            operation["stackName"] = stack_name
+        elif action == "delete_and_create":
+            if _safe_rule_segment(stack_id):
+                operation["stackId"] = stack_id
+            if _safe_rule_segment(stack_name):
+                operation["stackName"] = stack_name
+        elif target and _safe_rule_segment(target):
+            operation["stackId"] = target
         if region and _safe_rule_segment(region):
             operation["region"] = region
+        if deployment_summary := self._deployment_summary(input):
+            operation["deploymentSummary"] = deployment_summary
         return operation
+
+    def _deployment_summary(self, input: dict) -> dict[str, object] | None:
+        context = self._completion_guard_state.get("context_snapshot")
+        if not isinstance(context, dict):
+            return None
+        selected_plan = context.get("selected_plan")
+        if not isinstance(selected_plan, dict):
+            return None
+        candidate = selected_plan.get("selected_candidate")
+        candidate = candidate if isinstance(candidate, dict) else {}
+        result = selected_plan.get("selected_candidate_result")
+        result = result if isinstance(result, dict) else {}
+        cost = result.get("cost")
+        cost = cost if isinstance(cost, dict) else {}
+
+        summary: dict[str, object] = {}
+        candidate_name = _string_value(candidate.get("name")) or _string_value(
+            selected_plan.get("selected_candidate_name")
+        )
+        if candidate_name:
+            summary["candidateName"] = candidate_name
+        action = _string_value(input.get("action"))
+        if action:
+            summary["action"] = action
+        region = _string_value(input.get("region_id"))
+        if region:
+            summary["region"] = region
+        stack_name = _string_value(input.get("stack_name"))
+        if stack_name:
+            summary["stackName"] = stack_name
+        template_url = _string_value(input.get("template_url"))
+        if template_url:
+            summary["template"] = template_url
+        total_monthly_cost = _string_value(cost.get("monthly_estimate"))
+        if total_monthly_cost:
+            summary["totalMonthlyCost"] = total_monthly_cost
+
+        resources: list[dict[str, str]] = []
+        raw_resources = cost.get("resources")
+        if isinstance(raw_resources, list):
+            for raw_resource in raw_resources[:12]:
+                if not isinstance(raw_resource, dict):
+                    continue
+                name = _string_value(raw_resource.get("name")) or _string_value(raw_resource.get("type"))
+                monthly_cost = _string_value(raw_resource.get("monthly_cost")) or _string_value(
+                    raw_resource.get("cost")
+                )
+                spec = _string_value(raw_resource.get("spec"))
+                if not name and not monthly_cost:
+                    continue
+                item = {"name": name or "resource", "monthlyCost": monthly_cost}
+                if spec:
+                    item["spec"] = spec
+                resources.append(item)
+        if resources:
+            summary["resources"] = resources
+        return summary or None
 
     def _audit(
         self,

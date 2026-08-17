@@ -71,7 +71,12 @@ from iac_code.services.session_backup import BackupReason, SessionBackupBlocked,
 from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
 from iac_code.services.session_layout import SessionPaths
 from iac_code.services.session_storage import SessionStorage
-from iac_code.types.stream_events import AskUserQuestionEvent, SubPipelineStreamEvent, TextDeltaEvent
+from iac_code.types.stream_events import (
+    AskUserQuestionEvent,
+    PermissionRequestEvent,
+    SubPipelineStreamEvent,
+    TextDeltaEvent,
+)
 from iac_code.utils.path_locks import PathLockRegistry
 
 logger = logging.getLogger(__name__)
@@ -88,6 +93,8 @@ _WAITING_INPUT_CANCEL_LOCKS = PathLockRegistry()
 _TERMINAL_PUBLICATION_UNAVAILABLE_KIND = "terminal_publication_unavailable"
 _HANDOFF_PUBLICATION_UNAVAILABLE_ACTION = "switch_to_normal_unavailable"
 _PREREQUISITE_METADATA_UNSET = object()
+RICH_CANDIDATE_PRESENTATION = "rich-v1"
+A2A_RICH_CANDIDATE_SURFACE = "a2a_rich"
 _TERMINAL_EVENT_BY_SIDECAR_STATUS = {
     "completed": ("pipeline_completed", "completed"),
     "failed": ("pipeline_failed", "failed"),
@@ -251,10 +258,12 @@ class IacCodeA2APipelineExecutor:
         artifact_store: Any | None,
         push_notifier: Any | None,
         permission_resolver: Any | None,
+        permission_input_registry: Any | None = None,
         auto_approve_permissions: bool,
         thinking_exposure_types: Any,
         user_id: str | None = None,
         aliyun_credential: AliyunCredential | None = None,
+        preferred_language: str | None = None,
         model_from_metadata: bool = False,
         metadata_api_key: str | None = None,
         request_policy_override: ProviderRequestPolicy | None = None,
@@ -264,6 +273,7 @@ class IacCodeA2APipelineExecutor:
         provider_config_frozen: bool = False,
         provider_config_override: dict[str, Any] | None = None,
         effort_override: str | None = None,
+        candidate_presentation: str | None = None,
         backup_service: Any | None = None,
         aliyun_delegated_executor_factory: Any | None = None,
     ) -> None:
@@ -273,10 +283,12 @@ class IacCodeA2APipelineExecutor:
         self._artifact_store = artifact_store
         self._push_notifier = push_notifier
         self._permission_resolver = permission_resolver
+        self._permission_input_registry = permission_input_registry
         self._auto_approve_permissions = auto_approve_permissions
         self._thinking_exposure_types = thinking_exposure_types
         self._user_id = user_id
         self._aliyun_credential = aliyun_credential
+        self._preferred_language = preferred_language
         self._model_from_metadata = model_from_metadata
         self._metadata_api_key = metadata_api_key
         self._request_policy_override = request_policy_override
@@ -286,6 +298,7 @@ class IacCodeA2APipelineExecutor:
         self._provider_config_frozen = provider_config_frozen
         self._provider_config_override = provider_config_override
         self._effort_override = effort_override
+        self._candidate_presentation = candidate_presentation
         self._backup_service = backup_service or SessionBackupService()
         self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
 
@@ -721,6 +734,7 @@ class IacCodeA2APipelineExecutor:
             session_id=session_id,
             user_id=self._user_id,
             aliyun_credential=self._aliyun_credential,
+            preferred_language=self._preferred_language,
         )
 
     def _configure_runtime_for_request(self, runtime: Any) -> None:
@@ -1214,6 +1228,18 @@ class IacCodeA2APipelineExecutor:
         if delegated_factory is None:
             services = getattr(runtime, "aliyun_services", None)
             delegated_factory = getattr(services, "delegated_executor_factory", None)
+        agent_loop = getattr(runtime, "agent_loop", None)
+        permission_context_getter = getattr(agent_loop, "_permission_context_getter", None)
+        if not callable(permission_context_getter) and agent_loop is not None:
+
+            def permission_context_getter() -> Any:
+                return getattr(agent_loop, "_permission_context", None)
+
+        surface = (
+            A2A_RICH_CANDIDATE_SURFACE
+            if self._candidate_presentation == RICH_CANDIDATE_PRESENTATION
+            else "a2a"
+        )
         return create_pipeline(
             pipeline_name,
             provider_manager=runtime.provider_manager,
@@ -1221,8 +1247,9 @@ class IacCodeA2APipelineExecutor:
             session_storage=session_storage,
             session_id=session_id,
             cwd=cwd,
+            permission_context_getter=(permission_context_getter if callable(permission_context_getter) else None),
             resume_from_sidecar=resume_from_sidecar,
-            surface="a2a",
+            surface=surface,
             backup_service=self._backup_service,
             aliyun_delegated_executor_factory=delegated_factory,
             **create_kwargs,
@@ -1585,7 +1612,27 @@ class IacCodeA2APipelineExecutor:
                     if terminal_handoff_result.attempted:
                         text = None
                     else:
-                        if outbound is not None:
+                        if self._uses_interactive_sub_pipeline_permission(event):
+                            if outbound is not None:
+                                await outbound.flush()
+                            text = await publisher.publish_sub_pipeline_permission(event)
+                        elif self._uses_interactive_permission(event):
+                            if outbound is not None:
+                                await outbound.flush()
+                            pause_agent_loops = getattr(runtime.pipeline, "pause_agent_loops", None)
+                            resume_agent_loops = getattr(runtime.pipeline, "resume_agent_loops", None)
+                            if callable(pause_agent_loops):
+                                await _maybe_await(pause_agent_loops())
+                            try:
+                                text = await publisher.publish(
+                                    event,
+                                    permission_resolver=self._permission_resolver,
+                                    auto_approve_permissions=self._auto_approve_permissions,
+                                )
+                            finally:
+                                if callable(resume_agent_loops):
+                                    await _maybe_await(resume_agent_loops())
+                        elif outbound is not None:
                             delivery_text = _text_delta_output(event)
                             await outbound.submit(
                                 event,
@@ -1649,6 +1696,22 @@ class IacCodeA2APipelineExecutor:
                         raise
                     logger.warning("A2A pipeline outbound queue close failed", exc_info=True)
 
+    def _uses_interactive_permission(self, event: Any) -> bool:
+        return (
+            self._permission_input_registry is not None
+            and self._permission_resolver is None
+            and not self._auto_approve_permissions
+            and isinstance(event, PermissionRequestEvent)
+        )
+
+    def _uses_interactive_sub_pipeline_permission(self, event: Any) -> bool:
+        return (
+            self._permission_input_registry is not None
+            and self._permission_resolver is None
+            and not self._auto_approve_permissions
+            and _sub_pipeline_permission_request_from_stream_event(event) is not None
+        )
+
     async def _publish_terminal_stream_event(
         self,
         *,
@@ -1658,28 +1721,37 @@ class IacCodeA2APipelineExecutor:
         event: Any,
     ) -> _TerminalStreamPublishResult:
         async def publish() -> tuple[_TerminalHandoffPublishResult, str | None]:
-            await publish_mcp_warnings(
-                publisher.event_queue,
-                task_id=publisher.translator.context.task_id,
-                context_id=publisher.translator.context.context_id,
-                runtime=runtime.agent_runtime,
-                iac_code_session_id=publisher.translator.context.iac_code_session_id,
-            )
-            handoff = await self._maybe_publish_terminal_with_normal_handoff(
-                runtime.pipeline,
-                publisher,
-                event,
-            )
-            if handoff.attempted:
-                return handoff, None
-            text = await publisher.publish(
-                event,
-                permission_resolver=self._permission_resolver,
-                auto_approve_permissions=self._auto_approve_permissions,
-            )
-            self._track_pending_question(runtime, publisher, event)
-            await self._maybe_publish_normal_handoff_ready(runtime.pipeline, publisher, event)
-            return handoff, text
+            closing_token = None
+            if isinstance(event, PipelineEvent) and event.type != PipelineEventType.BACKUP_BLOCKED:
+                closing_token = await self._drain_sub_pipeline_permissions_before_terminal(publisher)
+            try:
+                await publish_mcp_warnings(
+                    publisher.event_queue,
+                    task_id=publisher.translator.context.task_id,
+                    context_id=publisher.translator.context.context_id,
+                    runtime=runtime.agent_runtime,
+                    iac_code_session_id=publisher.translator.context.iac_code_session_id,
+                )
+                handoff = await self._maybe_publish_terminal_with_normal_handoff(
+                    runtime.pipeline,
+                    publisher,
+                    event,
+                )
+                if handoff.attempted:
+                    if not handoff.terminal_available:
+                        await self._reopen_sub_pipeline_permissions_after_terminal_fallback(closing_token)
+                    return handoff, None
+                text = await publisher.publish(
+                    event,
+                    permission_resolver=self._permission_resolver,
+                    auto_approve_permissions=self._auto_approve_permissions,
+                )
+                self._track_pending_question(runtime, publisher, event)
+                await self._maybe_publish_normal_handoff_ready(runtime.pipeline, publisher, event)
+                return handoff, text
+            except BaseException:
+                await self._reopen_sub_pipeline_permissions_after_terminal_fallback(closing_token)
+                raise
 
         loop = asyncio.get_running_loop()
         deadline = loop.time() + _ACTIVE_INTERRUPT_TERMINAL_WAIT_TIMEOUT_SECONDS
@@ -1729,6 +1801,30 @@ class IacCodeA2APipelineExecutor:
                 )
                 timed_out = True
 
+    async def _drain_sub_pipeline_permissions_before_terminal(
+        self,
+        publisher: PipelineA2AEventPublisher,
+        *,
+        permanent: bool = False,
+    ) -> Any:
+        """Deny and remove every sideband permission before publishing Task terminal state."""
+
+        task_id = publisher.translator.context.task_id
+        closing_token = None
+        if self._permission_input_registry is not None:
+            closing_token = await self._permission_input_registry.cancel_task(
+                task_id,
+                reversible=not permanent,
+            )
+        task_store = getattr(publisher, "task_store", None)
+        if task_store is not None:
+            await task_store.set_pending_permissions(task_id, [])
+        return closing_token
+
+    async def _reopen_sub_pipeline_permissions_after_terminal_fallback(self, closing_token: Any) -> None:
+        if self._permission_input_registry is not None:
+            await self._permission_input_registry.reopen_task(closing_token)
+
     def _publisher(
         self,
         *,
@@ -1747,6 +1843,7 @@ class IacCodeA2APipelineExecutor:
             pipeline_name=getattr(pipeline, "pipeline_name", get_pipeline_name()),
             iac_code_session_id=session_id,
             parent_step_order=_pipeline_parent_step_order(pipeline),
+            parent_step_ui_modes=_pipeline_parent_step_ui_modes(pipeline),
             candidate_step_order=_pipeline_candidate_step_order(pipeline),
             emit_stack_events=bool(getattr(pipeline, "emit_stack_events", False)),
             a2a_artifacts_by_step_id=_pipeline_a2a_artifacts_by_step_id(pipeline),
@@ -1772,6 +1869,8 @@ class IacCodeA2APipelineExecutor:
             snapshot_store=A2APipelineSnapshotStore(pipeline_dir),
             artifact_store=artifact_store,
             exposure_types=self._thinking_exposure_types,
+            permission_input_registry=self._permission_input_registry,
+            task_store=self._task_store,
             backup_commit_gate=_requires_backup_committed_publication,
             flow_monitor=flow_monitor,
         )
@@ -2215,16 +2314,25 @@ class IacCodeA2APipelineExecutor:
         ) and not _has_unacknowledged_committed_terminal_event(scoped_journal_events):
             return _TerminalSidecarRecoveryResult(published=False, available=True)
 
-        published = await publisher.publish_manual(
-            event_type,
-            "pipeline",
-            status=status,
-            data={
-                "sidecarStatus": sidecar_status,
-                "recovered": True,
-            },
+        closing_token = await self._drain_sub_pipeline_permissions_before_terminal(
+            publisher,
+            permanent=event_type == "pipeline_canceled",
         )
+        try:
+            published = await publisher.publish_manual(
+                event_type,
+                "pipeline",
+                status=status,
+                data={
+                    "sidecarStatus": sidecar_status,
+                    "recovered": True,
+                },
+            )
+        except _PipelineBackupBlockedTransitionError:
+            await self._reopen_sub_pipeline_permissions_after_terminal_fallback(closing_token)
+            raise
         if published is None:
+            await self._reopen_sub_pipeline_permissions_after_terminal_fallback(closing_token)
             await self._persist_terminal_publication_unavailable(
                 publisher,
                 terminal_envelope={
@@ -2268,9 +2376,15 @@ class IacCodeA2APipelineExecutor:
     ) -> bool:
         if publisher is None:
             return False
+        closing_token = None
         try:
+            closing_token = await self._drain_sub_pipeline_permissions_before_terminal(
+                publisher,
+                permanent=event_type == "pipeline_canceled",
+            )
             published = await publisher.publish_manual(event_type, "pipeline", status=status, data=data)
             if published is None:
+                await self._reopen_sub_pipeline_permissions_after_terminal_fallback(closing_token)
                 await self._persist_terminal_publication_unavailable(
                     publisher,
                     terminal_envelope={
@@ -2283,8 +2397,10 @@ class IacCodeA2APipelineExecutor:
                 return False
             return True
         except _PipelineBackupBlockedTransitionError:
+            await self._reopen_sub_pipeline_permissions_after_terminal_fallback(closing_token)
             raise
         except Exception:
+            await self._reopen_sub_pipeline_permissions_after_terminal_fallback(closing_token)
             logger.warning("Failed to publish A2A pipeline terminal event", exc_info=True)
             return False
 
@@ -2332,8 +2448,13 @@ class IacCodeA2APipelineExecutor:
         terminal_data: dict[str, Any],
         handoff_data: dict[str, Any],
     ) -> _TerminalHandoffPublishResult:
+        closing_token = await self._drain_sub_pipeline_permissions_before_terminal(
+            publisher,
+            permanent=event_type == "pipeline_canceled",
+        )
         publication = self._normal_handoff_publication(pipeline, handoff_data)
         if publication is None:
+            await self._reopen_sub_pipeline_permissions_after_terminal_fallback(closing_token)
             return _TerminalHandoffPublishResult(attempted=False, terminal_available=False)
         terminal_envelope = publisher.translator.manual_event(
             event_type,
@@ -2341,12 +2462,18 @@ class IacCodeA2APipelineExecutor:
             status=status,
             data=terminal_data,
         )
-        terminal_available = await self._publish_terminal_handoff_transaction(
-            pipeline,
-            publisher,
-            terminal_envelope=terminal_envelope,
-            publication=publication,
-        )
+        try:
+            terminal_available = await self._publish_terminal_handoff_transaction(
+                pipeline,
+                publisher,
+                terminal_envelope=terminal_envelope,
+                publication=publication,
+            )
+        except _PipelineBackupBlockedTransitionError:
+            await self._reopen_sub_pipeline_permissions_after_terminal_fallback(closing_token)
+            raise
+        if not terminal_available:
+            await self._reopen_sub_pipeline_permissions_after_terminal_fallback(closing_token)
         return _TerminalHandoffPublishResult(attempted=True, terminal_available=terminal_available)
 
     async def _publish_terminal_handoff_transaction(
@@ -3137,6 +3264,18 @@ async def _resume_pending_ask_user_question_stream(
 def _ask_user_question_from(event: Any) -> AskUserQuestionEvent | None:
     inner = event.inner if isinstance(event, SubPipelineStreamEvent) else event
     return inner if isinstance(inner, AskUserQuestionEvent) else None
+
+
+def _permission_request_from_stream_event(event: Any) -> PermissionRequestEvent | None:
+    while isinstance(event, SubPipelineStreamEvent):
+        event = event.inner
+    return event if isinstance(event, PermissionRequestEvent) else None
+
+
+def _sub_pipeline_permission_request_from_stream_event(event: Any) -> PermissionRequestEvent | None:
+    if not isinstance(event, SubPipelineStreamEvent):
+        return None
+    return _permission_request_from_stream_event(event)
 
 
 def _ask_user_question_answer_from_prompt(event: AskUserQuestionEvent, prompt: str) -> dict[str, str]:
@@ -4287,6 +4426,17 @@ def _pipeline_flow_monitor_for_session(
 def _pipeline_parent_step_order(pipeline: Any) -> list[str]:
     loaded = getattr(pipeline, "_loaded", None)
     return _step_ids(getattr(loaded, "steps", []))
+
+
+def _pipeline_parent_step_ui_modes(pipeline: Any) -> dict[str, str]:
+    loaded = getattr(pipeline, "_loaded", None)
+    result: dict[str, str] = {}
+    for step in getattr(loaded, "steps", []):
+        step_id = getattr(step, "step_id", None)
+        ui_mode = getattr(step, "ui_mode", None)
+        if isinstance(step_id, str) and isinstance(ui_mode, str) and ui_mode:
+            result[step_id] = ui_mode
+    return result
 
 
 def _pipeline_candidate_step_order(pipeline: Any) -> list[str]:

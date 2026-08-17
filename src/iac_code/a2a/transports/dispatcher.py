@@ -49,6 +49,7 @@ from iac_code.a2a.artifacts import A2AArtifactStore
 from iac_code.a2a.events import make_text_part
 from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.exposure import normalize_a2a_exposure_types
+from iac_code.a2a.input_required import parse_permission_response
 from iac_code.a2a.jsonrpc_passthrough import (
     install_jsonrpc_error_data_passthrough,
     install_v03_jsonrpc_error_data_passthrough,
@@ -475,6 +476,13 @@ class IacCodeRequestHandler(DefaultRequestHandler):
     async def on_message_send(self, params: SendMessageRequest, context):
         self._validate_extensions(context)
         self._validate_pipeline_message_request(params)
+        permission_response = parse_permission_response(params.message)
+        if permission_response is not None:
+            resolve = getattr(getattr(self, "agent_executor", None), "resolve_sideband_permission", None)
+            if callable(resolve):
+                ack = await resolve(permission_response)
+                if ack is not None:
+                    return ack
         await self._hydrate_recoverable_pipeline_task_id(params)
         await self._reconcile_recoverable_pipeline_task(params, context)
         return await super().on_message_send(params, context)
@@ -482,8 +490,17 @@ class IacCodeRequestHandler(DefaultRequestHandler):
     async def on_message_send_stream(self, params: SendMessageRequest, context):
         self._validate_extensions(context)
         self._validate_pipeline_message_request(params)
-        await self._hydrate_recoverable_pipeline_task_id(params)
-        await self._reconcile_recoverable_pipeline_task(params, context)
+        permission_response = parse_permission_response(params.message)
+        if permission_response is not None:
+            resolve = getattr(getattr(self, "agent_executor", None), "resolve_sideband_permission", None)
+            if callable(resolve):
+                ack = await resolve(permission_response)
+                if ack is not None:
+                    yield ack
+                    return
+        if permission_response is None:
+            await self._hydrate_recoverable_pipeline_task_id(params)
+            await self._reconcile_recoverable_pipeline_task(params, context)
         task_id = params.message.task_id or None
         if task_id and isinstance(self.task_store, A2ATaskStore) and await self.task_store.is_task_active(task_id):
             task = await self.task_store.get(task_id, context)
@@ -491,7 +508,8 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             if (
                 task is not None
                 and active_task is not None
-                and task.status.state not in TERMINAL_TASK_STATES | INTERRUPTED_TASK_STATES
+                and task.status.state not in TERMINAL_TASK_STATES
+                and (task.status.state not in INTERRUPTED_TASK_STATES or permission_response is not None)
             ):
                 active_stream = self._on_active_message_send_stream(
                     params,
@@ -505,10 +523,15 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                 finally:
                     await active_stream.aclose()
                 return
-        tracked_stream = _iterate_with_pipeline_transport_tracking(
-            super().on_message_send_stream(params, context),
-            task_id=getattr(params.message, "task_id", None) or None,
-            context_id=getattr(params.message, "context_id", None) or None,
+        base_stream = super().on_message_send_stream(params, context)
+        tracked_stream = (
+            base_stream
+            if get_run_mode() is RunMode.PIPELINE
+            else _iterate_with_pipeline_transport_tracking(
+                base_stream,
+                task_id=getattr(params.message, "task_id", None) or None,
+                context_id=getattr(params.message, "context_id", None) or None,
+            )
         )
         try:
             async for event in tracked_stream:

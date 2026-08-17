@@ -1,0 +1,4 @@
+interface:
+  display_name: "iac-code"
+  short_description: "Design and operate Alibaba Cloud infrastructure"
+  default_prompt: "Use $iac-code for this Alibaba Cloud infrastructure task and follow one job through real interaction boundaries. Default to normal; use selling only when explicitly requested or when candidate architectures, cost comparison, plan confirmation, and deployment are all needed."

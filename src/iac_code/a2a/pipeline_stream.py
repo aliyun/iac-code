@@ -20,6 +20,7 @@ from iac_code.a2a.events import (
     _extract_artifact_metadata,
 )
 from iac_code.a2a.exposure import A2AExposureType, normalize_a2a_exposure_types
+from iac_code.a2a.input_required import PendingPermission, PermissionResponse
 from iac_code.a2a.pipeline_events import (
     PIPELINE_EVENTS_EXTENSION_URI,
     PIPELINE_METADATA_SCHEMA_VERSION,
@@ -44,7 +45,10 @@ from iac_code.pipeline.constants import (
     PIPELINE_EVENT_CLEANUP_PROGRESS,
     PIPELINE_EVENT_CLEANUP_STARTED,
 )
-from iac_code.services.permissions.audit import is_aliyun_api_non_read_only_permission_event
+from iac_code.services.permissions.audit import (
+    emit_permission_boundary_audit,
+    is_aliyun_api_non_read_only_permission_event,
+)
 from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent, ToolResultEvent
 from iac_code.utils.public_errors import sanitize_strict_text
 
@@ -92,6 +96,7 @@ _DISPLAY_ONLY_EVENT_TYPES = {
     "candidate_detail_shown",
     "diagram_shown",
     "permission_requested",
+    "permission_resolved",
     "thinking_delta",
     "text_delta",
     "message_tombstone",
@@ -145,6 +150,8 @@ class PipelineA2AEventPublisher:
         snapshot_store: A2APipelineSnapshotStore,
         artifact_store: Any | None = None,
         exposure_types: Any = None,
+        permission_input_registry: Any | None = None,
+        task_store: Any | None = None,
         delivery_task_id: str | None = None,
         delivery_context_id: str | None = None,
         before_enqueue: PipelineBeforeEnqueueHook | None = None,
@@ -160,6 +167,8 @@ class PipelineA2AEventPublisher:
         self.snapshot_store = snapshot_store
         self.artifact_store = artifact_store
         self.exposure_types = normalize_a2a_exposure_types(exposure_types)
+        self.permission_input_registry = permission_input_registry
+        self.task_store = task_store
         self.delivery_task_id = delivery_task_id
         self.delivery_context_id = delivery_context_id
         self.before_enqueue = before_enqueue
@@ -180,6 +189,105 @@ class PipelineA2AEventPublisher:
         self._extreme_snapshot_cache: dict[str, Any] | None = None
         self._extreme_pending_journal_events: list[dict[str, Any]] = []
         self._extreme_pending_snapshot_events: list[dict[str, Any]] = []
+        self.permission_resolution_owner = _PipelinePermissionResolutionOwner(self)
+
+    async def publish_sub_pipeline_permission(self, event: Any) -> str | None:
+        """Publish only a wrapped Sub Pipeline permission without waiting for its Future."""
+
+        permission_request = _sub_pipeline_permission_request_from(event)
+        if permission_request is None:
+            raise TypeError("Expected a Sub Pipeline permission request event")
+        if self.permission_input_registry is None:
+            raise PipelineA2APersistenceError("Sub Pipeline permission registry is unavailable")
+
+        envelopes = self.translator.translate(event)
+        permission_envelope = next(
+            (envelope for envelope in envelopes if envelope.get("eventType") == "permission_requested"),
+            None,
+        )
+        if permission_envelope is None:
+            raise PipelineA2APersistenceError("Sub Pipeline permission could not be translated")
+        coordinates = {
+            key: dict(value)
+            for key in ("step", "candidate", "candidateStep")
+            if isinstance((value := permission_envelope.get(key)), dict)
+        }
+        pending = await self.permission_input_registry.register(
+            permission_request,
+            task_id=self.translator.context.task_id,
+            context_id=self.translator.context.context_id,
+            resolution_owner=self.permission_resolution_owner,
+            scope=str(permission_envelope.get("scope") or "candidate"),
+            coordinates=coordinates,
+        )
+        permission = permission_envelope.setdefault("permission", {})
+        permission.clear()
+        permission.update(safe_permission_metadata(permission_request, include_tool_input=False))
+        permission.update({"permissionId": pending.input_id, "pending": True, "inputId": pending.input_id})
+        permission_envelope["status"] = "working"
+
+        try:
+            if not await self._commit_permission_control_event(permission_envelope):
+                raise PipelineA2APersistenceError("Failed to publish Sub Pipeline permission request")
+        except BaseException:
+            await self.permission_resolution_owner.fail_permission(pending)
+            raise
+        return None
+
+    async def _commit_permission_control_event(
+        self,
+        envelope: dict[str, Any],
+        *,
+        excluding_pending: set[str] | None = None,
+    ) -> bool:
+        """Commit a permission frame and its public pending projection in one delivery order."""
+
+        async with self.delivery_transaction():
+            safe_envelope = await self.persist_envelope(envelope, require_durable_metadata=True)
+            if safe_envelope is None:
+                return False
+            if not await self._run_before_enqueue_hook(safe_envelope):
+                return False
+            if self.task_store is not None and self.permission_input_registry is not None:
+                pending = await self.permission_input_registry.pending_envelopes(
+                    self.translator.context.task_id,
+                    excluding=excluding_pending,
+                )
+                await self.task_store.set_pending_permissions(self.translator.context.task_id, pending)
+            return await self.enqueue_persisted(
+                safe_envelope,
+                run_before_enqueue=False,
+                local_envelope=envelope,
+            )
+
+    async def publish_permission_resolution(
+        self,
+        pending: PendingPermission,
+        *,
+        decision: str,
+        canceled: bool = False,
+    ) -> bool:
+        permission = {
+            "permissionId": pending.input_id,
+            "inputId": pending.input_id,
+            "toolUseId": pending.request.tool_use_id,
+            "toolName": pending.request.tool_name,
+            "decision": decision,
+            "pending": False,
+        }
+        if canceled:
+            permission["canceled"] = True
+        envelope = self.translator.manual_event(
+            "permission_resolved",
+            pending.scope,
+            status="working",
+            data={"kind": "permission", **permission},
+        )
+        envelope["permission"] = permission
+        for key, value in (pending.coordinates or {}).items():
+            if key in {"step", "candidate", "candidateStep"} and isinstance(value, dict):
+                envelope[key] = dict(value)
+        return await self._commit_permission_control_event(envelope, excluding_pending={pending.input_id})
 
     async def publish(
         self,
@@ -188,80 +296,132 @@ class PipelineA2AEventPublisher:
         permission_resolver: PipelinePermissionResolver | None = None,
         auto_approve_permissions: bool = False,
     ) -> str | None:
+        if (
+            _sub_pipeline_permission_request_from(event) is not None
+            and self.permission_input_registry is not None
+            and permission_resolver is None
+            and not auto_approve_permissions
+        ):
+            return await self.publish_sub_pipeline_permission(event)
         envelopes = self.translator.translate(event)
         permission_request = _permission_request_from(event)
         tool_result = _tool_result_from(event)
         text_parts: list[str] = []
-
-        for envelope in envelopes:
-            if _should_skip_envelope(envelope, exposure_types=self.exposure_types):
-                continue
-
-            artifact_metadata = await self._maybe_externalize_artifact(envelope, tool_result)
-            if envelope.get("eventType") == "artifact_created" and artifact_metadata is None:
-                continue
-            if (
-                envelope.get("eventType") in ("tool_started", "tool_result")
-                and artifact_metadata is None
-                and A2AExposureType.TOOL_TRACE not in self.exposure_types
-            ):
-                continue
-
-            if permission_request is not None:
-                approved = await self._apply_permission_metadata(
-                    permission_request,
-                    envelope,
-                    permission_resolver=permission_resolver,
-                    auto_approve_permissions=auto_approve_permissions,
-                )
-                permission_audit_emitted = False
-                if approved and _can_resolve_permission_future(permission_request):
-                    audit_ok = (
-                        _emit_resolver_permission_audit(permission_request, approved)
-                        if permission_resolver is not None
-                        else _emit_auto_permission_audit(permission_request, approved)
-                    )
-                    permission_audit_emitted = True
-                    if not audit_ok:
-                        approved = False
-                        _set_permission_approval(envelope, approved)
-            else:
-                approved = None
-                permission_audit_emitted = False
-
-            persisted = await self._persist_and_enqueue(
-                envelope,
-                artifact_metadata=artifact_metadata,
-                require_durable_metadata=permission_request is not None,
+        interactive_permission = (
+            permission_request is not None
+            and self.permission_input_registry is not None
+            and permission_resolver is None
+            and not auto_approve_permissions
+        )
+        pending_permission = None
+        if interactive_permission:
+            pending_permission = await self.permission_input_registry.register(
+                permission_request,
+                task_id=self.translator.context.task_id,
+                context_id=self.translator.context.context_id,
             )
-            if permission_request is not None:
-                final_approved = bool(approved) if persisted else False
-                if _can_resolve_permission_future(permission_request):
-                    if permission_audit_emitted and bool(approved) and not persisted:
-                        if permission_resolver is not None:
-                            _emit_resolver_permission_audit(
-                                permission_request,
-                                False,
-                                persistence_failure=True,
-                            )
-                        else:
-                            _emit_auto_permission_audit(
-                                permission_request,
-                                False,
-                                persistence_failure=True,
-                            )
-                    elif not permission_audit_emitted:
-                        audit_ok = (
-                            _emit_resolver_permission_audit(permission_request, final_approved)
-                            if permission_resolver is not None
-                            else _emit_auto_permission_audit(permission_request, final_approved)
-                        )
-                        if final_approved and not audit_ok:
-                            final_approved = False
-                    _resolve_permission_future(permission_request, final_approved)
 
-            if envelope.get("eventType") == "text_delta":
-                text_parts.append(_text_from_envelope(envelope))
+        try:
+            for envelope in envelopes:
+                if _should_skip_envelope(envelope, exposure_types=self.exposure_types):
+                    continue
+
+                artifact_metadata = await self._maybe_externalize_artifact(envelope, tool_result)
+                if envelope.get("eventType") == "artifact_created" and artifact_metadata is None:
+                    continue
+                if (
+                    envelope.get("eventType") in ("tool_started", "tool_result")
+                    and artifact_metadata is None
+                    and A2AExposureType.TOOL_TRACE not in self.exposure_types
+                ):
+                    continue
+
+                if permission_request is not None and interactive_permission:
+                    assert pending_permission is not None
+                    permission = envelope.setdefault("permission", {})
+                    permission.clear()
+                    permission.update(safe_permission_metadata(permission_request, include_tool_input=False))
+                    permission.update({"pending": True, "inputId": pending_permission.input_id})
+                    envelope["status"] = "input_required"
+                    approved = None
+                    permission_audit_emitted = False
+                elif permission_request is not None:
+                    approved = await self._apply_permission_metadata(
+                        permission_request,
+                        envelope,
+                        permission_resolver=permission_resolver,
+                        auto_approve_permissions=auto_approve_permissions,
+                    )
+                    permission_audit_emitted = False
+                    if approved and _can_resolve_permission_future(permission_request):
+                        audit_ok = (
+                            _emit_resolver_permission_audit(permission_request, approved)
+                            if permission_resolver is not None
+                            else _emit_auto_permission_audit(permission_request, approved)
+                        )
+                        permission_audit_emitted = True
+                        if not audit_ok:
+                            approved = False
+                            _set_permission_approval(envelope, approved)
+                else:
+                    approved = None
+                    permission_audit_emitted = False
+
+                persisted = await self._persist_and_enqueue(
+                    envelope,
+                    artifact_metadata=artifact_metadata,
+                    require_durable_metadata=permission_request is not None,
+                )
+                if permission_request is not None and interactive_permission:
+                    if not persisted:
+                        assert pending_permission is not None
+                        await self.permission_input_registry.fail(pending_permission)
+                elif permission_request is not None:
+                    final_approved = bool(approved) if persisted else False
+                    if _can_resolve_permission_future(permission_request):
+                        if permission_audit_emitted and bool(approved) and not persisted:
+                            if permission_resolver is not None:
+                                _emit_resolver_permission_audit(
+                                    permission_request,
+                                    False,
+                                    persistence_failure=True,
+                                )
+                            else:
+                                _emit_auto_permission_audit(
+                                    permission_request,
+                                    False,
+                                    persistence_failure=True,
+                                )
+                        elif not permission_audit_emitted:
+                            audit_ok = (
+                                _emit_resolver_permission_audit(permission_request, final_approved)
+                                if permission_resolver is not None
+                                else _emit_auto_permission_audit(permission_request, final_approved)
+                            )
+                            if final_approved and not audit_ok:
+                                final_approved = False
+                        _resolve_permission_future(permission_request, final_approved)
+
+                if envelope.get("eventType") == "text_delta":
+                    text_parts.append(_text_from_envelope(envelope))
+
+            if interactive_permission:
+                assert permission_request is not None
+                future = permission_request.response_future
+                if future is None:
+                    assert pending_permission is not None
+                    await self.permission_input_registry.fail(pending_permission)
+                else:
+                    await asyncio.shield(future)
+        except BaseException:
+            if pending_permission is not None:
+                assert self.permission_input_registry is not None
+                await self.permission_input_registry.fail(pending_permission)
+            raise
+        finally:
+            if pending_permission is not None:
+                assert self.permission_input_registry is not None
+                await self.permission_input_registry.complete(pending_permission)
 
         return "".join(text_parts) if text_parts else None
 
@@ -1094,7 +1254,11 @@ class PipelineA2AEventPublisher:
                 state=_a2a_task_state_name(envelope),
             ),
         )
-        ParseDict({"iac_code": {"pipeline": envelope}}, update.metadata)
+        iac_code_metadata: dict[str, Any] = {"pipeline": envelope}
+        input_projection = self._unified_input_projection(envelope)
+        if input_projection is not None:
+            iac_code_metadata["input"] = input_projection
+        ParseDict({"iac_code": iac_code_metadata}, update.metadata)
         await self._enqueue_transport_event(update, wait_for_transport=wait_for_transport)
 
     async def _enqueue_status_batch(
@@ -1115,11 +1279,22 @@ class PipelineA2AEventPublisher:
             {
                 "iac_code": {
                     "pipelineBatch": _pipeline_batch_payload(envelopes),
+                    **(
+                        {"input": input_projection}
+                        if (input_projection := self._unified_input_projection(final_envelope)) is not None
+                        else {}
+                    ),
                 }
             },
             update.metadata,
         )
         await self._enqueue_transport_event(update, wait_for_transport=wait_for_transport)
+
+    def _unified_input_projection(self, envelope: dict[str, Any]) -> dict[str, Any] | None:
+        step = envelope.get("step")
+        step_id = step.get("id") if isinstance(step, dict) else None
+        kind_hint = self.translator.context.parent_step_ui_modes.get(step_id) if isinstance(step_id, str) else None
+        return _unified_input_projection(envelope, kind_hint=kind_hint)
 
     async def _enqueue_transport_event(self, event: Any, *, wait_for_transport: bool) -> None:
         wait_for_transport = wait_for_transport or pipeline_transport_delivery_is_required()
@@ -1153,7 +1328,108 @@ class PipelineA2AEventPublisher:
         return self.delivery_context_id or str(envelope["contextId"])
 
 
+class _PipelinePermissionResolutionOwner:
+    """Serialize replies, cancellation, journal order, and Future completion for one Task."""
+
+    def __init__(self, publisher: PipelineA2AEventPublisher) -> None:
+        self.publisher = publisher
+        self._lock = asyncio.Lock()
+
+    async def resolve_permission(self, pending: PendingPermission, response: PermissionResponse) -> bool:
+        registry = self.publisher.permission_input_registry
+        if registry is None:
+            raise PipelineA2APersistenceError("Sub Pipeline permission registry is unavailable")
+        async with self._lock:
+            await registry.claim(pending, response)
+            approved = response.decision == "allow_once"
+            audit_ok = emit_permission_boundary_audit(
+                pending.request,
+                decision="allow" if approved else "deny",
+                scope="a2a_sub_pipeline_permission",
+                source="a2a_user_permission",
+                reason_type="user_decision",
+                reason_detail=response.decision,
+            )
+            if approved and not audit_ok:
+                approved = False
+            decision = "allow_once" if approved else "deny"
+            try:
+                committed = await self.publisher.publish_permission_resolution(pending, decision=decision)
+            except BaseException:
+                await self._finish_failed(pending)
+                raise
+            if not committed:
+                await self._finish_failed(pending)
+                raise PipelineA2APersistenceError("Failed to publish Sub Pipeline permission resolution")
+            future = pending.request.response_future
+            if future is None or future.done():
+                await registry.complete(pending)
+                raise PipelineA2APersistenceError("Sub Pipeline permission wait point is unavailable")
+            future.set_result(approved)
+            await registry.complete(pending)
+            return approved
+
+    async def fail_permission(self, pending: PendingPermission) -> None:
+        async with self._lock:
+            await self._finish_failed(pending)
+
+    async def cancel_permissions(self, task_id: str) -> None:
+        registry = self.publisher.permission_input_registry
+        if registry is None:
+            return
+        async with self._lock:
+            pending_permissions = await registry.claim_for_cancel(task_id, self)
+            for pending in pending_permissions:
+                emit_permission_boundary_audit(
+                    pending.request,
+                    decision="deny",
+                    scope="a2a_sub_pipeline_permission",
+                    source="a2a_task_cancel",
+                    reason_type="task_canceled",
+                    reason_detail="task canceled while permission was pending",
+                )
+                try:
+                    await self.publisher.publish_permission_resolution(pending, decision="deny", canceled=True)
+                except Exception:
+                    logger.warning("Failed to publish canceled Sub Pipeline permission", exc_info=True)
+                finally:
+                    future = pending.request.response_future
+                    if future is not None and not future.done():
+                        future.set_result(False)
+                    await registry.complete(pending)
+            if self.publisher.task_store is not None:
+                remaining = await registry.pending_envelopes(task_id)
+                await self.publisher.task_store.set_pending_permissions(task_id, remaining)
+
+    async def _finish_failed(self, pending: PendingPermission) -> None:
+        registry = self.publisher.permission_input_registry
+        if registry is None:
+            return
+        emit_permission_boundary_audit(
+            pending.request,
+            decision="deny",
+            scope="a2a_sub_pipeline_permission",
+            source="a2a_permission_resume_invalid",
+            reason_type="permission_resume_invalid",
+            reason_detail="permission control event could not be committed",
+        )
+        future = pending.request.response_future
+        if future is not None and not future.done():
+            future.set_result(False)
+        await registry.complete(pending)
+        if self.publisher.task_store is not None:
+            remaining = await registry.pending_envelopes(pending.task_id)
+            await self.publisher.task_store.set_pending_permissions(pending.task_id, remaining)
+
+
 def _permission_request_from(event: Any) -> PermissionRequestEvent | None:
+    inner = _unwrap_stream_event(event)
+    return inner if isinstance(inner, PermissionRequestEvent) else None
+
+
+def _sub_pipeline_permission_request_from(event: Any) -> PermissionRequestEvent | None:
+    if not isinstance(event, SubPipelineStreamEvent):
+        return None
     inner = _unwrap_stream_event(event)
     return inner if isinstance(inner, PermissionRequestEvent) else None
 
@@ -1332,6 +1608,143 @@ def _a2a_task_state_name(envelope: dict[str, Any]) -> str:
     if status == "completed":
         return TaskState.Name(TaskState.TASK_STATE_COMPLETED)
     return TaskState.Name(TaskState.TASK_STATE_WORKING)
+
+
+def _unified_input_projection(
+    envelope: dict[str, Any],
+    *,
+    kind_hint: str | None = None,
+) -> dict[str, Any] | None:
+    task_id = envelope.get("taskId")
+    context_id = envelope.get("contextId")
+    if not isinstance(task_id, str) or not isinstance(context_id, str):
+        return None
+    permission = envelope.get("permission")
+    if isinstance(permission, dict) and permission.get("pending") is True:
+        input_id = permission.get("inputId")
+        tool_use_id = permission.get("toolUseId")
+        tool_name = permission.get("toolName")
+        safe_summary = permission.get("safeSummary")
+        title = permission.get("title")
+        purpose = permission.get("purpose")
+        effect = permission.get("effect")
+        target = permission.get("target")
+        is_read_only = permission.get("isReadOnly")
+        prompt = permission.get("prompt")
+        options = permission.get("options")
+        language = permission.get("language")
+        deployment_summary = permission.get("deploymentSummary")
+        if not all(isinstance(value, str) and value for value in (input_id, tool_use_id, tool_name, safe_summary)):
+            return None
+        if not isinstance(title, str) or not title:
+            title = "Run {}".format(tool_name)
+        if not isinstance(purpose, str) or not purpose:
+            purpose = "Run this operation for the requested infrastructure task."
+        if not isinstance(effect, str) or not effect:
+            effect = "unknown"
+        if not isinstance(target, str) or not target:
+            target = "the current task scope"
+        if not isinstance(is_read_only, bool):
+            is_read_only = False
+        if not isinstance(prompt, str) or not prompt:
+            prompt = "{} Allow once?".format(title)
+        if not isinstance(options, list) or not options:
+            options = [
+                {"id": "allow_once", "label": "Allow once"},
+                {"id": "deny", "label": "Deny"},
+            ]
+        projection = {
+            "schemaVersion": 1,
+            "kind": "permission",
+            "requestTaskId": task_id,
+            "contextId": context_id,
+            "inputId": input_id,
+            "toolUseId": tool_use_id,
+            "toolName": tool_name,
+            "title": title,
+            "purpose": purpose,
+            "effect": effect,
+            "target": target,
+            "isReadOnly": is_read_only,
+            "prompt": prompt,
+            "safeSummary": safe_summary,
+            "options": options,
+            "required": True,
+        }
+        if isinstance(language, str) and language:
+            projection["language"] = language
+        if isinstance(deployment_summary, dict):
+            projection["deploymentSummary"] = deployment_summary
+        return projection
+    raw_input = envelope.get("input")
+    if not isinstance(raw_input, dict):
+        raw_input = envelope.get("data") if envelope.get("eventType") == "input_required" else None
+    if not isinstance(raw_input, dict):
+        return None
+    kind = raw_input.get("kind") or kind_hint
+    if kind not in {"ask_user_question", "candidate_selection"}:
+        return None
+    projected: dict[str, Any] = {
+        "schemaVersion": 1,
+        "kind": kind,
+        "requestTaskId": task_id,
+        "contextId": context_id,
+        "inputId": str(raw_input.get("inputId") or "input-{}".format(envelope.get("eventId") or task_id)),
+        "prompt": str(raw_input.get("prompt") or raw_input.get("question") or "Input required")[:1000],
+        "required": True,
+    }
+    if kind == "ask_user_question":
+        projected["allowFreeText"] = bool(raw_input.get("allowFreeText"))
+        free_text_prompt = raw_input.get("freeTextPrompt")
+        if isinstance(free_text_prompt, str) and free_text_prompt:
+            projected["freeTextPrompt"] = free_text_prompt[:500]
+    raw_options = raw_input.get("options")
+    options: list[dict[str, Any]] = []
+    if isinstance(raw_options, list):
+        for index, option in enumerate(raw_options[:50]):
+            if isinstance(option, str):
+                options.append({"id": option[:200], "label": option[:300]})
+                continue
+            if not isinstance(option, dict):
+                continue
+            option_id = option.get("id")
+            if option_id is None:
+                option_id = option.get("candidate_index", option.get("index", index))
+            label = option.get("label") or option.get("name") or option.get("candidate_name") or option_id
+            projected_option: dict[str, Any] = {"id": str(option_id)[:200], "label": str(label)[:300]}
+            if kind == "candidate_selection":
+                summary = option.get("summary")
+                architecture_diagram = option.get("architecture_diagram") or option.get("architectureDiagram")
+                total_monthly_cost = option.get("total_monthly_cost") or option.get("totalMonthlyCost")
+                if isinstance(summary, str) and summary:
+                    projected_option["summary"] = summary[:600]
+                if isinstance(architecture_diagram, str) and architecture_diagram:
+                    projected_option["architectureDiagram"] = architecture_diagram[:1600]
+                if isinstance(total_monthly_cost, str) and total_monthly_cost:
+                    projected_option["totalMonthlyCost"] = total_monthly_cost[:300]
+                raw_cost_items = option.get("cost_items") or option.get("costItems")
+                cost_items: list[dict[str, str]] = []
+                if isinstance(raw_cost_items, list):
+                    for raw_cost_item in raw_cost_items[:12]:
+                        if not isinstance(raw_cost_item, dict):
+                            continue
+                        name = raw_cost_item.get("name")
+                        spec = raw_cost_item.get("spec")
+                        monthly_cost = raw_cost_item.get("monthly_cost") or raw_cost_item.get("monthlyCost")
+                        item: dict[str, str] = {}
+                        if isinstance(name, str) and name:
+                            item["name"] = name[:200]
+                        if isinstance(spec, str) and spec:
+                            item["spec"] = spec[:300]
+                        if isinstance(monthly_cost, str) and monthly_cost:
+                            item["monthlyCost"] = monthly_cost[:300]
+                        if item:
+                            cost_items.append(item)
+                if cost_items:
+                    projected_option["costItems"] = cost_items
+            options.append(projected_option)
+    projected["options"] = options
+    return projected
 
 
 def _events_for_envelope_identity(events: list[dict[str, Any]], envelope: dict[str, Any]) -> list[dict[str, Any]]:

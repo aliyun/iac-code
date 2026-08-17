@@ -1,0 +1,74 @@
+# 步骤：方案确认与选择（富展示）
+
+你正在执行 AI 售卖流程的方案确认步骤。
+
+## 任务
+基于候选方案评估结果生成可选择方案列表，并在用户选择后提交最终选择结果。
+
+## 评估结果
+```json
+{evaluated_candidates}
+```
+
+## 首次执行
+
+如果当前没有用户选择消息，直接调用 `complete_step` 提交待选择结论，随后流程会等待用户输入。
+
+仅包含 `failed` 为 `false` 的方案；失败方案不要加入 `options`。
+
+### 待选择结论
+
+`complete_step.conclusion.options` 中每个可选方案必须包含：
+- `options[].name`：候选方案名称，取 `candidate.name`
+- `options[].summary`：使用用户当前语言撰写 2-3 句方案描述，说明核心产品组合、架构特点和主要取舍
+- `options[].candidate_index`：候选方案在 `evaluated_candidates` 数组中的 0 基下标
+- `options[].architecture_diagram`：紧凑 Mermaid `flowchart` 源码，只使用当前 `candidate`、`template` 和拓扑中已有的事实；最多 12 个节点，不要添加 Markdown 代码围栏
+- `options[].total_monthly_cost`：原样取 `evaluated_candidates[i].cost.monthly_estimate`
+- `options[].cost_items`：逐项取 `evaluated_candidates[i].cost.resources`，每项包含 `name`、可选 `spec` 和 `monthly_cost`；`monthly_cost` 原样取资源的 `cost`
+
+不要使用 `evaluated_candidates[i].candidate.monthly_estimate`，它只是架构规划阶段的粗略估算。不要重新询价或自行补算价格。若费用明细没有规格字段，省略 `spec`，不要猜测。
+
+`user_prompt`、`summary` 和 Mermaid 节点标签应使用用户当前语言；字段名、枚举值和其他协议字段保持上面的固定形式。
+
+`complete_step.conclusion.user_prompt` 必须是展示给用户的选择提示，例如“请选择要部署的方案：”。
+
+## 收到用户选择
+
+如果当前用户消息是在选择方案（例如包含“选择方案0”、“方案1”、候选方案名称，或表达“选便宜/高可用/已有VPC”等偏好），请直接根据用户输入和上方 `evaluated_candidates` 判断最终选择。
+
+如果当前用户消息是结构化 JSON 选择消息，例如：
+```json
+{
+  "selected_candidate_index": 0,
+  "selected_evaluated_candidate_index": 2,
+  "parameter_overrides": {
+    "ZoneId": "cn-hangzhou-k",
+    "InstanceType": "ecs.g7.large"
+  }
+}
+```
+
+必须按以下规则处理：
+- `selected_candidate_index`：按本次展示的 `options` 列表 0 基顺序选择候选方案
+- `selected_evaluated_candidate_index`：候选方案在 `evaluated_candidates` 数组中的 0 基下标；存在时优先于 `selected_candidate_index`
+- `selected_candidate_name`：如果用户提供名称，则按候选方案名称匹配
+- `parameter_overrides`：用户传入的部署参数覆盖字典，必须原样整理为 `parameter_overrides`
+- `parameters`：兼容字段，若用户传入 `parameters`，也必须整理为 `parameter_overrides`
+
+收到用户选择后再次调用 `complete_step`，只提交以下选择结果：
+- `selected_candidate_name`：最终选择的候选方案名称，必须取 `candidate.name`
+- `selected_candidate_index`：最终选择的候选方案在本次展示的 `options` 列表中的 0 基顺序
+- `selected_evaluated_candidate_index`：最终选择的候选方案在 `evaluated_candidates` 数组中的 0 基下标
+- `parameter_overrides`：用户选择方案时传入的部署参数覆盖字典；没有传入时可省略
+
+不要再次提交 `user_prompt`、`options` 或 `user_input`。Pipeline 会保留首次提交的方案描述、架构图和费用数据以及真实用户输入，并与本次选择结果合并。
+
+如果用户输入可以明确映射到某个方案编号（例如“方案0”），按本次展示的 `options` 列表 0 基顺序选择对应方案。
+如果用户输入匹配某个候选方案名称，选择该方案。
+如果用户用偏好描述选择方案，请根据候选方案摘要、架构特点、成本和用户偏好选择最匹配的方案。
+
+## 约束
+- 不要读取项目文件或记忆，所需上下文已在上方提供。
+- 不要在本步骤重新询价。
+- 不要修改模板 Default。
+- 不要把 `parameter_overrides` 写入模板；后续部署步骤会基于最终选择结果处理部署参数。

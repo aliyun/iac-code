@@ -89,6 +89,10 @@ _REAL_RESTORE_FAILURE_REASONS = {
     "corrupt_context",
     "invalid_context",
 }
+
+
+def _is_a2a_surface(surface: str) -> bool:
+    return surface == "a2a" or surface.startswith("a2a_")
 _SIDECAR_ROOT_DIRS = {"a2a", "image-cache", "pipeline", "tool-results"}
 _SIDECAR_ROOT_FILES = {
     ".backup-state.json",
@@ -1370,7 +1374,7 @@ class PipelineRunner:
         )
         self._set_pending_input_kind(_PIPELINE_PAUSE_CONFIRMATION_KIND)
         await self._save_waiting_input(step_id)
-        if self._surface != "a2a":
+        if not _is_a2a_surface(self._surface):
             blocked_event = await self._critical_backup_blocked_event(step_id or None, BackupReason.INPUT_REQUIRED)
             if blocked_event is not None:
                 return blocked_event
@@ -3980,6 +3984,12 @@ class PipelineRunner:
                     "attempt_id": attempt["attempt_id"],
                     "transcript_id": attempt["transcript_id"],
                     "resume_messages": step_resume_messages,
+                    "resume_candidate_selection": (
+                        first_step
+                        and resume_current_step
+                        and step.ui_mode == "candidate_selection"
+                        and first_step_user_input is not None
+                    ),
                     "rollback_targets": self.state_machine.completed_non_future_rollback_targets(),
                     "rollback_count": self.state_machine.rollback_count,
                     "max_rollbacks": self.state_machine.max_rollbacks,
@@ -4348,7 +4358,7 @@ class PipelineRunner:
                 options = conclusion.get("options", [])
                 if not isinstance(options, list):
                     options = []
-                if self._surface != "a2a":
+                if not _is_a2a_surface(self._surface):
                     blocked_event = await self._critical_backup_blocked_event(
                         step.step_id,
                         BackupReason.INPUT_REQUIRED,

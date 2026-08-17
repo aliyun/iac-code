@@ -25,6 +25,7 @@ from a2a.utils.errors import TaskNotCancelableError, TaskNotFoundError
 from google.protobuf.json_format import MessageToDict
 from starlette.testclient import TestClient
 
+from iac_code import __version__
 from iac_code.a2a.app import (
     A2AAuthMiddleware,
     _serve_async_transport,
@@ -102,7 +103,25 @@ def test_health_route() -> None:
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "healthy"}
+    assert response.json() == {"status": "healthy", "version": __version__, "mode": "normal"}
+
+
+def test_readiness_route_is_authenticated_and_returns_non_secret_status(monkeypatch) -> None:
+    expected = {
+        "schemaVersion": 1,
+        "llm": {"ready": True, "provider": "openai", "model": "gpt-5.6", "missing": []},
+        "cloud": {"ready": False, "provider": "aliyun", "missing": ["credentials"]},
+    }
+    monkeypatch.setattr("iac_code.a2a.app.configuration_readiness", lambda *, model: expected)
+    app = create_app(host="127.0.0.1", port=41242, token="runtime-token", model="gpt-5.6")
+
+    with TestClient(app) as client:
+        unauthorized = client.get("/iac-code/readiness")
+        response = client.get("/iac-code/readiness", headers={"Authorization": "Bearer runtime-token"})
+
+    assert unauthorized.status_code == 401
+    assert response.status_code == 200
+    assert response.json() == expected
 
 
 @pytest.mark.asyncio
