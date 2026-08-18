@@ -1,4 +1,4 @@
-.PHONY: help install desktop-install desktop-sync-version test desktop-test desktop-build coverage lint format translate run dev web pipeline clean publish
+.PHONY: help install desktop-install desktop-sync-version bump-version test desktop-test desktop-build coverage lint format translate run dev web pipeline clean publish
 
 .DEFAULT_GOAL := help
 
@@ -20,6 +20,26 @@ desktop-install: ## Install Desktop build dependencies
 
 desktop-sync-version: ## Synchronize Desktop package versions from the Python package
 	uv run python desktop/scripts/sync_version.py
+
+bump-version: ## Bump the product version (usage: make bump-version VERSION=x.y.z)
+	@if [ "$(origin VERSION)" != "command line" ]; then \
+		echo "Usage: make bump-version VERSION=<new-version> (e.g. VERSION=0.12.2)"; \
+		exit 1; \
+	fi
+	@echo "$(VERSION)" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$$' || { \
+		echo "Invalid SemVer: $(VERSION)"; \
+		exit 1; \
+	}
+	@if grep -q '^__version__ = "$(VERSION)"$$' src/iac_code/__init__.py; then \
+		echo "Version is already $(VERSION), nothing to bump"; \
+		exit 1; \
+	fi
+	@perl -i -pe 's/^__version__ = ".*"/__version__ = "$(VERSION)"/' src/iac_code/__init__.py
+	@for lang in $(LOCALES); do \
+		perl -i -pe 's/^"Project-Id-Version: .*/"Project-Id-Version: iac-code $(VERSION)\\n"/' src/iac_code/i18n/locales/$$lang/LC_MESSAGES/messages.po; \
+	done
+	@uv run python desktop/scripts/sync_version.py
+	@echo "Bumped version to $(VERSION); review changes with: git diff"
 
 desktop-test: ## Run Desktop Python and Rust checks
 	uv run python desktop/scripts/sync_version.py --check

@@ -10,6 +10,8 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     import tomli as tomllib
 
+import iac_code
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -130,7 +132,7 @@ def test_legacy_setup_declares_package_metadata(monkeypatch):
     kwargs = setup_module._TEST_SETUP_KWARGS
 
     assert kwargs["name"] == "iac_code"
-    assert kwargs["version"] == "0.12.1"
+    assert kwargs["version"] == iac_code.__version__
     assert kwargs["package_dir"] == {"": "src"}
     assert "iac_code.pipeline.selling.tools" in kwargs["packages"]
     assert "iac_code.pipeline.selling.hooks" in kwargs["packages"]

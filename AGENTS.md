@@ -29,6 +29,13 @@ This file applies to the entire repository.
 
 Prefer using `uv` and existing Makefile targets. When adding new dependencies, update `pyproject.toml` and `uv.lock` — do not bypass the project's dependency management.
 
+## Version Bumping
+
+- The product version has a single source: `__version__` in `src/iac_code/__init__.py`. `pyproject.toml`, `setup.py`, the Makefile, and the Desktop sync script all derive it from there.
+- Bump the version with `make bump-version VERSION=x.y.z`. It validates SemVer, updates `__version__`, refreshes the `Project-Id-Version` header in every `messages.po`, and runs `desktop/scripts/sync_version.py` to sync the Desktop `package.json`/`package-lock.json`, `tauri.conf.json`, Cargo manifests, and lockfiles.
+- Do not hand-edit the synced Desktop version fields; `make desktop-test` and CI run `sync_version.py --check` and fail on drift.
+- Commit all files touched by one bump together in a single commit.
+
 ## Code Standards
 
 - Target version is Python 3.10; use modern type annotations and standard library capabilities. The codebase must stay compatible across the 3.10–3.14 test matrix.
