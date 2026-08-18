@@ -1944,6 +1944,12 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
   });
 
   textarea?.addEventListener("keydown", (event) => {
+    // IME 组合输入中(如中文输入法选词)时,Enter/方向键等按键属于输入法:
+    // 不能触发提交、联想或历史导航,否则回车会直接提交而不是上屏候选。
+    // keyCode 229 是组合期事件在部分内核下的兜底标识。
+    if (event.isComposing || event.keyCode === 229) {
+      return;
+    }
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       if (visibleSuggestions.length > 0) {
         event.preventDefault();

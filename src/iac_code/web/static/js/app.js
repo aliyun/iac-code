@@ -1,9 +1,9 @@
 import * as api from "./api.js?v=web-repl-ui-311";
-import { createComposerController } from "./components/composer.js?v=session-model-v19";
+import { createComposerController } from "./components/composer.js?v=session-model-v20";
 import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v5";
 import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v7";
 import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v24";
-import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v57";
+import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v58";
 import { createOutputController } from "./components/output_panel.js?v=output-panel-v23";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
 import { reduceEvent } from "./events.js?v=web-repl-ui-319";
@@ -6165,6 +6165,10 @@ async function start() {
   byShell("app-modal-form")?.addEventListener("submit", submitAppModal);
   // 多行编辑:回车换行,⌘/Ctrl + Enter 提交(与 composer 一致)。
   byShell("app-modal-textarea")?.addEventListener("keydown", (event) => {
+    // IME 组合输入中的按键属于输入法,不能触发提交(同 composer)。
+    if (event.isComposing || event.keyCode === 229) {
+      return;
+    }
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       void submitAppModal(event);

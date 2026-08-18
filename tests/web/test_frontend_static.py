@@ -1258,14 +1258,14 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-315" in html
-    assert "/static/js/app.js?v=web-repl-ui-333" in html
+    assert "/static/js/app.js?v=web-repl-ui-334" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
     # 已归档面板复刻(archived tab)新增 listArchivedSessions/deleteArchivedSessions,
     # 同样需 bump api.js 版本位,否则回访浏览器拿不到新导出。
     assert "./api.js?v=web-repl-ui-311" in app_source
-    assert "./components/composer.js?v=session-model-v19" in app_source
+    assert "./components/composer.js?v=session-model-v20" in app_source
     # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
     assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
     assert "./components/tool_cards.js?v=live-inline-tools-v24" in app_source
@@ -1292,13 +1292,13 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-333" in index_html
-    assert "web-repl-ui-332" not in index_html
+    assert "web-repl-ui-334" in index_html
+    assert "web-repl-ui-333" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-319" in app_source
-    assert "./components/workspace.js?v=cloud-creds-v57" in app_source
+    assert "./components/workspace.js?v=cloud-creds-v58" in app_source
     # ECS RAM Role 面板改动后旧 token 不得残留,否则回访浏览器仍加载旧缓存 workspace.js。
-    assert "./components/workspace.js?v=cloud-creds-v56" not in app_source
+    assert "./components/workspace.js?v=cloud-creds-v57" not in app_source
     assert "workspace-cloud-vendors" in workspace_source
     assert "Alibaba Cloud" in workspace_source
     assert "workspace-cloud-mode-fields" in workspace_source
@@ -2712,6 +2712,9 @@ def test_composer_handles_send_queue_interrupt_attachments_and_suggestions() -> 
 
     assert "Shift+Enter" in source
     assert 'event.key === "Enter"' in source
+    # IME 组合输入保护:组合期回车必须上屏候选而不是提交(见行为测试)。
+    assert "event.isComposing" in source
+    assert "event.keyCode === 229" in source
     assert "postMessage" in source
     assert "postQueuedInput" in source
     assert "postInterrupt" in source
@@ -4451,6 +4454,131 @@ def test_composer_renders_selected_skill_as_chip_and_submits_hidden_token(tmp_pa
             "command": "$Brainstorming\n创建一个 VPC",
         },
         "acceptedText": "$Brainstorming\n创建一个 VPC",
+    }
+
+
+def test_composer_enter_during_ime_composition_commits_instead_of_submitting(tmp_path: Path) -> None:
+    """中文输入法组合期按回车是「上屏候选」,不能触发提交;组合结束后回车照常发送。"""
+    output = _run_composer_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            const { createComposerController } = await import(__COMPOSER_MODULE__);
+
+            class Element {
+              constructor(tagName) {
+                this.tagName = tagName.toUpperCase();
+                this.children = [];
+                this.listeners = {};
+                this.className = "";
+                this.textContent = "";
+                this.value = "";
+                this.disabled = false;
+                this.hidden = false;
+                this.selectionStart = 0;
+                this.scrollTop = 0;
+                this.clientHeight = 120;
+                this.dataset = {};
+                this.style = { setProperty() {} };
+              }
+              append(...children) {
+                this.children.push(...children);
+              }
+              replaceChildren(...children) {
+                this.children = children;
+              }
+              setAttribute(name, value) {
+                this[name] = String(value);
+              }
+              addEventListener(type, handler) {
+                this.listeners[type] = [...(this.listeners[type] || []), handler];
+              }
+              dispatch(type, extra = {}) {
+                for (const handler of this.listeners[type] || []) {
+                  handler({ type, target: this, preventDefault() {}, ...extra });
+                }
+              }
+              focus() {}
+              contains(target) {
+                return target === this || this.children.includes(target);
+              }
+            }
+
+            globalThis.document = {
+              createElement(tagName) {
+                return new Element(tagName);
+              },
+              addEventListener() {},
+            };
+            globalThis.window = {
+              getComputedStyle() {
+                return { lineHeight: "20px", paddingTop: "12px", paddingLeft: "12px" };
+              },
+            };
+
+            const form = new Element("form");
+            const textarea = new Element("textarea");
+            const posted = [];
+            const accepted = [];
+            const controller = createComposerController(
+              {
+                form,
+                textarea,
+                sendButton: new Element("button"),
+                stopButton: new Element("button"),
+                interruptButton: new Element("button"),
+                fileInput: new Element("input"),
+                attachmentChips: new Element("div"),
+                skillRow: new Element("div"),
+                suggestions: new Element("div"),
+                errorTarget: new Element("output"),
+              },
+              {
+                getSuggestions() {
+                  return Promise.resolve({ suggestions: [] });
+                },
+                postMessage(sessionId, payload) {
+                  posted.push({ sessionId, text: payload?.text || "" });
+                  return Promise.resolve({ accepted: true });
+                },
+              },
+              {
+                onSubmitAccepted(event) {
+                  accepted.push(event.kind);
+                },
+              },
+            );
+            controller.setSession("S");
+
+            textarea.value = "hello";
+            textarea.selectionStart = textarea.value.length;
+            textarea.dispatch("input");
+            // 组合期的回车(两种内核形态):只应上屏候选,不能提交。
+            textarea.dispatch("keydown", { key: "Enter", shiftKey: false, isComposing: true });
+            textarea.dispatch("keydown", { key: "Enter", shiftKey: false, keyCode: 229 });
+            const postedDuringComposition = posted.length;
+            const valueDuringComposition = textarea.value;
+
+            // 组合结束后,回车恢复正常提交。
+            textarea.dispatch("keydown", { key: "Enter", shiftKey: false, isComposing: false });
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            await new Promise((resolve) => setTimeout(resolve, 0));
+
+            console.log(JSON.stringify({
+              postedDuringComposition,
+              valueDuringComposition,
+              posted,
+              accepted,
+            }));
+            """
+        ),
+    )
+
+    assert output == {
+        "postedDuringComposition": 0,
+        "valueDuringComposition": "hello",
+        "posted": [{"sessionId": "S", "text": "hello"}],
+        "accepted": ["message"],
     }
 
 
@@ -7777,7 +7905,7 @@ def test_workspace_cloud_panel_prefills_secrets_and_resets_on_mode_switch() -> N
 def test_app_wires_workspace_controls_to_current_session() -> None:
     source = _source(APP_JS)
 
-    workspace_import = 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v57";'
+    workspace_import = 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v58";'
     assert workspace_import in source
     assert "workspace = createWorkspaceController" in source
     assert 'tabs: byShell("workspace-tabs")' in source
@@ -10305,8 +10433,8 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-333" in html
-    assert "web-repl-ui-332" not in html
+    assert "web-repl-ui-334" in html
+    assert "web-repl-ui-333" not in html
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:

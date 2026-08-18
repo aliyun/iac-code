@@ -1857,6 +1857,10 @@ function createMemoryPanel(api, context) {
     }, 220);
   });
   legacyQueryInput.addEventListener("keydown", (event) => {
+    // IME 组合输入中的回车属于输入法(选词上屏),不能触发搜索。
+    if (event.isComposing || event.keyCode === 229) {
+      return;
+    }
     if (event.key === "Enter") {
       event.preventDefault?.();
       loadLegacyMemory();
