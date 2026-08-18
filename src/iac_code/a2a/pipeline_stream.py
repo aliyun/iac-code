@@ -39,6 +39,8 @@ from iac_code.a2a.pipeline_transport_delivery import (
     register_pipeline_transport_delivery,
     routed_pipeline_transport_delivery_tracker,
 )
+from iac_code.a2a.runtime_overrides import get_a2a_preferred_language
+from iac_code.i18n import translate_message
 from iac_code.pipeline.constants import (
     PIPELINE_EVENT_CLEANUP_COMPLETED,
     PIPELINE_EVENT_CLEANUP_FAILED,
@@ -1636,22 +1638,25 @@ def _unified_input_projection(
         deployment_summary = permission.get("deploymentSummary")
         if not all(isinstance(value, str) and value for value in (input_id, tool_use_id, tool_name, safe_summary)):
             return None
+        fallback_language = language if isinstance(language, str) and language else "en"
         if not isinstance(title, str) or not title:
-            title = "Run {}".format(tool_name)
+            title = translate_message("Run {tool}", language=fallback_language).format(tool=tool_name)
         if not isinstance(purpose, str) or not purpose:
-            purpose = "Run this operation for the requested infrastructure task."
+            purpose = translate_message(
+                "Run this operation for the requested infrastructure task.", language=fallback_language
+            )
         if not isinstance(effect, str) or not effect:
             effect = "unknown"
         if not isinstance(target, str) or not target:
-            target = "the current task scope"
+            target = translate_message("the current task scope", language=fallback_language)
         if not isinstance(is_read_only, bool):
             is_read_only = False
         if not isinstance(prompt, str) or not prompt:
-            prompt = "{} Allow once?".format(title)
+            prompt = translate_message("{title} Allow once?", language=fallback_language).format(title=title)
         if not isinstance(options, list) or not options:
             options = [
-                {"id": "allow_once", "label": "Allow once"},
-                {"id": "deny", "label": "Deny"},
+                {"id": "allow_once", "label": translate_message("Allow once", language=fallback_language)},
+                {"id": "deny", "label": translate_message("Deny", language=fallback_language)},
             ]
         projection = {
             "schemaVersion": 1,
@@ -1690,7 +1695,11 @@ def _unified_input_projection(
         "requestTaskId": task_id,
         "contextId": context_id,
         "inputId": str(raw_input.get("inputId") or "input-{}".format(envelope.get("eventId") or task_id)),
-        "prompt": str(raw_input.get("prompt") or raw_input.get("question") or "Input required")[:1000],
+        "prompt": str(
+            raw_input.get("prompt")
+            or raw_input.get("question")
+            or translate_message("Input required", language=get_a2a_preferred_language() or "en")
+        )[:1000],
         "required": True,
     }
     if kind == "ask_user_question":

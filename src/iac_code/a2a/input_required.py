@@ -13,6 +13,7 @@ from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.runtime_overrides import get_a2a_preferred_language
+from iac_code.i18n import translate_message
 from iac_code.services.permissions.audit import (
     build_prompt_tool_input,
     emit_permission_boundary_audit,
@@ -113,18 +114,14 @@ def permission_input_envelope(
 
 
 def permission_prompt(title: str, *, language: str | None = None) -> str:
-    return "是否允许本次操作：{}？".format(title) if language == "zh" else "{} Allow once?".format(title)
+    return translate_message("{title} Allow once?", language=language or "en").format(title=title)
 
 
 def permission_options(*, language: str | None = None) -> list[dict[str, str]]:
-    if language == "zh":
-        return [
-            {"id": "allow_once", "label": "本次允许"},
-            {"id": "deny", "label": "拒绝"},
-        ]
+    resolved = language or "en"
     return [
-        {"id": "allow_once", "label": "Allow once"},
-        {"id": "deny", "label": "Deny"},
+        {"id": "allow_once", "label": translate_message("Allow once", language=resolved)},
+        {"id": "deny", "label": translate_message("Deny", language=resolved)},
     ]
 
 
@@ -152,90 +149,77 @@ def permission_display_fields(request: PermissionRequestEvent, *, language: str 
     if product or action:
         operation_name = " ".join(value for value in (product, action) if value)
         title = _cloud_operation_title(product, action, is_read_only=is_read_only, language=language)
-        purpose = (
-            "为当前阿里云基础设施任务调用 {}。".format(operation_name)
-            if language == "zh"
-            else "Call {} for the requested Alibaba Cloud infrastructure task.".format(operation_name)
-        )
+        purpose = translate_message(
+            "Call {operation} for the requested Alibaba Cloud infrastructure task.", language=language
+        ).format(operation=operation_name)
         target = operation_name
         if region:
-            target += ("，地域 " if language == "zh" else " in ") + region
+            target += translate_message(" in {region}", language=language).format(region=region)
         if stack_name:
-            target += ("；资源栈 " if language == "zh" else "; stack ") + stack_name
+            target += translate_message("; stack {stack}", language=language).format(stack=stack_name)
         elif stack_id:
-            target += ("；资源栈 " if language == "zh" else "; stack ") + stack_id
+            target += translate_message("; stack {stack}", language=language).format(stack=stack_id)
         effect = "read" if is_read_only else ("cloud_change" if read_only_known else "unknown")
     elif tool_name == "bash":
-        if language == "zh":
-            title = "读取本地工作区数据" if is_read_only else "运行本地 Shell 命令"
+        if is_read_only:
+            title = translate_message("Read local workspace data", language=language)
         else:
-            title = "Read local workspace data" if is_read_only else "Run a local shell command"
-        purpose = (
-            ("读取当前基础设施任务所需的本地数据。" if is_read_only else "执行当前基础设施任务所需的本地命令。")
-            if language == "zh"
-            else (
-                "Read local data needed for the requested infrastructure task."
-                if is_read_only
-                else "Execute a local command needed for the requested infrastructure task."
+            title = translate_message("Run a local shell command", language=language)
+        if is_read_only:
+            purpose = translate_message(
+                "Read local data needed for the requested infrastructure task.", language=language
             )
-        )
+        else:
+            purpose = translate_message(
+                "Execute a local command needed for the requested infrastructure task.", language=language
+            )
         command = None
         if isinstance(safe_input, dict):
             command = safe_input.get("command") or safe_input.get("cmd")
-        target = (
-            ("当前本地工作区；命令：{}" if language == "zh" else "the current local workspace; command: {}").format(
-                _display_text(command, fallback="shell command", maximum=240)
-            )
-            if isinstance(command, str) and command.strip()
-            else ("当前本地工作区" if language == "zh" else "the current local workspace")
-        )
+        if isinstance(command, str) and command.strip():
+            command_fallback = translate_message("shell command", language=language)
+            target = translate_message(
+                "the current local workspace; command: {command}", language=language
+            ).format(command=_display_text(command, fallback=command_fallback, maximum=240))
+        else:
+            target = translate_message("the current local workspace", language=language)
         effect = "read" if is_read_only else ("local_execution" if read_only_known else "unknown")
     elif tool_name in {"write_file", "edit_file"}:
-        title = "修改工作区文件" if language == "zh" else "Change a workspace file"
-        purpose = (
-            "写入当前基础设施任务所需的文件。"
-            if language == "zh"
-            else "Write a file needed for the requested infrastructure task."
+        title = translate_message("Change a workspace file", language=language)
+        purpose = translate_message(
+            "Write a file needed for the requested infrastructure task.", language=language
         )
-        target = _safe_input_target(safe_input) or (
-            "当前工作区中的文件" if language == "zh" else "a file in the current workspace"
+        target = _safe_input_target(safe_input, language=language) or translate_message(
+            "a file in the current workspace", language=language
         )
         effect = "file_change"
     elif tool_name in {"read_file", "glob", "grep"} or is_read_only:
-        title = (
-            "使用 {} 读取工作区数据".format(public_tool)
-            if language == "zh"
-            else "Read workspace data with {}".format(public_tool)
+        title = translate_message("Read workspace data with {tool}", language=language).format(tool=public_tool)
+        purpose = translate_message(
+            "Read local data needed for the requested infrastructure task.", language=language
         )
-        purpose = (
-            "读取当前基础设施任务所需的本地数据。"
-            if language == "zh"
-            else "Read local data needed for the requested infrastructure task."
-        )
-        target = _safe_input_target(safe_input) or (
-            "当前本地工作区" if language == "zh" else "the current local workspace"
+        target = _safe_input_target(safe_input, language=language) or translate_message(
+            "the current local workspace", language=language
         )
         effect = "read"
     else:
-        title = "运行 {}".format(public_tool) if language == "zh" else "Run {}".format(public_tool)
-        purpose = (
-            "为当前基础设施任务执行此操作。"
-            if language == "zh"
-            else "Run this operation for the requested infrastructure task."
+        title = translate_message("Run {tool}", language=language).format(tool=public_tool)
+        purpose = translate_message(
+            "Run this operation for the requested infrastructure task.", language=language
         )
-        target = _safe_input_target(safe_input) or (
-            "当前任务工作区或云账号" if language == "zh" else "the current task workspace or cloud account"
+        target = _safe_input_target(safe_input, language=language) or translate_message(
+            "the current task workspace or cloud account", language=language
         )
         effect = "local_or_remote_change" if read_only_known else "unknown"
 
     display: dict[str, Any] = {
-        "title": _display_text(title, fallback="需要权限确认" if language == "zh" else "Permission required"),
+        "title": _display_text(title, fallback=translate_message("Permission required", language=language)),
         "purpose": _display_text(
             purpose,
-            fallback="完成当前基础设施任务。" if language == "zh" else "Complete the requested infrastructure task.",
+            fallback=translate_message("Complete the requested infrastructure task.", language=language),
         ),
         "effect": _display_text(effect, fallback="unknown", maximum=80),
-        "target": _display_text(target, fallback="当前任务范围" if language == "zh" else "the current task scope"),
+        "target": _display_text(target, fallback=translate_message("the current task scope", language=language)),
         "isReadOnly": is_read_only,
     }
     if deployment_summary:
@@ -304,34 +288,24 @@ def _deployment_summary_text(summary: dict[str, Any], *, language: str) -> str:
             label = " / ".join(value for value in (name, spec, cost) if value)
             if label:
                 resource_parts.append(label)
-    if language == "zh":
-        parts = ["部署 ROS 资源栈"]
-        if candidate:
-            parts.append("方案：{}".format(candidate))
-        if region:
-            parts.append("地域：{}".format(region))
-        if stack_name:
-            parts.append("资源栈：{}".format(stack_name))
-        if template:
-            parts.append("模板：{}".format(template))
-        if total:
-            parts.append("预计月费用：{}".format(total))
-        if resource_parts:
-            parts.append("资源费用：{}".format("；".join(resource_parts)))
-    else:
-        parts = ["Deploy a ROS stack"]
-        if candidate:
-            parts.append("plan: {}".format(candidate))
-        if region:
-            parts.append("region: {}".format(region))
-        if stack_name:
-            parts.append("stack: {}".format(stack_name))
-        if template:
-            parts.append("template: {}".format(template))
-        if total:
-            parts.append("estimated monthly cost: {}".format(total))
-        if resource_parts:
-            parts.append("resource costs: {}".format("; ".join(resource_parts)))
+    parts = [translate_message("Deploy a ROS stack", language=language)]
+    if candidate:
+        parts.append(translate_message("plan: {value}", language=language).format(value=candidate))
+    if region:
+        parts.append(translate_message("region: {value}", language=language).format(value=region))
+    if stack_name:
+        parts.append(translate_message("stack: {value}", language=language).format(value=stack_name))
+    if template:
+        parts.append(translate_message("template: {value}", language=language).format(value=template))
+    if total:
+        parts.append(translate_message("estimated monthly cost: {value}", language=language).format(value=total))
+    if resource_parts:
+        resource_separator = "；" if language == "zh" else "; "
+        parts.append(
+            translate_message("resource costs: {value}", language=language).format(
+                value=resource_separator.join(resource_parts)
+            )
+        )
     rendered = "；".join(parts) if language == "zh" else "; ".join(parts)
     return sanitize_prompt_text(rendered, max_chars=_SAFE_SUMMARY_MAX_CHARS) or "ros_deploy"
 
@@ -342,46 +316,37 @@ def _safe_scalar(value: Any) -> str:
 
 def _cloud_operation_title(product: str, action: str, *, is_read_only: bool, language: str = "en") -> str:
     product_label = product.upper() if product.lower() == "ros" else product
-    if language == "zh":
-        stack_actions = {
-            "CreateStack": "创建 {} 资源栈",
-            "ContinueCreateStack": "继续创建 {} 资源栈",
-            "UpdateStack": "更新 {} 资源栈",
-            "DeleteStack": "删除 {} 资源栈",
-        }
-        template = stack_actions.get(action)
-        if template:
-            return template.format(product_label)
-        operation_name = " ".join(value for value in (product, action) if value)
-        return "使用 {} 读取阿里云数据".format(operation_name) if is_read_only else "执行 {}".format(operation_name)
-    stack_actions = {
-        "CreateStack": "Create {} stack",
-        "ContinueCreateStack": "Continue creating {} stack",
-        "UpdateStack": "Update {} stack",
-        "DeleteStack": "Delete {} stack",
-    }
-    template = stack_actions.get(action)
-    if template:
-        return template.format(product_label)
+    if action == "CreateStack":
+        return translate_message("Create {product} stack", language=language).format(product=product_label)
+    if action == "ContinueCreateStack":
+        return translate_message("Continue creating {product} stack", language=language).format(
+            product=product_label
+        )
+    if action == "UpdateStack":
+        return translate_message("Update {product} stack", language=language).format(product=product_label)
+    if action == "DeleteStack":
+        return translate_message("Delete {product} stack", language=language).format(product=product_label)
     operation_name = " ".join(value for value in (product, action) if value)
-    return (
-        "Read Alibaba Cloud data with {}".format(operation_name)
-        if is_read_only
-        else "Run {}".format(operation_name)
-    )
+    if is_read_only:
+        return translate_message("Read Alibaba Cloud data with {operation}", language=language).format(
+            operation=operation_name
+        )
+    return translate_message("Run {operation}", language=language).format(operation=operation_name)
 
 
 def _display_text(value: str, *, fallback: str, maximum: int = _DISPLAY_FIELD_MAX_CHARS) -> str:
     return sanitize_prompt_text(value, max_chars=maximum) or fallback
 
 
-def _safe_input_target(value: Any) -> str:
+def _safe_input_target(value: Any, *, language: str) -> str:
     if not isinstance(value, dict):
         return ""
     for key in ("file_path", "filePath", "path", "region_id", "regionId", "resource_id", "resourceId"):
         candidate = value.get(key)
         if isinstance(candidate, str) and candidate.strip():
-            return _display_text(candidate, fallback="the current task scope")
+            return _display_text(
+                candidate, fallback=translate_message("the current task scope", language=language)
+            )
     return ""
 
 

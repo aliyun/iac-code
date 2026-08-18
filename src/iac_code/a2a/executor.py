@@ -1119,7 +1119,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     cwd=cwd,
                 )
             if cleanup_only and pipeline_mode and not route_pipeline_handoff_to_normal:
-                raise InvalidParamsError("Cleanup-only continuation requires a completed Pipeline handoff.")
+                raise InvalidParamsError(_("Cleanup-only continuation requires a completed Pipeline handoff."))
             pipeline_input: PipelineUserInput | None = None
             normal_input: PipelineUserInput | None = None
             if pipeline_mode and not route_pipeline_handoff_to_normal:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 
 import pytest
 from a2a.types import Message, Part, Role, Task, TaskState, TaskStatus
@@ -254,12 +255,49 @@ def test_ros_deployment_permission_is_localized_and_preserves_safe_plan_summary(
     assert envelope["title"] == "创建 ROS 资源栈"
     assert envelope["prompt"] == "是否允许本次操作：创建 ROS 资源栈？"
     assert envelope["options"] == [
-        {"id": "allow_once", "label": "本次允许"},
+        {"id": "allow_once", "label": "仅允许一次"},
         {"id": "deny", "label": "拒绝"},
     ]
     assert envelope["deploymentSummary"]["candidateName"] == "低成本方案"
     assert "预计月费用：¥88/月" in envelope["safeSummary"]
     assert "must-not-leak" not in envelope["safeSummary"]
+
+
+def test_permission_display_resolves_all_supported_languages_from_catalog() -> None:
+    """preferredLanguage values beyond zh/en must resolve through the messages catalog."""
+    if sys.platform == "win32":
+        pytest.skip("compiled message catalogs are not built on Windows CI")
+    request = PermissionRequestEvent(
+        tool_name="bash",
+        tool_input={"command": "python helper.py"},
+        tool_use_id="tool-1",
+        permission_result=PermissionResult(
+            behavior="ask",
+            audit=PermissionAuditMetadata(
+                scope="once",
+                source="permission_pipeline",
+                is_read_only=False,
+                operation={"is_read_only": False},
+            ),
+        ),
+    )
+
+    expected_titles = {
+        "ja": "ローカル Shell コマンドを実行する",
+        "es": "Ejecutar un comando de shell local",
+        "fr": "Exécuter une commande shell locale",
+        "de": "Einen lokalen Shell-Befehl ausführen",
+        "pt": "Executar um comando de shell local",
+    }
+    for language, expected_title in expected_titles.items():
+        with a2a_request_context(preferred_language=language):
+            envelope = permission_input_envelope(request, task_id="task-1", context_id="ctx-1")
+        assert envelope["language"] == language
+        assert envelope["title"] == expected_title
+        # Option labels must be localized too, never the English fallback.
+        labels = [option["label"] for option in envelope["options"]]
+        assert "Allow once" not in labels
+        assert "Deny" not in labels
 
 
 def test_unknown_bash_permission_is_not_mislabeled_as_read_only() -> None:
@@ -435,7 +473,7 @@ async def test_sub_pipeline_permissions_stay_working_and_resolve_independently(m
     assert remaining["language"] == "zh"
     assert remaining["prompt"] == "是否允许本次操作：运行本地 Shell 命令？"
     assert remaining["options"] == [
-        {"id": "allow_once", "label": "本次允许"},
+        {"id": "allow_once", "label": "仅允许一次"},
         {"id": "deny", "label": "拒绝"},
     ]
 
