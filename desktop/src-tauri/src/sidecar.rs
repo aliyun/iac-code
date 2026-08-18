@@ -2201,11 +2201,23 @@ mod tests {
         let started = Instant::now();
         reap_supervisor(child, Duration::from_millis(10)).unwrap();
         assert!(started.elapsed() < Duration::from_secs(2));
-        assert_eq!(unsafe { libc::kill(-process_group, 0) }, -1);
-        assert_eq!(
-            std::io::Error::last_os_error().raw_os_error(),
-            Some(libc::ESRCH)
-        );
+        // Orphaned group members are reaped by init/launchd asynchronously;
+        // until then kill(0) can observe zombies (EPERM on macOS, success on
+        // Linux). Wait for the group to fully disappear instead of racing
+        // the kernel cleanup.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if unsafe { libc::kill(-process_group, 0) } == -1
+                && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "process group survived the bounded supervisor cleanup"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]
