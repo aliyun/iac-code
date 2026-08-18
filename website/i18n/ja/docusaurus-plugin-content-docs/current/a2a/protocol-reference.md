@@ -149,8 +149,14 @@ Callback URL は保存前と配送前に検証されます。デフォルトの�
 | `role` | string | Yes | ユーザー入力には `ROLE_USER` を使用 |
 | `parts` | array | Yes | テキスト風、JSON データ、生テキスト、ローカルファイル URL、または制限付きマルチモーダルパーツ |
 | `metadata.iac_code.cwd` | string | Recommended | 絶対ワークスペースパス。省略時はサーバープロセスディレクトリがデフォルト |
+| `metadata.iac_code.preferredLanguage` | string | 任意 | 呼び出し側が本タスクに期待する表示言語。ユーザーに表示されるテキストがリクエスト単位でローカライズされる |
+| `metadata.iac_code.candidatePresentation` | string | 任意 | `rich-v1` を指定すると、Pipeline の候補確認ステップが構造化されたリッチ表示ペイロードを返す |
 
 `metadata.iac_code.cwd` が指定された場合、既存の絶対ディレクトリである必要があります。許可されたワークスペースルート内になければなりません。デフォルトでは、許可されるルートはサーバープロセスディレクトリとシステム一時ディレクトリです。`IACCODE_A2A_ALLOWED_CWDS` で、OS パス区切りの許可リストを指定できます。
+
+`metadata.iac_code.preferredLanguage` はユーザーに表示されるテキスト（進捗、質問、権限プロンプト、候補表示、結果の説明など）にのみ影響します。プロトコルフィールド名、列挙値、ID、コマンド形式は翻訳されません。指定できる値はサポートされている言語 `en`、`zh`、`es`、`fr`、`de`、`ja`、`pt` です。値は空白の除去、小文字化、地域サフィックスの除去（例: `zh-CN` は `zh` に解決）によって正規化され、認識できない値は無視されてサーバーの既定の言語に戻ります。このフィールドは現在のメッセージターンのみに適用されます。同じ `contextId` を再利用する後続ターンで再び指定しない場合、既定の言語に戻ります。
+
+`metadata.iac_code.candidatePresentation` に `rich-v1` を指定すると、selling pipeline の候補確認ステップがリッチレンダリングに適した構造化ペイロード（候補名、サマリー、アーキテクチャ図、月額総コスト、コスト内訳）を返します。指定しない場合、従来のテキスト表示の挙動は変わりません。
 
 サポートされる入力カテゴリ:
 
@@ -384,6 +390,39 @@ A2A server で `IAC_CODE_CONFIG_BACKUP_TMP_DIR` を使用する場合、`backup_
 Pipeline モードでは、`metadata.iac_code.pipeline.eventType == "mcp_status"` によって MCP status を pipeline metadata として公開することもできます。MCP warnings、status snapshots、progress metadata はストリーミング前にサニタイズされます。headers、環境変数、OAuth tokens、ローカルパス内の secrets はマスクまたは要約されます。
 
 ツール結果にサポート対象のテキストアーティファクトペイロードが含まれる場合、サーバーはペイロードをローカルに保存し、標準の `TaskArtifactUpdateEvent` を出力し、タスクの `artifacts` フィールドにアーティファクトを記録します。アーティファクトパーツは、`file://` URL と `mediaType`、`byteSize`、`sha256` などのメタデータを使用します。元のアーティファクト内容はツールメタデータ内に重複して含まれません。
+
+### 対話的な権限決定
+
+既定の構成では、A2A ターン中に発生したツール権限リクエストは入力待ちに変換されます。iac-code はターンを一時停止し、権限エンベロープを含む `TASK_STATE_INPUT_REQUIRED` 状態更新を発行して、呼び出し側の構造化された決定を待ちます。
+
+状態更新のメタデータには次が含まれます:
+
+- `metadata.iac_code.input` — 権限エンベロープ（`schemaVersion` は 1）。フィールドは次のとおり:
+  - 相関フィールド: `kind: "permission"`、`requestTaskId`、`contextId`、`inputId`、`toolUseId`、`toolName`
+  - 表示フィールド: `title`、`purpose`、`effect`、`target`、`isReadOnly`、`safeSummary`。デプロイリクエストには `deploymentSummary` も含まれる
+  - `prompt` と `options`（`allow_once` / `deny`）。呼び出し側の優先言語にローカライズされる
+- `metadata.iac_code.permission` — `autoApproved: false`、`pending: true`、`toolName`、`toolUseId` を含む
+
+呼び出し側はサイドバンドメッセージで決定を提出します。`ROLE_USER` の A2A メッセージ 1 件に `application/json` DataPart を 1 つだけ含め、その payload は次のフィールドのみで構成されなければなりません:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "permission",
+  "requestTaskId": "<権限リクエストを発行した taskId>",
+  "inputId": "<エンベロープの inputId>",
+  "toolUseId": "<エンベロープの toolUseId>",
+  "decision": "allow_once"
+}
+```
+
+- `decision` は `allow_once` または `deny` のみ受け付けます。
+- メッセージ外側の `taskId` は `requestTaskId` と等しくなければなりません。`contextId` はメッセージ外側のエンベロープから取得されます。すべての相関フィールドはそのまま保持する必要があり、リクエスト間での再利用や、ある入力への応答を別の入力として解釈し直すことはできません。
+- サーバーは決定を照合すると `permission_ack` DataPart（`schemaVersion: 1`、`kind: "permission_ack"`、`inputId`、`toolUseId`、`decision`、`accepted: true` を含む）を返し、`metadata.iac_code.inputReceived` を含む `TASK_STATE_WORKING` 状態更新を発行して、ターンを再開します。
+
+Pipeline モードでは、権限リクエストは pipeline イベントとして発行されます（エンベロープには `scope` と step/candidate 座標情報が追加されます）。サイドバンド応答の形式は同じです。
+
+`auto-approve-permissions` が有効な場合や明示的な権限ルールが構成されている場合、権限リクエストは対話的な入力待ちにならず、自動承認（監査付き）またはルールによる裁定で処理されます。保護された Alibaba Cloud 書き込み API は通常の allow ルールでは解放されず、引き続き API ごとの正確な承認が必要です。権限決定はローカルで監査され、監査レコードを必要とする allow 決定は、そのレコードを永続化できない場合に fail-closed になります。
 
 ## 拡張
 

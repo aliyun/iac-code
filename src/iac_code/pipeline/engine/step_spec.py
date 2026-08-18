@@ -35,6 +35,7 @@ class StepSurfaceOverride:
 
     prompt_file: str | None = None
     inject_tools: list[str] | None = None
+    conclusion_schema: dict[str, Any] | None = None
 
 
 @dataclass
@@ -99,6 +100,12 @@ class StepSpec:
         if override is not None and override.inject_tools is not None:
             return list(override.inject_tools)
         return list(self.inject_tools)
+
+    def conclusion_schema_for_surface(self, surface: str | None) -> dict[str, Any] | None:
+        override = self.surface_overrides.get(surface or "")
+        if override is not None and override.conclusion_schema is not None:
+            return override.conclusion_schema
+        return self.conclusion_schema
 
 
 @dataclass

@@ -221,6 +221,35 @@ def resolve_ui_language(override: str | None) -> str:
     return _detect_language()
 
 
+_messages_catalog_cache: dict[str, gettext.NullTranslations] = {}
+
+
+def translate_message(message: str, *, language: str) -> str:
+    """Translate an English ``messages`` msgid into ``language`` for one request.
+
+    Unlike ``_()``, which follows the process-wide locale, this resolves the
+    requested language per call so concurrent A2A tasks can answer each caller
+    in its own preferred language. Unsupported languages and missing catalog
+    entries fall back to the English source string.
+    """
+    if not message or language == DEFAULT_LANGUAGE or language not in SUPPORTED_LANGUAGES:
+        return message
+    translation = _messages_catalog_cache.get(language)
+    if translation is None:
+        locales_dir = Path(__file__).parent / "locales"
+        try:
+            translation = gettext.translation(
+                "messages",
+                localedir=str(locales_dir),
+                languages=[language],
+                fallback=True,
+            )
+        except Exception:
+            translation = gettext.NullTranslations()
+        _messages_catalog_cache[language] = translation
+    return translation.gettext(message)
+
+
 def load_webui_catalog(lang: str) -> dict[str, str]:
     """Return {msgid: msgstr} from the compiled `webui` catalog for ``lang``.
 

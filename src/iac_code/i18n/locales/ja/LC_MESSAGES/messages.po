@@ -96,6 +96,10 @@ msgstr "ロールバッククリーンアップはまだ進行中です。完了
 msgid "Task is already working."
 msgstr "タスクはすでに実行中です。"
 
+#: src/iac_code/a2a/executor.py
+msgid "Cleanup-only continuation requires a completed Pipeline handoff."
+msgstr "クリーンアップ専用の継続には、完了した Pipeline 引き継ぎが必要です。"
+
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
 #: src/iac_code/a2a/transports/dispatcher.py
 msgid "Task canceled."
@@ -109,6 +113,170 @@ msgstr "現在のモデル {model} は画像入力をサポートしていませ
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/transports/dispatcher.py
 msgid "Authentication required. Configure credentials and retry."
 msgstr "認証が必要です。認証情報を設定して再試行してください。"
+
+#: src/iac_code/a2a/input_required.py src/iac_code/a2a/pipeline_stream.py
+#, python-brace-format
+msgid "{title} Allow once?"
+msgstr "今回の操作を許可しますか：{title}"
+
+#: src/iac_code/a2a/input_required.py src/iac_code/a2a/pipeline_stream.py
+#: src/iac_code/acp/session.py src/iac_code/web/permissions.py
+msgid "Allow once"
+msgstr "今回のみ許可"
+
+#: src/iac_code/a2a/input_required.py src/iac_code/a2a/pipeline_stream.py
+msgid "Deny"
+msgstr "拒否"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Call {operation} for the requested Alibaba Cloud infrastructure task."
+msgstr "依頼された Alibaba Cloud インフラタスクのために {operation} を呼び出します。"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid " in {region}"
+msgstr "、リージョン {region}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "; stack {stack}"
+msgstr "；スタック {stack}"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Read local workspace data"
+msgstr "ローカルワークスペースのデータを読み取る"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Run a local shell command"
+msgstr "ローカル Shell コマンドを実行する"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Read local data needed for the requested infrastructure task."
+msgstr "依頼されたインフラタスクに必要なローカルデータを読み取ります。"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Execute a local command needed for the requested infrastructure task."
+msgstr "依頼されたインフラタスクに必要なローカルコマンドを実行します。"
+
+#: src/iac_code/a2a/input_required.py
+msgid "shell command"
+msgstr "Shell コマンド"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "the current local workspace; command: {command}"
+msgstr "現在のローカルワークスペース；コマンド：{command}"
+
+#: src/iac_code/a2a/input_required.py
+msgid "the current local workspace"
+msgstr "現在のローカルワークスペース"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Change a workspace file"
+msgstr "ワークスペースのファイルを変更する"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Write a file needed for the requested infrastructure task."
+msgstr "依頼されたインフラタスクに必要なファイルを書き込みます。"
+
+#: src/iac_code/a2a/input_required.py
+msgid "a file in the current workspace"
+msgstr "現在のワークスペース内のファイル"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Read workspace data with {tool}"
+msgstr "{tool} でワークスペースのデータを読み取る"
+
+#: src/iac_code/a2a/input_required.py src/iac_code/a2a/pipeline_stream.py
+#, python-brace-format
+msgid "Run {tool}"
+msgstr "{tool} を実行する"
+
+#: src/iac_code/a2a/input_required.py src/iac_code/a2a/pipeline_stream.py
+msgid "Run this operation for the requested infrastructure task."
+msgstr "依頼されたインフラタスクのためにこの操作を実行します。"
+
+#: src/iac_code/a2a/input_required.py
+msgid "the current task workspace or cloud account"
+msgstr "現在のタスクのワークスペースまたはクラウドアカウント"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Permission required"
+msgstr "権限の確認が必要"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Complete the requested infrastructure task."
+msgstr "依頼されたインフラタスクを完了させます。"
+
+#: src/iac_code/a2a/input_required.py src/iac_code/a2a/pipeline_stream.py
+msgid "the current task scope"
+msgstr "現在のタスクの範囲"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Deploy a ROS stack"
+msgstr "ROS スタックをデプロイする"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "plan: {value}"
+msgstr "プラン：{value}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "region: {value}"
+msgstr "リージョン：{value}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "stack: {value}"
+msgstr "スタック：{value}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "template: {value}"
+msgstr "テンプレート：{value}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "estimated monthly cost: {value}"
+msgstr "月額費用の見込み：{value}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "resource costs: {value}"
+msgstr "リソース費用：{value}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Create {product} stack"
+msgstr "{product} スタックを作成する"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Continue creating {product} stack"
+msgstr "{product} スタックの作成を続行する"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Update {product} stack"
+msgstr "{product} スタックを更新する"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Delete {product} stack"
+msgstr "{product} スタックを削除する"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Read Alibaba Cloud data with {operation}"
+msgstr "{operation} で Alibaba Cloud のデータを読み取る"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Run {operation}"
+msgstr "{operation} を実行する"
 
 #: src/iac_code/a2a/pipeline_executor.py
 #, python-brace-format
@@ -143,6 +311,10 @@ msgstr "A2A パイプライン状態が見つかりません"
 #: src/iac_code/a2a/pipeline_recovery.py
 msgid "A2A task/context mismatch"
 msgstr "A2A タスクとコンテキストが一致しません"
+
+#: src/iac_code/a2a/pipeline_stream.py
+msgid "Input required"
+msgstr "入力が必要"
 
 #: src/iac_code/a2a/projection.py src/iac_code/pipeline/engine/public_errors.py
 #: src/iac_code/utils/public_errors.py
@@ -239,10 +411,6 @@ msgstr "[切り詰め]"
 #: src/iac_code/acp/session.py
 msgid "Authentication required. Please configure your API credentials."
 msgstr "認証が必要です。API 認証情報を設定してください。"
-
-#: src/iac_code/acp/session.py src/iac_code/web/permissions.py
-msgid "Allow once"
-msgstr "今回のみ許可"
 
 #: src/iac_code/acp/session.py
 #, python-brace-format

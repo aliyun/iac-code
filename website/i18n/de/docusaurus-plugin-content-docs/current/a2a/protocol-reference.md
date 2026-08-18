@@ -149,8 +149,14 @@ Fuehrt einen nicht streamenden A2A-Nachrichten-Turn aus. Die Antwort enthaelt ei
 | `role` | string | Ja | `ROLE_USER` fuer Benutzereingaben verwenden |
 | `parts` | array | Ja | Textartige, JSON-Daten-, Rohtext-, lokale File-URL- oder begrenzte multimodale Teile |
 | `metadata.iac_code.cwd` | string | Empfohlen | Absoluter Workspace-Pfad; faellt auf das Server-Prozessverzeichnis zurueck, wenn ausgelassen |
+| `metadata.iac_code.preferredLanguage` | string | Optional | Vom Aufrufer bevorzugte Anzeigesprache fuer diesen Task; fuer Benutzer sichtbarer Text wird pro Anfrage lokalisiert |
+| `metadata.iac_code.candidatePresentation` | string | Optional | Mit `rich-v1` liefert der Kandidatenbestaetigungs-Step der Pipeline strukturierte Rich-Praesentations-Payloads |
 
 `metadata.iac_code.cwd` muss, wenn angegeben, ein vorhandenes absolutes Verzeichnis sein. Es muss innerhalb eines erlaubten Workspace-Roots liegen. Standardmaessig sind die erlaubten Roots das Server-Prozessverzeichnis und das System-Temp-Verzeichnis; `IACCODE_A2A_ALLOWED_CWDS` kann eine OS-pfadgetrennte Allowlist bereitstellen.
+
+`metadata.iac_code.preferredLanguage` wirkt sich nur auf fuer Benutzer sichtbaren Text aus (Fortschritt, Fragen, Berechtigungs-Prompts, Kandidatenpraesentationen, Ergebniseroerterungen); Protokollfeldnamen, Aufzaehlungen, IDs und Befehlsformen werden nie uebersetzt. Akzeptierte Werte sind die unterstuetzten Sprachen `en`, `zh`, `es`, `fr`, `de`, `ja`, `pt`; Werte werden normalisiert, indem Leerraum entfernt, kleingeschrieben und das Regionalsuffix entfernt wird (zum Beispiel wird `zh-CN` zu `zh`). Unbekannte Werte werden ignoriert, und der Server faellt auf seine Standardsprache zurueck. Das Feld gilt nur fuer den aktuellen Message-Turn; Folgeturns, die dieselbe `contextId` wiederverwenden, muessen es erneut uebertragen oder fallen auf die Standardsprache zurueck.
+
+`metadata.iac_code.candidatePresentation` mit `rich-v1` laesst den Kandidatenbestaetigungs-Step der Selling-Pipeline eine strukturierte, fuer Rich-Rendering geeignete Payload liefern (Kandidatenname, Zusammenfassung, Architekturdiagramm, monatliche Gesamtkosten, Kostenpositionen). Ohne das Feld bleibt das Verhalten der reinen Textpraesentation unveraendert.
 
 Unterstuetzte Eingabekategorien:
 
@@ -384,6 +390,39 @@ Tool- und Nutzungsdetails werden ueber `metadata.iac_code` geliefert:
 Im Pipeline-Modus kann MCP-Status auch als Pipeline-Metadata mit `metadata.iac_code.pipeline.eventType == "mcp_status"` veröffentlicht werden. MCP-Warnungen, Status-Snapshots und Progress-Metadata werden vor dem Streaming bereinigt; Secrets aus Headers, Umgebungsvariablen, OAuth-Tokens und lokalen Pfaden werden redigiert oder zusammengefasst.
 
 Wenn ein Tool-Ergebnis eine unterstuetzte Text-Artifact-Payload enthaelt, speichert der Server die Payload lokal, gibt ein standardmaessiges `TaskArtifactUpdateEvent` aus und zeichnet das Artifact im Task-Feld `artifacts` auf. Der Artifact-Teil verwendet eine `file://`-URL plus Metadaten wie `mediaType`, `byteSize` und `sha256`; der urspruengliche Artifact-Inhalt wird nicht innerhalb der Tool-Metadaten dupliziert.
+
+### Interaktive Berechtigungsentscheidungen
+
+Mit der Standardkonfiguration wird eine waehrend eines A2A-Turns ausgeloeste Tool-Berechtigungsanfrage in ein Eingabe-Warten umgewandelt: iac-code pausiert den Turn, emittiert eine `TASK_STATE_INPUT_REQUIRED`-Statusaktualisierung mit einem Berechtigungs-Umschlag und wartet auf die strukturierte Entscheidung des Aufrufers.
+
+Die Metadaten der Statusaktualisierung enthalten:
+
+- `metadata.iac_code.input` - der Berechtigungs-Umschlag (`schemaVersion` 1) mit den Feldern:
+  - Korrelationsfelder: `kind: "permission"`, `requestTaskId`, `contextId`, `inputId`, `toolUseId`, `toolName`
+  - Anzeigefelder: `title`, `purpose`, `effect`, `target`, `isReadOnly`, `safeSummary`, bei Deploy-Anfragen zusaetzlich `deploymentSummary`
+  - `prompt` und `options` (`allow_once` / `deny`), lokalisiert in der bevorzugten Sprache des Aufrufers
+- `metadata.iac_code.permission` - enthaelt `autoApproved: false`, `pending: true`, `toolName`, `toolUseId`
+
+Der Aufrufer uebermittelt seine Entscheidung ueber eine Sideband-Nachricht: eine einzelne `ROLE_USER`-A2A-Nachricht mit genau einem `application/json`-DataPart, dessen Payload genau diese Felder enthalten muss:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "permission",
+  "requestTaskId": "<taskId, der die Berechtigungsanfrage ausgeloest hat>",
+  "inputId": "<inputId aus dem Umschlag>",
+  "toolUseId": "<toolUseId aus dem Umschlag>",
+  "decision": "allow_once"
+}
+```
+
+- `decision` akzeptiert nur `allow_once` oder `deny`.
+- Die aeussere `taskId` der Nachricht muss gleich `requestTaskId` sein; `contextId` stammt aus dem aeusseren Nachrichtenumschlag. Alle Korrelationsfelder muessen wortgleich erhalten bleiben; sie duerfen nicht anfrageuebergreifend wiederverwendet werden, und eine Antwort fuer eine Eingabe darf nie als eine andere uminterpretiert werden.
+- Sobald der Server die Entscheidung zuordnet, liefert er einen `permission_ack`-DataPart zurueck (`schemaVersion: 1`, `kind: "permission_ack"`, mit `inputId`, `toolUseId`, `decision`, `accepted: true`) und emittiert eine `TASK_STATE_WORKING`-Statusaktualisierung mit `metadata.iac_code.inputReceived`; der Turn wird fortgesetzt.
+
+Im Pipeline-Modus werden Berechtigungsanfragen als Pipeline-Ereignisse veroeffentlicht (der Umschlag traegt zusaetzlich `scope` und Step-/Kandidaten-Koordinaten); das Sideband-Antwortformat ist identisch.
+
+Mit aktiviertem `auto-approve-permissions` oder konfigurierten expliziten Berechtigungsregeln werden Berechtigungsanfragen nicht zu interaktiver Eingabe; sie werden automatisch genehmigt (mit Audit) oder nach den Regeln entschieden. Geschuetzte Alibaba-Cloud-Schreib-APIs werden durch normale Allow-Regeln nicht freigegeben und erfordern weiterhin eine exakte Autorisierung pro API. Berechtigungsentscheidungen werden lokal auditiert; jede Allow-Entscheidung, die einen Auditdatensatz erfordert, schlaegt fail-closed fehl, wenn der Datensatz nicht persistiert werden kann.
 
 ## Extensions
 

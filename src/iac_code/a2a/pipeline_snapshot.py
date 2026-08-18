@@ -491,7 +491,7 @@ class _PipelineSnapshotReducer:
             self._upsert_display_item("diagrams", self._diagram_indexes, event, "diagramId")
         elif event_type == "artifact_created":
             self._upsert_artifact_item(event)
-        elif event_type == "permission_requested":
+        elif event_type in {"permission_requested", "permission_resolved"}:
             self._upsert_permission_item(event)
         elif event_type == "tool_result":
             self._upsert_tool_result_item(event)

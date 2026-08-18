@@ -478,6 +478,66 @@ steps:
       a2a:
         prompt: prompts/confirm_and_select.a2a.md
         inject_tools: []
+      a2a_rich:
+        prompt: prompts/confirm_and_select.a2a.rich.md
+        inject_tools: []
+        conclusion_schema:
+          type: object
+          required: [user_prompt, options]
+          additionalProperties: false
+          properties:
+            user_prompt:
+              type: string
+              description: 展示给用户的选择提示
+            options:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                required: [name, summary, candidate_index, architecture_diagram, total_monthly_cost, cost_items]
+                additionalProperties: false
+                properties:
+                  name:
+                    type: string
+                  summary:
+                    type: string
+                  candidate_index:
+                    type: integer
+                  architecture_diagram:
+                    type: string
+                    description: A2A 富展示使用的紧凑 Mermaid 架构图
+                  total_monthly_cost:
+                    type: string
+                    description: 成本预估步骤返回的月度总费用；不得使用架构规划阶段的粗略估算
+                  cost_items:
+                    type: array
+                    description: 成本预估步骤返回的逐资源月费用；不得重新估价
+                    items:
+                      type: object
+                      required: [name, monthly_cost]
+                      additionalProperties: false
+                      properties:
+                        name:
+                          type: string
+                        spec:
+                          type: string
+                        monthly_cost:
+                          type: string
+            user_input:
+              type: string
+              description: 用户选择方案时输入的原始文本；首次展示方案时可省略
+            selected_candidate_name:
+              type: string
+              description: 用户最终选择的候选方案名称；首次展示方案时可省略
+            selected_candidate_index:
+              type: integer
+              description: 用户最终选择的候选方案在本次 options 列表中的 0 基顺序；首次展示方案时可省略
+            selected_evaluated_candidate_index:
+              type: integer
+              description: 用户最终选择的方案在 evaluated_candidates 中的 0 基下标；首次展示方案时可省略
+            parameter_overrides:
+              type: object
+              description: 用户选择方案时传入的部署参数覆盖字典；首次展示方案时可省略
     tools:
       include: [complete_step]
       exclude: []

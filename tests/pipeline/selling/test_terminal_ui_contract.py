@@ -16,7 +16,7 @@ def test_selling_pipeline_base_sections_include_runtime_context():
     assert "runtime_context" in intent.base_prompt_sections.include
 
 
-def test_confirm_options_schema_requires_candidate_index():
+def test_confirm_base_schema_stays_lean_for_non_skill_surfaces():
     loaded = load_pipeline_dir(_selling_pipeline_dir())
     confirm = next(step for step in loaded.steps if step.step_id == "confirm_and_select")
     schema = confirm.conclusion_schema
@@ -25,6 +25,29 @@ def test_confirm_options_schema_requires_candidate_index():
 
     assert "candidate_index" in option_schema["required"]
     assert option_schema["properties"]["candidate_index"]["type"] == "integer"
+    assert "architecture_diagram" not in option_schema["properties"]
+    assert "total_monthly_cost" not in option_schema["properties"]
+    assert "cost_items" not in option_schema["properties"]
+
+
+def test_confirm_rich_a2a_schema_requires_skill_presentation_fields():
+    loaded = load_pipeline_dir(_selling_pipeline_dir())
+    confirm = next(step for step in loaded.steps if step.step_id == "confirm_and_select")
+    schema = confirm.conclusion_schema_for_surface("a2a_rich")
+    assert schema is not None
+    option_schema = schema["properties"]["options"]["items"]
+
+    assert set(option_schema["required"]) == {
+        "name",
+        "summary",
+        "candidate_index",
+        "architecture_diagram",
+        "total_monthly_cost",
+        "cost_items",
+    }
+    assert option_schema["properties"]["architecture_diagram"]["type"] == "string"
+    assert option_schema["properties"]["total_monthly_cost"]["type"] == "string"
+    assert option_schema["properties"]["cost_items"]["type"] == "array"
 
 
 def test_confirm_schema_accepts_parameter_overrides():
@@ -110,6 +133,9 @@ def test_confirm_prompt_tells_model_to_preserve_parameter_overrides():
 def test_confirm_prompts_share_selection_contract_structure():
     repl_prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.md").read_text(encoding="utf-8")
     a2a_prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.a2a.md").read_text(encoding="utf-8")
+    rich_prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.a2a.rich.md").read_text(
+        encoding="utf-8"
+    )
 
     shared_fragments = [
         "## 首次执行",
@@ -127,6 +153,7 @@ def test_confirm_prompts_share_selection_contract_structure():
     for fragment in shared_fragments:
         assert fragment in repl_prompt
         assert fragment in a2a_prompt
+        assert fragment in rich_prompt
 
 
 def test_confirm_a2a_surface_uses_thin_prompt_without_display_tools():
@@ -144,6 +171,31 @@ def test_confirm_a2a_surface_uses_thin_prompt_without_display_tools():
     assert "不要在本步骤重新询价" in prompt
     assert "show_architecture_diagram" not in prompt
     assert "show_candidate_detail" not in prompt
+    assert "`options[].architecture_diagram`" not in prompt
+    assert "`options[].total_monthly_cost`" not in prompt
+
+
+def test_confirm_skill_rich_surface_uses_rich_prompt_and_schema():
+    loaded = load_pipeline_dir(_selling_pipeline_dir())
+    confirm = next(step for step in loaded.steps if step.step_id == "confirm_and_select")
+    rich = confirm.surface_overrides["a2a_rich"]
+
+    assert rich.prompt_file == "prompts/confirm_and_select.a2a.rich.md"
+    assert rich.inject_tools == []
+    assert rich.conclusion_schema is not None
+
+    prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.a2a.rich.md").read_text(encoding="utf-8")
+    assert "`options[].architecture_diagram`" in prompt
+    assert "`options[].total_monthly_cost`" in prompt
+    assert "不要再次提交 `user_prompt`、`options` 或 `user_input`" in prompt
+    assert "Pipeline 会保留首次提交" in prompt
+    assert "show_architecture_diagram" not in prompt
+    assert "show_candidate_detail" not in prompt
+    assert "`options[].total_monthly_cost`" in prompt
+    assert "`options[].cost_items`" in prompt
+    assert "evaluated_candidates[i].cost.monthly_estimate" in prompt
+    assert "evaluated_candidates[i].candidate.monthly_estimate" in prompt
+    assert "用户当前语言" in prompt
 
 
 def test_selling_steps_do_not_expose_static_rollback_rules():

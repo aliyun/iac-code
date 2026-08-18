@@ -1360,9 +1360,18 @@ async def test_resume_candidate_selection_llm_result_continues_to_deploying(tmp_
         {"user_prompt": "请选择方案", "options": options},
     )
     calls = []
+    resume_candidate_selection_flags = []
 
-    async def fake_execute(step, context, session_id, user_message=None, **_kwargs):
+    async def fake_execute(
+        step,
+        context,
+        session_id,
+        user_message=None,
+        resume_candidate_selection=False,
+        **_kwargs,
+    ):
         calls.append((step.step_id, user_message))
+        resume_candidate_selection_flags.append((step.step_id, resume_candidate_selection))
         if step.step_id == "confirm_and_select":
             conclusion = {
                 "selected_candidate_name": "方案A",
@@ -1381,6 +1390,10 @@ async def test_resume_candidate_selection_llm_result_continues_to_deploying(tmp_
     assert calls == [
         ("confirm_and_select", "选一个最简单的方案"),
         ("deploying", None),
+    ]
+    assert resume_candidate_selection_flags == [
+        ("confirm_and_select", True),
+        ("deploying", False),
     ]
     assert any(
         isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events

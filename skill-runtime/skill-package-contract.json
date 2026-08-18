@@ -1,0 +1,15 @@
+{
+  "archiveRoot": "iac-code",
+  "files": [
+    "SKILL.md",
+    "agents/openai.yaml",
+    "scripts/iac_code.py"
+  ],
+  "hostPythonMaximum": "3.14",
+  "hostPythonMinimum": "3.8",
+  "kind": "iac-code-skill-package-contract",
+  "packageScript": "skill-runtime/package_skill.py",
+  "runtimePython": "cp312",
+  "schemaVersion": 1,
+  "sourceDirectory": "skills/iac-code"
+}

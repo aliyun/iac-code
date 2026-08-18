@@ -22,6 +22,7 @@ iac-code 可以作为 A2A 1.0 Server / Agent 运行。其他兼容 A2A 的客户
 - **工作流自动化** — 内部工具可以通过 HTTP 提交 IaC 生成、审查或转换任务。
 - **服务发现** — 客户端可以获取 Agent Card，并选择 IaC 生成或模板审查等能力。
 - **流式集成** — chatops 或仪表板客户端可以在轮次运行时显示模型文本、工具活动、用量元数据和最终任务状态。
+- **外部 Skill 集成** — 外部 agent 使用打包好的 iac-code Skill，通过纯标准库桥接脚本驱动本地认证的 A2A runtime，把 iac-code 作为阿里云基础设施能力嵌入自己的工作流。详见 [Skill 集成](./skill-integration.md)。
 
 ## 交互模式对比
 
@@ -32,6 +33,7 @@ iac-code 可以作为 A2A 1.0 Server / Agent 运行。其他兼容 A2A 的客户
 | **ACP Server** | `iac-code acp` | IDE/编辑器集成和多会话客户端控制 |
 | **A2A Server** | `iac-code a2a` | 通过 A2A 传输实现 agent 到 agent 的互操作 |
 | **A2A Client** | `iac-code a2a-client call` | 从 iac-code 调用远程 A2A agent |
+| **外部 Skill bridge** | `python3 scripts/iac_code.py start --follow` | 外部 agent 将 iac-code 作为阿里云基础设施能力嵌入 |
 
 ## 核心能力
 
@@ -43,6 +45,8 @@ iac-code 可以作为 A2A 1.0 Server / Agent 运行。其他兼容 A2A 的客户
 - **工作区范围限定** — 从 `iac_code.cwd` 处的消息元数据读取项目目录。
 - **工具元数据** — 发出 iac-code 专用元数据，用于工具启动、输入增量、已完成工具结果、权限决策和 token 用量。
 - **输入 parts** — 接收类文本 parts、JSON 数据 parts、原始 UTF-8 文本、本地工作区 `file://` 文本文件，以及表示为 prompt manifests 的有界多模态附件。
+- **按请求语言** — 调用方通过 `metadata.iac_code.preferredLanguage` 声明期望语言，用户可见文本按请求本地化，并发任务不会争抢全局 locale。
+- **交互式权限决策** — 权限请求会暂停轮次并发出结构化权限信封，调用方通过旁路消息应答 `allow_once` 或 `deny`。
 - **客户端调用** — 发现远程 Agent Cards，在配置后验证签名，并向远程 agent 发送文本提示。
 - **路由** — 按显式名称、技能或 prompt/tag 匹配选择已配置的远程 agent。
 - **持久化元数据** — 将本地 A2A 任务/上下文快照镜像到 JSON 文件，用作跨进程恢复元数据。
@@ -71,7 +75,7 @@ iac-code 支持通过 HTTP JSON-RPC/REST 以及若干可选传输运行 A2A serv
 - 没有自主 planner DAG 或复杂多 agent 编排。
 - Redis 后端队列的推送投递是至少一次；callback 接收方必须处理重复投递，并执行自己的端点侧授权策略。
 
-在 A2A server 模式下，除非 `auto-approve-permissions` 或显式权限规则允许，否则工具权限请求会被自动拒绝。权限决策会在本地审计；任何需要审计记录的允许决策在审计记录无法持久化时都会 fail closed。在非 blanket bypass 模式下，受保护的阿里云写 API 仍然需要按 API 精确授权。只应在受信任的本地环境中运行未认证的 A2A 模式，或者使用 Bearer token、Basic auth 或 API key authentication 进行保护。
+在 A2A server 模式下，工具权限请求默认转换为交互式输入等待：轮次暂停并发出结构化权限信封，调用方通过旁路消息应答 `allow_once` 或 `deny`；启用 `auto-approve-permissions` 或显式权限规则时，则按自动批准或规则裁决处理。权限决策会在本地审计；任何需要审计记录的允许决策在审计记录无法持久化时都会 fail closed。在非 blanket bypass 模式下，受保护的阿里云写 API 仍然需要按 API 精确授权。只应在受信任的本地环境中运行未认证的 A2A 模式，或者使用 Bearer token、Basic auth 或 API key authentication 进行保护。
 
 
 ## 持久化和会话备份

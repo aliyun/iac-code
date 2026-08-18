@@ -35,6 +35,13 @@ class TestWriteFileTool:
 
         assert result.is_error is False
         assert "successfully" in result.content.lower()
+        assert result.metadata == {
+            "artifact": {
+                "filename": "new_file.txt",
+                "mediaType": "text/plain",
+                "path": str(file_path),
+            }
+        }
         assert file_path.exists()
         assert file_path.read_text(encoding="utf-8") == content
 

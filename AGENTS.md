@@ -8,6 +8,7 @@ This file applies to the entire repository.
 - Source code uses a `src/` layout with the main package at `src/iac_code/` and tests at `tests/`.
 - The CLI entry point is declared in `pyproject.toml` as `iac-code = "iac_code.cli.main:app"`. Beyond the default interactive REPL, the same entry point exposes additional run modes as subcommands: `iac-code web` (local Web app), `iac-code acp` (ACP server), `iac-code a2a` (A2A 1.0 server), `iac-code mcp ...` (MCP management), and `iac-code a2a-client ...` (A2A client).
 - The native Desktop application uses Tauri 2 with the Python package bundled as a sidecar. It is a desktop shell for the existing product rather than a separate implementation of the agent or Web application.
+- The repository also ships an external iac-code Skill package (`skills/iac-code/`) and a CPython 3.12 Skill Runtime release pipeline (`skill-runtime/`) so external agents can operate iac-code over A2A.
 
 ## Common Commands
 
@@ -39,6 +40,9 @@ Prefer using `uv` and existing Makefile targets. When adding new dependencies, u
   - `web/` — local Web app: server, session/runtime management, SSE event bridging, output/diagram derivation, and the `static/` frontend.
   - `desktop/` — Tauri/Rust host, bootstrap and recovery UI, installers, icons, native packaging, and release automation.
   - `src/iac_code/desktop/` — Python Desktop runtime for control IPC, loopback ports, subprocess environment, Git Bash and tool discovery, diagnostics, and installation recovery. `desktop/sidecar/sidecar_entry.py` delegates to `iac_code.desktop.__main__`.
+- External Skill integration (repository root, distinct from the bundled agent skills in `src/iac_code/skills/`):
+  - `skills/iac-code/` — the packaged external Skill: `SKILL.md`, agent metadata (`agents/`), and `scripts/iac_code.py`, a bridge that drives iac-code over A2A. The bridge must stay standard-library-only and compatible with Python 3.8+ (CI compiles and smoke-runs it on 3.8–3.14); do not add third-party imports or newer-only syntax. `tests/skill_bridge/` validates the bridge and the release scripts offline — keep those tests free of network and cloud dependencies.
+  - `skill-runtime/` — release tooling for the CPython 3.12 Skill Runtime executable (build/package/manifest scripts and PyInstaller spec) plus the skill-package and publisher contracts. Build outputs go to `skill-runtime/dist/` (git-ignored); never commit runtime archives, skill ZIPs, or generated manifests.
 - Agent core:
   - `agent/` — agent loop, system prompts, and message types.
   - `commands/` — REPL commands.
@@ -48,9 +52,10 @@ Prefer using `uv` and existing Makefile targets. When adding new dependencies, u
 - Providers and services:
   - `providers/` — LLM provider adapters.
   - `services/` — session, context, credentials, capabilities, permissions, telemetry, and other business services.
+  - `services/configuration_readiness.py` — non-secret readiness report (LLM + Alibaba Cloud credential completeness) for runtimes that embed iac-code.
 - Orchestration and integration protocols:
-  - `pipeline/` — multi-step IaC pipeline engine (`engine/`) and the selling flow (`selling/`: candidate generation, cost estimation, and `ros_deploy` deployment orchestration).
-  - `a2a/` — A2A 1.0 server and client with multiple transports (`transports/`: gRPC, stdio, unix socket, Redis streams).
+  - `pipeline/` — multi-step IaC pipeline engine (`engine/`) and the selling flow (`selling/`: candidate generation, cost estimation, and `ros_deploy` deployment orchestration). Selling-flow steps support per-surface `surface_overrides` in `pipeline.yaml` (prompt file, injected tools, conclusion schema) — for example the `a2a` and `a2a_rich` variants of `confirm_and_select`; keep rich candidate presentation scoped to Skill/A2A surfaces so REPL/Web behavior stays unchanged.
+  - `a2a/` — A2A 1.0 server and client with multiple transports (`transports/`: gRPC, stdio, unix socket, Redis streams), plus input-required permission coordination (`input_required.py`) and request-scoped overrides such as the caller's preferred language (`runtime_overrides.py`).
   - `acp/` — ACP server.
   - `mcp/` — MCP client integration and configuration.
 - Supporting modules:
@@ -86,9 +91,10 @@ Prefer using `uv` and existing Makefile targets. When adding new dependencies, u
 ## i18n and Bundled Skills
 
 - Translations span **two Babel domains**, and `make translate` extracts/updates/compiles both across the `zh es fr de ja pt` locales:
-  - `messages` — Python strings marked with `_()`.
+  - `messages` — Python strings marked with `_()` or `translate_message()`.
   - `webui` — frontend strings extracted from the Web app JS (`babel_webui.cfg`, which excludes `vendor/`).
 - Python (`messages`) domain: do not use an f-string with `_()` (e.g. `f"hello {_('world')}"`); Python 3.10's tokenizer treats the entire f-string as a single token so Babel cannot extract nested `_()` calls — use `str.format` instead (e.g. `_('hello {}').format(name)`).
+- `_()` resolves against the process-wide locale and serves text displayed on the local machine (REPL, Web UI, local errors). Text that the A2A server returns in the caller's requested language must use `i18n.translate_message(msgid, language=...)`, which resolves the English msgid from the `messages` catalog per request, so concurrent tasks with different `preferredLanguage` values do not fight over the global locale. Do not nest the two, and keep the msgid a plain string literal as the first argument so Babel can extract it (`translate_message` is registered as an extraction keyword in `babel.cfg`).
 - Web (`webui`) domain: a new frontend `t()` entry must exist and be non-empty in **all** locales (there is a strict catalog-completeness test). Frontend JS modules are cache-busted with per-module `?v=` tokens — changing a module means bumping its token in `index.html` and keeping `tests/web/test_frontend_static.py` in sync.
 - After modifying user-facing translatable strings (Python or frontend), run `make translate`. Compiled `.mo` files are build artifacts and are not committed — but a missing `.mo` makes the UI silently fall back to English, so ensure compilation succeeds locally.
 - Public Desktop documentation is maintained in English, Simplified Chinese, Spanish, French, German, Japanese, and Portuguese. A Desktop documentation change must update `README.md`, every matching file in `readme/`, and every matching website document under `website/docs/` and `website/i18n/`. Write natural translations; do not use English copies or placeholder translations. The website locale name for Simplified Chinese is `zh-Hans`.

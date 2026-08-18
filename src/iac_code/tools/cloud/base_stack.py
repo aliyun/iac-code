@@ -165,6 +165,23 @@ class BaseCloudStack(Tool):
     def is_destructive(self, input: dict | None = None) -> bool:
         return True
 
+    def permission_audit_operation(self, input: dict | None = None) -> dict[str, object]:
+        tool_input = input or {}
+        params = tool_input.get("params")
+        params = params if isinstance(params, dict) else {}
+        operation: dict[str, object] = {
+            "product": self.provider_name,
+            "action": str(tool_input.get("action") or ""),
+            "region": str(tool_input.get("region_id") or params.get("RegionId") or ""),
+        }
+        stack_name = params.get("StackName")
+        stack_id = params.get("StackId")
+        if isinstance(stack_name, str) and stack_name:
+            operation["stackName"] = stack_name
+        if isinstance(stack_id, str) and stack_id:
+            operation["stackId"] = stack_id
+        return operation
+
     def user_facing_name(self, input: dict | None = None) -> str:
         return _("CloudStack")
 

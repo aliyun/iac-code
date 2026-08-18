@@ -1,0 +1,25 @@
+{
+  "assembleScript": "skill-runtime/assemble_manifest.py",
+  "buildScript": "skill-runtime/build_runtime.py",
+  "kind": "iac-code-skill-runtime-publisher-contract",
+  "manifestName": "runtime-manifest.json",
+  "runtimePython": "cp312",
+  "schemaVersion": 1,
+  "targets": [
+    {
+      "archive": "darwin-arm64-macos-cp312.tar.gz",
+      "target": "darwin-arm64-macos-cp312",
+      "worker": "macos-aarch64"
+    },
+    {
+      "archive": "linux-x86_64-gnu-cp312.tar.gz",
+      "target": "linux-x86_64-gnu-cp312",
+      "worker": "linux-x64"
+    },
+    {
+      "archive": "windows-x86_64-msvc-cp312.zip",
+      "target": "windows-x86_64-msvc-cp312",
+      "worker": "windows-x64"
+    }
+  ]
+}

@@ -17,6 +17,7 @@ from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.artifacts import A2AArtifactStore
 from iac_code.a2a.executor import IacCodeA2AExecutor
+from iac_code.a2a.input_required import PermissionResponse
 from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
@@ -40,7 +41,12 @@ from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, Bac
 from iac_code.services.session_layout import UnsupportedSessionLayoutError
 from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
 from iac_code.services.session_storage import SessionStorage
-from iac_code.types.stream_events import AskUserQuestionEvent, TextDeltaEvent
+from iac_code.types.stream_events import (
+    AskUserQuestionEvent,
+    PermissionRequestEvent,
+    SubPipelineStreamEvent,
+    TextDeltaEvent,
+)
 
 from .fakes import FakeEventQueue, FakeRequestContext
 
@@ -135,7 +141,7 @@ def _write_pipeline_yaml(pipeline_dir: Path) -> None:
     )
 
 
-def _pipeline_executor(*, aliyun_delegated_executor_factory=None):
+def _pipeline_executor(*, aliyun_delegated_executor_factory=None, candidate_presentation=None):
     from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
 
     return IacCodeA2APipelineExecutor(
@@ -148,6 +154,7 @@ def _pipeline_executor(*, aliyun_delegated_executor_factory=None):
         auto_approve_permissions=False,
         thinking_exposure_types=None,
         aliyun_delegated_executor_factory=aliyun_delegated_executor_factory,
+        candidate_presentation=candidate_presentation,
     )
 
 
@@ -230,6 +237,34 @@ def test_create_pipeline_inspects_prerequisites_for_fresh_a2a_run(
     assert create_kwargs["aliyun_delegated_executor_factory"] is delegated_factory
 
 
+def test_create_pipeline_uses_rich_surface_only_when_client_requests_it(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a import pipeline_executor as pipeline_executor_module
+
+    surfaces: list[str] = []
+    monkeypatch.setattr(pipeline_executor_module, "get_pipeline_name", lambda: "test-pipeline")
+    monkeypatch.setattr(
+        pipeline_executor_module,
+        "create_pipeline",
+        lambda *args, **kwargs: surfaces.append(kwargs["surface"]) or object(),
+    )
+
+    for candidate_presentation in (None, "unknown", "rich-v1"):
+        executor = _pipeline_executor(candidate_presentation=candidate_presentation)
+        monkeypatch.setattr(executor, "_inspect_pipeline_prerequisite_metadata", lambda **kwargs: None)
+        executor._create_pipeline(
+            session_id="session-1",
+            cwd=str(tmp_path),
+            runtime=_fake_runtime(),
+            session_storage=MagicMock(),
+            resume_from_sidecar=False,
+        )
+
+    assert surfaces == ["a2a", "a2a", "a2a_rich"]
+
+
 def test_create_pipeline_uses_current_runtime_services_delegated_factory_by_default(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -257,6 +292,37 @@ def test_create_pipeline_uses_current_runtime_services_delegated_factory_by_defa
     )
 
     assert create_kwargs["aliyun_delegated_executor_factory"] is delegated_factory
+
+
+def test_create_pipeline_reuses_agent_runtime_permission_context(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a import pipeline_executor as pipeline_executor_module
+
+    permission_context = object()
+    runtime = _fake_runtime()
+    runtime.agent_loop = SimpleNamespace(_permission_context=permission_context, _permission_context_getter=None)
+    create_kwargs: dict[str, object] = {}
+    executor = _pipeline_executor()
+    monkeypatch.setattr(executor, "_inspect_pipeline_prerequisite_metadata", lambda **kwargs: None)
+    monkeypatch.setattr(
+        pipeline_executor_module,
+        "create_pipeline",
+        lambda *args, **kwargs: create_kwargs.update(kwargs) or object(),
+    )
+
+    executor._create_pipeline(
+        session_id="session-1",
+        cwd=str(tmp_path),
+        runtime=runtime,
+        session_storage=MagicMock(),
+        resume_from_sidecar=False,
+    )
+
+    getter = create_kwargs["permission_context_getter"]
+    assert callable(getter)
+    assert getter() is permission_context
 
 
 def test_create_pipeline_resume_sidecar_prerequisites_skip_a2a_inspection(
@@ -1538,6 +1604,20 @@ async def _wait_for_output_text(task, expected: str) -> None:
             return
         await asyncio.sleep(0.01)
     raise AssertionError(f"Expected output text {expected!r}, got {''.join(task.output_text)!r}")
+
+
+async def _wait_for_backup_calls(backup_service, expected_count: int) -> None:
+    """Wait until ``backup_service`` has recorded at least ``expected_count`` backups.
+
+    Backups run in the publisher after_enqueue hook, which races with the delivery
+    of the event that triggered them; asserting immediately after observing the
+    event is flaky on slow runners.
+    """
+    for _ in range(_A2A_ASYNC_TEST_TIMEOUT * 100):
+        if len(backup_service.calls) >= expected_count:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"Expected {expected_count} backup call(s), got {backup_service.calls!r}")
 
 
 async def _wait_for_pipeline_event(queue: FakeEventQueue, expected_event_type: str) -> None:
@@ -2957,6 +3037,201 @@ async def test_pipeline_executor_runs_critical_backup_after_input_required_publi
 
 
 @pytest.mark.asyncio
+async def test_pipeline_permission_pauses_agent_loops_and_uses_existing_critical_backup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setattr("iac_code.a2a.input_required.emit_permission_boundary_audit", lambda *_args, **_kwargs: True)
+    future = asyncio.get_running_loop().create_future()
+
+    class PermissionPipeline(FakePipeline):
+        def __init__(self) -> None:
+            super().__init__(
+                [
+                    PermissionRequestEvent(
+                        tool_name="bash",
+                        tool_input={"cmd": "rm /tmp/demo"},
+                        tool_use_id="tool-1",
+                        response_future=future,
+                    )
+                ],
+                session_dir=tmp_path / "sidecar",
+            )
+            self.pause_calls = 0
+            self.resume_calls = 0
+
+        def pause_agent_loops(self) -> None:
+            self.pause_calls += 1
+
+        def resume_agent_loops(self) -> None:
+            self.resume_calls += 1
+
+    pipeline = PermissionPipeline()
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+    backup_service = RecordingBackupService(expected_task_states={BackupReason.INPUT_REQUIRED: "input-required"})
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus", backup_service=backup_service)
+    queue = FakeEventQueue()
+    execution = asyncio.create_task(
+        executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+    )
+    await _wait_for_pipeline_event(queue, "permission_requested")
+    assert pipeline.pause_calls == 1
+    assert pipeline.resume_calls == 0
+    await _wait_for_backup_calls(backup_service, 1)
+    assert [(reason, critical) for *_ids, reason, critical in backup_service.calls] == [
+        (BackupReason.INPUT_REQUIRED, True)
+    ]
+    permission_input = next(
+        dump(event)["metadata"]["iac_code"]["input"]
+        for event in queue.events
+        if isinstance(event, TaskStatusUpdateEvent)
+        and dump(event).get("metadata", {}).get("iac_code", {}).get("input", {}).get("kind") == "permission"
+    )
+
+    approved = await executor._permission_input_registry.answer(
+        PermissionResponse(
+            task_id="task-1",
+            context_id="ctx-1",
+            request_task_id="task-1",
+            input_id=permission_input["inputId"],
+            tool_use_id="tool-1",
+            decision="deny",
+        )
+    )
+    assert approved is False
+    await execution
+    assert future.result() is False
+    assert pipeline.resume_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_sub_pipeline_permission_stays_working_without_global_pause(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setattr("iac_code.a2a.pipeline_stream.emit_permission_boundary_audit", lambda *_args, **_kwargs: True)
+    future = asyncio.get_running_loop().create_future()
+    release_pipeline = asyncio.Event()
+
+    class PermissionPipeline(FakePipeline):
+        def __init__(self) -> None:
+            super().__init__([], session_dir=tmp_path / "sidecar")
+            self.pause_calls = 0
+            self.resume_calls = 0
+
+        async def run(self, prompt: str):
+            self.run_prompts.append(_display_text(prompt))
+            yield SubPipelineStreamEvent(
+                sub_pipeline_id="candidate-0",
+                candidate_index=0,
+                inner=PermissionRequestEvent(
+                    tool_name="bash",
+                    tool_input={"cmd": "pwd"},
+                    tool_use_id="tool-1",
+                    response_future=future,
+                ),
+            )
+            yield SubPipelineStreamEvent(
+                sub_pipeline_id="candidate-1",
+                candidate_index=1,
+                inner=TextDeltaEvent(text="other candidate continued"),
+            )
+            await release_pipeline.wait()
+
+        def pause_agent_loops(self) -> None:
+            self.pause_calls += 1
+
+        def resume_agent_loops(self) -> None:
+            self.resume_calls += 1
+
+    pipeline = PermissionPipeline()
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+    execution = asyncio.create_task(
+        executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+    )
+    await _wait_for_pipeline_event(queue, "permission_requested")
+    await _wait_for_pipeline_event(queue, "text_delta")
+    permission_event = next(
+        dump(event)
+        for event in queue.events
+        if dump(event).get("metadata", {}).get("iac_code", {}).get("input", {}).get("kind") == "permission"
+    )
+    permission_input = permission_event["metadata"]["iac_code"]["input"]
+    assert permission_event["status"]["state"] == "TASK_STATE_WORKING"
+    assert permission_event["metadata"]["iac_code"]["pipeline"]["candidate"]["index"] == 0
+    assert pipeline.pause_calls == 0
+    assert pipeline.resume_calls == 0
+    assert not future.done()
+
+    approved = await executor._permission_input_registry.answer(
+        PermissionResponse(
+            task_id="task-1",
+            context_id="ctx-1",
+            request_task_id="task-1",
+            input_id=permission_input["inputId"],
+            tool_use_id="tool-1",
+            decision="allow_once",
+        )
+    )
+    assert approved is True
+    assert future.result() is True
+    await _wait_for_pipeline_event(queue, "permission_resolved")
+    release_pipeline.set()
+    await execution
+
+
+@pytest.mark.asyncio
+async def test_pipeline_failure_drains_sub_pipeline_permission_before_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setattr("iac_code.a2a.pipeline_stream.emit_permission_boundary_audit", lambda *_args, **_kwargs: True)
+    future = asyncio.get_running_loop().create_future()
+    session_dir = tmp_path / "sidecar"
+    pipeline = FakePipeline(
+        [
+            SubPipelineStreamEvent(
+                sub_pipeline_id="candidate-0",
+                candidate_index=0,
+                inner=PermissionRequestEvent(
+                    tool_name="bash",
+                    tool_input={"cmd": "pwd"},
+                    tool_use_id="tool-1",
+                    response_future=future,
+                ),
+            ),
+            ValueError("candidate-1 failed"),
+        ],
+        session_dir=session_dir,
+    )
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    assert future.result() is False
+    journal = A2APipelineJournal(session_dir).read_all()
+    event_types = [event["eventType"] for event in journal]
+    assert event_types.index("permission_resolved") < event_types.index("pipeline_failed")
+    resolution = next(event for event in journal if event["eventType"] == "permission_resolved")
+    assert resolution["permission"]["canceled"] is True
+    assert "task-1" not in store._pending_permissions
+    assert _status_events(queue)[-1]["status"]["state"] == "TASK_STATE_FAILED"
+
+
+@pytest.mark.asyncio
 async def test_pipeline_executor_runs_critical_backups_for_terminal_and_handoff_ready(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -3233,6 +3508,100 @@ async def test_pipeline_backup_blocked_before_terminal_suppresses_terminal_publi
     assert snapshot is not None
     assert snapshot["status"] == "waiting_input"
     assert snapshot.get("pendingTerminal") is None
+
+
+@pytest.mark.asyncio
+async def test_terminal_backup_blocked_reopens_permission_registration_after_pending_drain(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setattr("iac_code.a2a.pipeline_stream.emit_permission_boundary_audit", lambda *_args, **_kwargs: True)
+    first_future = asyncio.get_running_loop().create_future()
+    pipeline = FakePipeline(
+        [
+            SubPipelineStreamEvent(
+                sub_pipeline_id="candidate-0",
+                candidate_index=0,
+                inner=PermissionRequestEvent(
+                    tool_name="bash",
+                    tool_input={"cmd": "pwd"},
+                    tool_use_id="tool-1",
+                    response_future=first_future,
+                ),
+            ),
+            PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=1717821601.0,
+                data={"total_steps": 1},
+            ),
+        ],
+        session_dir=tmp_path / "sidecar",
+    )
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        backup_service=RecordingBackupService(block_reasons={BackupReason.TERMINAL}),
+    )
+
+    await executor.execute(
+        FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        FakeEventQueue(),
+    )
+
+    assert first_future.result() is False
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    assert record.state == "input-required"
+    registry = executor._permission_input_registry
+
+    class ResumedPermissionOwner:
+        async def resolve_permission(self, pending, response) -> bool:
+            await registry.claim(pending, response)
+            approved = response.decision == "allow_once"
+            future = pending.request.response_future
+            assert future is not None
+            future.set_result(approved)
+            await registry.complete(pending)
+            return approved
+
+        async def fail_permission(self, pending) -> None:
+            future = pending.request.response_future
+            if future is not None and not future.done():
+                future.set_result(False)
+            await registry.complete(pending)
+
+        async def cancel_permissions(self, task_id: str) -> None:
+            for pending in await registry.claim_for_cancel(task_id, self):
+                await self.fail_permission(pending)
+
+    resumed_future = asyncio.get_running_loop().create_future()
+    resumed_pending = await registry.register(
+        PermissionRequestEvent(
+            tool_name="bash",
+            tool_input={"cmd": "ls"},
+            tool_use_id="tool-2",
+            response_future=resumed_future,
+        ),
+        task_id="task-1",
+        context_id="ctx-1",
+        resolution_owner=ResumedPermissionOwner(),
+    )
+    approved = await registry.answer(
+        PermissionResponse(
+            task_id="task-1",
+            context_id="ctx-1",
+            request_task_id="task-1",
+            input_id=resumed_pending.input_id,
+            tool_use_id="tool-2",
+            decision="allow_once",
+        )
+    )
+    assert approved is True
+    assert resumed_future.result() is True
 
 
 @pytest.mark.asyncio

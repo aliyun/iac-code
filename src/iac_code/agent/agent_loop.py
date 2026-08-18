@@ -231,9 +231,12 @@ def _emit_permission_audit_items(
 def _with_prompt_permission_metadata(tool: Any, tool_input: dict, permission: PermissionResult) -> PermissionResult:
     operation = tool.permission_audit_operation(tool_input)
     if permission.audit is not None:
-        if permission.audit.operation or not operation:
+        if not operation:
             return permission
-        return replace(permission, audit=replace(permission.audit, operation=operation))
+        merged_operation = {**permission.audit.operation, **operation}
+        if merged_operation == permission.audit.operation:
+            return permission
+        return replace(permission, audit=replace(permission.audit, operation=merged_operation))
     if permission.behavior != "ask":
         return permission
     reason_type = permission.reason.type if permission.reason is not None else "prompt_required"
@@ -1459,7 +1462,7 @@ class AgentLoop:
                         continue
 
                     response_future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
-                    yield PermissionRequestEvent(
+                    permission_event = PermissionRequestEvent(
                         tool_name=request.name,
                         tool_input=request.input,
                         tool_use_id=request.id,
@@ -1467,10 +1470,11 @@ class AgentLoop:
                         permission_result=permission,
                         audit_context=audit_context,
                     )
+                    yield permission_event
                     try:
                         approved = await asyncio.shield(response_future)
                     except asyncio.CancelledError:
-                        if not response_future.done():
+                        if not permission_event.resolution_owner_managed and not response_future.done():
                             response_future.set_result(False)
                         raise
                     additional_audit_ok = _emit_permission_audit_items(

@@ -111,6 +111,12 @@ msgstr ""
 msgid "Task is already working."
 msgstr "La tâche est déjà en cours."
 
+#: src/iac_code/a2a/executor.py
+msgid "Cleanup-only continuation requires a completed Pipeline handoff."
+msgstr ""
+"La continuation de nettoyage seule nécessite une passation de Pipeline "
+"terminée."
+
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
 #: src/iac_code/a2a/transports/dispatcher.py
 msgid "Task canceled."
@@ -124,6 +130,172 @@ msgstr "Le modèle actuel {model} ne prend pas en charge l’entrée d’image."
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/transports/dispatcher.py
 msgid "Authentication required. Configure credentials and retry."
 msgstr "Authentification requise. Configurez les identifiants puis réessayez."
+
+#: src/iac_code/a2a/input_required.py src/iac_code/a2a/pipeline_stream.py
+#, python-brace-format
+msgid "{title} Allow once?"
+msgstr "Autoriser une fois : {title} ?"
+
+#: src/iac_code/a2a/input_required.py src/iac_code/a2a/pipeline_stream.py
+#: src/iac_code/acp/session.py src/iac_code/web/permissions.py
+msgid "Allow once"
+msgstr "Autoriser une fois"
+
+#: src/iac_code/a2a/input_required.py src/iac_code/a2a/pipeline_stream.py
+msgid "Deny"
+msgstr "Refuser"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Call {operation} for the requested Alibaba Cloud infrastructure task."
+msgstr "Appeler {operation} pour la tâche d'infrastructure Alibaba Cloud demandée."
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid " in {region}"
+msgstr " dans {region}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "; stack {stack}"
+msgstr "; stack {stack}"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Read local workspace data"
+msgstr "Lire des données de l'espace de travail local"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Run a local shell command"
+msgstr "Exécuter une commande shell locale"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Read local data needed for the requested infrastructure task."
+msgstr "Lire les données locales nécessaires à la tâche d'infrastructure demandée."
+
+#: src/iac_code/a2a/input_required.py
+msgid "Execute a local command needed for the requested infrastructure task."
+msgstr ""
+"Exécuter une commande locale nécessaire à la tâche d'infrastructure "
+"demandée."
+
+#: src/iac_code/a2a/input_required.py
+msgid "shell command"
+msgstr "commande shell"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "the current local workspace; command: {command}"
+msgstr "l'espace de travail local actuel ; commande : {command}"
+
+#: src/iac_code/a2a/input_required.py
+msgid "the current local workspace"
+msgstr "l'espace de travail local actuel"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Change a workspace file"
+msgstr "Modifier un fichier de l'espace de travail"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Write a file needed for the requested infrastructure task."
+msgstr "Écrire un fichier nécessaire à la tâche d'infrastructure demandée."
+
+#: src/iac_code/a2a/input_required.py
+msgid "a file in the current workspace"
+msgstr "un fichier de l'espace de travail actuel"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Read workspace data with {tool}"
+msgstr "Lire des données de l'espace de travail avec {tool}"
+
+#: src/iac_code/a2a/input_required.py src/iac_code/a2a/pipeline_stream.py
+#, python-brace-format
+msgid "Run {tool}"
+msgstr "Exécuter {tool}"
+
+#: src/iac_code/a2a/input_required.py src/iac_code/a2a/pipeline_stream.py
+msgid "Run this operation for the requested infrastructure task."
+msgstr "Exécuter cette opération pour la tâche d'infrastructure demandée."
+
+#: src/iac_code/a2a/input_required.py
+msgid "the current task workspace or cloud account"
+msgstr "l'espace de travail de la tâche actuelle ou le compte cloud"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Permission required"
+msgstr "Autorisation requise"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Complete the requested infrastructure task."
+msgstr "Terminer la tâche d'infrastructure demandée."
+
+#: src/iac_code/a2a/input_required.py src/iac_code/a2a/pipeline_stream.py
+msgid "the current task scope"
+msgstr "le périmètre de la tâche actuelle"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Deploy a ROS stack"
+msgstr "Déployer une stack ROS"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "plan: {value}"
+msgstr "plan : {value}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "region: {value}"
+msgstr "région : {value}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "stack: {value}"
+msgstr "stack : {value}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "template: {value}"
+msgstr "modèle : {value}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "estimated monthly cost: {value}"
+msgstr "coût mensuel estimé : {value}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "resource costs: {value}"
+msgstr "coûts des ressources : {value}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Create {product} stack"
+msgstr "Créer une stack {product}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Continue creating {product} stack"
+msgstr "Continuer la création de la stack {product}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Update {product} stack"
+msgstr "Mettre à jour la stack {product}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Delete {product} stack"
+msgstr "Supprimer la stack {product}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Read Alibaba Cloud data with {operation}"
+msgstr "Lire des données Alibaba Cloud avec {operation}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Run {operation}"
+msgstr "Exécuter {operation}"
 
 #: src/iac_code/a2a/pipeline_executor.py
 #, python-brace-format
@@ -160,6 +332,10 @@ msgstr "État du pipeline A2A introuvable"
 #: src/iac_code/a2a/pipeline_recovery.py
 msgid "A2A task/context mismatch"
 msgstr "La tâche et le contexte A2A ne correspondent pas"
+
+#: src/iac_code/a2a/pipeline_stream.py
+msgid "Input required"
+msgstr "Saisie requise"
 
 #: src/iac_code/a2a/projection.py src/iac_code/pipeline/engine/public_errors.py
 #: src/iac_code/utils/public_errors.py
@@ -256,10 +432,6 @@ msgstr "[tronqué]"
 #: src/iac_code/acp/session.py
 msgid "Authentication required. Please configure your API credentials."
 msgstr "Authentification requise. Configurez vos identifiants API."
-
-#: src/iac_code/acp/session.py src/iac_code/web/permissions.py
-msgid "Allow once"
-msgstr "Autoriser une fois"
 
 #: src/iac_code/acp/session.py
 #, python-brace-format

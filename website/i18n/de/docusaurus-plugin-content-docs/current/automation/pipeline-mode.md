@@ -91,6 +91,8 @@ Nachdem die Pipeline abgeschlossen ist, fehlschlägt, frühzeitig beendet oder a
 
 Der Pipeline-Modus ist derzeit hauptsächlich für die interaktive REPL gedacht. Der A2A-Servermodus kann Pipeline-Fortschritt, Artefakte, Berechtigungsergebnisse und Wiederherstellungsinformationen nach außen bereitstellen. Das ist nützlich, wenn eine Pipeline an eine externe Konsole oder ein Aufgabensystem angebunden wird.
 
+Bei der Integration der Pipeline ueber A2A koennen Aufrufer zusaetzlich zwei Faehigkeiten in den Nachrichtenmetadaten deklarieren: `metadata.iac_code.preferredLanguage` liefert Fortschritt, Fragen und Berechtigungs-Prompts in der bevorzugten Sprache des Aufrufers; `metadata.iac_code.candidatePresentation: rich-v1` laesst den Planbestaetigungs-Step eine strukturierte Payload (Kandidatenname, Zusammenfassung, Architekturdiagramm, monatliche Gesamtkosten, Kostenpositionen) liefern, die fuer Rich-Rendering in externen Oberflaechen geeignet ist. Wenn ein Deployment oder eine Tool-Operation eine Berechtigung erfordert, veroeffentlicht die Pipeline einen ausstehenden Berechtigungs-Umschlag, und Aufrufer antworten mit `allow_once` oder `deny` ueber eine Sideband-Nachricht; Details finden Sie in der [Protokollreferenz](../a2a/protocol-reference.md).
+
 ACP unterstützt den Pipeline-Modus derzeit nicht. `--prompt` / der [nicht interaktive Modus](./non-interactive-mode.md) führt eine normale einmalige Anfrage aus und führt keine Pipeline-Schritte aus.
 
 ## Aktuelle Einschränkungen

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import inspect
 import logging
@@ -162,7 +163,7 @@ def _extract_artifact_metadata(result: Any, artifact_store: Any | None) -> dict[
         if not path.is_file():
             return None
         metadata = artifact_store.save_bytes(filename=filename, content=path.read_bytes(), media_type=str(media_type))
-        return metadata.to_dict()
+        return {**metadata.to_dict(), "sourcePath": str(path.resolve())}
     raw_bytes = raw.get("raw")
     if isinstance(raw_bytes, bytes):
         metadata = artifact_store.save_bytes(filename=filename, content=raw_bytes, media_type=str(media_type))
@@ -219,6 +220,9 @@ def _artifact_update_event(*, task_id: str, context_id: str, metadata: dict[str,
         "byteSize": metadata["byteSize"],
         "sha256": metadata["sha256"],
     }
+    source_path = metadata.get("sourcePath")
+    if isinstance(source_path, str) and source_path:
+        artifact_metadata["sourcePath"] = source_path
     artifact = Artifact(
         artifact_id=str(metadata["artifactId"]),
         name=str(metadata["filename"]),
@@ -280,6 +284,7 @@ async def publish_stream_event(
     event: Any,
     artifact_store: Any | None = None,
     permission_resolver: A2APermissionResolver | None = None,
+    permission_input_registry: Any | None = None,
     auto_approve_permissions: bool = False,
     exposure_types: Any = None,
     iac_code_session_id: str | None = None,
@@ -372,6 +377,8 @@ async def publish_stream_event(
 
     if isinstance(event, ToolResultEvent):
         artifact_metadata = _extract_artifact_metadata(event.result, artifact_store)
+        if artifact_metadata is None:
+            artifact_metadata = _extract_artifact_metadata(event.metadata, artifact_store)
         if A2AExposureType.TOOL_TRACE not in enabled_exposure_types:
             if artifact_metadata is not None:
                 await event_queue.enqueue_event(
@@ -429,6 +436,58 @@ async def publish_stream_event(
 
     permission_event = _permission_request_event(event)
     if permission_event is not None:
+        if permission_input_registry is not None and permission_resolver is None and not auto_approve_permissions:
+            pending = await permission_input_registry.register(
+                permission_event,
+                task_id=task_id,
+                context_id=context_id,
+            )
+            try:
+                await _enqueue_status(
+                    event_queue,
+                    task_id=task_id,
+                    context_id=context_id,
+                    state=TaskState.TASK_STATE_INPUT_REQUIRED,
+                    metadata={
+                        "iac_code": {
+                            "input": pending.envelope(),
+                            "permission": {
+                                "autoApproved": False,
+                                "pending": True,
+                                "toolName": permission_event.tool_name,
+                                "toolUseId": permission_event.tool_use_id,
+                            },
+                        }
+                    },
+                    iac_code_session_id=iac_code_session_id,
+                )
+                future = permission_event.response_future
+                if future is None:
+                    await permission_input_registry.fail(pending)
+                    return None
+                await asyncio.shield(future)
+                await _enqueue_status(
+                    event_queue,
+                    task_id=task_id,
+                    context_id=context_id,
+                    state=TaskState.TASK_STATE_WORKING,
+                    metadata={
+                        "iac_code": {
+                            "inputReceived": {
+                                "kind": "permission",
+                                "inputId": pending.input_id,
+                                "toolUseId": permission_event.tool_use_id,
+                            }
+                        }
+                    },
+                    iac_code_session_id=iac_code_session_id,
+                )
+            except BaseException:
+                await permission_input_registry.fail(pending)
+                raise
+            finally:
+                await permission_input_registry.complete(pending)
+            return None
         approved = auto_approve_permissions
         if permission_resolver is not None:
             decision = permission_resolver(permission_event)

@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from iac_code.agent.agent_loop import AgentLoop
+from iac_code.agent.agent_loop import AgentLoop, _with_prompt_permission_metadata
 from iac_code.mcp.tools import MCPTool
 from iac_code.mcp.types import MCPToolRecord
 from iac_code.services.permissions.audit import emit_permission_boundary_audit, fingerprint_text
@@ -74,6 +74,37 @@ class FakePermissionTool(Tool):
 
     async def check_permissions(self, input: dict, context=None) -> PermissionResult:
         return self.permission
+
+
+def test_prompt_permission_merges_specific_tool_operation_into_generic_audit() -> None:
+    tool = SimpleNamespace(
+        permission_audit_operation=lambda _tool_input: {
+            "product": "ros",
+            "action": "CreateStack",
+            "region": "cn-hangzhou",
+            "stackName": "demo-stack",
+        }
+    )
+    permission = PermissionResult(
+        behavior="ask",
+        audit=PermissionAuditMetadata(
+            scope="once",
+            source="permission_pipeline",
+            is_read_only=False,
+            operation={"is_read_only": False},
+        ),
+    )
+
+    enriched = _with_prompt_permission_metadata(tool, {}, permission)
+
+    assert enriched.audit is not None
+    assert enriched.audit.operation == {
+        "is_read_only": False,
+        "product": "ros",
+        "action": "CreateStack",
+        "region": "cn-hangzhou",
+        "stackName": "demo-stack",
+    }
 
 
 class FakeAliyunApi(AliyunApi):

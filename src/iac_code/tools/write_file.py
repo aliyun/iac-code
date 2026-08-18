@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import mimetypes
 import os
 from typing import Any
 
@@ -88,7 +89,17 @@ class WriteFileTool(Tool):
             return ToolResult.error(f"Error writing file: {e}")
 
         lines = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
-        return ToolResult.success(_("Successfully wrote {lines} lines to {path}").format(lines=lines, path=path))
+        media_type = mimetypes.guess_type(path)[0] or "text/plain"
+        return ToolResult(
+            content=_("Successfully wrote {lines} lines to {path}").format(lines=lines, path=path),
+            metadata={
+                "artifact": {
+                    "filename": os.path.basename(path),
+                    "mediaType": media_type,
+                    "path": path,
+                }
+            },
+        )
 
     # UI rendering methods
     def render_tool_use_message(self, input: dict, *, verbose: bool = False):

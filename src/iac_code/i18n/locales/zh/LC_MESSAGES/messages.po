@@ -96,6 +96,10 @@ msgstr "回滚清理仍在进行中。请在清理完成后继续。"
 msgid "Task is already working."
 msgstr "任务已在运行。"
 
+#: src/iac_code/a2a/executor.py
+msgid "Cleanup-only continuation requires a completed Pipeline handoff."
+msgstr "仅清理模式的继续操作需要先完成 Pipeline 交接。"
+
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
 #: src/iac_code/a2a/transports/dispatcher.py
 msgid "Task canceled."
@@ -109,6 +113,170 @@ msgstr "当前模型 {model} 不支持图片输入。"
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/transports/dispatcher.py
 msgid "Authentication required. Configure credentials and retry."
 msgstr "需要身份验证。请配置凭据后重试。"
+
+#: src/iac_code/a2a/input_required.py src/iac_code/a2a/pipeline_stream.py
+#, python-brace-format
+msgid "{title} Allow once?"
+msgstr "是否允许本次操作：{title}？"
+
+#: src/iac_code/a2a/input_required.py src/iac_code/a2a/pipeline_stream.py
+#: src/iac_code/acp/session.py src/iac_code/web/permissions.py
+msgid "Allow once"
+msgstr "仅允许一次"
+
+#: src/iac_code/a2a/input_required.py src/iac_code/a2a/pipeline_stream.py
+msgid "Deny"
+msgstr "拒绝"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Call {operation} for the requested Alibaba Cloud infrastructure task."
+msgstr "为当前阿里云基础设施任务调用 {operation}。"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid " in {region}"
+msgstr "，地域 {region}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "; stack {stack}"
+msgstr "；资源栈 {stack}"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Read local workspace data"
+msgstr "读取本地工作区数据"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Run a local shell command"
+msgstr "运行本地 Shell 命令"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Read local data needed for the requested infrastructure task."
+msgstr "读取当前基础设施任务所需的本地数据。"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Execute a local command needed for the requested infrastructure task."
+msgstr "执行当前基础设施任务所需的本地命令。"
+
+#: src/iac_code/a2a/input_required.py
+msgid "shell command"
+msgstr "Shell 命令"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "the current local workspace; command: {command}"
+msgstr "当前本地工作区；命令：{command}"
+
+#: src/iac_code/a2a/input_required.py
+msgid "the current local workspace"
+msgstr "当前本地工作区"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Change a workspace file"
+msgstr "修改工作区文件"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Write a file needed for the requested infrastructure task."
+msgstr "写入当前基础设施任务所需的文件。"
+
+#: src/iac_code/a2a/input_required.py
+msgid "a file in the current workspace"
+msgstr "当前工作区中的文件"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Read workspace data with {tool}"
+msgstr "使用 {tool} 读取工作区数据"
+
+#: src/iac_code/a2a/input_required.py src/iac_code/a2a/pipeline_stream.py
+#, python-brace-format
+msgid "Run {tool}"
+msgstr "运行 {tool}"
+
+#: src/iac_code/a2a/input_required.py src/iac_code/a2a/pipeline_stream.py
+msgid "Run this operation for the requested infrastructure task."
+msgstr "为当前基础设施任务执行此操作。"
+
+#: src/iac_code/a2a/input_required.py
+msgid "the current task workspace or cloud account"
+msgstr "当前任务工作区或云账号"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Permission required"
+msgstr "需要权限确认"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Complete the requested infrastructure task."
+msgstr "完成当前基础设施任务。"
+
+#: src/iac_code/a2a/input_required.py src/iac_code/a2a/pipeline_stream.py
+msgid "the current task scope"
+msgstr "当前任务范围"
+
+#: src/iac_code/a2a/input_required.py
+msgid "Deploy a ROS stack"
+msgstr "部署 ROS 资源栈"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "plan: {value}"
+msgstr "方案：{value}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "region: {value}"
+msgstr "地域：{value}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "stack: {value}"
+msgstr "资源栈：{value}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "template: {value}"
+msgstr "模板：{value}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "estimated monthly cost: {value}"
+msgstr "预计月费用：{value}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "resource costs: {value}"
+msgstr "资源费用：{value}"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Create {product} stack"
+msgstr "创建 {product} 资源栈"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Continue creating {product} stack"
+msgstr "继续创建 {product} 资源栈"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Update {product} stack"
+msgstr "更新 {product} 资源栈"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Delete {product} stack"
+msgstr "删除 {product} 资源栈"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Read Alibaba Cloud data with {operation}"
+msgstr "使用 {operation} 读取阿里云数据"
+
+#: src/iac_code/a2a/input_required.py
+#, python-brace-format
+msgid "Run {operation}"
+msgstr "执行 {operation}"
 
 #: src/iac_code/a2a/pipeline_executor.py
 #, python-brace-format
@@ -143,6 +311,10 @@ msgstr "未找到 A2A pipeline 状态"
 #: src/iac_code/a2a/pipeline_recovery.py
 msgid "A2A task/context mismatch"
 msgstr "A2A 任务与上下文不匹配"
+
+#: src/iac_code/a2a/pipeline_stream.py
+msgid "Input required"
+msgstr "需要输入"
 
 #: src/iac_code/a2a/projection.py src/iac_code/pipeline/engine/public_errors.py
 #: src/iac_code/utils/public_errors.py
@@ -237,10 +409,6 @@ msgstr "[已截断]"
 #: src/iac_code/acp/session.py
 msgid "Authentication required. Please configure your API credentials."
 msgstr "需要身份验证。请配置 API 凭据。"
-
-#: src/iac_code/acp/session.py src/iac_code/web/permissions.py
-msgid "Allow once"
-msgstr "仅允许一次"
 
 #: src/iac_code/acp/session.py
 #, python-brace-format

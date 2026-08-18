@@ -169,6 +169,8 @@ cython_debug/
 # Project specific
 *.local
 .local-observe/
+skill-runtime/dist/
+!skill-runtime/iac-code-runtime.spec
 src/iac_code/pipeline/engine/architecture_rules.json.backup-*
 
 # Docs

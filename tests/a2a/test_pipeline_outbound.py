@@ -563,9 +563,12 @@ async def test_submit_is_not_backpressured_by_a_busy_network_sender() -> None:
     await outbound.start()
     await outbound.submit(TextDeltaEvent(text="first"))
     await publisher.first_send_started.wait()
+    # Real backpressure would block these submissions indefinitely, so any generous
+    # timeout still detects it; keep the bound loose enough to survive slow,
+    # oversubscribed CI runners without flaking.
     await asyncio.wait_for(
         asyncio.gather(*(outbound.submit(TextDeltaEvent(text=str(index))) for index in range(1_000))),
-        timeout=0.5,
+        timeout=5.0,
     )
     publisher.release_first_send.set()
     await outbound.close()

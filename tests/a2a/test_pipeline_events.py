@@ -2146,9 +2146,12 @@ def test_permission_request_metadata_uses_shape_only_tool_input() -> None:
         )
     )[0]
 
-    assert envelope["permission"]["safeSummary"] == (
-        "bash permission request (fields: [redacted], cmd, {})".format(fingerprint_text("nested"))
-    )
+    safe_summary = envelope["permission"]["safeSummary"]
+    assert safe_summary.startswith('bash: {"cmd":')
+    assert '"redacted":true' in safe_summary
+    assert fingerprint_text("nested") in safe_summary
+    assert "secret-value" not in safe_summary
+    assert len(safe_summary) <= 1200
     tool_input = envelope["permission"]["toolInput"]
     assert tool_input["cmd"] == {
         "type": "str",
@@ -2179,7 +2182,7 @@ def test_permission_request_safe_summary_fingerprints_business_field_names() -> 
 
     summary = envelope["permission"]["safeSummary"]
     assert "command" in summary
-    assert "[redacted]" in summary
+    assert '"redacted":true' in summary
     assert fingerprint_text("/Users/alice/.iac-code/settings.yml") in summary
     assert fingerprint_text("alice@example.com") in summary
     assert fingerprint_text("customer-prod-123") in summary
@@ -2285,7 +2288,7 @@ def test_permission_request_safe_summary_caps_field_names() -> None:
     summary = envelope["permission"]["safeSummary"]
     assert "field_00" not in summary
     assert "sha256:" in summary
-    assert len(summary) <= 256
+    assert len(summary) <= 1200
 
 
 def test_permission_request_safe_summary_caps_total_length() -> None:
@@ -2299,7 +2302,7 @@ def test_permission_request_safe_summary_caps_total_length() -> None:
         )
     )[0]
 
-    assert len(envelope["permission"]["safeSummary"]) <= 256
+    assert len(envelope["permission"]["safeSummary"]) <= 1200
 
 
 def test_nested_pipeline_data_keys_are_preserved() -> None:

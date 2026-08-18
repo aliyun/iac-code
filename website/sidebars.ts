@@ -79,6 +79,7 @@ const sidebars: SidebarsConfig = {
             'a2a/protocol-reference',
             'a2a/http-transport',
             'a2a/examples',
+            'a2a/skill-integration',
           ],
         },
       ],

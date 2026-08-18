@@ -9,7 +9,7 @@ import inspect
 import json
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -203,11 +203,19 @@ class StepExecutor:
         transcript_id: str | None = None,
         resume_messages: list | None = None,
         precompleted_tools: dict[str, dict[str, Any]] | None = None,
+        resume_candidate_selection: bool = False,
         rollback_targets: list[str] | None = None,
         rollback_count: int = 0,
         max_rollbacks: int = 5,
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         """Execute a step, yielding AgentLoop events and a final StepResult."""
+        preserved_selection = self._preserved_candidate_selection(
+            step,
+            context,
+            resume_candidate_selection=resume_candidate_selection,
+        )
+        compact_candidate_selection = preserved_selection is not None
+        step = self._step_for_surface(step, compact_candidate_selection=compact_candidate_selection)
         self._observability.session_id = session_id
 
         if step.on_enter:
@@ -222,6 +230,7 @@ class StepExecutor:
             transcript_id=transcript_id,
             resume_messages=resume_messages,
             precompleted_tools=precompleted_tools,
+            compact_candidate_selection=compact_candidate_selection,
             rollback_targets=rollback_targets,
             rollback_count=rollback_count,
             max_rollbacks=max_rollbacks,
@@ -230,6 +239,14 @@ class StepExecutor:
             restored_conclusion = agent_context.restored_step_result.conclusion
             if restored_conclusion is None:
                 restored_conclusion = {}
+            restored_conclusion = self._merge_preserved_candidate_selection(
+                preserved_selection,
+                restored_conclusion,
+            )
+            agent_context.restored_step_result = replace(
+                agent_context.restored_step_result,
+                conclusion=restored_conclusion,
+            )
             context.set_conclusion(step.conclusion_field, restored_conclusion)
             if step.on_exit:
                 step.on_exit(context, restored_conclusion)
@@ -388,6 +405,7 @@ class StepExecutor:
                     resume_messages=None,
                     precompleted_tools=None,
                     completion_guard_state_seed=completion_guard_state,
+                    compact_candidate_selection=compact_candidate_selection,
                     rollback_targets=rollback_targets,
                     rollback_count=rollback_count,
                     max_rollbacks=max_rollbacks,
@@ -409,6 +427,7 @@ class StepExecutor:
             step_result = terminal_failed_step_result
         elif complete_step_input is not None:
             conclusion = complete_step_input.get("conclusion", {})
+            conclusion = self._merge_preserved_candidate_selection(preserved_selection, conclusion)
             rollback = complete_step_input.get("rollback_request")
             rollback_tuple = (rollback["target_step"], rollback["reason"]) if rollback else None
             step_result = StepResult(
@@ -441,11 +460,13 @@ class StepExecutor:
         resume_messages: list | None = None,
         precompleted_tools: dict[str, dict[str, Any]] | None = None,
         completion_guard_state_seed: dict[str, Any] | None = None,
+        compact_candidate_selection: bool = False,
         rollback_targets: list[str] | None = None,
         rollback_count: int = 0,
         max_rollbacks: int = 5,
     ) -> StepAgentLoopContext:
         """Build the AgentLoop exactly as ``execute`` would, without running it."""
+        step = self._step_for_surface(step, compact_candidate_selection=compact_candidate_selection)
         initial_prompt = user_message or f"请完成当前步骤：{step.step_id}。"
 
         repaired_messages = list(resume_messages or [])
@@ -469,6 +490,7 @@ class StepExecutor:
                 )
 
         build_tool_kwargs: dict[str, Any] = {
+            "compact_candidate_selection": compact_candidate_selection,
             "rollback_targets": rollback_targets,
             "rollback_count": rollback_count,
             "max_rollbacks": max_rollbacks,
@@ -623,6 +645,83 @@ class StepExecutor:
 
         parts = [p for p in [base_prompt, skill_content, rendered_step_prompt] if p]
         return "\n\n---\n\n".join(parts)
+
+    def _step_for_surface(self, step: StepSpec, *, compact_candidate_selection: bool = False) -> StepSpec:
+        conclusion_schema = step.conclusion_schema_for_surface(self._surface)
+        if compact_candidate_selection:
+            conclusion_schema = self._candidate_selection_response_schema(conclusion_schema)
+        if conclusion_schema is step.conclusion_schema:
+            return step
+        return replace(step, conclusion_schema=conclusion_schema)
+
+    def _preserved_candidate_selection(
+        self,
+        step: StepSpec,
+        context: PipelineContext | None,
+        *,
+        resume_candidate_selection: bool,
+    ) -> dict[str, Any] | None:
+        if not resume_candidate_selection:
+            return None
+        override = step.surface_overrides.get(self._surface)
+        if step.ui_mode != "candidate_selection" or override is None or override.conclusion_schema is None:
+            return None
+        if context is None:
+            return None
+        if context.get_field(step.conclusion_field).stale:
+            return None
+        current = context.get_conclusion(step.conclusion_field)
+        if not isinstance(current, dict):
+            return None
+        if not isinstance(current.get("options"), list) or not isinstance(current.get("user_input"), str):
+            return None
+        return copy.deepcopy(current)
+
+    @staticmethod
+    def _candidate_selection_response_schema(schema: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not isinstance(schema, dict):
+            return schema
+        properties = schema.get("properties")
+        if not isinstance(properties, dict):
+            return schema
+        field_names = (
+            "selected_candidate_name",
+            "selected_candidate_index",
+            "selected_evaluated_candidate_index",
+            "parameter_overrides",
+        )
+        selected_properties = {
+            name: copy.deepcopy(properties[name]) for name in field_names if isinstance(properties.get(name), dict)
+        }
+        required = [
+            name
+            for name in (
+                "selected_candidate_name",
+                "selected_candidate_index",
+                "selected_evaluated_candidate_index",
+            )
+            if name in selected_properties
+        ]
+        if not required:
+            return schema
+        return {
+            "type": "object",
+            "required": required,
+            "additionalProperties": False,
+            "properties": selected_properties,
+        }
+
+    @staticmethod
+    def _merge_preserved_candidate_selection(
+        preserved: dict[str, Any] | None,
+        conclusion: Any,
+    ) -> dict[str, Any]:
+        current = conclusion if isinstance(conclusion, dict) else {}
+        if preserved is None:
+            return current
+        merged = copy.deepcopy(preserved)
+        merged.update(current)
+        return merged
 
     def _runtime_provider_display(self) -> str:
         getter = getattr(self._provider_manager, "get_provider_display", None)
@@ -855,10 +954,12 @@ class StepExecutor:
         user_message: str = "",
         completion_guard_state: dict[str, Any] | None = None,
         *,
+        compact_candidate_selection: bool = False,
         rollback_targets: list[str] | None = None,
         rollback_count: int = 0,
         max_rollbacks: int = 5,
     ) -> ToolRegistry:
+        step = self._step_for_surface(step, compact_candidate_selection=compact_candidate_selection)
         if step.tools is None:
             registry = self._base_tool_registry.clone()
         else:

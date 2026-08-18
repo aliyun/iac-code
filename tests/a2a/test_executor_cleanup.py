@@ -874,6 +874,93 @@ async def test_normal_a2a_turn_runs_cleanup_prompt_as_continuation_then_processe
 
 
 @pytest.mark.asyncio
+async def test_cleanup_only_a2a_turn_completes_cleanup_without_running_synthetic_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    session_id = "session-cleanup-only"
+    context_id = "ctx-cleanup-only"
+    storage = SessionStorage()
+    ledger = CleanupLedger(storage.session_dir(str(cwd), session_id) / "pipeline" / "cleanup.yaml")
+    ledger.mark_cleanup_required(
+        [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-123",
+                region_id="cn-hangzhou",
+                source_step_id="deploying",
+            )
+        ],
+        source_step_id="deploying",
+        reason="rollback",
+    )
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=str(cwd)))
+    loop = _TwoStepCleanupContinuationLoop()
+    runtime = FakeRuntime(agent_loop=loop, session_id=session_id)
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    first_queue = FakeEventQueue()
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence),
+        model="qwen3.6-plus",
+    )
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-cleanup-only",
+            context_id=context_id,
+            text="continue",
+            metadata={"iac_code": {"cwd": str(cwd), "cleanupOnly": True}},
+        ),
+        first_queue,
+    )
+
+    assert loop.continue_calls == 1
+    assert loop.run_prompts == []
+    assert ledger.cleanup_resources()[0].cleanup_status == "pending"
+    assert _load_a2a_deferred_cleanup_prompts(cwd=str(cwd), session_id=session_id) == []
+    first_cleanup_results = [
+        _dump(event).get("metadata", {}).get("iac_code", {}).get("cleanupOnly")
+        for event in first_queue.events
+        if isinstance(event, TaskStatusUpdateEvent)
+    ]
+    assert any(
+        isinstance(result, dict) and result.get("status") == "pending" and result.get("resourceCount") == 1
+        for result in first_cleanup_results
+    )
+
+    second_queue = FakeEventQueue()
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-cleanup-only-2",
+            context_id=context_id,
+            text="continue",
+            metadata={"iac_code": {"cwd": str(cwd), "cleanupOnly": True}},
+        ),
+        second_queue,
+    )
+
+    assert loop.continue_calls == 2
+    assert loop.run_prompts == []
+    assert ledger.cleanup_resources()[0].cleanup_status == "completed"
+    second_cleanup_results = [
+        _dump(event).get("metadata", {}).get("iac_code", {}).get("cleanupOnly")
+        for event in second_queue.events
+        if isinstance(event, TaskStatusUpdateEvent)
+    ]
+    assert any(
+        isinstance(result, dict) and result.get("status") == "completed" and result.get("resourceCount") == 0
+        for result in second_cleanup_results
+    )
+
+
+@pytest.mark.asyncio
 async def test_normal_a2a_turn_injects_cleanup_prompt_from_ledger_before_cleanup_continuation(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

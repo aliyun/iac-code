@@ -97,6 +97,8 @@ Pipeline 运行时可能会暂停等待用户输入，例如：
 
 Pipeline 模式可以通过 A2A 服务模式或 SDK process 模式集成。A2A 服务模式会对外暴露 pipeline 进度、产物、权限结果和恢复信息，适合把 pipeline 接入外部控制台或任务系统。SDK process 模式会把 `iac-code` 保持为本地子进程，并通过 stdin/stdout 交换按行分隔的 JSON。
 
+通过 A2A 集成 pipeline 时，调用方还可以在消息元数据中声明两项能力：传 `metadata.iac_code.preferredLanguage` 让进度、提问和权限提示按调用方期望的语言返回；传 `metadata.iac_code.candidatePresentation: rich-v1` 让方案确认步骤返回结构化载荷（候选名称、摘要、架构图、月度总成本、分项成本），适合在外部界面做富渲染。当部署或工具操作需要权限时，pipeline 会发布待决权限信封，调用方通过旁路消息应答 `allow_once` 或 `deny`，协议细节见[协议参考](../a2a/protocol-reference.md)。
+
 在 SDK process 模式中，pipeline 事件会以 `stream_event` frame 发出，事件 payload 的 `type` 为 `"pipeline_event"`。最终 `result` frame 会包含 `pipeline` 对象，其中有 `contextId`、`taskId`、`iacCodeSessionId`、`status` 和 `sidecarStatus`。暂停中的 pipeline 应使用相同的 `contextId` 和活跃 `taskId` 恢复。如果某个 context 存在可恢复 task 但客户端省略 task id，process 会返回可重试的 `pipeline_task_required` 错误，并携带 `recoverableTaskId`。
 
 ACP 目前不支持 Pipeline 模式。`--prompt` / [非交互模式](./non-interactive-mode.md) 会走普通一次性调用，不会执行 Pipeline 步骤。

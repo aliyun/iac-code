@@ -199,6 +199,7 @@ class PermissionRequestEvent:
     response_future: asyncio.Future[bool] | None = field(default=None)
     permission_result: Any | None = field(default=None)
     audit_context: Any | None = field(default=None, repr=False, compare=False)
+    resolution_owner_managed: bool = field(default=False, repr=False, compare=False)
     type: Literal["permission_request"] = "permission_request"
 
 

@@ -370,6 +370,48 @@ ECS_RAM_ROLE_USER_VISIBLE_MSGIDS = {
     ),
 }
 
+A2A_PERMISSION_USER_VISIBLE_MSGIDS = {
+    "Cleanup-only continuation requires a completed Pipeline handoff.",
+    "{title} Allow once?",
+    "Allow once",
+    "Deny",
+    "Call {operation} for the requested Alibaba Cloud infrastructure task.",
+    " in {region}",
+    "; stack {stack}",
+    "Read local workspace data",
+    "Run a local shell command",
+    "Read local data needed for the requested infrastructure task.",
+    "Execute a local command needed for the requested infrastructure task.",
+    "shell command",
+    "the current local workspace; command: {command}",
+    "the current local workspace",
+    "Change a workspace file",
+    "Write a file needed for the requested infrastructure task.",
+    "a file in the current workspace",
+    "Read workspace data with {tool}",
+    "Run {tool}",
+    "Run this operation for the requested infrastructure task.",
+    "the current task workspace or cloud account",
+    "Permission required",
+    "Complete the requested infrastructure task.",
+    "the current task scope",
+    "Deploy a ROS stack",
+    "plan: {value}",
+    "region: {value}",
+    "stack: {value}",
+    "template: {value}",
+    "estimated monthly cost: {value}",
+    "resource costs: {value}",
+    "Read Alibaba Cloud data with {operation}",
+    "Run {operation}",
+    "Input required",
+    "Create {product} stack",
+    "Continue creating {product} stack",
+    "Update {product} stack",
+    "Delete {product} stack",
+}
+
+
 ROS_DEPLOYMENT_REJECTION_MSGID = (
     "ROS pipeline calls for {action} must use the dedicated ros_deploy tool instead of aliyun_api. "
     "Do not call the raw ROS deployment API directly."
@@ -1078,6 +1120,30 @@ def test_ecs_ram_role_user_visible_translations_are_complete():
                 errors.append(f"{lang_dir.name}: missing translation for {msgid!r}")
             elif msgstr == msgid:
                 errors.append(f"{lang_dir.name}: untranslated placeholder for {msgid!r}")
+            elif _format_fields(msgstr) != _format_fields(msgid):
+                errors.append(
+                    f"{lang_dir.name}: format fields changed for {msgid!r}: "
+                    f"expected {sorted(_format_fields(msgid))}, got {sorted(_format_fields(msgstr))}"
+                )
+
+    assert not errors, "\n".join(errors)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
+def test_a2a_permission_display_translations_are_complete():
+    """A2A permission prompts are rendered per request language and must be localized everywhere."""
+    assert POT_FILE.exists(), f"POT file not found at {POT_FILE}"
+    pot_msgids = _get_all_msgids_from_pot(POT_FILE)
+    missing_from_pot = sorted(A2A_PERMISSION_USER_VISIBLE_MSGIDS - pot_msgids)
+    assert not missing_from_pot, "A2A permission msgids missing from messages.pot: {}".format(missing_from_pot)
+
+    errors = []
+    for lang_dir in _discover_language_dirs():
+        translations = _get_all_translations_from_po(lang_dir / "LC_MESSAGES" / "messages.po")
+        for msgid in sorted(A2A_PERMISSION_USER_VISIBLE_MSGIDS):
+            msgstr = translations.get(msgid, "").strip()
+            if not msgstr:
+                errors.append(f"{lang_dir.name}: missing translation for {msgid!r}")
             elif _format_fields(msgstr) != _format_fields(msgid):
                 errors.append(
                     f"{lang_dir.name}: format fields changed for {msgid!r}: "

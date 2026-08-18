@@ -13,6 +13,8 @@ on:
       - "pyproject.toml"
       - "uv.lock"
       - "scripts/aliyun/**"
+      - "skills/iac-code/**"
+      - "skill-runtime/**"
       - ".github/workflows/test.yml"
   pull_request:
     branches: [main, master]
@@ -22,6 +24,8 @@ on:
       - "pyproject.toml"
       - "uv.lock"
       - "scripts/aliyun/**"
+      - "skills/iac-code/**"
+      - "skill-runtime/**"
       - ".github/workflows/test.yml"
 
 concurrency:
@@ -29,6 +33,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  skill-bridge-compatibility:
+    name: Skill bridge (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Verify standard-library bridge entry
+        run: |
+          python -m py_compile skills/iac-code/scripts/iac_code.py
+          python skills/iac-code/scripts/iac_code.py --help
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

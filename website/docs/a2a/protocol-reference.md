@@ -161,6 +161,8 @@ Runs a non-streaming A2A message turn. The response contains a task or message a
 | `metadata.iac_code.alibaba_cloud_access_key_secret` | string | Optional | Alibaba Cloud AccessKey Secret for this task |
 | `metadata.iac_code.alibaba_cloud_region_id` | string | Optional | Alibaba Cloud region for this task; defaults to `cn-hangzhou` when omitted with task credentials |
 | `metadata.iac_code.alibaba_cloud_security_token` | string | Optional | Alibaba Cloud STS token for this task |
+| `metadata.iac_code.preferredLanguage` | string | Optional | Caller's preferred display language for this task; user-visible text is localized per request |
+| `metadata.iac_code.candidatePresentation` | string | Optional | When set to `rich-v1`, the pipeline candidate confirmation step returns structured rich presentation payloads |
 
 `metadata.iac_code.cwd` must be an absolute directory path when provided. It must resolve inside an allowed workspace root. If it already exists, it must be a directory; if it does not exist, the executor creates it under the allowed root. By default, allowed roots are the server process directory and the system temp directory; `IACCODE_A2A_ALLOWED_CWDS` can provide an OS-path-separated allowlist.
 
@@ -171,6 +173,10 @@ When `metadata.iac_code` includes both `alibaba_cloud_access_key_id` and `alibab
 `metadata.iac_code.iac_code_model` only affects the current A2A message turn. It takes priority over `IAC_CODE_MODEL`, `settings.yml`, and the server startup default model. Follow-up turns without this metadata field fall back to the server default model even when they reuse the same `contextId`.
 
 `metadata.iac_code.iac_code_api_key` only affects the current A2A message turn. It takes priority over `IAC_CODE_API_KEY` and `.credentials.yml` for the provider selected by the effective model. Follow-up turns without this metadata field reload normal credentials, so a per-call key does not leak across reused `contextId`s. This field is for the LLM provider key and is separate from A2A transport authentication such as `api-key` / `IACCODE_A2A_API_KEY`.
+
+`metadata.iac_code.preferredLanguage` only affects user-visible text (progress, questions, permission prompts, candidate presentations, result explanations); protocol field names, enums, IDs, and command shapes are never translated. Accepted values are the supported languages `en`, `zh`, `es`, `fr`, `de`, `ja`, `pt`; values are normalized by trimming whitespace, lowercasing, and stripping region suffixes (for example `zh-CN` resolves to `zh`). Unrecognized values are ignored and the server falls back to its default language. The field applies only to the current message turn; follow-up turns reusing the same `contextId` must carry it again or fall back to the default language.
+
+`metadata.iac_code.candidatePresentation` set to `rich-v1` makes the selling pipeline's candidate confirmation step return a structured payload suitable for rich rendering (candidate name, summary, architecture diagram, total monthly cost, cost items). Without the field, the plain-text presentation behavior is unchanged.
 
 Supported input categories:
 
@@ -405,6 +411,39 @@ Tool and usage details are delivered through `metadata.iac_code`:
 Pipeline mode can also publish MCP status as pipeline metadata with `metadata.iac_code.pipeline.eventType == "mcp_status"`. MCP warnings, status snapshots, and progress metadata are sanitized before streaming; secrets from headers, environment variables, OAuth tokens, and local paths are redacted or summarized.
 
 When a tool result includes a supported text artifact payload, the server stores the payload locally, emits a standard `TaskArtifactUpdateEvent`, and records the artifact in the task `artifacts` field. The artifact part uses a `file://` URL plus metadata such as `mediaType`, `byteSize`, and `sha256`; the original artifact content is not duplicated inside tool metadata.
+
+### Interactive Permission Decisions
+
+With the default configuration, a tool permission request raised during an A2A turn becomes an input wait: iac-code pauses the turn, emits a `TASK_STATE_INPUT_REQUIRED` status update carrying a permission envelope, and waits for the caller's structured decision.
+
+The status update metadata contains:
+
+- `metadata.iac_code.input` — the permission envelope (`schemaVersion` 1), with fields:
+  - Correlation fields: `kind: "permission"`, `requestTaskId`, `contextId`, `inputId`, `toolUseId`, `toolName`
+  - Display fields: `title`, `purpose`, `effect`, `target`, `isReadOnly`, `safeSummary`, plus `deploymentSummary` for deployment requests
+  - `prompt` and `options` (`allow_once` / `deny`), localized to the caller's preferred language
+- `metadata.iac_code.permission` — contains `autoApproved: false`, `pending: true`, `toolName`, `toolUseId`
+
+The caller submits its decision through a sideband message: a single `ROLE_USER` A2A message containing exactly one `application/json` DataPart whose payload must contain exactly these fields:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "permission",
+  "requestTaskId": "<taskId that raised the permission request>",
+  "inputId": "<inputId from the envelope>",
+  "toolUseId": "<toolUseId from the envelope>",
+  "decision": "allow_once"
+}
+```
+
+- `decision` accepts only `allow_once` or `deny`.
+- The outer message `taskId` must equal `requestTaskId`; `contextId` comes from the outer message envelope. All correlation fields must be preserved verbatim; they must not be reused across requests, and an answer for one input must never be reinterpreted as another.
+- Once the server matches the decision, it returns a `permission_ack` DataPart (`schemaVersion: 1`, `kind: "permission_ack"`, with `inputId`, `toolUseId`, `decision`, `accepted: true`) and emits a `TASK_STATE_WORKING` status update carrying `metadata.iac_code.inputReceived`; the turn then resumes.
+
+In pipeline mode, permission requests are published as pipeline events (the envelope additionally carries `scope` and step/candidate coordinates); the sideband response format is identical.
+
+With `auto-approve-permissions` enabled or explicit permission rules configured, permission requests do not become interactive input; they are auto-approved (with audit) or resolved by the rules. Protected Alibaba Cloud write APIs are not released by ordinary allow rules and still require exact per-API authorization. Permission decisions are audited locally; any allow decision that requires an audit record fails closed when the record cannot be persisted.
 
 ## Extensions
 

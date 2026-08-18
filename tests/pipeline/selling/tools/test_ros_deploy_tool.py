@@ -170,6 +170,53 @@ def test_ros_deploy_uses_long_running_stack_timeout():
     assert RosDeployTool().timeout == 3600.0
 
 
+def test_ros_deploy_permission_metadata_contains_safe_deployment_summary() -> None:
+    from iac_code.pipeline.selling.tools.ros_deploy_tool import RosDeployTool
+
+    tool = RosDeployTool(
+        completion_guard_state={
+            "context_snapshot": {
+                "selected_plan": {
+                    "selected_candidate_name": "低成本方案",
+                    "selected_candidate": {"name": "低成本方案"},
+                    "selected_candidate_result": {
+                        "cost": {
+                            "monthly_estimate": "¥88/月",
+                            "resources": [
+                                {"type": "ALIYUN::ECS::Instance", "cost": "¥88/月"},
+                            ],
+                        }
+                    },
+                }
+            }
+        }
+    )
+
+    metadata = tool._operation_metadata(
+        {
+            "action": "create",
+            "stack_name": "demo-stack",
+            "template_url": "templates/demo.yml",
+            "parameters": {"Password": "must-not-appear"},
+            "region_id": "cn-hangzhou",
+        }
+    )
+
+    assert metadata["product"] == "ros"
+    assert metadata["action"] == "CreateStack"
+    assert metadata["stackName"] == "demo-stack"
+    assert metadata["deploymentSummary"] == {
+        "candidateName": "低成本方案",
+        "action": "create",
+        "region": "cn-hangzhou",
+        "stackName": "demo-stack",
+        "template": "templates/demo.yml",
+        "totalMonthlyCost": "¥88/月",
+        "resources": [{"name": "ALIYUN::ECS::Instance", "monthlyCost": "¥88/月"}],
+    }
+    assert "must-not-appear" not in str(metadata)
+
+
 @pytest.mark.parametrize(
     ("tool_input", "expected_fields"),
     [

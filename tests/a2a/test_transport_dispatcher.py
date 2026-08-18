@@ -8,7 +8,8 @@ import httpx
 import pytest
 from a2a.server.context import ServerCallContext
 from a2a.server.request_handlers import DefaultRequestHandler
-from a2a.types import SubscribeToTaskRequest, Task, TaskState, TaskStatus, TaskStatusUpdateEvent
+from a2a.types import Message, Part, Role, SubscribeToTaskRequest, Task, TaskState, TaskStatus, TaskStatusUpdateEvent
+from google.protobuf.struct_pb2 import Value
 
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
@@ -32,9 +33,9 @@ from iac_code.a2a.transports.dispatcher import (
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.services.session_backup import BackupReason, SessionBackupService
 from iac_code.services.session_storage import SessionStorage
-from iac_code.types.stream_events import TextDeltaEvent
+from iac_code.types.stream_events import PermissionRequestEvent, TextDeltaEvent
 
-from .fakes import FakeAgentLoop, FakeRuntime
+from .fakes import FakeAgentLoop, FakeRuntime, pending_future
 
 _STREAM_TEST_TIMEOUT = 5
 
@@ -421,6 +422,39 @@ async def test_message_stream_does_not_acknowledge_transport_delivery_when_close
 
 
 @pytest.mark.asyncio
+async def test_pipeline_message_stream_does_not_bind_subscriber_delivery_to_producer(monkeypatch) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    tracking_states = []
+    update = TaskStatusUpdateEvent(
+        task_id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+
+    async def sdk_stream(_handler, _params, _context):
+        tracking_states.append(pipeline_transport_delivery_tracking_enabled())
+        yield update
+
+    async def hydrate(_params) -> None:
+        return None
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send_stream", sdk_stream)
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = object()
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    params = SimpleNamespace(message=SimpleNamespace(task_id=None))
+
+    stream = handler.on_message_send_stream(params, object())
+    assert await anext(stream) is update
+    await stream.aclose()
+
+    assert tracking_states == [False]
+    assert pipeline_transport_delivery_tracking_enabled() is False
+
+
+@pytest.mark.asyncio
 async def test_message_stream_queues_input_required_followup_instead_of_routing_as_interrupt(monkeypatch) -> None:
     call_context = ServerCallContext()
     store = A2ATaskStore()
@@ -475,6 +509,263 @@ async def test_message_stream_queues_input_required_followup_instead_of_routing_
 
     assert events == [update]
     assert sdk_stream_called is True
+
+
+@pytest.mark.asyncio
+async def test_message_stream_routes_permission_response_to_active_input_required_task(monkeypatch) -> None:
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    await store.save(
+        Task(
+            id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+        ),
+        call_context,
+    )
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    record.active_task = asyncio.current_task()
+    update = TaskStatusUpdateEvent(
+        task_id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+    data = Value()
+    data.struct_value.update(
+        {
+            "schemaVersion": 1,
+            "kind": "permission",
+            "requestTaskId": "task-1",
+            "inputId": "permission-task-1-tool-1",
+            "toolUseId": "tool-1",
+            "decision": "allow_once",
+        }
+    )
+    message = Message(
+        message_id="message-1",
+        task_id="task-1",
+        context_id="ctx-1",
+        role=Role.ROLE_USER,
+        parts=[Part(data=data, media_type="application/json")],
+    )
+    active_stream_called = False
+
+    async def hydrate(_params) -> None:
+        return None
+
+    async def reconcile(_params, _context) -> None:
+        return None
+
+    class ActiveTaskRegistry:
+        async def get(self, _task_id):
+            return object()
+
+    async def active_stream(*_args, **_kwargs):
+        nonlocal active_stream_called
+        active_stream_called = True
+        yield update
+
+    async def fail_sdk_stream(*_args, **_kwargs):
+        raise AssertionError("permission response must not wait in the SDK task queue")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send_stream", fail_sdk_stream)
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler._active_task_registry = ActiveTaskRegistry()
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    handler._reconcile_recoverable_pipeline_task = reconcile
+    handler._on_active_message_send_stream = active_stream
+
+    events = await _collect_async(handler.on_message_send_stream(SimpleNamespace(message=message), call_context))
+
+    assert events == [update]
+    assert active_stream_called is True
+
+
+@pytest.mark.asyncio
+async def test_sideband_permission_response_returns_one_short_ack_without_tapping_task(monkeypatch) -> None:
+    call_context = ServerCallContext()
+    data = Value()
+    data.struct_value.update(
+        {
+            "schemaVersion": 1,
+            "kind": "permission",
+            "requestTaskId": "task-1",
+            "inputId": "permission-opaque",
+            "toolUseId": "tool-1",
+            "decision": "allow_once",
+        }
+    )
+    message = Message(
+        message_id="message-1",
+        task_id="task-1",
+        context_id="ctx-1",
+        role=Role.ROLE_USER,
+        parts=[Part(data=data, media_type="application/json")],
+    )
+    ack_data = Value()
+    ack_data.struct_value.update(
+        {
+            "schemaVersion": 1,
+            "kind": "permission_ack",
+            "inputId": "permission-opaque",
+            "toolUseId": "tool-1",
+            "decision": "allow_once",
+            "accepted": True,
+        }
+    )
+    ack = Message(
+        message_id="permission-ack-1",
+        task_id="task-1",
+        context_id="ctx-1",
+        role=Role.ROLE_AGENT,
+        parts=[Part(data=ack_data, media_type="application/json")],
+    )
+
+    class Executor:
+        async def resolve_sideband_permission(self, _response):
+            return ack
+
+    async def fail_sdk_stream(*_args, **_kwargs):
+        raise AssertionError("sideband permission response must not tap the active task")
+        yield  # pragma: no cover
+
+    async def fail_sdk_send(*_args, **_kwargs):
+        raise AssertionError("sideband permission response must not enter the normal message route")
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send_stream", fail_sdk_stream)
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send", fail_sdk_send)
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.agent_executor = Executor()
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    params = SimpleNamespace(message=message)
+
+    assert await handler.on_message_send(params, call_context) is ack
+    assert await _collect_async(handler.on_message_send_stream(params, call_context)) == [ack]
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_permission_followup_resumes_live_normal_stream(monkeypatch, tmp_path) -> None:
+    future = pending_future()
+    loop = FakeAgentLoop(
+        [
+            PermissionRequestEvent(
+                tool_name="bash",
+                tool_input={"cmd": "pwd"},
+                tool_use_id="tool-1",
+                response_future=future,
+            ),
+            TextDeltaEvent(text="after permission"),
+        ]
+    )
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+    monkeypatch.setattr("iac_code.a2a.input_required.emit_permission_boundary_audit", lambda *_args, **_kwargs: True)
+    components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
+    dispatcher = A2AJsonRpcDispatcher(components)
+    first_events: list[dict] = []
+
+    async def consume_first_stream() -> None:
+        async for event in dispatcher.dispatch_stream(
+            {
+                "jsonrpc": "2.0",
+                "id": "permission-first",
+                "method": "SendStreamingMessage",
+                "params": {
+                    "message": {
+                        "messageId": "permission-message-first",
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "start"}],
+                        "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            }
+        ):
+            first_events.append(event)
+
+    first_task = asyncio.create_task(consume_first_stream())
+    input_event = None
+    envelope = None
+    for _ in range(_STREAM_TEST_TIMEOUT * 100):
+        for event in first_events:
+            result = event.get("result", {})
+            payload = result.get("statusUpdate") or result.get("task") or result
+            metadata = payload.get("metadata") or {}
+            candidate = metadata.get("iac_code", {}).get("input")
+            if isinstance(candidate, dict) and candidate.get("kind") == "permission":
+                input_event = event
+                envelope = candidate
+                break
+        if input_event is not None:
+            break
+        await asyncio.sleep(0.01)
+    assert input_event is not None
+    assert envelope is not None
+    assert await components.task_store.is_task_active(envelope["requestTaskId"])
+    assert await components.handler._active_task_registry.get(envelope["requestTaskId"]) is not None
+
+    async def consume_second_stream() -> list[dict]:
+        return [
+            event
+            async for event in dispatcher.dispatch_stream(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "permission-second",
+                    "method": "SendStreamingMessage",
+                    "params": {
+                        "message": {
+                            "messageId": "permission-message-second",
+                            "role": "ROLE_USER",
+                            "taskId": envelope["requestTaskId"],
+                            "contextId": envelope["contextId"],
+                            "parts": [
+                                {
+                                    "mediaType": "application/json",
+                                    "data": {
+                                        "schemaVersion": 1,
+                                        "kind": "permission",
+                                        "requestTaskId": envelope["requestTaskId"],
+                                        "inputId": envelope["inputId"],
+                                        "toolUseId": envelope["toolUseId"],
+                                        "decision": "allow_once",
+                                    },
+                                }
+                            ],
+                            "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                        },
+                        "configuration": {"acceptedOutputModes": ["text/plain"]},
+                    },
+                }
+            )
+        ]
+
+    second_task = asyncio.create_task(consume_second_stream())
+    for _ in range(_STREAM_TEST_TIMEOUT * 100):
+        if future.done():
+            break
+        await asyncio.sleep(0.01)
+
+    try:
+        assert future.done() and future.result() is True
+        second_events = await asyncio.wait_for(second_task, timeout=_STREAM_TEST_TIMEOUT)
+        assert all("error" not in event for event in second_events)
+        await asyncio.wait_for(first_task, timeout=_STREAM_TEST_TIMEOUT)
+    finally:
+        if not second_task.done():
+            second_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await second_task
+        if not first_task.done():
+            first_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await first_task
+        await dispatcher.aclose()
+        await components.aclose()
 
 
 @pytest.mark.asyncio

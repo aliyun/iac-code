@@ -149,8 +149,14 @@ Exécute un tour de message A2A non streaming. La réponse contient une tâche o
 | `role` | string | Oui | Utilisez `ROLE_USER` pour l'entrée utilisateur |
 | `parts` | array | Oui | Parties de type texte, données JSON, texte brut, URL de fichier local ou parties multimodales bornées |
 | `metadata.iac_code.cwd` | string | Recommandé | Chemin absolu de l'espace de travail ; utilise par défaut le répertoire du processus serveur si omis |
+| `metadata.iac_code.preferredLanguage` | string | Facultatif | Langue d'affichage préférée de l'appelant pour cette tâche ; le texte visible par l'utilisateur est localisé par requête |
+| `metadata.iac_code.candidatePresentation` | string | Facultatif | Avec `rich-v1`, l'étape de confirmation des candidats du pipeline renvoie des charges structurées de présentation enrichie |
 
 `metadata.iac_code.cwd` doit être un répertoire absolu existant lorsqu'il est fourni. Il doit se trouver dans une racine d'espace de travail autorisée. Par défaut, les racines autorisées sont le répertoire du processus serveur et le répertoire temporaire système ; `IACCODE_A2A_ALLOWED_CWDS` peut fournir une liste d'autorisation séparée par le séparateur de chemins du système d'exploitation.
+
+`metadata.iac_code.preferredLanguage` n'affecte que le texte visible par l'utilisateur (progression, questions, invites de permission, présentations de candidats, explications des résultats) ; les noms de champs du protocole, les énumérations, les identifiants et les formes de commandes ne sont jamais traduits. Les valeurs acceptées sont les langues prises en charge `en`, `zh`, `es`, `fr`, `de`, `ja`, `pt` ; les valeurs sont normalisées par suppression des espaces, mise en minuscules et retrait du suffixe régional (par exemple `zh-CN` devient `zh`). Les valeurs non reconnues sont ignorées et le serveur retombe sur sa langue par défaut. Le champ ne s'applique qu'au tour de message courant ; les tours suivants réutilisant le même `contextId` doivent le transmettre à nouveau, sinon ils retombent sur la langue par défaut.
+
+`metadata.iac_code.candidatePresentation` défini sur `rich-v1` fait renvoyer à l'étape de confirmation des candidats du pipeline selling une charge structurée adaptée à un rendu enrichi (nom du candidat, résumé, diagramme d'architecture, coût mensuel total, postes de coût). Sans ce champ, le comportement de présentation en texte simple est inchangé.
 
 Catégories d'entrée prises en charge :
 
@@ -384,6 +390,39 @@ Les détails d'outils et d'utilisation sont livrés via `metadata.iac_code` :
 Le mode pipeline peut aussi publier l'état MCP comme metadata de pipeline avec `metadata.iac_code.pipeline.eventType == "mcp_status"`. Les warnings MCP, les instantanés d'état et la metadata de progression sont nettoyés avant le streaming ; les secrets dans les headers, variables d'environnement, tokens OAuth et chemins locaux sont expurgés ou résumés.
 
 Lorsqu'un résultat d'outil inclut une charge utile d'artefact texte prise en charge, le serveur stocke la charge utile localement, émet un `TaskArtifactUpdateEvent` standard et enregistre l'artefact dans le champ `artifacts` de la tâche. La partie d'artefact utilise une URL `file://` plus des métadonnées comme `mediaType`, `byteSize` et `sha256` ; le contenu original de l'artefact n'est pas dupliqué dans les métadonnées d'outil.
+
+### Décisions de permissions interactives
+
+Avec la configuration par défaut, une demande de permission d'outil soulevée pendant un tour A2A devient une attente d'entrée : iac-code suspend le tour, émet une mise à jour d'état `TASK_STATE_INPUT_REQUIRED` portant une enveloppe de permission et attend la décision structurée de l'appelant.
+
+Les métadonnées de la mise à jour d'état contiennent :
+
+- `metadata.iac_code.input` — l'enveloppe de permission (`schemaVersion` 1), avec les champs :
+  - Champs de corrélation : `kind: "permission"`, `requestTaskId`, `contextId`, `inputId`, `toolUseId`, `toolName`
+  - Champs d'affichage : `title`, `purpose`, `effect`, `target`, `isReadOnly`, `safeSummary`, plus `deploymentSummary` pour les demandes de déploiement
+  - `prompt` et `options` (`allow_once` / `deny`), localisés dans la langue préférée de l'appelant
+- `metadata.iac_code.permission` — contient `autoApproved: false`, `pending: true`, `toolName`, `toolUseId`
+
+L'appelant soumet sa décision via un message hors bande : un unique message A2A `ROLE_USER` contenant exactement un DataPart `application/json` dont le payload doit contenir exactement ces champs :
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "permission",
+  "requestTaskId": "<taskId ayant émis la demande de permission>",
+  "inputId": "<inputId de l'enveloppe>",
+  "toolUseId": "<toolUseId de l'enveloppe>",
+  "decision": "allow_once"
+}
+```
+
+- `decision` n'accepte que `allow_once` ou `deny`.
+- Le `taskId` externe du message doit être égal à `requestTaskId` ; `contextId` provient de l'enveloppe externe du message. Tous les champs de corrélation doivent être conservés tels quels ; ils ne doivent pas être réutilisés d'une requête à l'autre, et une réponse à une entrée ne doit jamais être réinterprétée comme une autre.
+- Une fois la décision appariée, le serveur renvoie un DataPart `permission_ack` (`schemaVersion: 1`, `kind: "permission_ack"`, avec `inputId`, `toolUseId`, `decision`, `accepted: true`) et émet une mise à jour d'état `TASK_STATE_WORKING` portant `metadata.iac_code.inputReceived` ; le tour reprend alors.
+
+En mode pipeline, les demandes de permission sont publiées comme événements de pipeline (l'enveloppe porte en plus `scope` et les coordonnées step/candidat) ; le format de réponse hors bande est identique.
+
+Avec `auto-approve-permissions` activé ou des règles de permission explicites configurées, les demandes de permission ne deviennent pas une entrée interactive ; elles sont approuvées automatiquement (avec audit) ou résolues selon les règles. Les API d'écriture Alibaba Cloud protégées ne sont pas libérées par de simples règles allow et nécessitent toujours une autorisation exacte par API. Les décisions de permissions sont auditées localement ; toute décision allow nécessitant un enregistrement d'audit échoue en mode fail-closed si l'enregistrement ne peut pas être persisté.
 
 ## Extensions
 

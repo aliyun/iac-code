@@ -2668,6 +2668,212 @@ class TestStepExecutorSchemaWiring:
         complete_tool = tool_reg.get("complete_step")
         assert complete_tool.input_schema["properties"]["conclusion"]["required"] == ["x"]
 
+    def test_surface_override_uses_rich_schema_only_for_requested_surface(self, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "confirm.md").write_text("Confirm.", encoding="utf-8")
+        base_schema = {
+            "type": "object",
+            "required": ["name"],
+            "properties": {"name": {"type": "string"}},
+        }
+        rich_schema = {
+            "type": "object",
+            "required": ["name", "architecture_diagram"],
+            "properties": {
+                "name": {"type": "string"},
+                "architecture_diagram": {"type": "string"},
+            },
+        }
+        step = StepSpec(
+            step_id="confirm_and_select",
+            conclusion_field="selected_plan",
+            forward=None,
+            prompt_file="prompts/confirm.md",
+            conclusion_schema=base_schema,
+            surface_overrides={"a2a_rich": StepSurfaceOverride(conclusion_schema=rich_schema)},
+        )
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[step],
+            context_dependencies={"selected_plan": []},
+            max_rollbacks=3,
+            skills={},
+        )
+        context = PipelineContext({"selected_plan": []})
+
+        generic_executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+            surface="a2a",
+        )
+        rich_executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+            surface="a2a_rich",
+        )
+
+        generic_schema = generic_executor._build_step_tools(step, context).get("complete_step").input_schema
+        rich_tool_schema = rich_executor._build_step_tools(step, context).get("complete_step").input_schema
+
+        assert generic_schema["properties"]["conclusion"]["required"] == ["name"]
+        assert rich_tool_schema["properties"]["conclusion"]["required"] == ["name", "architecture_diagram"]
+
+    def test_rich_candidate_resume_uses_compact_schema_and_preserves_first_conclusion(self, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "confirm.md").write_text("Confirm.", encoding="utf-8")
+        rich_schema = {
+            "type": "object",
+            "required": ["user_prompt", "options"],
+            "additionalProperties": False,
+            "properties": {
+                "user_prompt": {"type": "string"},
+                "options": {"type": "array", "items": {"type": "object"}},
+                "user_input": {"type": "string"},
+                "selected_candidate_name": {"type": "string"},
+                "selected_candidate_index": {"type": "integer"},
+                "selected_evaluated_candidate_index": {"type": "integer"},
+                "parameter_overrides": {"type": "object"},
+            },
+        }
+        step = StepSpec(
+            step_id="confirm_and_select",
+            conclusion_field="selected_plan",
+            forward=None,
+            prompt_file="prompts/confirm.md",
+            conclusion_schema={"type": "object"},
+            ui_mode="candidate_selection",
+            surface_overrides={"a2a_rich": StepSurfaceOverride(conclusion_schema=rich_schema)},
+        )
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[step],
+            context_dependencies={"selected_plan": []},
+            max_rollbacks=3,
+            skills={},
+        )
+        context = PipelineContext({"selected_plan": []})
+        original = {
+            "user_prompt": "请选择方案",
+            "options": [
+                {
+                    "name": "方案 A",
+                    "architecture_diagram": "flowchart LR\nA-->B",
+                    "total_monthly_cost": "¥88/月",
+                }
+            ],
+            "user_input": "选择方案 A",
+        }
+        context.set_conclusion("selected_plan", original)
+        executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+            surface="a2a_rich",
+        )
+
+        tool_schema = executor._build_step_tools(
+            step,
+            context,
+            compact_candidate_selection=True,
+        ).get("complete_step").input_schema
+        conclusion_schema = tool_schema["properties"]["conclusion"]
+        assert conclusion_schema["required"] == [
+            "selected_candidate_name",
+            "selected_candidate_index",
+            "selected_evaluated_candidate_index",
+        ]
+        assert "options" not in conclusion_schema["properties"]
+        assert "user_prompt" not in conclusion_schema["properties"]
+        assert "user_input" not in conclusion_schema["properties"]
+
+        preserved = executor._preserved_candidate_selection(
+            step,
+            context,
+            resume_candidate_selection=True,
+        )
+        merged = executor._merge_preserved_candidate_selection(
+            preserved,
+            {
+                "selected_candidate_name": "方案 A",
+                "selected_candidate_index": 0,
+                "selected_evaluated_candidate_index": 0,
+            },
+        )
+
+        assert merged["user_prompt"] == "请选择方案"
+        assert merged["options"] == original["options"]
+        assert merged["user_input"] == "选择方案 A"
+        assert merged["selected_candidate_name"] == "方案 A"
+
+    def test_stale_candidate_conclusion_cannot_enable_compact_resume_schema(self, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "confirm.md").write_text("Confirm.", encoding="utf-8")
+        rich_schema = {
+            "type": "object",
+            "required": ["user_prompt", "options"],
+            "additionalProperties": False,
+            "properties": {
+                "user_prompt": {"type": "string"},
+                "options": {"type": "array", "items": {"type": "object"}},
+                "selected_candidate_name": {"type": "string"},
+                "selected_candidate_index": {"type": "integer"},
+                "selected_evaluated_candidate_index": {"type": "integer"},
+            },
+        }
+        step = StepSpec(
+            step_id="confirm_and_select",
+            conclusion_field="selected_plan",
+            forward=None,
+            prompt_file="prompts/confirm.md",
+            ui_mode="candidate_selection",
+            surface_overrides={"a2a_rich": StepSurfaceOverride(conclusion_schema=rich_schema)},
+        )
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[step],
+            context_dependencies={"selected_plan": []},
+            max_rollbacks=3,
+            skills={},
+        )
+        context = PipelineContext({"selected_plan": []})
+        context.set_conclusion(
+            "selected_plan",
+            {
+                "user_prompt": "请选择旧方案",
+                "options": [{"name": "旧方案"}],
+                "user_input": "选择旧方案",
+            },
+        )
+        context.mark_stale("selected_plan")
+        executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+            surface="a2a_rich",
+        )
+
+        preserved = executor._preserved_candidate_selection(
+            step,
+            context,
+            resume_candidate_selection=True,
+        )
+        tool_schema = executor._build_step_tools(
+            step,
+            context,
+            compact_candidate_selection=preserved is not None,
+        ).get("complete_step").input_schema
+
+        assert preserved is None
+        conclusion_schema = tool_schema["properties"]["conclusion"]
+        assert conclusion_schema["required"] == ["user_prompt", "options"]
+        assert "options" in conclusion_schema["properties"]
+
     def test_passes_rollback_targets_to_tool(self, tmp_path):
         (tmp_path / "prompts").mkdir(exist_ok=True)
         (tmp_path / "prompts" / "intent_parsing.md").write_text("Parse.", encoding="utf-8")

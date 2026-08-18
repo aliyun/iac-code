@@ -25,6 +25,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import BaseRoute, Route
 
+from iac_code import __version__
 from iac_code.a2a.agent_card import agent_card_to_client_dict
 from iac_code.a2a.jsonrpc_passthrough import (
     install_jsonrpc_error_data_passthrough,
@@ -37,6 +38,8 @@ from iac_code.a2a.projection import (
     resolve_a2a_public_path_roots_for_data,
 )
 from iac_code.i18n import _
+from iac_code.pipeline.config import get_run_mode
+from iac_code.services.configuration_readiness import configuration_readiness
 
 logger = logging.getLogger(__name__)
 _V03_JSONRPC_METHODS = frozenset(
@@ -161,7 +164,7 @@ class A2AProjectionMiddleware(BaseHTTPMiddleware):
         request_data = await _a2a_request_data(request)
         response = await call_next(request)
         request_data = _with_a2a_path_parameters(request, request_data)
-        if request.url.path in {"/health", AGENT_CARD_WELL_KNOWN_PATH}:
+        if request.url.path in {"/health", "/iac-code/readiness", AGENT_CARD_WELL_KNOWN_PATH}:
             return response
 
         content_type = response.headers.get("content-type", "").lower()
@@ -291,7 +294,7 @@ def _take_sse_frame(data: bytes) -> tuple[bytes, bytes | None, bytes]:
 
 
 async def health(request: Request) -> JSONResponse:
-    return JSONResponse({"status": "healthy"})
+    return JSONResponse({"status": "healthy", "version": __version__, "mode": get_run_mode().value})
 
 
 async def normalize_v03_jsonrpc_version(request: Request) -> None:
@@ -398,6 +401,9 @@ def create_app(
             return Response(status_code=304, headers=card_cache_headers)
         return JSONResponse(card_data, headers=card_cache_headers)
 
+    async def get_readiness(request: Request) -> JSONResponse:
+        return JSONResponse(configuration_readiness(model=model))
+
     recovery_service = A2APipelineRecoveryService(task_store=components.task_store)
 
     async def recovery_path_roots(*, context_id: str | None, task_id: str | None) -> list[dict[str, str]]:
@@ -443,6 +449,7 @@ def create_app(
     routes: list[BaseRoute] = [
         Route("/health", health, methods=["GET"]),
         Route(AGENT_CARD_WELL_KNOWN_PATH, get_agent_card, methods=["GET"]),
+        Route("/iac-code/readiness", get_readiness, methods=["GET"]),
         Route("/iac-code/pipeline/state", get_pipeline_state, methods=["GET"]),
     ]
     install_jsonrpc_error_data_passthrough()

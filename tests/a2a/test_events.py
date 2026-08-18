@@ -1411,7 +1411,43 @@ async def test_tool_result_externalizes_workspace_path_binary_artifact(tmp_path)
 
     artifact_metadata = dump(queue.events[1])["metadata"]["iac_code"]["tool"]["artifact"]
     assert artifact_metadata["byteSize"] == 9
+    assert artifact_metadata["sourcePath"] == str(source)
+    assert dump(queue.events[0])["artifact"]["metadata"]["sourcePath"] == str(source)
     assert store.path_for(artifact_metadata["artifactId"]).read_bytes() == b"RIFFaudio"
+
+
+@pytest.mark.asyncio
+async def test_tool_result_externalizes_artifact_declared_in_event_metadata(tmp_path) -> None:
+    from iac_code.a2a.artifacts import A2AArtifactStore
+
+    source = tmp_path / "template.yaml"
+    source.write_text("ROSTemplateFormatVersion: '2015-09-01'\n", encoding="utf-8")
+    queue = FakeEventQueue()
+    store = A2AArtifactStore(tmp_path / "artifacts")
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolResultEvent(
+            tool_use_id="tool-1",
+            tool_name="write_file",
+            result="Successfully wrote template.yaml",
+            metadata={
+                "artifact": {
+                    "filename": "template.yaml",
+                    "mediaType": "application/yaml",
+                    "path": str(source),
+                }
+            },
+        ),
+        artifact_store=store,
+    )
+
+    artifact = dump(queue.events[0])["artifact"]
+    assert artifact["name"] == "template.yaml"
+    assert artifact["metadata"]["sourcePath"] == str(source)
+    assert store.path_for(artifact["artifactId"]).read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio
