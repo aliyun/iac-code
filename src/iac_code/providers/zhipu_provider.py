@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from iac_code.providers.openai_provider import OpenAIProvider
-from iac_code.providers.thinking import ThinkingFamily, get_thinking_spec, normalize_effort
+from iac_code.providers.thinking import EffortLevel, ThinkingFamily, get_thinking_spec, normalize_effort
 
 
 class ZhiPuProvider(OpenAIProvider):
@@ -42,7 +42,15 @@ class ZhiPuProvider(OpenAIProvider):
         if spec.family is not ThinkingFamily.ZHIPU:
             return {}
         if self._thinking_disabled():
-            return {"extra_body": {"thinking": {"type": "disabled"}}}
+            if spec.supports_disable:
+                return {"extra_body": {"thinking": {"type": "disabled"}}}
+            # Always-on models (glm-5.3) reject thinking.type=disabled. The
+            # official migration guidance is to keep thinking enabled at the
+            # lightest effort instead of failing the request.
+            always_on_kwargs: dict[str, Any] = {"extra_body": {"thinking": {"type": "enabled"}}}
+            if spec.uses_reasoning_effort_param and EffortLevel.LOW in spec.allowed_efforts:
+                always_on_kwargs["reasoning_effort"] = EffortLevel.LOW.value
+            return always_on_kwargs
         kwargs: dict[str, Any] = {"extra_body": {"thinking": {"type": "enabled"}}}
         if not spec.uses_reasoning_effort_param:
             return kwargs

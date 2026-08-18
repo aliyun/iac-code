@@ -77,6 +77,8 @@ class TestContextWindowConfig:
             "gemini-3.6-flash",
             "gemini-3.5-flash",
             "gemini-3.5-flash-lite",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
             "gemini-3.1-pro-preview",
             "gemini-3.1-pro-preview-customtools",
             "gemini-3-flash-preview",
@@ -102,8 +104,10 @@ class TestContextWindowConfig:
             ("qwen3.8-max-preview", 1_000_000),
             ("qwen3.7-max", 1_000_000),
             ("qwen3.7-plus", 1_000_000),
+            ("qwen3.7-flash", 1_000_000),
             ("qwen3.6-flash", 1_000_000),
             ("deepseek-v4-pro", 1_000_000),
+            ("deepseek-v4-pro-0813", 1_000_000),
             ("deepseek-v4-flash-0731", 1_000_000),
             ("deepseek-v4-flash", 1_000_000),
             ("glm-5.1", 202_752),
@@ -114,12 +118,19 @@ class TestContextWindowConfig:
     def test_current_dashscope_models_use_documented_context_capacity(self, model, context_window):
         assert get_context_window_config(model).context_window == context_window
 
-    @pytest.mark.parametrize("model", ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-0731"])
+    @pytest.mark.parametrize(
+        "model", ["deepseek-v4-pro", "deepseek-v4-pro-0813", "deepseek-v4-flash", "deepseek-v4-flash-0731"]
+    )
     def test_deepseek_v4_models_use_documented_output_capacity(self, model):
         assert get_context_window_config(model).max_output_tokens == 393_216
 
     def test_direct_glm52_uses_documented_context_and_output_capacity(self):
         config = get_context_window_config("glm-5.2")
+        assert config.context_window == 1_000_000
+        assert config.max_output_tokens == 128_000
+
+    def test_glm53_uses_documented_context_and_output_capacity(self):
+        config = get_context_window_config("glm-5.3")
         assert config.context_window == 1_000_000
         assert config.max_output_tokens == 128_000
 

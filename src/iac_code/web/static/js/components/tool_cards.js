@@ -983,7 +983,12 @@ function renderGenericDetail(tool = {}, options = {}) {
   const detail = document.createElement("section");
   detail.className = "tool-generic-detail";
 
-  if (tool.summary) {
+  // summary 行只作「进行中、尚无结果」时的进度消息:结果一旦到达,结果块已含
+  // 相同内容(后端把完整结果文本作为 summary 下发),再渲染就是转录里多出的
+  // 冗余行;非字符串 summary(如 input_complete 的 {toolName,input} 对象)由
+  // 输入块承载,同样不渲染。
+  const hasResults = Array.isArray(tool.results) && tool.results.length > 0;
+  if (typeof tool.summary === "string" && tool.summary.trim() && !hasResults) {
     const summary = document.createElement("p");
     summary.className = "tool-card-summary";
     summary.textContent = text(tool.summary);

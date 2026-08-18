@@ -51,7 +51,7 @@ class TestProvidersMetadata:
         models = set(entry["models"])
         for expected in (
             "qwen3.8-max",
-            "qwen3.8-max-preview",
+            "deepseek-v4-pro-0813",
             "qwen3.7-max",
             "qwen3.7-plus",
             "qwen3.6-plus",

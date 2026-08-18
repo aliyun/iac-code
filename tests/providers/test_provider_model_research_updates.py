@@ -27,6 +27,7 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
         "qwen3.8-max",
         "qwen3.7-max",
         "qwen3.7-plus",
+        "qwen3.7-flash",
         "qwen3.6-plus",
         "qwen3.6-flash",
         "qwen3.5-plus",
@@ -34,6 +35,7 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
         "qwen-plus",
         "qwen-flash",
         "deepseek-v4-pro",
+        "deepseek-v4-pro-0813",
         "deepseek-v4-flash-0731",
         "deepseek-v4-flash",
         "kimi/kimi-k3",
@@ -60,6 +62,7 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
     assert not _model_entry("dashscope", "qwen3.7-max").support_multimodal
     for model_id in (
         "qwen3.7-plus",
+        "qwen3.7-flash",
         "qwen3.6-plus",
         "qwen3.6-flash",
         "qwen3.5-plus",
@@ -68,6 +71,7 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
         "MiniMax/MiniMax-M3",
     ):
         assert _model_entry("dashscope", model_id).support_multimodal
+    assert not _model_entry("dashscope", "deepseek-v4-pro-0813").support_multimodal
     # The public adapter can only send local attachments as data URLs, but
     # Moonshot-hosted K3 on DashScope accepts public image URLs only.
     assert not _model_entry("dashscope", "kimi/kimi-k3").support_multimodal
@@ -78,12 +82,12 @@ def test_dashscope_token_plan_uses_exact_supported_chat_models() -> None:
 
     for model_id in (
         "qwen3.8-max",
-        "qwen3.8-max-preview",
         "qwen3.7-max",
         "qwen3.7-plus",
         "qwen3.6-plus",
         "qwen3.6-flash",
         "deepseek-v4-pro",
+        "deepseek-v4-pro-0813",
         "deepseek-v4-flash-0731",
         "deepseek-v4-flash",
         "deepseek-v3.2",
@@ -99,10 +103,13 @@ def test_dashscope_token_plan_uses_exact_supported_chat_models() -> None:
 
     assert "glm-5-turbo" not in models
     assert "MiniMax-M2.7" not in models
+    # qwen3.8-max-preview ended its preview and went offline; the legacy ID is
+    # now routed to qwen3.8-max server-side, so it leaves the selectable list.
+    assert "qwen3.8-max-preview" not in models
     assert PROVIDER_REGISTRY["dashscope_token_plan"].default_model == "qwen3.8-max"
     assert _model_entry("dashscope_token_plan", "qwen3.8-max").support_multimodal
-    assert _model_entry("dashscope_token_plan", "qwen3.8-max-preview").support_multimodal
     assert not _model_entry("dashscope_token_plan", "qwen3.7-max").support_multimodal
+    assert not _model_entry("dashscope_token_plan", "deepseek-v4-pro-0813").support_multimodal
     for model_id in ("qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash", "kimi-k2.7-code", "kimi-k2.5", "kimi-k2.6"):
         assert _model_entry("dashscope_token_plan", model_id).support_multimodal
 
@@ -136,11 +143,16 @@ def test_openai_azure_anthropic_and_gemini_models_are_updated() -> None:
     assert get_thinking_spec("anthropic", "claude-opus-4-8").family is ThinkingFamily.ANTHROPIC_ADAPTIVE
     assert get_thinking_spec("anthropic", "claude-sonnet-5").family is ThinkingFamily.ANTHROPIC_ADAPTIVE
 
-    for model_id in ("gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview-customtools"):
+    for model_id in (
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-pro-preview-customtools",
+    ):
         assert model_id in _model_ids("gemini")
         assert _model_entry("gemini", model_id).support_multimodal
         assert get_thinking_spec("gemini", model_id).family is ThinkingFamily.GEMINI
-    assert PROVIDER_REGISTRY["gemini"].default_model == "gemini-3.6-flash"
+    assert PROVIDER_REGISTRY["gemini"].default_model == "gemini-3.7-flash"
     assert "gemini-3.1-flash-lite-preview" not in _model_ids("gemini")
     assert "gemini-2.0-flash" not in _model_ids("gemini")
     assert get_thinking_spec("gemini", "gemini-2.5-flash-lite").family is ThinkingFamily.GEMINI
@@ -168,10 +180,16 @@ def test_direct_kimi_minimax_and_zhipu_models_are_updated() -> None:
         assert PROVIDER_REGISTRY[provider_key].default_model == "glm-5.2"
         assert get_thinking_spec(provider_key, "glm-5.2").family is ThinkingFamily.ZHIPU
         assert get_thinking_spec(provider_key, "glm-5.1").family is ThinkingFamily.ZHIPU
+        # GLM-5.3 is Coding-Plan-only for now; the standard model API is not
+        # live yet, so it must not appear on the direct endpoints.
+        assert "glm-5.3" not in _model_ids(provider_key)
+        assert get_thinking_spec(provider_key, "glm-5.3").family is ThinkingFamily.NONE
 
     for provider_key in ("zhipu_cn_codingplan", "zhipu_intl_codingplan"):
+        assert "glm-5.3" in _model_ids(provider_key)
         assert "glm-5.2" in _model_ids(provider_key)
-        assert PROVIDER_REGISTRY[provider_key].default_model == "glm-5.2"
+        assert PROVIDER_REGISTRY[provider_key].default_model == "glm-5.3"
+        assert get_thinking_spec(provider_key, "glm-5.3").family is ThinkingFamily.ZHIPU
         assert get_thinking_spec(provider_key, "glm-5.2").family is ThinkingFamily.ZHIPU
 
 
@@ -199,6 +217,23 @@ def test_provider_specific_thinking_wire_formats_do_not_use_openai_or_anthropic_
         "extra_body": {"thinking": {"type": "enabled"}},
         "reasoning_effort": "max",
     }
+    # GLM-5.3 (Coding Plan) is always-on: it accepts low/high/max and rejects
+    # thinking.type=disabled, so a disabled toggle degrades to enabled + low.
+    assert ZhiPuProvider(
+        model="glm-5.3", api_key="k", provider_key="zhipu_cn_codingplan", effort="max"
+    )._build_thinking_kwargs() == {
+        "extra_body": {"thinking": {"type": "enabled"}},
+        "reasoning_effort": "max",
+    }
+    assert ZhiPuProvider(
+        model="glm-5.3", api_key="k", provider_key="zhipu_cn_codingplan", thinking_enabled=False
+    )._build_thinking_kwargs() == {
+        "extra_body": {"thinking": {"type": "enabled"}},
+        "reasoning_effort": "low",
+    }
+    assert ZhiPuProvider(
+        model="glm-5.3", api_key="k", provider_key="zhipu_intl_codingplan"
+    )._build_thinking_kwargs() == {"extra_body": {"thinking": {"type": "enabled"}}}
     assert ZhiPuProvider(model="glm-5.2", api_key="k")._build_thinking_kwargs() == {
         "extra_body": {"thinking": {"type": "enabled"}}
     }
@@ -258,10 +293,24 @@ def test_gemini_thinking_rules_match_each_model_generation() -> None:
     assert GeminiProvider(model="gemini-3.5-flash-lite", api_key="k", effort="low")._build_thinking_kwargs() == {
         "reasoning_effort": "low"
     }
+    # Gemini 3.7 Flash documents low/medium/high; minimal returns an error
+    # server-side, so the adapter must fall back to the default instead.
+    assert GeminiProvider(model="gemini-3.7-flash", api_key="k", effort="low")._build_thinking_kwargs() == {
+        "reasoning_effort": "low"
+    }
+    assert GeminiProvider(model="gemini-3.7-flash", api_key="k", effort="minimal")._build_thinking_kwargs() == {
+        "reasoning_effort": "medium"
+    }
+    assert GeminiProvider(model="gemini-3.7-flash", api_key="k", thinking_enabled=False)._build_thinking_kwargs() == {}
 
     flash_lite = get_thinking_spec("gemini", "gemini-3.1-flash-lite")
     assert flash_lite.default_effort is EffortLevel.MINIMAL
     assert flash_lite.supports_disable is False
+
+    gemini_37 = get_thinking_spec("gemini", "gemini-3.7-flash")
+    assert gemini_37.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH)
+    assert gemini_37.default_effort is EffortLevel.MEDIUM
+    assert gemini_37.supports_disable is False
 
 
 def test_anthropic_effort_and_disable_rules_are_model_specific() -> None:
@@ -288,6 +337,22 @@ def test_anthropic_effort_and_disable_rules_are_model_specific() -> None:
 
 def test_dashscope_new_model_protocols_are_not_flattened() -> None:
     from iac_code.providers.dashscope_provider import DashScopeProvider
+
+    deepseek_0813 = get_thinking_spec("dashscope", "deepseek-v4-pro-0813")
+    assert deepseek_0813.allowed_efforts == (
+        EffortLevel.LOW,
+        EffortLevel.MEDIUM,
+        EffortLevel.HIGH,
+        EffortLevel.XHIGH,
+        EffortLevel.MAX,
+    )
+    assert deepseek_0813.default_effort is EffortLevel.HIGH
+    assert deepseek_0813.uses_reasoning_effort_param is True
+    assert DashScopeProvider(
+        model="deepseek-v4-pro-0813",
+        api_key="k",
+        thinking_enabled=False,
+    )._build_thinking_kwargs() == {"extra_body": {"enable_thinking": False}}
 
     deepseek = get_thinking_spec("dashscope", "deepseek-v4-flash-0731")
     assert deepseek.allowed_efforts == (

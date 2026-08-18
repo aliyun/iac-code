@@ -455,6 +455,8 @@ class TestLoadCredentials:
             ("qwen3.8-max-preview", "dashscope_token_plan"),
             ("kimi/kimi-k3", "dashscope"),
             ("MiniMax/MiniMax-M3", "dashscope"),
+            ("deepseek-v4-pro-0813", "dashscope"),
+            ("glm-5.3", "zhipu_cn_codingplan"),
         ],
     )
     def test_api_key_env_routed_via_exact_hosted_model(self, monkeypatch, tmp_path, model, expected_slot):

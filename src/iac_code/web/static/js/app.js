@@ -1,9 +1,9 @@
 import * as api from "./api.js?v=web-repl-ui-311";
-import { createComposerController } from "./components/composer.js?v=session-model-v19";
+import { createComposerController } from "./components/composer.js?v=session-model-v20";
 import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v5";
 import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v7";
-import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v24";
-import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v57";
+import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v25";
+import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v58";
 import { createOutputController } from "./components/output_panel.js?v=output-panel-v23";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
 import { reduceEvent } from "./events.js?v=web-repl-ui-319";
@@ -3214,6 +3214,13 @@ function renderCollapsedTurn(container, agentMessages, state, turnId, boundaries
 
   const details = document.createElement("details");
   details.className = "turn-process";
+  // 展开态须跨转录全量重建存活(如 pointerleave 追平帧、状态同步等静息态重渲染):
+  // toggle 记录器只登记带 openKey 的 details,applyDetailsOpenOverrides 也只恢复
+  // 有键者;缺键时重建即回默认收起,表现为「展开后自动收起来」。
+  const turnKey = turnId || text(agentMessages[0]?.messageId || agentMessages[0]?.id || "");
+  if (turnKey) {
+    details.dataset.openKey = `turnproc:${turnKey}`;
+  }
   const summary = document.createElement("summary");
   summary.className = "turn-process-summary";
   const summaryLabel = document.createElement("span");
@@ -6165,6 +6172,10 @@ async function start() {
   byShell("app-modal-form")?.addEventListener("submit", submitAppModal);
   // 多行编辑:回车换行,⌘/Ctrl + Enter 提交(与 composer 一致)。
   byShell("app-modal-textarea")?.addEventListener("keydown", (event) => {
+    // IME 组合输入中的按键属于输入法,不能触发提交(同 composer)。
+    if (event.isComposing || event.keyCode === 229) {
+      return;
+    }
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       void submitAppModal(event);
