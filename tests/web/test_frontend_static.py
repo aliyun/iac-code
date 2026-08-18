@@ -1258,7 +1258,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-315" in html
-    assert "/static/js/app.js?v=web-repl-ui-334" in html
+    assert "/static/js/app.js?v=web-repl-ui-335" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1292,8 +1292,8 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-334" in index_html
-    assert "web-repl-ui-333" not in index_html
+    assert "web-repl-ui-335" in index_html
+    assert "web-repl-ui-334" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-319" in app_source
     assert "./components/workspace.js?v=cloud-creds-v58" in app_source
@@ -2487,6 +2487,11 @@ def test_completed_turn_collapses_process_into_summary() -> None:
 
     # In-progress turn stays expanded; completed turns collapse.
     assert "flushPendingTurn(Boolean(state.currentTurnActive))" in app_source
+
+    # 「已处理」组的展开态必须跨重建保留:openKey 让 toggle 记录器登记用户操作、
+    # applyDetailsOpenOverrides 在重建后恢复;键取 turnId,缺 turnId 时回退首条消息 id。
+    assert 'const turnKey = turnId || text(agentMessages[0]?.messageId || agentMessages[0]?.id || "");' in app_source
+    assert 'details.dataset.openKey = `turnproc:${turnKey}`;' in app_source
 
     # 只有最后一次工具调用之后的文本才是「最终回答」;此前每个步骤的文本旁白
     # (夹在工具调用之间的 text delta)连同思考、工具一起折进「已处理」,不平铺成答案。
@@ -10527,8 +10532,8 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-334" in html
-    assert "web-repl-ui-333" not in html
+    assert "web-repl-ui-335" in html
+    assert "web-repl-ui-334" not in html
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:

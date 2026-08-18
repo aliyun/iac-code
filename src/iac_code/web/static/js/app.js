@@ -3214,6 +3214,13 @@ function renderCollapsedTurn(container, agentMessages, state, turnId, boundaries
 
   const details = document.createElement("details");
   details.className = "turn-process";
+  // 展开态须跨转录全量重建存活(如 pointerleave 追平帧、状态同步等静息态重渲染):
+  // toggle 记录器只登记带 openKey 的 details,applyDetailsOpenOverrides 也只恢复
+  // 有键者;缺键时重建即回默认收起,表现为「展开后自动收起来」。
+  const turnKey = turnId || text(agentMessages[0]?.messageId || agentMessages[0]?.id || "");
+  if (turnKey) {
+    details.dataset.openKey = `turnproc:${turnKey}`;
+  }
   const summary = document.createElement("summary");
   summary.className = "turn-process-summary";
   const summaryLabel = document.createElement("span");
