@@ -2333,6 +2333,9 @@ class TestModelPrefixAutoMapping:
             ("glm-5.2-fast-preview", "dashscope"),
             ("kimi/kimi-k3", "dashscope"),
             ("MiniMax/MiniMax-M3", "dashscope"),
+            ("deepseek-v4-pro-0813", "dashscope"),
+            ("deepseek-v4-flash-0731", "dashscope"),
+            ("glm-5.3", "zhipu_cn_codingplan"),
         ],
     )
     def test_exact_hosted_models_override_generic_prefixes(self, monkeypatch, model, expected_provider):
@@ -2352,12 +2355,15 @@ class TestModelPrefixAutoMapping:
 
 
 def test_qwen38_multimodal_fallback_preserves_image_support():
+    # qwen3.8-max-preview ended its preview and left the selectable catalog,
+    # but saved settings may still hold the ID; the fallback keeps routing
+    # it to the multimodal formal model.
     source_model = "qwen3.8-max-preview"
     fallback_model = MODEL_FALLBACK_MAP[source_model]
     entries = {model.id: model for model in PROVIDER_REGISTRY["dashscope_token_plan"].models}
 
     assert fallback_model == "qwen3.8-max"
-    assert entries[source_model].support_multimodal is True
+    assert source_model not in entries
     assert entries[fallback_model].support_multimodal is True
 
 

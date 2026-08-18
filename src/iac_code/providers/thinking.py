@@ -133,6 +133,14 @@ _GEMINI_3_EFFORTS: tuple[EffortLevel, ...] = (
     EffortLevel.HIGH,
 )
 
+# Gemini 3.7 Flash documents thinking levels low/medium/high and returns an
+# error for ``minimal``.
+_GEMINI_37_EFFORTS: tuple[EffortLevel, ...] = (
+    EffortLevel.LOW,
+    EffortLevel.MEDIUM,
+    EffortLevel.HIGH,
+)
+
 _GEMINI_25_EFFORTS: tuple[EffortLevel, ...] = (
     EffortLevel.MINIMAL,
     EffortLevel.LOW,
@@ -202,6 +210,14 @@ _KIMI_K3_EFFORTS: tuple[EffortLevel, ...] = (
 )
 
 _ZHIPU_GLM52_EFFORTS: tuple[EffortLevel, ...] = (EffortLevel.HIGH, EffortLevel.MAX)
+
+# GLM-5.3 always thinks; only low/high/max are documented and
+# thinking.type=disabled is rejected.
+_ZHIPU_GLM53_EFFORTS: tuple[EffortLevel, ...] = (
+    EffortLevel.LOW,
+    EffortLevel.HIGH,
+    EffortLevel.MAX,
+)
 
 
 _NONE_SPEC = ThinkingSpec(family=ThinkingFamily.NONE)
@@ -298,6 +314,14 @@ _ZHIPU_GLM52_SPEC = ThinkingSpec(
     EffortLevel.MAX,
     uses_reasoning_effort_param=True,
 )
+_ZHIPU_GLM53_SPEC = ThinkingSpec(
+    ThinkingFamily.ZHIPU,
+    _ZHIPU_GLM53_EFFORTS,
+    EffortLevel.MAX,
+    uses_reasoning_effort_param=True,
+    supports_disable=False,
+    thinking_enabled_by_default=True,
+)
 
 
 MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
@@ -340,6 +364,7 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "qwen3.8-max": _DASHSCOPE_QWEN38_SPEC,
         "qwen3.7-max": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.7-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
+        "qwen3.7-flash": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.6-max-preview": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.6-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.6-flash": ThinkingSpec(ThinkingFamily.DASHSCOPE),
@@ -358,6 +383,12 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "MiniMax-M2.5": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "MiniMax/MiniMax-M3": ThinkingSpec(ThinkingFamily.MINIMAX),
         "deepseek-v4-pro": ThinkingSpec(
+            ThinkingFamily.DASHSCOPE,
+            _DASHSCOPE_DEEPSEEK_EFFORTS,
+            EffortLevel.HIGH,
+            uses_reasoning_effort_param=True,
+        ),
+        "deepseek-v4-pro-0813": ThinkingSpec(
             ThinkingFamily.DASHSCOPE,
             _DASHSCOPE_DEEPSEEK_EFFORTS,
             EffortLevel.HIGH,
@@ -384,6 +415,7 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "qwen3.6-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.6-flash": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "deepseek-v4-pro": ThinkingSpec(ThinkingFamily.DASHSCOPE, _DEEPSEEK_EFFORTS, EffortLevel.HIGH),
+        "deepseek-v4-pro-0813": ThinkingSpec(ThinkingFamily.DASHSCOPE, _DEEPSEEK_EFFORTS, EffortLevel.HIGH),
         "deepseek-v4-flash-0731": ThinkingSpec(ThinkingFamily.DASHSCOPE, _DEEPSEEK_EFFORTS, EffortLevel.HIGH),
         "deepseek-v4-flash": ThinkingSpec(ThinkingFamily.DASHSCOPE, _DEEPSEEK_EFFORTS, EffortLevel.HIGH),
         "deepseek-v3.2": ThinkingSpec(ThinkingFamily.DASHSCOPE),
@@ -396,6 +428,12 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "glm-5.2": _DASHSCOPE_GLM52_SPEC,
     },
     "gemini": {
+        "gemini-3.7-flash": ThinkingSpec(
+            ThinkingFamily.GEMINI,
+            _GEMINI_37_EFFORTS,
+            EffortLevel.MEDIUM,
+            supports_disable=False,
+        ),
         "gemini-3.6-flash": ThinkingSpec(
             ThinkingFamily.GEMINI,
             _GEMINI_3_EFFORTS,
@@ -485,6 +523,7 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "glm-4.5-flash": ThinkingSpec(ThinkingFamily.ZHIPU),
     },
     "zhipu_cn_codingplan": {
+        "glm-5.3": _ZHIPU_GLM53_SPEC,
         "glm-5.2": _ZHIPU_GLM52_SPEC,
         "glm-5-turbo": ThinkingSpec(ThinkingFamily.ZHIPU),
         "glm-4.7": ThinkingSpec(ThinkingFamily.ZHIPU),

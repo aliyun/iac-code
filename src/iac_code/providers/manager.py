@@ -320,11 +320,14 @@ MODEL_FALLBACK_MAP = {
     "qwen3.8-max": "qwen3.7-plus",
     "qwen3.8-max-preview": "qwen3.8-max",
     "qwen3.7-max": "qwen3.7-plus",
+    "qwen3.7-flash": "qwen3.6-flash",
     "kimi/kimi-k3": "kimi-k2.7-code",
     "kimi-k3": "kimi-k2.7-code",
+    "glm-5.3": "glm-5.2",
     "glm-5.2-fast-preview": "glm-5.2",
     "glm-5.2": "glm-5.1",
     "deepseek-v4-pro": "deepseek-v4-flash",
+    "deepseek-v4-pro-0813": "deepseek-v4-pro",
     "deepseek-v4-flash-0731": "deepseek-v4-flash",
 }
 
@@ -843,7 +846,10 @@ class ProviderManager:
         if descriptor is None or not descriptor.models:
             return None
         model_ids = {entry.id for entry in descriptor.models}
-        return fallback if current_model in model_ids and fallback in model_ids else None
+        # The source model may be a legacy ID that left the selectable
+        # catalog but is still callable (e.g. qwen3.8-max-preview after the
+        # preview ended), so only the fallback target must stay in-catalog.
+        return fallback if fallback in model_ids else None
 
     def _get_refusal_fallback_model(self, model: str, provider_key: str) -> str | None:
         fallback = _MODEL_REFUSAL_FALLBACK_MAP.get(model)

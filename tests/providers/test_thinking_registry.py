@@ -158,6 +158,14 @@ class TestGetThinkingSpec:
         assert lite.default_effort is EffortLevel.NONE
         assert lite.supports_disable is True
 
+    def test_gemini_37_flash_excludes_minimal_effort(self):
+        spec = get_thinking_spec("gemini", "gemini-3.7-flash")
+        assert spec.family is ThinkingFamily.GEMINI
+        assert spec.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH)
+        assert EffortLevel.MINIMAL not in spec.allowed_efforts
+        assert spec.default_effort is EffortLevel.MEDIUM
+        assert spec.supports_disable is False
+
     def test_direct_glm52_supports_high_and_max_effort(self):
         for provider_key in ("zhipu_cn", "zhipu_intl", "zhipu_cn_codingplan", "zhipu_intl_codingplan"):
             spec = get_thinking_spec(provider_key, "glm-5.2")
@@ -209,7 +217,7 @@ class TestGetThinkingSpec:
             assert spec.default_thinking_budget is None, (provider_key, model)
 
     def test_dashscope_deepseek_supports_documented_efforts(self):
-        for model in ("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-0731"):
+        for model in ("deepseek-v4-pro", "deepseek-v4-pro-0813", "deepseek-v4-flash", "deepseek-v4-flash-0731"):
             spec = get_thinking_spec("dashscope", model)
             assert spec.family is ThinkingFamily.DASHSCOPE
             assert spec.allowed_efforts == (
@@ -224,6 +232,12 @@ class TestGetThinkingSpec:
 
     def test_token_plan_deepseek_0731_is_registered(self):
         spec = get_thinking_spec("dashscope_token_plan", "deepseek-v4-flash-0731")
+        assert spec.family is ThinkingFamily.DASHSCOPE
+        assert spec.allowed_efforts == (EffortLevel.LOW, EffortLevel.HIGH, EffortLevel.MAX)
+        assert spec.default_effort is EffortLevel.HIGH
+
+    def test_token_plan_deepseek_pro_0813_is_registered(self):
+        spec = get_thinking_spec("dashscope_token_plan", "deepseek-v4-pro-0813")
         assert spec.family is ThinkingFamily.DASHSCOPE
         assert spec.allowed_efforts == (EffortLevel.LOW, EffortLevel.HIGH, EffortLevel.MAX)
         assert spec.default_effort is EffortLevel.HIGH
@@ -280,6 +294,19 @@ class TestGetThinkingSpec:
         spec = get_thinking_spec("zhipu_intl_codingplan", "glm-5.1")
         assert spec.family is ThinkingFamily.ZHIPU
 
+    def test_glm53_coding_plan_is_always_on_with_low_high_max(self):
+        for provider_key in ("zhipu_cn_codingplan", "zhipu_intl_codingplan"):
+            spec = get_thinking_spec(provider_key, "glm-5.3")
+            assert spec.family is ThinkingFamily.ZHIPU
+            assert spec.allowed_efforts == (EffortLevel.LOW, EffortLevel.HIGH, EffortLevel.MAX)
+            assert spec.default_effort is EffortLevel.MAX
+            assert spec.uses_reasoning_effort_param is True
+            assert spec.supports_disable is False
+            assert spec.thinking_enabled_by_default is True
+        # The standard ZhiPu model API is not live for glm-5.3 yet.
+        assert get_thinking_spec("zhipu_cn", "glm-5.3").family is ThinkingFamily.NONE
+        assert get_thinking_spec("zhipu_intl", "glm-5.3").family is ThinkingFamily.NONE
+
     def test_token_plan_minimax_m25(self):
         spec = get_thinking_spec("dashscope_token_plan", "MiniMax-M2.5")
         assert spec.family is ThinkingFamily.DASHSCOPE
@@ -299,6 +326,11 @@ class TestResolveThinkingActive:
     def test_kimi_and_zhipu_unset_default_on(self):
         assert resolve_thinking_active("kimi_cn", "kimi-k2.6", None) is True
         assert resolve_thinking_active("zhipu_cn", "glm-5.2", None) is True
+
+    def test_glm53_cannot_be_turned_off(self):
+        assert resolve_thinking_active("zhipu_cn_codingplan", "glm-5.3", None) is True
+        assert resolve_thinking_active("zhipu_cn_codingplan", "glm-5.3", False) is True
+        assert resolve_thinking_active("zhipu_intl_codingplan", "glm-5.3", False) is True
 
     def test_reasoning_families_unset_default_off(self):
         # reasoning-effort / budget 家族:未配置时不下发思考指令 → 视为关。
