@@ -149,8 +149,14 @@ Ejecuta un turno de mensaje A2A sin streaming. La respuesta contiene una tarea o
 | `role` | string | Sí | Usa `ROLE_USER` para entrada de usuario |
 | `parts` | array | Sí | Partes similares a texto, datos JSON, texto sin procesar, URL de archivo local o partes multimodales acotadas |
 | `metadata.iac_code.cwd` | string | Recomendado | Ruta absoluta del espacio de trabajo; si se omite, toma por defecto el directorio del proceso del servidor |
+| `metadata.iac_code.preferredLanguage` | string | Opcional | Idioma de visualización preferido por el llamador para esta tarea; el texto visible para el usuario se localiza por solicitud |
+| `metadata.iac_code.candidatePresentation` | string | Opcional | Con `rich-v1`, el paso de confirmación de candidatos del pipeline devuelve cargas estructuradas de presentación enriquecida |
 
 `metadata.iac_code.cwd` debe ser un directorio absoluto existente cuando se proporciona. Debe estar dentro de una raíz de espacio de trabajo permitida. De forma predeterminada, las raíces permitidas son el directorio del proceso del servidor y el directorio temporal del sistema; `IACCODE_A2A_ALLOWED_CWDS` puede proporcionar una lista permitida separada por rutas del sistema operativo.
+
+`metadata.iac_code.preferredLanguage` solo afecta al texto visible para el usuario (progreso, preguntas, avisos de permisos, presentaciones de candidatos, explicaciones de resultados); los nombres de campos del protocolo, los enumerados, los ID y las formas de los comandos nunca se traducen. Los valores aceptados son los idiomas admitidos `en`, `zh`, `es`, `fr`, `de`, `ja`, `pt`; los valores se normalizan recortando espacios, pasando a minúsculas y eliminando el sufijo regional (por ejemplo, `zh-CN` se resuelve a `zh`). Los valores no reconocidos se ignoran y el servidor vuelve a su idioma predeterminado. El campo se aplica solo al turno de mensaje actual; los turnos posteriores que reutilicen el mismo `contextId` deben volver a incluirlo o volverán al idioma predeterminado.
+
+`metadata.iac_code.candidatePresentation` con `rich-v1` hace que el paso de confirmación de candidatos del pipeline selling devuelva una carga estructurada apta para renderizado enriquecido (nombre del candidato, resumen, diagrama de arquitectura, coste mensual total, partidas de coste). Sin el campo, el comportamiento de presentación en texto simple no cambia.
 
 Categorías de entrada soportadas:
 
@@ -384,6 +390,39 @@ Los detalles de herramientas y uso se entregan mediante `metadata.iac_code`:
 El modo pipeline también puede publicar el estado MCP como metadata de pipeline con `metadata.iac_code.pipeline.eventType == "mcp_status"`. Las advertencias MCP, las instantáneas de estado y la metadata de progreso se sanitizan antes del streaming; los secretos de headers, variables de entorno, tokens OAuth y rutas locales se redactan o resumen.
 
 Cuando un resultado de herramienta incluye un payload de artefacto de texto soportado, el servidor almacena el payload localmente, emite un `TaskArtifactUpdateEvent` estándar y registra el artefacto en el campo `artifacts` de la tarea. La parte de artefacto usa una URL `file://` más metadatos como `mediaType`, `byteSize` y `sha256`; el contenido original del artefacto no se duplica dentro de los metadatos de herramienta.
+
+### Decisiones interactivas de permisos
+
+Con la configuración predeterminada, una solicitud de permiso de herramienta durante un turno A2A se convierte en una espera de entrada: iac-code pausa el turno, emite una actualización de estado `TASK_STATE_INPUT_REQUIRED` con un sobre de permiso y espera la decisión estructurada del llamador.
+
+Los metadatos de la actualización de estado contienen:
+
+- `metadata.iac_code.input` — el sobre de permiso (`schemaVersion` 1), con los campos:
+  - Campos de correlación: `kind: "permission"`, `requestTaskId`, `contextId`, `inputId`, `toolUseId`, `toolName`
+  - Campos de visualización: `title`, `purpose`, `effect`, `target`, `isReadOnly`, `safeSummary`, más `deploymentSummary` en solicitudes de despliegue
+  - `prompt` y `options` (`allow_once` / `deny`), localizados al idioma preferido del llamador
+- `metadata.iac_code.permission` — contiene `autoApproved: false`, `pending: true`, `toolName`, `toolUseId`
+
+El llamador envía su decisión mediante un mensaje de banda lateral: un único mensaje A2A `ROLE_USER` que contiene exactamente un DataPart `application/json` cuyo payload debe contener exactamente estos campos:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "permission",
+  "requestTaskId": "<taskId que emitió la solicitud de permiso>",
+  "inputId": "<inputId del sobre>",
+  "toolUseId": "<toolUseId del sobre>",
+  "decision": "allow_once"
+}
+```
+
+- `decision` solo acepta `allow_once` o `deny`.
+- El `taskId` externo del mensaje debe ser igual a `requestTaskId`; `contextId` procede del sobre externo del mensaje. Todos los campos de correlación deben conservarse literalmente; no deben reutilizarse entre solicitudes ni reinterpretarse una respuesta de una entrada como otra.
+- Cuando el servidor empareja la decisión, devuelve un DataPart `permission_ack` (`schemaVersion: 1`, `kind: "permission_ack"`, con `inputId`, `toolUseId`, `decision`, `accepted: true`) y emite una actualización de estado `TASK_STATE_WORKING` con `metadata.iac_code.inputReceived`; el turno se reanuda.
+
+En modo pipeline, las solicitudes de permiso se publican como eventos de pipeline (el sobre incluye además `scope` y coordenadas de paso/candidato); el formato de respuesta de banda lateral es idéntico.
+
+Con `auto-approve-permissions` habilitado o reglas de permisos explícitas configuradas, las solicitudes de permiso no se convierten en entrada interactiva; se aprueban automáticamente (con auditoría) o se resuelven según las reglas. Las API protegidas de escritura de Alibaba Cloud no quedan liberadas por reglas allow ordinarias y siguen requiriendo autorización exacta por API. Las decisiones de permisos se auditan localmente; toda decisión allow que requiere un registro de auditoría falla en modo cerrado si el registro no puede persistirse.
 
 ## Extensiones
 

@@ -22,6 +22,7 @@ Use A2A when another agent, workflow engine, or service needs to call iac-code a
 - **Workflow automation** — Internal tools can submit IaC generation, review, or conversion tasks over HTTP.
 - **Service discovery** — Clients can fetch the Agent Card and choose capabilities such as IaC generation or template review.
 - **Streaming integrations** — A chatops or dashboard client can show model text, tool activity, usage metadata, and final task state as the turn runs.
+- **External Skill integration** — External agents use the packaged iac-code Skill to drive a local authenticated A2A runtime through a standard-library-only bridge script, embedding iac-code as their Alibaba Cloud infrastructure capability. See [Skill integration](./skill-integration.md).
 
 ## Interaction Modes Comparison
 
@@ -32,6 +33,7 @@ Use A2A when another agent, workflow engine, or service needs to call iac-code a
 | **ACP Server** | `iac-code acp` | IDE/editor integration and multi-session client control |
 | **A2A Server** | `iac-code a2a` | Agent-to-agent interoperability over A2A transports |
 | **A2A Client** | `iac-code a2a-client call` | Calling remote A2A agents from iac-code |
+| **External Skill bridge** | `python3 scripts/iac_code.py start --follow` | External agents embedding iac-code as an Alibaba Cloud infrastructure capability |
 
 ## Core Capabilities
 
@@ -43,6 +45,8 @@ Use A2A when another agent, workflow engine, or service needs to call iac-code a
 - **Workspace scoping** — Reads the project directory from message metadata at `iac_code.cwd`.
 - **Tool metadata** — Emits iac-code-specific metadata for tool starts, input deltas, completed tool results, permission decisions, and token usage.
 - **Input parts** — Accepts text-like parts, JSON data parts, raw UTF-8 text, local workspace `file://` text files, and bounded multimodal attachments represented as prompt manifests.
+- **Per-request language** — Callers declare `metadata.iac_code.preferredLanguage`; user-visible text is localized per request so concurrent tasks do not fight over the global locale.
+- **Interactive permission decisions** — Permission requests pause the turn and emit a structured permission envelope; callers answer with `allow_once` or `deny` through a sideband message.
 - **Client calls** — Discovers remote Agent Cards, verifies signatures when configured, and sends text prompts to remote agents.
 - **Routing** — Selects configured remote agents by explicit name, skill, or prompt/tag matching.
 - **Persistence metadata** — Mirrors local A2A task/context snapshots to JSON files for cross-process restoration metadata.
@@ -71,7 +75,7 @@ iac-code supports A2A server mode over HTTP JSON-RPC/REST and several optional t
 - No autonomous planner DAG or complex multi-agent orchestration.
 - Push delivery is at-least-once for Redis-backed queues; callback receivers must handle duplicates and enforce their own endpoint-side authorization policy.
 
-Tool permission requests are rejected automatically in A2A server mode unless `auto-approve-permissions` or an explicit permission rule allows them. Permission decisions are audited locally; any allow decision that requires an audit record fails closed if that record cannot be persisted. Protected Alibaba Cloud write APIs still require exact per-API authorization outside blanket bypass modes. Run unauthenticated A2A mode only in trusted local environments or protect it with Bearer token, Basic auth, or API key authentication.
+With the default configuration, tool permission requests in A2A server mode become an interactive input wait: the turn pauses and emits a structured permission envelope, and callers answer with `allow_once` or `deny` through a sideband message. With `auto-approve-permissions` or explicit permission rules enabled, permissions are instead auto-approved or resolved by the rules. Permission decisions are audited locally; any allow decision that requires an audit record fails closed if that record cannot be persisted. Protected Alibaba Cloud write APIs still require exact per-API authorization outside blanket bypass modes. Run unauthenticated A2A mode only in trusted local environments or protect it with Bearer token, Basic auth, or API key authentication.
 
 
 ## Persistence and Session Backup

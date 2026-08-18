@@ -22,6 +22,7 @@ Verwenden Sie A2A, wenn ein anderer Agent, eine Workflow-Engine oder ein Service
 - **Workflow-Automatisierung** - Interne Tools koennen IaC-Generierungs-, Review- oder Konvertierungs-Tasks ueber HTTP einreichen.
 - **Service Discovery** - Clients koennen die Agent Card abrufen und Faehigkeiten wie IaC-Generierung oder Template-Review auswaehlen.
 - **Streaming-Integrationen** - Ein ChatOps- oder Dashboard-Client kann Modelltext, Tool-Aktivitaet, Nutzungsmetadaten und den finalen Task-Zustand anzeigen, waehrend der Turn laeuft.
+- **Externe Skill-Integration** - Externe Agenten nutzen das paketiere iac-code-Skill, um eine lokale authentifizierte A2A-Runtime ueber ein Bridge-Skript mit reiner Standardbibliothek anzusteuern, und betten iac-code als Alibaba-Cloud-Infrastrukturfaehigkeit ein. Siehe [Skill-Integration](./skill-integration.md).
 
 ## Vergleich der Interaktionsmodi
 
@@ -32,6 +33,7 @@ Verwenden Sie A2A, wenn ein anderer Agent, eine Workflow-Engine oder ein Service
 | **ACP-Server** | `iac-code acp` | IDE-/Editor-Integration und Multi-Session-Clientsteuerung |
 | **A2A-Server** | `iac-code a2a` | Agent-zu-Agent-Interoperabilitaet ueber A2A-Transports |
 | **A2A-Client** | `iac-code a2a-client call` | Aufrufen entfernter A2A-Agents aus iac-code |
+| **Externe Skill-Bridge** | `python3 scripts/iac_code.py start --follow` | Externe Agenten, die iac-code als Alibaba-Cloud-Infrastrukturfaehigkeit einbetten |
 
 ## Kernfaehigkeiten
 
@@ -43,6 +45,8 @@ Verwenden Sie A2A, wenn ein anderer Agent, eine Workflow-Engine oder ein Service
 - **Workspace-Eingrenzung** - Liest das Projektverzeichnis aus Nachrichtenmetadaten unter `iac_code.cwd`.
 - **Tool-Metadaten** - Gibt iac-code-spezifische Metadaten fuer Tool-Starts, Eingabedeltas, abgeschlossene Tool-Ergebnisse, Berechtigungsentscheidungen und Token-Nutzung aus.
 - **Eingabeteile** - Akzeptiert textartige Teile, JSON-Datenteile, rohen UTF-8-Text, lokale Workspace-Textdateien mit `file://` und begrenzte multimodale Anhaenge, die als Prompt-Manifeste dargestellt werden.
+- **Sprache pro Anfrage** - Aufrufer deklarieren `metadata.iac_code.preferredLanguage`; fuer Benutzer sichtbarer Text wird pro Anfrage lokalisiert, sodass parallele Tasks nicht um die globale Locale konkurrieren.
+- **Interaktive Berechtigungsentscheidungen** - Berechtigungsanfragen pausieren den Turn und emittieren einen strukturierten Berechtigungs-Umschlag; Aufrufer antworten mit `allow_once` oder `deny` ueber eine Sideband-Nachricht.
 - **Client-Aufrufe** - Entdeckt entfernte Agent Cards, prueft Signaturen bei entsprechender Konfiguration und sendet Text-Prompts an entfernte Agents.
 - **Routing** - Waehlt konfigurierte entfernte Agents nach explizitem Namen, Skill oder Prompt-/Tag-Abgleich aus.
 - **Persistenzmetadaten** - Spiegelt lokale A2A-Task-/Kontext-Snapshots in JSON-Dateien fuer prozessuebergreifende Wiederherstellungsmetadaten.
@@ -71,7 +75,7 @@ iac-code unterstuetzt A2A-Servermodus ueber HTTP JSON-RPC/REST und mehrere optio
 - Kein autonomer Planner-DAG und keine komplexe Multi-Agent-Orchestrierung.
 - Push-Zustellung ist fuer Redis-gestuetzte Queues mindestens einmal; Callback-Empfaenger muessen Duplikate behandeln und ihre eigene autorisierungsseitige Endpoint-Policy erzwingen.
 
-Tool-Berechtigungsanfragen werden im A2A-Servermodus automatisch abgelehnt, sofern sie nicht durch `auto-approve-permissions` oder eine explizite Berechtigungsregel erlaubt werden. Berechtigungsentscheidungen werden lokal auditiert; jede Allow-Entscheidung, die einen Auditdatensatz erfordert, schlaegt fail-closed fehl, wenn dieser Datensatz nicht persistiert werden kann. Geschuetzte Alibaba-Cloud-Schreib-APIs erfordern ausserhalb pauschaler Bypass-Modi weiterhin eine exakte Autorisierung pro API. Fuehren Sie den unauthentifizierten A2A-Modus nur in vertrauenswuerdigen lokalen Umgebungen aus oder schuetzen Sie ihn mit Bearer-Token-, Basic-Auth- oder API-Key-Authentifizierung.
+Mit der Standardkonfiguration werden Tool-Berechtigungsanfragen im A2A-Servermodus in ein interaktives Eingabe-Warten umgewandelt: Der Turn pausiert und emittiert einen strukturierten Berechtigungs-Umschlag, und Aufrufer antworten mit `allow_once` oder `deny` ueber eine Sideband-Nachricht. Mit aktiviertem `auto-approve-permissions` oder expliziten Berechtigungsregeln werden Berechtigungen stattdessen automatisch genehmigt oder nach den Regeln entschieden. Berechtigungsentscheidungen werden lokal auditiert; jede Allow-Entscheidung, die einen Auditdatensatz erfordert, schlaegt fail-closed fehl, wenn dieser Datensatz nicht persistiert werden kann. Geschuetzte Alibaba-Cloud-Schreib-APIs erfordern ausserhalb pauschaler Bypass-Modi weiterhin eine exakte Autorisierung pro API. Fuehren Sie den unauthentifizierten A2A-Modus nur in vertrauenswuerdigen lokalen Umgebungen aus oder schuetzen Sie ihn mit Bearer-Token-, Basic-Auth- oder API-Key-Authentifizierung.
 
 
 ## Persistenz und Sitzungsbackup

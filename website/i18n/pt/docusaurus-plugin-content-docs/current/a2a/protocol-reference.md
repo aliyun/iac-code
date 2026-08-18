@@ -149,8 +149,14 @@ Executa um turno de mensagem A2A sem streaming. A resposta contém uma tarefa ou
 | `role` | string | Sim | Use `ROLE_USER` para entrada do usuário |
 | `parts` | array | Sim | Partes semelhantes a texto, dados JSON, texto bruto, URL de arquivo local ou partes multimodais limitadas |
 | `metadata.iac_code.cwd` | string | Recomendado | Caminho absoluto do workspace; usa como padrão o diretório do processo do servidor se omitido |
+| `metadata.iac_code.preferredLanguage` | string | Opcional | Idioma de exibição preferido pelo chamador para esta tarefa; o texto visível ao usuário é localizado por requisição |
+| `metadata.iac_code.candidatePresentation` | string | Opcional | Com `rich-v1`, a etapa de confirmação de candidatos do pipeline retorna payloads estruturados de apresentação rica |
 
 `metadata.iac_code.cwd` deve ser um diretório absoluto existente quando fornecido. Ele deve estar dentro de uma raiz de workspace permitida. Por padrão, as raízes permitidas são o diretório do processo do servidor e o diretório temporário do sistema; `IACCODE_A2A_ALLOWED_CWDS` pode fornecer uma allowlist separada pelo separador de caminhos do sistema operacional.
+
+`metadata.iac_code.preferredLanguage` afeta apenas o texto visível ao usuário (progresso, perguntas, prompts de permissão, apresentações de candidatos, explicações de resultados); nomes de campos do protocolo, enums, IDs e formatos de comando nunca são traduzidos. Os valores aceitos são os idiomas suportados `en`, `zh`, `es`, `fr`, `de`, `ja`, `pt`; os valores são normalizados removendo espaços, convertendo para minúsculas e retirando o sufixo regional (por exemplo, `zh-CN` vira `zh`). Valores não reconhecidos são ignorados e o servidor volta ao idioma padrão. O campo vale apenas para o turno de mensagem atual; turnos seguintes que reutilizem o mesmo `contextId` precisam enviá-lo de novo, senão voltam ao idioma padrão.
+
+`metadata.iac_code.candidatePresentation` com `rich-v1` faz a etapa de confirmação de candidatos do pipeline selling retornar um payload estruturado próprio para renderização rica (nome do candidato, resumo, diagrama de arquitetura, custo mensal total, itens de custo). Sem o campo, o comportamento de apresentação em texto simples permanece inalterado.
 
 Categorias de entrada suportadas:
 
@@ -384,6 +390,39 @@ Detalhes de ferramentas e uso são entregues por `metadata.iac_code`:
 O modo pipeline também pode publicar status MCP como metadata de pipeline com `metadata.iac_code.pipeline.eventType == "mcp_status"`. Warnings MCP, snapshots de status e metadata de progresso são sanitizados antes do streaming; secrets em headers, variáveis de ambiente, tokens OAuth e caminhos locais são redigidos ou resumidos.
 
 Quando um resultado de ferramenta inclui um payload de artefato de texto suportado, o servidor armazena o payload localmente, emite um `TaskArtifactUpdateEvent` padrão e registra o artefato no campo `artifacts` da tarefa. A parte do artefato usa uma URL `file://` mais metadados como `mediaType`, `byteSize` e `sha256`; o conteúdo original do artefato não é duplicado dentro dos metadados da ferramenta.
+
+### Decisões interativas de permissão
+
+Com a configuração padrão, uma solicitação de permissão de ferramenta levantada durante um turno A2A vira uma espera de entrada: o iac-code pausa o turno, emite uma atualização de estado `TASK_STATE_INPUT_REQUIRED` com um envelope de permissão e aguarda a decisão estruturada do chamador.
+
+Os metadados da atualização de estado contêm:
+
+- `metadata.iac_code.input` — o envelope de permissão (`schemaVersion` 1), com os campos:
+  - Campos de correlação: `kind: "permission"`, `requestTaskId`, `contextId`, `inputId`, `toolUseId`, `toolName`
+  - Campos de exibição: `title`, `purpose`, `effect`, `target`, `isReadOnly`, `safeSummary`, além de `deploymentSummary` em solicitações de deploy
+  - `prompt` e `options` (`allow_once` / `deny`), localizados no idioma preferido do chamador
+- `metadata.iac_code.permission` — contém `autoApproved: false`, `pending: true`, `toolName`, `toolUseId`
+
+O chamador envia a decisão por uma mensagem de banda lateral: uma única mensagem A2A `ROLE_USER` contendo exatamente um DataPart `application/json` cujo payload deve conter exatamente estes campos:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "permission",
+  "requestTaskId": "<taskId que levantou a solicitação de permissão>",
+  "inputId": "<inputId do envelope>",
+  "toolUseId": "<toolUseId do envelope>",
+  "decision": "allow_once"
+}
+```
+
+- `decision` aceita apenas `allow_once` ou `deny`.
+- O `taskId` externo da mensagem deve ser igual a `requestTaskId`; `contextId` vem do envelope externo da mensagem. Todos os campos de correlação devem ser preservados literalmente; não devem ser reutilizados entre requisições, e uma resposta de uma entrada nunca deve ser reinterpretada como outra.
+- Quando o servidor casa a decisão, devolve um DataPart `permission_ack` (`schemaVersion: 1`, `kind: "permission_ack"`, com `inputId`, `toolUseId`, `decision`, `accepted: true`) e emite uma atualização de estado `TASK_STATE_WORKING` com `metadata.iac_code.inputReceived`; o turno então retoma.
+
+No modo pipeline, solicitações de permissão são publicadas como eventos de pipeline (o envelope também carrega `scope` e coordenadas de etapa/candidato); o formato de resposta de banda lateral é idêntico.
+
+Com `auto-approve-permissions` habilitado ou regras de permissão explícitas configuradas, solicitações de permissão não viram entrada interativa; são aprovadas automaticamente (com auditoria) ou resolvidas pelas regras. APIs protegidas de escrita Alibaba Cloud não são liberadas por regras allow comuns e ainda exigem autorização exata por API. Decisões de permissão são auditadas localmente; toda decisão allow que exige um registro de auditoria falha de forma fechada quando o registro não pode ser persistido.
 
 ## Extensões
 

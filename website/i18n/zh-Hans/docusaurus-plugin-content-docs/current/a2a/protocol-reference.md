@@ -161,6 +161,8 @@ Callback URLs 会在存储前以及分发前再次校验。默认 validator 会�
 | `metadata.iac_code.alibaba_cloud_access_key_secret` | string | 可选 | 当前任务使用的 Alibaba Cloud AccessKey Secret |
 | `metadata.iac_code.alibaba_cloud_region_id` | string | 可选 | 当前任务使用的 Alibaba Cloud region；和任务凭据一起省略时默认为 `cn-hangzhou` |
 | `metadata.iac_code.alibaba_cloud_security_token` | string | 可选 | 当前任务使用的 Alibaba Cloud STS token |
+| `metadata.iac_code.preferredLanguage` | string | 可选 | 调用方期望的本任务展示语言；用户可见文本按请求本地化 |
+| `metadata.iac_code.candidatePresentation` | string | 可选 | 取 `rich-v1` 时，Pipeline 候选确认步骤返回结构化富展示载荷 |
 
 提供 `metadata.iac_code.cwd` 时，它必须是一个绝对目录路径，并且 resolve 后位于允许的工作区根目录内。如果路径已存在，它必须是目录；如果路径不存在，executor 会在允许根目录下创建它。默认情况下，允许的根目录是服务器进程目录和系统临时目录；`IACCODE_A2A_ALLOWED_CWDS` 可以提供按 OS path separator 分隔的 allowlist。
 
@@ -171,6 +173,10 @@ Callback URLs 会在存储前以及分发前再次校验。默认 validator 会�
 `metadata.iac_code.iac_code_model` 只影响当前 A2A message turn。它优先于 `IAC_CODE_MODEL`、`settings.yml` 和 server 启动默认 model；复用同一个 `contextId` 的后续轮次如果不再传该字段，会回落到 server 默认 model。
 
 `metadata.iac_code.iac_code_api_key` 只影响当前 A2A message turn。它优先于 `IAC_CODE_API_KEY` 和 `.credentials.yml` 中当前有效 model 对应 provider 的 key；复用同一个 `contextId` 的后续轮次如果不再传该字段，会重新加载正常凭据，因此单次调用 key 不会串到后续请求。这个字段用于 LLM provider key，和 A2A transport 认证里的 `api-key` / `IACCODE_A2A_API_KEY` 是两件事。
+
+`metadata.iac_code.preferredLanguage` 只影响用户可见文本（进度、提问、权限提示、候选展示、结果说明等）；协议字段名、枚举值、ID 和命令格式不会被翻译。取值为支持的语言 `en`、`zh`、`es`、`fr`、`de`、`ja`、`pt`；值会先去除空白、转小写并去掉区域后缀（例如 `zh-CN` 归一为 `zh`），无法识别的值会被忽略并回落到服务器默认语言。该字段只影响当前消息轮次；复用同一个 `contextId` 的后续轮次要再次携带，否则回落到默认语言。
+
+`metadata.iac_code.candidatePresentation` 取 `rich-v1` 时，selling pipeline 的候选确认步骤会返回适合富渲染的结构化载荷（候选名称、摘要、架构图、月度总成本、分项成本等）；不传该字段时保持原有文本展示行为。
 
 支持的输入类别：
 
@@ -404,6 +410,39 @@ Assistant text 作为 status message 投递：
 Pipeline 模式也可以通过 `metadata.iac_code.pipeline.eventType == "mcp_status"` 发布 MCP status 作为 pipeline metadata。MCP warnings、status snapshots 和 progress metadata 在流式输出前都会被清洗；headers、环境变量、OAuth tokens 和本地路径中的 secrets 会被脱敏或摘要化。
 
 当工具结果包含受支持的文本 artifact payload 时，服务器会在本地存储该 payload，发出标准 `TaskArtifactUpdateEvent`，并在 task `artifacts` 字段中记录该 artifact。Artifact part 使用 `file://` URL 以及 `mediaType`、`byteSize` 和 `sha256` 等元数据；原始 artifact 内容不会在工具元数据中重复。
+
+### 交互式权限决策
+
+默认配置下，A2A 轮次中的工具权限请求会被转换为一次输入等待：iac-code 暂停轮次，发出携带权限信封的 `TASK_STATE_INPUT_REQUIRED` 状态更新，等待调用方作出结构化决策。
+
+状态更新元数据包含：
+
+- `metadata.iac_code.input` — 权限信封（`schemaVersion` 为 1），字段包括：
+  - 关联字段：`kind: "permission"`、`requestTaskId`、`contextId`、`inputId`、`toolUseId`、`toolName`
+  - 展示字段：`title`、`purpose`、`effect`、`target`、`isReadOnly`、`safeSummary`，部署类请求还包含 `deploymentSummary`
+  - `prompt` 与 `options`（`allow_once` / `deny`），按调用方的首选语言本地化
+- `metadata.iac_code.permission` — 包含 `autoApproved: false`、`pending: true`、`toolName`、`toolUseId`
+
+调用方通过一条旁路消息（sideband message）提交决策：一条 `ROLE_USER` A2A 消息，恰好包含一个 `application/json` DataPart，payload 必须恰好包含以下字段：
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "permission",
+  "requestTaskId": "<发出权限请求的 taskId>",
+  "inputId": "<信封中的 inputId>",
+  "toolUseId": "<信封中的 toolUseId>",
+  "decision": "allow_once"
+}
+```
+
+- `decision` 只接受 `allow_once` 或 `deny`。
+- 消息外层 `taskId` 必须等于 `requestTaskId`；`contextId` 取自消息外层信封。所有关联字段必须原样保留，不得跨请求复用，也不得把一个输入的应答重新解释为另一个输入。
+- 服务器匹配决策后返回一个 `permission_ack` DataPart（`schemaVersion: 1`、`kind: "permission_ack"`，含 `inputId`、`toolUseId`、`decision`、`accepted: true`），并发出携带 `metadata.iac_code.inputReceived` 的 `TASK_STATE_WORKING` 状态更新，轮次继续执行。
+
+Pipeline 模式下，权限请求以 pipeline 事件发布（信封额外携带 `scope` 和 step/candidate 坐标信息），旁路应答格式相同。
+
+启用 `auto-approve-permissions` 或配置了显式权限规则时，权限请求不会进入交互输入，而是按自动批准（带审计）或规则裁决处理。受保护的阿里云写 API 不经过普通允许规则放行，仍需按 API 精确授权；权限决策在本地审计，任何需要审计记录的允许决策在审计记录无法持久化时都会 fail closed。
 
 ## 扩展
 

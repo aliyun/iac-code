@@ -22,6 +22,7 @@ Utilisez A2A lorsqu'un autre agent, moteur de workflow ou service doit appeler i
 - **Automatisation de workflows** — Des outils internes peuvent soumettre des tâches de génération, de revue ou de conversion IaC via HTTP.
 - **Découverte de service** — Les clients peuvent récupérer l'Agent Card et choisir des capacités comme la génération IaC ou la revue de modèles.
 - **Intégrations en streaming** — Un client chatops ou tableau de bord peut afficher le texte du modèle, l'activité des outils, les métadonnées d'utilisation et l'état final de la tâche pendant l'exécution du tour.
+- **Intégration Skill externe** — Des agents externes utilisent le Skill empaqueté d'iac-code pour piloter un runtime A2A local authentifié via un script pont utilisant uniquement la bibliothèque standard, en intégrant iac-code comme capacité d'infrastructure Alibaba Cloud. Voir [Intégration Skill](./skill-integration.md).
 
 ## Comparaison des modes d'interaction
 
@@ -32,6 +33,7 @@ Utilisez A2A lorsqu'un autre agent, moteur de workflow ou service doit appeler i
 | **Serveur ACP** | `iac-code acp` | Intégration IDE/éditeur et contrôle client multi-session |
 | **Serveur A2A** | `iac-code a2a` | Interopérabilité agent-à-agent via les transports A2A |
 | **Client A2A** | `iac-code a2a-client call` | Appel d'agents A2A distants depuis iac-code |
+| **Pont Skill externe** | `python3 scripts/iac_code.py start --follow` | Agents externes intégrant iac-code comme capacité d'infrastructure Alibaba Cloud |
 
 ## Capacités principales
 
@@ -43,6 +45,8 @@ Utilisez A2A lorsqu'un autre agent, moteur de workflow ou service doit appeler i
 - **Portée de l'espace de travail** — Lit le répertoire du projet depuis les métadonnées de message à `iac_code.cwd`.
 - **Métadonnées d'outil** — Émet des métadonnées propres à iac-code pour les démarrages d'outils, les deltas d'entrée, les résultats d'outils terminés, les décisions d'autorisation et l'utilisation des jetons.
 - **Parties d'entrée** — Accepte les parties de type texte, les parties de données JSON, le texte UTF-8 brut, les fichiers texte locaux `file://` de l'espace de travail et les pièces jointes multimodales bornées représentées comme manifestes de prompt.
+- **Langue par requête** — Les appelants déclarent `metadata.iac_code.preferredLanguage` ; le texte visible par l'utilisateur est localisé par requête, afin que les tâches simultanées ne se disputent pas la locale globale.
+- **Décisions de permissions interactives** — Les demandes de permission suspendent le tour et émettent une enveloppe de permission structurée ; les appelants répondent par `allow_once` ou `deny` via un message hors bande.
 - **Appels client** — Découvre les Agent Cards distantes, vérifie les signatures lorsqu'elles sont configurées, et envoie des prompts texte à des agents distants.
 - **Routage** — Sélectionne les agents distants configurés par nom explicite, compétence ou correspondance prompt/tag.
 - **Métadonnées de persistance** — Duplique les instantanés locaux de tâches/contextes A2A vers des fichiers JSON pour les métadonnées de restauration interprocessus.
@@ -71,7 +75,7 @@ iac-code prend en charge le mode serveur A2A via HTTP JSON-RPC/REST et plusieurs
 - Pas de DAG de planificateur autonome ni d'orchestration multi-agent complexe.
 - La livraison push est au moins une fois pour les files adossées à Redis ; les récepteurs de callback doivent gérer les doublons et appliquer leur propre politique d'autorisation côté endpoint.
 
-Les demandes d'autorisation d'outil sont rejetées automatiquement en mode serveur A2A, sauf si `auto-approve-permissions` ou une règle de permission explicite les autorise. Les décisions de permissions sont auditées localement ; toute décision allow nécessitant un enregistrement d'audit échoue en mode fail-closed si cet enregistrement ne peut pas être persisté. Les API d'écriture Alibaba Cloud protégées nécessitent toujours une autorisation exacte par API hors des modes de bypass global. N'exécutez le mode A2A non authentifié que dans des environnements locaux de confiance, ou protégez-le avec une authentification par jeton Bearer, Basic auth ou clé API.
+Avec la configuration par défaut, les demandes d'autorisation d'outil en mode serveur A2A deviennent une attente d'entrée interactive : le tour est suspendu et émet une enveloppe de permission structurée, et les appelants répondent par `allow_once` ou `deny` via un message hors bande. Avec `auto-approve-permissions` ou des règles de permission explicites activés, les permissions sont au contraire approuvées automatiquement ou résolues selon les règles. Les décisions de permissions sont auditées localement ; toute décision allow nécessitant un enregistrement d'audit échoue en mode fail-closed si cet enregistrement ne peut pas être persisté. Les API d'écriture Alibaba Cloud protégées nécessitent toujours une autorisation exacte par API hors des modes de bypass global. N'exécutez le mode A2A non authentifié que dans des environnements locaux de confiance, ou protégez-le avec une authentification par jeton Bearer, Basic auth ou clé API.
 
 
 ## Persistance et sauvegarde de session

@@ -91,6 +91,8 @@ Cuando el pipeline termina, falla, sale antes de tiempo o se cancela, IaC Code v
 
 El modo pipeline está diseñado actualmente sobre todo para el REPL interactivo. El modo servidor A2A puede exponer progreso del pipeline, artefactos, resultados de permisos e información de recuperación, lo que resulta útil para conectar un pipeline a una consola externa o a un sistema de tareas.
 
+Al integrar el pipeline mediante A2A, los llamadores también pueden declarar dos capacidades en los metadatos del mensaje: `metadata.iac_code.preferredLanguage` hace que el progreso, las preguntas y los avisos de permisos se devuelvan en el idioma preferido del llamador; `metadata.iac_code.candidatePresentation: rich-v1` hace que el paso de confirmación del plan devuelva una carga estructurada (nombre del candidato, resumen, diagrama de arquitectura, coste mensual total, partidas de coste) apta para renderizado enriquecido en interfaces externas. Cuando un despliegue u operación de herramienta requiere permiso, el pipeline publica un sobre de permiso pendiente y los llamadores responden con `allow_once` o `deny` mediante un mensaje de banda lateral; consulta la [Referencia del protocolo](../a2a/protocol-reference.md) para más detalles.
+
 ACP no admite actualmente el modo pipeline. `--prompt` / el [modo no interactivo](./non-interactive-mode.md) ejecuta una solicitud normal de una sola vez y no ejecuta pasos de Pipeline.
 
 ## Limitaciones actuales
