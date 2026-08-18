@@ -1268,7 +1268,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     assert "./components/composer.js?v=session-model-v20" in app_source
     # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
     assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
-    assert "./components/tool_cards.js?v=live-inline-tools-v24" in app_source
+    assert "./components/tool_cards.js?v=live-inline-tools-v25" in app_source
     assert "./components/blocking.js?v=blocking-keys-v5" in app_source
     # events.js 承载队列/消息 reducer,历次修复都在此;它的 import 必须带版本位,
     # 否则回访浏览器会加载「新 app.js + 旧缓存 events.js」,让队列行为与当前代码不一致。
@@ -2118,6 +2118,100 @@ def test_pipeline_tool_json_result_renders_labeled_fields(tmp_path) -> None:
     assert "stack_name" not in deploy_text
     # 纯文本结果解析不出对象,回退到原始文本呈现。
     assert "deploy finished, no json here" in output["plainText"]
+
+
+def test_tool_card_summary_line_only_shows_before_results_arrive(tmp_path: Path) -> None:
+    """结果到达后 summary 行与结果块重复(后端把完整结果文本作为 summary 下发),
+    必须隐藏;进行中无结果时保留作进度消息;非字符串 summary 不渲染。"""
+    output = _run_toolcards_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            class Element {
+              constructor(tag) {
+                this.tagName = tag;
+                this.className = "";
+                this.dataset = {};
+                this.style = {};
+                this.children = [];
+                this.open = false;
+                this._text = "";
+              }
+              set textContent(value) { this._text = value == null ? "" : String(value); }
+              get textContent() { return this._text; }
+              append(...nodes) {
+                for (const node of nodes) {
+                  if (node && typeof node === "object") { this.children.push(node); }
+                }
+              }
+            }
+            globalThis.document = { createElement: (tag) => new Element(tag) };
+
+            const { renderToolCards } = await import(__TOOLCARDS_MODULE__);
+
+            function summaryLines(node, out = []) {
+              if (String(node.className || "").split(/\\s+/).includes("tool-card-summary")) {
+                out.push(node._text);
+              }
+              for (const child of node.children || []) summaryLines(child, out);
+              return out;
+            }
+            function allText(node) {
+              const own = node._text || "";
+              const kids = (node.children || []).map(allText).join(" ");
+              return `${own} ${kids}`;
+            }
+            function countOf(haystack, needle) {
+              return haystack.split(needle).length - 1;
+            }
+
+            const RESULT_LINE = "File: /x/ros-template.md (155 lines)";
+            const running = {
+              tools: {
+                t1: {
+                  toolUseId: "t1", toolName: "read_file", status: "running",
+                  summary: "Reading ros-template.md", results: [],
+                },
+              },
+            };
+            const completed = {
+              tools: {
+                t2: {
+                  toolUseId: "t2", toolName: "read_file", status: "completed",
+                  summary: RESULT_LINE, results: [{ summary: RESULT_LINE }],
+                },
+              },
+            };
+            const objectSummary = {
+              tools: {
+                t3: {
+                  toolUseId: "t3", toolName: "write_file", status: "running",
+                  summary: { toolName: "write_file", input: { path: "a.yml" } }, results: [],
+                },
+              },
+            };
+
+            const runningRoot = renderToolCards(running, { turnActive: false });
+            const completedRoot = renderToolCards(completed, { turnActive: false });
+            const objectRoot = renderToolCards(objectSummary, { turnActive: false });
+            const completedText = allText(completedRoot);
+            console.log(JSON.stringify({
+              runningSummary: summaryLines(runningRoot),
+              completedSummary: summaryLines(completedRoot),
+              objectSummary: summaryLines(objectRoot),
+              resultLineOccurrences: countOf(completedText, RESULT_LINE),
+            }));
+            """
+        ),
+    )
+
+    # 进行中无结果:summary 行作为进度消息保留。
+    assert output["runningSummary"] == ["Reading ros-template.md"]
+    # 结果到达后:summary 行隐藏,结果文本只在结果块出现一次。
+    assert output["completedSummary"] == []
+    assert output["resultLineOccurrences"] == 1
+    # 非字符串 summary(input_complete 对象)不渲染。
+    assert output["objectSummary"] == []
 
 
 def test_expanding_tool_card_rechecks_message_stack_overflow() -> None:
