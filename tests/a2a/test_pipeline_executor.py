@@ -1606,6 +1606,20 @@ async def _wait_for_output_text(task, expected: str) -> None:
     raise AssertionError(f"Expected output text {expected!r}, got {''.join(task.output_text)!r}")
 
 
+async def _wait_for_backup_calls(backup_service, expected_count: int) -> None:
+    """Wait until ``backup_service`` has recorded at least ``expected_count`` backups.
+
+    Backups run in the publisher after_enqueue hook, which races with the delivery
+    of the event that triggered them; asserting immediately after observing the
+    event is flaky on slow runners.
+    """
+    for _ in range(_A2A_ASYNC_TEST_TIMEOUT * 100):
+        if len(backup_service.calls) >= expected_count:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"Expected {expected_count} backup call(s), got {backup_service.calls!r}")
+
+
 async def _wait_for_pipeline_event(queue: FakeEventQueue, expected_event_type: str) -> None:
     for _ in range(_A2A_ASYNC_TEST_TIMEOUT * 100):
         for event in queue.events:
@@ -3066,6 +3080,7 @@ async def test_pipeline_permission_pauses_agent_loops_and_uses_existing_critical
     await _wait_for_pipeline_event(queue, "permission_requested")
     assert pipeline.pause_calls == 1
     assert pipeline.resume_calls == 0
+    await _wait_for_backup_calls(backup_service, 1)
     assert [(reason, critical) for *_ids, reason, critical in backup_service.calls] == [
         (BackupReason.INPUT_REQUIRED, True)
     ]

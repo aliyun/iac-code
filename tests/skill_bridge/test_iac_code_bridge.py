@@ -28,6 +28,15 @@ def _load_bridge():
 bridge = _load_bridge()
 
 
+def _file_uri(path: Path) -> str:
+    # ``Path.as_uri()`` requires an absolute path, and POSIX-style paths such as
+    # ``/tmp/runtime.zip`` are relative on Windows (no drive letter). Build the
+    # URI manually for those synthetic fixtures so tests stay cross-platform.
+    if path.is_absolute():
+        return path.as_uri()
+    return "file://" + path.as_posix()
+
+
 def _artifact(*, archive: Path, digest: str, size: int, archive_type: str = "tar.gz") -> dict[str, object]:
     return {
         "target": "darwin-arm64-macos-cp312",
@@ -36,7 +45,7 @@ def _artifact(*, archive: Path, digest: str, size: int, archive_type: str = "tar
         "nativeAbi": "macos",
         "runtimePython": "cp312",
         "compatibility": {"minOsVersion": "12.0"},
-        "url": archive.as_uri(),
+        "url": _file_uri(archive),
         "sha256": digest,
         "size": size,
         "archive": archive_type,
