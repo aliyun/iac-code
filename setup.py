@@ -107,6 +107,9 @@ def _read_long_description():
     # relative image paths have no repository base and show up broken.
     # Rewrite them to absolute raw URLs at build time so the checked-in
     # README keeps GitHub-friendly relative paths.
+    # The language switcher links point at in-repo translated READMEs, which
+    # cannot resolve on PyPI's standalone rendering; drop the line there.
+    text = re.sub(r'<p align="center">\s*<strong>Language</strong>.*?</p>\n?', "", text, flags=re.S)
     ref = os.environ.get("IAC_CODE_README_IMG_REF", "main")
     base = "https://raw.githubusercontent.com/aliyun/iac-code/{}/website/static/img/".format(ref)
     return text.replace('src="website/static/img/', 'src="{}'.format(base))
