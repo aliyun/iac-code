@@ -823,13 +823,10 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
-.heroShot img {
+.heroShot img,
+.heroShot video {
   display: block;
   width: 100%;
-}
-
-.heroShot img[hidden] {
-  display: none;
 }
 
 /* ---------- why section: dedicated screenshot per row ---------- */

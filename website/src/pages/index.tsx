@@ -3,8 +3,8 @@ import clsx from 'clsx';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
 import styles from './index.module.css';
-import demoEnGif from '@site/static/img/demo_en.gif';
-import demoZhGif from '@site/static/img/demo_zh.gif';
+import demoEnVideo from '@site/static/img/demo_en.mp4';
+import demoZhVideo from '@site/static/img/demo_zh.mp4';
 import desktopCnScreenshot from '@site/static/img/screenshots/iac-code-desktop-cn.jpg';
 import desktopEnScreenshot from '@site/static/img/screenshots/iac-code-desktop-en.jpg';
 import webCnScreenshot from '@site/static/img/screenshots/iac-code-web-cn.jpg';
@@ -1591,8 +1591,11 @@ function HomepageHeader() {
         </div>
 
         <div className={styles.heroShot}>
-          <img src={isZh ? desktopCnScreenshot : desktopEnScreenshot} alt={desktopAlt} hidden={shot !== 'desktop'} />
-          <img src={isZh ? demoZhGif : demoEnGif} alt={t.demoAlt} hidden={shot !== 'terminal'} />
+          {shot === 'desktop' ? (
+            <img src={isZh ? desktopCnScreenshot : desktopEnScreenshot} alt={desktopAlt} decoding="async" />
+          ) : (
+            <video src={isZh ? demoZhVideo : demoEnVideo} autoPlay muted loop playsInline aria-label={t.demoAlt} />
+          )}
         </div>
       </div>
     </header>
