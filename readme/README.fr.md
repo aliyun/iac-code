@@ -25,15 +25,29 @@
   <a href="https://github.com/aliyun/iac-code/releases/latest">Tous les fichiers de la version</a>
 </p>
 
+## Application de bureau
+
+Pas besoin de Python, de pip ni de configuration terminal : téléchargez l'application native et commencez immédiatement à construire votre infrastructure cloud.
+
+Pour utiliser IaC Code comme une application native, téléchargez le paquet correspondant à votre plateforme depuis la [dernière version GitHub](https://github.com/aliyun/iac-code/releases/latest) :
+
+- Mac avec puce Apple : `.dmg`
+- Windows x64 : programme d'installation `.exe`
+- Linux x64 : `.AppImage` ou `.deb`
+
+L'application de bureau utilise le même moteur IaC Code et partage les fournisseurs de modèles, les identifiants cloud, les réglages, les projets et les sessions avec la CLI et l'application web. Au premier lancement, sélectionnez le dossier de projet dans lequel IaC Code doit travailler. Sous Windows, l'application vérifie également la présence de Git Bash et propose de vous guider dans son installation si nécessaire.
+
 <p align="center">
-  <img src="../website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
+  <img src="../website/static/img/screenshots/iac-code-desktop-en.jpg" alt="Application de bureau IaC Code" width="100%">
 </p>
+
+Les versions macOS, Windows et AppImage peuvent rechercher et appliquer dans l'application des mises à jour signées cryptographiquement. Le paquet deb se met à jour en installant une version plus récente. Les paquets macOS stables sont signés avec Apple Developer ID et notariés par Apple ; les paquets Windows stables portent une signature d'éditeur Authenticode. Téléchargez toujours les paquets depuis la page officielle de la version et vérifiez le fichier `SHA256SUMS` fourni. Consultez le [guide de l'application de bureau](https://aliyun.github.io/iac-code/fr/docs/desktop-app) pour les instructions et le dépannage.
 
 ## Installation
 
-IaC Code nécessite Python 3.10 ou supérieur. Il est compatible avec macOS, Linux et Windows.
+Le CLI et l'application web ci-dessous fonctionnent avec Python 3.10 ou ultérieur, sur macOS, Linux et Windows. Si vous utilisez uniquement l'application bureau, vous pouvez ignorer cette section.
 
-> **Note Windows** : Sous Windows, [Git for Windows](https://gitforwindows.org/) doit être installé pour fournir l'environnement shell bash utilisé par l'exécution des outils. Si Git Bash est installé mais n'est pas dans le PATH, définissez la variable d'environnement `IAC_CODE_GIT_BASH_PATH`.
+> **Note Windows** : Sous Windows, [Git for Windows](https://gitforwindows.org/) doit être installé pour fournir l'environnement shell bash utilisé par l'exécution des outils. Si Git Bash est installé mais n'est pas dans le PATH, définissez la variable d'environnement `IAC_CODE_GIT_BASH_PATH`. S'il n'est pas encore installé, exécutez `iac-code install-git-bash` pour installer Git for Windows automatiquement (téléchargé via le miroir npmmirror).
 
 ```bash
 pip install iac-code
@@ -50,6 +64,10 @@ Exécutez directement pour accéder au REPL interactif :
 ```bash
 iac-code
 ```
+
+<p align="center">
+  <img src="../website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
+</p>
 
 ### Mode Non Interactif
 
@@ -79,22 +97,6 @@ Par défaut, elle ouvre `http://127.0.0.1:8766` dans votre navigateur (bouclage 
 <p align="center">
   <img src="../website/static/img/screenshots/iac-code-web-en.jpg" alt="Application web IaC Code" width="100%">
 </p>
-
-### Application de bureau
-
-Pour utiliser IaC Code comme une application native, téléchargez le paquet correspondant à votre plateforme depuis la [dernière version GitHub](https://github.com/aliyun/iac-code/releases/latest) :
-
-- Mac avec puce Apple : `.dmg`
-- Windows x64 : programme d'installation `.exe`
-- Linux x64 : `.AppImage` ou `.deb`
-
-L'application de bureau utilise le même moteur IaC Code et partage les fournisseurs de modèles, les identifiants cloud, les réglages, les projets et les sessions avec la CLI et l'application web. Au premier lancement, sélectionnez le dossier de projet dans lequel IaC Code doit travailler. Sous Windows, l'application vérifie également la présence de Git Bash et propose de vous guider dans son installation si nécessaire.
-
-<p align="center">
-  <img src="../website/static/img/screenshots/iac-code-desktop-en.jpg" alt="Application de bureau IaC Code" width="100%">
-</p>
-
-Les versions macOS, Windows et AppImage peuvent rechercher et appliquer dans l'application des mises à jour signées cryptographiquement. Le paquet deb se met à jour en installant une version plus récente. Les paquets macOS stables sont signés avec Apple Developer ID et notariés par Apple ; les paquets Windows stables portent une signature d'éditeur Authenticode. Téléchargez toujours les paquets depuis la page officielle de la version et vérifiez le fichier `SHA256SUMS` fourni. Consultez le [guide de l'application de bureau](https://aliyun.github.io/iac-code/fr/docs/desktop-app) pour les instructions et le dépannage.
 
 ## Contribuer
 

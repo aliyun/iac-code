@@ -25,15 +25,29 @@
   <a href="https://github.com/aliyun/iac-code/releases/latest">すべてのリリースファイル</a>
 </p>
 
+## デスクトップアプリ
+
+Python も pip もターミナルのセットアップも不要——ネイティブアプリをダウンロードして、すぐにクラウドインフラの構築を始められます。
+
+ネイティブアプリとして利用する場合は、[最新の GitHub リリース](https://github.com/aliyun/iac-code/releases/latest) からお使いの環境に合ったパッケージをダウンロードしてください。
+
+- Apple シリコン搭載 Mac：`.dmg`
+- Windows x64：`.exe` インストーラー
+- Linux x64：`.AppImage` または `.deb`
+
+デスクトップアプリは CLI や Web アプリと同じ IaC Code エンジンを使用し、モデルプロバイダー、クラウド認証情報、設定、プロジェクト、セッションも共有します。初回起動時に、IaC Code で操作するプロジェクトフォルダーを選択してください。Windows 版では Git Bash の有無も確認し、未導入の場合はインストール手順を案内します。
+
 <p align="center">
-  <img src="../website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
+  <img src="../website/static/img/screenshots/iac-code-desktop-en.jpg" alt="IaC Code デスクトップアプリ" width="100%">
 </p>
+
+macOS 版、Windows 版、AppImage 版では、暗号署名された更新をアプリ内で確認して適用できます。deb パッケージは、新しいパッケージをインストールして更新します。安定版 macOS パッケージは Apple Developer ID で署名され、Apple の公証を受けています。安定版 Windows パッケージには Authenticode の発行元署名が付いています。必ず公式リリースページから入手し、添付された `SHA256SUMS` を確認してください。詳しい手順とトラブルシューティングについては、[デスクトップアプリガイド](https://aliyun.github.io/iac-code/ja/docs/desktop-app)をご覧ください。
 
 ## インストール
 
-IaC Code には Python 3.10 以降が必要です。macOS、Linux、Windows に対応しています。
+以下の CLI と Web アプリは、macOS・Linux・Windows 上の Python 3.10 以降で動作します。デスクトップアプリのみを使用する場合は、このセクションをスキップできます。
 
-> **Windows の注意事項**: Windows では、ツール実行環境として使用する bash シェルを提供するために [Git for Windows](https://gitforwindows.org/) のインストールが必要です。Git Bash がインストール済みだが PATH に含まれていない場合は、環境変数 `IAC_CODE_GIT_BASH_PATH` を設定してください。
+> **Windows の注意事項**: Windows では、ツール実行環境として使用する bash シェルを提供するために [Git for Windows](https://gitforwindows.org/) のインストールが必要です。Git Bash がインストール済みだが PATH に含まれていない場合は、環境変数 `IAC_CODE_GIT_BASH_PATH` を設定してください。まだインストールしていない場合は、`iac-code install-git-bash` を実行すると Git for Windows を自動的にインストールできます（npmmirror ミラー経由でダウンロード）。
 
 ```bash
 pip install iac-code
@@ -50,6 +64,10 @@ pip install iac-code
 ```bash
 iac-code
 ```
+
+<p align="center">
+  <img src="../website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
+</p>
 
 ### ノンインタラクティブモード
 
@@ -79,22 +97,6 @@ iac-code web
 <p align="center">
   <img src="../website/static/img/screenshots/iac-code-web-en.jpg" alt="IaC Code Web アプリ" width="100%">
 </p>
-
-### デスクトップアプリ
-
-ネイティブアプリとして利用する場合は、[最新の GitHub リリース](https://github.com/aliyun/iac-code/releases/latest) からお使いの環境に合ったパッケージをダウンロードしてください。
-
-- Apple シリコン搭載 Mac：`.dmg`
-- Windows x64：`.exe` インストーラー
-- Linux x64：`.AppImage` または `.deb`
-
-デスクトップアプリは CLI や Web アプリと同じ IaC Code エンジンを使用し、モデルプロバイダー、クラウド認証情報、設定、プロジェクト、セッションも共有します。初回起動時に、IaC Code で操作するプロジェクトフォルダーを選択してください。Windows 版では Git Bash の有無も確認し、未導入の場合はインストール手順を案内します。
-
-<p align="center">
-  <img src="../website/static/img/screenshots/iac-code-desktop-en.jpg" alt="IaC Code デスクトップアプリ" width="100%">
-</p>
-
-macOS 版、Windows 版、AppImage 版では、暗号署名された更新をアプリ内で確認して適用できます。deb パッケージは、新しいパッケージをインストールして更新します。安定版 macOS パッケージは Apple Developer ID で署名され、Apple の公証を受けています。安定版 Windows パッケージには Authenticode の発行元署名が付いています。必ず公式リリースページから入手し、添付された `SHA256SUMS` を確認してください。詳しい手順とトラブルシューティングについては、[デスクトップアプリガイド](https://aliyun.github.io/iac-code/ja/docs/desktop-app)をご覧ください。
 
 ## コントリビュート
 

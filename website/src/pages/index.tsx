@@ -1,4 +1,4 @@
-import {type ReactNode, useState} from 'react';
+import {type ReactNode, useEffect, useRef, useState} from 'react';
 import clsx from 'clsx';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
@@ -9,9 +9,21 @@ import desktopCnScreenshot from '@site/static/img/screenshots/iac-code-desktop-c
 import desktopEnScreenshot from '@site/static/img/screenshots/iac-code-desktop-en.jpg';
 import webCnScreenshot from '@site/static/img/screenshots/iac-code-web-cn.jpg';
 import webEnScreenshot from '@site/static/img/screenshots/iac-code-web-en.jpg';
+import whyCnShot1 from '@site/static/img/screenshots/iac-code-desktop-cn-1.jpg';
+import whyCnShot2 from '@site/static/img/screenshots/iac-code-desktop-cn-2.jpg';
+import whyCnShot3 from '@site/static/img/screenshots/iac-code-desktop-cn-3.jpg';
+import whyCnShot4 from '@site/static/img/screenshots/iac-code-desktop-cn-4.jpg';
+import whyEnShot1 from '@site/static/img/screenshots/iac-code-desktop-en-1.jpg';
+import whyEnShot2 from '@site/static/img/screenshots/iac-code-desktop-en-2.jpg';
+import whyEnShot3 from '@site/static/img/screenshots/iac-code-desktop-en-3.jpg';
+import whyEnShot4 from '@site/static/img/screenshots/iac-code-desktop-en-4.jpg';
+
+const whyCnShots = [whyCnShot1, whyCnShot2, whyCnShot3, whyCnShot4];
+const whyEnShots = [whyEnShot1, whyEnShot2, whyEnShot3, whyEnShot4];
 
 type Locale = 'en' | 'zh-Hans' | 'ja' | 'fr' | 'de' | 'es' | 'pt';
 type InstallTarget = 'shell' | 'windows';
+type Platform = 'macOS' | 'Windows' | 'Linux';
 
 type InstallCommand = {
   label: string;
@@ -33,6 +45,15 @@ type HomeCopy = {
 };
 
 const installCommand = 'pip install iac-code';
+
+const desktopDownloads: Record<Platform, string> = {
+  macOS:
+    'https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-macos-arm64.dmg',
+  Windows:
+    'https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-windows-x64.exe',
+  Linux:
+    'https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/desktop/stable/iac-code-linux-x64.AppImage',
+};
 
 type DemoEvent = {
   kind: 'prompt' | 'thought' | 'tool' | 'message' | 'confirm' | 'status' | 'success' | 'plain' | 'selected' | 'shell';
@@ -68,8 +89,12 @@ type HomepageDraft = {
   whyItems: HomepageItem[];
   howTitle: string;
   howItems: HomepageItem[];
-  ctaTitle: string;
-  ctaBody: string;
+  downloadLabel: string;
+  otherPlatformsLabel: string;
+  pipHint: string;
+  surfacesToggleLabel: string;
+  shotTabDesktop: string;
+  shotTabTerminal: string;
 };
 
 type TerminalTerms = {
@@ -112,27 +137,29 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
     whyTitle: 'Why IaC Code?',
     whyItems: [
       {
-        visual: 'naturalLanguage',
         title: 'Manage cloud infrastructure with natural language',
         body: 'Bring resource planning, template generation, change review, and deployment operations into one terminal conversation.',
       },
       {
-        visual: 'iacEngines',
         title: 'Support multiple IaC engines',
         body: 'Use Terraform and Alibaba Cloud ROS in one workflow to produce reviewable, executable infrastructure changes.',
       },
       {
-        visual: 'aiProviders',
         title: 'Support multiple AI providers',
         body: 'Connect multiple model providers so teams can choose AI capabilities by model, budget, and compliance needs.',
       },
       {
-        visual: 'agentWorkflow',
         title: 'Agentic workflow',
         body: 'Let the agent understand context, call tools, inspect results, and settle deliverable infrastructure changes.',
       },
     ],
-    howTitle: 'How to use IaC Code?',
+    howTitle: 'Start using IaC Code',
+    downloadLabel: 'Download for {os}',
+    otherPlatformsLabel: 'Other platforms: ',
+    pipHint: 'All three run from the command line — install first:',
+    surfacesToggleLabel: 'Other usage modes: ',
+    shotTabDesktop: 'Desktop',
+    shotTabTerminal: 'Terminal',
     howItems: [
       {
         visual: 'interactiveMode',
@@ -160,34 +187,34 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
         alt: 'IaC Code Desktop app',
       },
     ],
-    ctaTitle: 'Start using IaC Code',
-    ctaBody: 'Install once, then use interactive mode or run IaC Code headlessly in automation.',
   },
   'zh-Hans': {
     whyTitle: '为什么选择 IaC Code？',
     whyItems: [
       {
-        visual: 'naturalLanguage',
         title: '使用自然语言管理基础设施',
         body: '把资源规划、模板生成、变更审阅和部署操作放进同一个终端对话流。',
       },
       {
-        visual: 'iacEngines',
         title: '支持多种 IaC 引擎',
         body: '支持 Terraform 和阿里云 ROS 等多种 IaC 引擎，按目标工作流组织可审阅、可执行的基础设施变更。',
       },
       {
-        visual: 'aiProviders',
         title: '支持多种 AI 供应商',
         body: '可接入多种模型提供商，让团队按自己的模型、预算和合规要求选择 AI 能力。',
       },
       {
-        visual: 'agentWorkflow',
         title: '智能体工作流',
         body: '让智能体理解上下文、调用工具、检查结果，并把可交付的基础设施变更沉淀下来。',
       },
     ],
-    howTitle: '如何使用 IaC Code？',
+    howTitle: '开始使用 IaC Code',
+    downloadLabel: '下载 {os} 版',
+    otherPlatformsLabel: '其他平台：',
+    pipHint: '以上三种方式通过命令行运行，先安装：',
+    surfacesToggleLabel: '其他使用方式：',
+    shotTabDesktop: '桌面版',
+    shotTabTerminal: '终端版',
     howItems: [
       {
         visual: 'interactiveMode',
@@ -215,34 +242,34 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
         alt: 'IaC Code 桌面应用',
       },
     ],
-    ctaTitle: '开始使用 IaC Code',
-    ctaBody: '安装后即可使用交互模式，或在自动化流程中通过无头模式运行。',
   },
   ja: {
     whyTitle: 'IaC Code を選ぶ理由',
     whyItems: [
       {
-        visual: 'naturalLanguage',
         title: '自然言語でクラウドインフラを管理',
         body: 'リソース設計、テンプレート生成、変更レビュー、デプロイ操作を 1 つのターミナル対話にまとめます。',
       },
       {
-        visual: 'iacEngines',
         title: '複数の IaC エンジンに対応',
         body: 'Terraform と Alibaba Cloud ROS を同じワークフローで扱い、レビュー可能で実行可能なインフラ変更を作成します。',
       },
       {
-        visual: 'aiProviders',
         title: '複数の AI プロバイダーに対応',
         body: '複数のモデルプロバイダーに接続し、モデル、予算、コンプライアンス要件に応じて AI 能力を選べます。',
       },
       {
-        visual: 'agentWorkflow',
         title: 'エージェントワークフロー',
         body: 'エージェントがコンテキストを理解し、ツールを呼び出し、結果を確認して、引き渡せるインフラ変更にまとめます。',
       },
     ],
-    howTitle: 'IaC Code の使い方',
+    howTitle: 'IaC Code を使い始める',
+    downloadLabel: '{os} 版をダウンロード',
+    otherPlatformsLabel: 'その他のプラットフォーム：',
+    pipHint: '上記の3つの方法はいずれもコマンドラインで実行します。先にインストール：',
+    surfacesToggleLabel: 'その他の利用方法：',
+    shotTabDesktop: 'デスクトップ版',
+    shotTabTerminal: 'ターミナル版',
     howItems: [
       {
         visual: 'interactiveMode',
@@ -270,34 +297,34 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
         alt: 'IaC Code デスクトップアプリ',
       },
     ],
-    ctaTitle: 'IaC Code を使い始める',
-    ctaBody: 'インストール後は、インタラクティブモードでも自動化内のヘッドレス実行でも利用できます。',
   },
   fr: {
     whyTitle: 'Pourquoi choisir IaC Code ?',
     whyItems: [
       {
-        visual: 'naturalLanguage',
         title: 'Gérer l’infrastructure cloud en langage naturel',
         body: 'Regroupez planification des ressources, génération de templates, revue des changements et opérations de déploiement dans une conversation terminal.',
       },
       {
-        visual: 'iacEngines',
         title: 'Prendre en charge plusieurs moteurs IaC',
         body: 'Utilisez Terraform et Alibaba Cloud ROS dans un même workflow pour produire des changements d’infrastructure révisables et exécutables.',
       },
       {
-        visual: 'aiProviders',
         title: 'Prendre en charge plusieurs fournisseurs IA',
         body: 'Connectez plusieurs fournisseurs de modèles pour choisir les capacités IA selon le modèle, le budget et les exigences de conformité.',
       },
       {
-        visual: 'agentWorkflow',
         title: 'Workflow agentique',
         body: 'Laissez l’agent comprendre le contexte, appeler les outils, inspecter les résultats et stabiliser des changements d’infrastructure livrables.',
       },
     ],
-    howTitle: 'Comment utiliser IaC Code ?',
+    howTitle: 'Commencer avec IaC Code',
+    downloadLabel: 'Télécharger pour {os}',
+    otherPlatformsLabel: 'Autres plateformes : ',
+    pipHint: 'Ces trois modes s’exécutent en ligne de commande — installez d’abord :',
+    surfacesToggleLabel: 'Autres modes d’utilisation : ',
+    shotTabDesktop: 'Bureau',
+    shotTabTerminal: 'Terminal',
     howItems: [
       {
         visual: 'interactiveMode',
@@ -325,34 +352,34 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
         alt: 'Application de bureau IaC Code',
       },
     ],
-    ctaTitle: 'Commencer avec IaC Code',
-    ctaBody: 'Installez-le une fois, puis utilisez le mode interactif ou exécutez IaC Code en headless dans l’automatisation.',
   },
   de: {
     whyTitle: 'Warum IaC Code?',
     whyItems: [
       {
-        visual: 'naturalLanguage',
         title: 'Cloud-Infrastruktur mit natürlicher Sprache verwalten',
         body: 'Bringen Sie Ressourcenplanung, Template-Generierung, Änderungsreview und Deployment-Vorgänge in eine Terminal-Konversation.',
       },
       {
-        visual: 'iacEngines',
         title: 'Mehrere IaC-Engines unterstützen',
         body: 'Nutzen Sie Terraform und Alibaba Cloud ROS in einem Workflow, um prüfbare und ausführbare Infrastrukturänderungen zu erzeugen.',
       },
       {
-        visual: 'aiProviders',
         title: 'Mehrere KI-Anbieter unterstützen',
         body: 'Binden Sie mehrere Modellanbieter an, damit Teams KI-Fähigkeiten nach Modell, Budget und Compliance-Anforderungen wählen können.',
       },
       {
-        visual: 'agentWorkflow',
         title: 'Agentischer Workflow',
         body: 'Der Agent versteht Kontext, ruft Tools auf, prüft Ergebnisse und verdichtet alles zu lieferbaren Infrastrukturänderungen.',
       },
     ],
-    howTitle: 'Wie verwendet man IaC Code?',
+    howTitle: 'Mit IaC Code starten',
+    downloadLabel: 'Für {os} herunterladen',
+    otherPlatformsLabel: 'Andere Plattformen: ',
+    pipHint: 'Alle drei Varianten laufen über die Kommandozeile – zuerst installieren:',
+    surfacesToggleLabel: 'Weitere Nutzungsarten: ',
+    shotTabDesktop: 'Desktop',
+    shotTabTerminal: 'Terminal',
     howItems: [
       {
         visual: 'interactiveMode',
@@ -380,34 +407,34 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
         alt: 'IaC Code Desktop-App',
       },
     ],
-    ctaTitle: 'Mit IaC Code starten',
-    ctaBody: 'Einmal installieren, dann interaktiv nutzen oder IaC Code headless in Automatisierung ausführen.',
   },
   es: {
     whyTitle: '¿Por qué elegir IaC Code?',
     whyItems: [
       {
-        visual: 'naturalLanguage',
         title: 'Gestiona infraestructura cloud con lenguaje natural',
         body: 'Lleva planificación de recursos, generación de plantillas, revisión de cambios y operaciones de despliegue a una conversación de terminal.',
       },
       {
-        visual: 'iacEngines',
         title: 'Compatible con múltiples motores IaC',
         body: 'Usa Terraform y Alibaba Cloud ROS en un mismo flujo para producir cambios de infraestructura revisables y ejecutables.',
       },
       {
-        visual: 'aiProviders',
         title: 'Compatible con múltiples proveedores de IA',
         body: 'Conecta varios proveedores de modelos para que el equipo elija capacidades de IA según modelo, presupuesto y requisitos de cumplimiento.',
       },
       {
-        visual: 'agentWorkflow',
         title: 'Flujo de trabajo con agente',
         body: 'Deja que el agente entienda el contexto, invoque herramientas, inspeccione resultados y consolide cambios de infraestructura entregables.',
       },
     ],
-    howTitle: '¿Cómo usar IaC Code?',
+    howTitle: 'Empieza a usar IaC Code',
+    downloadLabel: 'Descargar para {os}',
+    otherPlatformsLabel: 'Otras plataformas: ',
+    pipHint: 'Las tres formas se ejecutan desde la línea de comandos; instala primero:',
+    surfacesToggleLabel: 'Otros modos de uso: ',
+    shotTabDesktop: 'Escritorio',
+    shotTabTerminal: 'Terminal',
     howItems: [
       {
         visual: 'interactiveMode',
@@ -435,34 +462,34 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
         alt: 'Aplicación de escritorio de IaC Code',
       },
     ],
-    ctaTitle: 'Empieza a usar IaC Code',
-    ctaBody: 'Instálalo una vez y úsalo en modo interactivo o ejecuta IaC Code en modo headless dentro de tu automatización.',
   },
   pt: {
     whyTitle: 'Por que escolher IaC Code?',
     whyItems: [
       {
-        visual: 'naturalLanguage',
         title: 'Gerencie infraestrutura em nuvem com linguagem natural',
         body: 'Leve planejamento de recursos, geração de templates, revisão de mudanças e operações de implantação para uma conversa no terminal.',
       },
       {
-        visual: 'iacEngines',
         title: 'Suporte a múltiplos motores IaC',
         body: 'Use Terraform e Alibaba Cloud ROS no mesmo fluxo para produzir mudanças de infraestrutura revisáveis e executáveis.',
       },
       {
-        visual: 'aiProviders',
         title: 'Suporte a múltiplos provedores de IA',
         body: 'Conecte vários provedores de modelos para que a equipe escolha capacidades de IA por modelo, orçamento e requisitos de conformidade.',
       },
       {
-        visual: 'agentWorkflow',
         title: 'Fluxo de agente',
         body: 'Deixe o agente entender o contexto, chamar ferramentas, inspecionar resultados e consolidar mudanças de infraestrutura entregáveis.',
       },
     ],
-    howTitle: 'Como usar IaC Code?',
+    howTitle: 'Comece a usar IaC Code',
+    downloadLabel: 'Baixar para {os}',
+    otherPlatformsLabel: 'Outras plataformas: ',
+    pipHint: 'As três formas rodam pela linha de comando — instale primeiro:',
+    surfacesToggleLabel: 'Outras formas de uso: ',
+    shotTabDesktop: 'Desktop',
+    shotTabTerminal: 'Terminal',
     howItems: [
       {
         visual: 'interactiveMode',
@@ -490,8 +517,6 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
         alt: 'Aplicativo para desktop do IaC Code',
       },
     ],
-    ctaTitle: 'Comece a usar IaC Code',
-    ctaBody: 'Instale uma vez e use o modo interativo ou execute o IaC Code em modo headless na automação.',
   },
 };
 
@@ -795,17 +820,9 @@ function getTerminalScenes(locale: Locale): Record<VisualKey, TerminalScene> {
       es: 'Crear una VPC con Terraform',
       pt: 'Criar uma VPC com Terraform',
     }[locale],
-    nginx: {
-      en: 'add nginx',
-      'zh-Hans': '新增nginx',
-      ja: 'nginxを追加',
-      fr: 'ajouter nginx',
-      de: 'nginx hinzufügen',
-      es: 'agregar nginx',
-      pt: 'adicionar nginx',
-    }[locale],
     headless: homepageDrafts[locale].howItems[1].command ?? homepageDrafts.en.howItems[1].command ?? '',
   };
+  const headlessFirst = prompts.headless.replace(/ --output-format stream-json$/, '');
   const firstOutput = isZh
     ? {id: '实例 ID', publicIp: '公网 IP', privateIp: '内网 IP', zone: '可用区', spec: '规格', image: '镜像', disk: '系统盘'}
     : {
@@ -854,45 +871,53 @@ function getTerminalScenes(locale: Locale): Record<VisualKey, TerminalScene> {
     ecsCreated: {en: 'ECS instance created successfully. Details:', 'zh-Hans': 'ECS 实例已创建成功，详情如下：', ja: 'ECS インスタンスの作成に成功しました。詳細：', fr: 'Instance ECS créée avec succès. Détails :', de: 'ECS-Instanz erfolgreich erstellt. Details:', es: 'Instancia ECS creada correctamente. Detalles:', pt: 'Instância ECS criada com sucesso. Detalhes:'}[locale],
     item: {en: 'Item', 'zh-Hans': '项目', ja: '項目', fr: 'Élément', de: 'Element', es: 'Elemento', pt: 'Item'}[locale],
   };
-  const interactiveCopy = {
-    review: {
-      en: 'I’ll add an Nginx deployment to the existing stack. First, I’ll read best practices for running commands in ROS templates.',
-      'zh-Hans': '我来在现有栈上新增 Nginx 部署。先查阅 ROS 模板中执行命令的最佳实践。',
-      ja: '既存スタックに Nginx デプロイを追加します。まず ROS テンプレートでコマンドを実行するベストプラクティスを確認します。',
-      fr: 'Je vais ajouter un déploiement Nginx à la pile existante. Je consulte d’abord les bonnes pratiques pour exécuter des commandes dans les templates ROS.',
-      de: 'Ich füge dem bestehenden Stack ein Nginx-Deployment hinzu. Zuerst lese ich Best Practices zum Ausführen von Befehlen in ROS-Templates.',
-      es: 'Agregaré un despliegue de Nginx al stack existente. Primero revisaré las mejores prácticas para ejecutar comandos en plantillas ROS.',
-      pt: 'Vou adicionar uma implantação do Nginx à pilha existente. Primeiro, vou consultar as melhores práticas para executar comandos em templates ROS.',
+  const surfaceCopy = {
+    sessionStarted: {
+      en: 'IaC Code interactive session started',
+      'zh-Hans': 'IaC Code 交互会话已启动',
+      ja: 'IaC Code の対話セッションを開始しました',
+      fr: 'Session interactive IaC Code démarrée',
+      de: 'Interaktive IaC-Code-Sitzung gestartet',
+      es: 'Sesión interactiva de IaC Code iniciada',
+      pt: 'Sessão interativa do IaC Code iniciada',
     }[locale],
-    update: {
-      en: 'Now updating the template: add ALIYUN::ECS::RunCommand to install Nginx and add the access URL output.',
-      'zh-Hans': '现在更新模板，新增 ALIYUN::ECS::RunCommand 安装 Nginx，并添加访问地址输出：',
-      ja: 'テンプレートを更新し、Nginx をインストールする ALIYUN::ECS::RunCommand とアクセス URL 出力を追加します。',
-      fr: 'Mise à jour du template : ajout de ALIYUN::ECS::RunCommand pour installer Nginx et ajout de la sortie d’URL d’accès.',
-      de: 'Ich aktualisiere das Template: ALIYUN::ECS::RunCommand zum Installieren von Nginx und die Ausgabe der Zugriffs-URL werden hinzugefügt.',
-      es: 'Actualizo la plantilla: agrego ALIYUN::ECS::RunCommand para instalar Nginx y la salida de URL de acceso.',
-      pt: 'Atualizando o template: adiciono ALIYUN::ECS::RunCommand para instalar Nginx e a saída da URL de acesso.',
+    createVpcEcs: {
+      en: 'Create a VPC + 2 ECS instances',
+      'zh-Hans': '创建一个 VPC + 2 台 ECS',
+      ja: 'VPC 1 個 + ECS 2 台を作成',
+      fr: 'Créer un VPC + 2 instances ECS',
+      de: 'Eine VPC + 2 ECS-Instanzen erstellen',
+      es: 'Crear una VPC + 2 instancias ECS',
+      pt: 'Criar uma VPC + 2 instâncias ECS',
     }[locale],
-    validate: {en: 'Validate template:', 'zh-Hans': '校验模板：', ja: 'テンプレートを検証：', fr: 'Valider le template :', de: 'Template validieren:', es: 'Validar plantilla:', pt: 'Validar template:'}[locale],
-    success: {
-      en: 'Template validation passed ✅ Added InstallNginx resource (RunCommand) and Console.NginxUrl output.',
-      'zh-Hans': '模板校验通过 ✅ 新增了 InstallNginx 资源（RunCommand）和 Console.NginxUrl 输出。',
-      ja: 'テンプレート検証に成功 ✅ InstallNginx リソース（RunCommand）と Console.NginxUrl 出力を追加しました。',
-      fr: 'Validation du template réussie ✅ Ressource InstallNginx (RunCommand) et sortie Console.NginxUrl ajoutées.',
-      de: 'Template-Validierung bestanden ✅ InstallNginx-Ressource (RunCommand) und Console.NginxUrl-Ausgabe hinzugefügt.',
-      es: 'Validación de plantilla correcta ✅ Se agregaron el recurso InstallNginx (RunCommand) y la salida Console.NginxUrl.',
-      pt: 'Validação do template aprovada ✅ Recurso InstallNginx (RunCommand) e saída Console.NginxUrl adicionados.',
+    generatedTemplate: {
+      en: 'Generated template',
+      'zh-Hans': '生成模板',
+      ja: 'テンプレート生成',
+      fr: 'Modèle généré',
+      de: 'Vorlage generiert',
+      es: 'Plantilla generada',
+      pt: 'Modelo gerado',
+    }[locale],
+    validationPassed: {
+      en: 'Validation passed',
+      'zh-Hans': '校验通过',
+      ja: '検証に成功',
+      fr: 'Validation réussie',
+      de: 'Validierung bestanden',
+      es: 'Validación correcta',
+      pt: 'Validação aprovada',
+    }[locale],
+    waitingConfirm: {
+      en: ', waiting for deploy confirmation…',
+      'zh-Hans': '，等待确认部署…',
+      ja: '、デプロイ確認を待機中…',
+      fr: ', en attente de confirmation du déploiement…',
+      de: ', warte auf Bestätigung der Bereitstellung…',
+      es: ', esperando confirmación del despliegue…',
+      pt: ', aguardando confirmação da implantação…',
     }[locale],
   };
-  const jsonStream = {
-    en: ['The', ' user wants to create', ' a VPC on', ' Alibaba Cloud. This', ' is a direct cloud', ' resource creation request,', ' not a', ' template generation request.', ' I should use', ' the aliyun', '_api tool to', ' create a VPC', ' directly.\\n\\n', 'Let me create a VPC in', ' the default region (cn-beijing).'],
-    'zh-Hans': ['用户', ' 想要创建', ' 一个 VPC，位于', ' 阿里云。这是', ' 直接的云', ' 资源创建请求，', ' 不是', ' 模板生成请求。', ' 我应该使用', ' aliyun', '_api 工具来', ' 创建一个 VPC', '。\\n\\n', '让我在', ' 默认地域（cn-beijing）创建一个 VPC。'],
-    ja: ['ユーザーは', ' VPC を作成したい', ' と考えています。対象は', ' Alibaba Cloud です。これは', ' 直接的なクラウド', ' リソース作成リクエストで、', ' テンプレート生成', ' リクエストではありません。', ' aliyun', '_api ツールを使って', ' VPC を', ' 直接作成します', '。\\n\\n', 'デフォルトリージョン', '（cn-beijing）で VPC を作成します。'],
-    fr: ['L’utilisateur', ' veut créer', ' un VPC sur', ' Alibaba Cloud. Il s’agit', ' d’une demande directe', ' de création de ressource cloud,', ' et non', ' d’une génération de template.', ' Je dois utiliser', ' l’outil aliyun', '_api pour', ' créer un VPC', ' directement.\\n\\n', 'Je vais créer ce VPC dans', ' la région par défaut (cn-beijing).'],
-    de: ['Der Benutzer', ' möchte', ' eine VPC in', ' Alibaba Cloud erstellen. Dies', ' ist eine direkte', ' Cloud-Ressourcenanforderung,', ' keine', ' Template-Generierung.', ' Ich sollte', ' das aliyun', '_api-Tool verwenden,', ' um die VPC', ' direkt zu erstellen.\\n\\n', 'Ich erstelle die VPC in', ' der Standardregion (cn-beijing).'],
-    es: ['El usuario', ' quiere crear', ' una VPC en', ' Alibaba Cloud. Es', ' una solicitud directa', ' de creación de recurso cloud,', ' no', ' una generación de plantilla.', ' Debo usar', ' la herramienta aliyun', '_api para', ' crear una VPC', ' directamente.\\n\\n', 'Crearé la VPC en', ' la región predeterminada (cn-beijing).'],
-    pt: ['O usuário', ' quer criar', ' uma VPC na', ' Alibaba Cloud. Esta', ' é uma solicitação direta', ' de criação de recurso em nuvem,', ' não', ' uma geração de template.', ' Devo usar', ' a ferramenta aliyun', '_api para', ' criar uma VPC', ' diretamente.\\n\\n', 'Vou criar a VPC na', ' região padrão (cn-beijing).'],
-  }[locale];
 
   return {
     naturalLanguage: {
@@ -982,15 +1007,32 @@ function getTerminalScenes(locale: Locale): Record<VisualKey, TerminalScene> {
     interactiveMode: {
       title: 'Interactive REPL',
       events: [
-        row('prompt', prompts.nginx),
-        row('message', interactiveCopy.review),
-        row('tool', `${t.read}(ros-template.md)`, `${readLines(153)}\n${expand}`),
-        row('message', interactiveCopy.update),
-        row('tool', `${t.read}(ecs-template.yml)`, `${readLines(144)}\n${expand}`),
-        row('tool', `${t.update}(/tmp/ecs-template.yml)`, `${editedFile('/tmp/ecs-template.yml')}\n${expand}`),
-        row('message', interactiveCopy.validate),
-        row('tool', `${t.aliyunApi}(ValidateTemplate ros cn-hangzhou)`, `${t.callSucceeded}\n${expand}`),
-        row('success', interactiveCopy.success),
+        row(
+          'plain',
+          <>
+            <span className={styles.termPromptGlyph}>›</span> iac-code
+          </>,
+        ),
+        row('plain', <span className={styles.termDim}>{surfaceCopy.sessionStarted}</span>),
+        row(
+          'plain',
+          <>
+            <span className={styles.termPromptGlyph}>›</span> {surfaceCopy.createVpcEcs}
+          </>,
+        ),
+        row(
+          'plain',
+          <>
+            <span className={styles.termHl}>✎ {surfaceCopy.generatedTemplate}</span> vpc-ecs-stack.yml
+          </>,
+        ),
+        row(
+          'plain',
+          <>
+            <span className={styles.termOk}>✓ {surfaceCopy.validationPassed}</span>
+            {surfaceCopy.waitingConfirm}
+          </>,
+        ),
       ],
     },
     headlessMode: {
@@ -998,15 +1040,14 @@ function getTerminalScenes(locale: Locale): Record<VisualKey, TerminalScene> {
       variant: 'shell',
       events: [
         row(
-          'shell',
+          'plain',
           <>
-            <span>➜</span> {prompts.headless}
+            <span className={styles.termPromptGlyph}>$</span> {headlessFirst} \
           </>,
         ),
-        row('plain', '{"message_id":"msg_cf0468624166472a604c499","type":"message_start"}'),
-        ...jsonStream.map((text) => row('plain', `{"text":"${text}","type":"thinking_delta"}`)),
-        row('plain', '{"tool_use_id":"call_5228445ffe4640aa9521c3c9","name":"aliyun_api","type":"tool_use_start"}'),
-        row('plain', '{"tool_use_id":"call_5228445ffe4640aa9521c3c9","partial_json":"{\\"Product\\":","type":"tool_input_delta"}'),
+        row('plain', <>{'\u00A0\u00A0\u00A0\u00A0'}--output-format stream-json</>),
+        row('plain', <span className={styles.termDim}>{'{"type":"tool_call","name":"ros_generate",…}'}</span>),
+        row('plain', <span className={styles.termDim}>{'{"type":"result","status":"success",…}'}</span>),
       ],
     },
   };
@@ -1431,12 +1472,16 @@ function DemoEventRow({event}: {event: DemoEvent}) {
   );
 }
 
-function TerminalMockup({scene}: {scene: TerminalScene}) {
+function TerminalMockup({scene, mini = false}: {scene: TerminalScene; mini?: boolean}) {
   const variant = scene.variant ?? 'repl';
 
   return (
     <div
-      className={clsx(styles.terminalMockup, styles[`terminalMockup${variant[0].toUpperCase()}${variant.slice(1)}`])}
+      className={clsx(
+        styles.terminalMockup,
+        styles[`terminalMockup${variant[0].toUpperCase()}${variant.slice(1)}`],
+        mini && styles.terminalMockupMini,
+      )}
       aria-label={scene.title}>
       <div className={styles.demoToolbar}>
         <span />
@@ -1452,9 +1497,71 @@ function TerminalMockup({scene}: {scene: TerminalScene}) {
   );
 }
 
+function usePlatform(): Platform {
+  const [platform, setPlatform] = useState<Platform>('macOS');
+
+  useEffect(() => {
+    const userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent;
+    let detected: Platform = 'macOS';
+    if (/Windows/i.test(userAgent)) {
+      detected = 'Windows';
+    } else if (!/Mac|iPhone|iPad/i.test(userAgent)) {
+      detected = 'Linux';
+    }
+    setPlatform(detected);
+  }, []);
+
+  return platform;
+}
+
+function DownloadIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.4}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true">
+      <path d="M12 3v12" />
+      <path d="m6 11 6 6 6-6" />
+      <path d="M4 21h16" />
+    </svg>
+  );
+}
+
+function DownloadActions() {
+  const draft = useHomepageDraft();
+  const platform = usePlatform();
+  const others = (Object.keys(desktopDownloads) as Platform[]).filter((item) => item !== platform);
+
+  return (
+    <div className={styles.dlRow}>
+      <a className={styles.dlBtn} href={desktopDownloads[platform]}>
+        <DownloadIcon />
+        <span>{tokenReplace(draft.downloadLabel, {os: platform})}</span>
+      </a>
+      <span className={styles.altPlatforms}>
+        {draft.otherPlatformsLabel}
+        {others.map((item, index) => (
+          <span key={item}>
+            {index > 0 && ' · '}
+            <a href={desktopDownloads[item]}>{item}</a>
+          </span>
+        ))}
+      </span>
+    </div>
+  );
+}
+
 function HomepageHeader() {
   const t = useHomeCopy();
+  const draft = useHomepageDraft();
   const {i18n} = useDocusaurusContext();
+  const [shot, setShot] = useState<'desktop' | 'terminal'>('desktop');
+  const isZh = i18n.currentLocale === 'zh-Hans';
+  const desktopAlt = draft.howItems.find((item) => item.screenshot === 'desktop')?.alt ?? t.demoAlt;
 
   return (
     <header className={styles.hero}>
@@ -1462,21 +1569,30 @@ function HomepageHeader() {
         <h1>{t.title}</h1>
         <p className={styles.subtitle}>{t.subtitle}</p>
 
-        <div className={styles.installPanel} aria-label={t.installLabel}>
-          <InstallCommandBar command={installCommand} copyCommand={t.copyCommand} copiedCommand={t.copiedCommand} />
+        <DownloadActions />
+
+        <div className={styles.shotTabs} role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={shot === 'desktop'}
+            className={clsx(styles.shotTab, shot === 'desktop' && styles.shotTabActive)}
+            onClick={() => setShot('desktop')}>
+            {draft.shotTabDesktop}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={shot === 'terminal'}
+            className={clsx(styles.shotTab, shot === 'terminal' && styles.shotTabActive)}
+            onClick={() => setShot('terminal')}>
+            {draft.shotTabTerminal}
+          </button>
         </div>
 
-        <div className={styles.demoShell}>
-          <div className={styles.demoToolbar}>
-            <span />
-            <span />
-            <span />
-          </div>
-          <img
-            src={i18n.currentLocale === 'zh-Hans' ? demoZhGif : demoEnGif}
-            alt={t.demoAlt}
-            className={styles.productGif}
-          />
+        <div className={styles.heroShot}>
+          <img src={isZh ? desktopCnScreenshot : desktopEnScreenshot} alt={desktopAlt} hidden={shot !== 'desktop'} />
+          <img src={isZh ? demoZhGif : demoEnGif} alt={t.demoAlt} hidden={shot !== 'terminal'} />
         </div>
       </div>
     </header>
@@ -1485,7 +1601,8 @@ function HomepageHeader() {
 
 function WhySection() {
   const draft = useHomepageDraft();
-  const terminalScenes = useTerminalScenes();
+  const {i18n} = useDocusaurusContext();
+  const shots = i18n.currentLocale === 'zh-Hans' ? whyCnShots : whyEnShots;
 
   return (
     <section className={styles.featureRowsSection}>
@@ -1501,7 +1618,12 @@ function WhySection() {
               <h3>{item.title}</h3>
               <p>{item.body}</p>
             </div>
-            <TerminalMockup scene={terminalScenes[item.visual ?? 'interactiveMode']} />
+            <img
+              className={styles.featureShot}
+              src={shots[index % shots.length]}
+              alt={item.alt ?? item.title}
+              loading="lazy"
+            />
           </article>
         ))}
       </div>
@@ -1509,73 +1631,111 @@ function WhySection() {
   );
 }
 
-function UsageSection() {
+function SurfaceCard({
+  item,
+  scene,
+  screenshot,
+}: {
+  item: HomepageItem;
+  scene?: TerminalScene;
+  screenshot?: string;
+}) {
+  return (
+    <div className={styles.surfaceCard}>
+      {screenshot ? (
+        <div className={styles.miniShot}>
+          <img src={screenshot} alt={item.alt ?? item.title} loading="lazy" />
+        </div>
+      ) : (
+        scene && <TerminalMockup scene={scene} mini />
+      )}
+      <h4>{item.title}</h4>
+      <p>{item.body}</p>
+      {item.command && <code className={styles.cmdChip}>{item.command}</code>}
+    </div>
+  );
+}
+
+function GetStartedSection() {
   const t = useHomeCopy();
   const draft = useHomepageDraft();
   const locale = useCurrentLocale();
   const terminalScenes = useTerminalScenes();
+  const [open, setOpen] = useState(false);
+  const toggleRef = useRef<HTMLButtonElement>(null);
   const screenshots =
     locale === 'zh-Hans'
       ? {web: webCnScreenshot, desktop: desktopCnScreenshot}
       : {web: webEnScreenshot, desktop: desktopEnScreenshot};
+  const desktopItem = draft.howItems.find((item) => item.screenshot === 'desktop');
+  const surfaceItems = draft.howItems.filter((item) => item.screenshot !== 'desktop');
+
+  function handleToggle() {
+    const next = !open;
+    setOpen(next);
+    window.setTimeout(() => {
+      toggleRef.current?.scrollIntoView({behavior: 'smooth', block: next ? 'start' : 'center'});
+    }, 60);
+  }
 
   return (
-    <section className={styles.featureRowsSection}>
+    <section className={clsx(styles.featureRowsSection, open && styles.surfacesSectionOpen)}>
       <div className={styles.rowsHeader}>
         <h2>{draft.howTitle}</h2>
       </div>
-      <div className={styles.featureRows}>
-        {draft.howItems.map((item, index) => (
-          <article
-            className={clsx(styles.featureRow, index % 2 === 1 && styles.featureRowReverse)}
-            key={item.title}>
-            <div className={styles.featureRowCopy}>
-              <h3>{item.title}</h3>
-              <p>{item.body}</p>
-              {item.command && (
-                <InstallCommandBar
-                  command={item.command}
-                  copyCommand={t.copyCommand}
-                  copiedCommand={t.copiedCommand}
-                  className={styles.rowCommandBar}
-                  showPrompt={false}
-                />
-              )}
-            </div>
-            {item.screenshot ? (
-              <div className={styles.usageScreenshotShell}>
-                <img
-                  src={screenshots[item.screenshot]}
-                  alt={item.alt ?? item.title}
-                  className={styles.usageScreenshot}
-                  loading="lazy"
-                />
-              </div>
-            ) : (
-              <TerminalMockup scene={terminalScenes[item.visual ?? 'interactiveMode']} />
-            )}
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
 
-function FinalCta() {
-  const t = useHomeCopy();
-  const draft = useHomepageDraft();
+      {desktopItem && (
+        <div className={styles.surfaceHeroCard}>
+          <div>
+            <h3>{desktopItem.title}</h3>
+            <p>{desktopItem.body}</p>
+            <DownloadActions />
+          </div>
+          <div className={styles.surfaceShot}>
+            <img src={screenshots.desktop} alt={desktopItem.alt ?? desktopItem.title} loading="lazy" />
+          </div>
+        </div>
+      )}
 
-  return (
-    <section className={styles.ctaSection}>
-      <div className={styles.ctaInner}>
-        <h2>{draft.ctaTitle}</h2>
-        <p>{draft.ctaBody}</p>
-        <InstallCommandBar
-          command={installCommand}
-          copyCommand={t.copyCommand}
-          copiedCommand={t.copiedCommand}
-          className={styles.ctaCommandBar}
-        />
+      <button
+        ref={toggleRef}
+        type="button"
+        className={styles.surfaceToggle}
+        aria-expanded={open}
+        onClick={handleToggle}>
+        <span>
+          {draft.surfacesToggleLabel}
+          {surfaceItems.map((item) => item.title).join(' · ')}
+        </span>
+        <span className={styles.chev} aria-hidden="true">
+          ▾
+        </span>
+      </button>
+
+      <div className={styles.surfaceMore}>
+        <div>
+          <div className={styles.surfaceGrid}>
+            {surfaceItems.map((item) => (
+              <SurfaceCard
+                key={item.title}
+                item={item}
+                scene={item.visual ? terminalScenes[item.visual] : undefined}
+                screenshot={item.screenshot === 'web' ? screenshots.web : undefined}
+              />
+            ))}
+          </div>
+
+          <div className={styles.cliHint}>
+            <span>{draft.pipHint}</span>
+            <InstallCommandBar
+              command={installCommand}
+              copyCommand={t.copyCommand}
+              copiedCommand={t.copiedCommand}
+              className={styles.hintCommandBar}
+              showPrompt={false}
+            />
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -1589,8 +1749,7 @@ export default function Home(): React.JSX.Element {
       <main className={styles.home}>
         <HomepageHeader />
         <WhySection />
-        <UsageSection />
-        <FinalCta />
+        <GetStartedSection />
       </main>
     </Layout>
   );
