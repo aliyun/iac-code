@@ -1,8 +1,7 @@
 [project]
 name = "iac_code"
-dynamic = ["version"]
+dynamic = ["version", "readme"]
 description = "Your AI-powered Infrastructure as Code assistant"
-readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
