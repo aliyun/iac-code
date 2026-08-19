@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="website/static/img/logo-with-front.png" alt="iac-code" width="200">
+  <img src="https://raw.githubusercontent.com/aliyun/iac-code/main/website/static/img/logo-with-front.png" alt="iac-code" width="200">
 </p>
 <p align="center">
   <em>AI-powered Infrastructure as Code assistant for cloud infrastructure through natural language interaction. Currently supports Alibaba Cloud ROS and Terraform workflows.</em>
@@ -36,7 +36,7 @@ No Python, pip, or terminal setup required — download the native app and start
 The Desktop app runs the same IaC Code engine and uses the same providers, cloud credentials, settings, projects, and sessions as the CLI and Web app. On first launch, select the project directory you want IaC Code to work in. Windows also checks for Git Bash and guides you through installation if it is missing.
 
 <p align="center">
-  <img src="website/static/img/screenshots/iac-code-desktop-en.jpg" alt="IaC Code Desktop app" width="100%">
+  <img src="https://raw.githubusercontent.com/aliyun/iac-code/main/website/static/img/screenshots/iac-code-desktop-en.jpg" alt="IaC Code Desktop app" width="100%">
 </p>
 
 macOS, Windows, and AppImage builds can check for and apply cryptographically signed updates in the app. The deb package is updated by installing a newer package. Stable macOS packages are signed with Apple Developer ID and notarized by Apple; stable Windows packages carry an Authenticode publisher signature. Always download from the official release page and verify the accompanying `SHA256SUMS`. See the [Desktop App guide](https://aliyun.github.io/iac-code/docs/desktop-app) for installation and troubleshooting details.
@@ -64,7 +64,7 @@ iac-code
 ```
 
 <p align="center">
-  <img src="website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
+  <img src="https://raw.githubusercontent.com/aliyun/iac-code/main/website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
 </p>
 
 ### Non-Interactive Mode
@@ -93,7 +93,7 @@ iac-code web
 By default it opens `http://127.0.0.1:8766` in your browser (loopback only). See the [Web App guide](https://aliyun.github.io/iac-code/web-app) for details.
 
 <p align="center">
-  <img src="website/static/img/screenshots/iac-code-web-en.jpg" alt="IaC Code Web app" width="100%">
+  <img src="https://raw.githubusercontent.com/aliyun/iac-code/main/website/static/img/screenshots/iac-code-web-en.jpg" alt="IaC Code Web app" width="100%">
 </p>
 
 ## Contributing
@@ -114,4 +114,4 @@ See the [Contributing Guide](https://aliyun.github.io/iac-code/getting-started/c
 
 | [DingTalk](https://qr.dingtalk.com/action/joingroup?code=v1,k1,ubm/77U7qRh/STFZUNBP26X4PNg2z6+uhiPcLGtDNfU=&_dt_no_comment=1&origin=11) | [Discord](https://discord.gg/qECFuFBwF) |
 | :----------------------------------------------------------: | :----------------------------------------------------------: |
-| [<img src="website/static/img/qrcode-dingtalk.jpg" width="120" height="120" alt="DingTalk">](https://qr.dingtalk.com/action/joingroup?code=v1,k1,ubm/77U7qRh/STFZUNBP26X4PNg2z6+uhiPcLGtDNfU=&_dt_no_comment=1&origin=11) | [<img src="website/static/img/qrcode-discord.jpg" width="120" height="120" alt="Discord">](https://discord.gg/qECFuFBwF) |
+| [<img src="https://raw.githubusercontent.com/aliyun/iac-code/main/website/static/img/qrcode-dingtalk.jpg" width="120" height="120" alt="DingTalk">](https://qr.dingtalk.com/action/joingroup?code=v1,k1,ubm/77U7qRh/STFZUNBP26X4PNg2z6+uhiPcLGtDNfU=&_dt_no_comment=1&origin=11) | [<img src="https://raw.githubusercontent.com/aliyun/iac-code/main/website/static/img/qrcode-discord.jpg" width="120" height="120" alt="Discord">](https://discord.gg/qECFuFBwF) |
