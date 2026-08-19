@@ -1,6 +1,15 @@
-import {themes as prismThemes} from 'prism-react-renderer';
+import {themes as prismThemes, type PrismTheme} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
+
+// The stock GitHub light theme tints symbol/constant tokens teal (#36acaa), which
+// reads as a leftover of the old cyan brand accent; re-hue those tokens to brand blue.
+const githubBrandBlue: PrismTheme = {
+  ...prismThemes.github,
+  styles: prismThemes.github.styles.map((style) =>
+    style.style.color === '#36acaa' ? {...style, style: {...style.style, color: '#1b56ba'}} : style,
+  ),
+};
 
 const config: Config = {
   title: 'iac-code',
@@ -184,7 +193,7 @@ const config: Config = {
       copyright: `Copyright © ${new Date().getFullYear()} IaC Code contributors.`,
     },
     prism: {
-      theme: prismThemes.github,
+      theme: githubBrandBlue,
       darkTheme: prismThemes.dracula,
       additionalLanguages: ['bash', 'json', 'yaml', 'python', 'hcl'],
     },
