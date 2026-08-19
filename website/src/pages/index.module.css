@@ -73,14 +73,6 @@
   line-height: 1.75;
 }
 
-.installPanel {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: min(100%, 640px);
-  margin-top: 34px;
-}
-
 .commandBar {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) 34px;
@@ -167,19 +159,6 @@
   border-color: #655fe7;
 }
 
-.demoShell {
-  overflow: hidden;
-  width: 100%;
-  margin-top: 44px;
-  border: 1px solid rgba(119, 112, 225, 0.32);
-  border-radius: 20px;
-  background: #101920;
-  box-shadow:
-    -34px 28px 90px rgba(72, 168, 255, 0.17),
-    38px 30px 100px rgba(166, 97, 236, 0.17),
-    0 26px 64px rgba(35, 42, 79, 0.2);
-}
-
 .demoToolbar {
   display: flex;
   align-items: center;
@@ -207,12 +186,6 @@
 
 .demoToolbar span:nth-child(3) {
   background: #36c46f;
-}
-
-.productGif {
-  display: block;
-  width: 100%;
-  height: auto;
 }
 
 .terminalMockup {
@@ -539,8 +512,7 @@
   color: #8f92a2;
 }
 
-.featureRowsSection,
-.ctaSection {
+.featureRowsSection {
   max-width: 1320px;
   margin: 0 auto;
   padding: 96px 24px;
@@ -560,8 +532,7 @@
   text-align: center;
 }
 
-.rowsHeader h2,
-.ctaInner h2 {
+.rowsHeader h2 {
   margin: 0;
   color: #202432;
   font-size: 44px;
@@ -604,7 +575,8 @@
 }
 
 .featureRowReverse .terminalMockup,
-.featureRowReverse .usageScreenshotShell {
+.featureRowReverse .usageScreenshotShell,
+.featureRowReverse .featureShot {
   grid-column: 1;
   grid-row: 1;
 }
@@ -638,8 +610,7 @@
   letter-spacing: 0;
 }
 
-.featureRow p,
-.ctaInner p {
+.featureRow p {
   margin: 24px 0 0;
   color: #687083;
   font-size: 18px;
@@ -651,37 +622,6 @@
   min-height: 72px;
   border-color: rgba(102, 111, 212, 0.2);
   padding-left: 20px;
-}
-
-.ctaSection {
-  padding-top: 36px;
-  padding-bottom: 112px;
-}
-
-.ctaInner {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.58);
-  border-radius: 30px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.16), rgba(111, 104, 205, 0.06));
-  box-shadow:
-    0 32px 90px rgba(66, 72, 145, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.92);
-  -webkit-backdrop-filter: blur(26px) saturate(158%);
-  backdrop-filter: blur(26px) saturate(158%);
-  padding: 64px 24px;
-  text-align: center;
-}
-
-.ctaInner p {
-  max-width: 620px;
-}
-
-.ctaCommandBar {
-  width: min(100%, 620px);
-  margin-top: 30px;
 }
 
 @media screen and (max-width: 996px) {
@@ -704,7 +644,8 @@
 
   .featureRowReverse .featureRowCopy,
   .featureRowReverse .terminalMockup,
-  .featureRowReverse .usageScreenshotShell {
+  .featureRowReverse .usageScreenshotShell,
+  .featureRowReverse .featureShot {
     grid-column: auto;
     grid-row: auto;
   }
@@ -722,10 +663,6 @@
 
   .subtitle {
     font-size: 16px;
-  }
-
-  .installPanel {
-    margin-top: 34px;
   }
 
   .terminalStream {
@@ -751,8 +688,7 @@
     grid-template-columns: minmax(0, 1fr) 32px;
   }
 
-  .featureRowsSection,
-  .ctaSection {
+  .featureRowsSection {
     padding-right: 18px;
     padding-left: 18px;
   }
@@ -761,8 +697,7 @@
     margin-bottom: 48px;
   }
 
-  .rowsHeader h2,
-  .ctaInner h2 {
+  .rowsHeader h2 {
     font-size: 32px;
   }
 
@@ -788,4 +723,391 @@
     padding: 48px 20px;
   }
 
+}
+
+/* ---------- desktop-first hero ---------- */
+.dlRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-top: 36px;
+}
+
+.dlBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 34px;
+  border-radius: 14px;
+  background: linear-gradient(105deg, #2f6fe0, #6a55e8);
+  box-shadow: 0 16px 40px rgba(85, 97, 190, 0.28);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.dlBtn:hover {
+  color: #fff;
+  filter: brightness(1.06);
+  text-decoration: none;
+}
+
+.dlBtn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.altPlatforms {
+  color: #8a90a4;
+  font-size: 13.5px;
+}
+
+.altPlatforms a {
+  color: #4b4fd0;
+  font-weight: 600;
+}
+
+.altPlatforms a:hover {
+  text-decoration: underline;
+}
+
+.hero .dlRow {
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.shotTabs {
+  display: inline-flex;
+  gap: 4px;
+  margin: 44px auto 14px;
+  padding: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.5);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.shotTab {
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 18px;
+  background: transparent;
+  color: #7c86a0;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color 0.2s,
+    background 0.2s,
+    box-shadow 0.2s;
+}
+
+.shotTabActive {
+  background: #fff;
+  color: #202432;
+  box-shadow: 0 4px 14px rgba(66, 72, 145, 0.12);
+}
+
+.heroShot {
+  overflow: hidden;
+  width: min(100%, 1020px);
+  margin: 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  border-radius: 18px;
+  box-shadow:
+    0 42px 110px rgba(66, 72, 145, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.heroShot img {
+  display: block;
+  width: 100%;
+}
+
+.heroShot img[hidden] {
+  display: none;
+}
+
+/* ---------- why section: dedicated screenshot per row ---------- */
+.featureShot {
+  display: block;
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 16px;
+  box-shadow: 0 26px 70px rgba(66, 72, 145, 0.22);
+}
+
+/* ---------- get started: desktop hero card + collapsible surfaces ---------- */
+.surfaceHeroCard {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 56px;
+  align-items: center;
+  padding: 52px;
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  border-radius: 30px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.5), rgba(104, 125, 250, 0.08));
+  box-shadow:
+    0 36px 100px rgba(66, 72, 145, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  -webkit-backdrop-filter: blur(26px) saturate(158%);
+  backdrop-filter: blur(26px) saturate(158%);
+}
+
+.surfaceHeroCard h3 {
+  margin: 0;
+  color: #202432;
+  font-size: 34px;
+  line-height: 1.18;
+}
+
+.surfaceHeroCard p {
+  margin: 20px 0 0;
+  color: #687083;
+  font-size: 17px;
+  line-height: 1.72;
+}
+
+.surfaceHeroCard .dlRow {
+  justify-content: flex-start;
+  margin-top: 28px;
+}
+
+.surfaceShot {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 14px;
+  box-shadow: 0 26px 70px rgba(66, 72, 145, 0.25);
+}
+
+.surfaceShot img {
+  display: block;
+  width: 100%;
+}
+
+.surfaceToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 26px auto 0;
+  padding: 10px 20px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.35);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  color: #7c86a0;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  scroll-margin-top: 84px;
+  transition:
+    color 0.2s,
+    background 0.2s,
+    border-color 0.2s;
+}
+
+.surfaceToggle:hover {
+  border-color: rgba(112, 124, 221, 0.28);
+  background: rgba(255, 255, 255, 0.62);
+  color: #4b4fd0;
+}
+
+.chev {
+  display: inline-block;
+  margin-left: 2px;
+  font-size: 12px;
+  line-height: 1;
+  transition: transform 0.3s ease;
+}
+
+.surfacesSectionOpen .surfaceToggle .chev {
+  transform: rotate(180deg);
+}
+
+.surfaceMore {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.4s ease;
+}
+
+.surfaceMore > div {
+  overflow: hidden;
+}
+
+.surfacesSectionOpen .surfaceMore {
+  grid-template-rows: 1fr;
+}
+
+.surfaceGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 22px;
+  margin-top: 22px;
+}
+
+.surfaceCard {
+  padding: 30px 28px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.42);
+  box-shadow:
+    0 20px 50px rgba(66, 72, 145, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  text-align: left;
+}
+
+.surfaceCard h4 {
+  margin: 0;
+  color: #202432;
+  font-size: 19px;
+}
+
+.surfaceCard p {
+  margin: 12px 0 0;
+  color: #687083;
+  font-size: 14.5px;
+  line-height: 1.7;
+}
+
+.cmdChip {
+  display: inline-block;
+  margin-top: 16px;
+  border: 0;
+  border-radius: 9px;
+  background: #0d1322;
+  color: #9ee493;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 12.5px;
+  padding: 8px 14px;
+  overflow-wrap: anywhere;
+}
+
+.miniShot {
+  overflow: hidden;
+  height: 158px;
+  margin-bottom: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 12px;
+  box-shadow: 0 14px 34px rgba(66, 72, 145, 0.18);
+}
+
+.miniShot img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 0%;
+}
+
+.terminalMockupMini {
+  height: 158px;
+  min-height: 0;
+  margin-bottom: 20px;
+  border-radius: 12px;
+  box-shadow: 0 14px 34px rgba(30, 40, 90, 0.28);
+}
+
+.terminalMockupMini .terminalStream {
+  gap: 2px;
+  padding: 8px 14px 14px;
+}
+
+.terminalMockupMini .demoEvent {
+  font-size: 11.5px;
+  line-height: 1.75;
+}
+
+.terminalMockupMini .demoEvent p {
+  color: #c9d4ee;
+  font-size: 11.5px;
+}
+
+.terminalMockupMini .demoEvent small {
+  font-size: 10px;
+}
+
+.terminalMockupMini .demoEventPlain {
+  padding-left: 0;
+}
+
+.termPromptGlyph {
+  color: #7dd3fc;
+  font-weight: 700;
+}
+
+.termDim {
+  color: #64748b;
+}
+
+.termHl {
+  color: #c4b5fd;
+}
+
+.termOk {
+  color: #4ade80;
+}
+
+.cliHint {
+  margin-top: 34px;
+  color: #8a90a4;
+  font-size: 14.5px;
+  text-align: center;
+}
+
+.hintCommandBar {
+  display: inline-grid;
+  width: auto;
+  min-height: 40px;
+  margin-left: 10px;
+  border-radius: 10px;
+  padding: 0 8px 0 14px;
+  vertical-align: middle;
+}
+
+.hintCommandBar code {
+  font-size: 13px;
+}
+
+.hintCommandBar .copyButton {
+  width: 26px;
+  height: 26px;
+}
+
+@media screen and (max-width: 996px) {
+  .surfaceHeroCard {
+    grid-template-columns: 1fr;
+    gap: 32px;
+    padding: 36px;
+  }
+
+  .surfaceGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media screen and (max-width: 640px) {
+  .surfaceHeroCard {
+    padding: 28px 20px;
+  }
+
+  .surfaceHeroCard h3 {
+    font-size: 28px;
+  }
+
+  .dlBtn {
+    padding: 12px 26px;
+  }
+
+  .hintCommandBar {
+    display: grid;
+    margin: 10px auto 0;
+  }
 }

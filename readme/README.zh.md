@@ -25,15 +25,29 @@
   <a href="https://github.com/aliyun/iac-code/releases/latest">全部发布文件</a>
 </p>
 
+## 桌面应用
+
+无需 Python、pip 或终端配置——下载原生应用，立即开始构建云基础设施。
+
+如需原生桌面体验，请从 [GitHub 最新正式版本](https://github.com/aliyun/iac-code/releases/latest) 下载对应平台的安装包：
+
+- macOS Apple 芯片：`.dmg`
+- Windows x64：`.exe` 安装程序
+- Linux x64：`.AppImage` 或 `.deb`
+
+桌面应用运行与 CLI 和 Web 应用相同的 IaC Code 引擎，并共用模型服务、云凭证、设置、项目和会话。首次启动时，请选择希望 IaC Code 操作的项目目录。Windows 版还会检查 Git Bash；如果尚未安装，应用会提供安装引导。
+
 <p align="center">
-  <img src="../website/static/img/demo_zh.gif" alt="iac-code 演示" width="100%">
+  <img src="../website/static/img/screenshots/iac-code-desktop-cn.jpg" alt="IaC Code 桌面应用" width="100%">
 </p>
+
+macOS、Windows 和 AppImage 版本可在应用内检查并安装经过加密签名的更新；deb 版本需要安装新版软件包来更新。稳定版 macOS 安装包使用 Apple Developer ID 签名并经过 Apple 公证，稳定版 Windows 安装包带有 Authenticode 发布者签名。请始终从官方版本页面下载，并核对随版本发布的 `SHA256SUMS`。安装方法和故障排查详见[桌面应用指南](https://aliyun.github.io/iac-code/zh-Hans/docs/desktop-app)。
 
 ## 安装
 
-IaC Code 需要 Python 3.10 或更高版本。支持 macOS、Linux 和 Windows。
+下面的 CLI 与 Web 应用运行在 Python 3.10 或更高版本上，支持 macOS、Linux 和 Windows。如果只使用桌面应用，可跳过本节。
 
-> **Windows 说明**：在 Windows 上需要安装 [Git for Windows](https://gitforwindows.org/) 以提供工具执行所需的 bash 环境。如果 Git Bash 已安装但不在 PATH 中，请设置 `IAC_CODE_GIT_BASH_PATH` 环境变量。
+> **Windows 说明**：在 Windows 上需要安装 [Git for Windows](https://gitforwindows.org/) 以提供工具执行所需的 bash 环境。如果 Git Bash 已安装但不在 PATH 中，请设置 `IAC_CODE_GIT_BASH_PATH` 环境变量。如果尚未安装，可运行 `iac-code install-git-bash` 自动安装 Git for Windows（经 npmmirror 镜像下载）。
 
 ```bash
 pip install iac-code
@@ -50,6 +64,10 @@ pip install iac-code
 ```bash
 iac-code
 ```
+
+<p align="center">
+  <img src="../website/static/img/demo_zh.gif" alt="iac-code 演示" width="100%">
+</p>
 
 ### 非交互模式
 
@@ -79,22 +97,6 @@ iac-code web
 <p align="center">
   <img src="../website/static/img/screenshots/iac-code-web-cn.jpg" alt="IaC Code Web 应用" width="100%">
 </p>
-
-### 桌面应用
-
-如需原生桌面体验，请从 [GitHub 最新正式版本](https://github.com/aliyun/iac-code/releases/latest) 下载对应平台的安装包：
-
-- macOS Apple 芯片：`.dmg`
-- Windows x64：`.exe` 安装程序
-- Linux x64：`.AppImage` 或 `.deb`
-
-桌面应用运行与 CLI 和 Web 应用相同的 IaC Code 引擎，并共用模型服务、云凭证、设置、项目和会话。首次启动时，请选择希望 IaC Code 操作的项目目录。Windows 版还会检查 Git Bash；如果尚未安装，应用会提供安装引导。
-
-<p align="center">
-  <img src="../website/static/img/screenshots/iac-code-desktop-cn.jpg" alt="IaC Code 桌面应用" width="100%">
-</p>
-
-macOS、Windows 和 AppImage 版本可在应用内检查并安装经过加密签名的更新；deb 版本需要安装新版软件包来更新。稳定版 macOS 安装包使用 Apple Developer ID 签名并经过 Apple 公证，稳定版 Windows 安装包带有 Authenticode 发布者签名。请始终从官方版本页面下载，并核对随版本发布的 `SHA256SUMS`。安装方法和故障排查详见[桌面应用指南](https://aliyun.github.io/iac-code/zh-Hans/docs/desktop-app)。
 
 ## 贡献
 
