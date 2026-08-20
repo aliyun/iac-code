@@ -1727,7 +1727,11 @@ async function toggleSessionPinned(session, event) {
     pinned: !previousPinned,
     pinnedAt: previousPinned ? null : new Date().toISOString(),
   };
-  sessionPinMutations.set(sessionId, optimistic);
+  // Keep a stable mutation identity so a later archive can cancel this request.
+  // The PATCH itself cannot be aborted reliably once sent, so its response must
+  // prove it still owns the row before changing navigation state.
+  const mutation = { patch: optimistic };
+  sessionPinMutations.set(sessionId, mutation);
   invalidateSessionListLoads();
   state = patchPinnedSessionState(state, optimistic, sessionPinPatchOptions());
   renderSessionsImmediate(state);
@@ -1735,9 +1739,15 @@ async function toggleSessionPinned(session, event) {
   let updated = null;
   try {
     updated = await api.updateSession(sessionId, { pinned: !previousPinned });
-    sessionPinMutations.set(sessionId, updated);
+    if (sessionPinMutations.get(sessionId) !== mutation) {
+      return;
+    }
+    mutation.patch = updated;
     state = patchPinnedSessionState(state, updated, sessionPinPatchOptions());
   } catch (error) {
+    if (sessionPinMutations.get(sessionId) !== mutation) {
+      return;
+    }
     state = patchPinnedSessionState(
       state,
       { ...identity, pinned: previousPinned, pinnedAt: previousPinned ? latest.pinnedAt || null : null },
@@ -1745,8 +1755,10 @@ async function toggleSessionPinned(session, event) {
     );
     window.alert?.(error?.message || t("Operation failed"));
   } finally {
-    sessionPinMutations.delete(sessionId);
-    renderSessionsImmediate(state);
+    if (sessionPinMutations.get(sessionId) === mutation) {
+      sessionPinMutations.delete(sessionId);
+      renderSessionsImmediate(state);
+    }
   }
   if (updated) {
     void reconcileSessionsAfterPinMutation();
@@ -1761,6 +1773,9 @@ async function archiveSession(session, event) {
   }
   try {
     const updated = await api.updateSession(sessionId, { archived: true });
+    // Archiving wins over an older in-flight pin PATCH. Removing the ownership
+    // token also makes that PATCH's eventual response a no-op.
+    sessionPinMutations.delete(sessionId);
     invalidateSessionListLoads();
     state = removeArchivedSessionFromNavigation(state, updated);
     if (state.currentSessionId === sessionId) {
@@ -2132,7 +2147,7 @@ async function toggleProjectPinned(group) {
   closeProjectMenu();
   try {
     await api.updateProject(group.key, { pinned: !group.pinned });
-    await loadSessions();
+    await loadSessions({ retryIfSuperseded: true });
     renderSessionsImmediate(state);
   } catch (error) {
     window.alert?.(error?.message || t("Operation failed"));
@@ -2145,7 +2160,7 @@ async function archiveProjectGroup(group) {
     // 归档整个项目 = 归档其下全部会话(会话级 archived=True),使它们成组出现在
     // 「已归档对话」面板、可逐条撤销;项目本身不设归档标志,撤销任一会话即回到侧栏。
     await api.archiveProjectSessions(group.key);
-    await loadSessions();
+    await loadSessions({ retryIfSuperseded: true });
     renderSessionsImmediate(state);
   } catch (error) {
     window.alert?.(error?.message || t("Archive failed"));
@@ -2162,7 +2177,7 @@ function removeProjectGroup(group) {
     danger: true,
     onConfirm: async () => {
       await api.updateProject(group.key, { hidden: true });
-      await loadSessions();
+      await loadSessions({ retryIfSuperseded: true });
       renderSessionsImmediate(state);
     },
   });
@@ -2187,7 +2202,7 @@ function startProjectRename(group) {
     confirmLabel: t("Save"),
     onConfirm: async (value) => {
       await api.updateProject(group.key, { label: value });
-      await loadSessions();
+      await loadSessions({ retryIfSuperseded: true });
       renderSessionsImmediate(state);
     },
   });
@@ -5267,30 +5282,38 @@ async function reconcileSessionsAfterPinMutation() {
   }
 }
 
-async function loadSessions() {
-  const generation = ++sessionListLoadGeneration;
-  const payload = await api.listSessions({
-    limit: 50,
-    perProjectLimit: PROJECT_THREAD_PREVIEW_LIMIT,
-  });
-  if (generation !== sessionListLoadGeneration) {
-    return state.sessions || [];
+export async function loadSessions({ retryIfSuperseded = false } = {}) {
+  while (true) {
+    const generation = ++sessionListLoadGeneration;
+    const payload = await api.listSessions({
+      limit: 50,
+      perProjectLimit: PROJECT_THREAD_PREVIEW_LIMIT,
+    });
+    if (generation !== sessionListLoadGeneration) {
+      // A user action must not immediately repaint the pre-action snapshot. If
+      // another list request or mutation superseded this one, retry from the
+      // newest generation; background refreshes still keep their cheap early-out.
+      if (retryIfSuperseded) {
+        continue;
+      }
+      return state.sessions || [];
+    }
+    const sessions = payload.sessions || [];
+    let nextState = {
+      ...state,
+      sessions,
+      pinnedSessions: payload.pinnedSessions || [],
+      pinnedProjects: payload.pinnedProjects || [],
+      projectGroups: preserveExpandedProjectGroups(payload.projects || []),
+    };
+    // 另一个后台刷新可能在 PATCH 完成前返回旧快照。把仍在进行的本地 pin 状态覆盖到新快照上，
+    // 避免按钮刚变为置顶/取消置顶又短暂跳回旧状态。
+    for (const mutation of sessionPinMutations.values()) {
+      nextState = patchPinnedSessionState(nextState, mutation.patch, sessionPinPatchOptions());
+    }
+    state = nextState;
+    return sessions;
   }
-  const sessions = payload.sessions || [];
-  let nextState = {
-    ...state,
-    sessions,
-    pinnedSessions: payload.pinnedSessions || [],
-    pinnedProjects: payload.pinnedProjects || [],
-    projectGroups: preserveExpandedProjectGroups(payload.projects || []),
-  };
-  // 另一个后台刷新可能在 PATCH 完成前返回旧快照。把仍在进行的本地 pin 变更覆盖到快照上，
-  // 避免按钮刚变为置顶/取消置顶又短暂跳回旧状态。
-  for (const patch of sessionPinMutations.values()) {
-    nextState = patchPinnedSessionState(nextState, patch, sessionPinPatchOptions());
-  }
-  state = nextState;
-  return sessions;
 }
 
 async function loadPipelineState(session) {
@@ -6344,7 +6367,7 @@ async function start() {
       // 归档面板取消归档/删除会话后,重新拉取会话列表并重绘侧栏,使被隐藏的空项目
       // 或恢复的会话立即出现,无需手动刷新页面。
       onSessionsMutated: async () => {
-        await loadSessions();
+        await loadSessions({ retryIfSuperseded: true });
         renderSessionsImmediate(state);
       },
       // 新会话默认面板据此渲染「默认流水线」下拉:流水线模式必须绑定一条具体流水线。

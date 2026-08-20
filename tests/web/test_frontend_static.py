@@ -1259,7 +1259,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-315" in html
-    assert "/static/js/app.js?v=web-repl-ui-337" in html
+    assert "/static/js/app.js?v=web-repl-ui-338" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1293,7 +1293,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-337" in index_html
+    assert "web-repl-ui-338" in index_html
     assert "web-repl-ui-334" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-319" in app_source
@@ -1812,6 +1812,10 @@ def test_sidebar_defers_repaint_while_pointer_inside() -> None:
     )[0]
     assert pin_body.index("renderSessionsImmediate(state);") < pin_body.index("await api.updateSession(")
     assert "invalidateSessionListLoads();" in pin_body
+    # 归档同一会话可取消尚未完成的 pin mutation；旧 PATCH 返回时必须先核验所有权，不能复活归档行。
+    assert "const mutation = { patch: optimistic };" in pin_body
+    assert "sessionPinMutations.get(sessionId) !== mutation" in pin_body
+    assert "mutation.patch = updated;" in pin_body
 
     # 会话 PATCH 成功后先从本地导航快照移除并立即绘制，全量列表仅后台校准；归档当前会话/点击
     # “新会话”则在全量 render 后立即清除旧选中态。两条路径都不能把反馈拖到慢列表或 pointerleave。
@@ -1819,6 +1823,9 @@ def test_sidebar_defers_repaint_while_pointer_inside() -> None:
     assert "removeArchivedSessionFromNavigation" in archive_body
     assert "void refreshSessionsSidebar();" in archive_body
     assert "await loadSessions();" not in archive_body
+    assert archive_body.index("sessionPinMutations.delete(sessionId);") < archive_body.index(
+        "removeArchivedSessionFromNavigation"
+    )
     draft_body = app_source.split("function startNewSessionDraft(", 1)[1].split(
         "\nasync function createSessionForSubmit(", 1
     )[0]
@@ -1832,17 +1839,24 @@ def test_sidebar_defers_repaint_while_pointer_inside() -> None:
         ("function startProjectRename(", "\nfunction ensureProjectMenu("),
     ]:
         action_body = app_source.split(start, 1)[1].split(end, 1)[0]
+        assert "loadSessions({ retryIfSuperseded: true })" in action_body
         assert "renderSessionsImmediate(state);" in action_body
     archived_panel_callback = app_source.split("onSessionsMutated: async () =>", 1)[1].split("},", 1)[0]
+    assert "loadSessions({ retryIfSuperseded: true })" in archived_panel_callback
     assert "renderSessionsImmediate(state);" in archived_panel_callback
 
-    # 列表请求用独立 generation 丢弃旧响应，并把仍在进行的本地 pin 状态覆盖到新快照。
-    load_body = app_source.split("async function loadSessions()", 1)[1].split(
+    # 列表请求用独立 generation 丢弃旧响应；用户操作若被抢占则循环重试到最新代，后台请求仍直接
+    # 早退。成功应用快照时还要覆盖仍持有所有权的本地 pin 状态。
+    load_body = app_source.split("export async function loadSessions({ retryIfSuperseded = false } = {})", 1)[1].split(
         "\nasync function loadPipelineState(", 1
     )[0]
+    assert "while (true)" in load_body
     assert "const generation = ++sessionListLoadGeneration;" in load_body
     assert "if (generation !== sessionListLoadGeneration)" in load_body
-    assert "for (const patch of sessionPinMutations.values())" in load_body
+    assert "if (retryIfSuperseded)" in load_body
+    assert "continue;" in load_body
+    assert "for (const mutation of sessionPinMutations.values())" in load_body
+    assert "mutation.patch" in load_body
 
     # 流式 render 与后台刷新都改走节流包装,不再直接 renderSessions。
     assert "renderSessionsAuto(state);" in app_source
@@ -7165,6 +7179,68 @@ def test_sidebar_archive_state_is_removed_without_waiting_for_full_list(tmp_path
     }
 
 
+def test_user_session_list_refresh_retries_when_background_request_supersedes_it(tmp_path: Path) -> None:
+    output = _run_app_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            globalThis.document = {
+              getElementById() {
+                return null;
+              },
+            };
+            globalThis.window = {
+              location: { origin: "http://127.0.0.1:8080", search: "" },
+            };
+
+            const requests = [];
+            globalThis.fetch = () => new Promise((resolve) => requests.push(resolve));
+            const respond = (index, sessionId) => {
+              requests[index](new Response(JSON.stringify({
+                sessions: [{ webSessionId: sessionId }],
+                pinnedSessions: [],
+                pinnedProjects: [],
+                projects: [],
+              }), {
+                status: 200,
+                headers: { "content-type": "application/json" },
+              }));
+            };
+            const waitForRequests = async (count) => {
+              while (requests.length < count) {
+                await new Promise((resolve) => setImmediate(resolve));
+              }
+            };
+
+            const { loadSessions } = await import(__APP_MODULE__);
+            const userRefresh = loadSessions({ retryIfSuperseded: true });
+            await waitForRequests(1);
+            const backgroundRefresh = loadSessions();
+            await waitForRequests(2);
+
+            // The background request takes the next generation before the user
+            // response lands. The user refresh must start a third request instead
+            // of returning and immediately painting its stale snapshot.
+            respond(0, "stale-user-response");
+            await waitForRequests(3);
+            respond(1, "background-response");
+            respond(2, "latest-user-response");
+
+            const [userSessions] = await Promise.all([userRefresh, backgroundRefresh]);
+            console.log(JSON.stringify({
+              requestCount: requests.length,
+              userSessionIds: userSessions.map((session) => session.webSessionId),
+            }));
+            """
+        ),
+    )
+
+    assert output == {
+        "requestCount": 3,
+        "userSessionIds": ["latest-user-response"],
+    }
+
+
 def test_styles_use_codex_dark_visual_tokens() -> None:
     styles = _source(STYLES_CSS)
 
@@ -10782,7 +10858,7 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-337" in html
+    assert "web-repl-ui-338" in html
     assert "web-repl-ui-334" not in html
 
 
@@ -10799,7 +10875,7 @@ def test_load_sessions_preserves_expanded_project_groups() -> None:
     # groupSessionsByProject 归一化后的 key(projectKeyFromGroup)。保留逻辑必须用同一个
     # projectKeyFromGroup 派生 key,否则 has(group.key)=has(undefined) 恒 false,展开态照样丢。
     preserve_body = app_source.split("function preserveExpandedProjectGroups(freshGroups)", 1)[1].split(
-        "async function loadSessions()", 1
+        "export async function loadSessions({ retryIfSuperseded = false } = {})", 1
     )[0]
     assert "const key = projectKeyFromGroup(group)" in preserve_body
     assert "expandedProjectKeys.has(key)" in preserve_body
