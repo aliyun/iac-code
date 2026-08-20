@@ -1,15 +1,17 @@
 import contextvars
 import json
 import os
+import threading
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
-from dataclasses import dataclass, field
+from contextlib import contextmanager, nullcontext
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
 from iac_code.config import _load_yaml, _save_yaml, get_cloud_credentials_path
 from iac_code.i18n import _
+from iac_code.utils.state_io import cross_process_append_lock
 
 DEFAULT_REGION = "cn-hangzhou"
 DEFAULT_ALIYUN_CLI_CONFIG_PATH = os.path.expanduser("~/.aliyun/config.json")
@@ -102,11 +104,43 @@ class AliyunCredential:
     oauth_refresh_token: str = ""
     oauth_access_token_expire: int = 0
     oauth_refresh_token_expire: int = 0
+    # Runtime-only origin metadata. It lets OAuth refresh reload the same
+    # iac-code credential file after acquiring its cross-process lock without
+    # changing the persisted credential schema.
+    credential_source: str = field(default="", repr=False, compare=False)
+    credential_source_path: str = field(default="", repr=False, compare=False)
 
 
 _aliyun_credential_override: contextvars.ContextVar[AliyunCredential | None] = contextvars.ContextVar(
     "iac_code_aliyun_credential_override", default=None
 )
+_cloud_credential_lock_paths: contextvars.ContextVar[frozenset[str]] = contextvars.ContextVar(
+    "iac_code_cloud_credential_lock_paths", default=frozenset()
+)
+_cloud_credential_thread_lock = threading.RLock()
+
+
+@contextmanager
+def _cloud_credential_file_lock(path: Path) -> Iterator[None]:
+    """Serialize read-modify-write credential operations across threads and processes."""
+    lock_key = str(path.resolve(strict=False))
+    held_paths = _cloud_credential_lock_paths.get()
+    if lock_key in held_paths:
+        yield
+        return
+
+    with _cloud_credential_thread_lock:
+        with cross_process_append_lock(path):
+            token = _cloud_credential_lock_paths.set(held_paths | {lock_key})
+            try:
+                yield
+            finally:
+                _cloud_credential_lock_paths.reset(token)
+
+
+def _copy_credential(target: AliyunCredential, source: AliyunCredential) -> None:
+    for credential_field in fields(AliyunCredential):
+        setattr(target, credential_field.name, getattr(source, credential_field.name))
 
 
 @contextmanager
@@ -211,56 +245,92 @@ class AliyunCredentials:
         has_sts = bool(credential.access_key_id and credential.access_key_secret and credential.sts_token)
         if has_sts and not is_epoch_expired(credential.sts_expiration, current, STS_SKEW_SECONDS):
             return credential
-
         if not credential.oauth_site_type:
             raise AliyunOAuthReloginRequired(_("Alibaba Cloud OAuth site is missing."))
 
-        owns_client = oauth_client is None
-        client = AliyunOAuthClient(get_oauth_site(credential.oauth_site_type)) if oauth_client is None else oauth_client
-
-        try:
-            refreshed_access_token = False
-            if is_epoch_expired(credential.oauth_access_token_expire, current, ACCESS_TOKEN_SKEW_SECONDS):
-                if not credential.oauth_refresh_token:
+        source_path = (
+            Path(credential.credential_source_path)
+            if credential.credential_source == "iac_code" and credential.credential_source_path
+            else None
+        )
+        lock = _cloud_credential_file_lock(source_path) if source_path is not None else nullcontext()
+        with lock:
+            if source_path is not None:
+                stored = AliyunCredentials._load_from_iac_code_path(source_path)
+                if stored is None:
                     raise AliyunOAuthReloginRequired(_("Alibaba Cloud OAuth refresh token is missing."))
-                token = client.refresh_access_token(credential.oauth_refresh_token, now=current)
-                credential.oauth_access_token = token.access_token
-                credential.oauth_refresh_token = token.refresh_token
-                credential.oauth_access_token_expire = token.access_token_expire
-                credential.oauth_refresh_token_expire = token.refresh_token_expire
-                refreshed_access_token = True
+                _copy_credential(credential, stored)
+                if credential.mode != "OAuth":
+                    return credential
 
-            if not credential.oauth_access_token:
-                raise AliyunOAuthReloginRequired(_("Alibaba Cloud OAuth access token is missing."))
+                # Another process may have completed the refresh while this
+                # caller waited for the credential-file lock.
+                has_sts = bool(credential.access_key_id and credential.access_key_secret and credential.sts_token)
+                if has_sts and not is_epoch_expired(credential.sts_expiration, current, STS_SKEW_SECONDS):
+                    return credential
+
+            if not credential.oauth_site_type:
+                raise AliyunOAuthReloginRequired(_("Alibaba Cloud OAuth site is missing."))
+
+            owns_client = oauth_client is None
+            client = (
+                AliyunOAuthClient(get_oauth_site(credential.oauth_site_type))
+                if oauth_client is None
+                else oauth_client
+            )
 
             try:
-                sts = client.exchange_access_token_for_sts(credential.oauth_access_token)
-            except AliyunOAuthError as error:
-                if refreshed_access_token or not _is_short_lived_access_token_sts_exchange_error(error):
-                    raise
-                if not credential.oauth_refresh_token:
-                    raise AliyunOAuthReloginRequired(_("Alibaba Cloud OAuth refresh token is missing.")) from error
-                token = client.refresh_access_token(credential.oauth_refresh_token, now=current)
-                credential.oauth_access_token = token.access_token
-                credential.oauth_refresh_token = token.refresh_token
-                credential.oauth_access_token_expire = token.access_token_expire
-                credential.oauth_refresh_token_expire = token.refresh_token_expire
-                sts = client.exchange_access_token_for_sts(credential.oauth_access_token)
-            credential.access_key_id = sts.access_key_id
-            credential.access_key_secret = sts.access_key_secret
-            credential.sts_token = sts.sts_token
-            credential.sts_expiration = sts.sts_expiration
+                refreshed_access_token = False
+                if is_epoch_expired(credential.oauth_access_token_expire, current, ACCESS_TOKEN_SKEW_SECONDS):
+                    if not credential.oauth_refresh_token:
+                        raise AliyunOAuthReloginRequired(_("Alibaba Cloud OAuth refresh token is missing."))
+                    token = client.refresh_access_token(credential.oauth_refresh_token, now=current)
+                    credential.oauth_access_token = token.access_token
+                    credential.oauth_refresh_token = token.refresh_token
+                    credential.oauth_access_token_expire = token.access_token_expire
+                    credential.oauth_refresh_token_expire = token.refresh_token_expire
+                    refreshed_access_token = True
+                    # Refresh tokens rotate. Persist the replacement before any
+                    # later network request so a transient STS exchange failure
+                    # cannot strand the old, already-invalid token on disk.
+                    AliyunCredentials.save(credential)
 
-            AliyunCredentials.save(credential)
-            return credential
-        finally:
-            if owns_client:
-                client.close()
+                if not credential.oauth_access_token:
+                    raise AliyunOAuthReloginRequired(_("Alibaba Cloud OAuth access token is missing."))
+
+                try:
+                    sts = client.exchange_access_token_for_sts(credential.oauth_access_token)
+                except AliyunOAuthError as error:
+                    if refreshed_access_token or not _is_short_lived_access_token_sts_exchange_error(error):
+                        raise
+                    if not credential.oauth_refresh_token:
+                        raise AliyunOAuthReloginRequired(_("Alibaba Cloud OAuth refresh token is missing.")) from error
+                    token = client.refresh_access_token(credential.oauth_refresh_token, now=current)
+                    credential.oauth_access_token = token.access_token
+                    credential.oauth_refresh_token = token.refresh_token
+                    credential.oauth_access_token_expire = token.access_token_expire
+                    credential.oauth_refresh_token_expire = token.refresh_token_expire
+                    AliyunCredentials.save(credential)
+                    sts = client.exchange_access_token_for_sts(credential.oauth_access_token)
+                credential.access_key_id = sts.access_key_id
+                credential.access_key_secret = sts.access_key_secret
+                credential.sts_token = sts.sts_token
+                credential.sts_expiration = sts.sts_expiration
+
+                AliyunCredentials.save(credential)
+                return credential
+            finally:
+                if owns_client:
+                    client.close()
 
     @staticmethod
     def _load_from_iac_code_config() -> AliyunCredential | None:
         """Load credentials from ~/.iac-code/.cloud-credentials.yml."""
-        cloud_creds = _load_yaml(get_cloud_credentials_path())
+        return AliyunCredentials._load_from_iac_code_path(get_cloud_credentials_path())
+
+    @staticmethod
+    def _load_from_iac_code_path(path: Path) -> AliyunCredential | None:
+        cloud_creds = _load_yaml(path)
         aliyun_data = cloud_creds.get("aliyun")
         if not aliyun_data or not isinstance(aliyun_data, dict):
             return None
@@ -270,10 +340,13 @@ class AliyunCredentials:
             return None
 
         if mode == "EcsRamRole":
-            return _ecs_ram_role_credential(
+            credential = _ecs_ram_role_credential(
                 aliyun_data.get("region_id", DEFAULT_REGION),
                 aliyun_data.get("ram_role_name", ""),
             )
+            credential.credential_source = "iac_code"
+            credential.credential_source_path = str(path)
+            return credential
 
         return AliyunCredential(
             mode=mode,
@@ -289,6 +362,8 @@ class AliyunCredentials:
             oauth_refresh_token=aliyun_data.get("oauth_refresh_token", ""),
             oauth_access_token_expire=int(aliyun_data.get("oauth_access_token_expire") or 0),
             oauth_refresh_token_expire=int(aliyun_data.get("oauth_refresh_token_expire") or 0),
+            credential_source="iac_code",
+            credential_source_path=str(path),
         )
 
     @staticmethod
@@ -373,10 +448,21 @@ class AliyunCredentials:
         """Save credentials to ~/.iac-code/.cloud-credentials.yml."""
         if config_path is not None:
             # For testing: save to specified path in aliyun CLI format
-            AliyunCredentials._save_to_aliyun_cli_format(credential, config_path)
+            path = Path(config_path)
+            with _cloud_credential_file_lock(path):
+                AliyunCredentials._save_to_aliyun_cli_format(credential, config_path)
             return
 
-        path = get_cloud_credentials_path()
+        path = (
+            Path(credential.credential_source_path)
+            if credential.credential_source == "iac_code" and credential.credential_source_path
+            else get_cloud_credentials_path()
+        )
+        with _cloud_credential_file_lock(path):
+            AliyunCredentials._save_to_iac_code_config(credential, path)
+
+    @staticmethod
+    def _save_to_iac_code_config(credential: AliyunCredential, path: Path) -> None:
         cloud_creds = _load_yaml(path)
 
         aliyun_data: dict[str, Any] = {
@@ -404,6 +490,8 @@ class AliyunCredentials:
 
         cloud_creds["aliyun"] = aliyun_data
         _save_yaml(path, cloud_creds)
+        credential.credential_source = "iac_code"
+        credential.credential_source_path = str(path)
 
         # The dynamic-credential runtime caches one provider per (mode, role name, IMDSv1
         # policy); a saved configuration change must not keep serving the old provider.

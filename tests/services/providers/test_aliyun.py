@@ -1,5 +1,7 @@
 import json
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 import pytest
@@ -966,7 +968,7 @@ class TestAliyunCredentialsOAuthRefresh:
 
         assert refreshed is cred
         assert calls == ["exchange:old-access", "refresh:old-refresh", "exchange:new-access"]
-        assert saved == [cred]
+        assert saved == [cred, cred]
         assert cred.oauth_access_token == "new-access"
         assert cred.oauth_refresh_token == "new-refresh"
         assert cred.oauth_access_token_expire == 4600
@@ -1004,7 +1006,7 @@ class TestAliyunCredentialsOAuthRefresh:
         refreshed = AliyunCredentials.refresh_oauth_if_needed(cred, oauth_client=FakeClient(), now=1000)
 
         assert refreshed is cred
-        assert saved == [cred]
+        assert saved == [cred, cred]
         assert cred.oauth_access_token == "new-access"
         assert cred.oauth_refresh_token == "new-refresh"
         assert cred.oauth_access_token_expire == 4600
@@ -1013,6 +1015,116 @@ class TestAliyunCredentialsOAuthRefresh:
         assert cred.access_key_secret == "new-sk"
         assert cred.sts_token == "new-sts"
         assert cred.sts_expiration == 2500
+
+    def test_refresh_oauth_persists_rotated_token_before_sts_exchange(self, tmp_path):
+        cloud_creds_file = tmp_path / ".cloud-credentials.yml"
+        cred = AliyunCredential(
+            mode="OAuth",
+            oauth_site_type="CN",
+            oauth_access_token="old-access",
+            oauth_refresh_token="old-refresh",
+            oauth_access_token_expire=900,
+            oauth_refresh_token_expire=3000,
+            access_key_id="old-ak",
+            access_key_secret="old-sk",
+            sts_token="old-sts",
+            sts_expiration=900,
+        )
+
+        class FakeClient:
+            def refresh_access_token(self, refresh_token, *, now=None):
+                assert refresh_token == "old-refresh"
+                assert now == 1000
+                return OAuthToken("new-access", "new-refresh", 4600, 5000)
+
+            def exchange_access_token_for_sts(self, access_token):
+                assert access_token == "new-access"
+                raise AliyunOAuthError("temporary STS exchange failure")
+
+        class RecoveringClient:
+            def refresh_access_token(self, refresh_token, *, now=None):
+                raise AssertionError("the persisted replacement refresh token should not be used")
+
+            def exchange_access_token_for_sts(self, access_token):
+                assert access_token == "new-access"
+                return OAuthStsCredentials("new-ak", "new-sk", "new-sts", 2500)
+
+        with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
+            AliyunCredentials.save(cred)
+            with pytest.raises(AliyunOAuthError, match="temporary STS exchange failure"):
+                AliyunCredentials.refresh_oauth_if_needed(cred, oauth_client=FakeClient(), now=1000)
+            persisted = AliyunCredentials.load_from_iac_code_config()
+            assert persisted is not None
+            assert persisted.oauth_access_token == "new-access"
+            assert persisted.oauth_refresh_token == "new-refresh"
+            assert persisted.oauth_access_token_expire == 4600
+            assert persisted.oauth_refresh_token_expire == 5000
+            assert persisted.sts_token == "old-sts"
+            assert persisted.sts_expiration == 900
+
+            recovered = AliyunCredentials.refresh_oauth_if_needed(
+                persisted,
+                oauth_client=RecoveringClient(),
+                now=1000,
+            )
+
+        assert recovered.oauth_refresh_token == "new-refresh"
+        assert recovered.access_key_id == "new-ak"
+        assert recovered.sts_token == "new-sts"
+        assert recovered.sts_expiration == 2500
+
+    def test_refresh_oauth_serializes_stale_in_process_credentials(self, tmp_path):
+        cloud_creds_file = tmp_path / ".cloud-credentials.yml"
+        original = AliyunCredential(
+            mode="OAuth",
+            oauth_site_type="CN",
+            oauth_access_token="old-access",
+            oauth_refresh_token="old-refresh",
+            oauth_access_token_expire=900,
+            oauth_refresh_token_expire=3000,
+            access_key_id="old-ak",
+            access_key_secret="old-sk",
+            sts_token="old-sts",
+            sts_expiration=900,
+        )
+        start = threading.Barrier(2)
+
+        class RotatingClient:
+            def __init__(self):
+                self.refresh_token = "old-refresh"
+                self.refresh_calls = 0
+                self._lock = threading.Lock()
+
+            def refresh_access_token(self, refresh_token, *, now=None):
+                with self._lock:
+                    assert refresh_token == self.refresh_token
+                    assert now == 1000
+                    self.refresh_calls += 1
+                    self.refresh_token = "new-refresh"
+                return OAuthToken("new-access", "new-refresh", 4600, 5000)
+
+            def exchange_access_token_for_sts(self, access_token):
+                assert access_token == "new-access"
+                return OAuthStsCredentials("new-ak", "new-sk", "new-sts", 2500)
+
+        client = RotatingClient()
+        with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
+            AliyunCredentials.save(original)
+            first = AliyunCredentials.load_from_iac_code_config()
+            second = AliyunCredentials.load_from_iac_code_config()
+            assert first is not None
+            assert second is not None
+
+            def refresh(stale: AliyunCredential) -> AliyunCredential:
+                start.wait()
+                return AliyunCredentials.refresh_oauth_if_needed(stale, oauth_client=client, now=1000)
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                results = list(executor.map(refresh, (first, second)))
+
+        assert client.refresh_calls == 1
+        assert [result.oauth_refresh_token for result in results] == ["new-refresh", "new-refresh"]
+        assert [result.sts_token for result in results] == ["new-sts", "new-sts"]
 
     def test_refresh_oauth_requires_relogin_when_refresh_token_missing(self):
         cred = AliyunCredential(
