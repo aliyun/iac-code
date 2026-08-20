@@ -29,7 +29,7 @@ from iac_code.agent.message import (
     compaction_summary_tail_count,
     is_compaction_summary_message,
 )
-from iac_code.i18n import _
+from iac_code.i18n import _, get_current_language
 from iac_code.pipeline.constants import CLEANUP_PROMPT_METADATA_TYPE
 from iac_code.pipeline.display_names import display_step_name
 from iac_code.pipeline.engine.display_replay import DISPLAY_TRANSCRIPT_FILENAME
@@ -2511,6 +2511,7 @@ class WebSessionManager:
         if not session.pending_llm_title:
             return
         session.pending_llm_title = False  # 立即消费,永不重触发
+        language = get_current_language()
 
         async def _run() -> None:
             try:
@@ -2528,6 +2529,7 @@ class WebSessionManager:
                     text=text,
                     image_blocks=image_blocks,
                     selection=model_selection_for_session(session),
+                    language=language,
                 )
                 if not title:
                     stripped = (text or "").strip()
