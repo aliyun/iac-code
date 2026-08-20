@@ -1277,6 +1277,21 @@ async def test_task_store_persistence_failure_does_not_abort_task_creation() -> 
 
 
 @pytest.mark.asyncio
+async def test_has_active_work_tracks_running_tasks() -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    await store.get_or_create_context(context_id="ctx-1", cwd="/tmp", runtime_factory=lambda sid: object())
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    release = asyncio.Event()
+    active_task = asyncio.create_task(release.wait())
+    task.active_task = active_task
+
+    assert await store.has_active_work() is True
+    release.set()
+    await active_task
+    assert await store.has_active_work() is False
+
+
+@pytest.mark.asyncio
 async def test_cleanup_loop_survives_cleanup_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     store = A2ATaskStore(metrics=NoOpA2AMetrics(), cleanup_interval_seconds=0.01)
     calls = 0

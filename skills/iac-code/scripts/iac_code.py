@@ -60,6 +60,8 @@ MAX_FOLLOW_SECONDS = 120.0
 INSTALL_LOCK_TIMEOUT = 30.0
 DOWNLOAD_ATTEMPTS = 3
 RUNTIME_START_TIMEOUT = 20.0
+RUNTIME_STOP_TIMEOUT = 5.0
+RUNTIME_IDLE_TIMEOUT_SECONDS = 30 * 60
 WORKER_IDENTITY_TIMEOUT = 10.0
 TERMINAL_STATES = {
     "completed",
@@ -785,9 +787,13 @@ def clean_runtime_cache(args):
     }
 
 
-def _runtime_key(mode, pipeline_name, workspace, target):
-    identity = "\0".join([RUNTIME_TAG, target, mode, pipeline_name or "", str(workspace)])
+def _runtime_key(mode, pipeline_name, target):
+    identity = "\0".join([RUNTIME_TAG, target, mode, pipeline_name or ""])
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+
+
+def _runtime_record_path(mode, pipeline_name, target):
+    return _bridge_root() / "servers" / _runtime_key(mode, pipeline_name, target) / "runtime.json"
 
 
 def _pid_alive(pid):
@@ -904,14 +910,13 @@ def _runtime_configuration_readiness(record, require_cloud):
     return readiness
 
 
-def _runtime_matches(record, mode, pipeline_name, workspace, target):
+def _runtime_matches(record, mode, pipeline_name, target):
     expected = {
         "runtimeTag": RUNTIME_TAG,
         "iacCodeVersion": IAC_CODE_VERSION,
         "target": target,
         "mode": mode,
         "pipelineName": pipeline_name or "",
-        "workspace": str(workspace),
     }
     if any(record.get(key) != value for key, value in expected.items()) or not _pid_alive(record.get("pid")):
         return False
@@ -944,7 +949,7 @@ def _runtime_record_for_job(job):
     record = _load_json(pathlib.Path(record_path), "runtime_identity_mismatch")
     if record.get("generation") != job.get("runtimeGeneration"):
         raise BridgeError("runtime_identity_mismatch", "The Skill job runtime generation is no longer active.")
-    if not _runtime_matches(record, mode, pipeline_name, pathlib.Path(workspace), target):
+    if not _runtime_matches(record, mode, pipeline_name, target):
         raise BridgeError("runtime_identity_mismatch", "The Skill job runtime identity no longer matches.")
     return record
 
@@ -956,10 +961,37 @@ def _free_port():
         return int(listener.getsockname()[1])
 
 
-def ensure_server(executable, artifact, mode, pipeline_name, workspace):
+def _stop_spawned_process(process):
+    if process.poll() is not None:
+        return
+    with contextlib.suppress(OSError):
+        process.terminate()
+    try:
+        process.wait(timeout=RUNTIME_STOP_TIMEOUT)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    except OSError:
+        return
+    with contextlib.suppress(OSError):
+        process.kill()
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=RUNTIME_STOP_TIMEOUT)
+
+
+def _remove_runtime_record(record_path, generation):
+    if not record_path.is_file():
+        return
+    with contextlib.suppress(BridgeError, OSError):
+        current = _load_json(record_path, "runtime_identity_mismatch")
+        if current.get("generation") == generation:
+            record_path.unlink()
+
+
+def ensure_server(executable, artifact, mode, pipeline_name):
     runtimes = _bridge_root() / "servers"
     _secure_directory(runtimes)
-    key = _runtime_key(mode, pipeline_name, workspace, artifact["target"])
+    key = _runtime_key(mode, pipeline_name, artifact["target"])
     root = runtimes / key
     _secure_directory(root)
     record_path = root / "runtime.json"
@@ -967,7 +999,7 @@ def ensure_server(executable, artifact, mode, pipeline_name, workspace):
         if record_path.is_file():
             with contextlib.suppress(BridgeError):
                 record = _load_json(record_path, "runtime_identity_mismatch")
-                if _runtime_matches(record, mode, pipeline_name, workspace, artifact["target"]):
+                if _runtime_matches(record, mode, pipeline_name, artifact["target"]):
                     return record
         token = secrets.token_urlsafe(32)
         port = _free_port()
@@ -983,13 +1015,15 @@ def ensure_server(executable, artifact, mode, pipeline_name, workspace):
             "auto_approve_permissions": False,
             "thinking_exposure": ["tool-trace"],
             "log_to_stdout": False,
+            "idle_shutdown_seconds": RUNTIME_IDLE_TIMEOUT_SECONDS,
         }
         config_path = root / "a2a.json"
         _atomic_json(config_path, config)
         log_path = root / "runtime.log"
         environment = dict(os.environ)
         environment["IAC_CODE_MODE"] = mode
-        environment["IACCODE_A2A_ALLOWED_CWDS"] = str(workspace)
+        environment.pop("IACCODE_A2A_ALLOWED_CWDS", None)
+        environment["IAC_CODE_A2A_TRUST_REQUEST_CWD"] = "1"
         environment["IAC_CODE_SKILL_RUNTIME_GENERATION"] = generation
         if pipeline_name:
             environment["IAC_CODE_PIPELINE_NAME"] = pipeline_name
@@ -1006,47 +1040,54 @@ def ensure_server(executable, artifact, mode, pipeline_name, workspace):
             str(config_path),
         ]
         creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
-        with log_path.open("ab", buffering=0) as log:
-            process = subprocess.Popen(
-                command,
-                cwd=str(workspace),
-                env=environment,
-                stdin=subprocess.DEVNULL,
-                stdout=log,
-                stderr=log,
-                start_new_session=os.name != "nt",
-                creationflags=creationflags,
+        process = None
+        ready = False
+        try:
+            with log_path.open("ab", buffering=0) as log:
+                process = subprocess.Popen(
+                    command,
+                    cwd=str(root),
+                    env=environment,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=log,
+                    start_new_session=os.name != "nt",
+                    creationflags=creationflags,
+                )
+            record = {
+                "schemaVersion": 2,
+                "runtimeTag": RUNTIME_TAG,
+                "skillVersion": SKILL_VERSION,
+                "iacCodeVersion": IAC_CODE_VERSION,
+                "target": artifact["target"],
+                "generation": generation,
+                "mode": mode,
+                "pipelineName": pipeline_name or "",
+                "pid": process.pid,
+                "port": port,
+                "token": token,
+                "logPath": str(log_path),
+                "startedAt": int(time.time()),
+            }
+            _atomic_json(record_path, record)
+            deadline = time.monotonic() + RUNTIME_START_TIMEOUT
+            while time.monotonic() < deadline:
+                if process.poll() is not None:
+                    break
+                if _runtime_matches(record, mode, pipeline_name, artifact["target"]):
+                    ready = True
+                    return record
+                time.sleep(0.15)
+            raise BridgeError(
+                "runtime_start_failed",
+                "The local iac-code A2A runtime failed its health check.",
+                True,
+                {"logPath": str(log_path)},
             )
-        record = {
-            "schemaVersion": 1,
-            "runtimeTag": RUNTIME_TAG,
-            "skillVersion": SKILL_VERSION,
-            "iacCodeVersion": IAC_CODE_VERSION,
-            "target": artifact["target"],
-            "generation": generation,
-            "mode": mode,
-            "pipelineName": pipeline_name or "",
-            "workspace": str(workspace),
-            "pid": process.pid,
-            "port": port,
-            "token": token,
-            "logPath": str(log_path),
-            "startedAt": int(time.time()),
-        }
-        _atomic_json(record_path, record)
-        deadline = time.monotonic() + RUNTIME_START_TIMEOUT
-        while time.monotonic() < deadline:
-            if process.poll() is not None:
-                break
-            if _runtime_matches(record, mode, pipeline_name, workspace, artifact["target"]):
-                return record
-            time.sleep(0.15)
-        raise BridgeError(
-            "runtime_start_failed",
-            "The local iac-code A2A runtime failed its health check.",
-            True,
-            {"logPath": str(log_path)},
-        )
+        finally:
+            if process is not None and not ready:
+                _stop_spawned_process(process)
+                _remove_runtime_record(record_path, generation)
 
 
 def _sanitize_text(value, maximum=MAX_PUBLIC_TEXT):
@@ -2484,7 +2525,7 @@ def start_job(args):
     _set_output_language(preferred_language)
     artifact, executable, cache_hit = ensure_runtime()
     _progress("start", "Starting or reusing the local A2A runtime")
-    record = ensure_server(executable, artifact, args.mode, args.pipeline_name, workspace)
+    record = ensure_server(executable, artifact, args.mode, args.pipeline_name)
     readiness = _runtime_configuration_readiness(
         record,
         require_cloud=args.mode == "pipeline" and args.pipeline_name == "selling",
@@ -2495,15 +2536,12 @@ def start_job(args):
     spool.touch()
     if os.name != "nt":
         os.chmod(str(spool), 0o600)
-    runtime_record = (
-        _bridge_root()
-        / "servers"
-        / _runtime_key(args.mode, args.pipeline_name, workspace, artifact["target"])
-        / "runtime.json"
-    )
+    runtime_record = _runtime_record_path(args.mode, args.pipeline_name, artifact["target"])
     job = {
         "schemaVersion": 1,
         "jobId": job_id,
+        "runtimeIdentityVersion": 2,
+        "runtimeTag": RUNTIME_TAG,
         "runtimeGeneration": record["generation"],
         "target": artifact["target"],
         "mode": args.mode,
@@ -2529,6 +2567,50 @@ def start_job(args):
     followed["runtimeCacheHit"] = cache_hit
     followed["configurationReadiness"] = readiness
     return _bounded_result(followed, MAX_FOLLOW_BYTES, preserve_final=True)
+
+
+def _ensure_job_runtime(job_id):
+    root, job_path, _spool = _job_paths(job_id)
+    job = _load_json(job_path)
+    _set_output_language(job.get("preferredLanguage"))
+    if job.get("runtimeIdentityVersion") != 2 or job.get("runtimeTag") != RUNTIME_TAG:
+        return job, _runtime_record_for_job(job)
+    try:
+        return job, _runtime_record_for_job(job)
+    except BridgeError as exc:
+        if exc.code != "runtime_identity_mismatch":
+            raise
+
+    mode = job.get("mode")
+    pipeline_name = job.get("pipelineName")
+    target = job.get("target")
+    workspace = job.get("workspace")
+    if (
+        mode not in {"normal", "pipeline"}
+        or not isinstance(pipeline_name, str)
+        or (mode == "pipeline") != bool(pipeline_name)
+        or not isinstance(target, str)
+        or not target
+        or not isinstance(workspace, str)
+        or not workspace
+    ):
+        raise BridgeError("runtime_identity_mismatch", "The Skill job runtime identity is incomplete.")
+
+    artifact, executable, _cache_hit = ensure_runtime()
+    if artifact.get("target") != target:
+        raise BridgeError("runtime_identity_mismatch", "The Skill job Runtime target is no longer available.")
+    _progress("start", "Starting or reusing the local A2A runtime")
+    record = ensure_server(executable, artifact, mode, pipeline_name)
+    runtime_record = _runtime_record_path(mode, pipeline_name, target)
+    with InstallLock(root / ".job.lock", timeout=10):
+        current = _load_json(job_path)
+        immutable = ("runtimeIdentityVersion", "runtimeTag", "target", "mode", "pipelineName", "workspace")
+        if any(current.get(key) != job.get(key) for key in immutable):
+            raise BridgeError("runtime_identity_mismatch", "The Skill job runtime identity changed during recovery.")
+        current["runtimeGeneration"] = record["generation"]
+        current["runtimeRecord"] = str(runtime_record)
+        _atomic_json(job_path, current)
+    return current, record
 
 
 def _read_spool(spool):
@@ -3043,8 +3125,7 @@ def _cleanup_is_pending(job):
 
 def _start_cleanup_only_task(job_id):
     root, job_path, spool = _job_paths(job_id)
-    job = _load_json(job_path)
-    _runtime_record_for_job(job)
+    job, _record = _ensure_job_runtime(job_id)
     cursor = len(_read_spool(spool))
     with InstallLock(root / ".job.lock", timeout=10):
         current = _load_json(job_path)
@@ -3195,8 +3276,7 @@ def follow_job(args):
 
 def respond_job(args):
     root, job_path, spool = _job_paths(args.job_id)
-    job = _load_json(job_path)
-    record = _runtime_record_for_job(job)
+    job, record = _ensure_job_runtime(args.job_id)
     pending = job.get("inputRequired")
     if not isinstance(pending, dict):
         raise BridgeError("input_response_mismatch", "The Skill job is not waiting for input.")
@@ -3287,8 +3367,7 @@ def respond_job(args):
 
 def continue_job(args):
     root, job_path, spool = _job_paths(args.job_id)
-    job = _load_json(job_path)
-    record = _runtime_record_for_job(job)
+    job, record = _ensure_job_runtime(args.job_id)
     if not _job_uses_normal_conversation(job):
         raise BridgeError(
             "input_response_mismatch",
@@ -3347,8 +3426,7 @@ def continue_job(args):
 
 def cancel_job(args):
     _root, job_path, _spool = _job_paths(args.job_id)
-    job = _load_json(job_path)
-    record = _runtime_record_for_job(job)
+    job, record = _ensure_job_runtime(args.job_id)
     task_id = job.get("taskId")
     if not isinstance(task_id, str):
         raise BridgeError("job_not_found", "The Skill job has no A2A task identity.")

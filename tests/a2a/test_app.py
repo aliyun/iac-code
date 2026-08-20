@@ -28,6 +28,7 @@ from starlette.testclient import TestClient
 from iac_code import __version__
 from iac_code.a2a.app import (
     A2AAuthMiddleware,
+    _A2AIdleShutdownController,
     _serve_async_transport,
     _supported_interfaces,
     create_app,
@@ -88,6 +89,27 @@ def test_resolve_api_key_prefers_cli_value(monkeypatch) -> None:
     monkeypatch.setenv("IACCODE_A2A_API_KEY", "env-key")
 
     assert resolve_api_key("cli-key") == "cli-key"
+
+
+@pytest.mark.asyncio
+async def test_idle_shutdown_waits_for_active_work() -> None:
+    class Store:
+        active = True
+
+        async def has_active_work(self) -> bool:
+            return self.active
+
+    store = Store()
+    shutdown = asyncio.Event()
+    controller = _A2AIdleShutdownController(0.05, shutdown.set)
+    controller.touch()
+    monitor = asyncio.create_task(controller.monitor(store))
+
+    await asyncio.sleep(0.12)
+    assert not shutdown.is_set()
+    store.active = False
+    await asyncio.wait_for(shutdown.wait(), timeout=0.5)
+    await monitor
 
 
 def test_resolve_api_key_uses_environment(monkeypatch) -> None:

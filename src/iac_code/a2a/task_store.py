@@ -857,6 +857,23 @@ class A2ATaskStore(TaskStore):
         async with self._mutation_lock:
             return self._task_is_active_locked(task_id)
 
+    async def has_active_work(self) -> bool:
+        """Return whether shutting down would interrupt in-process A2A work."""
+        async with self._mutation_lock:
+            return (
+                any(record.active_task is not None and not record.active_task.done() for record in self._tasks.values())
+                or any(not task.done() for task in self._context_runtime_tasks.values())
+                or any(
+                    not task.done()
+                    for starts in self._context_execution_starts.values()
+                    for task in starts.values()
+                )
+                or any(self._context_reconciliation_waiters.values())
+                or any(lock.locked() for lock in self._reconciliation_locks.values())
+                or any(count > 0 for count in self._context_runtime_waiters.values())
+                or any(not task.done() for task in self._discarded_context_runtime_tasks)
+            )
+
     def mirror_task(self, record: A2ATaskRecord) -> None:
         record.updated_at = time.time()
         self._mirror_task(record)

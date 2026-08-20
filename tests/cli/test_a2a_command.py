@@ -104,6 +104,7 @@ def test_a2a_command_passes_config_options_to_server(monkeypatch, tmp_path) -> N
         push_lease_timeout_ms: int,
         auto_approve_permissions: bool,
         thinking_exposure: list[str] | None,
+        idle_shutdown_seconds: float,
     ) -> None:
         called.update(
             {
@@ -138,6 +139,7 @@ def test_a2a_command_passes_config_options_to_server(monkeypatch, tmp_path) -> N
                 "push_lease_timeout_ms": push_lease_timeout_ms,
                 "auto_approve_permissions": auto_approve_permissions,
                 "thinking_exposure": thinking_exposure,
+                "idle_shutdown_seconds": idle_shutdown_seconds,
             }
         )
 
@@ -170,6 +172,7 @@ def test_a2a_command_passes_config_options_to_server(monkeypatch, tmp_path) -> N
                 "push-consumer-name: worker-a",
                 "push-lease-timeout-ms: 120000",
                 "auto-approve-permissions: true",
+                "idle-shutdown-seconds: 1800",
                 "thinking-exposure:",
                 "  - raw-thinking",
                 "  - tool-trace",
@@ -220,6 +223,7 @@ def test_a2a_command_passes_config_options_to_server(monkeypatch, tmp_path) -> N
         "push_lease_timeout_ms": 120000,
         "auto_approve_permissions": True,
         "thinking_exposure": ["raw-thinking", "tool-trace"],
+        "idle_shutdown_seconds": 1800,
     }
 
 

@@ -846,6 +846,116 @@ def test_job_runtime_identity_rejects_a_replaced_generation(monkeypatch, tmp_pat
     assert caught.value.code == "runtime_identity_mismatch"
 
 
+def test_runtime_identity_is_shared_across_workspaces() -> None:
+    target = "darwin-arm64-macos-cp312"
+
+    normal_record = bridge._runtime_record_path("normal", "", target)
+    same_normal_record = bridge._runtime_record_path("normal", "", target)
+    pipeline_record = bridge._runtime_record_path("pipeline", "selling", target)
+
+    assert normal_record == same_normal_record
+    assert normal_record != pipeline_record
+
+
+def test_ensure_server_uses_stable_root_and_skill_cwd_policy(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr(bridge, "_free_port", lambda: 41242)
+    monkeypatch.setattr(bridge, "_runtime_matches", lambda *_args: True)
+    spawned = []
+
+    class Process:
+        pid = 12345
+
+        def poll(self):
+            return None
+
+    def popen(command, **kwargs):
+        spawned.append((command, kwargs))
+        return Process()
+
+    monkeypatch.setattr(bridge.subprocess, "Popen", popen)
+    artifact = {"target": "darwin-arm64-macos-cp312"}
+
+    first = bridge.ensure_server(tmp_path / "iac-code", artifact, "normal", "")
+    second = bridge.ensure_server(tmp_path / "iac-code", artifact, "normal", "")
+
+    assert first == second
+    assert len(spawned) == 1
+    _command, kwargs = spawned[0]
+    assert kwargs["cwd"] == str(bridge._runtime_record_path("normal", "", artifact["target"]).parent)
+    assert kwargs["env"]["IAC_CODE_A2A_TRUST_REQUEST_CWD"] == "1"
+    assert "IACCODE_A2A_ALLOWED_CWDS" not in kwargs["env"]
+    config = bridge._load_json(Path(first["logPath"]).with_name("a2a.json"))
+    assert config["idle_shutdown_seconds"] == 1800
+
+
+def test_ensure_server_terminates_failed_spawn_and_removes_record(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr(bridge, "_free_port", lambda: 41242)
+    monkeypatch.setattr(bridge, "_runtime_matches", lambda *_args: False)
+    monkeypatch.setattr(bridge, "RUNTIME_START_TIMEOUT", 0)
+
+    class Process:
+        pid = 12345
+        terminated = False
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout):
+            return 0
+
+    process = Process()
+    monkeypatch.setattr(bridge.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    artifact = {"target": "darwin-arm64-macos-cp312"}
+
+    with pytest.raises(bridge.BridgeError, match="health check"):
+        bridge.ensure_server(tmp_path / "iac-code", artifact, "normal", "")
+
+    assert process.terminated is True
+    assert not bridge._runtime_record_path("normal", "", artifact["target"]).exists()
+
+
+def test_job_runtime_rebinds_after_idle_shutdown(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    job_id = "9" * 32
+    root, job_path, _spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    target = "darwin-arm64-macos-cp312"
+    bridge._atomic_json(
+        job_path,
+        {
+            "jobId": job_id,
+            "runtimeIdentityVersion": 2,
+            "runtimeTag": bridge.RUNTIME_TAG,
+            "runtimeGeneration": "stopped-generation",
+            "runtimeRecord": str(tmp_path / "stopped-runtime.json"),
+            "target": target,
+            "mode": "normal",
+            "pipelineName": "",
+            "workspace": str(workspace),
+            "preferredLanguage": "en",
+        },
+    )
+    monkeypatch.setattr(bridge, "ensure_runtime", lambda: ({"target": target}, tmp_path / "iac-code", True))
+    monkeypatch.setattr(
+        bridge,
+        "ensure_server",
+        lambda *_args: {"generation": "new-generation", "port": 41242, "token": "token"},
+    )
+
+    job, record = bridge._ensure_job_runtime(job_id)
+
+    assert record["generation"] == "new-generation"
+    assert job["runtimeGeneration"] == "new-generation"
+    assert job["runtimeRecord"] == str(bridge._runtime_record_path("normal", "", target))
+
+
 def test_poll_output_is_bounded_and_cursor_is_incremental(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     job_id = "a" * 32

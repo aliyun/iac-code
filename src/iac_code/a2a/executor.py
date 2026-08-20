@@ -40,6 +40,7 @@ from iac_code.a2a.parts import (
     parts_to_prompt,
     parts_to_user_input,
     resolve_workspace_path,
+    trust_request_cwd,
 )
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_executor import (
@@ -1730,7 +1731,9 @@ class IacCodeA2AExecutor(AgentExecutor):
             raise ValueError("Invalid A2A workspace metadata.")
         logical_cwd = os.path.normpath(cwd)
         resolved_cwd = resolve_workspace_path(Path(logical_cwd))
-        if not any(_is_relative_to(resolved_cwd, root) for root in _allowed_cwd_roots()):
+        if not trust_request_cwd() and not any(
+            _is_relative_to(resolved_cwd, root) for root in _allowed_cwd_roots()
+        ):
             raise ValueError("Invalid A2A workspace metadata.")
         if resolved_cwd.exists():
             if not resolved_cwd.is_dir():

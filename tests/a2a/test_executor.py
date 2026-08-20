@@ -2142,6 +2142,21 @@ async def test_executor_rejects_workspace_outside_allowed_roots(
     assert "workspace" in dumped["status"]["message"]["parts"][0]["text"].lower()
 
 
+def test_resolve_cwd_trusts_per_context_workspace_for_skill_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside"
+    allowed.mkdir()
+    outside.mkdir()
+    monkeypatch.setenv("IACCODE_A2A_ALLOWED_CWDS", str(allowed))
+    monkeypatch.setenv("IAC_CODE_A2A_TRUST_REQUEST_CWD", "1")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    assert executor._resolve_cwd({"iac_code": {"cwd": str(outside)}}) == str(outside)
+
+
 @pytest.mark.asyncio
 async def test_executor_reports_invalid_task_id() -> None:
     store = A2ATaskStore(metrics=NoOpA2AMetrics())

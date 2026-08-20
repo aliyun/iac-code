@@ -7,7 +7,9 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
+import signal
 from contextlib import asynccontextmanager, suppress
 from email.utils import formatdate
 from pathlib import Path
@@ -70,6 +72,58 @@ class _PrincipalUser(User):
     @property
     def user_name(self) -> str:
         return self._principal
+
+
+class _A2AIdleShutdownController:
+    def __init__(self, timeout_seconds: float, callback: Callable[[], None]) -> None:
+        self._timeout_seconds = timeout_seconds
+        self._callback = callback
+        self._inflight_requests = 0
+        self._last_activity = 0.0
+
+    def touch(self) -> None:
+        self._last_activity = asyncio.get_running_loop().time()
+
+    def request_started(self) -> None:
+        self._inflight_requests += 1
+        self.touch()
+
+    def request_finished(self) -> None:
+        self._inflight_requests = max(0, self._inflight_requests - 1)
+        self.touch()
+
+    async def monitor(self, task_store: Any) -> None:
+        interval = min(1.0, max(0.05, self._timeout_seconds / 10))
+        while True:
+            await asyncio.sleep(interval)
+            if self._inflight_requests:
+                continue
+            now = asyncio.get_running_loop().time()
+            if now - self._last_activity < self._timeout_seconds:
+                continue
+            if await task_store.has_active_work():
+                self._last_activity = asyncio.get_running_loop().time()
+                continue
+            if self._inflight_requests:
+                continue
+            self._callback()
+            return
+
+
+class _A2AIdleActivityMiddleware:
+    def __init__(self, app: Any, *, controller: _A2AIdleShutdownController) -> None:
+        self._app = app
+        self._controller = controller
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        self._controller.request_started()
+        try:
+            await self._app(scope, receive, send)
+        finally:
+            self._controller.request_finished()
 
 
 def resolve_token(cli_token: str | None) -> str | None:
@@ -339,6 +393,8 @@ def create_app(
     agent_extensions: object | None = None,
     auto_approve_permissions: bool = False,
     thinking_exposure: object | None = None,
+    idle_shutdown_seconds: float = 0,
+    idle_shutdown_callback: Callable[[], None] | None = None,
 ) -> Starlette:
     from iac_code.a2a.transports.dispatcher import create_runtime_components
 
@@ -371,16 +427,31 @@ def create_app(
     )
     from iac_code.a2a.pipeline_recovery import A2APipelineRecoveryService
 
+    idle_controller: _A2AIdleShutdownController | None = None
+    if idle_shutdown_seconds > 0:
+        idle_controller = _A2AIdleShutdownController(
+            idle_shutdown_seconds,
+            idle_shutdown_callback or (lambda: os.kill(os.getpid(), signal.SIGTERM)),
+        )
+
     @asynccontextmanager
     async def lifespan(app: Starlette):
         push_worker_task: asyncio.Task[None] | None = None
+        idle_shutdown_task: asyncio.Task[None] | None = None
         components.start_background_services()
         try:
             await components.task_store.start_cleanup_loop()
             if components.push_worker is not None:
                 push_worker_task = asyncio.create_task(components.push_worker.serve_forever())
+            if idle_controller is not None:
+                idle_controller.touch()
+                idle_shutdown_task = asyncio.create_task(idle_controller.monitor(components.task_store))
             yield
         finally:
+            if idle_shutdown_task is not None:
+                idle_shutdown_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await idle_shutdown_task
             if push_worker_task is not None:
                 push_worker_task.cancel()
                 with suppress(asyncio.CancelledError):
@@ -472,6 +543,8 @@ def create_app(
         api_key=api_key,
         api_key_header=api_key_header,
     )
+    if idle_controller is not None:
+        app.add_middleware(_A2AIdleActivityMiddleware, controller=idle_controller)
     return app
 
 
@@ -535,10 +608,20 @@ def run_server(
     push_lease_timeout_ms: int = 300_000,
     auto_approve_permissions: bool = False,
     thinking_exposure: object | None = None,
+    idle_shutdown_seconds: float = 0,
 ) -> None:
     from iac_code.a2a.transports.base import normalize_transport_name, validate_transport_for_platform
 
     normalized_transport = normalize_transport_name(transport)
+    if isinstance(idle_shutdown_seconds, bool) or not isinstance(idle_shutdown_seconds, (int, float)):
+        raise ValueError("idle_shutdown_seconds must be a non-negative number.")
+    idle_shutdown_seconds = float(idle_shutdown_seconds)
+    if not math.isfinite(idle_shutdown_seconds):
+        raise ValueError("idle_shutdown_seconds must be a non-negative number.")
+    if idle_shutdown_seconds < 0:
+        raise ValueError("idle_shutdown_seconds must be a non-negative number.")
+    if idle_shutdown_seconds > 0 and normalized_transport != "http":
+        raise RuntimeError("idle_shutdown_seconds is only supported with the HTTP transport.")
     if persistence_dir is None:
         from iac_code.config import get_config_dir
 
@@ -663,6 +746,13 @@ def run_server(
         )
         return
 
+    idle_server_holder: dict[str, Any] = {}
+
+    def request_idle_shutdown() -> None:
+        server = idle_server_holder.get("server")
+        if server is not None:
+            server.should_exit = True
+
     if normalized_transport == "websocket":
         from iac_code.a2a.transports.websocket import WebSocketA2AServerApp
 
@@ -694,6 +784,8 @@ def run_server(
             supported_interfaces=supported_interfaces,
             auto_approve_permissions=auto_approve_permissions,
             thinking_exposure=thinking_exposure,
+            idle_shutdown_seconds=idle_shutdown_seconds,
+            idle_shutdown_callback=request_idle_shutdown,
         )
 
     try:
@@ -701,11 +793,16 @@ def run_server(
     except ImportError as exc:
         raise RuntimeError("A2A server dependencies are missing. Install with: pip install 'iac-code[a2a]'") from exc
 
-    uvicorn.run(
-        app,
-        host=host,
-        port=port,
-    )
+    if idle_shutdown_seconds > 0:
+        server = uvicorn.Server(uvicorn.Config(app, host=host, port=port))
+        idle_server_holder["server"] = server
+        server.run()
+    else:
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+        )
 
 
 async def _serve_async_transport(server, *, components) -> None:
