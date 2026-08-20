@@ -565,11 +565,12 @@ def test_session_switch_is_optimistic_with_loading_animation() -> None:
     optimistic = switch_body.index("loadingSession: true")
     bind_composer = switch_body.index("composer?.setSession(sessionId)")
     optimistic_render = switch_body.index("render(state)")
+    immediate_sidebar_render = switch_body.index("renderSessionsImmediate(state)")
     await_load = switch_body.index("await loadSession(sessionId, { forceDraft: false, generation })")
     assert optimistic < await_load
     # 输入控制器必须在乐观渲染前同步改绑到目标会话。否则加载窗口里允许输入时，
     # composer 仍持有旧 session id，会把消息投递给刚切走的会话。
-    assert optimistic < bind_composer < optimistic_render < await_load
+    assert optimistic < bind_composer < optimistic_render < immediate_sidebar_render < await_load
     # 异常时清掉加载态，避免转圈永久卡死。
     assert "loadingSession: false" in switch_body
 
@@ -1258,7 +1259,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-315" in html
-    assert "/static/js/app.js?v=web-repl-ui-336" in html
+    assert "/static/js/app.js?v=web-repl-ui-337" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1292,7 +1293,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-336" in index_html
+    assert "web-repl-ui-337" in index_html
     assert "web-repl-ui-334" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-319" in app_source
@@ -1811,6 +1812,29 @@ def test_sidebar_defers_repaint_while_pointer_inside() -> None:
     )[0]
     assert pin_body.index("renderSessionsImmediate(state);") < pin_body.index("await api.updateSession(")
     assert "invalidateSessionListLoads();" in pin_body
+
+    # 会话 PATCH 成功后先从本地导航快照移除并立即绘制，全量列表仅后台校准；归档当前会话/点击
+    # “新会话”则在全量 render 后立即清除旧选中态。两条路径都不能把反馈拖到慢列表或 pointerleave。
+    archive_body = app_source.split("async function archiveSession(", 1)[1].split("\nfunction createThreadRow(", 1)[0]
+    assert "removeArchivedSessionFromNavigation" in archive_body
+    assert "void refreshSessionsSidebar();" in archive_body
+    assert "await loadSessions();" not in archive_body
+    draft_body = app_source.split("function startNewSessionDraft(", 1)[1].split(
+        "\nasync function createSessionForSubmit(", 1
+    )[0]
+    assert draft_body.index("render(state);") < draft_body.index("renderSessionsImmediate(state);")
+
+    # 项目置顶、归档、移除和重命名同属主动侧栏操作，也统一绕过自动刷新专用的 hover 守卫。
+    for start, end in [
+        ("async function toggleProjectPinned(", "\nasync function archiveProjectGroup("),
+        ("async function archiveProjectGroup(", "\nfunction removeProjectGroup("),
+        ("function removeProjectGroup(", "\nasync function revealProjectGroup("),
+        ("function startProjectRename(", "\nfunction ensureProjectMenu("),
+    ]:
+        action_body = app_source.split(start, 1)[1].split(end, 1)[0]
+        assert "renderSessionsImmediate(state);" in action_body
+    archived_panel_callback = app_source.split("onSessionsMutated: async () =>", 1)[1].split("},", 1)[0]
+    assert "renderSessionsImmediate(state);" in archived_panel_callback
 
     # 列表请求用独立 generation 丢弃旧响应，并把仍在进行的本地 pin 状态覆盖到新快照。
     load_body = app_source.split("async function loadSessions()", 1)[1].split(
@@ -7056,6 +7080,91 @@ def test_sidebar_pin_state_updates_optimistically_for_active_and_pinned_projects
     }
 
 
+def test_sidebar_archive_state_is_removed_without_waiting_for_full_list(tmp_path: Path) -> None:
+    output = _run_app_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            globalThis.document = {
+              getElementById() {
+                return null;
+              },
+            };
+
+            const { removeArchivedSessionFromNavigation } = await import(__APP_MODULE__);
+            const a = {
+              webSessionId: "session-a", sessionId: "runtime-a", cwd: "/workspace/demo",
+              title: "A", pinned: false, archived: false,
+            };
+            const b = {
+              webSessionId: "session-b", sessionId: "runtime-b", cwd: "/workspace/demo",
+              title: "B", pinned: false, archived: false,
+            };
+            const active = removeArchivedSessionFromNavigation(
+              {
+                currentSession: b,
+                sessions: [a, b],
+                pinnedSessions: [],
+                projectGroups: [{ cwd: a.cwd, sessions: [a, b], total: 2, hasMore: false }],
+                pinnedProjects: [],
+              },
+              { ...a, archived: true },
+            );
+
+            const pinnedA = { ...a, pinned: true, pinnedAt: "2026-08-20T11:00:00Z" };
+            const pinned = removeArchivedSessionFromNavigation(
+              {
+                currentSession: pinnedA,
+                sessions: [pinnedA, b],
+                pinnedSessions: [pinnedA],
+                projectGroups: [{ cwd: a.cwd, sessions: [b], total: 1, hasMore: false }],
+                pinnedProjects: [{ cwd: a.cwd, sessions: [b], total: 1, hasMore: false, pinned: true }],
+              },
+              { ...pinnedA, pinned: false, pinnedAt: null, archived: true },
+            );
+
+            const last = removeArchivedSessionFromNavigation(
+              {
+                sessions: [a],
+                pinnedSessions: [],
+                projectGroups: [{ cwd: a.cwd, sessions: [a], total: 1, hasMore: false }],
+                pinnedProjects: [],
+              },
+              { ...a, archived: true },
+            );
+            const ids = (items) => (items || []).map((item) => item.webSessionId);
+            console.log(JSON.stringify({
+              active: {
+                sessionIds: ids(active.sessions),
+                projectIds: ids(active.projectGroups[0].sessions),
+                projectTotal: active.projectGroups[0].total,
+              },
+              pinned: {
+                currentArchived: pinned.currentSession.archived,
+                sessionIds: ids(pinned.sessions),
+                pinnedIds: ids(pinned.pinnedSessions),
+                activeProjectTotal: pinned.projectGroups[0].total,
+                pinnedProjectTotal: pinned.pinnedProjects[0].total,
+              },
+              lastProjectCount: last.projectGroups.length,
+            }));
+            """
+        ),
+    )
+
+    assert output == {
+        "active": {"sessionIds": ["session-b"], "projectIds": ["session-b"], "projectTotal": 1},
+        "pinned": {
+            "currentArchived": True,
+            "sessionIds": ["session-b"],
+            "pinnedIds": [],
+            "activeProjectTotal": 1,
+            "pinnedProjectTotal": 1,
+        },
+        "lastProjectCount": 0,
+    }
+
+
 def test_styles_use_codex_dark_visual_tokens() -> None:
     styles = _source(STYLES_CSS)
 
@@ -10673,7 +10782,7 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-336" in html
+    assert "web-repl-ui-337" in html
     assert "web-repl-ui-334" not in html
 
 

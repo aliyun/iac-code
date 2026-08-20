@@ -489,6 +489,63 @@ export function patchPinnedSessionState(currentState = {}, sessionPatch = {}, op
   };
 }
 
+// PATCH 归档成功后直接从侧栏快照移除会话；全量列表只在后台校准，避免归档操作再次被慢列表接口
+// 和 hover 守卫拖住。置顶会话本来就不计入项目会话总数，归档时只从置顶区移除，不重复扣减项目 total。
+export function removeArchivedSessionFromNavigation(currentState = {}, archivedSession = {}) {
+  const targetId = displaySessionId(archivedSession);
+  if (!targetId) {
+    return currentState;
+  }
+  const same = (session) =>
+    displaySessionId(session) === targetId ||
+    Boolean(
+      session?.sessionId &&
+        archivedSession.sessionId &&
+        session.sessionId === archivedSession.sessionId &&
+        session.cwd === archivedSession.cwd,
+    );
+  const previous = [
+    currentState.currentSession,
+    ...(currentState.sessions || []),
+    ...(currentState.pinnedSessions || []),
+    ...(currentState.projectGroups || []).flatMap((group) => group.sessions || []),
+    ...(currentState.pinnedProjects || []).flatMap((group) => group.sessions || []),
+  ].find(same);
+  const cwd = String(previous?.cwd || archivedSession.cwd || "");
+  const wasPinned = previous?.pinned === true;
+  const groupKey = (group) => String(group?.cwd || group?.key || group?.projectPath || "");
+  const patchGroups = (groups = [], keepEmpty = false) =>
+    groups
+      .map((group) => {
+        if (groupKey(group) !== cwd) {
+          return group;
+        }
+        const sessions = Array.isArray(group.sessions) ? group.sessions : [];
+        const nextSessions = sessions.filter((session) => !same(session));
+        const contained = nextSessions.length !== sessions.length;
+        const total = Number.isFinite(Number(group.total)) ? Number(group.total) : sessions.length;
+        const nextTotal = contained || !wasPinned ? Math.max(0, total - 1) : total;
+        return {
+          ...group,
+          sessions: nextSessions,
+          total: nextTotal,
+          hasMore: nextTotal > nextSessions.length,
+        };
+      })
+      .filter((group) => keepEmpty || groupKey(group) !== cwd || Number(group.total) > 0);
+
+  return {
+    ...currentState,
+    currentSession: same(currentState.currentSession)
+      ? { ...(currentState.currentSession || {}), ...archivedSession }
+      : currentState.currentSession,
+    sessions: (currentState.sessions || []).filter((session) => !same(session)),
+    pinnedSessions: (currentState.pinnedSessions || []).filter((session) => !same(session)),
+    projectGroups: patchGroups(currentState.projectGroups || []),
+    pinnedProjects: patchGroups(currentState.pinnedProjects || [], true),
+  };
+}
+
 function structuredFallbackText(value) {
   try {
     const rendered = JSON.stringify(value, null, 2);
@@ -1702,14 +1759,19 @@ async function archiveSession(session, event) {
   if (!sessionId) {
     return;
   }
-  const updated = await api.updateSession(sessionId, { archived: true });
-  state = replaceUpdatedSessionInState(state, updated);
-  await loadSessions();
-  if (state.currentSessionId === sessionId) {
-    startNewSessionDraft({ cwd: session.cwd });
-    return;
+  try {
+    const updated = await api.updateSession(sessionId, { archived: true });
+    invalidateSessionListLoads();
+    state = removeArchivedSessionFromNavigation(state, updated);
+    if (state.currentSessionId === sessionId) {
+      startNewSessionDraft({ cwd: session.cwd });
+    } else {
+      renderSessionsImmediate(state);
+    }
+    void refreshSessionsSidebar();
+  } catch (error) {
+    window.alert?.(error?.message || t("Archive failed"));
   }
-  render(state);
 }
 
 function createThreadRow(session, state) {
@@ -2071,7 +2133,7 @@ async function toggleProjectPinned(group) {
   try {
     await api.updateProject(group.key, { pinned: !group.pinned });
     await loadSessions();
-    render(state);
+    renderSessionsImmediate(state);
   } catch (error) {
     window.alert?.(error?.message || t("Operation failed"));
   }
@@ -2084,7 +2146,7 @@ async function archiveProjectGroup(group) {
     // 「已归档对话」面板、可逐条撤销;项目本身不设归档标志,撤销任一会话即回到侧栏。
     await api.archiveProjectSessions(group.key);
     await loadSessions();
-    render(state);
+    renderSessionsImmediate(state);
   } catch (error) {
     window.alert?.(error?.message || t("Archive failed"));
   }
@@ -2101,7 +2163,7 @@ function removeProjectGroup(group) {
     onConfirm: async () => {
       await api.updateProject(group.key, { hidden: true });
       await loadSessions();
-      render(state);
+      renderSessionsImmediate(state);
     },
   });
 }
@@ -2126,7 +2188,7 @@ function startProjectRename(group) {
     onConfirm: async (value) => {
       await api.updateProject(group.key, { label: value });
       await loadSessions();
-      render(state);
+      renderSessionsImmediate(state);
     },
   });
 }
@@ -4765,18 +4827,10 @@ async function toggleCurrentSessionPinned() {
 
 async function archiveCurrentSession() {
   closeThreadMenu();
-  const session = state.currentSession;
-  const sessionId = state.currentSessionId;
-  if (!sessionId) {
+  if (!state.currentSessionId || !state.currentSession) {
     return;
   }
-  try {
-    await api.updateSession(sessionId, { archived: true });
-    await loadSessions();
-    startNewSessionDraft({ cwd: session?.cwd });
-  } catch (error) {
-    window.alert?.(error?.message || t("Archive failed"));
-  }
+  await archiveSession(state.currentSession);
 }
 
 function renderThreadHeader(state) {
@@ -5782,6 +5836,9 @@ async function switchSession(sessionId) {
   // 内容就绪后应落在最新消息处，先置位；loadSession 会在真实内容渲染后消费它。
   pendingScrollToBottom = true;
   render(state);
+  // render(state) 的侧栏分支会在指针仍位于侧栏时延迟自动重绘；会话切换是主动操作，必须同步
+  // 重建会话导航，让旧行立即取消选中、目标行立即高亮，而不是等到 pointerleave。
+  renderSessionsImmediate(state);
   try {
     const loaded = await loadSession(sessionId, { forceDraft: false, generation });
     if (loaded) {
@@ -5820,6 +5877,8 @@ function startNewSessionDraft(options = {}) {
   workspace?.setSession("", null);
   outputController?.reset();
   render(state);
+  // “新会话”及归档当前会话都会走这里；主动清除旧选中态，不能等侧栏 pointerleave。
+  renderSessionsImmediate(state);
   setMobileSidebarOpen(false);
   return generation;
 }
@@ -6286,7 +6345,7 @@ async function start() {
       // 或恢复的会话立即出现,无需手动刷新页面。
       onSessionsMutated: async () => {
         await loadSessions();
-        render(state);
+        renderSessionsImmediate(state);
       },
       // 新会话默认面板据此渲染「默认流水线」下拉:流水线模式必须绑定一条具体流水线。
       pipelineOptions: PIPELINE_OPTIONS,
