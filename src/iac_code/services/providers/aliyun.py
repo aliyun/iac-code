@@ -462,10 +462,10 @@ class AliyunCredentials:
             AliyunCredentials._save_to_iac_code_config(credential, path)
 
     @staticmethod
-    # OAuth credentials intentionally persist between runs; _save_yaml writes
-    # atomically and restricts the file to the current user on every platform.
-    # codeql[py/clear-text-storage-sensitive-data]
-    def _save_to_iac_code_config(credential: AliyunCredential, path: Path) -> None:
+    def _save_to_iac_code_config(  # codeql[py/clear-text-storage-sensitive-data]
+        credential: AliyunCredential, path: Path
+    ) -> None:
+        """Persist OAuth credentials atomically to an owner-only file."""
         cloud_creds = _load_yaml(path)
 
         aliyun_data: dict[str, Any] = {
