@@ -149,10 +149,13 @@ Executa um turno de mensagem A2A sem streaming. A resposta contém uma tarefa ou
 | `role` | string | Sim | Use `ROLE_USER` para entrada do usuário |
 | `parts` | array | Sim | Partes semelhantes a texto, dados JSON, texto bruto, URL de arquivo local ou partes multimodais limitadas |
 | `metadata.iac_code.cwd` | string | Recomendado | Caminho absoluto do workspace; usa como padrão o diretório do processo do servidor se omitido |
+| `metadata.iac_code.channel` | string | Opcional | Canal de telemetria vinculado a este `contextId`; tem prioridade sobre `IAC_CODE_CHANNEL` |
 | `metadata.iac_code.preferredLanguage` | string | Opcional | Idioma de exibição preferido pelo chamador para esta tarefa; o texto visível ao usuário é localizado por requisição |
 | `metadata.iac_code.candidatePresentation` | string | Opcional | Com `rich-v1`, a etapa de confirmação de candidatos do pipeline retorna payloads estruturados de apresentação rica |
 
 `metadata.iac_code.cwd` deve ser um diretório absoluto existente quando fornecido. Ele deve estar dentro de uma raiz de workspace permitida. Por padrão, as raízes permitidas são o diretório do processo do servidor e o diretório temporário do sistema; `IACCODE_A2A_ALLOWED_CWDS` pode fornecer uma allowlist separada pelo separador de caminhos do sistema operacional.
+
+`metadata.iac_code.channel` vincula `iac_code.channel` ao `contextId` A2A. O valor é aparado, limitado a 128 caracteres e tem prioridade sobre `IAC_CODE_CHANNEL`; valores vazios ou que não sejam strings são ignorados. Turnos normais, turnos de pipeline, acompanhamentos input-required e o chat normal após um handoff de pipeline reutilizam o vínculo com o mesmo `contextId`, inclusive após reinício do servidor e restauração do contexto. Um valor válido enviado depois atualiza o vínculo. Sem vínculo, a telemetria usa `IAC_CODE_CHANNEL` e depois `unknown`.
 
 `metadata.iac_code.preferredLanguage` afeta apenas o texto visível ao usuário (progresso, perguntas, prompts de permissão, apresentações de candidatos, explicações de resultados); nomes de campos do protocolo, enums, IDs e formatos de comando nunca são traduzidos. Os valores aceitos são os idiomas suportados `en`, `zh`, `es`, `fr`, `de`, `ja`, `pt`; os valores são normalizados removendo espaços, convertendo para minúsculas e retirando o sufixo regional (por exemplo, `zh-CN` vira `zh`). Valores não reconhecidos são ignorados e o servidor volta ao idioma padrão. O campo vale apenas para o turno de mensagem atual; turnos seguintes que reutilizem o mesmo `contextId` precisam enviá-lo de novo, senão voltam ao idioma padrão.
 

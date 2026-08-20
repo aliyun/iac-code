@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from iac_code.services.telemetry.attributes import use_telemetry_channel
 from iac_code.services.telemetry.client import TelemetryClient
 from iac_code.services.telemetry.events import EventEmitter
 from iac_code.services.telemetry.metrics import MetricsRegistry
@@ -66,6 +67,19 @@ def test_add_metric_uses_configured_channel(tmp_path, monkeypatch):
     client.add_metric(Metrics.SESSION_COUNT, 1, {"iac_code.channel": "spoofed"})
 
     counter.add.assert_called_once_with(1, {"iac_code.channel": "partner_acme"})
+
+
+def test_add_metric_uses_request_channel_over_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("IAC_CODE_CHANNEL", "environment")
+    counter = MagicMock()
+    registry = MetricsRegistry(instruments={Metrics.SESSION_COUNT: counter})
+    client = TelemetryClient(metrics=registry)
+
+    with use_telemetry_channel("a2a-request"):
+        client.add_metric(Metrics.SESSION_COUNT, 1)
+
+    counter.add.assert_called_once_with(1, {"iac_code.channel": "a2a-request"})
 
 
 def test_start_span_delegates_to_factory(tmp_path, monkeypatch):

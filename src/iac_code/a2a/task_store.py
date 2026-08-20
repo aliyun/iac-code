@@ -38,6 +38,7 @@ from iac_code.i18n import _
 from iac_code.services.session_backup import SessionBackupService
 from iac_code.services.session_layout import SessionPaths, ensure_session_owned_parent
 from iac_code.services.session_storage import SessionStorage
+from iac_code.services.telemetry.attributes import normalize_telemetry_channel
 from iac_code.utils.file_security import atomic_write_text
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ class A2ATaskStore(TaskStore):
         self._tasks: dict[str, A2ATaskRecord] = {}
         self._task_persistence_dirty: set[str] = set()
         self._contexts: dict[str, A2AContextRecord] = {}
+        self._pending_context_telemetry_channels: dict[str, str] = {}
         self._expired_task_tombstones: dict[str, float] = {}
         self._metrics = metrics or NoOpA2AMetrics()
         self._persistence = persistence
@@ -294,6 +296,9 @@ class A2ATaskStore(TaskStore):
         async with self._mutation_lock:
             if context_id in self._contexts:
                 record = self._contexts[context_id]
+                pending_channel = self._pending_context_telemetry_channels.get(context_id)
+                if pending_channel is not None:
+                    record.telemetry_channel = pending_channel
                 if record.expired:
                     raise ValueError(_("A2A context expired"))
                 if record.cwd != cwd:
@@ -306,15 +311,18 @@ class A2ATaskStore(TaskStore):
                 else:
                     record.touch()
                     self._mirror_context(record)
+                    self._pending_context_telemetry_channels.pop(context_id, None)
                     return record
             else:
                 session_id: str | None = None
-                if self._persistence is not None:
-                    snapshot = self._persistence.load_context(context_id)
-                    if snapshot is not None:
-                        if snapshot.cwd != cwd:
-                            raise ValueError(_("A2A context belongs to a different workspace"))
-                        session_id = snapshot.session_id
+                telemetry_channel = self._pending_context_telemetry_channels.get(context_id)
+                snapshot = self._load_context_snapshot(context_id)
+                if snapshot is not None:
+                    if snapshot.cwd != cwd:
+                        raise ValueError(_("A2A context belongs to a different workspace"))
+                    session_id = snapshot.session_id
+                    if telemetry_channel is None:
+                        telemetry_channel = snapshot.telemetry_channel
 
                 if session_id is None:
                     session_id = str(uuid.uuid4())
@@ -323,6 +331,7 @@ class A2ATaskStore(TaskStore):
                     context_id=context_id,
                     session_id=session_id,
                     cwd=cwd,
+                    telemetry_channel=telemetry_channel,
                     runtime=None,
                     lock=asyncio.Lock(),
                 )
@@ -397,7 +406,47 @@ class A2ATaskStore(TaskStore):
                 await _close_runtime(runtime)
             record.touch()
             self._mirror_context(record)
+            self._pending_context_telemetry_channels.pop(context_id, None)
             return record
+
+    async def resolve_context_telemetry_channel(
+        self,
+        context_id: str,
+        requested_channel: str | None,
+    ) -> str | None:
+        """Resolve and, when explicitly supplied, bind telemetry channel to an A2A context."""
+
+        context_id = validate_protocol_id(context_id)
+        requested_channel = normalize_telemetry_channel(requested_channel)
+        async with self._mutation_lock:
+            record = self._contexts.get(context_id)
+            if record is not None:
+                if requested_channel is not None and requested_channel != record.telemetry_channel:
+                    record.telemetry_channel = requested_channel
+                    record.touch()
+                    self._mirror_context(record)
+                return record.telemetry_channel
+
+            snapshot = self._load_context_snapshot(context_id)
+            stored_channel = self._pending_context_telemetry_channels.get(context_id)
+            if stored_channel is None and snapshot is not None:
+                stored_channel = snapshot.telemetry_channel
+            effective_channel = requested_channel or stored_channel
+            if effective_channel is None:
+                return None
+
+            self._pending_context_telemetry_channels[context_id] = effective_channel
+            if snapshot is not None and snapshot.telemetry_channel != effective_channel:
+                snapshot = A2AContextSnapshot(
+                    context_id=snapshot.context_id,
+                    session_id=snapshot.session_id,
+                    cwd=snapshot.cwd,
+                    telemetry_channel=effective_channel,
+                    active_task_id=snapshot.active_task_id,
+                    updated_at=time.time(),
+                )
+                self._persist_context_snapshot(snapshot)
+            return effective_channel
 
     async def get_context_record(self, context_id: str) -> A2AContextRecord:
         context_id = validate_protocol_id(context_id)
@@ -408,6 +457,7 @@ class A2ATaskStore(TaskStore):
                     context_id=record.context_id,
                     session_id=record.session_id,
                     cwd=record.cwd,
+                    telemetry_channel=record.telemetry_channel,
                     active_task_id=record.active_task_id,
                     expired=record.expired,
                     created_at=record.created_at,
@@ -421,6 +471,7 @@ class A2ATaskStore(TaskStore):
                         context_id=snapshot.context_id,
                         session_id=snapshot.session_id,
                         cwd=snapshot.cwd,
+                        telemetry_channel=snapshot.telemetry_channel,
                         active_task_id=snapshot.active_task_id,
                     )
 
@@ -690,11 +741,14 @@ class A2ATaskStore(TaskStore):
                     context_id=context_id,
                     session_id=session_id,
                     cwd=cwd,
+                    telemetry_channel=snapshot.telemetry_channel,
                     lock=asyncio.Lock(),
                 )
                 self._contexts[context_id] = record
             elif record.session_id != session_id or record.cwd != cwd:
                 raise ValueError(_("A2A context belongs to a different workspace"))
+            elif record.telemetry_channel is None:
+                record.telemetry_channel = snapshot.telemetry_channel
             runtime = record.runtime
             record.runtime = None
             record.active_task_id = None if clear_active_task_for_proven_handoff else snapshot.active_task_id
@@ -704,6 +758,7 @@ class A2ATaskStore(TaskStore):
                 context_id=record.context_id,
                 session_id=record.session_id,
                 cwd=record.cwd,
+                telemetry_channel=record.telemetry_channel,
                 active_task_id=record.active_task_id,
                 expired=record.expired,
                 created_at=record.created_at,
@@ -873,6 +928,7 @@ class A2ATaskStore(TaskStore):
                 for context_id, task in self._context_runtime_tasks.items()
             ]
             self._contexts.clear()
+            self._pending_context_telemetry_channels.clear()
             self._context_runtime_tasks.clear()
             self._context_runtime_waiters.clear()
             for task, waiters in runtime_tasks:
@@ -917,13 +973,17 @@ class A2ATaskStore(TaskStore):
             context_id=record.context_id,
             session_id=record.session_id,
             cwd=record.cwd,
+            telemetry_channel=record.telemetry_channel,
             active_task_id=record.active_task_id,
         )
+        self._persist_context_snapshot(snapshot)
+
+    def _persist_context_snapshot(self, snapshot: A2AContextSnapshot) -> None:
         if self._persistence is not None:
             try:
                 self._persistence.save_context(snapshot)
             except Exception:
-                logger.exception("Failed to persist A2A context %s", record.context_id)
+                logger.exception("Failed to persist A2A context %s", snapshot.context_id)
         self._mirror_session_context(snapshot)
 
     def _mirror_session_task(self, snapshot: A2ATaskSnapshot) -> None:
@@ -1099,6 +1159,7 @@ def _load_session_context_snapshot(*, cwd: str, session_id: str) -> A2AContextSn
         context_id=context_id,
         session_id=snapshot_session_id,
         cwd=snapshot_cwd,
+        telemetry_channel=normalize_telemetry_channel(payload.get("telemetry_channel")),
         active_task_id=active_task_id,
         updated_at=float(updated_at) if isinstance(updated_at, (int, float)) else time.time(),
     )

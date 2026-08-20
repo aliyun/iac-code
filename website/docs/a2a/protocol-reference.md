@@ -155,6 +155,7 @@ Runs a non-streaming A2A message turn. The response contains a task or message a
 | `parts` | array | Yes | Text-like, JSON data, raw text, local file URL, or bounded multimodal parts |
 | `metadata.iac_code.cwd` | string | Recommended | Absolute workspace path; defaults to the server process directory if omitted |
 | `metadata.iac_code.user_id` | string | Optional | Per-task telemetry user ID override; ignored when blank or non-string |
+| `metadata.iac_code.channel` | string | Optional | Telemetry channel binding for this `contextId`; takes priority over `IAC_CODE_CHANNEL` |
 | `metadata.iac_code.iac_code_model` | string | Optional | Per-call LLM model override; this is the lowercase form of `IAC_CODE_MODEL` and is ignored when blank or non-string |
 | `metadata.iac_code.iac_code_api_key` | string | Optional | Per-call LLM provider API key override; this is the lowercase form of `IAC_CODE_API_KEY` and is ignored when blank or non-string |
 | `metadata.iac_code.alibaba_cloud_access_key_id` | string | Optional | Alibaba Cloud AccessKey ID for this task |
@@ -169,6 +170,8 @@ Runs a non-streaming A2A message turn. The response contains a task or message a
 When `metadata.iac_code` includes both `alibaba_cloud_access_key_id` and `alibaba_cloud_access_key_secret`, the A2A executor uses those Alibaba Cloud credentials only for the current task. They take priority over process environment variables and `.cloud-credentials.yml`; if the task metadata is incomplete or absent, normal credential fallback still applies.
 
 `metadata.iac_code.user_id` only affects telemetry identity for the current task. It does not change the A2A `contextId`, `taskId`, or iac-code's internal session ID.
+
+`metadata.iac_code.channel` binds `iac_code.channel` to the A2A `contextId`. It is trimmed, limited to 128 characters, and takes priority over `IAC_CODE_CHANNEL`; blank or non-string values are ignored. Normal turns, pipeline turns, input-required follow-ups, and normal chat after a pipeline handoff all reuse the binding when they keep the same `contextId`, including after server restart and context restoration. Sending another valid value on a later turn updates the binding. If the context has no binding, telemetry falls back to `IAC_CODE_CHANNEL`, then `unknown` when the environment variable is unset.
 
 `metadata.iac_code.iac_code_model` only affects the current A2A message turn. It takes priority over `IAC_CODE_MODEL`, `settings.yml`, and the server startup default model. Follow-up turns without this metadata field fall back to the server default model even when they reuse the same `contextId`.
 

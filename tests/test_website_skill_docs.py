@@ -35,6 +35,7 @@ def test_website_documents_external_skill_integration_in_all_locales() -> None:
             "127.0.0.1",
         ],
         "a2a/protocol-reference.md": [
+            "metadata.iac_code.channel",
             "metadata.iac_code.preferredLanguage",
             "metadata.iac_code.candidatePresentation",
             "rich-v1",

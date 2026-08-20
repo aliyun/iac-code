@@ -110,6 +110,7 @@ from iac_code.services.session_backup_state import (
     SessionBackupState,
 )
 from iac_code.services.session_storage import SessionStorage
+from iac_code.services.telemetry.attributes import normalize_telemetry_channel
 from iac_code.types.stream_events import MessageEndEvent, MessageStartEvent, TextDeltaEvent
 from iac_code.utils.file_security import atomic_write_text, ensure_private_dir, ensure_private_file
 from iac_code.utils.public_errors import sanitize_strict_text
@@ -1027,9 +1028,23 @@ class IacCodeA2AExecutor(AgentExecutor):
         return permission_ack_message(response, approved=approved)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        metadata = getattr(context, "metadata", None) or getattr(getattr(context, "message", None), "metadata", None)
+        permission_response = parse_permission_response(getattr(context, "message", None))
+        context_id = (
+            context.context_id
+            or (permission_response.context_id if permission_response is not None else None)
+            or "ctx-" + uuid.uuid4().hex[:12]
+        )
+        telemetry_channel = await self._task_store.resolve_context_telemetry_channel(
+            context_id,
+            self._resolve_telemetry_channel(metadata),
+        )
+        with a2a_request_context(telemetry_channel=telemetry_channel):
+            await self._execute(context, event_queue, context_id=context_id)
+
+    async def _execute(self, context: RequestContext, event_queue: EventQueue, *, context_id: str) -> None:
         requested_task_id = context.task_id or None
         task_id = requested_task_id or "task-" + uuid.uuid4().hex[:12]
-        context_id = context.context_id or "ctx-" + uuid.uuid4().hex[:12]
         permission_response = parse_permission_response(getattr(context, "message", None))
         if permission_response is not None:
             approved = await self._permission_input_registry.answer(permission_response)
@@ -1736,6 +1751,16 @@ class IacCodeA2AExecutor(AgentExecutor):
         if isinstance(raw_user_id, str) and raw_user_id.strip():
             return raw_user_id.strip()
         return None
+
+    def _resolve_telemetry_channel(self, metadata: Any | None) -> str | None:
+        if metadata is not None and hasattr(metadata, "DESCRIPTOR"):
+            metadata = MessageToDict(metadata, preserving_proto_field_name=False)
+        if not isinstance(metadata, Mapping):
+            return None
+        raw_iac_meta = metadata.get("iac_code")
+        if not isinstance(raw_iac_meta, Mapping):
+            return None
+        return normalize_telemetry_channel(raw_iac_meta.get("channel"))
 
     def _resolve_preferred_language(self, metadata: Any | None) -> str | None:
         if metadata is not None and hasattr(metadata, "DESCRIPTOR"):

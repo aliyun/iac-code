@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import cast
 
 from iac_code.a2a.types import validate_protocol_id
+from iac_code.services.telemetry.attributes import normalize_telemetry_channel
 from iac_code.utils.file_security import atomic_write_text
 
 _INTERRUPTED_RESTORE_STATES = {"submitted", "working", "auth-required"}
@@ -48,6 +49,7 @@ class A2AContextSnapshot:
     context_id: str
     session_id: str
     cwd: str
+    telemetry_channel: str | None = None
     active_task_id: str | None = None
     updated_at: float = field(default_factory=time.time)
 
@@ -185,6 +187,7 @@ class A2APersistenceStore:
             context_id=context_id,
             session_id=session_id,
             cwd=cwd,
+            telemetry_channel=normalize_telemetry_channel(data.get("telemetry_channel")),
             active_task_id=active_task_id if isinstance(active_task_id, str) else None,
             updated_at=float(updated_at) if isinstance(updated_at, (int, float)) else time.time(),
         )

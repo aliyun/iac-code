@@ -149,10 +149,13 @@ Callback URL は保存前と配送前に検証されます。デフォルトの�
 | `role` | string | Yes | ユーザー入力には `ROLE_USER` を使用 |
 | `parts` | array | Yes | テキスト風、JSON データ、生テキスト、ローカルファイル URL、または制限付きマルチモーダルパーツ |
 | `metadata.iac_code.cwd` | string | Recommended | 絶対ワークスペースパス。省略時はサーバープロセスディレクトリがデフォルト |
+| `metadata.iac_code.channel` | string | 任意 | この `contextId` に紐づくテレメトリチャネル。`IAC_CODE_CHANNEL` より優先される |
 | `metadata.iac_code.preferredLanguage` | string | 任意 | 呼び出し側が本タスクに期待する表示言語。ユーザーに表示されるテキストがリクエスト単位でローカライズされる |
 | `metadata.iac_code.candidatePresentation` | string | 任意 | `rich-v1` を指定すると、Pipeline の候補確認ステップが構造化されたリッチ表示ペイロードを返す |
 
 `metadata.iac_code.cwd` が指定された場合、既存の絶対ディレクトリである必要があります。許可されたワークスペースルート内になければなりません。デフォルトでは、許可されるルートはサーバープロセスディレクトリとシステム一時ディレクトリです。`IACCODE_A2A_ALLOWED_CWDS` で、OS パス区切りの許可リストを指定できます。
+
+`metadata.iac_code.channel` は `iac_code.channel` を A2A の `contextId` に紐づけます。値は前後の空白が除去され、128 文字に制限され、`IAC_CODE_CHANNEL` より優先されます。空値または文字列以外の値は無視されます。同じ `contextId` を使う normal ターン、pipeline ターン、input-required の後続ターン、および pipeline handoff 後の normal chat は、サーバー再起動と context 復元後もこの設定を引き継ぎます。後続ターンで別の有効値を送ると紐づけが更新されます。紐づけがない場合は `IAC_CODE_CHANNEL`、それも未設定なら `unknown` を使用します。
 
 `metadata.iac_code.preferredLanguage` はユーザーに表示されるテキスト（進捗、質問、権限プロンプト、候補表示、結果の説明など）にのみ影響します。プロトコルフィールド名、列挙値、ID、コマンド形式は翻訳されません。指定できる値はサポートされている言語 `en`、`zh`、`es`、`fr`、`de`、`ja`、`pt` です。値は空白の除去、小文字化、地域サフィックスの除去（例: `zh-CN` は `zh` に解決）によって正規化され、認識できない値は無視されてサーバーの既定の言語に戻ります。このフィールドは現在のメッセージターンのみに適用されます。同じ `contextId` を再利用する後続ターンで再び指定しない場合、既定の言語に戻ります。
 
