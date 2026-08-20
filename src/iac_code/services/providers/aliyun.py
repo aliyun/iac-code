@@ -459,48 +459,41 @@ class AliyunCredentials:
             else get_cloud_credentials_path()
         )
         with _cloud_credential_file_lock(path):
-            AliyunCredentials._save_to_iac_code_config(credential, path)
+            cloud_creds = _load_yaml(path)
 
-    @staticmethod
-    def _save_to_iac_code_config(  # codeql[py/clear-text-storage-sensitive-data]
-        credential: AliyunCredential, path: Path
-    ) -> None:
-        """Persist OAuth credentials atomically to an owner-only file."""
-        cloud_creds = _load_yaml(path)
+            aliyun_data: dict[str, Any] = {
+                "mode": credential.mode,
+                "region_id": credential.region_id,
+            }
 
-        aliyun_data: dict[str, Any] = {
-            "mode": credential.mode,
-            "region_id": credential.region_id,
-        }
+            # Save fields relevant to the credential mode
+            mode_fields = MODE_FIELDS.get(credential.mode, [])
+            for field_name, _label, _sensitive in mode_fields:
+                value = getattr(credential, field_name, "")
+                if value in ("", None):
+                    continue
+                if (
+                    field_name
+                    in {
+                        "sts_expiration",
+                        "oauth_access_token_expire",
+                        "oauth_refresh_token_expire",
+                    }
+                    and value == 0
+                ):
+                    continue
+                aliyun_data[field_name] = value
 
-        # Save fields relevant to the credential mode
-        mode_fields = MODE_FIELDS.get(credential.mode, [])
-        for field_name, _label, _sensitive in mode_fields:
-            value = getattr(credential, field_name, "")
-            if value in ("", None):
-                continue
-            if (
-                field_name
-                in {
-                    "sts_expiration",
-                    "oauth_access_token_expire",
-                    "oauth_refresh_token_expire",
-                }
-                and value == 0
-            ):
-                continue
-            aliyun_data[field_name] = value
+            cloud_creds["aliyun"] = aliyun_data
+            _save_yaml(path, cloud_creds)
+            credential.credential_source = "iac_code"
+            credential.credential_source_path = str(path)
 
-        cloud_creds["aliyun"] = aliyun_data
-        _save_yaml(path, cloud_creds)
-        credential.credential_source = "iac_code"
-        credential.credential_source_path = str(path)
+            # The dynamic-credential runtime caches one provider per (mode, role name, IMDSv1
+            # policy); a saved configuration change must not keep serving the old provider.
+            from iac_code.services.providers.aliyun_credentials_runtime import invalidate_aliyun_credential_runtime
 
-        # The dynamic-credential runtime caches one provider per (mode, role name, IMDSv1
-        # policy); a saved configuration change must not keep serving the old provider.
-        from iac_code.services.providers.aliyun_credentials_runtime import invalidate_aliyun_credential_runtime
-
-        invalidate_aliyun_credential_runtime()
+            invalidate_aliyun_credential_runtime()
 
     @staticmethod
     def _save_to_aliyun_cli_format(credential: AliyunCredential, config_path: str) -> None:
