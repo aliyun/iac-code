@@ -489,6 +489,7 @@ def test_bridge_automatically_runs_cleanup_only_task_and_restores_pipeline_resul
             "turn": 1,
             "taskId": "task-pipeline-1",
             "contextId": "ctx-pipeline-1",
+            "channel": "skill/host",
             "turnArtifacts": [{"id": "template", "name": "template.yaml"}],
             "pipelineResult": {"status": "success", "stack_id": "stack-123"},
             "cleanup": {"status": "pending", "resourceCount": 1},
@@ -542,6 +543,10 @@ def test_bridge_automatically_runs_cleanup_only_task_and_restores_pipeline_resul
     assert len(captured_payloads) == 2
     assert all(
         payload["params"]["message"]["metadata"]["iac_code"]["cleanupOnly"] is True
+        for payload in captured_payloads
+    )
+    assert all(
+        payload["params"]["message"]["metadata"]["iac_code"]["channel"] == "skill/host"
         for payload in captured_payloads
     )
     assert captured_payloads[0]["params"]["message"]["contextId"] == "ctx-pipeline-1"
@@ -1156,17 +1161,49 @@ def test_candidate_presentation_survives_bounded_bridge_projection() -> None:
     assert len(bridge._json_bytes(projection)) <= bridge.MAX_INPUT_PROJECTION_BYTES
 
 
-def test_bridge_detects_language_and_sends_it_in_a2a_metadata() -> None:
+def test_bridge_detects_language_and_sends_durable_controls_in_a2a_metadata() -> None:
     assert bridge._preferred_language("请部署一个 VPC", "auto") == "zh"
     assert bridge._preferred_language("日本語で説明してください", "auto") == "ja"
     assert bridge._preferred_language("Deploy a VPC", "fr") == "fr"
 
     payload = bridge._worker_payload(
-        {"workspace": "/tmp/work", "preferredLanguage": "zh"},
+        {"workspace": "/tmp/work", "preferredLanguage": "zh", "channel": "marketplace"},
         prompt="请部署一个 VPC",
     )
     assert payload["params"]["message"]["metadata"]["iac_code"]["preferredLanguage"] == "zh"
     assert payload["params"]["message"]["metadata"]["iac_code"]["candidatePresentation"] == "rich-v1"
+    assert payload["params"]["message"]["metadata"]["iac_code"]["channel"] == "skill/marketplace"
+
+    assert bridge._normalize_telemetry_channel(" configured-channel ") == "skill/configured-channel"
+    assert bridge._normalize_telemetry_channel(" skill/configured-channel ") == "skill/configured-channel"
+    assert bridge._normalize_telemetry_channel("x" * 200) == "skill/" + "x" * (
+        bridge.MAX_CHANNEL_LENGTH - len("skill/")
+    )
+    with pytest.raises(bridge.BridgeError, match="non-empty string"):
+        bridge._normalize_telemetry_channel("  ")
+
+
+def test_installed_skill_channel_config_is_optional_and_validated(monkeypatch, tmp_path: Path) -> None:
+    installed_skill = tmp_path / "installed-skill"
+    installed_skill.mkdir()
+    monkeypatch.setattr(bridge, "SKILL_ROOT", installed_skill)
+
+    assert bridge._skill_telemetry_channel() is None
+    payload = bridge._worker_payload({"workspace": "/tmp/work"}, prompt="Deploy a VPC")
+    assert "channel" not in payload["params"]["message"]["metadata"]["iac_code"]
+    (installed_skill / "config.json").write_text("{}", encoding="utf-8")
+    assert bridge._skill_telemetry_channel() is None
+    (installed_skill / "config.json").write_text('{"channel":null}', encoding="utf-8")
+    assert bridge._skill_telemetry_channel() is None
+
+    (installed_skill / "config.json").write_text("not-json", encoding="utf-8")
+    with pytest.raises(bridge.BridgeError) as invalid_json:
+        bridge._skill_telemetry_channel()
+    assert invalid_json.value.code == "skill_configuration_invalid"
+
+    (installed_skill / "config.json").write_text('{"channel":"  "}', encoding="utf-8")
+    with pytest.raises(bridge.BridgeError, match="non-empty string"):
+        bridge._skill_telemetry_channel()
 
 
 def test_job_results_repeat_preferred_language(monkeypatch, tmp_path: Path) -> None:
@@ -1297,6 +1334,75 @@ def test_start_checks_pipeline_readiness_before_creating_a_job(monkeypatch, tmp_
 
     assert error.value.code == "cloud_credentials_not_configured"
     assert observed == {"requireCloud": True}
+
+
+def test_start_persists_installed_skill_channel_and_injects_it_into_a2a_metadata(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    installed_skill = tmp_path / "installed-skill"
+    installed_skill.mkdir()
+    (installed_skill / "config.json").write_text('{"channel":" host "}', encoding="utf-8")
+    monkeypatch.setattr(bridge, "SKILL_ROOT", installed_skill)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    prompt = workspace / "prompt.txt"
+    prompt.write_text("Deploy a VPC", encoding="utf-8")
+    monkeypatch.setattr(
+        bridge,
+        "ensure_runtime",
+        lambda: ({"target": "darwin-arm64-macos-cp312"}, tmp_path / "iac-code", True),
+    )
+    monkeypatch.setattr(
+        bridge,
+        "ensure_server",
+        lambda *_args: {"port": 41242, "token": "token", "generation": "generation-1"},
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_runtime_configuration_readiness",
+        lambda _record, require_cloud: _configuration_readiness(),
+    )
+    captured = {}
+
+    def spawn(job_id, payload):
+        captured["jobId"] = job_id
+        captured["payload"] = payload
+        return 12345
+
+    monkeypatch.setattr(bridge, "_spawn_worker", spawn)
+    monkeypatch.setattr(
+        bridge,
+        "_wait_for_task_identity",
+        lambda job_id, _previous, cursor, worker_pid: {
+            "ok": True,
+            "jobId": job_id,
+            "taskId": "task-1",
+            "contextId": "context-1",
+            "cursor": cursor,
+            "state": "working",
+            "turn": 1,
+            "workerPid": worker_pid,
+            "preferredLanguage": "en",
+        },
+    )
+
+    result = bridge.start_job(
+        SimpleNamespace(
+            cwd=str(workspace),
+            prompt_file=str(prompt),
+            language="en",
+            mode="normal",
+            pipeline_name="",
+            follow=False,
+            follow_seconds=0,
+        )
+    )
+
+    _root, job_path, _spool = bridge._job_paths(captured["jobId"])
+    job = bridge._load_json(job_path)
+    metadata = captured["payload"]["params"]["message"]["metadata"]["iac_code"]
+    assert job["channel"] == "skill/host"
+    assert metadata["channel"] == "skill/host"
+    assert result["contextId"] == "context-1"
 
 
 def test_follow_surfaces_every_parent_and_candidate_step_boundary() -> None:
@@ -1925,6 +2031,7 @@ def test_continue_reuses_context_and_gets_a_new_task(monkeypatch, tmp_path: Path
             "turn": 1,
             "taskId": "task-1",
             "contextId": "ctx-1",
+            "channel": "skill/host",
             "taskHistory": [],
             "finalText": "ready",
         },
@@ -1956,6 +2063,7 @@ def test_continue_reuses_context_and_gets_a_new_task(monkeypatch, tmp_path: Path
     message = captured["payload"]["params"]["message"]
     assert message["contextId"] == "ctx-1"
     assert "taskId" not in message
+    assert message["metadata"]["iac_code"]["channel"] == "skill/host"
     assert result["taskId"] == "task-2"
     assert result["contextId"] == "ctx-1"
     assert result["turn"] == 2
@@ -1986,6 +2094,7 @@ def test_continue_reuses_completed_pipeline_handoff_context(monkeypatch, tmp_pat
             "turn": 1,
             "taskId": "task-pipeline-1",
             "contextId": "ctx-pipeline-1",
+            "channel": "skill/host",
             "taskHistory": [],
             "pipelineResult": {"status": "success", "stack_id": "stack-123"},
         },
@@ -2021,6 +2130,7 @@ def test_continue_reuses_completed_pipeline_handoff_context(monkeypatch, tmp_pat
     message = captured["payload"]["params"]["message"]
     assert message["contextId"] == "ctx-pipeline-1"
     assert "taskId" not in message
+    assert message["metadata"]["iac_code"]["channel"] == "skill/host"
     assert result["taskId"] == "task-normal-2"
     assert result["contextId"] == "ctx-pipeline-1"
     assert result["turn"] == 2
@@ -2434,6 +2544,10 @@ def test_skill_contract_uses_implicit_trigger_normal_default_and_follow() -> Non
     assert "Do not expand this into raw tool-event or token-delta output" in skill
     assert "`llm_not_configured`" in skill
     assert "`cloud_credentials_not_configured`" in skill
+    assert "optional `config.json` beside this `SKILL.md`" in skill
+    assert '{"channel":"<channel>"}' in skill
+    assert "adds the `skill/` prefix" in skill
+    assert "Never derive a channel from the user's request" in skill
     assert "python3 scripts/iac_code.py cache list" in skill
     assert "cache clean --candidates --confirm" in skill
     assert "remove only downloaded Runtime packages" in skill

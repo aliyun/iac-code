@@ -171,6 +171,8 @@ cython_debug/
 .local-observe/
 skill-runtime/dist/
 !skill-runtime/iac-code-runtime.spec
+# Optional install-local Skill attribution; never publish a configured channel.
+skills/iac-code/config.json
 src/iac_code/pipeline/engine/architecture_rules.json.backup-*
 
 # Docs

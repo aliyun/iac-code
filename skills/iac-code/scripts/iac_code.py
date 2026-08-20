@@ -54,6 +54,9 @@ MAX_USER_UPDATE_TEXT = 280
 MAX_FOLLOW_PROGRESS_LINES = 48
 MAX_FOLLOW_PROGRESS_BYTES = 4096
 MAX_AUTO_CLEANUP_TASKS_PER_FOLLOW = 4
+MAX_CHANNEL_LENGTH = 128
+MAX_SKILL_CONFIG_BYTES = 16 * 1024
+SKILL_CHANNEL_PREFIX = "skill/"
 FOLLOW_HEARTBEAT_SECONDS = 12.0
 DEFAULT_FOLLOW_SECONDS = 60.0
 MAX_FOLLOW_SECONDS = 120.0
@@ -91,6 +94,7 @@ CLEANUP_TERMINAL_STATES = {"completed", "failed", "none", "unavailable"}
 PROGRESS_BOUNDARY_EVENT_TYPES = STEP_BOUNDARY_EVENT_TYPES | CLEANUP_EVENT_TYPES
 CACHE_RESERVED_DIRECTORIES = {"jobs", "servers"}
 SUPPORTED_LANGUAGES = ("en", "zh", "es", "fr", "de", "ja", "pt")
+SKILL_ROOT = pathlib.Path(__file__).resolve().parent.parent
 _ACTIVE_LANGUAGE = "en"
 _SECRET_PATTERN = re.compile(
     r"(?i)(authorization\s*:\s*bearer\s+|access[_-]?key[_-]?(?:secret|id)?\s*[=:]\s*|"
@@ -2246,6 +2250,9 @@ def _worker_payload(job, prompt=None, response=None, cleanup_only=False):
         "preferredLanguage": job.get("preferredLanguage", "en"),
         "candidatePresentation": "rich-v1",
     }
+    channel = _normalize_telemetry_channel(job.get("channel")) if job.get("channel") is not None else None
+    if channel is not None:
+        iac_metadata["channel"] = channel
     if cleanup_only:
         iac_metadata["cleanupOnly"] = True
     message = {
@@ -2463,6 +2470,38 @@ def _preferred_language(prompt, requested):
     return "en"
 
 
+def _normalize_telemetry_channel(value):
+    if value is None:
+        return None
+    channel = value.strip() if isinstance(value, str) else ""
+    if channel.startswith(SKILL_CHANNEL_PREFIX):
+        channel = channel[len(SKILL_CHANNEL_PREFIX) :].strip()
+    if channel:
+        return SKILL_CHANNEL_PREFIX + channel[: MAX_CHANNEL_LENGTH - len(SKILL_CHANNEL_PREFIX)]
+    raise BridgeError("skill_configuration_invalid", "The Skill telemetry channel must be a non-empty string.")
+
+
+def _skill_telemetry_channel():
+    config_path = SKILL_ROOT / "config.json"
+    try:
+        encoded = config_path.read_bytes()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise BridgeError("skill_configuration_invalid", "The installed Skill config could not be read.") from exc
+    if len(encoded) > MAX_SKILL_CONFIG_BYTES:
+        raise BridgeError("skill_configuration_invalid", "The installed Skill config is too large.")
+    try:
+        config = json.loads(encoded.decode("utf-8"))
+    except (UnicodeError, ValueError) as exc:
+        raise BridgeError("skill_configuration_invalid", "The installed Skill config is not valid UTF-8 JSON.") from exc
+    if not isinstance(config, dict):
+        raise BridgeError("skill_configuration_invalid", "The installed Skill config must be a JSON object.")
+    if config.get("channel") is None:
+        return None
+    return _normalize_telemetry_channel(config.get("channel"))
+
+
 def _identity_result(job_id, job, cursor, worker_pid):
     return {
         "ok": True,
@@ -2523,6 +2562,7 @@ def start_job(args):
     prompt = _read_workspace_prompt(workspace, args.prompt_file)
     preferred_language = _preferred_language(prompt, args.language)
     _set_output_language(preferred_language)
+    channel = _skill_telemetry_channel()
     artifact, executable, cache_hit = ensure_runtime()
     _progress("start", "Starting or reusing the local A2A runtime")
     record = ensure_server(executable, artifact, args.mode, args.pipeline_name)
@@ -2558,6 +2598,8 @@ def start_job(args):
         "createdAt": int(time.time()),
         "turnStartedAt": int(time.time()),
     }
+    if channel is not None:
+        job["channel"] = channel
     _atomic_json(job_path, job)
     payload = _worker_payload(job, prompt=prompt)
     worker_pid = _spawn_worker(job_id, payload)
