@@ -67,8 +67,9 @@ MODE_DISPLAY_NAMES: dict[str, str] = {
 }
 
 # Required subset of MODE_FIELDS per mode. EcsRamRole's role name is optional
-# (empty means "auto-detect from ECS metadata"), so callers must not treat every
-# declared field as mandatory.
+# (empty means "auto-detect from ECS metadata"), and Alibaba Cloud OAuth does
+# not always return refresh_expires_in, so callers must not treat every declared
+# field as mandatory.
 MODE_REQUIRED_FIELDS: dict[str, set[str]] = {
     "AK": {"access_key_id", "access_key_secret"},
     "StsToken": {"access_key_id", "access_key_secret", "sts_token", "sts_expiration"},
@@ -79,7 +80,6 @@ MODE_REQUIRED_FIELDS: dict[str, set[str]] = {
         "oauth_access_token",
         "oauth_refresh_token",
         "oauth_access_token_expire",
-        "oauth_refresh_token_expire",
         "access_key_id",
         "access_key_secret",
         "sts_token",
