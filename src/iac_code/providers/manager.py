@@ -10,6 +10,7 @@ from collections.abc import AsyncGenerator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from anthropic import APIConnectionError as AnthropicAPIConnectionError
 from loguru import logger
@@ -101,6 +102,33 @@ _TOKEN_METRIC_SCOPE_KEYS = frozenset(
         PipelineAttr.CANDIDATE_INDEX,
     }
 )
+
+# Keep these telemetry-only allowlists aligned with the official Model Studio
+# Base URL overview: https://help.aliyun.com/zh/model-studio/base-url
+_BAILIAN_SHARED_HOSTS = frozenset(
+    {
+        "dashscope.aliyuncs.com",
+        "dashscope-intl.aliyuncs.com",
+        "dashscope-us.aliyuncs.com",
+    }
+)
+_BAILIAN_CODING_HOSTS = frozenset(
+    {
+        "coding.dashscope.aliyuncs.com",
+        "coding-intl.dashscope.aliyuncs.com",
+    }
+)
+_BAILIAN_MAAS_REGIONS = frozenset(
+    {
+        "cn-beijing",
+        "ap-southeast-1",
+        "ap-northeast-1",
+        "eu-central-1",
+        "us-east-1",
+    }
+)
+_BAILIAN_COMPATIBLE_PATHS = ("/compatible-mode", "/apps/anthropic")
+_BAILIAN_CODING_PATHS = ("/v1", "/apps/anthropic")
 
 
 class _BestEffortSpan:
@@ -633,6 +661,54 @@ def _provider_endpoint_url(provider: Any) -> str | None:
     return str(client_base_url) if client_base_url else None
 
 
+def _is_bailian_compatible_endpoint(base_url: str | None) -> bool:
+    """Return whether a compatible API URL is an official Bailian endpoint."""
+    if not isinstance(base_url, str) or not base_url.strip():
+        return False
+    try:
+        parsed = urlsplit(base_url.strip())
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return False
+    if parsed.scheme.lower() != "https" or not hostname or port not in (None, 443):
+        return False
+    normalized_host = hostname.lower().rstrip(".")
+    path = parsed.path.rstrip("/")
+    if normalized_host in _BAILIAN_CODING_HOSTS:
+        return _path_matches_any_prefix(path, _BAILIAN_CODING_PATHS)
+    if normalized_host in _BAILIAN_SHARED_HOSTS:
+        return _path_matches_any_prefix(path, _BAILIAN_COMPATIBLE_PATHS)
+    labels = normalized_host.split(".")
+    is_maas_host = (
+        len(labels) == 5
+        and labels[-3:] == ["maas", "aliyuncs", "com"]
+        and _is_dns_label(labels[0])
+        and labels[1] in _BAILIAN_MAAS_REGIONS
+    )
+    return is_maas_host and _path_matches_any_prefix(path, _BAILIAN_COMPATIBLE_PATHS)
+
+
+def _path_matches_any_prefix(path: str, prefixes: tuple[str, ...]) -> bool:
+    return any(path == prefix or path.startswith(f"{prefix}/") for prefix in prefixes)
+
+
+def _is_dns_label(value: str) -> bool:
+    return (
+        1 <= len(value) <= 63
+        and value[0] != "-"
+        and value[-1] != "-"
+        and all(character == "-" or "a" <= character <= "z" or "0" <= character <= "9" for character in value)
+    )
+
+
+def _telemetry_provider_name(provider: Any) -> str:
+    """Resolve the service provider reported by telemetry without changing the request adapter."""
+    if _is_bailian_compatible_endpoint(_provider_endpoint_url(provider)):
+        return "dashscope"
+    return type(provider).__name__.replace("Provider", "").lower()
+
+
 class ProviderManager:
     """Manages provider lifecycle, streaming fallback, and model degradation.
     When streaming fails mid-way:
@@ -900,7 +976,7 @@ class ProviderManager:
             yield _error_event_from_exception(exc)
             return
         provider, model = self._active_provider_and_model()
-        provider_name = type(provider).__name__.replace("Provider", "").lower()
+        provider_name = _telemetry_provider_name(provider)
         sanitized_model = sanitize_model_name(model)
 
         started = time.monotonic()
@@ -1451,7 +1527,7 @@ class ProviderManager:
             model = model_override or self._model
         visited = set(fallback_visited or ())
         visited.add(model)
-        provider_name = type(provider).__name__.replace("Provider", "").lower()
+        provider_name = _telemetry_provider_name(provider)
         sanitized_model = sanitize_model_name(model)
 
         async def _on_retry(attempt, exc, delay):

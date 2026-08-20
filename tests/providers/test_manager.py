@@ -15,6 +15,8 @@ from iac_code.providers.manager import (
     MODEL_FALLBACK_MAP,
     ProviderManager,
     _detect_provider_name,
+    _is_bailian_compatible_endpoint,
+    _telemetry_provider_name,
     create_provider,
 )
 from iac_code.providers.registry import PROVIDER_REGISTRY
@@ -38,6 +40,53 @@ async def _collect_stream_events(stream):
 
 
 class TestCreateProvider:
+    @pytest.mark.parametrize(
+        "base_url",
+        [
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "https://dashscope-intl.aliyuncs.com/apps/anthropic",
+            "https://dashscope-us.aliyuncs.com/compatible-mode/v1/chat/completions",
+            "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+            "https://llm-testworkspace000000.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+            "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic",
+            "https://workspace-1.ap-southeast-1.maas.aliyuncs.com/apps/anthropic",
+            "https://llm-tokyo.ap-northeast-1.maas.aliyuncs.com/compatible-mode/v1",
+            "https://llm-frankfurt.eu-central-1.maas.aliyuncs.com/apps/anthropic/v1/messages",
+            "https://llm-virginia.us-east-1.maas.aliyuncs.com/compatible-mode/v1",
+            "https://trial.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+            "https://trial.ap-southeast-1.maas.aliyuncs.com/apps/anthropic",
+            "https://coding.dashscope.aliyuncs.com/v1",
+            "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+            "https://coding-intl.dashscope.aliyuncs.com/v1/chat/completions",
+            "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic/v1/messages",
+            "https://LLM-TESTWORKSPACE000000.CN-BEIJING.MAAS.ALIYUNCS.COM:443/apps/anthropic?version=1",
+        ],
+    )
+    def test_bailian_compatible_endpoint_detection(self, base_url):
+        assert _is_bailian_compatible_endpoint(base_url) is True
+
+    @pytest.mark.parametrize(
+        "base_url",
+        [
+            "http://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+            "https://token-plan.cn-beijing.maas.aliyuncs.com:8443/compatible-mode/v1",
+            "https://token-plan.cn-beijing.maas.aliyuncs.com.example/compatible-mode/v1",
+            "https://example.com/token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+            "https://example.com/compatible-mode/v1?target=token-plan.cn-beijing.maas.aliyuncs.com",
+            "https://llm-example.cn-hangzhou.maas.aliyuncs.com/compatible-mode/v1",
+            "https://-invalid.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+            "https://llm-example.cn-beijing.maas.aliyuncs.com/v1",
+            "https://llm-example.cn-beijing.maas.aliyuncs.com/api/v1",
+            "https://dashscope-us.aliyuncs.com/api/v1",
+            "https://dashscope-eu.aliyuncs.com/compatible-mode/v1",
+            "https://coding.dashscope.aliyuncs.com/compatible-mode/v1",
+            "https://coding.dashscope.aliyuncs.com.example/v1",
+            "https://example.cn-beijing.pai-eas.aliyuncs.com/apps/anthropic",
+        ],
+    )
+    def test_bailian_compatible_endpoint_detection_rejects_non_official_urls(self, base_url):
+        assert _is_bailian_compatible_endpoint(base_url) is False
+
     @pytest.mark.parametrize("provider_key", PROVIDER_REGISTRY)
     def test_saved_api_base_overrides_registry_default_for_every_provider(self, provider_key):
         descriptor = PROVIDER_REGISTRY[provider_key]
@@ -377,6 +426,40 @@ class TestCreateProvider:
         p = create_provider("any-model", credentials={"openai_compatible": "sk-x"})
         assert p.get_model_name() == "any-model"
         assert p._base_url == "https://my.llm.local/v1"
+
+    def test_openai_compatible_bailian_llm_endpoint_changes_only_telemetry_attribution(self, monkeypatch):
+        from iac_code.providers.openai_provider import OpenAIProvider
+
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "openai_compatible")
+        base_url = "https://llm-testworkspace000000.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+
+        p = create_provider(
+            "any-model",
+            credentials={"openai_compatible": "sk-x"},
+            provider_config_override={"apiBase": base_url},
+        )
+
+        assert type(p) is OpenAIProvider
+        assert p._PROVIDER_KEY == "openai_compatible"
+        assert p._logical_provider_key == "openai_compatible"
+        assert _telemetry_provider_name(p) == "dashscope"
+
+    def test_anthropic_compatible_bailian_endpoint_changes_only_telemetry_attribution(self, monkeypatch):
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic_compatible")
+        base_url = "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic"
+
+        p = create_provider(
+            "any-model",
+            credentials={"anthropic_compatible": "sk-x"},
+            provider_config_override={"apiBase": base_url},
+        )
+
+        assert type(p) is AnthropicProvider
+        assert p._PROVIDER_KEY == "anthropic_compatible"
+        assert p._logical_provider_key == "anthropic_compatible"
+        assert _telemetry_provider_name(p) == "dashscope"
 
     def test_openai_compatible_dashscope_base_uses_dashscope_default_thinking_wire_format(self, monkeypatch):
         from iac_code.providers.dashscope_provider import DashScopeProvider
@@ -760,6 +843,45 @@ class TestProviderManagerStreaming:
         total_metric = next((value, attrs) for name, value, attrs in metrics if name == Metrics.TOKEN_TOTAL)
         assert total_metric[0] == 120
         assert total_metric[1][IacCodeAttr.MODE] == "pipeline"
+
+    async def test_stream_attributes_bailian_anthropic_endpoint_to_dashscope_on_all_signals(self):
+        class AnthropicCompatibleProvider:
+            _base_url = "https://llm-testworkspace000000.cn-beijing.maas.aliyuncs.com/apps/anthropic"
+
+            async def stream(self, messages, system, tools=None, max_tokens=8192):
+                yield MessageStartEvent(message_id="m1")
+                yield MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=3, output_tokens=2))
+
+        provider = AnthropicCompatibleProvider()
+        span = MagicMock()
+        telemetry_events = []
+        metrics = []
+        manager = ProviderManager(model="any-model", credentials={"anthropic": "k"})
+        manager._provider = provider
+
+        with (
+            patch("iac_code.providers.manager.start_detached_span", return_value=span) as start_span,
+            patch(
+                "iac_code.providers.manager.log_event",
+                side_effect=lambda name, attrs: telemetry_events.append((name, attrs)),
+            ),
+            patch(
+                "iac_code.providers.manager.add_metric",
+                side_effect=lambda name, value, attrs: metrics.append((name, value, attrs)),
+            ),
+        ):
+            await _collect_stream_events(manager.stream(messages=[Message.user("hi")], system="sys"))
+
+        assert start_span.call_args.args[1][GenAiAttr.PROVIDER_NAME] == "dashscope"
+        provider_events = [
+            attrs["provider"]
+            for name, attrs in telemetry_events
+            if name in {Events.API_REQUEST_STARTED, Events.API_REQUEST_SUCCEEDED}
+        ]
+        assert provider_events == ["dashscope", "dashscope"]
+        token_metrics = [attrs["provider"] for name, _value, attrs in metrics if name == Metrics.TOKEN_TOTAL]
+        assert token_metrics == ["dashscope"]
+        assert provider._base_url.endswith("/apps/anthropic")
 
     async def test_stream_records_zero_cache_breakdown_on_span(self):
         mock_provider = AsyncMock()
@@ -1551,6 +1673,49 @@ class TestProviderManagerCompleteRetry:
         assert total_metrics == [
             (120, {"provider": "asyncmock", "model": "claude-sonnet-4-6", "iac_code.mode": "normal"})
         ]
+
+    async def test_complete_attributes_bailian_openai_endpoint_to_dashscope_on_all_signals(self):
+        mock_provider = AsyncMock()
+        mock_provider._base_url = (
+            "https://llm-testworkspace000000.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+        )
+        mock_provider.complete = AsyncMock(
+            return_value=NonStreamingResponse(
+                message_id="complete-response",
+                text="ok",
+                tool_uses=[],
+                stop_reason="end_turn",
+                usage=Usage(input_tokens=4, output_tokens=3),
+            )
+        )
+        span = MagicMock()
+        telemetry_events = []
+        metrics = []
+        manager = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
+        manager._provider = mock_provider
+
+        with (
+            patch("iac_code.providers.manager.start_span", return_value=nullcontext(span)) as start_span,
+            patch(
+                "iac_code.providers.manager.log_event",
+                side_effect=lambda name, attrs: telemetry_events.append((name, attrs)),
+            ),
+            patch(
+                "iac_code.providers.manager.add_metric",
+                side_effect=lambda name, value, attrs: metrics.append((name, value, attrs)),
+            ),
+        ):
+            await manager.complete(messages=[Message.user("hi")], system="sys")
+
+        assert start_span.call_args.args[1][GenAiAttr.PROVIDER_NAME] == "dashscope"
+        provider_events = [
+            attrs["provider"]
+            for name, attrs in telemetry_events
+            if name in {Events.API_REQUEST_STARTED, Events.API_REQUEST_SUCCEEDED}
+        ]
+        assert provider_events == ["dashscope", "dashscope"]
+        token_metrics = [attrs["provider"] for name, _value, attrs in metrics if name == Metrics.TOKEN_TOTAL]
+        assert token_metrics == ["dashscope"]
 
     async def test_complete_succeeds_when_telemetry_start_event_and_metrics_fail(self):
         mock_provider = AsyncMock()
