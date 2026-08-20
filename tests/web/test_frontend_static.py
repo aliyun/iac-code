@@ -1258,7 +1258,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-315" in html
-    assert "/static/js/app.js?v=web-repl-ui-335" in html
+    assert "/static/js/app.js?v=web-repl-ui-336" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1292,7 +1292,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-335" in index_html
+    assert "web-repl-ui-336" in index_html
     assert "web-repl-ui-334" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-319" in app_source
@@ -1801,6 +1801,24 @@ def test_sidebar_defers_repaint_while_pointer_inside() -> None:
     assert "if (sidebarPointerInside)" in auto_body
     assert "sidebarRepaintPending = true;" in auto_body
     assert "renderSessions(state);" in auto_body
+
+    # 置顶/取消置顶是用户主动操作，必须绕过 hover 守卫立即绘制；而且乐观绘制发生在 PATCH 等待前。
+    immediate_body = app_source.split("function renderSessionsImmediate(state)", 1)[1].split("\n}", 1)[0]
+    assert "sidebarRepaintPending = false;" in immediate_body
+    assert "renderSessions(state);" in immediate_body
+    pin_body = app_source.split("async function toggleSessionPinned(", 1)[1].split(
+        "\nasync function archiveSession(", 1
+    )[0]
+    assert pin_body.index("renderSessionsImmediate(state);") < pin_body.index("await api.updateSession(")
+    assert "invalidateSessionListLoads();" in pin_body
+
+    # 列表请求用独立 generation 丢弃旧响应，并把仍在进行的本地 pin 状态覆盖到新快照。
+    load_body = app_source.split("async function loadSessions()", 1)[1].split(
+        "\nasync function loadPipelineState(", 1
+    )[0]
+    assert "const generation = ++sessionListLoadGeneration;" in load_body
+    assert "if (generation !== sessionListLoadGeneration)" in load_body
+    assert "for (const patch of sessionPinMutations.values())" in load_body
 
     # 流式 render 与后台刷新都改走节流包装,不再直接 renderSessions。
     assert "renderSessionsAuto(state);" in app_source
@@ -6877,6 +6895,10 @@ def test_sidebar_threads_use_mode_icons_and_pin_archive_actions() -> None:
         't("Pin conversation")',
         't("Unpin conversation")',
         't("Archive conversation")',
+        "patchPinnedSessionState",
+        "renderSessionsImmediate",
+        "sessionPinMutations",
+        "sessionListLoadGeneration",
     ]:
         assert snippet in app_source
 
@@ -6913,6 +6935,125 @@ def test_sidebar_threads_use_mode_icons_and_pin_archive_actions() -> None:
         "font-weight: 400",
     ]:
         assert snippet in styles
+
+
+def test_sidebar_pin_state_updates_optimistically_for_active_and_pinned_projects(tmp_path: Path) -> None:
+    output = _run_app_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            globalThis.document = {
+              getElementById() {
+                return null;
+              },
+            };
+
+            const { patchPinnedSessionState } = await import(__APP_MODULE__);
+            const a = {
+              webSessionId: "session-a",
+              sessionId: "runtime-a",
+              cwd: "/workspace/demo",
+              title: "A",
+              updatedAt: "2026-08-20T10:00:00Z",
+              pinned: false,
+            };
+            const b = {
+              webSessionId: "session-b",
+              sessionId: "runtime-b",
+              cwd: "/workspace/demo",
+              title: "B",
+              updatedAt: "2026-08-20T09:00:00Z",
+              pinned: false,
+            };
+            const options = { previewLimit: 5, expandedProjectKeys: new Set() };
+            const activeBase = {
+              currentSession: a,
+              sessions: [a, b],
+              pinnedSessions: [],
+              projectGroups: [{ cwd: a.cwd, sessions: [a, b], total: 2, hasMore: false }],
+              pinnedProjects: [],
+            };
+            const activePinned = patchPinnedSessionState(
+              activeBase,
+              { ...a, pinned: true, pinnedAt: "2026-08-20T11:00:00Z" },
+              options,
+            );
+            const activeUnpinned = patchPinnedSessionState(
+              activePinned,
+              { ...a, pinned: false, pinnedAt: null },
+              options,
+            );
+
+            const pinnedProjectBase = {
+              sessions: [a, b],
+              pinnedSessions: [],
+              projectGroups: [],
+              pinnedProjects: [{ cwd: a.cwd, sessions: [a, b], total: 2, hasMore: false, pinned: true }],
+            };
+            const pinnedProjectPinned = patchPinnedSessionState(
+              pinnedProjectBase,
+              { ...a, pinned: true, pinnedAt: "2026-08-20T11:00:00Z" },
+              options,
+            );
+            const pinnedProjectUnpinned = patchPinnedSessionState(
+              pinnedProjectPinned,
+              { ...a, pinned: false, pinnedAt: null },
+              options,
+            );
+
+            const ids = (items) => (items || []).map((item) => item.webSessionId);
+            console.log(JSON.stringify({
+              activePinned: {
+                currentPinned: activePinned.currentSession.pinned,
+                pinnedIds: ids(activePinned.pinnedSessions),
+                projectIds: ids(activePinned.projectGroups[0].sessions),
+                projectTotal: activePinned.projectGroups[0].total,
+              },
+              activeUnpinned: {
+                currentPinned: activeUnpinned.currentSession.pinned,
+                pinnedIds: ids(activeUnpinned.pinnedSessions),
+                projectIds: ids(activeUnpinned.projectGroups[0].sessions),
+                projectTotal: activeUnpinned.projectGroups[0].total,
+              },
+              pinnedProjectPinned: {
+                pinnedIds: ids(pinnedProjectPinned.pinnedSessions),
+                projectIds: ids(pinnedProjectPinned.pinnedProjects[0].sessions),
+                projectTotal: pinnedProjectPinned.pinnedProjects[0].total,
+              },
+              pinnedProjectUnpinned: {
+                pinnedIds: ids(pinnedProjectUnpinned.pinnedSessions),
+                projectIds: ids(pinnedProjectUnpinned.pinnedProjects[0].sessions),
+                projectTotal: pinnedProjectUnpinned.pinnedProjects[0].total,
+              },
+            }));
+            """
+        ),
+    )
+
+    assert output == {
+        "activePinned": {
+            "currentPinned": True,
+            "pinnedIds": ["session-a"],
+            "projectIds": ["session-b"],
+            "projectTotal": 1,
+        },
+        "activeUnpinned": {
+            "currentPinned": False,
+            "pinnedIds": [],
+            "projectIds": ["session-a", "session-b"],
+            "projectTotal": 2,
+        },
+        "pinnedProjectPinned": {
+            "pinnedIds": ["session-a"],
+            "projectIds": ["session-b"],
+            "projectTotal": 1,
+        },
+        "pinnedProjectUnpinned": {
+            "pinnedIds": [],
+            "projectIds": ["session-a", "session-b"],
+            "projectTotal": 2,
+        },
+    }
 
 
 def test_styles_use_codex_dark_visual_tokens() -> None:
@@ -10532,7 +10673,7 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-335" in html
+    assert "web-repl-ui-336" in html
     assert "web-repl-ui-334" not in html
 
 

@@ -362,6 +362,133 @@ function replaceUpdatedSessionInState(currentState, updatedSession) {
   };
 }
 
+// 置顶/取消置顶是纯展示元数据变更。先在内存里同步当前会话、置顶区和项目分组，避免为了一个
+// pin 标志阻塞等待全量 /api/sessions；服务端列表随后只负责权威校准。函数保持纯函数，便于覆盖
+// “置顶移出项目 / 取消置顶回到项目 / 置顶项目中的会话”三种行为。
+export function patchPinnedSessionState(currentState = {}, sessionPatch = {}, options = {}) {
+  const displayId = (session) => session?.webSessionId || session?.sessionId || "";
+  const targetId = displayId(sessionPatch);
+  if (!targetId) {
+    return currentState;
+  }
+  const same = (session) => {
+    if (!session) {
+      return false;
+    }
+    const candidateId = displayId(session);
+    if (candidateId && candidateId === targetId) {
+      return true;
+    }
+    return Boolean(
+      session.sessionId &&
+        sessionPatch.sessionId &&
+        session.sessionId === sessionPatch.sessionId &&
+        session.cwd === sessionPatch.cwd,
+    );
+  };
+  const candidates = [
+    currentState.currentSession,
+    ...(currentState.sessions || []),
+    ...(currentState.pinnedSessions || []),
+    ...(currentState.projectGroups || []).flatMap((group) => group.sessions || []),
+    ...(currentState.pinnedProjects || []).flatMap((group) => group.sessions || []),
+  ];
+  const previous = candidates.find(same) || {};
+  const pinned = sessionPatch.pinned === true;
+  const merged = {
+    ...previous,
+    ...sessionPatch,
+    pinned,
+    pinnedAt: pinned ? sessionPatch.pinnedAt || previous.pinnedAt || null : null,
+  };
+  const upsert = (items = []) => {
+    let found = false;
+    const patched = items.map((item) => {
+      if (!same(item)) {
+        return item;
+      }
+      found = true;
+      return { ...item, ...merged };
+    });
+    return found ? patched : [merged, ...patched];
+  };
+  const withoutTarget = (items = []) => items.filter((item) => !same(item));
+  const cwd = String(merged.cwd || sessionPatch.cwd || "");
+  const groupKey = (group) => String(group?.cwd || group?.key || group?.projectPath || "");
+  const pinnedProjectExists = (currentState.pinnedProjects || []).some((group) => groupKey(group) === cwd);
+  const activeProjectExists = (currentState.projectGroups || []).some((group) => groupKey(group) === cwd);
+  const expandedKeys = options.expandedProjectKeys instanceof Set ? options.expandedProjectKeys : new Set();
+  const previewLimit = Number.isFinite(Number(options.previewLimit)) ? Math.max(1, Number(options.previewLimit)) : 5;
+
+  const patchGroups = (groups = [], insertMissing) =>
+    groups.map((group) => {
+      if (groupKey(group) !== cwd) {
+        return group;
+      }
+      const sessions = Array.isArray(group.sessions) ? group.sessions : [];
+      const contained = sessions.some(same);
+      let nextSessions = contained ? sessions.map((item) => (same(item) ? { ...item, ...merged } : item)) : sessions;
+      let total = Number.isFinite(Number(group.total)) ? Number(group.total) : sessions.length;
+      if (pinned) {
+        if (contained) {
+          nextSessions = withoutTarget(nextSessions);
+          total = Math.max(0, total - 1);
+        }
+      } else if (!contained && insertMissing) {
+        nextSessions = [merged, ...nextSessions].sort((left, right) =>
+          String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")),
+        );
+        total += 1;
+        if (!expandedKeys.has(groupKey(group))) {
+          nextSessions = nextSessions.slice(0, previewLimit);
+        }
+      }
+      return {
+        ...group,
+        sessions: nextSessions,
+        total,
+        hasMore: total > nextSessions.length,
+      };
+    });
+
+  let projectGroups = patchGroups(currentState.projectGroups || [], !pinnedProjectExists);
+  const pinnedProjects = patchGroups(currentState.pinnedProjects || [], pinnedProjectExists);
+  if (pinned) {
+    // 普通项目若最后一个会话被置顶，后端列表会隐藏这个空项目；乐观态保持相同行为。
+    projectGroups = projectGroups.filter(
+      (group) => groupKey(group) !== cwd || Number(group.total) > 0 || (group.sessions || []).length > 0,
+    );
+  } else if (!pinnedProjectExists && !activeProjectExists && cwd) {
+    const parts = cwd.replaceAll("\\", "/").split("/").filter(Boolean);
+    projectGroups = [
+      {
+        cwd,
+        key: cwd,
+        label: parts.at(-1) || cwd,
+        sessions: [merged],
+        total: 1,
+        hasMore: false,
+        pinned: false,
+        pinnedAt: null,
+        archived: false,
+        collapsed: false,
+      },
+      ...projectGroups,
+    ];
+  }
+
+  return {
+    ...currentState,
+    currentSession: same(currentState.currentSession)
+      ? { ...(currentState.currentSession || {}), ...merged }
+      : currentState.currentSession,
+    sessions: upsert(currentState.sessions || []),
+    pinnedSessions: pinned ? upsert(currentState.pinnedSessions || []) : withoutTarget(currentState.pinnedSessions || []),
+    projectGroups,
+    pinnedProjects,
+  };
+}
+
 function structuredFallbackText(value) {
   try {
     const rendered = JSON.stringify(value, null, 2);
@@ -1528,12 +1655,45 @@ function setThreadActionTooltip(button, label) {
 async function toggleSessionPinned(session, event) {
   event?.stopPropagation?.();
   const sessionId = displaySessionId(session);
-  if (!sessionId) {
+  if (!sessionId || sessionPinMutations.has(sessionId)) {
     return;
   }
-  await api.updateSession(sessionId, { pinned: !session.pinned });
-  await loadSessions();
-  render(state);
+  const latest = findSessionForPinMutation(state, sessionId) || session;
+  const previousPinned = latest.pinned === true;
+  const identity = {
+    webSessionId: latest.webSessionId,
+    sessionId: latest.sessionId,
+    cwd: latest.cwd,
+  };
+  const optimistic = {
+    ...identity,
+    pinned: !previousPinned,
+    pinnedAt: previousPinned ? null : new Date().toISOString(),
+  };
+  sessionPinMutations.set(sessionId, optimistic);
+  invalidateSessionListLoads();
+  state = patchPinnedSessionState(state, optimistic, sessionPinPatchOptions());
+  renderSessionsImmediate(state);
+
+  let updated = null;
+  try {
+    updated = await api.updateSession(sessionId, { pinned: !previousPinned });
+    sessionPinMutations.set(sessionId, updated);
+    state = patchPinnedSessionState(state, updated, sessionPinPatchOptions());
+  } catch (error) {
+    state = patchPinnedSessionState(
+      state,
+      { ...identity, pinned: previousPinned, pinnedAt: previousPinned ? latest.pinnedAt || null : null },
+      sessionPinPatchOptions(),
+    );
+    window.alert?.(error?.message || t("Operation failed"));
+  } finally {
+    sessionPinMutations.delete(sessionId);
+    renderSessionsImmediate(state);
+  }
+  if (updated) {
+    void reconcileSessionsAfterPinMutation();
+  }
 }
 
 async function archiveSession(session, event) {
@@ -1629,6 +1789,8 @@ function createThreadRow(session, state) {
   const pinAction = document.createElement("button");
   pinAction.type = "button";
   pinAction.className = session.pinned ? "thread-action thread-action-pin is-pinned" : "thread-action thread-action-pin";
+  pinAction.disabled = sessionPinMutations.has(displaySessionId(session));
+  pinAction.setAttribute("aria-busy", pinAction.disabled ? "true" : "false");
   const pinTooltip = session.pinned ? t("Unpin conversation") : t("Pin conversation");
   setThreadActionTooltip(pinAction, pinTooltip);
   pinAction.addEventListener("click", (event) => {
@@ -4595,18 +4757,10 @@ function startThreadRename() {
 
 async function toggleCurrentSessionPinned() {
   closeThreadMenu();
-  const sessionId = state.currentSessionId;
-  if (!sessionId) {
+  if (!state.currentSessionId || !state.currentSession) {
     return;
   }
-  try {
-    const updated = await api.updateSession(sessionId, { pinned: !state.currentSession?.pinned });
-    state = replaceUpdatedSessionInState(state, updated);
-    await loadSessions();
-    render(state);
-  } catch (error) {
-    window.alert?.(error?.message || t("Operation failed"));
-  }
+  await toggleSessionPinned(state.currentSession);
 }
 
 async function archiveCurrentSession() {
@@ -4905,6 +5059,8 @@ function liveStacksFromState() {
   return [...byKey.values()];
 }
 let sessionLoadGeneration = 0;
+let sessionListLoadGeneration = 0;
+const sessionPinMutations = new Map();
 let materializedDraftSession = null;
 let draftProjectMenuOpen = false;
 let draftProjectNewMenuOpen = false;
@@ -5025,19 +5181,61 @@ function preserveExpandedProjectGroups(freshGroups) {
   });
 }
 
+function sessionPinPatchOptions() {
+  return {
+    expandedProjectKeys,
+    previewLimit: PROJECT_THREAD_PREVIEW_LIMIT,
+  };
+}
+
+function findSessionForPinMutation(currentState, sessionId) {
+  const matches = (session) => displaySessionId(session) === sessionId;
+  const candidates = [
+    ...(currentState.sessions || []),
+    ...(currentState.pinnedSessions || []),
+    ...(currentState.projectGroups || []).flatMap((group) => group.sessions || []),
+    ...(currentState.pinnedProjects || []).flatMap((group) => group.sessions || []),
+    currentState.currentSession,
+  ];
+  return candidates.find(matches) || null;
+}
+
+function invalidateSessionListLoads() {
+  sessionListLoadGeneration += 1;
+}
+
+async function reconcileSessionsAfterPinMutation() {
+  try {
+    await loadSessions();
+    renderSessionsAuto(state);
+  } catch {
+    // PATCH 的返回值已经是权威会话状态；列表校准失败时保留它，下一轮后台刷新会继续重试。
+  }
+}
+
 async function loadSessions() {
+  const generation = ++sessionListLoadGeneration;
   const payload = await api.listSessions({
     limit: 50,
     perProjectLimit: PROJECT_THREAD_PREVIEW_LIMIT,
   });
+  if (generation !== sessionListLoadGeneration) {
+    return state.sessions || [];
+  }
   const sessions = payload.sessions || [];
-  state = {
+  let nextState = {
     ...state,
     sessions,
     pinnedSessions: payload.pinnedSessions || [],
     pinnedProjects: payload.pinnedProjects || [],
     projectGroups: preserveExpandedProjectGroups(payload.projects || []),
   };
+  // 另一个后台刷新可能在 PATCH 完成前返回旧快照。把仍在进行的本地 pin 变更覆盖到快照上，
+  // 避免按钮刚变为置顶/取消置顶又短暂跳回旧状态。
+  for (const patch of sessionPinMutations.values()) {
+    nextState = patchPinnedSessionState(nextState, patch, sessionPinPatchOptions());
+  }
+  state = nextState;
   return sessions;
 }
 
@@ -5430,6 +5628,13 @@ function renderSessionsAuto(state) {
     sidebarRepaintPending = true;
     return;
   }
+  sidebarRepaintPending = false;
+  renderSessions(state);
+}
+
+// 用户点击置顶/取消置顶属于主动操作，即使指针仍停在侧栏也必须马上绘制反馈，不能被自动刷新专用的
+// hover 守卫延迟到 pointerleave。
+function renderSessionsImmediate(state) {
   sidebarRepaintPending = false;
   renderSessions(state);
 }
