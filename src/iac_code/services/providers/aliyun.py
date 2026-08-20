@@ -6,8 +6,9 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, fields
+from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from iac_code.config import _load_yaml, _save_yaml, get_cloud_credentials_path
 from iac_code.i18n import _
@@ -141,6 +142,29 @@ def _cloud_credential_file_lock(path: Path) -> Iterator[None]:
 def _copy_credential(target: AliyunCredential, source: AliyunCredential) -> None:
     for credential_field in fields(AliyunCredential):
         setattr(target, credential_field.name, getattr(source, credential_field.name))
+
+
+def _credential_save_path(credential: AliyunCredential, config_path: str | None) -> Path:
+    if config_path is not None:
+        return Path(config_path)
+    if credential.credential_source == "iac_code" and credential.credential_source_path:
+        return Path(credential.credential_source_path)
+    return get_cloud_credentials_path()
+
+
+class _CredentialSaveOperation(Protocol):
+    def __call__(self, credential: AliyunCredential, config_path: str | None = None) -> None: ...
+
+
+def _lock_cloud_credential_save(
+    save_operation: _CredentialSaveOperation,
+) -> _CredentialSaveOperation:
+    @wraps(save_operation)
+    def locked_save(credential: AliyunCredential, config_path: str | None = None) -> None:
+        with _cloud_credential_file_lock(_credential_save_path(credential, config_path)):
+            save_operation(credential, config_path)
+
+    return locked_save
 
 
 @contextmanager
@@ -441,6 +465,7 @@ class AliyunCredentials:
         return AliyunCredentials._load_from_aliyun_cli(config_path)
 
     @staticmethod
+    @_lock_cloud_credential_save
     def save(
         credential: AliyunCredential,
         config_path: str | None = None,
@@ -448,52 +473,45 @@ class AliyunCredentials:
         """Save credentials to ~/.iac-code/.cloud-credentials.yml."""
         if config_path is not None:
             # For testing: save to specified path in aliyun CLI format
-            path = Path(config_path)
-            with _cloud_credential_file_lock(path):
-                AliyunCredentials._save_to_aliyun_cli_format(credential, config_path)
+            AliyunCredentials._save_to_aliyun_cli_format(credential, config_path)
             return
 
-        path = (
-            Path(credential.credential_source_path)
-            if credential.credential_source == "iac_code" and credential.credential_source_path
-            else get_cloud_credentials_path()
-        )
-        with _cloud_credential_file_lock(path):
-            cloud_creds = _load_yaml(path)
+        path = _credential_save_path(credential, config_path)
+        cloud_creds = _load_yaml(path)
 
-            aliyun_data: dict[str, Any] = {
-                "mode": credential.mode,
-                "region_id": credential.region_id,
-            }
+        aliyun_data: dict[str, Any] = {
+            "mode": credential.mode,
+            "region_id": credential.region_id,
+        }
 
-            # Save fields relevant to the credential mode
-            mode_fields = MODE_FIELDS.get(credential.mode, [])
-            for field_name, _label, _sensitive in mode_fields:
-                value = getattr(credential, field_name, "")
-                if value in ("", None):
-                    continue
-                if (
-                    field_name
-                    in {
-                        "sts_expiration",
-                        "oauth_access_token_expire",
-                        "oauth_refresh_token_expire",
-                    }
-                    and value == 0
-                ):
-                    continue
-                aliyun_data[field_name] = value
+        # Save fields relevant to the credential mode
+        mode_fields = MODE_FIELDS.get(credential.mode, [])
+        for field_name, _label, _sensitive in mode_fields:
+            value = getattr(credential, field_name, "")
+            if value in ("", None):
+                continue
+            if (
+                field_name
+                in {
+                    "sts_expiration",
+                    "oauth_access_token_expire",
+                    "oauth_refresh_token_expire",
+                }
+                and value == 0
+            ):
+                continue
+            aliyun_data[field_name] = value
 
-            cloud_creds["aliyun"] = aliyun_data
-            _save_yaml(path, cloud_creds)
-            credential.credential_source = "iac_code"
-            credential.credential_source_path = str(path)
+        cloud_creds["aliyun"] = aliyun_data
+        _save_yaml(path, cloud_creds)
+        credential.credential_source = "iac_code"
+        credential.credential_source_path = str(path)
 
-            # The dynamic-credential runtime caches one provider per (mode, role name, IMDSv1
-            # policy); a saved configuration change must not keep serving the old provider.
-            from iac_code.services.providers.aliyun_credentials_runtime import invalidate_aliyun_credential_runtime
+        # The dynamic-credential runtime caches one provider per (mode, role name, IMDSv1
+        # policy); a saved configuration change must not keep serving the old provider.
+        from iac_code.services.providers.aliyun_credentials_runtime import invalidate_aliyun_credential_runtime
 
-            invalidate_aliyun_credential_runtime()
+        invalidate_aliyun_credential_runtime()
 
     @staticmethod
     def _save_to_aliyun_cli_format(credential: AliyunCredential, config_path: str) -> None:
