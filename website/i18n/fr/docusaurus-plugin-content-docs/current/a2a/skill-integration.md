@@ -1,100 +1,222 @@
 ---
 sidebar_position: 7
-title: Intégration Skill
-description: Des agents externes pilotent iac-code via le Skill empaqueté d'iac-code et le Skill Runtime.
+title: Installer et utiliser le Skill IaC Code
+description: Téléchargez et installez le Skill IaC Code afin qu'un agent externe puisse gérer des ressources cloud Alibaba Cloud.
 ---
 
-# Intégration Skill
+# Installer et utiliser le Skill IaC Code
 
-iac-code fournit un Skill empaqueté destiné aux agents externes. Un agent externe (un agent planificateur ou une plateforme d'agents) n'installe pas le paquet Python d'iac-code et n'invoque pas de commandes headless ; il pilote un runtime A2A local authentifié via un script pont utilisant uniquement la bibliothèque standard, afin d'exécuter des travaux d'infrastructure Alibaba Cloud tels que la génération de templates ROS/Terraform, l'estimation des coûts, la sélection de ressources et le déploiement.
+Le Skill IaC Code s'adresse aux agents externes qui prennent en charge les Skills. Une fois installé, il permet à un
+agent hôte de déléguer à IaC Code la conception d'architectures cloud, la génération et la vérification de modèles ROS
+ou Terraform, l'estimation des coûts, le choix des ressources, les opérations sur les stacks et le déploiement. Le
+Skill utilise un pont écrit uniquement avec la bibliothèque standard de Python pour démarrer un Runtime A2A local et
+authentifié. Il n'est pas nécessaire d'installer IaC Code avec pip, et l'agent hôte ne doit pas se rabattre sur des
+commandes headless.
 
-## Composants
+## Télécharger le Skill
 
-| Composant | Emplacement | Description |
+### Dernière version stable
+
+Téléchargez directement la dernière version stable :
+
+[Télécharger iac-code-skill.zip](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill/stable/iac-code-skill.zip)
+
+Cette URL fixe pointe toujours vers le paquet du Skill promu sur le canal stable. Elle convient au téléchargement
+depuis un navigateur et à l'installation manuelle, et ne change pas à chaque nouvelle version.
+
+Les programmes d'installation qui ont besoin de la version, de la taille du fichier, de l'empreinte SHA-256 et de
+l'URL immuable propre à la version peuvent consulter les métadonnées du canal stable :
+
+[Consulter latest.json](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill/stable/latest.json)
+
+Ce document contient :
+
+- `skillVersion` : version stable actuelle du Skill ;
+- `skill.url` : URL immuable du fichier ZIP correspondant à cette version ;
+- `skill.sha256` et `skill.size` : valeurs utilisées pour vérifier le téléchargement ;
+- `manifest.url` : manifeste de publication immuable correspondant à cette version.
+
+Pour une vérification stricte ou une installation automatisée reproductible, lisez `latest.json`, téléchargez
+`skill.url`, puis vérifiez `skill.sha256`. Ne construisez pas vous-même une URL à partir du numéro de version.
+
+## Installer le Skill
+
+### Prérequis
+
+- L'agent hôte prend en charge les Skills locaux définis par un fichier `SKILL.md`.
+- CPython 3.8 à 3.14 est installé. Utilisez `python3` sous macOS/Linux et, de préférence, `py -3` sous Windows.
+- L'environnement peut accéder aux URL OSS ci-dessus afin de télécharger le fichier ZIP du Skill et le Runtime requis
+  lors de la première utilisation.
+- La configuration du service de modèles est disponible. Une identité Alibaba Cloud avec le principe du moindre
+  privilège est également requise pour les tâches qui consultent ou gèrent des ressources cloud.
+
+Les versions officielles du Skill Runtime prennent en charge les plateformes suivantes :
+
+| Système d'exploitation | Architecture |
+|---|---|
+| macOS | Apple Silicon (arm64) |
+| Linux | x86_64 |
+| Windows | x86_64 |
+
+Les versions minimales du système d'exploitation et de la glibc sous Linux sont définies par le manifeste du Runtime
+épinglé par le Skill. Le pont vérifie la compatibilité avant le téléchargement. Sur une plateforme non prise en
+charge, il renvoie une erreur au lieu de télécharger un artefact destiné à une autre plateforme ou ABI.
+
+### Extraire le paquet dans le répertoire des Skills de l'agent hôte
+
+Extrayez directement le fichier ZIP à la racine des Skills de l'agent hôte. L'emplacement exact dépend du produit ;
+consultez la documentation de l'agent hôte. L'arborescence finale doit être la suivante :
+
+```text
+<Racine des Skills de l'agent>/
+└── iac-code/
+    ├── SKILL.md
+    ├── agents/
+    │   └── openai.yaml
+    └── scripts/
+        └── iac_code.py
+```
+
+Le fichier ZIP contient déjà le répertoire de premier niveau `iac-code/`. N'ajoutez pas un second répertoire du même
+nom. Après une installation ou une mise à jour, redémarrez l'agent hôte ou ouvrez une nouvelle session afin qu'il
+détecte à nouveau le Skill.
+
+### Vérifier l'installation
+
+Dans le répertoire `iac-code` extrait, exécutez la commande suivante sous macOS ou Linux :
+
+```bash
+python3 scripts/iac_code.py ensure-runtime
+```
+
+Dans Windows PowerShell, exécutez :
+
+```powershell
+py -3 scripts\iac_code.py ensure-runtime
+```
+
+Lors de la première exécution, cette commande télécharge le Runtime correspondant à la plateforme, vérifie sa taille
+et son empreinte SHA-256, puis affiche un objet JSON contenant `skillVersion`, `runtimeTag` et le chemin
+d'installation. Un Runtime déjà vérifié et mis en cache est réutilisé sans nouveau téléchargement.
+
+## Configurer le modèle et l'identité Alibaba Cloud
+
+Le Skill Runtime utilise le même répertoire de configuration que les autres modes de IaC Code : `~/.iac-code/` par
+défaut. Si IaC Code est déjà configuré via le REPL, l'application Web ou l'application Desktop, le Skill peut
+réutiliser ces paramètres. Définissez `IAC_CODE_CONFIG_DIR` pour employer un autre répertoire de configuration.
+
+Dans les environnements automatisés, fournissez les variables suivantes au moyen d'une solution de gestion des
+secrets :
+
+| Catégorie | Variable d'environnement | Description |
 |---|---|---|
-| Paquet du Skill | `skills/iac-code/` | Instructions `SKILL.md`, métadonnées d'agent dans `agents/` et `scripts/iac_code.py`, le script pont |
-| Skill Runtime | Publié par plateforme | Exécutable natif CPython 3.12 intégrant le serveur A2A d'iac-code |
-| Contrats de distribution | `skill-runtime/skill-package-contract.json`, `skill-runtime/publisher-contract.json` | Contraintes de format et de vérification pour les paquets de skill et les éditeurs |
+| Modèle | `IAC_CODE_PROVIDER` | Fournisseur du modèle |
+| Modèle | `IAC_CODE_MODEL` | Nom du modèle |
+| Modèle | `IAC_CODE_API_KEY` | Clé API du service de modèles |
+| Modèle | `IAC_CODE_BASE_URL` | Remplacement facultatif de l'endpoint compatible |
+| Alibaba Cloud | `ALIBABA_CLOUD_ACCESS_KEY_ID` | ID de l'AccessKey |
+| Alibaba Cloud | `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | Secret de l'AccessKey |
+| Alibaba Cloud | `ALIBABA_CLOUD_SECURITY_TOKEN` | Jeton de sécurité pour les identifiants STS |
+| Alibaba Cloud | `ALIBABA_CLOUD_REGION_ID` | Région par défaut |
 
-Le script pont est écrit entièrement avec la bibliothèque standard de Python et reste compatible avec Python 3.8+ ; la CI le compile et l'exécute en test de fumée sur toute la matrice 3.8–3.14. N'ajoutez ni dépendance tierce ni syntaxe réservée aux versions récentes au pont.
+Ne placez jamais d'identifiants réels dans `SKILL.md`, les prompts de l'agent hôte, les fichiers du projet ou
+l'historique du shell. Privilégiez les identifiants temporaires, les rôles RAM ou OAuth, et n'accordez que les
+autorisations d'API cloud nécessaires à la tâche. Pour les instructions complètes, consultez
+[Fournisseurs de LLM](../configuration/llm-providers.md) et
+[Identifiants Alibaba Cloud](../configuration/alibaba-cloud-credentials.md).
 
-## Acquisition et cache du Runtime
+## Première utilisation
 
-À la première utilisation, le pont lit le manifeste, télécharge l'artefact correspondant à la plateforme courante, vérifie sa taille et son SHA-256, l'installe et le met en cache sous `<IAC_CODE_CONFIG_DIR ou ~/.iac-code>/skill-runtime/<runtime-tag>/<target>/`.
+Après l'installation et la configuration, ouvrez une nouvelle session dans l'agent hôte et décrivez directement une
+tâche d'infrastructure Alibaba Cloud. Par exemple :
 
-- `python3 scripts/iac_code.py ensure-runtime` — prépare le runtime à l'avance ; un runtime en cache est réutilisé.
-- `python3 scripts/iac_code.py cache list` — affiche les runtimes installés et les paquets candidats.
-- `python3 scripts/iac_code.py cache clean [--runtime-tag <tag>] [--candidates] --confirm` — nettoie les caches du runtime ou les paquets candidats ; nécessite `--confirm` explicite.
+```text
+Utilise iac-code pour vérifier le modèle ROS de ce projet. Répertorie les risques de sécurité et les modifications recommandées sans modifier le fichier.
+```
 
-## Prévol de configuration
+Les agents hôtes qui prennent en charge une syntaxe explicite peuvent sélectionner le Skill avec `$iac-code`.
+L'agent hôte lit `SKILL.md`, écrit la demande complète dans un fichier UTF-8 de l'espace de travail, puis utilise le
+pont pour créer et suivre une seule tâche. L'utilisateur n'a pas besoin de démarrer manuellement un serveur A2A.
 
-Avant de créer un job, `start` exécute une vérification de préparation de la configuration via le runtime. Le prévol ne lit pas les valeurs secrètes ; il signale uniquement l'état de préparation :
+Déroulement attendu :
+
+1. Le pont vérifie que la configuration du modèle et d'Alibaba Cloud est prête.
+2. Lors de la première utilisation, il télécharge et vérifie le Runtime IaC Code épinglé par le Skill.
+3. Le Runtime écoute uniquement sur un port aléatoire de `127.0.0.1` et génère un jeton Bearer propre au processus.
+4. L'agent hôte présente la progression, les questions, les plans candidats et les demandes d'autorisation renvoyés
+   par IaC Code.
+5. Une fois la tâche terminée, l'agent hôte renvoie le résultat final et les fichiers générés dans l'espace de travail.
+
+## Mettre à jour et désinstaller
+
+Pour effectuer une mise à jour manuelle, téléchargez à nouveau `skill/stable/iac-code-skill.zip` et remplacez
+l'intégralité du répertoire `iac-code/` dans la racine des Skills de l'agent hôte. Un programme de mise à jour
+automatique peut comparer la valeur `skillVersion` de `latest.json`, puis télécharger et vérifier le nouveau paquet à
+l'aide de son URL immuable et de son empreinte SHA-256. Chaque Skill officiel est épinglé à un Runtime vérifié. Ne
+remplacez pas uniquement `scripts/iac_code.py` et ne modifiez pas manuellement l'URL ou l'empreinte du Runtime.
+
+Pour désinstaller le Skill, supprimez `iac-code/` de la racine des Skills de l'agent hôte. Le cache du Runtime n'est
+pas supprimé avec le répertoire du Skill. N'exécutez `cache list` et `cache clean` que si l'utilisateur demande
+explicitement de supprimer ce cache.
+
+## Cache du Runtime
+
+Le Runtime téléchargé lors de la première utilisation est mis en cache dans
+`<IAC_CODE_CONFIG_DIR ou ~/.iac-code>/skill-runtime/<runtime-tag>/<target>/` et réutilisé automatiquement. En usage
+normal, il n'est pas nécessaire de gérer ce répertoire. Pour examiner l'espace disque utilisé ou supprimer
+d'anciennes versions, utilisez :
+
+- `python3 scripts/iac_code.py cache list` — répertorie les Runtimes installés et les paquets candidats ;
+- `python3 scripts/iac_code.py cache clean [--runtime-tag <tag>] [--candidates] --confirm` — supprime les caches du
+  Runtime ou les paquets candidats ; l'option `--confirm` est obligatoire.
+
+Le Runtime actuel et tout Runtime utilisé par un processus actif sont protégés contre le nettoyage. Le format du
+paquet et les contraintes du Runtime sont définis par `skill-runtime/skill-package-contract.json` dans le dépôt
+source ; les utilisateurs n'ont pas à modifier ce fichier.
+
+## Résolution des problèmes
+
+### La configuration est incomplète
+
+Le Skill vérifie la configuration avant de créer une tâche, mais ne lit ni ne renvoie jamais les valeurs secrètes :
 
 | Situation | Résultat |
 |---|---|
-| Fournisseur LLM ou clé API incomplet | Renvoie `llm_not_configured` et refuse de créer le job |
-| Pipeline selling avec identifiants Alibaba Cloud incomplets | Renvoie `cloud_credentials_not_configured` et refuse de créer le job |
-| Mode normal avec identifiants Alibaba Cloud incomplets | Peut continuer pour les travaux n'appelant pas d'API cloud, avec un avertissement de prévol |
+| Le fournisseur de LLM ou la clé API est incomplet | Renvoie `llm_not_configured` et ne crée pas la tâche |
+| Les identifiants Alibaba Cloud sont incomplets pour le Pipeline de vente | Renvoie `cloud_credentials_not_configured` et ne crée pas la tâche |
+| Les identifiants Alibaba Cloud sont incomplets en mode normal | Les tâches qui n'appellent pas d'API cloud peuvent continuer avec un avertissement préalable |
 
-## Référence des commandes
+### Pourquoi l'exécution se met en pause
 
-| Commande | Objet |
-|---|---|
-| `start` | Créer un job : `--mode normal|pipeline`, `--pipeline-name`, `--cwd` espace de travail absolu, `--prompt-file` fichier de prompt UTF-8, `--language auto|en|zh|es|fr|de|ja|pt`, `--follow` facultatif |
-| `follow` | Consomme le flux d'événements jusqu'à la prochaine frontière d'interaction : `--job-id`, `--cursor`, `--wait-seconds` (60 s par défaut, 120 s maximum) |
-| `continue` | Poursuit une conversation en mode normal dans le même job : `--job-id`, `--prompt-file`, `--follow` facultatif |
-| `respond` | Répond à une entrée en attente, voir [Entrée utilisateur](#input-required) |
-| `poll` | Interrogation unique réservée au diagnostic et à la récupération ; ne pas l'utiliser en remplacement de `follow` |
-| `cancel` | Annule le job |
-| `ensure-runtime` / `cache list` / `cache clean` | Gestion du runtime et du cache |
+IaC Code se met en pause lorsqu'il attend une autorisation, une information complémentaire ou le choix d'un plan.
+L'agent hôte présente directement la demande :
 
-`start --follow` et `follow` écrivent les frontières d'étape et les battements basse fréquence sur stderr ; stdout produit exactement un résultat JSON borné.
+- une demande d'autorisation pour un outil ou un déploiement (`permission`) ;
+- une question à choix multiple ou une demande d'informations (`ask_user_question`) ;
+- le choix d'un plan candidat du Pipeline (`candidate_selection`).
 
-## Frontières d'interaction {#boundaries}
+Avant de confirmer, vérifiez la ressource cible, la région, l'impact prévu et le prix. L'agent hôte ne peut pas passer
+outre un refus de IaC Code. Dans le protocole, une autorisation ponctuelle est représentée par `allow_once`.
 
-`--follow` consomme le flux d'événements jusqu'à la prochaine frontière d'étape, demande de permission, question utilisateur, sélection de candidat, `turn_completed` ou état terminal. Un résultat de frontière porte :
+> **Note pour l'intégration de l'agent hôte**
+>
+> Lorsqu'un résultat du pont contient `inputRequired`, l'agent hôte doit présenter la demande en cours et attendre une
+> réponse. `boundaryReached` indique une limite d'affichage ou d'interaction, et non la fin de la tâche ; l'agent hôte
+> doit afficher la mise à jour et continuer à suivre la même tâche.
 
-- `boundaryReached: true` — une frontière est atteinte ; cela ne signifie **pas** que le job est terminé ;
-- `presentationRequired: true` et `userUpdates` — des chaînes localisées prêtes à être affichées à l'utilisateur ;
-- le `cursor` nécessaire pour continuer.
+## Sécurité
 
-L'agent externe doit d'abord présenter chaque chaîne `userUpdates` reçue dans une réponse visible par l'utilisateur, puis rappeler immédiatement `follow` avec le `cursor` renvoyé. Ne répondez pas à la tâche d'infrastructure en parallèle et ne posez pas de questions sans rapport pendant qu'un follow est en cours.
+- Le Runtime écoute uniquement sur un port aléatoire de `127.0.0.1`. Chaque démarrage génère un nouveau jeton Bearer,
+  transmis avec chaque requête du pont.
+- Le pont conserve les artefacts et les résultats dans l'espace de travail de la tâche. Les résultats sont enregistrés
+  dans `.iac-code-skill-results/`.
+- Les champs affichés lors des vérifications préalables et des demandes d'autorisation sont nettoyés ; aucun secret ni
+  identifiant n'y apparaît.
 
-## Entrée utilisateur {#input-required}
+## Documentation associée
 
-Un résultat contient `inputRequired` lorsqu'une entrée utilisateur est nécessaire. Il existe trois sortes :
-
-- `permission` — une demande de permission d'outil ou de déploiement. L'enveloppe contient `inputId`, `toolUseId`, un titre, un objectif, un effet, une cible, un indicateur lecture seule, `safeSummary` et, pour les demandes de déploiement, `deploymentSummary`. L'agent externe doit décider selon sa propre politique de permissions : si la même opération se poursuivrait sans demande lorsque l'agent l'exécute directement, répondez `allow_once` ; si sa politique la refuserait, répondez `deny` ; sinon demandez à l'utilisateur. Les refus d'iac-code lui-même ne doivent pas être contournés.
-- `ask_user_question` — une question à choix multiples ou en texte libre. Présentez l'invite et les options telles quelles ; n'acceptez le texte libre que si `allowFreeText` vaut `true`.
-- `candidate_selection` — sélection de plan du pipeline. Présentez d'abord le résumé, le diagramme d'architecture (Mermaid), le coût mensuel total et les postes de coût de chaque candidat, puis renvoyez le candidat retenu. Ne remplacez jamais les prix fournis par des estimations approximatives.
-
-`respond` existe sous deux formes :
-
-```bash
-# Décision en ligne pour les permissions
-python3 scripts/iac_code.py respond --job-id <job-id> \
-  --input-id <inputId> --tool-use-id <toolUseId> --decision allow_once --follow
-
-# Les questions et sélections de candidat utilisent un fichier de réponse
-python3 scripts/iac_code.py respond --job-id <job-id> --input-file <answer.json> --follow
-```
-
-Une réponse doit conserver tous les champs de corrélation de l'entrée en attente et reste liée aux `kind`, `inputId`, `requestTaskId` et `contextId` courants ; ne réutilisez jamais une réponse provenant d'une autre requête et ne réinterprétez jamais une sélection de ressource comme une confirmation de déploiement.
-
-## Contrôle de la langue
-
-`start --language` définit la langue préférée du job (utilisez `auto` en cas d'inconnue). Chaque résultat de ce job répète `preferredLanguage` ; traitez-le comme un état de contrôle durable : la progression, les questions, les invites de permission, les plans candidats et les résultats finaux sont présentés dans cette langue, tandis que les noms de champs du protocole, les énumérations, les identifiants et les commandes restent inchangés. Lorsque le texte faisant autorité utilise déjà cette langue, présentez-le directement ou résumez-le dans la même langue ; ne traduisez jamais un contenu chinois visible par l'utilisateur vers l'anglais.
-
-## Relation avec le protocole A2A
-
-Le pont communique avec le runtime local via HTTP A2A JSON-RPC ; les états de tâche, les artefacts et les interactions de permissions réutilisent le protocole A2A d'iac-code :
-
-- Les réponses hors bande de permissions utilisent le format de message `schemaVersion 1` ; voir la [Référence du protocole](./protocol-reference.md) pour les champs et contraintes.
-- En mode pipeline, transmettre `candidatePresentation: rich-v1` renvoie des charges structurées de présentation des candidats.
-- Les états de résultat du job correspondent aux états de tâche A2A : `turn_completed` termine un tour normal ; les états terminaux du pipeline sont `completed`, `failed`, `canceled` et `rejected`, avec `pipelineResult` et `artifacts` comme résultat faisant autorité.
-
-## Limite de sécurité
-
-- Le runtime n'écoute que sur un port aléatoire de `127.0.0.1` ; chaque démarrage génère un nouveau jeton Bearer aléatoire, et chaque requête du pont le transmet.
-- Le pont conserve les artefacts et les résultats dans l'espace de travail du job ; les résultats sont écrits dans `.iac-code-skill-results/` de l'espace de travail.
-- Les rapports de prévol et les champs d'affichage des permissions sont assainis ; les secrets et identifiants n'apparaissent jamais dans les champs d'affichage.
+- [Présentation du protocole A2A](./overview.md)
+- [Référence du protocole A2A](./protocol-reference.md)
+- [Fournisseurs de LLM](../configuration/llm-providers.md)
+- [Identifiants Alibaba Cloud](../configuration/alibaba-cloud-credentials.md)
+- [Configuration du Runtime](../configuration/runtime-configuration.md)
