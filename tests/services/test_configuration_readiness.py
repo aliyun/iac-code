@@ -95,3 +95,33 @@ def test_readiness_treats_ecs_ram_role_as_complete_without_static_keys(monkeypat
     assert result["cloud"]["ready"] is True
     assert result["cloud"]["mode"] == "EcsRamRole"
     assert result["cloud"]["missing"] == []
+
+
+def test_readiness_treats_oauth_refresh_token_expiry_as_optional(monkeypatch, tmp_path) -> None:
+    _isolate_configuration(monkeypatch, tmp_path)
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / ".cloud-credentials.yml").write_text(
+        "aliyun:\n"
+        "  mode: OAuth\n"
+        "  region_id: cn-hangzhou\n"
+        "  oauth_site_type: CN\n"
+        "  oauth_access_token: access-token\n"
+        "  oauth_refresh_token: refresh-token\n"
+        "  oauth_access_token_expire: 1801382400\n"
+        "  access_key_id: sts-access-key-id\n"
+        "  access_key_secret: sts-access-key-secret\n"
+        "  sts_token: sts-token\n"
+        "  sts_expiration: 1801382400\n",
+        encoding="utf-8",
+    )
+
+    result = configuration_readiness(model="qwen3.8-max")
+
+    assert result["cloud"] == {
+        "ready": True,
+        "provider": "aliyun",
+        "mode": "OAuth",
+        "regionId": "cn-hangzhou",
+        "missing": [],
+    }

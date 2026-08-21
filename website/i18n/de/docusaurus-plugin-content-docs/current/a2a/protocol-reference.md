@@ -149,10 +149,13 @@ Fuehrt einen nicht streamenden A2A-Nachrichten-Turn aus. Die Antwort enthaelt ei
 | `role` | string | Ja | `ROLE_USER` fuer Benutzereingaben verwenden |
 | `parts` | array | Ja | Textartige, JSON-Daten-, Rohtext-, lokale File-URL- oder begrenzte multimodale Teile |
 | `metadata.iac_code.cwd` | string | Empfohlen | Absoluter Workspace-Pfad; faellt auf das Server-Prozessverzeichnis zurueck, wenn ausgelassen |
+| `metadata.iac_code.channel` | string | Optional | Telemetriekanal-Bindung fuer diese `contextId`; hat Vorrang vor `IAC_CODE_CHANNEL` |
 | `metadata.iac_code.preferredLanguage` | string | Optional | Vom Aufrufer bevorzugte Anzeigesprache fuer diesen Task; fuer Benutzer sichtbarer Text wird pro Anfrage lokalisiert |
 | `metadata.iac_code.candidatePresentation` | string | Optional | Mit `rich-v1` liefert der Kandidatenbestaetigungs-Step der Pipeline strukturierte Rich-Praesentations-Payloads |
 
 `metadata.iac_code.cwd` muss, wenn angegeben, ein vorhandenes absolutes Verzeichnis sein. Es muss innerhalb eines erlaubten Workspace-Roots liegen. Standardmaessig sind die erlaubten Roots das Server-Prozessverzeichnis und das System-Temp-Verzeichnis; `IACCODE_A2A_ALLOWED_CWDS` kann eine OS-pfadgetrennte Allowlist bereitstellen.
+
+`metadata.iac_code.channel` bindet `iac_code.channel` an die A2A-`contextId`. Der Wert wird getrimmt, auf 128 Zeichen begrenzt und hat Vorrang vor `IAC_CODE_CHANNEL`; leere Werte und Nicht-Strings werden ignoriert. Normale Turns, Pipeline-Turns, Input-Required-Folgeturns und normaler Chat nach einem Pipeline-Handoff verwenden die Bindung bei gleicher `contextId` erneut, auch nach Serverneustart und Context-Wiederherstellung. Ein spaeter gesendeter gueltiger Wert aktualisiert die Bindung. Ohne Bindung wird auf `IAC_CODE_CHANNEL` und danach auf `unknown` zurueckgefallen.
 
 `metadata.iac_code.preferredLanguage` wirkt sich nur auf fuer Benutzer sichtbaren Text aus (Fortschritt, Fragen, Berechtigungs-Prompts, Kandidatenpraesentationen, Ergebniseroerterungen); Protokollfeldnamen, Aufzaehlungen, IDs und Befehlsformen werden nie uebersetzt. Akzeptierte Werte sind die unterstuetzten Sprachen `en`, `zh`, `es`, `fr`, `de`, `ja`, `pt`; Werte werden normalisiert, indem Leerraum entfernt, kleingeschrieben und das Regionalsuffix entfernt wird (zum Beispiel wird `zh-CN` zu `zh`). Unbekannte Werte werden ignoriert, und der Server faellt auf seine Standardsprache zurueck. Das Feld gilt nur fuer den aktuellen Message-Turn; Folgeturns, die dieselbe `contextId` wiederverwenden, muessen es erneut uebertragen oder fallen auf die Standardsprache zurueck.
 

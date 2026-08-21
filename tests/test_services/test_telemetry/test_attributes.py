@@ -2,7 +2,7 @@
 
 import pytest
 
-from iac_code.services.telemetry.attributes import AttributeBuilder
+from iac_code.services.telemetry.attributes import AttributeBuilder, use_telemetry_channel
 from iac_code.services.telemetry.identity import Identity
 
 
@@ -69,6 +69,44 @@ def test_resource_channel_comes_from_environment(identity, monkeypatch):
 
     assert builder.build_resource()["iac_code.channel"] == "ros_official"
     assert builder.build_signal_attributes() == {"iac_code.channel": "ros_official"}
+
+
+def test_request_channel_overrides_environment_and_is_restored(identity, monkeypatch):
+    monkeypatch.setenv("IAC_CODE_CHANNEL", "environment")
+    builder = AttributeBuilder(identity, "iac-code", "0.1.0")
+
+    with use_telemetry_channel("  a2a-request  "):
+        assert builder.build_resource()["iac_code.channel"] == "a2a-request"
+        assert builder.build_signal_attributes() == {"iac_code.channel": "a2a-request"}
+
+    assert builder.build_signal_attributes() == {"iac_code.channel": "environment"}
+
+
+def test_request_channel_isolated_between_async_tasks(identity, monkeypatch):
+    import asyncio
+
+    monkeypatch.setenv("IAC_CODE_CHANNEL", "environment")
+    builder = AttributeBuilder(identity, "iac-code", "0.1.0")
+
+    async def under_override(channel: str, started: asyncio.Event, release: asyncio.Event) -> str:
+        with use_telemetry_channel(channel):
+            started.set()
+            await release.wait()
+            return builder.build_signal_attributes()["iac_code.channel"]
+
+    async def run() -> tuple[str, str, str]:
+        started_a = asyncio.Event()
+        started_b = asyncio.Event()
+        release = asyncio.Event()
+        task_a = asyncio.create_task(under_override("channel-a", started_a, release))
+        task_b = asyncio.create_task(under_override("channel-b", started_b, release))
+        await started_a.wait()
+        await started_b.wait()
+        outside = builder.build_signal_attributes()["iac_code.channel"]
+        release.set()
+        return outside, await task_a, await task_b
+
+    assert asyncio.run(run()) == ("environment", "channel-a", "channel-b")
 
 
 def test_resource_deployment_environment_overridable(builder, monkeypatch):

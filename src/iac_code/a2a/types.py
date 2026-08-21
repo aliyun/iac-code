@@ -46,6 +46,7 @@ class A2AContextRecord:
     context_id: str
     session_id: str
     cwd: str
+    telemetry_channel: str | None = None
     runtime: Any | None = None
     lock: asyncio.Lock | None = None
     active_task_id: str | None = None

@@ -2142,6 +2142,21 @@ async def test_executor_rejects_workspace_outside_allowed_roots(
     assert "workspace" in dumped["status"]["message"]["parts"][0]["text"].lower()
 
 
+def test_resolve_cwd_trusts_per_context_workspace_for_skill_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside"
+    allowed.mkdir()
+    outside.mkdir()
+    monkeypatch.setenv("IACCODE_A2A_ALLOWED_CWDS", str(allowed))
+    monkeypatch.setenv("IAC_CODE_A2A_TRUST_REQUEST_CWD", "1")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    assert executor._resolve_cwd({"iac_code": {"cwd": str(outside)}}) == str(outside)
+
+
 @pytest.mark.asyncio
 async def test_executor_reports_invalid_task_id() -> None:
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
@@ -2181,9 +2196,15 @@ async def test_executor_rejects_empty_prompt_before_creating_runtime(
 async def test_executor_delegates_pipeline_mode_after_validation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    from iac_code.services.telemetry.attributes import AttributeBuilder
+    from iac_code.services.telemetry.identity import Identity
+
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", "1")
+    monkeypatch.setenv("IAC_CODE_CHANNEL", "environment")
     calls = []
+    captured_channels: list[str] = []
+    attributes = AttributeBuilder(Identity(tmp_path / "settings.yml"), "iac-code", "0.1.0")
 
     class SpyPipelineExecutor:
         def __init__(self, **kwargs):
@@ -2201,6 +2222,7 @@ async def test_executor_delegates_pipeline_mode_after_validation(
             pipeline_input,
             active_followup_only=False,
         ):
+            captured_channels.append(attributes.build_signal_attributes()["iac_code.channel"])
             calls.append(
                 (
                     "execute",
@@ -2223,6 +2245,7 @@ async def test_executor_delegates_pipeline_mode_after_validation(
             metadata={
                 "iac_code": {
                     "cwd": str(tmp_path),
+                    "channel": "a2a-pipeline",
                     "user_id": "client-user",
                     "iac_code_model": "metadata-model",
                     "iac_code_api_key": "metadata-api-key",
@@ -2249,6 +2272,7 @@ async def test_executor_delegates_pipeline_mode_after_validation(
     assert init_kwargs["aliyun_credential"].access_key_secret == "client-secret"
     assert init_kwargs["aliyun_credential"].region_id == "cn-beijing"
     assert init_kwargs["aliyun_credential"].sts_token == "client-sts"
+    assert captured_channels == ["a2a-pipeline"]
     assert calls[-1] == (
         "execute",
         {
@@ -2911,6 +2935,7 @@ async def test_pipeline_handoff_context_routes_followup_to_normal_after_restart(
     from iac_code.services.session_storage import SessionStorage
 
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setenv("IAC_CODE_CHANNEL", "environment")
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
@@ -2920,7 +2945,14 @@ async def test_pipeline_handoff_context_routes_followup_to_normal_after_restart(
     session_id = "session-handoff"
     context_id = "ctx-handoff"
     persistence = A2APersistenceStore(tmp_path / "a2a")
-    persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=str(cwd)))
+    persistence.save_context(
+        A2AContextSnapshot(
+            context_id=context_id,
+            session_id=session_id,
+            cwd=str(cwd),
+            telemetry_channel="a2a-pipeline",
+        )
+    )
     _ensure_v2_session(str(cwd), session_id)
     pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
     handoff_events = _committed_normal_handoff_events(
@@ -2932,6 +2964,19 @@ async def test_pipeline_handoff_context_routes_followup_to_normal_after_restart(
     A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events(handoff_events))
     SessionStorage().append(str(cwd), session_id, Message(role="user", content="[Pipeline Handoff Context]"))
 
+    from iac_code.services.telemetry.attributes import AttributeBuilder
+    from iac_code.services.telemetry.identity import Identity
+
+    attributes = AttributeBuilder(Identity(tmp_path / "settings.yml"), "iac-code", "0.1.0")
+    captured_channels: list[str] = []
+    original_run_streaming = FakeAgentLoop.run_streaming
+
+    async def capturing_run_streaming(self, prompt):
+        captured_channels.append(attributes.build_signal_attributes()["iac_code.channel"])
+        async for event in original_run_streaming(self, prompt):
+            yield event
+
+    monkeypatch.setattr(FakeAgentLoop, "run_streaming", capturing_run_streaming)
     loop = FakeAgentLoop([TextDeltaEvent(text="normal-ok")])
     seen_resume: list[object | None] = []
 
@@ -2960,6 +3005,7 @@ async def test_pipeline_handoff_context_routes_followup_to_normal_after_restart(
     await executor.execute(context, FakeEventQueue())
 
     assert loop.prompts == ["继续解释一下"]
+    assert captured_channels == ["a2a-pipeline"]
     assert store._contexts[context_id].session_id == session_id
     assert seen_resume and seen_resume[0] is not None
     assert any(getattr(message, "content", "") == "[Pipeline Handoff Context]" for message in seen_resume[0])
@@ -3696,6 +3742,25 @@ class TestResolveUserId:
         assert executor._resolve_user_id({"iac_code": {"user_id": 12345}}) is None
 
 
+class TestResolveTelemetryChannel:
+    def _make_executor(self) -> IacCodeA2AExecutor:
+        store = A2ATaskStore(metrics=NoOpA2AMetrics())
+        return IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    def test_extracts_and_bounds_channel(self) -> None:
+        executor = self._make_executor()
+
+        assert executor._resolve_telemetry_channel({"iac_code": {"channel": "  skill  "}}) == "skill"
+        assert executor._resolve_telemetry_channel({"iac_code": {"channel": "x" * 200}}) == "x" * 128
+
+    def test_ignores_missing_blank_or_non_string_channel(self) -> None:
+        executor = self._make_executor()
+
+        assert executor._resolve_telemetry_channel({}) is None
+        assert executor._resolve_telemetry_channel({"iac_code": {"channel": "   "}}) is None
+        assert executor._resolve_telemetry_channel({"iac_code": {"channel": 123}}) is None
+
+
 class TestResolvePreferredLanguage:
     def _make_executor(self) -> IacCodeA2AExecutor:
         store = A2ATaskStore(metrics=NoOpA2AMetrics())
@@ -3822,6 +3887,47 @@ async def test_executor_applies_user_id_to_telemetry(monkeypatch: pytest.MonkeyP
     await executor.execute(context, queue)
 
     assert captured_user_ids == ["client-user-xyz"]
+
+
+@pytest.mark.asyncio
+async def test_executor_applies_metadata_channel_over_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from iac_code.services.telemetry.attributes import AttributeBuilder
+    from iac_code.services.telemetry.identity import Identity
+
+    monkeypatch.setenv("IAC_CODE_CHANNEL", "environment")
+    attributes = AttributeBuilder(Identity(tmp_path / "settings.yml"), "iac-code", "0.1.0")
+    captured_channels: list[str] = []
+    original_run_streaming = FakeAgentLoop.run_streaming
+
+    async def capturing_run_streaming(self, prompt):
+        captured_channels.append(attributes.build_signal_attributes()["iac_code.channel"])
+        async for event in original_run_streaming(self, prompt):
+            yield event
+
+    monkeypatch.setattr(FakeAgentLoop, "run_streaming", capturing_run_streaming)
+    runtime = FakeRuntime(agent_loop=FakeAgentLoop([TextDeltaEvent(text="ok")]), session_id="sess-channel")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    first_context = FakeRequestContext(
+        task_id="task-channel-1",
+        context_id="ctx-channel",
+        metadata={"iac_code": {"cwd": str(tmp_path), "channel": "a2a-request"}},
+    )
+    followup_context = FakeRequestContext(
+        task_id="task-channel-2",
+        context_id="ctx-channel",
+        metadata={"iac_code": {"cwd": str(tmp_path)}},
+    )
+
+    await executor.execute(first_context, FakeEventQueue())
+    await executor.execute(followup_context, FakeEventQueue())
+
+    assert captured_channels == ["a2a-request", "a2a-request"]
+    assert attributes.build_signal_attributes()["iac_code.channel"] == "environment"
 
 
 @pytest.mark.asyncio

@@ -1925,10 +1925,14 @@ def test_apply_llm_auto_title_noop_when_already_titled(tmp_path) -> None:
 async def test_schedule_llm_title_applies_generated_title(tmp_path, monkeypatch) -> None:
     from iac_code.web import session_manager as sm
 
-    async def fake_generate(**_kwargs):
+    generated: list[dict] = []
+
+    async def fake_generate(**kwargs):
+        generated.append(kwargs)
         return "生成的标题"
 
     monkeypatch.setattr(sm.session_titler, "generate_session_title", fake_generate)
+    monkeypatch.setattr(sm, "get_current_language", lambda: "en")
     manager = WebSessionManager(projects_dir=tmp_path / "projects")
     session = manager.create_session(cwd=str(tmp_path / "project"), session_id="llm-3")
     assert session.pending_llm_title is True
@@ -1939,6 +1943,7 @@ async def test_schedule_llm_title_applies_generated_title(tmp_path, monkeypatch)
     for task in list(session.active_local_tasks):
         await task
     assert session.title == "生成的标题"
+    assert generated[0]["language"] == "en"
 
 
 @pytest.mark.asyncio

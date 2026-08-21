@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from iac_code.services.telemetry.attributes import use_telemetry_channel
 from iac_code.services.telemetry.client import TelemetryClient
 from iac_code.services.telemetry.identity import use_session_id, use_user_id
 from iac_code.services.telemetry.tracing import (
@@ -29,6 +30,7 @@ __all__ = [
     "get_session_id",
     "get_user_id",
     "use_session_id",
+    "use_telemetry_channel",
     "use_user_id",
 ]
 

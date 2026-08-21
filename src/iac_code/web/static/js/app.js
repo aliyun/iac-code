@@ -362,6 +362,190 @@ function replaceUpdatedSessionInState(currentState, updatedSession) {
   };
 }
 
+// 置顶/取消置顶是纯展示元数据变更。先在内存里同步当前会话、置顶区和项目分组，避免为了一个
+// pin 标志阻塞等待全量 /api/sessions；服务端列表随后只负责权威校准。函数保持纯函数，便于覆盖
+// “置顶移出项目 / 取消置顶回到项目 / 置顶项目中的会话”三种行为。
+export function patchPinnedSessionState(currentState = {}, sessionPatch = {}, options = {}) {
+  const displayId = (session) => session?.webSessionId || session?.sessionId || "";
+  const targetId = displayId(sessionPatch);
+  if (!targetId) {
+    return currentState;
+  }
+  const same = (session) => {
+    if (!session) {
+      return false;
+    }
+    const candidateId = displayId(session);
+    if (candidateId && candidateId === targetId) {
+      return true;
+    }
+    return Boolean(
+      session.sessionId &&
+        sessionPatch.sessionId &&
+        session.sessionId === sessionPatch.sessionId &&
+        session.cwd === sessionPatch.cwd,
+    );
+  };
+  const candidates = [
+    currentState.currentSession,
+    ...(currentState.sessions || []),
+    ...(currentState.pinnedSessions || []),
+    ...(currentState.projectGroups || []).flatMap((group) => group.sessions || []),
+    ...(currentState.pinnedProjects || []).flatMap((group) => group.sessions || []),
+  ];
+  const previous = candidates.find(same) || {};
+  const pinned = sessionPatch.pinned === true;
+  const merged = {
+    ...previous,
+    ...sessionPatch,
+    pinned,
+    pinnedAt: pinned ? sessionPatch.pinnedAt || previous.pinnedAt || null : null,
+  };
+  const upsert = (items = []) => {
+    let found = false;
+    const patched = items.map((item) => {
+      if (!same(item)) {
+        return item;
+      }
+      found = true;
+      return { ...item, ...merged };
+    });
+    return found ? patched : [merged, ...patched];
+  };
+  const withoutTarget = (items = []) => items.filter((item) => !same(item));
+  const cwd = String(merged.cwd || sessionPatch.cwd || "");
+  const groupKey = (group) => String(group?.cwd || group?.key || group?.projectPath || "");
+  const pinnedProjectExists = (currentState.pinnedProjects || []).some((group) => groupKey(group) === cwd);
+  const activeProjectExists = (currentState.projectGroups || []).some((group) => groupKey(group) === cwd);
+  const expandedKeys = options.expandedProjectKeys instanceof Set ? options.expandedProjectKeys : new Set();
+  const previewLimit = Number.isFinite(Number(options.previewLimit)) ? Math.max(1, Number(options.previewLimit)) : 5;
+
+  const patchGroups = (groups = [], insertMissing) =>
+    groups.map((group) => {
+      if (groupKey(group) !== cwd) {
+        return group;
+      }
+      const sessions = Array.isArray(group.sessions) ? group.sessions : [];
+      const contained = sessions.some(same);
+      let nextSessions = contained ? sessions.map((item) => (same(item) ? { ...item, ...merged } : item)) : sessions;
+      let total = Number.isFinite(Number(group.total)) ? Number(group.total) : sessions.length;
+      if (pinned) {
+        if (contained) {
+          nextSessions = withoutTarget(nextSessions);
+          total = Math.max(0, total - 1);
+        }
+      } else if (!contained && insertMissing) {
+        nextSessions = [merged, ...nextSessions].sort((left, right) =>
+          String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")),
+        );
+        total += 1;
+        if (!expandedKeys.has(groupKey(group))) {
+          nextSessions = nextSessions.slice(0, previewLimit);
+        }
+      }
+      return {
+        ...group,
+        sessions: nextSessions,
+        total,
+        hasMore: total > nextSessions.length,
+      };
+    });
+
+  let projectGroups = patchGroups(currentState.projectGroups || [], !pinnedProjectExists);
+  const pinnedProjects = patchGroups(currentState.pinnedProjects || [], pinnedProjectExists);
+  if (pinned) {
+    // 普通项目若最后一个会话被置顶，后端列表会隐藏这个空项目；乐观态保持相同行为。
+    projectGroups = projectGroups.filter(
+      (group) => groupKey(group) !== cwd || Number(group.total) > 0 || (group.sessions || []).length > 0,
+    );
+  } else if (!pinnedProjectExists && !activeProjectExists && cwd) {
+    const parts = cwd.replaceAll("\\", "/").split("/").filter(Boolean);
+    projectGroups = [
+      {
+        cwd,
+        key: cwd,
+        label: parts.at(-1) || cwd,
+        sessions: [merged],
+        total: 1,
+        hasMore: false,
+        pinned: false,
+        pinnedAt: null,
+        archived: false,
+        collapsed: false,
+      },
+      ...projectGroups,
+    ];
+  }
+
+  return {
+    ...currentState,
+    currentSession: same(currentState.currentSession)
+      ? { ...(currentState.currentSession || {}), ...merged }
+      : currentState.currentSession,
+    sessions: upsert(currentState.sessions || []),
+    pinnedSessions: pinned ? upsert(currentState.pinnedSessions || []) : withoutTarget(currentState.pinnedSessions || []),
+    projectGroups,
+    pinnedProjects,
+  };
+}
+
+// PATCH 归档成功后直接从侧栏快照移除会话；全量列表只在后台校准，避免归档操作再次被慢列表接口
+// 和 hover 守卫拖住。置顶会话本来就不计入项目会话总数，归档时只从置顶区移除，不重复扣减项目 total。
+export function removeArchivedSessionFromNavigation(currentState = {}, archivedSession = {}) {
+  const targetId = displaySessionId(archivedSession);
+  if (!targetId) {
+    return currentState;
+  }
+  const same = (session) =>
+    displaySessionId(session) === targetId ||
+    Boolean(
+      session?.sessionId &&
+        archivedSession.sessionId &&
+        session.sessionId === archivedSession.sessionId &&
+        session.cwd === archivedSession.cwd,
+    );
+  const previous = [
+    currentState.currentSession,
+    ...(currentState.sessions || []),
+    ...(currentState.pinnedSessions || []),
+    ...(currentState.projectGroups || []).flatMap((group) => group.sessions || []),
+    ...(currentState.pinnedProjects || []).flatMap((group) => group.sessions || []),
+  ].find(same);
+  const cwd = String(previous?.cwd || archivedSession.cwd || "");
+  const wasPinned = previous?.pinned === true;
+  const groupKey = (group) => String(group?.cwd || group?.key || group?.projectPath || "");
+  const patchGroups = (groups = [], keepEmpty = false) =>
+    groups
+      .map((group) => {
+        if (groupKey(group) !== cwd) {
+          return group;
+        }
+        const sessions = Array.isArray(group.sessions) ? group.sessions : [];
+        const nextSessions = sessions.filter((session) => !same(session));
+        const contained = nextSessions.length !== sessions.length;
+        const total = Number.isFinite(Number(group.total)) ? Number(group.total) : sessions.length;
+        const nextTotal = contained || !wasPinned ? Math.max(0, total - 1) : total;
+        return {
+          ...group,
+          sessions: nextSessions,
+          total: nextTotal,
+          hasMore: nextTotal > nextSessions.length,
+        };
+      })
+      .filter((group) => keepEmpty || groupKey(group) !== cwd || Number(group.total) > 0);
+
+  return {
+    ...currentState,
+    currentSession: same(currentState.currentSession)
+      ? { ...(currentState.currentSession || {}), ...archivedSession }
+      : currentState.currentSession,
+    sessions: (currentState.sessions || []).filter((session) => !same(session)),
+    pinnedSessions: (currentState.pinnedSessions || []).filter((session) => !same(session)),
+    projectGroups: patchGroups(currentState.projectGroups || []),
+    pinnedProjects: patchGroups(currentState.pinnedProjects || [], true),
+  };
+}
+
 function structuredFallbackText(value) {
   try {
     const rendered = JSON.stringify(value, null, 2);
@@ -1528,12 +1712,57 @@ function setThreadActionTooltip(button, label) {
 async function toggleSessionPinned(session, event) {
   event?.stopPropagation?.();
   const sessionId = displaySessionId(session);
-  if (!sessionId) {
+  if (!sessionId || sessionPinMutations.has(sessionId)) {
     return;
   }
-  await api.updateSession(sessionId, { pinned: !session.pinned });
-  await loadSessions();
-  render(state);
+  const latest = findSessionForPinMutation(state, sessionId) || session;
+  const previousPinned = latest.pinned === true;
+  const identity = {
+    webSessionId: latest.webSessionId,
+    sessionId: latest.sessionId,
+    cwd: latest.cwd,
+  };
+  const optimistic = {
+    ...identity,
+    pinned: !previousPinned,
+    pinnedAt: previousPinned ? null : new Date().toISOString(),
+  };
+  // Keep a stable mutation identity so a later archive can cancel this request.
+  // The PATCH itself cannot be aborted reliably once sent, so its response must
+  // prove it still owns the row before changing navigation state.
+  const mutation = { patch: optimistic };
+  sessionPinMutations.set(sessionId, mutation);
+  invalidateSessionListLoads();
+  state = patchPinnedSessionState(state, optimistic, sessionPinPatchOptions());
+  renderSessionsImmediate(state);
+
+  let updated = null;
+  try {
+    updated = await api.updateSession(sessionId, { pinned: !previousPinned });
+    if (sessionPinMutations.get(sessionId) !== mutation) {
+      return;
+    }
+    mutation.patch = updated;
+    state = patchPinnedSessionState(state, updated, sessionPinPatchOptions());
+  } catch (error) {
+    if (sessionPinMutations.get(sessionId) !== mutation) {
+      return;
+    }
+    state = patchPinnedSessionState(
+      state,
+      { ...identity, pinned: previousPinned, pinnedAt: previousPinned ? latest.pinnedAt || null : null },
+      sessionPinPatchOptions(),
+    );
+    window.alert?.(error?.message || t("Operation failed"));
+  } finally {
+    if (sessionPinMutations.get(sessionId) === mutation) {
+      sessionPinMutations.delete(sessionId);
+      renderSessionsImmediate(state);
+    }
+  }
+  if (updated) {
+    void reconcileSessionsAfterPinMutation();
+  }
 }
 
 async function archiveSession(session, event) {
@@ -1542,14 +1771,22 @@ async function archiveSession(session, event) {
   if (!sessionId) {
     return;
   }
-  const updated = await api.updateSession(sessionId, { archived: true });
-  state = replaceUpdatedSessionInState(state, updated);
-  await loadSessions();
-  if (state.currentSessionId === sessionId) {
-    startNewSessionDraft({ cwd: session.cwd });
-    return;
+  try {
+    const updated = await api.updateSession(sessionId, { archived: true });
+    // Archiving wins over an older in-flight pin PATCH. Removing the ownership
+    // token also makes that PATCH's eventual response a no-op.
+    sessionPinMutations.delete(sessionId);
+    invalidateSessionListLoads();
+    state = removeArchivedSessionFromNavigation(state, updated);
+    if (state.currentSessionId === sessionId) {
+      startNewSessionDraft({ cwd: session.cwd });
+    } else {
+      renderSessionsImmediate(state);
+    }
+    void refreshSessionsSidebar();
+  } catch (error) {
+    window.alert?.(error?.message || t("Archive failed"));
   }
-  render(state);
 }
 
 function createThreadRow(session, state) {
@@ -1629,6 +1866,8 @@ function createThreadRow(session, state) {
   const pinAction = document.createElement("button");
   pinAction.type = "button";
   pinAction.className = session.pinned ? "thread-action thread-action-pin is-pinned" : "thread-action thread-action-pin";
+  pinAction.disabled = sessionPinMutations.has(displaySessionId(session));
+  pinAction.setAttribute("aria-busy", pinAction.disabled ? "true" : "false");
   const pinTooltip = session.pinned ? t("Unpin conversation") : t("Pin conversation");
   setThreadActionTooltip(pinAction, pinTooltip);
   pinAction.addEventListener("click", (event) => {
@@ -1908,8 +2147,8 @@ async function toggleProjectPinned(group) {
   closeProjectMenu();
   try {
     await api.updateProject(group.key, { pinned: !group.pinned });
-    await loadSessions();
-    render(state);
+    await loadSessions({ retryIfSuperseded: true });
+    renderSessionsImmediate(state);
   } catch (error) {
     window.alert?.(error?.message || t("Operation failed"));
   }
@@ -1921,8 +2160,8 @@ async function archiveProjectGroup(group) {
     // 归档整个项目 = 归档其下全部会话(会话级 archived=True),使它们成组出现在
     // 「已归档对话」面板、可逐条撤销;项目本身不设归档标志,撤销任一会话即回到侧栏。
     await api.archiveProjectSessions(group.key);
-    await loadSessions();
-    render(state);
+    await loadSessions({ retryIfSuperseded: true });
+    renderSessionsImmediate(state);
   } catch (error) {
     window.alert?.(error?.message || t("Archive failed"));
   }
@@ -1938,8 +2177,8 @@ function removeProjectGroup(group) {
     danger: true,
     onConfirm: async () => {
       await api.updateProject(group.key, { hidden: true });
-      await loadSessions();
-      render(state);
+      await loadSessions({ retryIfSuperseded: true });
+      renderSessionsImmediate(state);
     },
   });
 }
@@ -1963,8 +2202,8 @@ function startProjectRename(group) {
     confirmLabel: t("Save"),
     onConfirm: async (value) => {
       await api.updateProject(group.key, { label: value });
-      await loadSessions();
-      render(state);
+      await loadSessions({ retryIfSuperseded: true });
+      renderSessionsImmediate(state);
     },
   });
 }
@@ -4595,34 +4834,18 @@ function startThreadRename() {
 
 async function toggleCurrentSessionPinned() {
   closeThreadMenu();
-  const sessionId = state.currentSessionId;
-  if (!sessionId) {
+  if (!state.currentSessionId || !state.currentSession) {
     return;
   }
-  try {
-    const updated = await api.updateSession(sessionId, { pinned: !state.currentSession?.pinned });
-    state = replaceUpdatedSessionInState(state, updated);
-    await loadSessions();
-    render(state);
-  } catch (error) {
-    window.alert?.(error?.message || t("Operation failed"));
-  }
+  await toggleSessionPinned(state.currentSession);
 }
 
 async function archiveCurrentSession() {
   closeThreadMenu();
-  const session = state.currentSession;
-  const sessionId = state.currentSessionId;
-  if (!sessionId) {
+  if (!state.currentSessionId || !state.currentSession) {
     return;
   }
-  try {
-    await api.updateSession(sessionId, { archived: true });
-    await loadSessions();
-    startNewSessionDraft({ cwd: session?.cwd });
-  } catch (error) {
-    window.alert?.(error?.message || t("Archive failed"));
-  }
+  await archiveSession(state.currentSession);
 }
 
 function renderThreadHeader(state) {
@@ -4905,6 +5128,8 @@ function liveStacksFromState() {
   return [...byKey.values()];
 }
 let sessionLoadGeneration = 0;
+let sessionListLoadGeneration = 0;
+const sessionPinMutations = new Map();
 let materializedDraftSession = null;
 let draftProjectMenuOpen = false;
 let draftProjectNewMenuOpen = false;
@@ -5025,20 +5250,70 @@ function preserveExpandedProjectGroups(freshGroups) {
   });
 }
 
-async function loadSessions() {
-  const payload = await api.listSessions({
-    limit: 50,
-    perProjectLimit: PROJECT_THREAD_PREVIEW_LIMIT,
-  });
-  const sessions = payload.sessions || [];
-  state = {
-    ...state,
-    sessions,
-    pinnedSessions: payload.pinnedSessions || [],
-    pinnedProjects: payload.pinnedProjects || [],
-    projectGroups: preserveExpandedProjectGroups(payload.projects || []),
+function sessionPinPatchOptions() {
+  return {
+    expandedProjectKeys,
+    previewLimit: PROJECT_THREAD_PREVIEW_LIMIT,
   };
-  return sessions;
+}
+
+function findSessionForPinMutation(currentState, sessionId) {
+  const matches = (session) => displaySessionId(session) === sessionId;
+  const candidates = [
+    ...(currentState.sessions || []),
+    ...(currentState.pinnedSessions || []),
+    ...(currentState.projectGroups || []).flatMap((group) => group.sessions || []),
+    ...(currentState.pinnedProjects || []).flatMap((group) => group.sessions || []),
+    currentState.currentSession,
+  ];
+  return candidates.find(matches) || null;
+}
+
+function invalidateSessionListLoads() {
+  sessionListLoadGeneration += 1;
+}
+
+async function reconcileSessionsAfterPinMutation() {
+  try {
+    await loadSessions();
+    renderSessionsAuto(state);
+  } catch {
+    // PATCH 的返回值已经是权威会话状态；列表校准失败时保留它，下一轮后台刷新会继续重试。
+  }
+}
+
+export async function loadSessions({ retryIfSuperseded = false } = {}) {
+  while (true) {
+    const generation = ++sessionListLoadGeneration;
+    const payload = await api.listSessions({
+      limit: 50,
+      perProjectLimit: PROJECT_THREAD_PREVIEW_LIMIT,
+    });
+    if (generation !== sessionListLoadGeneration) {
+      // A user action must not immediately repaint the pre-action snapshot. If
+      // another list request or mutation superseded this one, retry from the
+      // newest generation; background refreshes still keep their cheap early-out.
+      if (retryIfSuperseded) {
+        continue;
+      }
+      return state.sessions || [];
+    }
+    const sessions = payload.sessions || [];
+    let nextState = {
+      ...state,
+      sessions,
+      pinnedSessions: payload.pinnedSessions || [],
+      pinnedProjects: payload.pinnedProjects || [],
+      projectGroups: preserveExpandedProjectGroups(payload.projects || []),
+    };
+    // 另一个后台刷新可能在 PATCH 完成前返回旧快照。把仍在进行的本地 pin 状态覆盖到新快照上，
+    // 避免按钮刚变为置顶/取消置顶又短暂跳回旧状态。
+    for (const mutation of sessionPinMutations.values()) {
+      nextState = patchPinnedSessionState(nextState, mutation.patch, sessionPinPatchOptions());
+    }
+    state = nextState;
+    return sessions;
+  }
 }
 
 async function loadPipelineState(session) {
@@ -5434,6 +5709,13 @@ function renderSessionsAuto(state) {
   renderSessions(state);
 }
 
+// 用户点击置顶/取消置顶属于主动操作，即使指针仍停在侧栏也必须马上绘制反馈，不能被自动刷新专用的
+// hover 守卫延迟到 pointerleave。
+function renderSessionsImmediate(state) {
+  sidebarRepaintPending = false;
+  renderSessions(state);
+}
+
 // 给稳定的 .session-rail 容器绑定进出边界的悬停探测(只一次)。pointerenter/leave 不随子节点冒泡，
 // 容器本身不被 replaceChildren 重建,故监听长期有效。
 function ensureSidebarHoverGuard() {
@@ -5577,6 +5859,9 @@ async function switchSession(sessionId) {
   // 内容就绪后应落在最新消息处，先置位；loadSession 会在真实内容渲染后消费它。
   pendingScrollToBottom = true;
   render(state);
+  // render(state) 的侧栏分支会在指针仍位于侧栏时延迟自动重绘；会话切换是主动操作，必须同步
+  // 重建会话导航，让旧行立即取消选中、目标行立即高亮，而不是等到 pointerleave。
+  renderSessionsImmediate(state);
   try {
     const loaded = await loadSession(sessionId, { forceDraft: false, generation });
     if (loaded) {
@@ -5615,6 +5900,8 @@ function startNewSessionDraft(options = {}) {
   workspace?.setSession("", null);
   outputController?.reset();
   render(state);
+  // “新会话”及归档当前会话都会走这里；主动清除旧选中态，不能等侧栏 pointerleave。
+  renderSessionsImmediate(state);
   setMobileSidebarOpen(false);
   return generation;
 }
@@ -6080,8 +6367,8 @@ async function start() {
       // 归档面板取消归档/删除会话后,重新拉取会话列表并重绘侧栏,使被隐藏的空项目
       // 或恢复的会话立即出现,无需手动刷新页面。
       onSessionsMutated: async () => {
-        await loadSessions();
-        render(state);
+        await loadSessions({ retryIfSuperseded: true });
+        renderSessionsImmediate(state);
       },
       // 新会话默认面板据此渲染「默认流水线」下拉:流水线模式必须绑定一条具体流水线。
       pipelineOptions: PIPELINE_OPTIONS,

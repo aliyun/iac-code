@@ -7,7 +7,7 @@ from typing import Any
 
 from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.providers.aliyun import AliyunCredential, use_aliyun_credential
-from iac_code.services.telemetry import use_session_id, use_user_id
+from iac_code.services.telemetry import use_session_id, use_telemetry_channel, use_user_id
 
 _RUNTIME_OVERRIDE_UNSET = object()
 _preferred_language: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -28,8 +28,11 @@ def a2a_request_context(
     user_id: str | None = None,
     aliyun_credential: AliyunCredential | None = None,
     preferred_language: str | None = None,
+    telemetry_channel: str | None = None,
 ) -> Iterator[None]:
     with contextlib.ExitStack() as stack:
+        if telemetry_channel:
+            stack.enter_context(use_telemetry_channel(telemetry_channel))
         if preferred_language:
             token = _preferred_language.set(preferred_language)
             stack.callback(_preferred_language.reset, token)

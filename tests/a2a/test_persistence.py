@@ -11,10 +11,25 @@ def test_persistence_round_trips_task_and_context(tmp_path) -> None:
     store = A2APersistenceStore(tmp_path)
 
     store.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="working", output_text=["hi"]))
-    store.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    store.save_context(
+        A2AContextSnapshot(
+            context_id="ctx-1",
+            session_id="session-1",
+            cwd=str(tmp_path),
+            telemetry_channel="skill",
+        )
+    )
 
     assert store.load_task("task-1").state == "working"
     assert store.load_context("ctx-1").session_id == "session-1"
+    assert store.load_context("ctx-1").telemetry_channel == "skill"
+
+
+def test_persistence_loads_legacy_context_without_telemetry_channel(tmp_path) -> None:
+    store = A2APersistenceStore(tmp_path)
+    store.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+
+    assert store.load_context("ctx-1").telemetry_channel is None
 
 
 def test_persistence_uses_filesystem_safe_names_for_protocol_ids(tmp_path) -> None:

@@ -78,6 +78,21 @@ def allowed_cwd_roots() -> list[Path]:
     return [resolve_workspace_path(path) for path in candidates if path.exists() and path.is_dir()]
 
 
+def trust_request_cwd() -> bool:
+    """Return whether authenticated callers may select any local user workspace.
+
+    The external Skill Runtime is a localhost-only, single-user process with a
+    random bearer token.  It opts into this mode so one A2A server can serve
+    multiple per-context workspaces without widening the default A2A policy.
+    """
+    return os.environ.get("IAC_CODE_A2A_TRUST_REQUEST_CWD", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def is_relative_to(path: Path, root: Path) -> bool:
     try:
         path.relative_to(root)

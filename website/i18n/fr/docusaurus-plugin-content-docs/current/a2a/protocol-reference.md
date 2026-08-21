@@ -149,10 +149,13 @@ Exécute un tour de message A2A non streaming. La réponse contient une tâche o
 | `role` | string | Oui | Utilisez `ROLE_USER` pour l'entrée utilisateur |
 | `parts` | array | Oui | Parties de type texte, données JSON, texte brut, URL de fichier local ou parties multimodales bornées |
 | `metadata.iac_code.cwd` | string | Recommandé | Chemin absolu de l'espace de travail ; utilise par défaut le répertoire du processus serveur si omis |
+| `metadata.iac_code.channel` | string | Facultatif | Canal de télémétrie lié à ce `contextId` ; prioritaire sur `IAC_CODE_CHANNEL` |
 | `metadata.iac_code.preferredLanguage` | string | Facultatif | Langue d'affichage préférée de l'appelant pour cette tâche ; le texte visible par l'utilisateur est localisé par requête |
 | `metadata.iac_code.candidatePresentation` | string | Facultatif | Avec `rich-v1`, l'étape de confirmation des candidats du pipeline renvoie des charges structurées de présentation enrichie |
 
 `metadata.iac_code.cwd` doit être un répertoire absolu existant lorsqu'il est fourni. Il doit se trouver dans une racine d'espace de travail autorisée. Par défaut, les racines autorisées sont le répertoire du processus serveur et le répertoire temporaire système ; `IACCODE_A2A_ALLOWED_CWDS` peut fournir une liste d'autorisation séparée par le séparateur de chemins du système d'exploitation.
+
+`metadata.iac_code.channel` lie `iac_code.channel` au `contextId` A2A. La valeur est nettoyée, limitée à 128 caractères et prioritaire sur `IAC_CODE_CHANNEL` ; les valeurs vides ou non textuelles sont ignorées. Les tours normaux, les tours de pipeline, les suivis input-required et le chat normal après un handoff de pipeline réutilisent cette liaison avec le même `contextId`, y compris après un redémarrage du serveur et la restauration du contexte. Une valeur valide envoyée plus tard met la liaison à jour. Sans liaison, la télémétrie utilise `IAC_CODE_CHANNEL`, puis `unknown`.
 
 `metadata.iac_code.preferredLanguage` n'affecte que le texte visible par l'utilisateur (progression, questions, invites de permission, présentations de candidats, explications des résultats) ; les noms de champs du protocole, les énumérations, les identifiants et les formes de commandes ne sont jamais traduits. Les valeurs acceptées sont les langues prises en charge `en`, `zh`, `es`, `fr`, `de`, `ja`, `pt` ; les valeurs sont normalisées par suppression des espaces, mise en minuscules et retrait du suffixe régional (par exemple `zh-CN` devient `zh`). Les valeurs non reconnues sont ignorées et le serveur retombe sur sa langue par défaut. Le champ ne s'applique qu'au tour de message courant ; les tours suivants réutilisant le même `contextId` doivent le transmettre à nouveau, sinon ils retombent sur la langue par défaut.
 

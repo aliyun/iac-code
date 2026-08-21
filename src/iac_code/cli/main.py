@@ -795,6 +795,7 @@ def a2a(
     push_consumer_name = config.get("push_consumer_name", "")
     push_lease_timeout_ms = config.get("push_lease_timeout_ms", 300000)
     auto_approve_permissions = config.get("auto_approve_permissions", False)
+    idle_shutdown_seconds = config.get("idle_shutdown_seconds", 0)
     log_to_stdout = _a2a_config_value(ctx, config, "log_to_stdout", log_to_stdout)
     thinking_exposure = _a2a_config_value(ctx, config, "thinking_exposure", thinking_exposure)
     model = load_saved_model() or DEFAULT_MODEL
@@ -938,6 +939,7 @@ def a2a(
             consumer_group=consumer_group,
             auto_approve_permissions=auto_approve_permissions,
             thinking_exposure=thinking_exposure,
+            idle_shutdown_seconds=idle_shutdown_seconds,
         )
     except (RuntimeError, ValueError) as exc:
         exit_reason = "error"

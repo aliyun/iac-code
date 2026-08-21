@@ -17,11 +17,25 @@ logger = logging.getLogger(__name__)
 
 TITLE_MAX_TOKENS = 32
 TITLE_TEXT_INPUT_LIMIT = 2000
-TITLE_SYSTEM_PROMPT = (
+_TITLE_LANGUAGE_NAMES = {
+    "en": "English",
+    "zh": "Simplified Chinese",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "ja": "Japanese",
+    "pt": "Portuguese",
+}
+_TITLE_SYSTEM_PROMPT = (
     "You generate a very short title for a conversation based on the user's first message. "
-    "Rules: at most 6 words or about 20 CJK characters; use the same language as the input; "
+    "Write the title in {language}, regardless of the language of the input. "
+    "Rules: at most 6 words or about 20 CJK characters; "
     "no surrounding quotes, no trailing punctuation, no explanation. Output only the title."
 )
+
+
+def _title_system_prompt(language: str) -> str:
+    return _TITLE_SYSTEM_PROMPT.format(language=_TITLE_LANGUAGE_NAMES.get(language, "English"))
 
 
 def _title_effort_override(provider_key: str | None, model: str) -> str:
@@ -61,6 +75,7 @@ async def generate_session_title(
     text: str | None,
     image_blocks: list[ContentBlock],
     selection: WebModelSelection,
+    language: str,
     timeout: float = 20.0,
 ) -> str | None:
     """一次性 LLM 调用生成标题;首次失败重试一次;仍失败返回 None。不做持久化。"""
@@ -69,7 +84,7 @@ async def generate_session_title(
         try:
             manager = _build_manager(selection)
             response = await asyncio.wait_for(
-                manager.complete(messages, TITLE_SYSTEM_PROMPT, max_tokens=TITLE_MAX_TOKENS),
+                manager.complete(messages, _title_system_prompt(language), max_tokens=TITLE_MAX_TOKENS),
                 timeout=timeout,
             )
         except (asyncio.TimeoutError, Exception) as exc:  # noqa: BLE001 - best-effort side query

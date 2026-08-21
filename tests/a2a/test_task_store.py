@@ -130,6 +130,39 @@ async def test_context_reuses_runtime_until_evicted() -> None:
 
 
 @pytest.mark.asyncio
+async def test_context_telemetry_channel_binding_persists_and_can_be_updated(monkeypatch, tmp_path) -> None:
+    config_dir = tmp_path / "config"
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    persistence = A2APersistenceStore(config_dir / "a2a")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+
+    assert await store.resolve_context_telemetry_channel("ctx-1", "  skill  ") == "skill"
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: object(),
+    )
+
+    assert context.telemetry_channel == "skill"
+    assert await store.resolve_context_telemetry_channel("ctx-1", None) == "skill"
+    assert persistence.load_context("ctx-1").telemetry_channel == "skill"
+
+    assert await store.resolve_context_telemetry_channel("ctx-1", "web-a2a") == "web-a2a"
+    assert persistence.load_context("ctx-1").telemetry_channel == "web-a2a"
+
+    restored_store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    assert await restored_store.resolve_context_telemetry_channel("ctx-1", None) == "web-a2a"
+    restored = await restored_store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: object(),
+    )
+    assert restored.telemetry_channel == "web-a2a"
+
+
+@pytest.mark.asyncio
 async def test_new_a2a_session_initializes_backup_generation_zero(monkeypatch, tmp_path) -> None:
     config_dir = tmp_path / "config"
     backup_root = tmp_path / "backup"
@@ -1241,6 +1274,21 @@ async def test_task_store_persistence_failure_does_not_abort_task_creation() -> 
     task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
 
     assert task.task_id == "task-1"
+
+
+@pytest.mark.asyncio
+async def test_has_active_work_tracks_running_tasks() -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    await store.get_or_create_context(context_id="ctx-1", cwd="/tmp", runtime_factory=lambda sid: object())
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    release = asyncio.Event()
+    active_task = asyncio.create_task(release.wait())
+    task.active_task = active_task
+
+    assert await store.has_active_work() is True
+    release.set()
+    await active_task
+    assert await store.has_active_work() is False
 
 
 @pytest.mark.asyncio

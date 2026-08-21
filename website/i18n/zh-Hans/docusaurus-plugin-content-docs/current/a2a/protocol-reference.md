@@ -155,6 +155,7 @@ Callback URLs 会在存储前以及分发前再次校验。默认 validator 会�
 | `parts` | array | 是 | 类文本、JSON 数据、原始文本、本地 file URL 或有界多模态 parts |
 | `metadata.iac_code.cwd` | string | 建议 | 绝对工作区路径；省略时默认为服务器进程目录 |
 | `metadata.iac_code.user_id` | string | 可选 | 当前任务的 telemetry user ID 覆盖；空字符串或非字符串会被忽略 |
+| `metadata.iac_code.channel` | string | 可选 | 当前 `contextId` 绑定的 telemetry channel；优先级高于 `IAC_CODE_CHANNEL` |
 | `metadata.iac_code.iac_code_model` | string | 可选 | 当前调用的 LLM model 覆盖；这是 `IAC_CODE_MODEL` 的小写形式，空字符串或非字符串会被忽略 |
 | `metadata.iac_code.iac_code_api_key` | string | 可选 | 当前调用的 LLM provider API key 覆盖；这是 `IAC_CODE_API_KEY` 的小写形式，空字符串或非字符串会被忽略 |
 | `metadata.iac_code.alibaba_cloud_access_key_id` | string | 可选 | 当前任务使用的 Alibaba Cloud AccessKey ID |
@@ -169,6 +170,8 @@ Callback URLs 会在存储前以及分发前再次校验。默认 validator 会�
 当 `metadata.iac_code` 同时包含 `alibaba_cloud_access_key_id` 和 `alibaba_cloud_access_key_secret` 时，A2A executor 只会在当前任务中使用这些 Alibaba Cloud 凭据。它们优先于进程环境变量和 `.cloud-credentials.yml`；如果任务 metadata 不完整或不存在，则继续使用正常凭据 fallback。
 
 `metadata.iac_code.user_id` 只影响当前任务的 telemetry identity，不会改变 A2A `contextId`、`taskId` 或 iac-code 内部 session ID。
+
+`metadata.iac_code.channel` 会把 telemetry 的 `iac_code.channel` 绑定到 A2A `contextId`。该值会去除首尾空白并限制为 128 个字符，优先级高于 `IAC_CODE_CHANNEL`；空字符串或非字符串会被忽略。复用同一个 `contextId` 的 normal 轮次、pipeline 轮次、input-required 后续输入以及 pipeline handoff 后的 normal chat 都会自动沿用该绑定，包括 server 重启并恢复 context 后。后续轮次再次传入有效值时会更新绑定。context 尚未绑定 channel 时，才回退到 `IAC_CODE_CHANNEL`，环境变量也未设置时再使用 `unknown`。
 
 `metadata.iac_code.iac_code_model` 只影响当前 A2A message turn。它优先于 `IAC_CODE_MODEL`、`settings.yml` 和 server 启动默认 model；复用同一个 `contextId` 的后续轮次如果不再传该字段，会回落到 server 默认 model。
 

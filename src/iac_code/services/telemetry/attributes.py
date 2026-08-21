@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import contextvars
 import itertools
 import os
 import platform
 import socket
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from threading import Lock
 
@@ -21,6 +24,30 @@ from iac_code.services.telemetry.names import (
 _CHANNEL_ENV = "IAC_CODE_CHANNEL"
 _DEFAULT_CHANNEL = "unknown"
 _MAX_CHANNEL_LENGTH = 128
+_telemetry_channel_override: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "iac_code_telemetry_channel_override",
+    default=None,
+)
+
+
+def normalize_telemetry_channel(value: object) -> str | None:
+    """Return a bounded non-empty channel, or None for invalid input."""
+    if not isinstance(value, str):
+        return None
+    return value.strip()[:_MAX_CHANNEL_LENGTH] or None
+
+
+@contextmanager
+def use_telemetry_channel(channel: str) -> Iterator[None]:
+    """Override the telemetry channel for the current async context."""
+    normalized = normalize_telemetry_channel(channel)
+    if normalized is None:
+        raise ValueError("telemetry channel must be a non-empty string")
+    token = _telemetry_channel_override.set(normalized)
+    try:
+        yield
+    finally:
+        _telemetry_channel_override.reset(token)
 
 
 def _detect_service_version() -> str:
@@ -56,13 +83,13 @@ class AttributeBuilder:
         self._identity = identity
         self._service_name = service_name
         self._service_version = service_version or _detect_service_version()
-        self._channel = os.environ.get(_CHANNEL_ENV, "").strip()[:_MAX_CHANNEL_LENGTH] or _DEFAULT_CHANNEL
+        self._channel = normalize_telemetry_channel(os.environ.get(_CHANNEL_ENV)) or _DEFAULT_CHANNEL
         self._sequence = itertools.count(1)
         self._sequence_lock = Lock()
 
     def build_signal_attributes(self) -> dict[str, str]:
         """Attributes attached directly to every exported signal."""
-        return {IacCodeAttr.CHANNEL: self._channel}
+        return {IacCodeAttr.CHANNEL: _telemetry_channel_override.get() or self._channel}
 
     def build_resource(self) -> dict[str, str]:
         """Identity + app + device attributes. Called once at startup, usually."""
