@@ -29,6 +29,7 @@ class StepConfig:
     max_conclusion_retries: int = 2
     rollback_count: int = 0
     max_rollbacks: int = 5
+    rollback_exhausted_target: str | None = None
 
 
 @dataclass
@@ -40,3 +41,7 @@ class StepResult:
     conclusion: dict | None = None
     rollback_request: tuple[str, str] | None = None
     error: str | None = None
+    # Set when the rollback budget is exhausted and the request was redirected to
+    # ``rollback_exhausted_target`` so the user can confirm again instead of the
+    # pipeline terminating as failed.
+    rollback_exhausted: bool = False

@@ -587,6 +587,8 @@ steps:
     prompt: prompts/deploying.md
     complete_step_terminal: false
     interrupt_judge_failure: pause
+    # 回滚预算耗尽时不直接 failed 终止，回退到 confirm_and_select 让用户重新确认参数或方案。
+    rollback_exhausted_target: confirm_and_select
     context_fields: [intent, selected_plan, evaluated_candidates]
     hooks_file: hooks/deploying.py
     completion_guards:

@@ -988,6 +988,7 @@ class StepExecutor:
             max_conclusion_retries=step.max_conclusion_retries,
             rollback_count=rollback_count,
             max_rollbacks=max_rollbacks,
+            rollback_exhausted_target=step.rollback_exhausted_target,
         )
         guard_state = ensure_completion_guard_state(
             completion_guard_state if completion_guard_state is not None else {}

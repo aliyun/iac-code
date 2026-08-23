@@ -252,6 +252,174 @@ class TestCompleteStepToolExecute:
         assert "5" in result.content
 
     @pytest.mark.asyncio
+    async def test_exhausted_rollback_falls_back_to_configured_target(self):
+        config = StepConfig(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            rollback_targets=["confirm_and_select"],
+            rollback_count=3,
+            max_rollbacks=3,
+            rollback_exhausted_target="confirm_and_select",
+        )
+        tool = CompleteStepTool(config)
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {"status": "failed"},
+                "rollback_request": {"target_step": "confirm_and_select", "reason": "rollback limit reached"},
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+        step_result = result.metadata["step_result"]
+        assert step_result.status == StepStatus.COMPLETED
+        assert step_result.rollback_request == ("confirm_and_select", "rollback limit reached")
+        assert step_result.rollback_exhausted is True
+
+    @pytest.mark.asyncio
+    async def test_exhausted_rollback_fallback_redirects_other_targets(self):
+        config = StepConfig(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            rollback_targets=["confirm_and_select", "architecture_planning"],
+            rollback_count=3,
+            max_rollbacks=3,
+            rollback_exhausted_target="confirm_and_select",
+        )
+        tool = CompleteStepTool(config)
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {"status": "failed"},
+                "rollback_request": {"target_step": "architecture_planning", "reason": "template broken"},
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+        step_result = result.metadata["step_result"]
+        assert step_result.rollback_request == ("confirm_and_select", "template broken")
+        assert step_result.rollback_exhausted is True
+
+    @pytest.mark.asyncio
+    async def test_exhausted_rollback_without_fallback_target_keeps_error(self):
+        config = StepConfig(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            rollback_targets=["confirm_and_select"],
+            rollback_count=3,
+            max_rollbacks=3,
+        )
+        tool = CompleteStepTool(config)
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {"status": "failed"},
+                "rollback_request": {"target_step": "confirm_and_select", "reason": "rollback limit reached"},
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert result.metadata is None
+        assert "Rollback count cannot exceed 3" in result.content
+
+    @pytest.mark.asyncio
+    async def test_self_referential_fallback_target_keeps_error(self):
+        config = StepConfig(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            rollback_targets=["confirm_and_select"],
+            rollback_count=3,
+            max_rollbacks=3,
+            rollback_exhausted_target="deploying",
+        )
+        tool = CompleteStepTool(config)
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {"status": "failed"},
+                "rollback_request": {"target_step": "confirm_and_select", "reason": "rollback limit reached"},
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "Rollback count cannot exceed 3" in result.content
+
+    def test_validate_completion_input_allows_exhausted_rollback_with_fallback(self):
+        config = StepConfig(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            rollback_targets=["confirm_and_select"],
+            rollback_count=3,
+            max_rollbacks=3,
+            rollback_exhausted_target="confirm_and_select",
+        )
+        tool = CompleteStepTool(config)
+
+        error = tool.validate_completion_input(
+            {
+                "conclusion": {"status": "failed"},
+                "rollback_request": {"target_step": "confirm_and_select", "reason": "rollback limit reached"},
+            }
+        )
+
+        assert error is None
+
+    def test_validate_completion_input_rejects_exhausted_rollback_without_fallback(self):
+        config = StepConfig(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            rollback_targets=["confirm_and_select"],
+            rollback_count=3,
+            max_rollbacks=3,
+        )
+        tool = CompleteStepTool(config)
+
+        error = tool.validate_completion_input(
+            {
+                "conclusion": {"status": "failed"},
+                "rollback_request": {"target_step": "confirm_and_select", "reason": "rollback limit reached"},
+            }
+        )
+
+        assert error is not None
+        assert "Rollback count cannot exceed 3" in error
+
+    @pytest.mark.asyncio
+    async def test_within_budget_rollback_is_not_marked_exhausted(self):
+        config = StepConfig(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            rollback_targets=["confirm_and_select"],
+            rollback_count=1,
+            max_rollbacks=3,
+            rollback_exhausted_target="confirm_and_select",
+        )
+        tool = CompleteStepTool(config)
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {"status": "failed"},
+                "rollback_request": {"target_step": "confirm_and_select", "reason": "retry"},
+            },
+            context=ToolContext(),
+        )
+
+        step_result = result.metadata["step_result"]
+        assert step_result.rollback_request == ("confirm_and_select", "retry")
+        assert step_result.rollback_exhausted is False
+
+    @pytest.mark.asyncio
     async def test_rejects_when_rollback_target_count_exceeds_limit(self):
         config = StepConfig(
             step_id="reviewing",

@@ -82,6 +82,7 @@ class StepSpec:
     conclusion_schema: dict | None = None
     max_conclusion_retries: int = 2
     interrupt_judge_failure: str = "continue"
+    rollback_exhausted_target: str | None = None
     completion_guards: list[dict] = field(default_factory=list)
     description: str = ""
     exit_condition: dict | None = None

@@ -315,6 +315,62 @@ class TestLoadPipelineDir:
             load_pipeline_dir(tmp_path)
 
 
+class TestRollbackExhaustedTargetParsing:
+    def _yaml_with_target(self, target: str) -> str:
+        return MINIMAL_YAML.replace(
+            "    skill: skill-x\n",
+            f"    skill: skill-x\n    rollback_exhausted_target: {target}\n",
+        )
+
+    def test_defaults_to_none(self, tmp_path):
+        _write_pipeline(tmp_path, MINIMAL_YAML, {"step_a.md": "Do A", "step_b.md": "Do B with {intent}"})
+
+        loaded = load_pipeline_dir(tmp_path)
+
+        assert loaded.steps[0].rollback_exhausted_target is None
+
+    def test_parses_declared_target(self, tmp_path):
+        yaml_content = MINIMAL_YAML.replace(
+            "    context_fields: [intent]\n",
+            "    context_fields: [intent]\n    rollback_exhausted_target: step_a\n",
+        )
+        _write_pipeline(tmp_path, yaml_content, {"step_a.md": "Do A", "step_b.md": "Do B with {intent}"})
+
+        loaded = load_pipeline_dir(tmp_path)
+
+        assert loaded.steps[1].rollback_exhausted_target == "step_a"
+
+    def test_unknown_target_raises(self, tmp_path):
+        _write_pipeline(
+            tmp_path,
+            self._yaml_with_target("missing_step"),
+            {"step_a.md": "Do A", "step_b.md": "Do B with {intent}"},
+        )
+
+        with pytest.raises(ValueError, match="rollback_exhausted_target references unknown step"):
+            load_pipeline_dir(tmp_path)
+
+    def test_self_referential_target_raises(self, tmp_path):
+        _write_pipeline(
+            tmp_path,
+            self._yaml_with_target("step_a"),
+            {"step_a.md": "Do A", "step_b.md": "Do B with {intent}"},
+        )
+
+        with pytest.raises(ValueError, match="must not reference the step itself"):
+            load_pipeline_dir(tmp_path)
+
+    def test_non_string_target_raises(self, tmp_path):
+        _write_pipeline(
+            tmp_path,
+            self._yaml_with_target("[]"),
+            {"step_a.md": "Do A", "step_b.md": "Do B with {intent}"},
+        )
+
+        with pytest.raises(ValueError, match="rollback_exhausted_target must be a non-empty string"):
+            load_pipeline_dir(tmp_path)
+
+
 class TestSubPipelineParsing:
     def test_loads_sub_pipelines(self, tmp_path):
         yaml_content = dedent("""\

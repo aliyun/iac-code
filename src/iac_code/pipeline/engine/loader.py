@@ -87,6 +87,7 @@ def load_pipeline_dir(
 
     steps = _parse_steps(raw["steps"])
     steps = _filter_and_relink(steps, feature_flags)
+    _validate_rollback_exhausted_targets(steps)
     _resolve_artifact_roles_after_filtering(steps)
     _bind_hooks(steps, pipeline_dir)
     _validate_prompts_exist(steps, pipeline_dir)
@@ -237,6 +238,7 @@ def _parse_sub_pipelines(
     for sub_name, sub_raw in raw_subs.items():
         steps = _parse_steps(sub_raw.get("steps", []))
         steps = _filter_and_relink(steps, feature_flags)
+        _validate_rollback_exhausted_targets(steps)
         _resolve_artifact_roles_after_filtering(steps)
         _validate_prompts_exist(steps, pipeline_dir)
         result[sub_name] = SubPipelineSpec(
@@ -297,6 +299,9 @@ def _parse_steps(raw_steps: list[dict]) -> list[StepSpec]:
                     raw.get("id", "?"),
                 ),
                 completion_guards=_parse_completion_guards(raw.get("completion_guards"), step_id),
+                rollback_exhausted_target=_parse_rollback_exhausted_target(
+                    raw.get("rollback_exhausted_target"), step_id
+                ),
                 description=raw.get("description", ""),
                 exit_condition=_parse_exit_condition(raw.get("exit_condition"), step_id),
                 a2a_artifacts=_parse_a2a_artifacts(raw.get("a2a_artifacts"), step_id),
@@ -393,6 +398,27 @@ def _parse_a2a_artifacts(raw: object, step_id: str) -> list[A2AArtifactSpec]:
             )
         )
     return specs
+
+
+def _parse_rollback_exhausted_target(raw: object, step_id: str) -> str | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw:
+        raise ValueError(f"Step '{step_id}': rollback_exhausted_target must be a non-empty string, got {raw!r}")
+    return raw
+
+
+def _validate_rollback_exhausted_targets(steps: list[StepSpec]) -> None:
+    """Ensure every declared exhausted-rollback fallback target exists and is not self-referential."""
+    step_ids = {step.step_id for step in steps}
+    for step in steps:
+        target = step.rollback_exhausted_target
+        if target is None:
+            continue
+        if target == step.step_id:
+            raise ValueError(f"Step '{step.step_id}': rollback_exhausted_target must not reference the step itself")
+        if target not in step_ids:
+            raise ValueError(f"Step '{step.step_id}': rollback_exhausted_target references unknown step {target!r}")
 
 
 def _parse_interrupt_judge_failure(raw: object, step_id: str) -> str:

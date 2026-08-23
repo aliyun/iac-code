@@ -215,6 +215,79 @@ class TestInterruptRollback:
             sm.interrupt_rollback("a", "after done")
 
 
+class TestRollbackFallback:
+    def _exhausted(self, **kwargs):
+        sm = StateMachine(_make_three_steps(), max_rollbacks=1, **kwargs)
+        sm.advance()  # a → b
+        sm.advance()  # b → c
+        sm.rollback("a", "first")
+        sm.advance()  # a → b
+        sm.advance()  # b → c
+        return sm
+
+    def test_fallback_succeeds_after_rollback_budget_is_exhausted(self):
+        sm = self._exhausted()
+
+        with pytest.raises(ValueError, match="Max rollbacks"):
+            sm.rollback("a", "over budget")
+
+        step = sm.rollback_fallback("a", "budget exhausted")
+
+        assert step.step_id == "a"
+        assert sm.current_step.step_id == "a"
+        assert sm._step_statuses["a"] == StepStatus.RUNNING
+        assert sm._step_statuses["b"] == StepStatus.STALE
+        assert sm._step_statuses["c"] == StepStatus.STALE
+
+    def test_fallback_uses_its_own_budget(self):
+        sm = self._exhausted()
+
+        assert sm.rollback_count == 1
+        sm.rollback_fallback("a", "budget exhausted")
+
+        assert sm.rollback_count == 1
+        assert sm.rollback_fallback_count == 1
+
+    def test_can_rollback_fallback_to_rejects_invalid_target(self):
+        sm = self._exhausted()
+
+        assert sm.can_rollback_fallback_to("missing") == (False, "invalid_target")
+        with pytest.raises(ValueError, match="Cannot rollback"):
+            sm.rollback_fallback("missing", "bad target")
+
+    def test_can_rollback_fallback_to_rejects_budget_exhaustion(self):
+        sm = self._exhausted(max_rollback_fallbacks=1)
+        sm.rollback_fallback("a", "first fallback")
+        sm.advance()  # a → b
+        sm.advance()  # b → c
+
+        assert sm.can_rollback_fallback_to("a") == (False, "max_rollback_fallbacks_exceeded")
+        with pytest.raises(ValueError, match="Max rollback fallbacks"):
+            sm.rollback_fallback("a", "second fallback")
+
+    def test_snapshot_preserves_rollback_fallback_count(self):
+        steps = _make_three_steps()
+        sm = StateMachine(steps, max_rollbacks=1)
+        sm.advance()
+        sm.advance()
+        sm.rollback_fallback("a", "budget exhausted")
+
+        snapshot = sm.to_snapshot()
+        restored = StateMachine.from_snapshot(snapshot, steps, max_rollbacks=1)
+
+        assert "rollback_fallback_count" in snapshot
+        assert restored.rollback_fallback_count == 1
+
+    def test_from_snapshot_defaults_missing_rollback_fallback_count(self):
+        steps = _make_three_steps()
+        snapshot = StateMachine(steps).to_snapshot()
+        del snapshot["rollback_fallback_count"]
+
+        restored = StateMachine.from_snapshot(snapshot, steps)
+
+        assert restored.rollback_fallback_count == 0
+
+
 class TestJumpTo:
     def test_jump_to_later_step(self):
         steps = _make_three_steps()

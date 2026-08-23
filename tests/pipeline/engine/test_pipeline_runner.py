@@ -940,6 +940,110 @@ async def test_rollback_metadata_is_appended_without_step_backup(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_exhausted_rollback_falls_back_to_user_confirmation_instead_of_failing(tmp_path):
+    runner = _build_two_step_runner(tmp_path, auto_advance_first=False)
+    runner._loaded.steps[1].rollback_exhausted_target = "a"
+    runner.state_machine._rollback_count = runner.state_machine.max_rollbacks
+    runner.state_machine.jump_to("b")
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        conclusion = {"value": step.step_id, "user_prompt": "pick again", "options": []}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        exhausted = step.step_id == "b"
+        yield StepResult(
+            step_id=step.step_id,
+            status=StepStatus.COMPLETED,
+            conclusion=conclusion,
+            rollback_request=("a", "deployment failed after 3 rollbacks") if exhausted else None,
+            rollback_exhausted=exhausted,
+        )
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    rollback_events = [
+        event
+        for event in events
+        if isinstance(event, PipelineEvent) and event.type == PipelineEventType.ROLLBACK_TRIGGERED
+    ]
+    assert len(rollback_events) == 1
+    assert rollback_events[0].data["to_step"] == "a"
+    assert rollback_events[0].data["rollback_exhausted"] is True
+    assert "deployment failed after 3 rollbacks" in rollback_events[0].data["reason"]
+
+    assert any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_REQUIRED for event in events
+    )
+    assert not any(isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_FAILED for event in events)
+    assert not any(
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.PIPELINE_COMPLETED
+        and event.data.get("failed")
+        for event in events
+    )
+    assert runner.state_machine.current_step.step_id == "a"
+    assert runner.state_machine.rollback_fallback_count == 1
+
+
+@pytest.mark.asyncio
+async def test_exhausted_rollback_without_fallback_target_still_fails(tmp_path):
+    runner = _build_two_step_runner(tmp_path)
+    runner.state_machine._rollback_count = runner.state_machine.max_rollbacks
+    runner.state_machine.jump_to("b")
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(
+            step_id=step.step_id,
+            status=StepStatus.COMPLETED,
+            conclusion=conclusion,
+            rollback_request=("a", "retry"),
+        )
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    assert any(isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_FAILED for event in events)
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.ROLLBACK_TRIGGERED for event in events
+    )
+
+
+def test_exhausted_rollback_reason_lists_pending_cleanup_resources(tmp_path):
+    runner = _build_two_step_runner(tmp_path)
+    ledger_resource = SimpleNamespace(
+        provider="ros",
+        resource_type="stack",
+        resource_id="stack-abc",
+        region_id="cn-hangzhou",
+        cleanup_status="pending",
+    )
+    runner.cleanup_ledger = lambda: SimpleNamespace(pending_resources=lambda: [ledger_resource])
+
+    reason = runner._rollback_exhausted_reason("CREATE_FAILED")
+
+    assert "CREATE_FAILED" in reason
+    assert "stack-abc" in reason
+    assert "pending" in reason
+
+
+def test_exhausted_rollback_reason_survives_unreadable_cleanup_ledger(tmp_path):
+    runner = _build_two_step_runner(tmp_path)
+
+    def broken_pending_resources():
+        raise OSError("ledger unreadable")
+
+    runner.cleanup_ledger = lambda: SimpleNamespace(pending_resources=broken_pending_resources)
+
+    reason = runner._rollback_exhausted_reason("CREATE_FAILED")
+
+    assert "CREATE_FAILED" in reason
+
+
+@pytest.mark.asyncio
 async def test_removed_step_backup_does_not_record_success_metric(tmp_path):
     backup = RecordingBackupService(retry_count=1)
     runner = _build_two_step_runner(tmp_path, backup_service=backup)

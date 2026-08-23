@@ -18,7 +18,13 @@ class StateMachine:
     and rollback count.
     """
 
-    def __init__(self, steps: list[StepSpec], max_rollbacks: int = 3, max_interrupt_rollbacks: int = 10) -> None:
+    def __init__(
+        self,
+        steps: list[StepSpec],
+        max_rollbacks: int = 3,
+        max_interrupt_rollbacks: int = 10,
+        max_rollback_fallbacks: int = 3,
+    ) -> None:
         self._steps: dict[str, StepSpec] = {s.step_id: s for s in steps}
         self._order: list[str] = [s.step_id for s in steps]
         self._current_index: int = 0
@@ -27,6 +33,8 @@ class StateMachine:
         self._step_statuses: dict[str, StepStatus] = {sid: StepStatus.PENDING for sid in self._order}
         self._interrupt_rollback_count: int = 0
         self._max_interrupt_rollbacks: int = max_interrupt_rollbacks
+        self._rollback_fallback_count: int = 0
+        self._max_rollback_fallbacks: int = max_rollback_fallbacks
 
     @property
     def current_step(self) -> StepSpec:
@@ -47,6 +55,14 @@ class StateMachine:
     @property
     def max_rollbacks(self) -> int:
         return self._max_rollbacks
+
+    @property
+    def rollback_fallback_count(self) -> int:
+        return self._rollback_fallback_count
+
+    @property
+    def max_rollback_fallbacks(self) -> int:
+        return self._max_rollback_fallbacks
 
     @property
     def is_complete(self) -> bool:
@@ -83,6 +99,43 @@ class StateMachine:
 
     def can_rollback_to(self, target_step_id: str) -> bool:
         return target_step_id in self.completed_non_future_rollback_targets()
+
+    def can_rollback_fallback_to(self, target_step_id: str) -> tuple[bool, str | None]:
+        """Validate an exhausted-budget fallback target without mutating state."""
+        if not self.can_rollback_to(target_step_id):
+            return False, "invalid_target"
+        if self._rollback_fallback_count >= self._max_rollback_fallbacks:
+            return False, "max_rollback_fallbacks_exceeded"
+        return True, None
+
+    def rollback_fallback(self, target_step_id: str, reason: str) -> StepSpec:
+        """Roll back after the normal rollback budget is exhausted.
+
+        Uses its own budget so an exhausted ``_rollback_count`` no longer forces a
+        terminal failure, while still bounding how often the pipeline may bounce
+        back to the fallback target.
+        """
+        ok, error = self.can_rollback_fallback_to(target_step_id)
+        if not ok:
+            if error == "invalid_target":
+                raise ValueError(f"Cannot rollback from {self.current_step.step_id} to {target_step_id}")
+            raise ValueError(f"Max rollback fallbacks ({self._max_rollback_fallbacks}) exceeded")
+
+        self._rollback_fallback_count += 1
+        target_index = self._order.index(target_step_id)
+        logger.info(
+            "Rollback fallback #%d: %s -> %s, reason: %s",
+            self._rollback_fallback_count,
+            self._order[self._current_index],
+            target_step_id,
+            reason,
+        )
+
+        for i in range(target_index + 1, len(self._order)):
+            self._step_statuses[self._order[i]] = StepStatus.STALE
+        self._current_index = target_index
+        self._step_statuses[target_step_id] = StepStatus.RUNNING
+        return self.current_step
 
     def completed_non_future_rollback_targets(self) -> list[str]:
         """Return completed rollback targets at or before the current position."""
@@ -166,6 +219,7 @@ class StateMachine:
             "current_index": self._current_index,
             "rollback_count": self._rollback_count,
             "interrupt_rollback_count": self._interrupt_rollback_count,
+            "rollback_fallback_count": self._rollback_fallback_count,
             "step_statuses": {k: v.value for k, v in self._step_statuses.items()},
         }
 
@@ -176,10 +230,17 @@ class StateMachine:
         steps: list[StepSpec],
         max_rollbacks: int = 3,
         max_interrupt_rollbacks: int = 10,
+        max_rollback_fallbacks: int = 3,
     ) -> StateMachine:
-        sm = cls(steps, max_rollbacks=max_rollbacks, max_interrupt_rollbacks=max_interrupt_rollbacks)
+        sm = cls(
+            steps,
+            max_rollbacks=max_rollbacks,
+            max_interrupt_rollbacks=max_interrupt_rollbacks,
+            max_rollback_fallbacks=max_rollback_fallbacks,
+        )
         sm._current_index = snapshot["current_index"]
         sm._rollback_count = snapshot["rollback_count"]
         sm._interrupt_rollback_count = snapshot.get("interrupt_rollback_count", 0)
+        sm._rollback_fallback_count = snapshot.get("rollback_fallback_count", 0)
         sm._step_statuses = {k: StepStatus(v) for k, v in snapshot["step_statuses"].items()}
         return sm

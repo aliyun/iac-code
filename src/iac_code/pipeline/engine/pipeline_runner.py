@@ -766,6 +766,54 @@ class PipelineRunner:
             return None
         return CleanupLedger(Path(session_dir) / "cleanup.yaml")
 
+    def _rollback_exhausted_reason(self, reason: str) -> str:
+        """Explain the exhausted rollback budget and list resources awaiting cleanup.
+
+        The fallback target re-confirms with the user, so it needs both the original
+        failure reason and the resources already rolled back or pending cleanup.
+        """
+        lines = [
+            _(
+                "The deployment rollback budget is exhausted, so the pipeline returned here "
+                "for you to confirm again instead of failing."
+            ),
+            _("Original failure reason: {reason}").format(reason=reason),
+        ]
+        resources = self._rollback_exhausted_cleanup_resources()
+        if resources:
+            lines.append(_("Resources already rolled back or awaiting cleanup:"))
+            lines.extend(
+                _("- provider={provider}, type={resource_type}, id={resource_id}, status={status}").format(
+                    provider=resource["provider"],
+                    resource_type=resource["resource_type"],
+                    resource_id=resource["resource_id"],
+                    status=resource["cleanup_status"],
+                )
+                for resource in resources
+            )
+        lines.append(_("Fix the template or deployment parameters and retry, or pick another candidate plan."))
+        return "\n".join(lines)
+
+    def _rollback_exhausted_cleanup_resources(self) -> list[dict[str, Any]]:
+        ledger = self.cleanup_ledger()
+        if ledger is None:
+            return []
+        try:
+            resources = ledger.pending_resources()
+        except Exception:
+            logger.warning("Failed to read cleanup ledger for rollback fallback", exc_info=True)
+            return []
+        return [
+            {
+                "provider": resource.provider,
+                "resource_type": resource.resource_type,
+                "resource_id": resource.resource_id,
+                "region_id": resource.region_id,
+                "cleanup_status": resource.cleanup_status,
+            }
+            for resource in resources
+        ]
+
     def _handle_resource_observed(
         self,
         step: StepSpec,
@@ -4182,9 +4230,15 @@ class PipelineRunner:
 
             if step_result.rollback_request:
                 target, reason = step_result.rollback_request
+                rollback_exhausted = bool(step_result.rollback_exhausted)
                 current_attempt_id = attempt.get("attempt_id")
+                if rollback_exhausted:
+                    reason = self._rollback_exhausted_reason(reason)
                 try:
-                    self.state_machine.rollback(target, reason)
+                    if rollback_exhausted:
+                        self.state_machine.rollback_fallback(target, reason)
+                    else:
+                        self.state_machine.rollback(target, reason)
                 except ValueError as exc:
                     valid_targets = self.state_machine.completed_non_future_rollback_targets()
                     error_message = f"Invalid rollback target {target!r}. Valid targets: {valid_targets}. ({exc})"
@@ -4291,7 +4345,7 @@ class PipelineRunner:
                     from_step=step.step_id,
                     to_step=target,
                     rollback_reason=reason,
-                    rollback_scope="parent",
+                    rollback_scope="rollback_exhausted_fallback" if rollback_exhausted else "parent",
                     stale_fields=stale,
                 )
                 emit_step_success_observability()
@@ -4305,6 +4359,7 @@ class PipelineRunner:
                         "to_step": target,
                         "reason": reason,
                         "stale_fields": stale,
+                        "rollback_exhausted": rollback_exhausted,
                     },
                 )
                 continue

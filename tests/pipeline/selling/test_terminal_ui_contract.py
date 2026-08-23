@@ -211,6 +211,17 @@ def test_deploying_pauses_when_interrupt_judge_fails():
     assert deploying.interrupt_judge_failure == "pause"
 
 
+def test_deploying_falls_back_to_confirm_and_select_when_rollbacks_are_exhausted():
+    loaded = load_pipeline_dir(_selling_pipeline_dir())
+    deploying = next(step for step in loaded.steps if step.step_id == "deploying")
+    confirm_and_select = next(step for step in loaded.steps if step.step_id == "confirm_and_select")
+
+    assert deploying.rollback_exhausted_target == "confirm_and_select"
+    # confirm_and_select must wait for the user so the fallback yields input_required
+    # instead of auto-advancing straight back into deploying.
+    assert confirm_and_select.auto_advance is False
+
+
 def test_deploying_success_requires_create_stack_complete_guard():
     loaded = load_pipeline_dir(_selling_pipeline_dir())
     deploying = next(step for step in loaded.steps if step.step_id == "deploying")

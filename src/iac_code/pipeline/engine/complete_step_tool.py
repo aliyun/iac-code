@@ -946,11 +946,10 @@ class CompleteStepTool(Tool):
         conclusion = tool_input["conclusion"]
         rollback = tool_input.get("rollback_request")
         rollback_tuple = (rollback["target_step"], rollback["reason"]) if rollback else None
-        if rollback_tuple and self._step_config.rollback_count >= self._step_config.max_rollbacks:
-            max_rollbacks = self._step_config.max_rollbacks
-            return _(
-                "Rollback count cannot exceed {max_rollbacks}. Complete the current step or ask the user for help."
-            ).format(max_rollbacks=max_rollbacks)
+        if self._rollback_budget_exhausted(rollback_tuple):
+            assert rollback_tuple is not None
+            if self._rollback_exhausted_fallback(rollback_tuple) is None:
+                return self._rollback_exhausted_error()
 
         validation_error = self._validate_conclusion(conclusion)
         if validation_error is None:
@@ -1028,6 +1027,25 @@ class CompleteStepTool(Tool):
             "Rollback target count cannot exceed {limit}; there are {count}. "
             "Ask the user for help or narrow the rollback targets before calling complete_step."
         ).format(limit=MAX_ROLLBACK_TARGETS, count=target_count)
+
+    def _rollback_budget_exhausted(self, rollback_tuple: tuple[str, str] | None) -> bool:
+        return bool(rollback_tuple) and self._step_config.rollback_count >= self._step_config.max_rollbacks
+
+    def _rollback_exhausted_error(self) -> str:
+        return _(
+            "Rollback count cannot exceed {max_rollbacks}. Complete the current step or ask the user for help."
+        ).format(max_rollbacks=self._step_config.max_rollbacks)
+
+    def _rollback_exhausted_fallback(self, rollback_tuple: tuple[str, str]) -> tuple[str, str] | None:
+        """Redirect an over-budget rollback to the configured fallback target.
+
+        Returns ``None`` when the step declares no fallback target, in which case the
+        caller keeps the original over-budget error and the pipeline terminates as before.
+        """
+        target = self._step_config.rollback_exhausted_target
+        if not target or target == self._step_config.step_id:
+            return None
+        return target, rollback_tuple[1]
 
     @staticmethod
     def _matches(pattern: str, value: str) -> bool:
@@ -1126,6 +1144,7 @@ class CompleteStepTool(Tool):
         conclusion = tool_input["conclusion"]
         rollback = tool_input.get("rollback_request")
         rollback_tuple = (rollback["target_step"], rollback["reason"]) if rollback else None
+        rollback_exhausted = False
 
         logger.debug(
             "[complete_step] step=%s input=%s",
@@ -1134,13 +1153,18 @@ class CompleteStepTool(Tool):
         )
 
         if rollback_tuple and self._step_config.rollback_count >= self._step_config.max_rollbacks:
-            max_rollbacks = self._step_config.max_rollbacks
-            return ToolResult(
-                content=_(
-                    "Rollback count cannot exceed {max_rollbacks}. Complete the current step or ask the user for help."
-                ).format(max_rollbacks=max_rollbacks),
-                is_error=True,
+            fallback = self._rollback_exhausted_fallback(rollback_tuple)
+            if fallback is None:
+                return ToolResult(content=self._rollback_exhausted_error(), is_error=True)
+            logger.info(
+                "[complete_step] step=%s rollback budget exhausted (%d/%d); falling back to %s for user confirmation",
+                self._step_config.step_id,
+                self._step_config.rollback_count,
+                self._step_config.max_rollbacks,
+                fallback[0],
             )
+            rollback_tuple = fallback
+            rollback_exhausted = True
 
         validation_error = self._validate_conclusion(conclusion)
         if validation_error is None:
@@ -1178,6 +1202,7 @@ class CompleteStepTool(Tool):
             status=StepStatus.COMPLETED,
             conclusion=conclusion,
             rollback_request=rollback_tuple,
+            rollback_exhausted=rollback_exhausted,
         )
 
         logger.debug(
