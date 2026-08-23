@@ -34,6 +34,7 @@ from iac_code.a2a.pipeline_paths import (
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.a2a.pipeline_stream import (
     BACKUP_COMMITTED_EVENT_TYPE,
+    UNAVAILABLE_BACKUP_VISIBILITY,
     PipelineA2AEventPublisher,
     backup_committed_delivery_envelope,
     committed_backup_publication_envelope,
@@ -89,6 +90,7 @@ _WAITING_A2A_STATUSES = {"waiting_input", "input_required"}
 _RUNNING_A2A_STATUSES = {"working"}
 _PENDING_BACKUP_VISIBILITY = "pending_backup"
 _COMMITTED_BACKUP_VISIBILITY = "committed"
+_UNAVAILABLE_BACKUP_VISIBILITY = UNAVAILABLE_BACKUP_VISIBILITY
 _WAITING_INPUT_CANCEL_LOCKS = PathLockRegistry()
 _TERMINAL_PUBLICATION_UNAVAILABLE_KIND = "terminal_publication_unavailable"
 _HANDOFF_PUBLICATION_UNAVAILABLE_ACTION = "switch_to_normal_unavailable"
@@ -2691,6 +2693,9 @@ class IacCodeA2APipelineExecutor:
                 "handoffEventId": handoff_envelope.get("eventId"),
             },
         )
+        # 降级兜底通道:告知客户端交接不可用,不是权威终态,审计计数必须排除。
+        marker["visibility"] = _UNAVAILABLE_BACKUP_VISIBILITY
+        marker["authoritative"] = False
         persisted = await publisher.persist_envelope(
             marker,
             require_durable_metadata=True,

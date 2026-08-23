@@ -363,6 +363,8 @@ Task 和 context IDs 必须非空，最多 128 个字符，并且只能包含字
 
 iac-code 使用 `TASK_STATE_INPUT_REQUIRED` 作为正常完成状态，因为 context 仍可用于后续消息。普通 A2A 轮次会把 `TASK_STATE_INPUT_REQUIRED` 视为这种正常完成状态；成功的轮次结束备份是非阻塞的 `normal_turn_end` 检查点。如果普通 A2A 的 terminal 或 cancellation 发布被关键备份门控阻塞，task metadata 会暴露 `metadata.iac_code.backupBlocked`，其中包含 `reason`、`error` 和 `recoverable`；客户端应等待恢复后再发送下一轮。Pipeline 模式会把备份失败作为 pipeline 事件发布，客户端应检查 `metadata.iac_code.pipeline.eventType == "backup_blocked"` 以及事件 data。Pipeline 模式不再执行步骤完成备份；`pipeline_step_completed` 仅为旧会话恢复保留。启用 `IAC_CODE_CONFIG_BACKUP_DIR` 后，`input_required` 和 `waiting_input` 会先发布，再执行唯一一次关键备份。`terminal` reason 仍会门控 terminal 发布，`handoff_ready` reason 仍会门控 `pipeline_handoff_ready` 事件类型。对于 terminal 和 `pipeline_handoff_ready` 的 committed 发布，iac-code 会持久化一个 `backup_committed` pipeline 事件，其 data 包含 `committedEventId`、`committedEventType` 和 `committedSequence`；客户端可先把它与受保护事件配对，再把该发布视为重启后可恢复。
 
+由于同一个逻辑终态可能在事件流中出现多次，每条受备份门控的发布都会在 `visibility` 之外额外携带显式的 `authoritative` 布尔字段。`pending_backup` 预写记录和降级兜底的 `pipeline_handoff_ready`（`visibility: "unavailable"`、`data.action: "switch_to_normal_unavailable"`）都是 `authoritative: false`，只有 `committed` 发布才是 `authoritative: true`。做审计或监控计数的客户端必须按 `(eventType, pipelineRunId)` 归并并只保留权威事件，否则一次取消会被统计成多条 `pipeline_canceled` 和 `pipeline_handoff_ready`。没有该字段的信封属于旧版本，应回退到 `visibility` 判断。
+
 A2A Server 启用 `IAC_CODE_CONFIG_BACKUP_TMP_DIR` 时，`backup_committed` 确认的是本地不可变快照，可用于同一 sandbox 内恢复，并不表示最终备份目录已经更新。后台进程将快照复制到 `IAC_CODE_CONFIG_BACKUP_DIR` 后，跨 sandbox 恢复才可用。未启用临时目录时，`backup_committed` 仍然确认最终备份目录。
 
 ## 流式更新

@@ -1502,6 +1502,60 @@ def test_projection_keeps_step_boundaries_and_coordinates_ahead_of_recent_tools(
     assert len(bridge._json_bytes(projection)) + 1 <= bridge.MAX_PROJECTION_BYTES
 
 
+def test_projection_merges_backup_gated_terminal_events_into_one_authoritative_each() -> None:
+    """一次取消在 journal 里留下 pending_backup / committed / unavailable 多条同类型记录,
+    投影只应保留权威终态,否则会出现 pipeline_canceled x3、pipeline_handoff_ready x4。"""
+
+    def terminal(sequence, event_type, visibility, authoritative, data=None):
+        return {
+            "eventType": event_type,
+            "status": "canceled",
+            "sequence": sequence,
+            "pipelineRunId": "ctx-1",
+            "visibility": visibility,
+            "authoritative": authoritative,
+            "data": data or {},
+        }
+
+    events = [
+        terminal(1, "pipeline_canceled", "pending_backup", False),
+        terminal(2, "pipeline_handoff_ready", "pending_backup", False),
+        terminal(3, "pipeline_canceled", "committed", True),
+        terminal(4, "pipeline_handoff_ready", "committed", True),
+        terminal(5, "pipeline_canceled", "committed", True, {"recovered": True}),
+        terminal(6, "pipeline_handoff_ready", "committed", True, {"recovered": True}),
+        terminal(
+            7,
+            "pipeline_handoff_ready",
+            "unavailable",
+            False,
+            {"action": "switch_to_normal_unavailable", "unavailable": True},
+        ),
+    ]
+    frame = {
+        "result": {
+            "statusUpdate": {
+                "taskId": "task-1",
+                "contextId": "ctx-1",
+                "status": {"state": "TASK_STATE_CANCELED"},
+                "metadata": {"iac_code": {"pipelineBatch": {"events": events}}},
+            }
+        }
+    }
+
+    projection = bridge.project_frame(frame)
+
+    event_types = [milestone["eventType"] for milestone in projection["milestones"]]
+    assert event_types.count("pipeline_canceled") == 1
+    assert event_types.count("pipeline_handoff_ready") == 1
+    sequences = {
+        milestone["eventType"]: milestone["sequence"]
+        for milestone in projection["milestones"]
+        if milestone["eventType"] in {"pipeline_canceled", "pipeline_handoff_ready"}
+    }
+    assert sequences == {"pipeline_canceled": 5, "pipeline_handoff_ready": 6}
+
+
 def test_projection_keeps_bounded_step_one_and_two_conclusion_summaries() -> None:
     events = [
         {

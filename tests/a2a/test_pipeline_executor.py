@@ -4045,7 +4045,10 @@ async def test_pipeline_completed_handoff_enqueue_failure_keeps_terminal_availab
         and event["data"].get("action") == "switch_to_normal_unavailable"
     ]
     assert len(unavailable_handoff) == 1
-    assert unavailable_handoff[0].get("visibility") is None
+    # 降级兜底标记走独立的 unavailable 通道:既不是 pending_backup(否则 reducer 会把它
+    # 记成 pendingNormalHandoff),也不是权威终态(审计计数必须排除)。
+    assert unavailable_handoff[0].get("visibility") == "unavailable"
+    assert unavailable_handoff[0].get("authoritative") is False
     snapshot = A2APipelineSnapshotStore(session_dir).load()
     assert snapshot is not None
     assert snapshot["status"] == "completed"

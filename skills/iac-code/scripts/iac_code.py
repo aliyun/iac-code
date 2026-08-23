@@ -92,6 +92,13 @@ CLEANUP_EVENT_TYPES = {"cleanup_started", "cleanup_progress", "cleanup_completed
 CLEANUP_PENDING_STATES = {"pending", "started", "in_progress", "running"}
 CLEANUP_TERMINAL_STATES = {"completed", "failed", "none", "unavailable"}
 PROGRESS_BOUNDARY_EVENT_TYPES = STEP_BOUNDARY_EVENT_TYPES | CLEANUP_EVENT_TYPES
+MERGEABLE_TERMINAL_EVENT_TYPES = {
+    "pipeline_completed",
+    "pipeline_failed",
+    "pipeline_canceled",
+    "pipeline_handoff_ready",
+}
+NON_AUTHORITATIVE_VISIBILITIES = {"pending_backup", "unavailable"}
 CACHE_RESERVED_DIRECTORIES = {"jobs", "servers"}
 SUPPORTED_LANGUAGES = ("en", "zh", "es", "fr", "de", "ja", "pt")
 SKILL_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -1102,6 +1109,54 @@ def _sanitize_text(value, maximum=MAX_PUBLIC_TEXT):
     return value[:maximum]
 
 
+def _event_visibility(event):
+    visibility = event.get("visibility")
+    if isinstance(visibility, str):
+        return visibility
+    data = event.get("data")
+    data_visibility = data.get("visibility") if isinstance(data, dict) else None
+    return data_visibility if isinstance(data_visibility, str) else "committed"
+
+
+def _is_authoritative_pipeline_event(event):
+    """旧信封没有 authoritative 标记时回退到 visibility,保持向后兼容。"""
+    authoritative = event.get("authoritative")
+    if isinstance(authoritative, bool):
+        return authoritative
+    return _event_visibility(event) not in NON_AUTHORITATIVE_VISIBILITIES
+
+
+def _event_sequence(event):
+    try:
+        return int(event.get("sequence"))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _authoritative_pipeline_events(events):
+    """按 (eventType, pipelineRunId) 归并受备份门控保护的终态事件。
+
+    同一逻辑终态只保留 sequence 最大的那一条(committed 晚于 pending,恢复补发晚于原发布),
+    备份/降级通道记录整体剔除。其余事件原样保留。
+    """
+    latest_terminal = {}
+    passthrough = []
+    for event in events:
+        if not isinstance(event, dict) or not _is_authoritative_pipeline_event(event):
+            continue
+        event_type = event.get("eventType")
+        if event_type not in MERGEABLE_TERMINAL_EVENT_TYPES:
+            passthrough.append(event)
+            continue
+        key = (event_type, event.get("pipelineRunId"))
+        previous = latest_terminal.get(key)
+        if previous is None or _event_sequence(event) >= _event_sequence(previous):
+            latest_terminal[key] = event
+    merged = passthrough + list(latest_terminal.values())
+    merged.sort(key=_event_sequence)
+    return merged
+
+
 def _truncate_utf8(value, maximum):
     encoded = value.encode("utf-8")
     if len(encoded) <= maximum:
@@ -1784,6 +1839,10 @@ def project_frame(frame):
             if id(item) in recent_ids
             or (isinstance(item, dict) and item.get("eventType") in PROGRESS_BOUNDARY_EVENT_TYPES)
         ]
+        # 终态事件受关键备份门控保护,同一逻辑终态会有 pending_backup 预写、committed 权威
+        # 发布和 unavailable 降级兜底多条同类型记录。归并后只保留权威事件,否则一次取消会被
+        # 统计成 pipeline_canceled x3 / pipeline_handoff_ready x4。
+        selected_items = _authoritative_pipeline_events(selected_items)
         for item in selected_items:
             if not isinstance(item, dict) or item.get("eventType") not in allowed_types:
                 continue

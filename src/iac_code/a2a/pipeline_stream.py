@@ -62,6 +62,7 @@ PipelineBackupCommitGate = Callable[[dict[str, Any]], bool]
 logger = logging.getLogger(__name__)
 PENDING_BACKUP_VISIBILITY = "pending_backup"
 COMMITTED_BACKUP_VISIBILITY = "committed"
+UNAVAILABLE_BACKUP_VISIBILITY = "unavailable"
 BACKUP_COMMITTED_EVENT_TYPE = "backup_committed"
 _ARTIFACT_SEMANTIC_METADATA_KEYS = ("role", "supersedesPath", "supersedesKey", "supersedesFingerprint")
 _RECOVERY_SEMANTIC_EVENT_TYPES = {
@@ -1529,6 +1530,8 @@ def _permission_approval_metadata(approved: bool) -> dict[str, Any]:
 def pending_backup_publication_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
     pending = dict(to_json_safe(envelope) or {})
     pending["visibility"] = PENDING_BACKUP_VISIBILITY
+    # 备份预写通道:同一逻辑终态还会有一条 committed 记录,审计计数必须排除这条。
+    pending["authoritative"] = False
     return pending
 
 
@@ -1545,6 +1548,8 @@ def committed_backup_publication_envelope(
         data=data,
     )
     envelope["visibility"] = COMMITTED_BACKUP_VISIBILITY
+    # 唯一权威终态发布;审计按 (eventType, pipelineRunId) 归并时只认这一条。
+    envelope["authoritative"] = True
     created_at = pending_envelope.get("createdAt")
     if isinstance(created_at, str) and created_at:
         envelope["createdAt"] = created_at
@@ -1820,6 +1825,7 @@ def _int_value(value: Any, default: int) -> int:
 __all__ = [
     "COMMITTED_BACKUP_VISIBILITY",
     "PENDING_BACKUP_VISIBILITY",
+    "UNAVAILABLE_BACKUP_VISIBILITY",
     "PipelineA2AEventPublisher",
     "PipelineAfterBackupCommitHook",
     "PipelineBackupCommitGate",
