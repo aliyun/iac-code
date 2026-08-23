@@ -7,6 +7,49 @@
 - ALIYUN::ECS::SecurityGroup: 创建安全组（同时支持安全组规则）
 - ALIYUN::ECS::InstanceGroup: 创建N个ECS实例（通过 `MaxAmount` 指定数量）
 
+## 元素级完备性
+
+结构合法（`ros_validate_template` 通过）不代表模板完整。以下元素即使 ROS 校验不要求，也必须显式写出——缺失会让模板与业务期望的参考模板产生元素级差异：
+
+| 元素 | 适用范围 | 要求 |
+|------|---------|------|
+| `Tags` | 所有支持标签的资源 | 至少带一个标识业务用途的标签，便于分账和检索 |
+| 安全组 Ingress 规则 | 每个 `ALIYUN::ECS::SecurityGroup` | 按实际暴露端口逐条写出，不依赖默认规则 |
+| `DeletionPolicy` | 有状态资源（RDS、Redis、OSS 等） | 显式声明，避免误删数据 |
+| Outputs `Label` | 所有输出变量 | 必须定义；应用访问链接用 `Console.` 前缀 |
+
+标签和安全组规则属于「不需要参数化」的元素：直接使用合理默认值写在模板里，不要定义成 Parameters。完备性要求这些元素**存在**，参数化规则约束元素**取值来源**，两者不冲突。
+
+```yaml
+Resources:
+  WebSecurityGroup:
+    Type: ALIYUN::ECS::SecurityGroup
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: app
+          Value: web
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          PortRange: 80/80
+          SourceCidrIp: 0.0.0.0/0
+          Priority: 1
+        - IpProtocol: tcp
+          PortRange: 443/443
+          SourceCidrIp: 0.0.0.0/0
+          Priority: 1
+
+  AppDatabase:
+    Type: ALIYUN::RDS::DBInstance
+    DeletionPolicy: Retain
+    Properties:
+      Tags:
+        - Key: app
+          Value: web
+```
+
+用户明确要求资源可随栈删除时，把 `DeletionPolicy` 显式写成 `Delete`，而不是省略该字段。
+
 ## 在实例中执行命令
 
 **不要使用 UserData + WaitCondition**。根据场景选择：

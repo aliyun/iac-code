@@ -17,6 +17,7 @@ SKILL_DIR = (
 SKILL_MD = SKILL_DIR / "SKILL.md"
 EVALS_JSON = SKILL_DIR / "evals.json"
 TEMPLATE_PROMPT_MD = SKILL_DIR.parents[1] / "prompts" / "template_generating.md"
+ROS_TEMPLATE_REFERENCE_MD = SKILL_DIR / "references" / "ros-template.md"
 
 
 def _parse_frontmatter(text: str) -> dict:
@@ -143,6 +144,46 @@ class TestSkillContentRosOnly:
         assert "bash" not in body.lower()
         assert "mkdir" not in body.lower()
 
+    def test_requires_element_completeness_checklist(self, body):
+        assert "元素级完备性" in body
+        assert "references/ros-template.md" in body
+        assert "校验通过不代表完备" in body
+        assert "清单未逐项自检不得提交结论" in body
+
+    def test_element_completeness_selfcheck_precedes_validation(self, body):
+        checklist_index = body.index("「元素级完备性」清单逐项自检")
+        validate_index = body.index("调用 `ros_validate_template` 校验")
+        assert checklist_index < validate_index
+
+
+class TestElementCompletenessReference:
+    @pytest.fixture()
+    def reference(self) -> str:
+        return ROS_TEMPLATE_REFERENCE_MD.read_text(encoding="utf-8")
+
+    def test_reference_is_reachable_from_skill_dir(self):
+        assert ROS_TEMPLATE_REFERENCE_MD.exists()
+
+    def test_declares_element_completeness_section(self, reference):
+        assert "## 元素级完备性" in reference
+
+    def test_lists_elements_missing_from_generated_templates(self, reference):
+        assert "Tags" in reference
+        assert "SecurityGroupIngress" in reference
+        assert "DeletionPolicy" in reference
+
+    def test_states_validation_success_is_not_completeness(self, reference):
+        assert "结构合法" in reference
+        assert "不代表模板完整" in reference
+
+    def test_reconciles_completeness_with_parameterization_rule(self, reference):
+        assert "不要定义成 Parameters" in reference
+        assert "两者不冲突" in reference
+
+    def test_deletion_policy_stays_explicit_when_resources_are_disposable(self, reference):
+        assert "`Delete`" in reference
+        assert "而不是省略该字段" in reference
+
 
 class TestSkillDiscovery:
     def test_discovered_by_pipeline_loader(self):
@@ -184,6 +225,17 @@ class TestSkillPromptRendering:
         assert "不要把候选推荐值当成用户硬约束" not in body
         assert "查询可用区、实例规格" not in body
         assert "对用户未指定的参数直接使用合理默认值" not in body
+
+    def test_prompt_defines_completeness_instead_of_validation_success(self):
+        body = TEMPLATE_PROMPT_MD.read_text(encoding="utf-8")
+        assert "元素级完备性" in body
+        assert "不是「校验通过即完整」" in body
+
+    def test_prompt_requires_selfcheck_before_completing_step(self):
+        body = TEMPLATE_PROMPT_MD.read_text(encoding="utf-8")
+        selfcheck_index = body.index("逐项自检并补齐缺失元素")
+        complete_index = body.index("再调用 `complete_step` 提交结论")
+        assert selfcheck_index < complete_index
 
     def test_full_prompt_includes_skill_base_directory(self, tmp_path):
         from iac_code.pipeline.engine.context import PipelineContext

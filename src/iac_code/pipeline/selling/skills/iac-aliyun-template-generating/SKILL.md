@@ -46,9 +46,10 @@ conclusion_schema:
 3. **必须**阅读 [references/ros-template.md](references/ros-template.md)，了解 ROS 模板最佳实践，未阅读不得生成模板
 4. 生成 ROS YAML 模板（库存相关属性按 [references/cloud-products/](references/cloud-products/) 与 [references/template-parameters.md](references/template-parameters.md) 定义为 Parameters，所有 Parameters 必须添加 AssociationProperty）并写入文件
    - 生成的模板默认放在当前工作目录；仅当用户指定其他路径时才写入该路径，不要默认使用 `/tmp` 等工作目录外路径
-5. 调用 `ros_validate_template` 校验；`template_url` 使用刚写入的模板文件路径，已有具体地域时传 `region_id`，否则使用工具默认地域
-6. 校验失败 → 分析错误 → 修复 → 重试（最多 5 轮）
-7. 校验通过 → 完成
+5. 按 [references/ros-template.md](references/ros-template.md) 的「元素级完备性」清单逐项自检，补齐缺失元素后再校验
+6. 调用 `ros_validate_template` 校验；`template_url` 使用刚写入的模板文件路径，已有具体地域时传 `region_id`，否则使用工具默认地域
+7. 校验失败 → 分析错误 → 修复 → 重试（最多 5 轮）
+8. 校验通过 → 完成
 
 > **模板路径支持本地文件**：`ros_validate_template` 的 `template_url` 可传当前工作目录内的本地文件路径（如 `./template.yml`）。避免将大模板内容直接作为参数传递。
 
@@ -93,6 +94,7 @@ conclusion_schema:
 - 模板格式为 YAML
 - 使用 `!Ref`、`!GetAtt` 等内置函数引用参数和资源属性，避免硬编码
 - Outputs 中所有输出变量必须定义 Label
+- **必须**满足 [references/ros-template.md](references/ros-template.md) 的「元素级完备性」清单：资源 Tags、安全组 Ingress 规则、有状态资源 DeletionPolicy、Outputs Label。校验通过不代表完备，清单未逐项自检不得提交结论
 
 ## 资源和文档搜索
 
