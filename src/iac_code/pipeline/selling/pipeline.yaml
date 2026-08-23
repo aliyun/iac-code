@@ -473,6 +473,7 @@ steps:
     context_fields: [evaluated_candidates]
     auto_advance: false
     ui_mode: candidate_selection
+    hooks_file: hooks/confirm_and_select.py
     inject_tools: [show_architecture_diagram, show_candidate_detail]
     surface_overrides:
       a2a:

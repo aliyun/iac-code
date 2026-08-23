@@ -64,3 +64,4 @@
 - 不要在本步骤重新询价。
 - 不要修改模板 Default。
 - 不要把 `parameter_overrides` 写入模板；后续部署步骤会基于最终选择结果处理部署参数。
+- 成本一致性：流程已把跨步骤成本偏差写入 `evaluated_candidates[i].cost_consistency`。当某候选 `cost_consistency.exceeds_threshold` 为 `true` 时，其 `summary` 必须以成本预估真实询价为准并说明与规划预估的偏差倍数（取 `cost_consistency.deviation_ratio`），`user_prompt` 需提醒用户实际月费与规划预估显著偏差，确认真实月费后再选择部署。

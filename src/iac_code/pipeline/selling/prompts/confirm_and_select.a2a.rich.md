@@ -28,6 +28,12 @@
 
 不要使用 `evaluated_candidates[i].candidate.monthly_estimate`，它只是架构规划阶段的粗略估算。不要重新询价或自行补算价格。若费用明细没有规格字段，省略 `spec`，不要猜测。
 
+### 成本一致性回显（跨步骤偏差告警）
+
+流程已在进入本步骤前对每个候选比对「架构规划粗估」与「成本预估真实询价」，结果写入 `evaluated_candidates[i].cost_consistency`。当某候选的 `cost_consistency.exceeds_threshold` 为 `true` 时：
+- 该候选的 `summary` 必须以真实询价 `total_monthly_cost` 为准，并明确说明它与规划预估的偏差倍数（取 `cost_consistency.deviation_ratio`）。
+- `user_prompt` 必须提醒用户成本与规划预估存在显著偏差，请在确认真实月费后再选择部署，不得沿用规划粗估口径。
+
 `user_prompt`、`summary` 和 Mermaid 节点标签应使用用户当前语言；字段名、枚举值和其他协议字段保持上面的固定形式。
 
 `complete_step.conclusion.user_prompt` 必须是展示给用户的选择提示，例如“请选择要部署的方案：”。

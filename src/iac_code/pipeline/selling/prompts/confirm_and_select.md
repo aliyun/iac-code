@@ -50,6 +50,13 @@
 
 不要使用 `evaluated_candidates[i].candidate.monthly_estimate`，该字段是架构规划阶段的粗略估算。不要重新询价，也不要重新估算价格。
 
+### 成本一致性回显（跨步骤偏差告警）
+
+流程已在进入本步骤前对每个候选比对「架构规划粗估」与「成本预估真实询价」，结果写入 `evaluated_candidates[i].cost_consistency`。展示方案时：
+- 始终以 `cost.monthly_estimate`（真实询价）作为用户看到的月费口径。
+- 当某候选的 `cost_consistency.exceeds_threshold` 为 `true` 时，必须在该方案摘要或选择提示中明确重述真实月费，并说明它与规划预估的偏差倍数（取 `cost_consistency.deviation_ratio`、`cost_consistency.message`），提示用户实际账单以询价为准。
+- 存在任一超阈值候选时，`user_prompt` 必须提醒用户成本与规划预估存在显著偏差，请在确认真实月费后再选择部署；不得沿用规划粗估口径诱导确认。
+
 如果多个方案都需要展示，必须对每个方案都调用一次“架构图 + 方案详情”的并行展示；不要为了架构图优化额外阻塞方案详情展示。
 
 - 不要用文字输出对比表格或方案信息 — 所有展示数据通过上述工具传递
