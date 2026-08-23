@@ -4,7 +4,11 @@ from unittest.mock import MagicMock
 
 import yaml
 
-from iac_code.pipeline.engine.handoff import build_handoff_summary, terminal_outcome_from_completed_event
+from iac_code.pipeline.engine.handoff import (
+    build_handoff_summary,
+    candidate_progress_from_execution,
+    terminal_outcome_from_completed_event,
+)
 from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
 
 
@@ -181,3 +185,115 @@ def test_runner_build_normal_handoff_summary_uses_configured_context_values(tmp_
     assert "Outcome: completed" in summary
     assert '"summary": "deploy nginx"' in summary
     assert "Missing context fields:\n- architecture" in summary
+
+
+def _evaluate_candidates_execution() -> dict:
+    return {
+        "kind": "parallel_sub_pipeline",
+        "step_id": "evaluate_candidates",
+        "sub_pipeline_name": "evaluate_candidate",
+        "candidates": {
+            "1": {
+                "status": "running",
+                "candidate": {"name": "低成本单机"},
+                "current_sub_step": "template_generating",
+                "step_conclusions": {},
+                "tool_result_cache": {"k1": {}, "k2": {}, "k3": {}},
+            },
+            "0": {
+                "status": "running",
+                "candidate": {"name": "高可用多可用区"},
+                "current_sub_step": "cost_estimating",
+                "step_conclusions": {"template_generating": {"file_path": "ha.yaml"}},
+                "tool_result_cache": {"k1": {}},
+            },
+        },
+    }
+
+
+def test_candidate_progress_from_execution_lists_completed_and_pending_sub_steps():
+    progress = candidate_progress_from_execution(
+        _evaluate_candidates_execution(),
+        ["template_generating", "cost_estimating"],
+    )
+
+    assert progress == [
+        {
+            "candidate_index": 0,
+            "candidate_name": "高可用多可用区",
+            "status": "running",
+            "current_sub_step": "cost_estimating",
+            "completed_sub_steps": ["template_generating"],
+            "pending_sub_steps": ["cost_estimating"],
+            "cached_tool_results": 1,
+        },
+        {
+            "candidate_index": 1,
+            "candidate_name": "低成本单机",
+            "status": "running",
+            "current_sub_step": "template_generating",
+            "completed_sub_steps": [],
+            "pending_sub_steps": ["template_generating", "cost_estimating"],
+            "cached_tool_results": 3,
+        },
+    ]
+
+
+def test_candidate_progress_from_execution_ignores_unrelated_execution_state():
+    assert candidate_progress_from_execution(None, ["template_generating"]) == []
+    assert candidate_progress_from_execution({}, ["template_generating"]) == []
+    assert candidate_progress_from_execution({"kind": "step", "candidates": {}}, ["template_generating"]) == []
+    assert (
+        candidate_progress_from_execution(
+            {"kind": "parallel_sub_pipeline", "candidates": "nope"},
+            ["template_generating"],
+        )
+        == []
+    )
+
+
+def test_build_handoff_summary_includes_machine_readable_candidate_progress():
+    progress = candidate_progress_from_execution(
+        _evaluate_candidates_execution(),
+        ["template_generating", "cost_estimating"],
+    )
+
+    summary = build_handoff_summary(
+        pipeline_name="selling",
+        outcome="canceled",
+        context_snapshot={"intent": {"summary": "部署 NAS"}},
+        include_fields=["intent", "evaluated_candidates"],
+        candidate_progress=progress,
+    )
+
+    assert "Candidate sub-step progress:" in summary
+    assert '"candidate_index": 0' in summary
+    assert '"completed_sub_steps": [' in summary
+    assert '"pending_sub_steps": [' in summary
+    assert '"cached_tool_results": 3' in summary
+    assert "reuse them instead of re-evaluating the candidate from scratch" in summary
+    # Existing handoff structure is preserved.
+    assert "Missing context fields:\n- evaluated_candidates" in summary
+
+
+def test_build_handoff_summary_omits_progress_section_without_candidates():
+    summary = build_handoff_summary(
+        pipeline_name="selling",
+        outcome="completed",
+        context_snapshot={},
+        include_fields=[],
+    )
+
+    assert "Candidate sub-step progress:" not in summary
+
+
+def test_runner_build_normal_handoff_summary_includes_candidate_progress(tmp_path):
+    runner = _make_runner(tmp_path, _switch_policy("canceled", include=["intent"]))
+    runner.context.set_conclusion("intent", {"summary": "部署 NAS"})
+    runner._execution = _evaluate_candidates_execution()
+
+    summary = runner.build_normal_handoff_summary({"canceled": True})
+
+    assert "Outcome: canceled" in summary
+    assert "Candidate sub-step progress:" in summary
+    assert '"candidate_name": "高可用多可用区"' in summary

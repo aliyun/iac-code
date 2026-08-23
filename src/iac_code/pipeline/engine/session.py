@@ -559,6 +559,10 @@ class PipelineSession:
         attempts = self._load_existing_meta().get("attempts")
         return attempts if isinstance(attempts, dict) else None
 
+    def load_execution_metadata(self) -> dict[str, Any] | None:
+        execution = self._load_existing_meta().get("execution")
+        return execution if isinstance(execution, dict) else None
+
     def peek_prerequisites_sync(self) -> dict[str, Any]:
         prerequisites = self._load_existing_meta().get("prerequisites")
         if not isinstance(prerequisites, dict):

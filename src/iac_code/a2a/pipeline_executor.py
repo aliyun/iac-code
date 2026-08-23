@@ -58,7 +58,11 @@ from iac_code.pipeline import create_pipeline, discover_pipelines
 from iac_code.pipeline.config import get_pipeline_name, is_selling_review_step_enabled
 from iac_code.pipeline.engine.cleanup import CleanupLedger
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
-from iac_code.pipeline.engine.handoff import build_handoff_summary, terminal_outcome_from_completed_event
+from iac_code.pipeline.engine.handoff import (
+    build_handoff_summary,
+    candidate_progress_from_execution,
+    terminal_outcome_from_completed_event,
+)
 from iac_code.pipeline.engine.loader import _resolve_feature_flags, load_pipeline_dir
 from iac_code.pipeline.engine.prerequisites import inspect_prerequisites
 from iac_code.pipeline.engine.public_errors import public_error
@@ -3912,6 +3916,11 @@ def _waiting_input_cancel_handoff_event(
         outcome="canceled",
         context_snapshot=context_snapshot,
         include_fields=include_fields,
+        candidate_progress=_candidate_progress_from_sidecar(
+            cwd=cwd,
+            session_id=session_id,
+            loaded_pipeline=loaded_pipeline,
+        ),
     )
     data: dict[str, Any] = {
         "action": "switch_to_normal",
@@ -3954,6 +3963,28 @@ def _flat_pipeline_context_from_sidecar(*, cwd: str, session_id: str) -> dict[st
     if not isinstance(context_snapshot, dict):
         return {}
     return _flatten_pipeline_context_snapshot(context_snapshot)
+
+
+def _candidate_progress_from_sidecar(*, cwd: str, session_id: str, loaded_pipeline: Any) -> list[dict[str, Any]]:
+    """Candidate sub-step progress for a cancel handoff, read from the pipeline sidecar.
+
+    Cancelling during ``evaluate_candidates`` leaves the per-candidate progress only
+    in sidecar metadata, so the flat context snapshot alone cannot tell normal chat
+    which candidate sub-steps already finished.
+    """
+    try:
+        session = PipelineSession(SessionStorage().session_dir(cwd, session_id) / "pipeline")
+        execution = session.load_execution_metadata()
+    except Exception:
+        logger.warning("Failed to load candidate progress for A2A cancel handoff", exc_info=True)
+        return []
+    if not isinstance(execution, dict):
+        return []
+    sub_pipeline_name = execution.get("sub_pipeline_name")
+    sub_pipelines = getattr(loaded_pipeline, "sub_pipelines", {})
+    sub_spec = sub_pipelines.get(sub_pipeline_name) if isinstance(sub_pipelines, dict) else None
+    sub_step_ids = [str(step.step_id) for step in getattr(sub_spec, "steps", [])] if sub_spec is not None else []
+    return candidate_progress_from_execution(execution, sub_step_ids)
 
 
 def _flat_pipeline_context_from_a2a_snapshot(snapshot: dict[str, Any] | None, loaded_pipeline: Any) -> dict[str, Any]:

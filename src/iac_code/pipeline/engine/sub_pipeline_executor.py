@@ -14,6 +14,7 @@ from typing import Any
 
 from iac_code.agent.message import ContentBlock, Message
 from iac_code.i18n import _
+from iac_code.pipeline.engine.candidate_tool_cache import CandidateToolResultCache
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.observability import PipelineObservability
@@ -24,7 +25,7 @@ from iac_code.pipeline.engine.step_executor import StepExecutor
 from iac_code.pipeline.engine.step_spec import LoadedPipeline, SubPipelineSpec
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.services.session_backup import SessionBackupBlocked
-from iac_code.types.stream_events import SubPipelineStreamEvent
+from iac_code.types.stream_events import SubPipelineStreamEvent, ToolResultEvent, ToolUseEndEvent
 from iac_code.utils.public_errors import sanitize_strict_text
 
 logger = logging.getLogger(__name__)
@@ -385,9 +386,14 @@ class SubPipelineExecutor:
         sub_step_attempt_allocator: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         sub_step_state_callback: Callable[[dict[str, Any]], Any] | None = None,
         precompleted_tools: dict[str, dict[str, Any]] | None = None,
+        tool_result_cache: CandidateToolResultCache | None = None,
     ) -> AsyncGenerator[PipelineEvent | SubPipelineStreamEvent, None]:
         """Execute sub-pipeline yielding all events in real-time for UI rendering."""
         self._observability.session_id = session_id
+        if tool_result_cache is None:
+            tool_result_cache = CandidateToolResultCache.from_snapshot(
+                (resume_state or {}).get("tool_result_cache"),
+            )
         sub_pipeline_id = (
             str(resume_state["sub_pipeline_id"])
             if resume_state and resume_state.get("sub_pipeline_id")
@@ -487,6 +493,7 @@ class SubPipelineExecutor:
         sub_step_started_at: float | None = None
         current_sub_step_id: str | None = None
         attempt_info: dict[str, Any] | None = None
+        pending_tool_inputs: dict[str, tuple[str, dict[str, Any]]] = {}
 
         async def publish_sub_step_state(
             *,
@@ -514,6 +521,7 @@ class SubPipelineExecutor:
                 "transcript_id": attempt_info.get("transcript_id"),
                 "conclusions": dict(conclusions),
                 "step_conclusions": dict(step_conclusions),
+                "tool_result_cache": tool_result_cache.to_snapshot(),
             }
             result = sub_step_state_callback(payload)
             if asyncio.iscoroutine(result):
@@ -637,7 +645,14 @@ class SubPipelineExecutor:
                         )
 
                         step_msg = user_message if is_first_step else None
-                        step_precompleted_tools = precompleted_tools if is_first_step else None
+                        step_precompleted_tools: dict[str, dict[str, Any]] = (
+                            dict(precompleted_tools) if is_first_step and precompleted_tools else {}
+                        )
+                        # Replay read-only lookups already completed for this candidate sub-step so a
+                        # run resumed mid-sub-step does not repeat the same schema/pricing queries.
+                        cached_precompleted = tool_result_cache.precompleted_tools_for(candidate_index, step.step_id)
+                        for cached_tool_name, cached_result in cached_precompleted.items():
+                            step_precompleted_tools.setdefault(cached_tool_name, cached_result)
                         attempt_resume_messages = attempt_info.get("resume_messages")
                         if not isinstance(attempt_resume_messages, list):
                             attempt_resume_messages = []
@@ -660,7 +675,7 @@ class SubPipelineExecutor:
                                 "attempt_id": attempt_info.get("attempt_id"),
                                 "transcript_id": attempt_info.get("transcript_id"),
                                 "resume_messages": step_resume_messages,
-                                "precompleted_tools": step_precompleted_tools,
+                                "precompleted_tools": step_precompleted_tools or None,
                                 "rollback_targets": state_machine.completed_non_future_rollback_targets(),
                                 "rollback_count": state_machine.rollback_count,
                                 "max_rollbacks": state_machine.max_rollbacks,
@@ -687,6 +702,13 @@ class SubPipelineExecutor:
                                     # Forward pipeline-level events from the step executor directly
                                     yield event
                                 else:
+                                    self._record_cacheable_tool_event(
+                                        tool_result_cache,
+                                        event,
+                                        pending_tool_inputs,
+                                        candidate_index=candidate_index,
+                                        sub_step_id=step.step_id,
+                                    )
                                     yield SubPipelineStreamEvent(
                                         sub_pipeline_id=sub_pipeline_id,
                                         candidate_index=candidate_index,
@@ -988,6 +1010,32 @@ class SubPipelineExecutor:
                     "step_conclusions": step_conclusions,
                 },
             ),
+        )
+
+    @staticmethod
+    def _record_cacheable_tool_event(
+        tool_result_cache: CandidateToolResultCache,
+        event: Any,
+        pending_tool_inputs: dict[str, tuple[str, dict[str, Any]]],
+        *,
+        candidate_index: int,
+        sub_step_id: str,
+    ) -> None:
+        """Track tool inputs and cache successful read-only results for resume replay."""
+        if isinstance(event, ToolUseEndEvent):
+            tool_input = event.input if isinstance(event.input, dict) else {}
+            pending_tool_inputs[event.tool_use_id] = (event.name, tool_input)
+            return
+        if not isinstance(event, ToolResultEvent) or event.is_error:
+            return
+        pending = pending_tool_inputs.pop(event.tool_use_id, None)
+        tool_name, tool_input = pending if pending is not None else (event.tool_name, {})
+        tool_result_cache.record(
+            candidate_index=candidate_index,
+            sub_step_id=sub_step_id,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            result={"result": event.result, "metadata": event.metadata},
         )
 
     def _build_sub_context(

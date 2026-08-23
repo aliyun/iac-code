@@ -19,6 +19,7 @@ from unittest.mock import Mock
 
 from iac_code.agent.message import ContentBlock, Message, ToolResultBlock
 from iac_code.i18n import _
+from iac_code.pipeline.engine.candidate_tool_cache import CandidateToolResultCache
 from iac_code.pipeline.engine.cleanup import (
     CleanupLedger,
     CleanupLedgerWriteStatus,
@@ -28,7 +29,11 @@ from iac_code.pipeline.engine.cleanup import (
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.display_replay import DISPLAY_TRANSCRIPT_FILENAME
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType, backup_blocked_event
-from iac_code.pipeline.engine.handoff import build_handoff_summary, terminal_outcome_from_completed_event
+from iac_code.pipeline.engine.handoff import (
+    build_handoff_summary,
+    candidate_progress_from_execution,
+    terminal_outcome_from_completed_event,
+)
 from iac_code.pipeline.engine.interrupt import InterruptController, InterruptVerdict
 from iac_code.pipeline.engine.loader import load_pipeline_dir
 from iac_code.pipeline.engine.observability import PipelineObservability
@@ -1002,7 +1007,18 @@ class PipelineRunner:
             outcome=outcome,
             context_snapshot=self.context.snapshot(),
             include_fields=include_fields,
+            candidate_progress=self._candidate_progress_for_handoff(),
         )
+
+    def _candidate_progress_for_handoff(self) -> list[dict[str, Any]]:
+        """Candidate sub-step progress for the current parallel step, if any."""
+        execution = self._execution if isinstance(self._execution, dict) else None
+        if not execution:
+            return []
+        sub_pipeline_name = execution.get("sub_pipeline_name")
+        sub_spec = self._loaded.sub_pipelines.get(sub_pipeline_name) if isinstance(sub_pipeline_name, str) else None
+        sub_step_ids = [step.step_id for step in sub_spec.steps] if sub_spec is not None else []
+        return candidate_progress_from_execution(execution, sub_step_ids)
 
     def mark_normal_handoff(self, status: str, failed_reason: str | None = None) -> None:
         """Record terminal pipeline-to-normal handoff metadata without deleting the sidecar."""
@@ -4554,6 +4570,9 @@ class PipelineRunner:
             step_conclusions = payload.get("step_conclusions")
             if step_conclusions is not None:
                 entry["step_conclusions"] = step_conclusions
+            tool_result_cache = payload.get("tool_result_cache")
+            if isinstance(tool_result_cache, dict):
+                entry["tool_result_cache"] = tool_result_cache
             active_state = self._active_candidates.get(i)
             pending_ask_resume = (
                 active_state.get(_PENDING_ASK_USER_QUESTION_RESUME_KEY) if isinstance(active_state, dict) else None
@@ -4576,6 +4595,7 @@ class PipelineRunner:
                 "transcript_id": state.get("transcript_id"),
                 "conclusions": conclusions,
                 "step_conclusions": state.get("step_conclusions", {}),
+                "tool_result_cache": state.get("tool_result_cache", {}),
             }
             self._execution.setdefault("candidates", {})[str(i)] = entry
             await self._save_running(step.step_id, reason="parallel candidate completed")
@@ -4596,6 +4616,7 @@ class PipelineRunner:
                 "transcript_id": state.get("transcript_id"),
                 "conclusions": state.get("conclusions", {}),
                 "step_conclusions": state.get("step_conclusions", {}),
+                "tool_result_cache": state.get("tool_result_cache", {}),
             }
             if state.get("error") is not None:
                 entry["error"] = state["error"]
@@ -4658,6 +4679,7 @@ class PipelineRunner:
                 "context": (resume_state or {}).get("context"),
                 "active_attempt_id": (resume_state or {}).get("active_attempt_id"),
                 "transcript_id": (resume_state or {}).get("transcript_id"),
+                "tool_result_cache": (resume_state or {}).get("tool_result_cache", {}),
             }
             pending_ask_resume = (resume_state or {}).get(_PENDING_ASK_USER_QUESTION_RESUME_KEY)
             if pending_ask_resume is not None:
@@ -4696,6 +4718,10 @@ class PipelineRunner:
                     state["transcript_id"] = None
                 state["conclusions"] = payload.get("conclusions", state.get("conclusions", {}))
                 state["step_conclusions"] = payload.get("step_conclusions", state.get("step_conclusions", {}))
+                state["tool_result_cache"] = payload.get(
+                    "tool_result_cache",
+                    state.get("tool_result_cache", {}),
+                )
                 await save_candidate_execution_state(
                     i,
                     payload,
@@ -4747,6 +4773,10 @@ class PipelineRunner:
                         recovery_kwargs["precompleted_tools"] = candidate_precompleted_tools
                     if "resume_messages" in parameters or has_var_keyword:
                         recovery_kwargs["resume_messages"] = candidate_resume_messages
+                    if "tool_result_cache" in parameters or has_var_keyword:
+                        recovery_kwargs["tool_result_cache"] = CandidateToolResultCache.from_snapshot(
+                            state.get("tool_result_cache"),
+                        )
                     event_stream = execute_streaming(**stream_kwargs, **recovery_kwargs)
                 else:
                     event_stream = execute_streaming(**stream_kwargs)

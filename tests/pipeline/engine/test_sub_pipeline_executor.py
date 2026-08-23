@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from iac_code.agent.message import ImageBlock, Message, ToolResultBlock, ToolUseBlock
+from iac_code.pipeline.engine.candidate_tool_cache import CandidateToolResultCache
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.state_machine import StateMachine
@@ -1761,3 +1762,183 @@ class TestFailedCandidateErrorPropagated:
             conclusions={},
         )
         assert result.error_details is None
+
+
+class TestCandidateToolResultCacheIntegration:
+    """Mid-sub-step interrupts must not force repeated read-only lookups on resume."""
+
+    @staticmethod
+    def _pipeline() -> LoadedPipeline:
+        return LoadedPipeline(
+            name="test",
+            steps=[],
+            context_dependencies={"intent": []},
+            max_rollbacks=3,
+            skills={"iac_aliyun": "# IaC Skill"},
+        )
+
+    @staticmethod
+    def _parent_context() -> PipelineContext:
+        parent_ctx = PipelineContext({"intent": []})
+        parent_ctx.set_conclusion("intent", {"type": "test"})
+        return parent_ctx
+
+    @staticmethod
+    def _executor(tmp_path, monkeypatch, step_executor) -> SubPipelineExecutor:
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "template.md").write_text("Generate template", encoding="utf-8")
+        executor = SubPipelineExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=TestCandidateToolResultCacheIntegration._pipeline(),
+            pipeline_dir=tmp_path,
+            cwd=str(tmp_path),
+        )
+        monkeypatch.setattr(executor, "_make_step_executor", lambda: step_executor)
+        return executor
+
+    @pytest.mark.asyncio
+    async def test_successful_read_only_lookups_are_persisted_for_resume(self, tmp_path, monkeypatch):
+        class LookupStepExecutor:
+            current_agent_loop = None
+
+            async def execute(self, step, context, session_id, **kwargs):
+                yield ToolUseEndEvent(
+                    tool_use_id="t1",
+                    name="aliyun_api",
+                    input={"action": "GetResourceType", "type": "ALIYUN::NAS::FileSystem"},
+                )
+                yield ToolResultEvent(tool_use_id="t1", tool_name="aliyun_api", result="nas-schema")
+                yield ToolUseEndEvent(tool_use_id="t2", name="read_file", input={"path": "reference.md"})
+                yield ToolResultEvent(tool_use_id="t2", tool_name="read_file", result="reference body")
+                # Writes must never be replayed from cache.
+                yield ToolUseEndEvent(tool_use_id="t3", name="write_file", input={"path": "template.yaml"})
+                yield ToolResultEvent(tool_use_id="t3", tool_name="write_file", result="written")
+                yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"body": "ok"})
+
+        published: list[dict] = []
+        executor = self._executor(tmp_path, monkeypatch, LookupStepExecutor())
+
+        async for _event in executor.execute_streaming(
+            sub_spec=_make_single_step_sub_spec(),
+            candidate={"name": "Plan A"},
+            candidate_index=0,
+            parent_context=self._parent_context(),
+            session_id="test_session",
+            sub_step_state_callback=lambda payload: published.append(payload),
+        ):
+            pass
+
+        assert published, "sub-step state must be published for checkpointing"
+        cache_snapshot = published[-1]["tool_result_cache"]
+        cached_tools = sorted(entry["tool_name"] for entry in cache_snapshot.values())
+        assert cached_tools == ["aliyun_api", "read_file"]
+        assert all(entry["sub_step_id"] == "template_generating" for entry in cache_snapshot.values())
+        assert all(entry["candidate_index"] == 0 for entry in cache_snapshot.values())
+
+    @pytest.mark.asyncio
+    async def test_failed_lookups_are_not_cached(self, tmp_path, monkeypatch):
+        class FailingLookupStepExecutor:
+            current_agent_loop = None
+
+            async def execute(self, step, context, session_id, **kwargs):
+                yield ToolUseEndEvent(tool_use_id="t1", name="aliyun_api", input={"action": "GetResourceType"})
+                yield ToolResultEvent(
+                    tool_use_id="t1",
+                    tool_name="aliyun_api",
+                    result="throttled",
+                    is_error=True,
+                )
+                yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"body": "ok"})
+
+        published: list[dict] = []
+        executor = self._executor(tmp_path, monkeypatch, FailingLookupStepExecutor())
+
+        async for _event in executor.execute_streaming(
+            sub_spec=_make_single_step_sub_spec(),
+            candidate={"name": "Plan A"},
+            candidate_index=0,
+            parent_context=self._parent_context(),
+            session_id="test_session",
+            sub_step_state_callback=lambda payload: published.append(payload),
+        ):
+            pass
+
+        assert published[-1]["tool_result_cache"] == {}
+
+    @pytest.mark.asyncio
+    async def test_resume_replays_cached_lookups_as_precompleted_tools(self, tmp_path, monkeypatch):
+        cache = CandidateToolResultCache()
+        cache.record(
+            candidate_index=0,
+            sub_step_id="template_generating",
+            tool_name="aliyun_api",
+            tool_input={"action": "GetResourceType", "type": "ALIYUN::NAS::FileSystem"},
+            result={"result": "nas-schema"},
+        )
+        cache.record(
+            candidate_index=0,
+            sub_step_id="template_generating",
+            tool_name="read_file",
+            tool_input={"path": "reference.md"},
+            result={"result": "reference body"},
+        )
+        # Another candidate's cache must not leak into this candidate's replay.
+        cache.record(
+            candidate_index=1,
+            sub_step_id="template_generating",
+            tool_name="aliyun_api",
+            tool_input={"action": "DescribeRegions"},
+            result={"result": "regions"},
+        )
+
+        observed_kwargs: list[dict] = []
+
+        class RecordingStepExecutor:
+            current_agent_loop = None
+
+            async def execute(self, step, context, session_id, **kwargs):
+                observed_kwargs.append(kwargs)
+                yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"body": "ok"})
+
+        executor = self._executor(tmp_path, monkeypatch, RecordingStepExecutor())
+
+        async for _event in executor.execute_streaming(
+            sub_spec=_make_single_step_sub_spec(),
+            candidate={"name": "Plan A"},
+            candidate_index=0,
+            parent_context=self._parent_context(),
+            session_id="test_session",
+            resume_state={"tool_result_cache": cache.to_snapshot()},
+        ):
+            pass
+
+        precompleted = observed_kwargs[0]["precompleted_tools"]
+        assert precompleted == {
+            "aliyun_api": {"result": "nas-schema"},
+            "read_file": {"result": "reference body"},
+        }
+
+    @pytest.mark.asyncio
+    async def test_fresh_run_without_cache_passes_no_precompleted_tools(self, tmp_path, monkeypatch):
+        observed_kwargs: list[dict] = []
+
+        class RecordingStepExecutor:
+            current_agent_loop = None
+
+            async def execute(self, step, context, session_id, **kwargs):
+                observed_kwargs.append(kwargs)
+                yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"body": "ok"})
+
+        executor = self._executor(tmp_path, monkeypatch, RecordingStepExecutor())
+
+        async for _event in executor.execute_streaming(
+            sub_spec=_make_single_step_sub_spec(),
+            candidate={"name": "Plan A"},
+            candidate_index=0,
+            parent_context=self._parent_context(),
+            session_id="test_session",
+        ):
+            pass
+
+        assert observed_kwargs[0]["precompleted_tools"] is None
