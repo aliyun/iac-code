@@ -36,6 +36,9 @@ _CLEANUP_STATUS_BY_EVENT_TYPE = {
     PIPELINE_EVENT_CLEANUP_FAILED: "failed",
 }
 _KNOWN_CLEANUP_STATUSES = {"pending", "started", "in_progress", "completed", "failed", "skipped"}
+_TERMINAL_CANDIDATE_STATUSES = {"completed", "failed", "canceled"}
+_TERMINAL_CANDIDATE_STEP_STATUSES = {"completed", "failed", "canceled", "skipped", "superseded"}
+_CANDIDATE_TERMINAL_WITHOUT_RESULT_REASON = "candidate_terminal_without_result"
 _PENDING_BACKUP_VISIBILITY = "pending_backup"
 _COMMITTED_BACKUP_VISIBILITY = "committed"
 _BACKUP_COMMITTED_EVENT_TYPE = "backup_committed"
@@ -266,9 +269,21 @@ class _PipelineSnapshotReducer:
                     valid_candidate_steps.append(candidate_step)
                     self._candidate_steps_by_run_id[candidate_step_run_id] = candidate_step
                 candidate["steps"] = valid_candidate_steps
+                self._repair_candidate_step_consistency(candidate)
             step["candidates"] = valid_candidates
         self._snapshot["steps"] = valid_steps
         self._sanitize_active_candidate_run_ids()
+
+    @staticmethod
+    def _repair_candidate_step_consistency(candidate: dict[str, Any]) -> None:
+        """Heal snapshots persisted before candidate steps were explicitly terminated."""
+        for candidate_step in candidate["steps"]:
+            _supersede_replaced_candidate_steps(candidate, candidate_step, candidate_step.get("startedAt"))
+        if _string_or_none(candidate.get("status")) in _TERMINAL_CANDIDATE_STATUSES:
+            _finalize_candidate_steps(
+                candidate,
+                _string_or_none(candidate.get("completedAt")) or _string_or_none(candidate.get("failedAt")),
+            )
 
     def _hydrate_messages(self) -> None:
         valid_messages: list[dict[str, Any]] = []
@@ -677,11 +692,13 @@ class _PipelineSnapshotReducer:
             candidate["status"] = "completed"
             _set_time(candidate, "completedAt", created_at)
             _merge_completion_data(candidate, event)
+            _finalize_candidate_steps(candidate, created_at)
             _remove_value(self._snapshot["control"]["activeCandidateRunIds"], run_id)
         elif event_type == "candidate_failed":
             candidate["status"] = "failed"
             _set_time(candidate, "failedAt", created_at)
             _merge_completion_data(candidate, event)
+            _finalize_candidate_steps(candidate, created_at)
             _remove_value(self._snapshot["control"]["activeCandidateRunIds"], run_id)
         elif event_type == "candidate_restart_requested":
             candidate["status"] = "restarting"
@@ -732,6 +749,7 @@ class _PipelineSnapshotReducer:
             candidate["steps"].append(candidate_step)
 
         _merge_coordinate(candidate_step, coordinate)
+        _supersede_replaced_candidate_steps(candidate, candidate_step, _string_or_none(event.get("createdAt")))
         self._apply_candidate_step_lifecycle(candidate_step, event)
         return candidate_step
 
@@ -1756,6 +1774,56 @@ def _merge_completion_data(target: dict[str, Any], event: dict[str, Any]) -> Non
     ):
         if key in data:
             target[key] = copy.deepcopy(data[key])
+
+
+def _supersede_replaced_candidate_steps(
+    candidate: dict[str, Any],
+    current: dict[str, Any],
+    created_at: str | None,
+) -> None:
+    """Terminate earlier attempts of the same candidate step id as ``superseded``.
+
+    A candidate step that is re-run gets a fresh ``runId`` (``…-<step_id>-<attempt>``),
+    so the previous attempt stays in ``candidate["steps"]``.  Without this it keeps the
+    ``pending`` skeleton status forever and the candidate looks inconsistent once it
+    reaches a terminal status.  Existing conclusion fields are left untouched so the
+    superseded entry still points at whatever it produced.
+    """
+    step_id = _string_or_none(current.get("id"))
+    if step_id is None:
+        return
+    current_run_id = _string_or_none(current.get("runId"))
+    current_attempt = _int_or_none(current.get("attempt")) or 1
+    for candidate_step in candidate.get("steps", []):
+        if not isinstance(candidate_step, dict) or candidate_step is current:
+            continue
+        if _string_or_none(candidate_step.get("id")) != step_id:
+            continue
+        if (_int_or_none(candidate_step.get("attempt")) or 1) >= current_attempt:
+            continue
+        if _string_or_none(candidate_step.get("status")) in _TERMINAL_CANDIDATE_STEP_STATUSES:
+            continue
+        candidate_step["status"] = "superseded"
+        _set_time(candidate_step, "supersededAt", created_at)
+        if current_run_id is not None:
+            candidate_step["supersededByRunId"] = current_run_id
+
+
+def _finalize_candidate_steps(candidate: dict[str, Any], created_at: str | None) -> None:
+    """Ensure a terminal candidate has no unterminated child steps.
+
+    Steps that never ran (or were interrupted) still carry the ``pending``/``working``
+    skeleton status.  Once the candidate itself is terminal those steps can no longer
+    produce a conclusion, so they are explicitly canceled.
+    """
+    for candidate_step in candidate.get("steps", []):
+        if not isinstance(candidate_step, dict):
+            continue
+        if _string_or_none(candidate_step.get("status")) in _TERMINAL_CANDIDATE_STEP_STATUSES:
+            continue
+        candidate_step["status"] = "canceled"
+        _set_time(candidate_step, "canceledAt", created_at)
+        candidate_step["terminalReason"] = _CANDIDATE_TERMINAL_WITHOUT_RESULT_REASON
 
 
 def _append_unique(values: list[Any], value: Any) -> None:

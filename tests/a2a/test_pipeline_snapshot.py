@@ -1477,6 +1477,135 @@ def test_store_returns_none_for_invalid_utf8_snapshot(tmp_path) -> None:
     assert store.load() is None
 
 
+def test_reduce_supersedes_replaced_candidate_step_attempt() -> None:
+    parent = _base("evt-1", 1, "step_started", scope="step")
+    parent["step"] = {"runId": "step-evaluate-1", "id": "evaluate", "index": 1, "total": 1, "attempt": 1}
+    candidate = _base("evt-2", 2, "candidate_started", scope="candidate")
+    candidate["step"] = parent["step"]
+    candidate["candidate"] = {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1}
+    first_completed = _base("evt-3", 3, "candidate_step_completed", scope="candidate_step")
+    first_completed["step"] = parent["step"]
+    first_completed["candidate"] = candidate["candidate"]
+    first_completed["candidateStep"] = {
+        "runId": "candidate-eval-0-1-template_generating-1",
+        "id": "template_generating",
+        "index": 1,
+        "total": 2,
+        "attempt": 1,
+    }
+    first_completed["data"] = {"conclusionField": "template", "conclusion": {"body": "first"}}
+    retry_started = _base("evt-4", 4, "candidate_step_started", scope="candidate_step")
+    retry_started["step"] = parent["step"]
+    retry_started["candidate"] = candidate["candidate"]
+    retry_started["candidateStep"] = {
+        "runId": "candidate-eval-0-1-template_generating-2",
+        "id": "template_generating",
+        "index": 1,
+        "total": 2,
+        "attempt": 2,
+    }
+
+    snapshot = reduce_pipeline_events([parent, candidate, first_completed, retry_started])
+
+    steps = snapshot["steps"][0]["candidates"][0]["steps"]
+    assert [(step["attempt"], step["status"]) for step in steps] == [(1, "completed"), (2, "working")]
+
+    pending_first = _base("evt-5", 3, "candidate_step_started", scope="candidate_step")
+    pending_first["step"] = parent["step"]
+    pending_first["candidate"] = candidate["candidate"]
+    pending_first["candidateStep"] = dict(first_completed["candidateStep"])
+    snapshot = reduce_pipeline_events([parent, candidate, pending_first, retry_started])
+
+    steps = snapshot["steps"][0]["candidates"][0]["steps"]
+    assert [(step["attempt"], step["status"]) for step in steps] == [(1, "superseded"), (2, "working")]
+    assert steps[0]["supersededByRunId"] == "candidate-eval-0-1-template_generating-2"
+
+
+def test_reduce_candidate_completed_terminates_leftover_candidate_steps() -> None:
+    parent = _base("evt-1", 1, "step_started", scope="step")
+    parent["step"] = {"runId": "step-evaluate-1", "id": "evaluate", "index": 1, "total": 1, "attempt": 1}
+    candidate = _base("evt-2", 2, "candidate_started", scope="candidate")
+    candidate["step"] = parent["step"]
+    candidate["candidate"] = {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1}
+    template_started = _base("evt-3", 3, "candidate_step_started", scope="candidate_step")
+    template_started["step"] = parent["step"]
+    template_started["candidate"] = candidate["candidate"]
+    template_started["candidateStep"] = {
+        "runId": "candidate-eval-0-1-template_generating-1",
+        "id": "template_generating",
+        "index": 1,
+        "total": 2,
+        "attempt": 1,
+    }
+    completed = _base("evt-4", 4, "candidate_completed", scope="candidate")
+    completed["step"] = parent["step"]
+    completed["candidate"] = candidate["candidate"]
+
+    snapshot = reduce_pipeline_events([parent, candidate, template_started, completed])
+
+    result_candidate = snapshot["steps"][0]["candidates"][0]
+    assert result_candidate["status"] == "completed"
+    leftover = result_candidate["steps"][0]
+    assert leftover["status"] == "canceled"
+    assert leftover["terminalReason"] == "candidate_terminal_without_result"
+
+
+def test_reduce_repairs_completed_candidate_with_pending_steps_in_existing_snapshot() -> None:
+    existing = {
+        "schemaVersion": SNAPSHOT_SCHEMA_VERSION,
+        "status": "working",
+        "lastSequence": 4,
+        "seenEventIds": ["evt-1", "evt-2", "evt-3", "evt-4"],
+        "steps": [
+            {
+                "runId": "step-evaluate_candidates-1",
+                "id": "evaluate_candidates",
+                "attempt": 1,
+                "status": "completed",
+                "candidates": [
+                    {
+                        "runId": "candidate-eval-0-1",
+                        "id": "evaluate_candidate_7c06c02f",
+                        "attempt": 1,
+                        "status": "completed",
+                        "completedAt": "2026-06-08T10:05:00Z",
+                        "steps": [
+                            {
+                                "runId": "candidate-eval-0-1-template_generating-1",
+                                "id": "template_generating",
+                                "attempt": 1,
+                                "index": 1,
+                                "status": "pending",
+                            },
+                            {
+                                "runId": "candidate-eval-0-1-reviewing-1",
+                                "id": "reviewing",
+                                "attempt": 1,
+                                "index": 2,
+                                "status": "completed",
+                            },
+                            {
+                                "runId": "candidate-eval-0-1-cost_estimating-1",
+                                "id": "cost_estimating",
+                                "attempt": 1,
+                                "index": 3,
+                                "status": "pending",
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+    snapshot = reduce_pipeline_events([], existing)
+
+    steps = snapshot["steps"][0]["candidates"][0]["steps"]
+    assert [step["status"] for step in steps] == ["canceled", "completed", "canceled"]
+    assert steps[0]["canceledAt"] == "2026-06-08T10:05:00Z"
+    assert steps[2]["terminalReason"] == "candidate_terminal_without_result"
+
+
 def test_snapshot_schema_version_is_exported() -> None:
     assert SNAPSHOT_SCHEMA_VERSION == "1.1"
     assert "SNAPSHOT_SCHEMA_VERSION" in pipeline_snapshot.__all__
