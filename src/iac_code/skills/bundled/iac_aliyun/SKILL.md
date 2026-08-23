@@ -199,6 +199,20 @@ auto_trigger:
 
 **例外：ROS API 的 Parameters 参数**支持直接传字典格式 `{"参数名": "参数值"}`，工具会自动展开为 `Parameters.<N>.ParameterKey / Parameters.<N>.ParameterValue` 平铺格式。其他 RPC 参数仍需按上述规则手动平铺。
 
+### 调用前先从页面上下文取齐必填标识参数
+
+**不要靠错误码驱动重试。** 调用前先确认必填参数已齐备：
+
+- `GetTemplate` 必须且只能传 `TemplateId / StackId / ChangeSetId / StackGroupName` 中的**一个**。一个都不传会返回 `MissingParameter`。
+- `GetTemplateEstimateCost` 必须且只能传 `TemplateBody / TemplateURL / TemplateId / TemplateScratchId` 中的**一个**。一个都不传会触发 ROS 本地校验 `ROS1201 no source location`。
+- 优先从当前 ROS 页面上下文提取这些标识：模板详情页取 `TemplateId`，资源栈详情页取 `StackId`，变更集详情页取 `ChangeSetId`，资源栈组页取 `StackGroupName`。
+
+### TemplateId 不是模板展示名称
+
+`TemplateId` 是 ROS 返回的不透明标识（如 `5ecd1e10-b0e9-4389-a565-e4c48b1c1234`），**不是**页面上显示的模板名称或标题。把名称/标题当作 `TemplateId` 传入会返回 `InvalidParameter`。
+
+只有模板名称时，先用 `ros_template` 的 `ListTemplates`（可按 `TemplateName` 过滤）解析出真实 `TemplateId`，再发起调用。
+
 ## 错误处理
 
 ### 校验失败

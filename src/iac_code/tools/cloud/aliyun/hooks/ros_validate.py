@@ -16,6 +16,7 @@ from iac_code.tools.cloud.aliyun.ros_validation.action_policy import (
     TEMPLATE_BODY_ACTIONS,
     validate_action_request,
 )
+from iac_code.tools.cloud.aliyun.ros_validation.identifier_policy import validate_template_id_shape
 from iac_code.tools.cloud.aliyun.ros_validation.model import (
     Category,
     MaterializedTemplateSource,
@@ -149,6 +150,7 @@ def check_template(
     if action_policy is None:
         return None
     diagnostics = list(request_diagnostics)
+    diagnostics.extend(validate_template_id_shape(action, params))
     analysis_incomplete = False
     if active_body:
         template_body = params.get("TemplateBody")

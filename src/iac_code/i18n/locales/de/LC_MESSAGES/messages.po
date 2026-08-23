@@ -7012,6 +7012,15 @@ msgid "Provide exactly one of these sources: {}; {} were provided."
 msgstr "Geben Sie genau eine dieser Quellen an: {}; {} wurden bereitgestellt."
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid ""
+"Take exactly one source from the page context: TemplateBody/TemplateURL, "
+"TemplateId (not the displayed template name), or TemplateScratchId."
+msgstr ""
+"Verwenden Sie genau eine Quelle aus dem Seitenkontext: "
+"TemplateBody/TemplateURL, TemplateId (nicht der angezeigte Vorlagenname) "
+"oder TemplateScratchId."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
 #, python-brace-format
 msgid "{} provides multiple template sources."
 msgstr "{} bietet mehrere Vorlagenquellen."
@@ -8766,6 +8775,67 @@ msgstr "Eine interne ROS-Validatorkomponente ist fehlgeschlagen."
 #, python-brace-format
 msgid "Component {} raised {}."
 msgstr "Komponente {} erhöhte {}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+#, python-brace-format
+msgid "{} is missing a required identifier parameter."
+msgstr "{} fehlt ein erforderlicher Identifikator-Parameter."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+#, python-brace-format
+msgid "Provide exactly one of these identifiers: {fields}; none were provided."
+msgstr ""
+"Geben Sie genau einen dieser Identifikatoren an: {fields}; es wurde "
+"keiner angegeben."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+msgid ""
+"Read one identifier from the page context, using the template page "
+"TemplateId rather than the displayed template name."
+msgstr ""
+"Lesen Sie einen Identifikator aus dem Seitenkontext und verwenden Sie die"
+" TemplateId von der Vorlagenseite anstelle des angezeigten "
+"Vorlagennamens."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+#, python-brace-format
+msgid "{} provides multiple mutually exclusive identifier parameters."
+msgstr ""
+"{} gibt mehrere sich gegenseitig ausschließende Identifikator-Parameter "
+"an."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+#, python-brace-format
+msgid ""
+"Provide exactly one of these identifiers: {fields}; {provided} were "
+"provided."
+msgstr ""
+"Geben Sie genau einen dieser Identifikatoren an: {fields}; angegeben "
+"wurden {provided}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+msgid "Keep only the identifier that matches the target you want to read."
+msgstr "Behalten Sie nur den Identifikator, der zum gewünschten Ziel passt."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+msgid "TemplateId is a template display name rather than a ROS identifier."
+msgstr "TemplateId ist ein angezeigter Vorlagenname und kein ROS-Identifikator."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+msgid ""
+"TemplateId must be the opaque identifier returned by ROS, not the name or"
+" title shown on the page."
+msgstr ""
+"TemplateId muss der von ROS zurückgegebene opake Identifikator sein, "
+"nicht der auf der Seite angezeigte Name oder Titel."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+msgid ""
+"Resolve the real TemplateId first via ros_template ListTemplates filtered"
+" by TemplateName, then retry."
+msgstr ""
+"Ermitteln Sie zuerst die echte TemplateId über ros_template ListTemplates"
+" mit Filter auf TemplateName und versuchen Sie es erneut."
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/model.py
 msgid "origin"

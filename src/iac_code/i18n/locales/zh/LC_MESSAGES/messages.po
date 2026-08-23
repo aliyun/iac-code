@@ -6425,6 +6425,14 @@ msgid "Provide exactly one of these sources: {}; {} were provided."
 msgstr "必须且只能提供以下来源之一：{}；当前提供了 {} 个。"
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid ""
+"Take exactly one source from the page context: TemplateBody/TemplateURL, "
+"TemplateId (not the displayed template name), or TemplateScratchId."
+msgstr ""
+"请从页面上下文中提供且仅提供一个来源：TemplateBody/TemplateURL、TemplateId（不是显示的模板名称）或 "
+"TemplateScratchId。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
 #, python-brace-format
 msgid "{} provides multiple template sources."
 msgstr "{} 同时提供了多个模板来源。"
@@ -7921,6 +7929,54 @@ msgstr "ROS 本地校验器内部组件执行失败。"
 #, python-brace-format
 msgid "Component {} raised {}."
 msgstr "组件 {} 发生 {}。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+#, python-brace-format
+msgid "{} is missing a required identifier parameter."
+msgstr "{} 缺少必填的标识参数。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+#, python-brace-format
+msgid "Provide exactly one of these identifiers: {fields}; none were provided."
+msgstr "请在这些标识中提供且仅提供一个：{fields}；当前一个都没有提供。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+msgid ""
+"Read one identifier from the page context, using the template page "
+"TemplateId rather than the displayed template name."
+msgstr "请从页面上下文中读取一个标识，并使用模板页面上的 TemplateId，而不是显示的模板名称。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+#, python-brace-format
+msgid "{} provides multiple mutually exclusive identifier parameters."
+msgstr "{} 提供了多个互斥的标识参数。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+#, python-brace-format
+msgid ""
+"Provide exactly one of these identifiers: {fields}; {provided} were "
+"provided."
+msgstr "请在这些标识中提供且仅提供一个：{fields}；当前提供了 {provided}。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+msgid "Keep only the identifier that matches the target you want to read."
+msgstr "只保留与你要读取的目标相对应的那个标识。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+msgid "TemplateId is a template display name rather than a ROS identifier."
+msgstr "TemplateId 是模板的显示名称，而不是 ROS 标识。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+msgid ""
+"TemplateId must be the opaque identifier returned by ROS, not the name or"
+" title shown on the page."
+msgstr "TemplateId 必须是 ROS 返回的不透明标识，而不是页面上显示的名称或标题。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+msgid ""
+"Resolve the real TemplateId first via ros_template ListTemplates filtered"
+" by TemplateName, then retry."
+msgstr "请先通过 ros_template ListTemplates 按 TemplateName 过滤解析出真实的 TemplateId，然后重试。"
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/model.py
 msgid "origin"

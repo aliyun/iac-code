@@ -6586,6 +6586,15 @@ msgid "Provide exactly one of these sources: {}; {} were provided."
 msgstr "これらのソースの1つを正確に提供:{};{}は提供されました。"
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
+msgid ""
+"Take exactly one source from the page context: TemplateBody/TemplateURL, "
+"TemplateId (not the displayed template name), or TemplateScratchId."
+msgstr ""
+"ページコンテキストからソースを 1 つだけ指定してください: "
+"TemplateBody/TemplateURL、TemplateId（表示されているテンプレート名ではありません）、または "
+"TemplateScratchId。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/action_policy.py
 #, python-brace-format
 msgid "{} provides multiple template sources."
 msgstr "{}は複数のテンプレートソースを提供します。"
@@ -8104,6 +8113,56 @@ msgstr "内部のROSローカルvalidatorコンポーネントは失敗しまし
 #, python-brace-format
 msgid "Component {} raised {}."
 msgstr "コンポーネント{}は{}を上げました。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+#, python-brace-format
+msgid "{} is missing a required identifier parameter."
+msgstr "{} に必須の識別子パラメータがありません。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+#, python-brace-format
+msgid "Provide exactly one of these identifiers: {fields}; none were provided."
+msgstr "次の識別子のいずれか 1 つだけを指定してください: {fields}。現在は 1 つも指定されていません。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+msgid ""
+"Read one identifier from the page context, using the template page "
+"TemplateId rather than the displayed template name."
+msgstr "ページコンテキストから識別子を 1 つ読み取り、表示されているテンプレート名ではなくテンプレートページの TemplateId を使用してください。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+#, python-brace-format
+msgid "{} provides multiple mutually exclusive identifier parameters."
+msgstr "{} に相互排他的な識別子パラメータが複数指定されています。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+#, python-brace-format
+msgid ""
+"Provide exactly one of these identifiers: {fields}; {provided} were "
+"provided."
+msgstr "次の識別子のいずれか 1 つだけを指定してください: {fields}。現在は {provided} が指定されています。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+msgid "Keep only the identifier that matches the target you want to read."
+msgstr "読み取りたい対象に一致する識別子だけを残してください。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+msgid "TemplateId is a template display name rather than a ROS identifier."
+msgstr "TemplateId が ROS の識別子ではなく、表示用のテンプレート名になっています。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+msgid ""
+"TemplateId must be the opaque identifier returned by ROS, not the name or"
+" title shown on the page."
+msgstr "TemplateId は ROS が返す不透明な識別子である必要があり、ページに表示される名前やタイトルではありません。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/identifier_policy.py
+msgid ""
+"Resolve the real TemplateId first via ros_template ListTemplates filtered"
+" by TemplateName, then retry."
+msgstr ""
+"まず ros_template ListTemplates を TemplateName で絞り込んで実際の TemplateId "
+"を解決し、再試行してください。"
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/model.py
 msgid "origin"

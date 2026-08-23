@@ -114,13 +114,14 @@ def _present(params: Mapping[str, Any], field: str) -> bool:
     return value is not None and value != "" and value != []
 
 
-def _request_error(action: str, summary: str, detail: str, *stable: str) -> Diagnostic:
+def _request_error(action: str, summary: str, detail: str, *stable: str, suggestion: str | None = None) -> Diagnostic:
     return make_diagnostic(
         code="ROS1201",
         severity=Severity.ERROR,
         category=Category.COMPATIBILITY,
         summary=summary,
         detail=detail,
+        suggestion=suggestion,
         stable_args=(action, *stable),
         subject="template-source",
     )
@@ -510,6 +511,10 @@ def validate_action_request(
                     ", ".join(sorted(policy.allowed_fields)), len(sources)
                 ),
                 str(len(sources)),
+                suggestion=_(
+                    "Take exactly one source from the page context: TemplateBody/TemplateURL, TemplateId (not the "
+                    "displayed template name), or TemplateScratchId."
+                ),
             )
         )
     elif policy.cardinality == Cardinality.ZERO_OR_ONE and len(sources) > 1:
