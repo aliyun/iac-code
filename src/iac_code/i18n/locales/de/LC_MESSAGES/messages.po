@@ -4088,6 +4088,24 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"Generated resource types must match the candidate resource_intents; fix "
+"the template resource types and validate it again before completing the "
+"step."
+msgstr ""
+"Die generierten Ressourcentypen müssen den resource_intents des "
+"Kandidaten entsprechen; korrigieren Sie die Ressourcentypen der Vorlage "
+"und validieren Sie sie erneut, bevor Sie den Schritt abschließen."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"template_generating must validate the generated template with "
+"ros_validate_template for the same file_path."
+msgstr ""
+"template_generating muss die generierte Vorlage mit ros_validate_template"
+" für denselben file_path validieren."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -4195,13 +4213,13 @@ msgstr ""
 "{fields}."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
-msgid "A completion guard is misconfigured."
-msgstr "Eine Abschlussbedingung ist falsch konfiguriert."
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
 msgid "{message} Validation issue: {code} ({detail})."
 msgstr "{message} Validierungsproblem: {code} ({detail})."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A completion guard is misconfigured."
+msgstr "Eine Abschlussbedingung ist falsch konfiguriert."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A conclusion content hash is required before completing the current step."

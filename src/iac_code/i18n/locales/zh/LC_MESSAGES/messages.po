@@ -3840,6 +3840,19 @@ msgstr "每个用户明确提出的硬约束都必须由一条状态为满足的
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"Generated resource types must match the candidate resource_intents; fix "
+"the template resource types and validate it again before completing the "
+"step."
+msgstr "生成的资源类型必须与候选方案的 resource_intents 一致；请先修正模板资源类型并重新校验，然后再完成该步骤。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"template_generating must validate the generated template with "
+"ros_validate_template for the same file_path."
+msgstr "template_generating 必须使用 ros_validate_template 校验生成的模板，且 file_path 必须一致。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr "调用此工具提交结论以完成当前步骤。如需回滚到较早步骤，请设置 rollback_request。"
@@ -3930,13 +3943,13 @@ msgid ""
 msgstr "{message} complete_step.conclusion 必须包含以下字段之一: {fields}。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
-msgid "A completion guard is misconfigured."
-msgstr "完成守卫配置错误。"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
 msgid "{message} Validation issue: {code} ({detail})."
 msgstr "{message} 校验问题：{code}（{detail}）。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A completion guard is misconfigured."
+msgstr "完成守卫配置错误。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A conclusion content hash is required before completing the current step."
