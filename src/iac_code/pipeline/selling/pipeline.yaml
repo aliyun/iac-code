@@ -410,6 +410,24 @@ steps:
           selected_id: clarification_choice
           free_text: clarification_text
         message_key: intent_alibaba_cloud_only
+      # 跨境 GA 类意图必须先锁定拓扑形态（实例数量 + 上/下车点），
+      # 否则 architecture_planning 只能凭"跨境加速"自由发挥出多区域方案，交付后易被推翻。
+      - require_tool: ask_user_question
+        when_user_message_matches_any:
+          - '全球加速|\bglobal\s+accelerator\b'
+          - '(?<![A-Za-z0-9])GA(?![A-Za-z0-9])[^\n]{0,40}(跨境|加速|上车|下车|加速地域|终端节点|监听)'
+          - '(跨境|加速|上车|下车|加速地域|终端节点|监听)[^\n]{0,40}(?<![A-Za-z0-9])GA(?![A-Za-z0-9])'
+        unless_user_message_matches_any:
+          # 用户已明确给出上车点与下车点
+          - '(上车|接入点|入口)[^\n]{0,40}(下车|落地|出口)'
+          - '(下车|落地|出口)[^\n]{0,40}(上车|接入点|入口)'
+          # 用户已明确给出 GA 实例数量，且同时给出上/下车点
+          - '\d+\s*个[^\n]{0,12}(独立[^\n]{0,6})?(GA|全球加速)[^\n]{0,60}(上车|下车|加速地域)'
+        required_conclusion_any_of: [topology.entry_points, clarification_choice, clarification_text]
+        copy_tool_result_to_conclusion:
+          selected_id: clarification_choice
+          free_text: clarification_text
+        message_key: intent_ga_topology_clarification_required
       - require_tool: ask_user_question
         when_conclusion_field_equals:
           confidence: low

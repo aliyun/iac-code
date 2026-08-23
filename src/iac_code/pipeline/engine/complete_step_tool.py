@@ -55,6 +55,10 @@ _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
         "This input is not a deployment or cloud resource request; ask the user to provide a deployment target "
         "or confirm that it should not be handled for now."
     ),
+    "intent_ga_topology_clarification_required": (
+        "Cross-region acceleration intents must lock the topology before planning; ask the user how many "
+        "accelerator instances are needed and which entry and exit points they cover."
+    ),
     "deploy_wait_create_complete": ("A successful deployment must wait until ros_deploy returns CREATE_COMPLETE."),
     "hard_constraint_verification_required": (
         "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
@@ -94,6 +98,10 @@ def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
         _(
             "This input is not a deployment or cloud resource request; ask the user to provide a deployment target "
             "or confirm that it should not be handled for now."
+        ),
+        _(
+            "Cross-region acceleration intents must lock the topology before planning; ask the user how many "
+            "accelerator instances are needed and which entry and exit points they cover."
         ),
         _("A successful deployment must wait until ros_deploy returns CREATE_COMPLETE."),
         _(

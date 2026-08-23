@@ -110,6 +110,32 @@ conclusion_schema:
       type: string
     budget_constraint:
       type: string
+    topology:
+      type: object
+      description: 跨境/跨地域加速类需求的拓扑形态；只记录用户明确表达或澄清后确认的内容，不得按场景推荐补全
+      additionalProperties: false
+      properties:
+        instance_cardinality:
+          type: string
+          enum: [single, multiple, unspecified]
+          description: single=一个共享实例；multiple=多个彼此独立的实例；unspecified=用户尚未表态
+        instance_count:
+          type: integer
+          minimum: 1
+          description: 用户明确给出的实例数量；未给出时省略
+        entry_points:
+          type: array
+          description: 上车点（接入侧）地域或站点列表，保留用户原始表达
+          items:
+            type: string
+        exit_points:
+          type: array
+          description: 下车点（落地侧）地域或站点列表，保留用户原始表达
+          items:
+            type: string
+        confirmed:
+          type: boolean
+          description: 拓扑形态是否已由用户明确表达或澄清确认；false 表示仍为推断值
     additional_notes:
       type: string
     platform_note:
@@ -172,6 +198,7 @@ conclusion_schema:
 - 非部署/非基础设施但不是恶意或异常输入的请求，例如闲聊、纯代码、纯知识问题、"帮我做个网站"。
 - 明确指定非阿里云平台的请求，例如 AWS、Azure、GCP、腾讯云、华为云。
 - 仅描述“做网站/做应用/做小程序/上线项目”，但没有明确云资源、部署目标、运维约束、规模或预算的信息。
+- 跨境 / 跨地域加速类需求（全球加速 GA 及同类意图）尚未说清拓扑形态：实例数量（一个共享实例 vs 多个独立实例）与上车点 / 下车点。
 
 遇到上述输入时，必须先调用 `ask_user_question`，不得直接调用 `complete_step`。不要把这类输入提升为 `confidence: medium` 后直接完成。
 
@@ -193,6 +220,13 @@ conclusion_schema:
 - 约束：预算、地域、已有阿里云资源、是否需要公网入口、是否需要数据库。
 
 不要固定询问经济型/均衡/高可用，也不要每次都问同一个架构目标。只有当用户已经给出部署对象但缺少偏好，并且偏好确实是下一步最关键的信息时，才可以把成本、稳定性、可用性作为候选方向之一。
+
+对于跨境 / 跨地域加速类需求（全球加速 GA 及同类意图），拓扑形态是最关键的缺口，优先于成本与可用性偏好提问。按「每次只问一个缺口」的规则依次澄清：
+
+- 先问实例数量：一个共享实例覆盖全部线路，还是每条线路一个彼此独立的实例。
+- 再问上车点与下车点：接入侧和落地侧分别是哪些地域或站点。
+
+拿到回答后把结果写入 `topology` 并置 `confirmed: true`，再调用 `complete_step`；不要在拓扑未确认时直接给出多地域方案。
 
 对于非部署/非云资源输入，应通过 `ask_user_question` 说明本流程处理阿里云部署/云资源方案，并让用户在 `free_text` 中重新输入要部署的应用、服务或网站。选项 id 动态生成。
 
@@ -239,6 +273,16 @@ conclusion_schema:
 - 实际值能从模板属性或最终部署参数直接定位时使用 `verification_mode: direct`；依赖云产品元数据、SKU 映射、库存或已有资源状态时使用 `verification_mode: tool`。该字段只描述验证方式，不得改变用户要求的值。
 - 同一属性的上下限拆成两条独立约束并使用不同 `id`；不要把自然语言范围压成模糊摘要。
 - 用户没有明确说出的数值、版本、地域或资源规格，不得根据场景推荐写成硬约束。
+
+### 跨境加速拓扑提取规则
+
+跨境 / 跨地域加速类需求（全球加速 GA 及同类加速意图）的拓扑形态决定方案骨架，必须先锁定再进入架构设计。
+
+- 拓扑形态包含两个维度：**实例数量**（一个共享实例，还是多个彼此独立的实例）与**上车点 / 下车点**（接入侧与落地侧的地域或站点）。
+- 用户未明确表达拓扑形态时，不要按"跨境加速"推断出多地域方案，也不要把推断值写入 `hard_constraints`；先通过 `ask_user_question` 澄清。
+- 拓扑形态一旦由用户明确表达或澄清确认，写入 `topology` 并置 `confirmed: true`，同时把实例数量和上/下车点作为 `hard_constraints` 落位（例如 `target: GA` + `property: instance_count` + `operator: eq`，`property: entry_region` / `exit_region` + `operator: in`），`source_text` 保留用户原话。
+- 用户只说了上/下车点但没说实例数量时，`instance_cardinality` 填 `unspecified`，不要自行选择 single 或 multiple。
+- `entry_points` / `exit_points` 保留用户原始表达（如 "hk"、"深圳"），不要归一化成 region id；地域归一化交给后续步骤。
 
 ### 资源生命周期提取规则
 
