@@ -12408,6 +12408,33 @@ msgstr "gespeicherte Aliyun-Anmeldeinformationen sind ungültig"
 msgid "Allow Bash?"
 msgstr "Bash zulassen?"
 
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Resource {} uses undocumented resource type {}."
+msgstr "Ressource {} verwendet den nicht dokumentierten Ressourcentyp {}."
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The ROS resource reference does not document this Type, so the stack cannot create the resource."
+msgstr "Die ROS-Ressourcenreferenz dokumentiert diesen Type nicht, daher kann der Stack die Ressource nicht erstellen."
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Change it to the documented resource type {}."
+msgstr "Ändern Sie ihn in den dokumentierten Ressourcentyp {}."
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Use a resource type documented in the ROS resource reference."
+msgstr "Verwenden Sie einen in der ROS-Ressourcenreferenz dokumentierten Ressourcentyp."
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Fn::GetAtt references undocumented attribute {attribute} of resource {resource}."
+msgstr "Fn::GetAtt verweist auf das nicht dokumentierte Attribut {attribute} der Ressource {resource}."
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Resource type {} does not expose this attribute, so the reference cannot be resolved."
+msgstr "Ressourcentyp {} stellt dieses Attribut nicht bereit, daher kann der Verweis nicht aufgelöst werden."
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Use one of the documented attributes of {}."
+msgstr "Verwenden Sie eines der dokumentierten Attribute von {}."
+
 #~ msgid "toggle preview"
 #~ msgstr "Vorschau umschalten"
 

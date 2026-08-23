@@ -3064,3 +3064,114 @@ Resources:
 """
     )
     assert any(item.severity == Severity.ERROR and "Fn::Sub" in item.summary for item in report.diagnostics)
+
+
+def test_reports_undocumented_resource_type() -> None:
+    report = validate(
+        """ROSTemplateFormatVersion: 2015-09-01
+Resources:
+  Thing:
+    Type: ALIYUN::NOSUCH::Thing
+"""
+    )
+    codes = [item.code for item in report.diagnostics if item.severity == Severity.ERROR]
+    assert "ROS5103" in codes
+
+
+def test_undocumented_resource_type_suggests_closest_documented_type() -> None:
+    report = validate(
+        """ROSTemplateFormatVersion: 2015-09-01
+Resources:
+  Bucket:
+    Type: ALIYUN::OSS::Buckett
+"""
+    )
+    item = next(item for item in report.diagnostics if item.code == "ROS5103")
+    assert item.expected == "ALIYUN::OSS::Bucket"
+
+
+def test_accepts_documented_resource_type() -> None:
+    report = validate(
+        """ROSTemplateFormatVersion: 2015-09-01
+Resources:
+  Bucket:
+    Type: ALIYUN::OSS::Bucket
+"""
+    )
+    assert not [item for item in report.diagnostics if item.code == "ROS5103"]
+
+
+def test_skips_undocumented_check_for_module_and_datasource_types() -> None:
+    report = validate(
+        """ROSTemplateFormatVersion: 2015-09-01
+Resources:
+  Mod:
+    Type: MODULE::MyOrg::MyModule
+  Zones:
+    Type: DATASOURCE::ECS::Zones
+"""
+    )
+    assert not [item for item in report.diagnostics if item.code == "ROS5103"]
+
+
+def test_skips_undocumented_check_for_terraform_templates() -> None:
+    report = validate(
+        """ROSTemplateFormatVersion: 2015-09-01
+Transform: Aliyun::Terraform-v1.5
+Resources:
+  Thing:
+    Type: ALIYUN::NOSUCH::Thing
+"""
+    )
+    assert not [item for item in report.diagnostics if item.code == "ROS5103"]
+
+
+def test_reports_undocumented_getatt_attribute() -> None:
+    report = validate(
+        """ROSTemplateFormatVersion: 2015-09-01
+Resources:
+  Vpc:
+    Type: ALIYUN::ECS::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/8
+Outputs:
+  Bad:
+    Value:
+      Fn::GetAtt: [Vpc, NoSuchAttribute]
+"""
+    )
+    item = next(item for item in report.diagnostics if item.code == "ROS4207")
+    assert item.severity == Severity.ERROR
+    assert item.actual == "NoSuchAttribute"
+
+
+def test_accepts_documented_getatt_attribute() -> None:
+    report = validate(
+        """ROSTemplateFormatVersion: 2015-09-01
+Resources:
+  Vpc:
+    Type: ALIYUN::ECS::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/8
+Outputs:
+  Good:
+    Value:
+      Fn::GetAtt: [Vpc, VpcId]
+"""
+    )
+    assert not [item for item in report.diagnostics if item.code == "ROS4207"]
+
+
+def test_skips_getatt_attribute_check_when_catalog_documents_no_attributes() -> None:
+    report = validate(
+        """ROSTemplateFormatVersion: 2015-09-01
+Resources:
+  Command:
+    Type: ALIYUN::ECS::RunCommand
+Outputs:
+  Results:
+    Value:
+      Fn::GetAtt: [Command, InvokeResults]
+"""
+    )
+    assert not [item for item in report.diagnostics if item.code == "ROS4207"]

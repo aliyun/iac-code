@@ -11525,6 +11525,33 @@ msgstr "保存された Aliyun 認証情報が無効です"
 msgid "Allow Bash?"
 msgstr "Bash を許可しますか？"
 
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Resource {} uses undocumented resource type {}."
+msgstr "リソース {} は未収録のリソースタイプ {} を使用しています。"
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The ROS resource reference does not document this Type, so the stack cannot create the resource."
+msgstr "ROS リソースリファレンスにこの Type は記載されていないため、スタックはこのリソースを作成できません。"
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Change it to the documented resource type {}."
+msgstr "収録済みのリソースタイプ {} に変更してください。"
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Use a resource type documented in the ROS resource reference."
+msgstr "ROS リソースリファレンスに記載されているリソースタイプを使用してください。"
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Fn::GetAtt references undocumented attribute {attribute} of resource {resource}."
+msgstr "Fn::GetAtt がリソース {resource} の未収録の属性 {attribute} を参照しています。"
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Resource type {} does not expose this attribute, so the reference cannot be resolved."
+msgstr "リソースタイプ {} はこの属性を提供していないため、この参照は解決できません。"
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Use one of the documented attributes of {}."
+msgstr "{} の収録済みの属性のいずれかを使用してください。"
+
 #~ msgid "toggle preview"
 #~ msgstr "プレビューを切り替え"
 

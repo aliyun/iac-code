@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import binascii
+import difflib
 import ipaddress
 import json
 import math
@@ -978,8 +979,40 @@ class ExpressionAnalyzer:
                     stable_args=(str(resource_type), replacement),
                     suggestion=_("Change it to {}.").format(replacement),
                 )
+            else:
+                self._documented_resource_type_rule(name, resource_type, type_path)
             if resource_type == "ALIYUN::ECS::VSwitch":
                 self._existing_vpc_rule(name, resource, parameters, path)
+
+    def _documented_resource_type_rule(self, name: Any, resource_type: Any, type_path: RosPath) -> None:
+        """Report ALIYUN:: resource types that the official catalog does not document.
+
+        Only types the catalog can positively refute are reported, so an
+        incomplete catalog never blocks a legitimate template.
+        """
+        if not isinstance(resource_type, str) or not resource_type.startswith("ALIYUN::"):
+            return
+        if isinstance(self.parsed.data, Mapping) and is_terraform_template(self.parsed.data):
+            return
+        documented = self.resource_specs.documented_resource_types()
+        if not documented or resource_type in documented:
+            return
+        closest = difflib.get_close_matches(resource_type, documented, n=1, cutoff=0.85)
+        suggestion = (
+            _("Change it to the documented resource type {}.").format(closest[0])
+            if closest
+            else _("Use a resource type documented in the ROS resource reference.")
+        )
+        self.diagnostic(
+            "ROS5103",
+            _("Resource {} uses undocumented resource type {}.").format(name, resource_type),
+            _("The ROS resource reference does not document this Type, so the stack cannot create the resource."),
+            type_path,
+            stable_args=(str(resource_type),),
+            expected=closest[0] if closest else None,
+            actual=resource_type,
+            suggestion=suggestion,
+        )
 
     def _check_condition_graph(self, conditions: Mapping[Any, Any]) -> None:
         names = frozenset(name for name in conditions if isinstance(name, str))
@@ -3126,7 +3159,47 @@ class ExpressionAnalyzer:
                     stable_args=(resource_name, "getatt"),
                 )
             return InferredValue.invalid()
+        if (
+            attribute is not None
+            and semantic_reachable
+            and self._report_undocumented_attribute(resource_name, symbol.resource_type, attribute, _index(path, 1))
+        ):
+            return InferredValue.invalid()
         return InferredValue.dynamic(base_type)
+
+    def _report_undocumented_attribute(
+        self,
+        resource_name: str,
+        resource_type: str,
+        attribute: str,
+        path: RosPath,
+    ) -> bool:
+        """Report Fn::GetAtt attributes the catalog positively refutes.
+
+        ``attribute_exists`` returns ``None`` when the catalog does not claim a
+        complete attribute list, in which case the reference is left alone.
+        """
+        if resource_type.startswith("DATASOURCE::") or resource_type == "ALIYUN::ROS::Stack":
+            return False
+        if self.resource_specs.attribute_exists(resource_type, attribute) is not False:
+            return False
+        spec = self.resource_specs.get(resource_type)
+        documented = sorted(spec.attributes) if spec is not None else []
+        self.diagnostic(
+            "ROS4207",
+            _("Fn::GetAtt references undocumented attribute {attribute} of resource {resource}.").format(
+                attribute=attribute, resource=resource_name
+            ),
+            _("Resource type {} does not expose this attribute, so the reference cannot be resolved.").format(
+                resource_type
+            ),
+            path,
+            stable_args=(resource_type, attribute),
+            expected=", ".join(documented) if documented else None,
+            actual=attribute,
+            suggestion=_("Use one of the documented attributes of {}.").format(resource_type),
+        )
+        return True
 
     def _if(
         self,

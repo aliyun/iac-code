@@ -174,6 +174,7 @@ def _verify_catalog_checksum(payload: Mapping[str, Any]) -> None:
 class ResourceValueSpecRegistry:
     def __init__(self, specs: Mapping[str, ResourceValueSpec] | None = None) -> None:
         self._specs = dict(specs or _load_specs())
+        self._documented_resource_types: frozenset[str] | None = None
 
     def get(self, resource_type: str) -> ResourceValueSpec | None:
         return self._specs.get(resource_type)
@@ -194,9 +195,23 @@ class ResourceValueSpecRegistry:
 
     def attribute_exists(self, resource_type: str, attribute: str) -> bool | None:
         spec = self.get(resource_type)
-        if spec is None or not spec.attributes_complete:
+        if spec is None or not spec.attributes_complete or not spec.attributes:
+            # An empty documented set means the extractor found no attribute
+            # table, not that the resource exposes no attributes.
             return None
         return attribute in spec.attributes
+
+    def documented_resource_types(self) -> frozenset[str]:
+        """Return the resource types backed by a FOUND official documentation page.
+
+        Types whose evidence is ``NOT_FOUND`` are excluded: the catalog cannot
+        prove they are invalid, so they must not be reported as undocumented.
+        """
+        if self._documented_resource_types is None:
+            self._documented_resource_types = frozenset(
+                spec.resource_type for spec in self._specs.values() if _has_found_evidence(spec)
+            )
+        return self._documented_resource_types
 
     def is_raw_content_property(self, resource_type: str, property_name: Any) -> bool:
         return isinstance(property_name, str) and property_name in _RAW_CONTENT_PROPERTIES.get(
@@ -209,6 +224,13 @@ class ResourceValueSpecRegistry:
     @property
     def specs(self) -> Mapping[str, ResourceValueSpec]:
         return MappingProxyType(self._specs)
+
+
+def _has_found_evidence(spec: ResourceValueSpec) -> bool:
+    for evidence in spec.official_evidence:
+        if not isinstance(evidence, str) and evidence.get("status") == "FOUND":
+            return True
+    return False
 
 
 def _load_specs() -> dict[str, ResourceValueSpec]:

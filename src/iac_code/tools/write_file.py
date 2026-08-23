@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import mimetypes
 import os
 from typing import Any
@@ -11,6 +12,8 @@ from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.tools.path_safety import check_write_path
 from iac_code.types.permissions import PermissionDecisionReason, PermissionResult, ToolPermissionContext
 from iac_code.utils.platform import normalize_user_path
+
+logger = logging.getLogger(__name__)
 
 
 class WriteFileTool(Tool):
@@ -79,6 +82,10 @@ class WriteFileTool(Tool):
         if not os.path.isabs(path):
             path = os.path.join(context.cwd, path)
 
+        outcome = self._ros_preflight(path, content)
+        if outcome is not None and outcome.blocking_result is not None:
+            return outcome.blocking_result
+
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
@@ -90,7 +97,7 @@ class WriteFileTool(Tool):
 
         lines = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
         media_type = mimetypes.guess_type(path)[0] or "text/plain"
-        return ToolResult(
+        result = ToolResult(
             content=_("Successfully wrote {lines} lines to {path}").format(lines=lines, path=path),
             metadata={
                 "artifact": {
@@ -100,6 +107,34 @@ class WriteFileTool(Tool):
                 }
             },
         )
+        return self._attach_ros_preflight(result, outcome)
+
+    @staticmethod
+    def _ros_preflight(path: str, content: str) -> Any | None:
+        """Validate ROS templates before they reach disk.
+
+        A validation failure must never break unrelated file writes, so any
+        unexpected error degrades to "no preflight" instead of blocking.
+        """
+        try:
+            from iac_code.tools.cloud.aliyun.ros_validation.write_preflight import validate_template_before_write
+
+            return validate_template_before_write(path, content)
+        except Exception:
+            logger.debug("ROS write preflight skipped", exc_info=True)
+            return None
+
+    @staticmethod
+    def _attach_ros_preflight(result: ToolResult, outcome: Any | None) -> ToolResult:
+        if outcome is None:
+            return result
+        try:
+            from iac_code.tools.cloud.aliyun.ros_validation.outcome import attach_ros_validation
+
+            return attach_ros_validation(result, outcome)
+        except Exception:
+            logger.debug("ROS write preflight diagnostics not attached", exc_info=True)
+            return result
 
     # UI rendering methods
     def render_tool_use_message(self, input: dict, *, verbose: bool = False):

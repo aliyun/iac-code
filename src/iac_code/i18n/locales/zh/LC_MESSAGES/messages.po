@@ -11332,6 +11332,33 @@ msgstr "存储的阿里云凭证无效"
 msgid "Allow Bash?"
 msgstr "允许 Bash?"
 
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Resource {} uses undocumented resource type {}."
+msgstr "资源 {} 使用了未收录的资源类型 {}。"
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "The ROS resource reference does not document this Type, so the stack cannot create the resource."
+msgstr "ROS 资源参考文档中没有该 Type，因此资源栈无法创建该资源。"
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Change it to the documented resource type {}."
+msgstr "请改为已收录的资源类型 {}。"
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+msgid "Use a resource type documented in the ROS resource reference."
+msgstr "请使用 ROS 资源参考文档中已收录的资源类型。"
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Fn::GetAtt references undocumented attribute {attribute} of resource {resource}."
+msgstr "Fn::GetAtt 引用了资源 {resource} 上未收录的属性 {attribute}。"
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Resource type {} does not expose this attribute, so the reference cannot be resolved."
+msgstr "资源类型 {} 不提供该属性，因此该引用无法解析。"
+#: src/iac_code/tools/cloud/aliyun/ros_validation/analyzer.py
+#, python-brace-format
+msgid "Use one of the documented attributes of {}."
+msgstr "请使用 {} 已收录的属性之一。"
+
 #~ msgid "toggle preview"
 #~ msgstr "切换预览"
 
