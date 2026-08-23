@@ -3978,6 +3978,30 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"template_generating must write the generated template to file_path with "
+"write_file before completing the step."
+msgstr "template_generating debe escribir la plantilla generada en file_path con write_file antes de completar el paso."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"template_generating must validate the generated template with "
+"ros_validate_template for the same file_path."
+msgstr "template_generating debe validar la plantilla generada con ros_validate_template para el mismo file_path."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"template_generating ran write_file/edit_file after ros_validate_template;"
+" rerun ros_validate_template for the same file_path."
+msgstr "template_generating ejecutó write_file/edit_file después de ros_validate_template; vuelve a ejecutar ros_validate_template para el mismo file_path."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"template_generating must submit the final template content together with "
+"its sha256 hash."
+msgstr "template_generating debe enviar el contenido final de la plantilla junto con su hash sha256."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "reviewing ran write_file/edit_file after ros_validate_template; rerun "
 "ros_validate_template and infraguard_scan for the same file_path."
 msgstr ""

@@ -3808,6 +3808,30 @@ msgstr "{count} 件のロールバッククリーンアップリソースを検�
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"template_generating must write the generated template to file_path with "
+"write_file before completing the step."
+msgstr "template_generating はステップを完了する前に、生成したテンプレートを write_file で file_path に書き込む必要があります。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"template_generating must validate the generated template with "
+"ros_validate_template for the same file_path."
+msgstr "template_generating は生成したテンプレートを同じ file_path で ros_validate_template により検証する必要があります。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"template_generating ran write_file/edit_file after ros_validate_template;"
+" rerun ros_validate_template for the same file_path."
+msgstr "template_generating は ros_validate_template の後に write_file/edit_file を実行しました。同じ file_path に対して ros_validate_template を再実行してください。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"template_generating must submit the final template content together with "
+"its sha256 hash."
+msgstr "template_generating は最終的なテンプレート内容とその sha256 ハッシュを併せて提出する必要があります。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "reviewing ran write_file/edit_file after ros_validate_template; rerun "
 "ros_validate_template and infraguard_scan for the same file_path."
 msgstr ""

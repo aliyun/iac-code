@@ -3774,6 +3774,30 @@ msgstr "检测到 {count} 个回滚清理资源；开始清理。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"template_generating must write the generated template to file_path with "
+"write_file before completing the step."
+msgstr "template_generating 必须先用 write_file 把生成的模板写入 file_path，然后才能完成该步骤。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"template_generating must validate the generated template with "
+"ros_validate_template for the same file_path."
+msgstr "template_generating 必须使用 ros_validate_template 校验生成的模板，且 file_path 必须一致。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"template_generating ran write_file/edit_file after ros_validate_template;"
+" rerun ros_validate_template for the same file_path."
+msgstr "template_generating 在 ros_validate_template 之后运行了 write_file/edit_file；请对同一 file_path 重新运行 ros_validate_template。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"template_generating must submit the final template content together with "
+"its sha256 hash."
+msgstr "template_generating 必须同时提交最终模板内容及其 sha256 摘要。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "reviewing ran write_file/edit_file after ros_validate_template; rerun "
 "ros_validate_template and infraguard_scan for the same file_path."
 msgstr ""
