@@ -2630,3 +2630,206 @@ def test_sanitize_tool_input_passthrough_keeps_template_and_conclusion() -> None
     assert result == tool_input
     assert "[REDACTED]" not in json.dumps(result)
     assert "***" not in json.dumps(result)
+
+
+def _event_types(envelopes: list[dict]) -> list[str]:
+    return [envelope["eventType"] for envelope in envelopes]
+
+
+def _translate_all(translator: PipelineEventTranslator, events: list[PipelineEvent]) -> list[dict]:
+    envelopes: list[dict] = []
+    for event in events:
+        envelopes.extend(translator.translate(event))
+    return envelopes
+
+
+def _step_started(step_id: str, attempt: int) -> PipelineEvent:
+    return PipelineEvent(
+        type=PipelineEventType.STEP_STARTED,
+        step_id=step_id,
+        timestamp=time.time(),
+        data={"attempt": attempt, "name": step_id},
+    )
+
+
+def _step_completed(step_id: str, attempt: int) -> PipelineEvent:
+    return PipelineEvent(
+        type=PipelineEventType.STEP_COMPLETED,
+        step_id=step_id,
+        timestamp=time.time(),
+        data={"attempt": attempt, "conclusion_field": "intent", "conclusion": {"ok": True}},
+    )
+
+
+def _pipeline_started() -> PipelineEvent:
+    return PipelineEvent(
+        type=PipelineEventType.PIPELINE_STARTED,
+        step_id=None,
+        timestamp=time.time(),
+        data={"pipeline_type": "selling", "total_steps": 4},
+    )
+
+
+def _pipeline_completed(**data: object) -> PipelineEvent:
+    return PipelineEvent(
+        type=PipelineEventType.PIPELINE_COMPLETED,
+        step_id=None,
+        timestamp=time.time(),
+        data={"total_steps": 4, **data},
+    )
+
+
+def test_repeated_step_completed_for_same_attempt_is_deduplicated() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    envelopes = _translate_all(
+        translator,
+        [
+            _step_started("confirm_and_select", 1),
+            _step_completed("confirm_and_select", 1),
+            # resume() 之后引擎再次为同一 attempt yield STEP_COMPLETED
+            _step_completed("confirm_and_select", 1),
+        ],
+    )
+
+    event_types = _event_types(envelopes)
+    assert event_types.count("step_started") == 1
+    assert event_types.count("step_completed") == 1
+
+
+def test_step_completed_keeps_conclusion_artifacts_after_dedup_guard() -> None:
+    context = _ctx()
+    context.a2a_artifacts_by_step_id = {
+        "reviewing": [{"path": "conclusion.file_path", "content": "conclusion.content"}]
+    }
+    translator = PipelineEventTranslator(context)
+
+    completion = PipelineEvent(
+        type=PipelineEventType.STEP_COMPLETED,
+        step_id="reviewing",
+        timestamp=time.time(),
+        data={
+            "attempt": 1,
+            "conclusion_field": "review",
+            "conclusion": {"file_path": "/tmp/template.yaml", "content": "ROSTemplate"},
+        },
+    )
+
+    # 首个完成事件仍完整放行，包含由 conclusion 派生的 artifact。
+    assert _event_types(translator.translate(completion)) == ["step_completed", "artifact_created"]
+    # 重复的完成事件被丢弃，不会重复派发 artifact。
+    assert translator.translate(completion) == []
+
+
+def test_input_required_resume_keeps_step_started_and_completed_paired() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    envelopes = _translate_all(
+        translator,
+        [
+            _pipeline_started(),
+            _step_started("intent_parsing", 1),
+            _step_completed("intent_parsing", 1),
+            _step_started("confirm_and_select", 1),
+            # 首轮完成后进入 input_required 等待用户输入
+            _step_completed("confirm_and_select", 1),
+            # resume() 续跑：引擎跳过 step_started，仅再次 yield step_completed
+            _step_completed("confirm_and_select", 1),
+        ],
+    )
+
+    event_types = _event_types(envelopes)
+    assert event_types.count("step_started") == event_types.count("step_completed")
+
+
+def test_step_completed_for_new_attempt_is_not_deduplicated() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    envelopes = _translate_all(
+        translator,
+        [
+            _step_started("intent_parsing", 1),
+            _step_completed("intent_parsing", 1),
+            _step_started("intent_parsing", 2),
+            _step_completed("intent_parsing", 2),
+        ],
+    )
+
+    event_types = _event_types(envelopes)
+    assert event_types.count("step_started") == 2
+    assert event_types.count("step_completed") == 2
+
+
+def test_repeated_pipeline_completed_emits_single_terminal_event() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    envelopes = _translate_all(
+        translator,
+        [_pipeline_started(), _pipeline_completed(), _pipeline_completed()],
+    )
+
+    event_types = _event_types(envelopes)
+    assert event_types.count("pipeline_started") == 1
+    assert event_types.count("pipeline_completed") == 1
+
+
+def test_pipeline_failed_terminal_event_is_also_deduplicated() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    envelopes = _translate_all(
+        translator,
+        [_pipeline_started(), _pipeline_completed(failed=True), _pipeline_completed(failed=True)],
+    )
+
+    event_types = _event_types(envelopes)
+    assert event_types.count("pipeline_failed") == 1
+    assert "pipeline_completed" not in event_types
+
+
+def test_pipeline_resumed_reopens_terminal_budget_for_next_round() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    envelopes = _translate_all(
+        translator,
+        [
+            _pipeline_started(),
+            _pipeline_completed(),
+            PipelineEvent(
+                type=PipelineEventType.PIPELINE_RESUMED,
+                step_id=None,
+                timestamp=time.time(),
+                data={"total_steps": 4},
+            ),
+            _pipeline_completed(),
+        ],
+    )
+
+    event_types = _event_types(envelopes)
+    assert event_types.count("pipeline_resumed") == 1
+    assert event_types.count("pipeline_completed") == 2
+
+
+def test_hydrate_from_events_keeps_pairing_ledger_across_resume() -> None:
+    context = _ctx()
+    first = PipelineEventTranslator(context)
+    journal = _translate_all(
+        first,
+        [_pipeline_started(), _step_started("confirm_and_select", 1), _step_completed("confirm_and_select", 1)],
+    )
+
+    resumed = PipelineEventTranslator(context)
+    resumed.hydrate_from_events(journal)
+
+    # 续跑进程重复收到同一 attempt 的完成事件时不应重复计数。
+    assert resumed.translate(_step_completed("confirm_and_select", 1)) == []
+
+
+def test_hydrate_from_terminal_journal_suppresses_duplicate_terminal_event() -> None:
+    context = _ctx()
+    first = PipelineEventTranslator(context)
+    journal = _translate_all(first, [_pipeline_started(), _pipeline_completed()])
+
+    resumed = PipelineEventTranslator(context)
+    resumed.hydrate_from_events(journal)
+
+    assert resumed.translate(_pipeline_completed()) == []

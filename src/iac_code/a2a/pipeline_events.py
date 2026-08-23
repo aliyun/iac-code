@@ -97,6 +97,12 @@ _NESTED_DATA_KEY_ALIASES = {
 }
 _STACK_TOOL_ACTIONS = {"CreateStack", "UpdateStack", "ContinueCreateStack", "DeleteStack"}
 _STACK_CLEAR_ACTIONS = {"DeleteStack"}
+_PIPELINE_TERMINAL_EVENT_TYPES = {"pipeline_completed", "pipeline_failed", "pipeline_canceled"}
+_PIPELINE_LIFECYCLE_EVENT_TYPES = {
+    "pipeline_started",
+    "pipeline_resumed",
+    *_PIPELINE_TERMINAL_EVENT_TYPES,
+}
 
 
 @dataclass
@@ -143,6 +149,13 @@ class PipelineEventTranslator:
         self._current_parent_step_id: str | None = None
         self._tool_inputs: dict[str, dict[str, Any]] = {}
         self._emitted_candidate_detail_tool_ids: set[str] = set()
+        # 完成事件幂等账本。引擎会从多个终态分支重复 yield PIPELINE_COMPLETED
+        # (pipeline_runner._continue_from_current 的 emit_pipeline_completed 只对
+        # telemetry 去重),并在 input_required 恢复路径上跳过 step_started 却再次
+        # yield STEP_COMPLETED,导致 a2a 事件流里完成事件多于启动事件、无法 1:1
+        # 配对。归类层按 (step_id, attempt) 与 run 维度只放行首个完成事件。
+        self._completed_step_keys: set[tuple[str, int]] = set()
+        self._pipeline_terminal_emitted = False
 
     @property
     def last_sequence(self) -> int:
@@ -154,6 +167,8 @@ class PipelineEventTranslator:
 
     def hydrate_from_events(self, events: list[dict[str, Any]]) -> None:
         latest_parent_step_sequence = -1
+        latest_lifecycle_sequence = -1
+        latest_lifecycle_event_type: str | None = None
         for event in events:
             if not isinstance(event, dict):
                 continue
@@ -164,6 +179,11 @@ class PipelineEventTranslator:
             self._sequence = max(self._sequence, sequence)
             self._hydrate_candidate_state(event)
 
+            event_type = _string_or_none(event.get("eventType"))
+            if event_type in _PIPELINE_LIFECYCLE_EVENT_TYPES and sequence >= latest_lifecycle_sequence:
+                latest_lifecycle_sequence = sequence
+                latest_lifecycle_event_type = event_type
+
             step = event.get("step")
             if not isinstance(step, dict):
                 continue
@@ -172,8 +192,9 @@ class PipelineEventTranslator:
             if step_id is None or attempt is None or attempt <= 0:
                 continue
             self._parent_step_attempts[step_id] = max(self._parent_step_attempts.get(step_id, 1), attempt)
+            self._hydrate_parent_step_pairing(event_type, step_id, attempt)
 
-            if sequence >= latest_parent_step_sequence and event.get("eventType") not in {
+            if sequence >= latest_parent_step_sequence and event_type not in {
                 "step_completed",
                 "step_failed",
                 "pipeline_completed",
@@ -182,6 +203,16 @@ class PipelineEventTranslator:
             }:
                 latest_parent_step_sequence = sequence
                 self._current_parent_step_id = step_id
+
+        if latest_lifecycle_event_type is not None:
+            # 只有当 journal 的最后一个生命周期事件仍是终态时,才认为本 run 已经
+            # 派发过终态事件。若之后又出现 pipeline_started/resumed,说明进入了新
+            # 的一轮,终态额度需要重新开放。
+            self._pipeline_terminal_emitted = latest_lifecycle_event_type in _PIPELINE_TERMINAL_EVENT_TYPES
+
+    def _hydrate_parent_step_pairing(self, event_type: str | None, step_id: str, attempt: int) -> None:
+        if event_type == "step_completed":
+            self._completed_step_keys.add((step_id, attempt))
 
     def _hydrate_candidate_state(self, event: dict[str, Any]) -> None:
         candidate = event.get("candidate")
@@ -365,8 +396,10 @@ class PipelineEventTranslator:
         created_at = _created_at_from_timestamp(event.timestamp)
 
         if event.type == PipelineEventType.PIPELINE_STARTED:
+            self._pipeline_terminal_emitted = False
             return [self._envelope("pipeline_started", "pipeline", "working", _event_data(data), created_at=created_at)]
         if event.type == PipelineEventType.PIPELINE_RESUMED:
+            self._pipeline_terminal_emitted = False
             return [self._envelope("pipeline_resumed", "pipeline", "working", _event_data(data), created_at=created_at)]
         if event.type == PipelineEventType.PIPELINE_WARNING:
             return [
@@ -399,12 +432,20 @@ class PipelineEventTranslator:
                 )
             ]
         if event.type == PipelineEventType.PIPELINE_COMPLETED:
+            if self._pipeline_terminal_emitted:
+                return []
             event_type = "pipeline_failed" if data.get("failed") is True else "pipeline_completed"
             status = "failed" if event_type == "pipeline_failed" else "completed"
+            self._pipeline_terminal_emitted = True
             return [self._envelope(event_type, "pipeline", status, _event_data(data), created_at=created_at)]
         if event.type == PipelineEventType.STEP_STARTED:
             return [self._translate_parent_step_event(event, "step_started", "working", created_at)]
         if event.type == PipelineEventType.STEP_COMPLETED:
+            if event.step_id is not None:
+                step_key = self._parent_step_key(event.step_id, event.data)
+                if step_key in self._completed_step_keys:
+                    return []
+                self._completed_step_keys.add(step_key)
             envelope = self._translate_parent_step_event(event, "step_completed", "working", created_at)
             return [envelope, *self._completion_artifact_events(envelope)]
         if event.type == PipelineEventType.STEP_FAILED:
@@ -446,6 +487,12 @@ class PipelineEventTranslator:
         if event.step_id is not None:
             envelope["step"] = self._parent_step_coordinate(event.step_id, event.data or {})
         return envelope
+
+    def _parent_step_key(self, step_id: str, data: dict[str, Any] | None) -> tuple[str, int]:
+        explicit_attempt = _int_or_none((data or {}).get("attempt"))
+        if explicit_attempt is not None and explicit_attempt > 0:
+            return (step_id, explicit_attempt)
+        return (step_id, self._parent_step_attempts.get(step_id, 1))
 
     def _translate_input_event(
         self,
