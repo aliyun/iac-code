@@ -36,6 +36,7 @@ _CLEANUP_STATUS_BY_EVENT_TYPE = {
     PIPELINE_EVENT_CLEANUP_FAILED: "failed",
 }
 _KNOWN_CLEANUP_STATUSES = {"pending", "started", "in_progress", "completed", "failed", "skipped"}
+_CANDIDATE_STEP_STATUS_RANK = {"pending": 1, "working": 2, "failed": 3, "completed": 4}
 _PENDING_BACKUP_VISIBILITY = "pending_backup"
 _COMMITTED_BACKUP_VISIBILITY = "committed"
 _BACKUP_COMMITTED_EVENT_TYPE = "backup_committed"
@@ -257,12 +258,19 @@ class _PipelineSnapshotReducer:
                 self._candidate_parent_step_run_ids[candidate_run_id] = step_run_id
 
                 valid_candidate_steps: list[dict[str, Any]] = []
-                seen_candidate_step_run_ids: set[str] = set()
+                candidate_steps_by_run_id: dict[str, dict[str, Any]] = {}
                 for candidate_step in candidate["steps"]:
                     candidate_step_run_id = _string_or_none(candidate_step.get("runId"))
-                    if candidate_step_run_id is None or candidate_step_run_id in seen_candidate_step_run_ids:
+                    if candidate_step_run_id is None:
                         continue
-                    seen_candidate_step_run_ids.add(candidate_step_run_id)
+                    existing = candidate_steps_by_run_id.get(candidate_step_run_id)
+                    if existing is not None:
+                        # A legacy snapshot can hold both the pending skeleton and the
+                        # completed node for one runId.  Merge them so the terminal
+                        # status and conclusion survive instead of being dropped.
+                        _merge_candidate_step_records(existing, candidate_step)
+                        continue
+                    candidate_steps_by_run_id[candidate_step_run_id] = candidate_step
                     valid_candidate_steps.append(candidate_step)
                     self._candidate_steps_by_run_id[candidate_step_run_id] = candidate_step
                 candidate["steps"] = valid_candidate_steps
@@ -660,9 +668,35 @@ class _PipelineSnapshotReducer:
             step["candidates"].append(candidate)
         self._candidate_parent_step_run_ids[run_id] = step["runId"]
 
-        _merge_coordinate(candidate, coordinate)
+        # ``candidate.steps`` carries the pending sub-step skeleton emitted with
+        # candidate_started.  Merging it as a plain coordinate value would replace the
+        # nodes the candidate_step_* events own, so register the skeleton by runId
+        # instead and let the lifecycle events keep driving status/conclusion.
+        _merge_coordinate(candidate, coordinate, skip_keys=("steps",))
+        self._merge_candidate_step_skeletons(candidate, coordinate.get("steps"))
         self._apply_candidate_lifecycle(candidate, event)
         return candidate
+
+    def _merge_candidate_step_skeletons(self, candidate: dict[str, Any], skeletons: Any) -> None:
+        for skeleton in _dict_list(skeletons):
+            run_id = _string_or_none(skeleton.get("runId"))
+            if run_id is None:
+                continue
+
+            candidate_step = self._candidate_steps_by_run_id.get(run_id)
+            if candidate_step is None:
+                candidate_step = {
+                    "runId": run_id,
+                    "status": _string_or_none(skeleton.get("status")) or "pending",
+                }
+                self._candidate_steps_by_run_id[run_id] = candidate_step
+
+            for key, value in skeleton.items():
+                if key != "status" and value is not None:
+                    candidate_step.setdefault(key, copy.deepcopy(value))
+
+            if candidate_step not in candidate["steps"]:
+                candidate["steps"].append(candidate_step)
 
     def _apply_candidate_lifecycle(self, candidate: dict[str, Any], event: dict[str, Any]) -> None:
         event_type = event.get("eventType")
@@ -1485,9 +1519,34 @@ def _sanitize_cleanup_private_fields(value: dict[str, Any], *, root_is_cleanup: 
     return copy.deepcopy(value)
 
 
-def _merge_coordinate(target: dict[str, Any], coordinate: dict[str, Any]) -> None:
+def _merge_candidate_step_records(target: dict[str, Any], other: dict[str, Any]) -> None:
+    """Fold a duplicate candidate sub-step record into ``target``.
+
+    ``candidate_started`` publishes a ``pending`` skeleton for every sub-step while the
+    ``candidate_step_*`` events publish the authoritative node.  When both land in one
+    snapshot, the more advanced status wins and its completion fields are preserved.
+    """
+    target_rank = _CANDIDATE_STEP_STATUS_RANK.get(_string_or_none(target.get("status")) or "", 0)
+    other_rank = _CANDIDATE_STEP_STATUS_RANK.get(_string_or_none(other.get("status")) or "", 0)
+    for key, value in other.items():
+        if value is None:
+            continue
+        if key == "status":
+            continue
+        if other_rank >= target_rank or key not in target:
+            target[key] = copy.deepcopy(value)
+    if other_rank > target_rank:
+        target["status"] = other["status"]
+
+
+def _merge_coordinate(
+    target: dict[str, Any],
+    coordinate: dict[str, Any],
+    *,
+    skip_keys: tuple[str, ...] = (),
+) -> None:
     for key, value in coordinate.items():
-        if value is not None:
+        if value is not None and key not in skip_keys:
             target[key] = copy.deepcopy(value)
 
 
