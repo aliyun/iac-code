@@ -149,8 +149,7 @@ class StagedSessionBackupService(SessionBackupService):
                         existing = self._read_existing_snapshot_state(destination, session_id)
                         if existing is not None:
                             completed_next = (
-                                base_state.status == "succeeded"
-                                and existing.parent_generation == base_state.generation
+                                base_state.status == "succeeded" and existing.parent_generation == base_state.generation
                             )
                             if not completed_next and not existing.same_lineage(committed_state):
                                 raise SessionBackupConflict(
