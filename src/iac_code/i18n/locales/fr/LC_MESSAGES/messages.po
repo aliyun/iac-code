@@ -6513,6 +6513,42 @@ msgstr ""
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
 msgid ""
+"Alibaba Cloud API {operation} was denied by authorization with HTTP "
+"{status} and error code {code}. This is a permission failure, not an "
+"input or resource problem. Tell the user which Alibaba Cloud permission "
+"is missing for {operation}, then either use an authorized alternative or "
+"report this step as failed. Do not continue steps that depend on this "
+"result until the permission is granted."
+msgstr ""
+"L'API {operation} d'Alibaba Cloud a été refusée par l'autorisation avec "
+"le code HTTP {status} et le code d'erreur {code}. Il s'agit d'une erreur "
+"de permission, et non d'un problème d'entrée ou de ressource. Indiquez à "
+"l'utilisateur quelle permission Alibaba Cloud manque pour {operation}, "
+"puis utilisez une alternative autorisée ou signalez cette étape comme "
+"ayant échoué. Ne poursuivez pas les étapes qui dépendent de ce résultat "
+"tant que la permission n'a pas été accordée."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} was denied by authorization with HTTP "
+"{status}. This is a permission failure, not an input or resource problem."
+" Tell the user which Alibaba Cloud permission is missing for {operation},"
+" then either use an authorized alternative or report this step as failed."
+" Do not continue steps that depend on this result until the permission is"
+" granted."
+msgstr ""
+"L'API {operation} d'Alibaba Cloud a été refusée par l'autorisation avec "
+"le code HTTP {status}. Il s'agit d'une erreur de permission, et non d'un "
+"problème d'entrée ou de ressource. Indiquez à l'utilisateur quelle "
+"permission Alibaba Cloud manque pour {operation}, puis utilisez une "
+"alternative autorisée ou signalez cette étape comme ayant échoué. Ne "
+"poursuivez pas les étapes qui dépendent de ce résultat tant que la "
+"permission n'a pas été accordée."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
 "Alibaba Cloud API {operation} returned HTTP {status} with error code "
 "{code}. Check the request and cloud permissions before retrying."
 msgstr ""

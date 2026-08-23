@@ -6025,6 +6025,33 @@ msgstr "阿里云 API {operation} 的 max_response_bytes 必须介于 1 和 1677
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
 msgid ""
+"Alibaba Cloud API {operation} was denied by authorization with HTTP "
+"{status} and error code {code}. This is a permission failure, not an "
+"input or resource problem. Tell the user which Alibaba Cloud permission "
+"is missing for {operation}, then either use an authorized alternative or "
+"report this step as failed. Do not continue steps that depend on this "
+"result until the permission is granted."
+msgstr ""
+"阿里云 API {operation} 因授权被拒绝，返回 HTTP {status}，错误码为 "
+"{code}。这是权限问题，不是参数或资源问题。请告知用户 {operation} "
+"缺少哪个阿里云权限，然后改用有权限的替代方案，或将该步骤显式标记为失败。在权限授予之前，不要继续执行依赖该结果的步骤。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} was denied by authorization with HTTP "
+"{status}. This is a permission failure, not an input or resource problem."
+" Tell the user which Alibaba Cloud permission is missing for {operation},"
+" then either use an authorized alternative or report this step as failed."
+" Do not continue steps that depend on this result until the permission is"
+" granted."
+msgstr ""
+"阿里云 API {operation} 因授权被拒绝，返回 HTTP {status}。这是权限问题，不是参数或资源问题。请告知用户 "
+"{operation} 缺少哪个阿里云权限，然后改用有权限的替代方案，或将该步骤显式标记为失败。在权限授予之前，不要继续执行依赖该结果的步骤。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
 "Alibaba Cloud API {operation} returned HTTP {status} with error code "
 "{code}. Check the request and cloud permissions before retrying."
 msgstr "阿里云 API {operation} 返回 HTTP {status}，错误码为 {code}。请检查请求和云权限后重试。"

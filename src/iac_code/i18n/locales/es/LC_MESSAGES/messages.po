@@ -6499,6 +6499,41 @@ msgstr ""
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
 msgid ""
+"Alibaba Cloud API {operation} was denied by authorization with HTTP "
+"{status} and error code {code}. This is a permission failure, not an "
+"input or resource problem. Tell the user which Alibaba Cloud permission "
+"is missing for {operation}, then either use an authorized alternative or "
+"report this step as failed. Do not continue steps that depend on this "
+"result until the permission is granted."
+msgstr ""
+"La API {operation} de Alibaba Cloud fue denegada por autorización con "
+"HTTP {status} y el código de error {code}. Se trata de un fallo de "
+"permisos, no de un problema de entrada ni de recursos. Indica al usuario "
+"qué permiso de Alibaba Cloud falta para {operation} y, a continuación, "
+"usa una alternativa autorizada o informa de que este paso ha fallado. No "
+"continúes con los pasos que dependen de este resultado hasta que se "
+"conceda el permiso."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} was denied by authorization with HTTP "
+"{status}. This is a permission failure, not an input or resource problem."
+" Tell the user which Alibaba Cloud permission is missing for {operation},"
+" then either use an authorized alternative or report this step as failed."
+" Do not continue steps that depend on this result until the permission is"
+" granted."
+msgstr ""
+"La API {operation} de Alibaba Cloud fue denegada por autorización con "
+"HTTP {status}. Se trata de un fallo de permisos, no de un problema de "
+"entrada ni de recursos. Indica al usuario qué permiso de Alibaba Cloud "
+"falta para {operation} y, a continuación, usa una alternativa autorizada "
+"o informa de que este paso ha fallado. No continúes con los pasos que "
+"dependen de este resultado hasta que se conceda el permiso."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
 "Alibaba Cloud API {operation} returned HTTP {status} with error code "
 "{code}. Check the request and cloud permissions before retrying."
 msgstr ""

@@ -6164,6 +6164,34 @@ msgstr ""
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
 msgid ""
+"Alibaba Cloud API {operation} was denied by authorization with HTTP "
+"{status} and error code {code}. This is a permission failure, not an "
+"input or resource problem. Tell the user which Alibaba Cloud permission "
+"is missing for {operation}, then either use an authorized alternative or "
+"report this step as failed. Do not continue steps that depend on this "
+"result until the permission is granted."
+msgstr ""
+"Alibaba Cloud API {operation} は認可により拒否され、HTTP {status}、エラーコード {code} "
+"が返されました。これは入力やリソースの問題ではなく権限の問題です。{operation} に不足しているAlibaba Cloud "
+"の権限をユーザーに伝えたうえで、権限のある代替手段を使うか、このステップを失敗として明示してください。権限が付与されるまで、この結果に依存するステップを続行しないでください。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} was denied by authorization with HTTP "
+"{status}. This is a permission failure, not an input or resource problem."
+" Tell the user which Alibaba Cloud permission is missing for {operation},"
+" then either use an authorized alternative or report this step as failed."
+" Do not continue steps that depend on this result until the permission is"
+" granted."
+msgstr ""
+"Alibaba Cloud API {operation} は認可により拒否され、HTTP {status} "
+"が返されました。これは入力やリソースの問題ではなく権限の問題です。{operation} に不足している Alibaba Cloud "
+"の権限をユーザーに伝えたうえで、権限のある代替手段を使うか、このステップを失敗として明示してください。権限が付与されるまで、この結果に依存するステップを続行しないでください。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
 "Alibaba Cloud API {operation} returned HTTP {status} with error code "
 "{code}. Check the request and cloud permissions before retrying."
 msgstr ""

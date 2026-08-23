@@ -161,6 +161,16 @@ def test_aliyun_public_error_templates_are_directly_extractable(tmp_path: Path) 
         "so {operation} cannot be signed. Retry and check the ECS metadata service.",
         "Alibaba Cloud ECS instance RAM role credentials could not be refreshed before they expired, "
         "so {operation} cannot be signed. Check ECS metadata availability.",
+        "Alibaba Cloud API {operation} was denied by authorization with HTTP {status} "
+        "and error code {code}. This is a permission failure, not an input or resource problem. "
+        "Tell the user which Alibaba Cloud permission is missing for {operation}, then either use an "
+        "authorized alternative or report this step as failed. Do not continue steps that depend on "
+        "this result until the permission is granted.",
+        "Alibaba Cloud API {operation} was denied by authorization with HTTP {status}. "
+        "This is a permission failure, not an input or resource problem. "
+        "Tell the user which Alibaba Cloud permission is missing for {operation}, then either use an "
+        "authorized alternative or report this step as failed. Do not continue steps that depend on "
+        "this result until the permission is granted.",
     }
     assert msgids == required
 
@@ -227,6 +237,79 @@ def test_pipeline_write_forbidden_error_requires_pipeline_specific_tool() -> Non
         "Alibaba Cloud API ros/UpdateTemplate cannot modify cloud resources from a pipeline step. "
         "Use a pipeline-specific tool for this operation."
     )
+
+
+_PERMISSION_CONTRACT = (
+    "This is a permission failure, not an input or resource problem. "
+    "Tell the user which Alibaba Cloud permission is missing for Ecs/DescribeInstances, then either use an "
+    "authorized alternative or report this step as failed. Do not continue steps that depend on "
+    "this result until the permission is granted."
+)
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        (
+            "aliyun_target_http_error:403:Forbidden",
+            "Alibaba Cloud API Ecs/DescribeInstances was denied by authorization with HTTP 403 "
+            "and error code Forbidden. " + _PERMISSION_CONTRACT,
+        ),
+        (
+            "aliyun_target_http_error:403:NoPermission",
+            "Alibaba Cloud API Ecs/DescribeInstances was denied by authorization with HTTP 403 "
+            "and error code NoPermission. " + _PERMISSION_CONTRACT,
+        ),
+        (
+            "aliyun_target_http_error:403:Auth.AccessDenied.WorkSpace",
+            "Alibaba Cloud API Ecs/DescribeInstances was denied by authorization with HTTP 403 "
+            "and error code Auth.AccessDenied.WorkSpace. " + _PERMISSION_CONTRACT,
+        ),
+        (
+            # A permission code still carries the contract when the gateway status
+            # is not one of the authorization statuses.
+            "aliyun_target_http_error:429:CCAI.TenantPermission.NoAuth",
+            "Alibaba Cloud API Ecs/DescribeInstances was denied by authorization with HTTP 429 "
+            "and error code CCAI.TenantPermission.NoAuth. " + _PERMISSION_CONTRACT,
+        ),
+        (
+            "aliyun_target_http_error:403",
+            "Alibaba Cloud API Ecs/DescribeInstances was denied by authorization with HTTP 403. "
+            + _PERMISSION_CONTRACT,
+        ),
+        (
+            "aliyun_target_http_error:401",
+            "Alibaba Cloud API Ecs/DescribeInstances was denied by authorization with HTTP 401. "
+            + _PERMISSION_CONTRACT,
+        ),
+    ],
+)
+def test_permission_denials_require_explicit_handling(code: str, expected: str) -> None:
+    assert public_aliyun_error(code, product="Ecs", action="DescribeInstances") == expected
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        (
+            "aliyun_target_http_error:400:InvalidParameter",
+            "Alibaba Cloud API Ecs/DescribeInstances returned HTTP 400 with error code InvalidParameter. "
+            "Check the request and cloud permissions before retrying.",
+        ),
+        (
+            "aliyun_target_http_error:404:ResourceNotFound",
+            "Alibaba Cloud API Ecs/DescribeInstances returned HTTP 404 with error code ResourceNotFound. "
+            "Check the request and cloud permissions before retrying.",
+        ),
+        (
+            "aliyun_target_http_error:500",
+            "Alibaba Cloud API Ecs/DescribeInstances returned HTTP 500. "
+            "Check the request and cloud permissions before retrying.",
+        ),
+    ],
+)
+def test_non_permission_http_errors_keep_the_generic_message(code: str, expected: str) -> None:
+    assert public_aliyun_error(code, product="Ecs", action="DescribeInstances") == expected
 
 
 def test_missing_required_parameter_error_reports_every_safe_name_without_values() -> None:

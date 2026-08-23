@@ -42,6 +42,25 @@ _OSS_UNSUPPORTED_REASONS = frozenset(
         "sdk_lifecycle_method",
     }
 )
+_PERMISSION_HTTP_STATUSES = frozenset({"401", "403"})
+# Alibaba Cloud products spell authorization denials with many product-specific
+# codes; match on the dotted segments so `Auth.AccessDenied.WorkSpace`,
+# `CCAI.TenantPermission.NoAuth`, and `Forbidden.NoUserAuthorization` all resolve
+# to the same permission contract.
+_PERMISSION_ERROR_CODE_SEGMENTS = frozenset(
+    {
+        "accessdenied",
+        "accessforbid",
+        "accessforbidden",
+        "forbidden",
+        "noauth",
+        "nopermission",
+        "notauthorized",
+        "permissiondenied",
+        "unauthorized",
+        "unauthorizedoperation",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -423,6 +442,25 @@ def public_aliyun_error(
     target_http = _target_http_context(code)
     if target_http is not None:
         status, target_code = target_http
+        if _is_permission_denial(status, target_code):
+            # A permission denial must never be skipped silently: the model has to
+            # tell the user which authorization is missing and must not keep running
+            # steps that depend on the unavailable result.
+            if target_code is not None:
+                return _(
+                    "Alibaba Cloud API {operation} was denied by authorization with HTTP {status} "
+                    "and error code {code}. This is a permission failure, not an input or resource problem. "
+                    "Tell the user which Alibaba Cloud permission is missing for {operation}, then either use an "
+                    "authorized alternative or report this step as failed. Do not continue steps that depend on "
+                    "this result until the permission is granted."
+                ).format(operation=operation, status=status, code=target_code)
+            return _(
+                "Alibaba Cloud API {operation} was denied by authorization with HTTP {status}. "
+                "This is a permission failure, not an input or resource problem. "
+                "Tell the user which Alibaba Cloud permission is missing for {operation}, then either use an "
+                "authorized alternative or report this step as failed. Do not continue steps that depend on "
+                "this result until the permission is granted."
+            ).format(operation=operation, status=status)
         if target_code is not None:
             return _(
                 "Alibaba Cloud API {operation} returned HTTP {status} with error code {code}. "
@@ -532,6 +570,21 @@ def _target_http_context(code: str) -> tuple[str, str | None] | None:
     if not 100 <= int(status) <= 599:
         return None
     return status, match.group(2)
+
+
+def _is_permission_denial(status: str, target_code: str | None) -> bool:
+    """Report whether a target HTTP failure is an authorization denial.
+
+    Either signal is enough: the gateway status for authentication/authorization,
+    or a product error code whose dotted segments name a permission denial. A
+    non-permission 4xx without such a code keeps the generic HTTP message.
+    """
+
+    if status in _PERMISSION_HTTP_STATUSES:
+        return True
+    if target_code is None:
+        return False
+    return any(segment.casefold() in _PERMISSION_ERROR_CODE_SEGMENTS for segment in target_code.split("."))
 
 
 def _safe_identifier(value: Any, fallback: str) -> str:
