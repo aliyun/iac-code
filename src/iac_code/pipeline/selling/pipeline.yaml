@@ -149,6 +149,29 @@ sub_pipelines:
         skill: iac-aliyun-template-generating
         prompt: prompts/template_generating.md
         context_fields: [candidate]
+        completion_guards:
+          - always: true
+            require_tool_result:
+              tool: write_file
+              match_conclusion_field: file_path
+              match_result_field: result.file_path
+            message_key: template_generating_write_file_required
+          - always: true
+            require_tool_result:
+              tool: ros_validate_template
+              match_conclusion_field: file_path
+              match_result_field: input.template_url
+              disallow_tool_results_after_match:
+                - tools: [write_file, edit_file]
+                  match_conclusion_field: file_path
+                  match_result_field: result.file_path
+                  message_key: template_generating_rerun_after_validate_template_write
+            message_key: template_generating_validate_template_required
+          - always: true
+            require_conclusion_sha256:
+              content_field: template
+              sha256_field: template_sha256
+            message_key: template_generating_template_sha256_required
         tools:
           include: []
           exclude:

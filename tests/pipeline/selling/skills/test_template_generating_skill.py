@@ -51,6 +51,33 @@ class TestSkillFrontmatter:
         fm = _parse_frontmatter(content)
         assert "ROS" in fm["description"]
 
+    def test_conclusion_schema_rejects_empty_template_and_requires_sha256(self):
+        fm = _parse_frontmatter(SKILL_MD.read_text(encoding="utf-8"))
+        schema = fm["conclusion_schema"]
+
+        assert schema["required"] == ["template", "template_sha256", "file_path", "region", "description"]
+        assert schema["properties"]["template"]["minLength"] == 1
+        assert schema["properties"]["template_sha256"]["type"] == "string"
+        assert schema["additionalProperties"] is False
+
+    def test_conclusion_schema_validates_template_emptiness(self):
+        import jsonschema
+
+        schema = _parse_frontmatter(SKILL_MD.read_text(encoding="utf-8"))["conclusion_schema"]
+        valid = {
+            "template": "ROSTemplateFormatVersion: 2015-09-01\n",
+            "template_sha256": "a" * 64,
+            "file_path": "template.yml",
+            "region": "cn-hangzhou",
+            "description": "demo",
+        }
+        jsonschema.validate(valid, schema)
+
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({**valid, "template": ""}, schema)
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({key: value for key, value in valid.items() if key != "template_sha256"}, schema)
+
 
 class TestSkillContentRosOnly:
     @pytest.fixture()
@@ -109,6 +136,13 @@ class TestSkillContentRosOnly:
 
     def test_contains_error_handling(self, body):
         assert "校验失败" in body
+
+    def test_states_output_contract_for_template_content(self, body):
+        assert "## 产出协议" in body
+        assert "template_sha256" in body
+        assert "sha256" in body
+        assert "逐字节一致" in body
+        assert "不要在未产出模板文件的情况下提交结论" in body
 
     def test_honors_candidate_resource_lifecycle_contract(self, body):
         assert "resource_intents" in body
@@ -176,6 +210,13 @@ class TestSkillPromptRendering:
         assert "如果 `templates/` 目录不存在，先创建它" not in body
         assert "mkdir" not in body.lower()
         assert "bash" not in body.lower()
+
+    def test_prompt_requires_template_content_and_sha256_in_conclusion(self):
+        body = TEMPLATE_PROMPT_MD.read_text(encoding="utf-8")
+        assert "`template_sha256`" in body
+        assert "sha256" in body
+        assert "逐字节一致" in body
+        assert "已通过 `ros_validate_template` 校验的路径" in body
 
     def test_prompt_passes_full_candidate_without_repeating_skill_constraints(self):
         body = TEMPLATE_PROMPT_MD.read_text(encoding="utf-8")
@@ -267,3 +308,129 @@ class TestEvalsJson:
             for assertion in ev["assertions"]:
                 assert "name" in assertion
                 assert "check" in assertion
+
+
+class TestTemplateGeneratingOutputEnforcement:
+    """The real pipeline guards must reject conclusions without a written, validated template."""
+
+    TEMPLATE = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n"
+
+    @staticmethod
+    def _sha256(value: str) -> str:
+        import hashlib
+
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    @pytest.fixture()
+    def step(self):
+        from iac_code.pipeline.engine.loader import load_pipeline_dir
+
+        loaded = load_pipeline_dir(SKILL_DIR.parents[1])
+        return next(s for s in loaded.sub_pipelines["evaluate_candidate"].steps if s.step_id == "template_generating")
+
+    def _tool(self, step, tool_calls, cwd):
+        from iac_code.pipeline.engine.complete_step_tool import CompleteStepTool
+        from iac_code.pipeline.engine.completion_guard_state import record_completion_guard_tool_result
+        from iac_code.pipeline.engine.types import StepConfig
+
+        state: dict = {}
+        for tool_name, tool_input, content in tool_calls:
+            record_completion_guard_tool_result(
+                state,
+                tool_name=tool_name,
+                tool_input=tool_input,
+                content=content,
+                is_error=False,
+                cwd=cwd,
+            )
+        config = StepConfig(
+            step_id=step.step_id,
+            conclusion_field=step.conclusion_field,
+            forward=step.forward,
+            conclusion_schema=step.conclusion_schema,
+        )
+        return CompleteStepTool(config, completion_guards=step.completion_guards, completion_guard_state=state)
+
+    def _write_call(self):
+        return ("write_file", {"path": "template.yml", "content": self.TEMPLATE}, None)
+
+    def _validate_call(self):
+        return ("ros_validate_template", {"template_url": "template.yml"}, json.dumps({"Parameters": {}}))
+
+    def _conclusion(self, **overrides):
+        conclusion = {
+            "template": self.TEMPLATE,
+            "template_sha256": self._sha256(self.TEMPLATE),
+            "file_path": "template.yml",
+            "region": "cn-hangzhou",
+            "description": "demo",
+        }
+        conclusion.update(overrides)
+        return conclusion
+
+    @pytest.mark.asyncio
+    async def test_written_and_validated_template_completes_step(self, step, tmp_path):
+        from iac_code.tools.base import ToolContext
+
+        tool = self._tool(step, [self._write_call(), self._validate_call()], str(tmp_path))
+
+        result = await tool.execute(tool_input={"conclusion": self._conclusion()}, context=ToolContext())
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_empty_template_is_rejected(self, step, tmp_path):
+        from iac_code.tools.base import ToolContext
+
+        tool = self._tool(step, [self._write_call(), self._validate_call()], str(tmp_path))
+        conclusion = self._conclusion(template="", template_sha256=self._sha256(""))
+
+        result = await tool.execute(tool_input={"conclusion": conclusion}, context=ToolContext())
+
+        assert result.is_error
+
+    @pytest.mark.asyncio
+    async def test_template_without_write_file_is_rejected(self, step, tmp_path):
+        from iac_code.tools.base import ToolContext
+
+        tool = self._tool(step, [self._validate_call()], str(tmp_path))
+
+        result = await tool.execute(tool_input={"conclusion": self._conclusion()}, context=ToolContext())
+
+        assert result.is_error
+        assert "write_file" in result.content
+
+    @pytest.mark.asyncio
+    async def test_template_without_validation_is_rejected(self, step, tmp_path):
+        from iac_code.tools.base import ToolContext
+
+        tool = self._tool(step, [self._write_call()], str(tmp_path))
+
+        result = await tool.execute(tool_input={"conclusion": self._conclusion()}, context=ToolContext())
+
+        assert result.is_error
+        assert "ros_validate_template" in result.content
+
+    @pytest.mark.asyncio
+    async def test_rewrite_after_validation_is_rejected(self, step, tmp_path):
+        from iac_code.tools.base import ToolContext
+
+        tool_calls = [self._write_call(), self._validate_call(), self._write_call()]
+        tool = self._tool(step, tool_calls, str(tmp_path))
+
+        result = await tool.execute(tool_input={"conclusion": self._conclusion()}, context=ToolContext())
+
+        assert result.is_error
+        assert "ros_validate_template" in result.content
+
+    @pytest.mark.asyncio
+    async def test_template_hash_mismatch_is_rejected(self, step, tmp_path):
+        from iac_code.tools.base import ToolContext
+
+        tool = self._tool(step, [self._write_call(), self._validate_call()], str(tmp_path))
+        conclusion = self._conclusion(template_sha256=self._sha256("stale template\n"))
+
+        result = await tool.execute(tool_input={"conclusion": conclusion}, context=ToolContext())
+
+        assert result.is_error
+        assert "template_sha256" in result.content

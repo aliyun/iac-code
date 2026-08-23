@@ -23,6 +23,11 @@
 ## 输出
 文件写入完成后调用 `complete_step` 提交结论。
 
+结论必须携带模板本身，不能只描述已完成的工作：
+- `template`：非空，与 `{candidate.output_path}` 文件的最终内容逐字节一致
+- `template_sha256`：`template` 内容按 UTF-8 编码的 sha256 十六进制摘要
+- `file_path`：实际写入并已通过 `ros_validate_template` 校验的路径
+
 > 注意：`template` 字段为 YAML 字符串（与磁盘文件内容一致），不是 JSON 对象。
 
 ## 注意事项

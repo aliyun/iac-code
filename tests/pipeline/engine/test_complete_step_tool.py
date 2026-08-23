@@ -1460,6 +1460,34 @@ class TestCompletionGuards:
         assert result.is_error
         assert "rerun validation" in result.content
 
+    @pytest.mark.asyncio
+    async def test_template_generating_message_keys_render_actionable_text(self):
+        config = StepConfig(step_id="template_generating", conclusion_field="template", forward=None)
+        keys_to_expected = {
+            "template_generating_write_file_required": "write_file",
+            "template_generating_validate_template_required": "ros_validate_template",
+            "template_generating_template_sha256_required": "sha256",
+        }
+
+        for message_key, expected in keys_to_expected.items():
+            tool = CompleteStepTool(
+                config,
+                completion_guards=[
+                    {
+                        "always": True,
+                        "required_conclusion_field": "template",
+                        "message_key": message_key,
+                    }
+                ],
+            )
+
+            result = await tool.execute(tool_input={"conclusion": {"file_path": "t.yml"}}, context=ToolContext())
+
+            assert result.is_error
+            assert expected in result.content
+            assert message_key not in result.content
+
+
 
 class TestSchemaValidation:
     def test_missing_conclusion_validation_error_includes_current_step_schema(self):

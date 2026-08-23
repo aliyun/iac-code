@@ -26,6 +26,21 @@ logger = logging.getLogger(__name__)
 MAX_PARALLEL_CANDIDATES = 5
 MAX_ROLLBACK_TARGETS = 5
 _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
+    "template_generating_write_file_required": (
+        "template_generating must write the generated template to file_path with write_file "
+        "before completing the step."
+    ),
+    "template_generating_validate_template_required": (
+        "template_generating must validate the generated template with ros_validate_template "
+        "for the same file_path."
+    ),
+    "template_generating_rerun_after_validate_template_write": (
+        "template_generating ran write_file/edit_file after ros_validate_template; "
+        "rerun ros_validate_template for the same file_path."
+    ),
+    "template_generating_template_sha256_required": (
+        "template_generating must submit the final template content together with its sha256 hash."
+    ),
     "reviewing_rerun_after_validate_template_write": (
         "reviewing ran write_file/edit_file after ros_validate_template; "
         "rerun ros_validate_template and infraguard_scan for the same file_path."
@@ -72,6 +87,19 @@ def _completion_guard_message_from_key(key: str) -> str | None:
 def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
     """Keep YAML-selected completion guard messages visible to Babel."""
     return (
+        _(
+            "template_generating must write the generated template to file_path with write_file "
+            "before completing the step."
+        ),
+        _(
+            "template_generating must validate the generated template with ros_validate_template "
+            "for the same file_path."
+        ),
+        _(
+            "template_generating ran write_file/edit_file after ros_validate_template; "
+            "rerun ros_validate_template for the same file_path."
+        ),
+        _("template_generating must submit the final template content together with its sha256 hash."),
         _(
             "reviewing ran write_file/edit_file after ros_validate_template; "
             "rerun ros_validate_template and infraguard_scan for the same file_path."

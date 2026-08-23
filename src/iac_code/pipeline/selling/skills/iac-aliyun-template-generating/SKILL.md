@@ -5,12 +5,16 @@ when_to_use: 当需要根据架构方案生成阿里云 ROS 模板时
 user_invocable: false
 conclusion_schema:
   type: object
-  required: [template, file_path, region, description]
+  required: [template, template_sha256, file_path, region, description]
   additionalProperties: false
   properties:
     template:
       type: string
-      description: 与写入文件相同的 YAML 字符串
+      minLength: 1
+      description: 与写入文件相同的 YAML 字符串，不能为空
+    template_sha256:
+      type: string
+      description: template 字段内容的 sha256 十六进制摘要
     file_path:
       type: string
       description: 模板文件路径
@@ -48,7 +52,17 @@ conclusion_schema:
    - 生成的模板默认放在当前工作目录；仅当用户指定其他路径时才写入该路径，不要默认使用 `/tmp` 等工作目录外路径
 5. 调用 `ros_validate_template` 校验；`template_url` 使用刚写入的模板文件路径，已有具体地域时传 `region_id`，否则使用工具默认地域
 6. 校验失败 → 分析错误 → 修复 → 重试（最多 5 轮）
-7. 校验通过 → 完成
+7. 校验通过 → 回传结论：`template` 为最终落盘内容，`template_sha256` 为该内容的 sha256 摘要，`file_path` 为实际写入路径
+
+## 产出协议
+
+结论不是对工作过程的描述，而是模板本身。以下三条由引擎强制校验，不满足会被拒绝并要求重试：
+
+- `template` 必须非空，且与 `file_path` 指向文件的最终内容逐字节一致。
+- `template_sha256` 必须等于 `template` 内容按 UTF-8 编码的 sha256 十六进制摘要。
+- `file_path` 必须是本步骤实际写入的路径，且该路径必须已通过 `ros_validate_template` 校验。校验通过后又修改了文件，必须重新校验。
+
+不要在未产出模板文件的情况下提交结论，也不要用摘要、说明文字或空串代替 `template` 内容。
 
 > **模板路径支持本地文件**：`ros_validate_template` 的 `template_url` 可传当前工作目录内的本地文件路径（如 `./template.yml`）。避免将大模板内容直接作为参数传递。
 

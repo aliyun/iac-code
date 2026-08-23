@@ -248,6 +248,51 @@ def test_review_disabled_removes_review_step_and_generated_template_remains_fina
     assert cost_step.context_fields == ["candidate", "template"]
 
 
+def test_template_generating_guards_require_written_and_validated_template() -> None:
+    loaded = _load_selling(enable_reviewing=False)
+    template_step = loaded.sub_pipelines["evaluate_candidate"].steps[0]
+
+    assert template_step.completion_guards == [
+        {
+            "always": True,
+            "require_tool_result": {
+                "tool": "write_file",
+                "match_conclusion_field": "file_path",
+                "match_result_field": "result.file_path",
+            },
+            "message_key": "template_generating_write_file_required",
+        },
+        {
+            "always": True,
+            "require_tool_result": {
+                "tool": "ros_validate_template",
+                "match_conclusion_field": "file_path",
+                "match_result_field": "input.template_url",
+                "disallow_tool_results_after_match": [
+                    {
+                        "tools": ["write_file", "edit_file"],
+                        "match_conclusion_field": "file_path",
+                        "match_result_field": "result.file_path",
+                        "message_key": "template_generating_rerun_after_validate_template_write",
+                    }
+                ],
+            },
+            "message_key": "template_generating_validate_template_required",
+        },
+        {
+            "always": True,
+            "require_conclusion_sha256": {
+                "content_field": "template",
+                "sha256_field": "template_sha256",
+            },
+            "message_key": "template_generating_template_sha256_required",
+        },
+    ]
+    assert template_step.conclusion_schema is not None
+    assert template_step.conclusion_schema["properties"]["template"]["minLength"] == 1
+    assert "template_sha256" in template_step.conclusion_schema["required"]
+
+
 def test_cost_prompt_injects_only_required_candidate_fields() -> None:
     from iac_code.pipeline.engine.context import PipelineContext
 
