@@ -756,9 +756,17 @@ class PipelineTranscriptTranslator:
         message_id = self._text_message_id(env)
         if not message_id:
             return []
-        text = str(_as_mapping(env.get("data")).get("text") or "")
+        data = _as_mapping(env.get("data"))
+        text = str(data.get("text") or "")
         if not text:
-            return []
+            # The durable journal may bound (or drop) raw thinking to control storage cost
+            # (see ``pipeline_stream._project_thinking_delta_for_journal``). When the text was
+            # elided but the envelope still records that thinking occurred, emit a minimal
+            # placeholder so a reloaded transcript keeps showing 思考完成 instead of losing the
+            # thinking bubble entirely. The live/transport copy keeps the full text untouched.
+            if not _optional_int(data.get("rawThinkingChars")):
+                return []
+            text = "…"
         events = self._ensure_started(message_id)
         events.append({"type": "assistant.thinking.delta", "payload": {"messageId": message_id, "delta": text}})
         return events

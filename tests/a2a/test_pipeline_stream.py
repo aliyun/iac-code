@@ -394,8 +394,45 @@ async def test_publish_thinking_delta_writes_pipeline_metadata_when_exposed(tmp_
     assert "message" not in dumped["status"]
     envelope = dumped["metadata"]["iac_code"]["pipeline"]
     assert envelope["eventType"] == "thinking_delta"
+    # The transport copy keeps the full raw thinking so remote A2A / Web stay unchanged.
     assert envelope["data"] == {"type": "raw_thinking", "text": "visible reasoning"}
-    assert publisher.journal.read_all()[0]["data"] == {"type": "raw_thinking", "text": "visible reasoning"}
+    # The durable journal bounds raw thinking (default: drop text, keep the length) so a
+    # reasoning-heavy session stops inflating a2a-events.jsonl / the audit surface.
+    assert publisher.journal.read_all()[0]["data"] == {
+        "type": "raw_thinking",
+        "text": "",
+        "rawThinkingChars": len("visible reasoning"),
+        "thinkingTruncated": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_publish_thinking_delta_journal_respects_char_limit(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv(pipeline_stream.A2A_JOURNAL_RAW_THINKING_MAX_CHARS_ENV, "4")
+    publisher, queue = _publisher(tmp_path, exposure_types=[A2AExposureType.RAW_THINKING])
+
+    await publisher.publish(ThinkingDeltaEvent(text="abcdefgh"))
+
+    # Transport keeps the full text; journal is truncated to the configured limit.
+    transport = dump(queue.events[0])["metadata"]["iac_code"]["pipeline"]
+    assert transport["data"]["text"] == "abcdefgh"
+    assert publisher.journal.read_all()[0]["data"] == {
+        "type": "raw_thinking",
+        "text": "abcd",
+        "rawThinkingChars": 8,
+        "thinkingTruncated": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_publish_thinking_delta_journal_keeps_short_text_under_limit(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv(pipeline_stream.A2A_JOURNAL_RAW_THINKING_MAX_CHARS_ENV, "16")
+    publisher, queue = _publisher(tmp_path, exposure_types=[A2AExposureType.RAW_THINKING])
+
+    await publisher.publish(ThinkingDeltaEvent(text="short"))
+
+    # Within the limit: journal keeps the text verbatim and adds no bookkeeping fields.
+    assert publisher.journal.read_all()[0]["data"] == {"type": "raw_thinking", "text": "short"}
 
 
 @pytest.mark.asyncio
@@ -489,7 +526,31 @@ async def test_publish_batch_extreme_mode_defers_delta_sidecar_persistence_until
 
 
 @pytest.mark.asyncio
-async def test_publish_batch_holds_delivery_lock_while_before_enqueue_waits(tmp_path: Path) -> None:
+async def test_publish_batch_extreme_mode_bounds_journaled_thinking_delta(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(A2A_EXTREME_PERFORMANCE_ENV, raising=False)
+    publisher, queue = _publisher(tmp_path, exposure_types=[A2AExposureType.RAW_THINKING])
+
+    await publisher.publish_batch([ThinkingDeltaEvent(text="deferred reasoning")])
+    # Deferred deltas flush to the journal only once a semantic event lands.
+    await publisher.publish_manual("pipeline_warning", "pipeline", data={"message": "flush"})
+
+    journal = publisher.journal.read_all()
+    thinking = next(event for event in journal if event["eventType"] == "thinking_delta")
+    assert thinking["data"] == {
+        "type": "raw_thinking",
+        "text": "",
+        "rawThinkingChars": len("deferred reasoning"),
+        "thinkingTruncated": True,
+    }
+    # Transport still carried the full text.
+    transport = dump(queue.events[0])["metadata"]["iac_code"]["pipeline"]
+    assert transport["data"]["text"] == "deferred reasoning"
+
+
+
     publisher, queue = _publisher(tmp_path)
     hook_started = asyncio.Event()
     release_hook = asyncio.Event()

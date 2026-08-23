@@ -1291,6 +1291,26 @@ def test_translator_skips_empty_thinking_delta():
     assert not any(e["type"] == "assistant.thinking.delta" for e in events)
 
 
+def test_translator_keeps_thinking_indicator_when_journal_elided_raw_text():
+    # The durable journal may drop raw thinking text (rawThinkingChars records the original
+    # length). Reload must still surface a thinking bubble so 思考完成 shows instead of nothing.
+    step = {"id": "s", "runId": "r-10b", "index": 1, "total": 3}
+    events = PipelineTranscriptTranslator().translate_all(
+        [
+            _envelope("step_started", "step", 1, step=step),
+            _envelope(
+                "thinking_delta",
+                "step",
+                2,
+                step=step,
+                data={"type": "raw_thinking", "text": "", "rawThinkingChars": 42, "thinkingTruncated": True},
+            ),
+        ]
+    )
+    thinking = next(e for e in events if e["type"] == "assistant.thinking.delta")
+    assert thinking["payload"]["delta"] == "…"
+
+
 def test_build_rows_accumulate_thinking_into_message_row():
     step = {"id": "s", "runId": "r-11", "index": 1, "total": 3}
     rows = build_pipeline_transcript_rows(

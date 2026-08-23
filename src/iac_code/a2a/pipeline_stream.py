@@ -110,6 +110,54 @@ _EXTREME_JOURNAL_FLUSH_EVENTS = 512
 _RECOVERY_STATE_SCOPES = {"step", "candidate", "candidateStep", "candidate_step"}
 _RECOVERY_STATE_STATUSES = {"working"}
 
+# raw thinking is display-only: the snapshot reducer and recovery hydration never read
+# ``thinking_delta`` text, yet the journal used to persist every increment verbatim. On
+# reasoning-heavy sessions these deltas dominate the durable ``a2a-events.jsonl`` (and the
+# audit surface derived from it). We therefore project ``thinking_delta`` down to a bounded
+# summary before it reaches the journal, keeping ``rawThinkingChars`` so the original volume
+# stays traceable. The transport/live-stream copy is untouched, so remote A2A clients and the
+# Web "思考完成" indicator still receive the full text.
+A2A_JOURNAL_RAW_THINKING_MAX_CHARS_ENV = "IAC_CODE_A2A_JOURNAL_RAW_THINKING_MAX_CHARS"
+_DEFAULT_A2A_JOURNAL_RAW_THINKING_MAX_CHARS = 0
+
+
+def _a2a_journal_raw_thinking_max_chars() -> int:
+    raw = os.environ.get(A2A_JOURNAL_RAW_THINKING_MAX_CHARS_ENV)
+    if raw is None or raw.strip() == "":
+        return _DEFAULT_A2A_JOURNAL_RAW_THINKING_MAX_CHARS
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return _DEFAULT_A2A_JOURNAL_RAW_THINKING_MAX_CHARS
+    return value if value >= 0 else _DEFAULT_A2A_JOURNAL_RAW_THINKING_MAX_CHARS
+
+
+def _project_thinking_delta_for_journal(envelope: dict[str, Any], *, max_chars: int) -> dict[str, Any]:
+    """Return a journal-bound copy of a ``thinking_delta`` envelope with bounded raw text.
+
+    Non ``thinking_delta`` envelopes are returned unchanged. For ``thinking_delta`` the
+    ``data.text`` is truncated to ``max_chars`` (``0`` stores no raw text at all) and the
+    original character count is preserved under ``data.rawThinkingChars`` with a
+    ``data.thinkingTruncated`` flag so the reduction stays auditable.
+    """
+    if envelope.get("eventType") != "thinking_delta":
+        return envelope
+    data = envelope.get("data")
+    if not isinstance(data, dict):
+        return envelope
+    text = data.get("text")
+    if not isinstance(text, str) or not text:
+        return envelope
+    if len(text) <= max_chars and not data.get("thinkingTruncated"):
+        return envelope
+    projected = dict(envelope)
+    projected_data = dict(data)
+    projected_data["rawThinkingChars"] = len(text)
+    projected_data["thinkingTruncated"] = len(text) > max_chars
+    projected_data["text"] = text[:max_chars] if max_chars > 0 else ""
+    projected["data"] = projected_data
+    return projected
+
 
 def backup_committed_delivery_envelope(
     ack_envelope: dict[str, Any],
@@ -187,6 +235,7 @@ class PipelineA2AEventPublisher:
         self.extreme_performance = (
             a2a_extreme_performance_enabled() if extreme_performance is None else extreme_performance
         )
+        self._journal_raw_thinking_max_chars = _a2a_journal_raw_thinking_max_chars()
         self._extreme_snapshot_loaded = False
         self._extreme_snapshot_cache: dict[str, Any] | None = None
         self._extreme_pending_journal_events: list[dict[str, Any]] = []
@@ -737,7 +786,7 @@ class PipelineA2AEventPublisher:
             journal_persisted = False
             snapshot_persisted = False
             try:
-                self.journal.append(safe_envelope, durable=durable_required)
+                self.journal.append(self._journal_envelope(safe_envelope), durable=durable_required)
                 journal_persisted = True
             except Exception as exc:
                 logger.warning(
@@ -764,6 +813,19 @@ class PipelineA2AEventPublisher:
                 return None
         return safe_envelope
 
+    def _journal_envelope(self, safe_envelope: dict[str, Any]) -> dict[str, Any]:
+        """Project an outbound envelope into its journal-bound form.
+
+        Only ``thinking_delta`` is affected: its verbatim raw thinking is bounded to
+        ``self._journal_raw_thinking_max_chars`` so the durable journal stops carrying the
+        bulk of reasoning-heavy sessions. The transport copy (``safe_envelope``) is left
+        untouched for remote A2A delivery and the Web loopback sink.
+        """
+        return _project_thinking_delta_for_journal(
+            safe_envelope,
+            max_chars=self._journal_raw_thinking_max_chars,
+        )
+
     def _persist_envelope_extreme(
         self,
         safe_envelope: dict[str, Any],
@@ -778,7 +840,7 @@ class PipelineA2AEventPublisher:
             durable_required=durable_required,
             require_journal_metadata=require_journal_metadata,
         ):
-            self._extreme_pending_journal_events.append(safe_envelope)
+            self._extreme_pending_journal_events.append(self._journal_envelope(safe_envelope))
             self._extreme_pending_snapshot_events.append(safe_envelope)
             if len(self._extreme_pending_journal_events) >= _EXTREME_JOURNAL_FLUSH_EVENTS:
                 self._flush_extreme_journal_events()
@@ -788,7 +850,7 @@ class PipelineA2AEventPublisher:
         snapshot_persisted = False
         self._flush_extreme_journal_events()
         try:
-            self.journal.append(safe_envelope, durable=False)
+            self.journal.append(self._journal_envelope(safe_envelope), durable=False)
             journal_persisted = True
         except Exception as exc:
             logger.warning(
