@@ -985,7 +985,9 @@ class RequestBuilder:
         for name, value in params.items():
             parameter = metadata.get(name)
             if parameter is not None:
-                _validate_parameter(parameter, value)
+                coerced = _coerce_parameter(parameter, value)
+                _validate_parameter(parameter, coerced)
+                params[name] = coerced
 
         pathname = contract.pathname
         query: dict[str, str] = {}
@@ -1060,9 +1062,11 @@ class RequestBuilder:
         elif body_present:
             _validate_content_type(content_type, "json", contract.consumes)
             declared_body = [parameter for parameter in contract.parameters if parameter.location == "body"]
+            body_value = tool_input["body"]
             if len(declared_body) == 1:
-                _validate_parameter(declared_body[0], tool_input["body"])
-            body = _json_bytes(tool_input["body"])
+                body_value = _coerce_parameter(declared_body[0], body_value)
+                _validate_parameter(declared_body[0], body_value)
+            body = _json_bytes(body_value)
             content_type = content_type or _preferred_media(contract.consumes, "json") or "application/json"
         elif body_parameters:
             _validate_content_type(content_type, "json", contract.consumes)
@@ -1179,6 +1183,82 @@ def _validate_pathname(pathname: str) -> None:
         or "://" in pathname
     ):
         raise ApiContractError("invalid_pathname")
+
+
+def _coerce_parameter(parameter: ParameterMetadata, value: Any) -> Any:
+    """Repair a losslessly convertible value so it matches the declared contract type.
+
+    Models routinely send `"2"` for an integer parameter or a bare string for an array
+    parameter. Those inputs carry the intended value unambiguously, so rejecting them
+    only produced a tool error and a retry. Coercion runs before validation and is
+    strictly lossless: anything that cannot round-trip is returned unchanged and still
+    fails closed in `_validate_parameter`.
+    """
+
+    schema = parameter.schema or {}
+    return _coerce_parameter_schema(value, schema, depth=_MAX_PARAMETER_SCHEMA_DEPTH)
+
+
+def _coerce_parameter_schema(value: Any, schema: Mapping[str, Any], *, depth: int) -> Any:
+    if depth <= 0 or not isinstance(schema, Mapping):
+        return value
+    coerced = _coerce_scalar_value(value, schema.get("type"))
+    if isinstance(coerced, list) and isinstance(items := schema.get("items"), Mapping):
+        coerced = [_coerce_parameter_schema(item, items, depth=depth - 1) for item in coerced]
+    branches = schema.get("allOf")
+    if isinstance(branches, list | tuple):
+        for branch in branches:
+            coerced = _coerce_parameter_schema(coerced, branch, depth=depth - 1)
+    return coerced
+
+
+def _coerce_scalar_value(value: Any, expected: Any) -> Any:
+    if expected == "array" and not isinstance(value, list | tuple):
+        # A JSON array literal must be parsed rather than wrapped, otherwise
+        # '["a","b"]' would silently become a single-element array on the wire.
+        if isinstance(value, str) and isinstance(parsed := _parsed_json_array(value), list):
+            return parsed
+        return [value] if value is not None else value
+    if not isinstance(value, str):
+        return value
+    if expected == "integer":
+        return _coerced_integer(value)
+    if expected == "number":
+        return _coerced_number(value)
+    if expected == "boolean" and value in {"true", "false"}:
+        return value == "true"
+    return value
+
+
+def _parsed_json_array(value: str) -> Any:
+    if not value.strip().startswith("["):
+        return None
+    try:
+        return json.loads(value)
+    except ValueError:
+        return None
+
+
+def _coerced_integer(value: str) -> Any:
+    candidate = value.strip()
+    try:
+        parsed = int(candidate)
+    except ValueError:
+        return value
+    # Only an exact round-trip is lossless: "007" and "+2" keep their original form
+    # so the caller still sees a stable contract error instead of a rewritten request.
+    return parsed if str(parsed) == candidate else value
+
+
+def _coerced_number(value: str) -> Any:
+    candidate = value.strip()
+    if (parsed := _coerced_integer(candidate)) is not value and isinstance(parsed, int):
+        return parsed
+    try:
+        number = float(candidate)
+    except ValueError:
+        return value
+    return number if str(number) == candidate else value
 
 
 def _validate_parameter(parameter: ParameterMetadata, value: Any) -> None:

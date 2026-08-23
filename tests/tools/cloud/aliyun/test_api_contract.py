@@ -2217,6 +2217,125 @@ async def test_request_builder_accepts_numeric_values_for_string_numeric_openmet
 
 
 @pytest.mark.asyncio
+async def test_request_builder_coerces_evaluate_candidate_instance_type_parameters() -> None:
+    """The candidate evaluation inputs that used to fail and force an aliyun_api retry."""
+
+    api = contract(
+        parameter("InstanceTypes", "query", style="repeatList", schema={"type": "array", "items": {"type": "string"}}),
+        parameter("MinimumCpuCoreCount", "query", schema={"type": "integer"}),
+        action="DescribeInstanceTypes",
+    )
+
+    built = await RequestBuilder().build(
+        api,
+        {"params": {"InstanceTypes": "ecs.u1-c1m2.large", "MinimumCpuCoreCount": "2"}},
+    )
+
+    assert dict(built.canonical_query) == {
+        "InstanceTypes.1": "ecs.u1-c1m2.large",
+        "MinimumCpuCoreCount": "2",
+    }
+
+
+@pytest.mark.asyncio
+async def test_request_builder_parses_json_array_literal_instead_of_wrapping_it() -> None:
+    api = contract(
+        parameter("InstanceTypes", "query", style="repeatList", schema={"type": "array", "items": {"type": "string"}})
+    )
+
+    built = await RequestBuilder().build(api, {"params": {"InstanceTypes": '["ecs.g6.large","ecs.g7.large"]'}})
+
+    assert dict(built.canonical_query) == {
+        "InstanceTypes.1": "ecs.g6.large",
+        "InstanceTypes.2": "ecs.g7.large",
+    }
+
+
+@pytest.mark.asyncio
+async def test_request_builder_coerces_array_items_against_the_declared_item_schema() -> None:
+    api = contract(
+        parameter("Ports", "query", style="repeatList", schema={"type": "array", "items": {"type": "integer"}})
+    )
+
+    built = await RequestBuilder().build(api, {"params": {"Ports": ["80", "443"]}})
+
+    assert dict(built.canonical_query) == {"Ports.1": "80", "Ports.2": "443"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("schema_type", "value", "expected"),
+    [
+        ("integer", "2", "2"),
+        ("integer", "-7", "-7"),
+        ("number", "1.5", "1.5"),
+        ("number", "3", "3"),
+        ("boolean", "true", "true"),
+        ("boolean", "false", "false"),
+    ],
+)
+async def test_request_builder_coerces_lossless_scalar_strings(schema_type: str, value: str, expected: str) -> None:
+    api = contract(parameter("Value", "query", schema={"type": schema_type}))
+
+    built = await RequestBuilder().build(api, {"params": {"Value": value}})
+
+    assert dict(built.canonical_query) == {"Value": expected}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("schema_type", "value", "expected_type", "actual_type"),
+    [
+        ("integer", "007", "integer", "string"),
+        ("integer", "+2", "integer", "string"),
+        ("integer", "2.5", "integer", "string"),
+        ("integer", "abc", "integer", "string"),
+        ("number", "2.50", "number", "string"),
+        ("number", "1e3", "number", "string"),
+        ("boolean", "True", "boolean", "string"),
+        ("string", 7, "string", "integer"),
+    ],
+)
+async def test_request_builder_still_rejects_values_that_cannot_convert_losslessly(
+    schema_type: str,
+    value: Any,
+    expected_type: str,
+    actual_type: str,
+) -> None:
+    api = contract(parameter("Value", "query", schema={"type": schema_type}))
+
+    with pytest.raises(ApiContractError, match="^invalid_parameter_type:Value$") as raised:
+        await RequestBuilder().build(api, {"params": {"Value": value}})
+
+    assert raised.value.expected_type == expected_type
+    assert raised.value.actual_type == actual_type
+
+
+@pytest.mark.asyncio
+async def test_request_builder_enforces_enum_against_the_coerced_value() -> None:
+    api = contract(parameter("PageSize", "query", schema={"type": "integer", "enum": [30, 50]}))
+
+    built = await RequestBuilder().build(api, {"params": {"PageSize": "30"}})
+    assert dict(built.canonical_query) == {"PageSize": "30"}
+
+    with pytest.raises(ApiContractError, match="^invalid_parameter_enum:PageSize$"):
+        await RequestBuilder().build(api, {"params": {"PageSize": "31"}})
+
+
+@pytest.mark.asyncio
+async def test_request_builder_coerces_single_declared_json_body_parameter() -> None:
+    api = contract(
+        parameter("Ports", "body", schema={"type": "array", "items": {"type": "integer"}}),
+        consumes=("application/json",),
+        request_body_type="json",
+    )
+
+    built = await RequestBuilder().build(api, {"body": "8080"})
+
+    assert built.body == b"[8080]"
+
+
+@pytest.mark.asyncio
 async def test_request_builder_enforces_local_ref_sibling_type() -> None:
     api, name = await local_ref_sibling_contract("query", {"type": "string"}, component_schema={})
 
