@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 from collections.abc import Mapping
@@ -17,7 +18,8 @@ from iac_code.tools.cloud.aliyun.aliyun_api import (
     AliyunApi,
 )
 from iac_code.tools.cloud.aliyun.public_errors import public_aliyun_error
-from iac_code.tools.cloud.aliyun.template_source import is_local_template_url
+from iac_code.tools.cloud.aliyun.ros_validation.parser import parse_template_source
+from iac_code.tools.cloud.aliyun.template_source import is_local_template_url, read_local_template_url
 from iac_code.types.permissions import PermissionResult, ToolPermissionContext
 
 _TEMPLATE_URL_PROPERTY = {
@@ -149,6 +151,29 @@ def render_ros_template_tool_result_message(
     return aliyun_api.render_tool_result_message(output, is_error=is_error, verbose=verbose)
 
 
+def _local_template_declares_no_parameters(template_url: Any, context: ToolContext) -> bool:
+    """Return True only when a readable local template provably declares no Parameters.
+
+    ROS rejects GetTemplateParameterConstraints with HTTP 400 for templates without
+    Parameters, so that call is never useful for them. Anything we cannot read or
+    parse locally stays on the delegated path and keeps its original behavior.
+    """
+
+    if not isinstance(template_url, str) or not template_url or not is_local_template_url(template_url):
+        return False
+    try:
+        template_body = read_local_template_url(template_url, context)
+    except (OSError, UnicodeError, ValueError):
+        return False
+    parsed = parse_template_source(template_body)
+    if parsed.template is None or not isinstance(parsed.template.data, Mapping):
+        return False
+    parameters = parsed.template.data.get("Parameters")
+    if parameters is None:
+        return True
+    return isinstance(parameters, Mapping) and not parameters
+
+
 class _RosTemplateTool(Tool):
     action: str
 
@@ -254,6 +279,15 @@ class RosGetTemplateParameterConstraintsTool(_RosTemplateTool):
         return delegated_input_schema(self.action)
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
+        if self._delegated_executor is None:
+            return ToolResult.error(self._delegated_executor_error())
+        no_parameters = await asyncio.to_thread(
+            _local_template_declares_no_parameters,
+            tool_input.get("template_url"),
+            context,
+        )
+        if no_parameters:
+            return ToolResult.success(json.dumps({"ParameterConstraints": []}, ensure_ascii=False, indent=2))
         return await self._call_ros_api(tool_input=tool_input, context=context)
 
 

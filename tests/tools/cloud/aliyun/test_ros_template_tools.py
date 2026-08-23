@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from iac_code.tools.base import ToolContext, ToolResult
@@ -330,3 +332,124 @@ async def test_ros_template_tool_preserves_delegated_permission_result() -> None
     result = await tool.check_permissions(tool_input, _permission_context())
 
     assert result is expected
+
+
+_TEMPLATE_WITHOUT_PARAMETERS = """ROSTemplateFormatVersion: '2015-09-01'
+Resources:
+  Vpc:
+    Type: ALIYUN::ECS::VPC
+    Properties:
+      CidrBlock: 192.168.0.0/16
+"""
+
+_TEMPLATE_WITH_PARAMETERS = """ROSTemplateFormatVersion: '2015-09-01'
+Parameters:
+  ZoneId:
+    Type: String
+Resources:
+  Vpc:
+    Type: ALIYUN::ECS::VPC
+    Properties:
+      CidrBlock: 192.168.0.0/16
+"""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "template_body",
+    [
+        _TEMPLATE_WITHOUT_PARAMETERS,
+        _TEMPLATE_WITHOUT_PARAMETERS + "Parameters: {}\n",
+    ],
+)
+async def test_parameter_constraints_skips_api_for_local_template_without_parameters(
+    tmp_path,
+    template_body: str,
+) -> None:
+    template = tmp_path / "template.yml"
+    template.write_text(template_body, encoding="utf-8")
+    delegated = _FakeDelegatedExecutor()
+    tool = RosGetTemplateParameterConstraintsTool(delegated_executor=delegated)
+
+    result = await tool.execute(
+        tool_input={"template_url": str(template), "region_id": "cn-hangzhou"},
+        context=ToolContext(cwd=str(tmp_path), pipeline_mode=True),
+    )
+
+    assert not result.is_error
+    assert json.loads(result.content) == {"ParameterConstraints": []}
+    assert delegated.execution_calls == []
+
+
+@pytest.mark.asyncio
+async def test_parameter_constraints_calls_api_for_local_template_with_parameters(tmp_path) -> None:
+    template = tmp_path / "template.yml"
+    template.write_text(_TEMPLATE_WITH_PARAMETERS, encoding="utf-8")
+    delegated = _FakeDelegatedExecutor()
+    tool = RosGetTemplateParameterConstraintsTool(delegated_executor=delegated)
+    tool_input = {"template_url": str(template), "region_id": "cn-hangzhou"}
+    context = ToolContext(cwd=str(tmp_path), pipeline_mode=True)
+
+    result = await tool.execute(tool_input=tool_input, context=context)
+
+    assert not result.is_error
+    assert delegated.execution_calls == [(tool_input, context)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "template_url",
+    [
+        "https://example.com/template.yml",
+        "oss://bucket/template.yml",
+        "missing-template.yml",
+    ],
+)
+async def test_parameter_constraints_keeps_delegating_when_template_is_not_locally_readable(
+    tmp_path,
+    template_url: str,
+) -> None:
+    delegated = _FakeDelegatedExecutor()
+    tool = RosGetTemplateParameterConstraintsTool(delegated_executor=delegated)
+    tool_input = {"template_url": template_url}
+    context = ToolContext(cwd=str(tmp_path), pipeline_mode=True)
+
+    result = await tool.execute(tool_input=tool_input, context=context)
+
+    assert not result.is_error
+    assert delegated.execution_calls == [(tool_input, context)]
+
+
+@pytest.mark.asyncio
+async def test_parameter_constraints_keeps_delegating_for_unparsable_local_template(tmp_path) -> None:
+    template = tmp_path / "template.yml"
+    template.write_text("Resources: [unclosed\n", encoding="utf-8")
+    delegated = _FakeDelegatedExecutor()
+    tool = RosGetTemplateParameterConstraintsTool(delegated_executor=delegated)
+    tool_input = {"template_url": str(template)}
+    context = ToolContext(cwd=str(tmp_path), pipeline_mode=True)
+
+    result = await tool.execute(tool_input=tool_input, context=context)
+
+    assert not result.is_error
+    assert delegated.execution_calls == [(tool_input, context)]
+
+
+@pytest.mark.asyncio
+async def test_other_ros_template_tools_still_call_api_without_parameters(tmp_path) -> None:
+    template = tmp_path / "template.yml"
+    template.write_text(_TEMPLATE_WITHOUT_PARAMETERS, encoding="utf-8")
+    context = ToolContext(cwd=str(tmp_path), pipeline_mode=True)
+    for tool_type, extra in (
+        (RosValidateTemplateTool, {}),
+        (RosPreviewTemplateTool, {"stack_name": "preview-stack", "parameters": {}}),
+        (RosEstimateTemplateCostTool, {"parameters": {}}),
+    ):
+        delegated = _FakeDelegatedExecutor()
+        tool = tool_type(delegated_executor=delegated)
+        tool_input = {"template_url": str(template), **extra}
+
+        result = await tool.execute(tool_input=tool_input, context=context)
+
+        assert not result.is_error
+        assert delegated.execution_calls == [(tool_input, context)]
