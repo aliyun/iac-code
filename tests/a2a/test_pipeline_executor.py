@@ -6512,6 +6512,46 @@ def test_cleanup_handoff_missing_ledger_does_not_reconstruct_prompt_from_public_
     assert "stack-public-only" not in repr(cleanup)
 
 
+def test_cleanup_handoff_missing_ledger_treats_unavailable_snapshot_without_resources_as_empty(
+    tmp_path: Path,
+) -> None:
+    # Regression (session 9dc515b2…): a canceled run that never created resources
+    # has no cleanup.yaml and a public snapshot whose only "evidence" is a prior
+    # status="unavailable" with resourceCount=0. That must resolve to a
+    # deterministic empty cleanup state (None handoff cleanup), not re-derive
+    # "unavailable" and ask the user to inspect resources manually.
+    from iac_code.a2a.pipeline_executor import _pipeline_cleanup_handoff_data_from_session
+
+    cleanup = _pipeline_cleanup_handoff_data_from_session(
+        cwd=str(tmp_path),
+        session_id="session-unavailable-no-resources",
+        public_snapshot={"cleanup": {"status": "unavailable", "resourceCount": 0, "resources": []}},
+    )
+
+    assert cleanup is None
+
+
+def test_public_cleanup_snapshot_pending_evidence_ignores_unavailable_without_resources() -> None:
+    from iac_code.a2a.pipeline_executor import _public_cleanup_snapshot_has_pending_evidence
+
+    assert (
+        _public_cleanup_snapshot_has_pending_evidence(
+            {"status": "unavailable", "resourceCount": 0, "resources": []}
+        )
+        is False
+    )
+    # Real pending evidence must still be honored so ledger-loss with known
+    # resources keeps surfacing an unavailable cleanup state.
+    assert _public_cleanup_snapshot_has_pending_evidence({"status": "pending"}) is True
+    assert _public_cleanup_snapshot_has_pending_evidence({"resourceCount": 1}) is True
+    assert (
+        _public_cleanup_snapshot_has_pending_evidence(
+            {"status": "unavailable", "resourceCount": 2, "resources": []}
+        )
+        is True
+    )
+
+
 @pytest.mark.asyncio
 async def test_pipeline_executor_routes_second_prompt_as_interrupt(tmp_path: Path) -> None:
     from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator

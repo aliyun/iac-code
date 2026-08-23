@@ -4178,7 +4178,11 @@ def _public_cleanup_snapshot_has_pending_evidence(cleanup: Any) -> bool:
     if isinstance(resource_count, int) and resource_count > 0:
         return True
     status = cleanup.get("status")
-    if isinstance(status, str) and status in {"pending", "started", "in_progress", "failed", "unavailable"}:
+    # "unavailable" is not real cleanup evidence: it is what a prior missing/corrupt
+    # ledger already degraded to. Treating it as pending here re-derives "unavailable"
+    # on every recovery even when the run created no resources (resourceCount=0), so a
+    # deterministically empty cancel state gets stuck reporting "inspect manually".
+    if isinstance(status, str) and status in {"pending", "started", "in_progress", "failed"}:
         return True
     return False
 
