@@ -1480,3 +1480,82 @@ def test_store_returns_none_for_invalid_utf8_snapshot(tmp_path) -> None:
 def test_snapshot_schema_version_is_exported() -> None:
     assert SNAPSHOT_SCHEMA_VERSION == "1.1"
     assert "SNAPSHOT_SCHEMA_VERSION" in pipeline_snapshot.__all__
+
+
+def test_failure_history_records_each_failure_trigger() -> None:
+    started = _base("evt-start", 1, "pipeline_started")
+    step_failure = _base("evt-fail-1", 2, "pipeline_failed", status="failed")
+    step_failure["data"] = {
+        "totalSteps": 5,
+        "failed": True,
+        "failureTrigger": "step_failed",
+        "errorSummary": "generate_template exploded",
+        "errorDetails": {"type": "StepFailed", "errorId": "abc123abc123"},
+    }
+    executor_failure = _base("evt-fail-2", 3, "pipeline_failed", status="failed")
+    executor_failure["data"] = {
+        "source": "executor",
+        "failureTrigger": "executor_exception",
+        "errorSummary": "RuntimeError: boom",
+        "errorDetails": {"type": "RuntimeError", "errorId": "def456def456"},
+    }
+
+    snapshot = reduce_pipeline_events([started, step_failure, executor_failure])
+
+    assert snapshot["status"] == "failed"
+    assert [entry["trigger"] for entry in snapshot["control"]["failureHistory"]] == [
+        "step_failed",
+        "executor_exception",
+    ]
+    assert [entry["errorId"] for entry in snapshot["control"]["failureHistory"]] == [
+        "abc123abc123",
+        "def456def456",
+    ]
+    assert snapshot["control"]["failureHistory"][0]["errorSummary"] == "generate_template exploded"
+    assert all(entry["recovered"] is False for entry in snapshot["control"]["failureHistory"])
+
+
+def test_failure_history_marks_sidecar_recovery_replay() -> None:
+    recovery = _base("evt-recovered", 1, "pipeline_failed", status="failed")
+    recovery["data"] = {
+        "sidecarStatus": "failed",
+        "recovered": True,
+        "failureTrigger": "sidecar_recovery",
+    }
+
+    snapshot = reduce_pipeline_events([recovery])
+
+    assert snapshot["control"]["failureHistory"] == [
+        {
+            "eventId": "evt-recovered",
+            "sequence": 1,
+            "createdAt": "2026-06-08T10:00:00Z",
+            "trigger": "sidecar_recovery",
+            "recovered": True,
+            "errorId": None,
+            "errorSummary": None,
+        }
+    ]
+
+
+def test_failure_history_defaults_trigger_and_dedups_replayed_events() -> None:
+    failure = _base("evt-fail", 1, "pipeline_failed", status="failed")
+    failure["data"] = {"totalSteps": 5, "failed": True}
+
+    snapshot = reduce_pipeline_events([failure])
+    assert [entry["trigger"] for entry in snapshot["control"]["failureHistory"]] == ["unclassified"]
+
+    replayed = reduce_pipeline_events([failure], existing_snapshot=snapshot)
+    assert [entry["trigger"] for entry in replayed["control"]["failureHistory"]] == ["unclassified"]
+
+
+def test_failure_history_migrates_snapshot_without_the_key() -> None:
+    legacy = reduce_pipeline_events([_base("evt-start", 1, "pipeline_started")])
+    del legacy["control"]["failureHistory"]
+
+    failure = _base("evt-fail", 2, "pipeline_failed", status="failed")
+    failure["data"] = {"failureTrigger": "invalid_rollback_target"}
+
+    snapshot = reduce_pipeline_events([failure], existing_snapshot=legacy)
+
+    assert [entry["trigger"] for entry in snapshot["control"]["failureHistory"]] == ["invalid_rollback_target"]

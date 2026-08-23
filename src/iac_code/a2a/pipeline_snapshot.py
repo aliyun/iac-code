@@ -175,6 +175,7 @@ class _PipelineSnapshotReducer:
         self._candidate_restart_keys: set[str] = set()
         self._handoff_history_keys: set[str] = set()
         self._warning_history_keys: set[str] = set()
+        self._failure_history_keys: set[str] = set()
         self._stack_history_keys: set[str] = set()
         self._cleanup_history_keys: set[str] = set()
         self._skip_sequences_through = 0
@@ -227,6 +228,7 @@ class _PipelineSnapshotReducer:
         self._hydrate_candidate_restarts()
         self._hydrate_control_history("handoffHistory", self._handoff_history_keys)
         self._hydrate_control_history("warningHistory", self._warning_history_keys)
+        self._hydrate_control_history("failureHistory", self._failure_history_keys)
         self._hydrate_stack_history()
         self._hydrate_cleanup_history()
 
@@ -522,6 +524,12 @@ class _PipelineSnapshotReducer:
             self._snapshot["status"] = "waiting_input"
 
         terminal_status = _TERMINAL_STATUS_BY_EVENT_TYPE.get(event_type)
+        if event_type == "pipeline_failed":
+            self._append_control_history(
+                "failureHistory",
+                self._failure_history_keys,
+                _failure_history_entry(event),
+            )
         if terminal_status is not None and _is_pending_backup_publication(event):
             self._snapshot["pendingTerminal"] = _terminal_publication(event)
         elif terminal_status is not None:
@@ -1215,6 +1223,28 @@ def _publication_visibility(event: dict[str, Any]) -> str | None:
     return _string_or_none(data.get("visibility"))
 
 
+def _failure_history_entry(event: dict[str, Any]) -> dict[str, Any]:
+    """One auditable row per ``pipeline_failed`` terminal.
+
+    A run can emit several terminals across retries and recovery replays, and
+    counting raw events cannot tell them apart. Recording the trigger and the
+    error id per failure makes the density attributable.
+    """
+    data = _dict_or_empty(event.get("data"))
+    error_details = _dict_or_empty(data.get("errorDetails"))
+    entry = {
+        "eventId": _string_or_none(event.get("eventId")),
+        "sequence": _sequence_value(event),
+        "createdAt": _string_or_none(event.get("createdAt")),
+        "trigger": _string_or_none(data.get("failureTrigger")) or "unclassified",
+        "recovered": data.get("recovered") is True,
+        "errorId": _string_or_none(error_details.get("errorId")),
+        "errorSummary": _string_or_none(data.get("errorSummary")),
+    }
+    _merge_event_coordinates(entry, event)
+    return entry
+
+
 def _warning_history_entry(event: dict[str, Any]) -> dict[str, Any]:
     entry = {
         "eventId": _string_or_none(event.get("eventId")),
@@ -1323,6 +1353,7 @@ def _empty_snapshot() -> dict[str, Any]:
             "candidateRestarts": [],
             "handoffHistory": [],
             "warningHistory": [],
+            "failureHistory": [],
         },
         "seenEventIds": [],
     }
@@ -1427,6 +1458,7 @@ def _snapshot_from_existing(existing_snapshot: dict[str, Any] | None) -> dict[st
         "candidateRestarts",
         "handoffHistory",
         "warningHistory",
+        "failureHistory",
     ):
         value = snapshot["control"].get(key)
         snapshot["control"][key] = copy.deepcopy(value) if isinstance(value, list) else []

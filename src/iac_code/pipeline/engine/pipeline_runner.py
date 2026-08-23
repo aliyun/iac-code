@@ -32,7 +32,7 @@ from iac_code.pipeline.engine.handoff import build_handoff_summary, terminal_out
 from iac_code.pipeline.engine.interrupt import InterruptController, InterruptVerdict
 from iac_code.pipeline.engine.loader import load_pipeline_dir
 from iac_code.pipeline.engine.observability import PipelineObservability
-from iac_code.pipeline.engine.public_errors import public_error, public_error_from_exception
+from iac_code.pipeline.engine.public_errors import PublicError, public_error, public_error_from_exception
 from iac_code.pipeline.engine.resume_recovery import reconcile_resume_messages, user_message_already_in_resume
 from iac_code.pipeline.engine.session import PipelineIdentity, PipelineSession, RestoreResult
 from iac_code.pipeline.engine.state_machine import StateMachine
@@ -1320,7 +1320,7 @@ class PipelineRunner:
                 type=PipelineEventType.PIPELINE_COMPLETED,
                 step_id=getattr(current_step, "step_id", None),
                 timestamp=time.time(),
-                data={"total_steps": self.state_machine.total_steps, "failed": True},
+                data=self._failed_pipeline_completed_data(failure_trigger="interrupted_failed_sidecar"),
             )
             return
         self.resume_agent_loops()
@@ -1836,6 +1836,30 @@ class PipelineRunner:
                 meta.get("type"),
                 exc_info=True,
             )
+
+    def _failed_pipeline_completed_data(
+        self,
+        *,
+        failure_trigger: str,
+        failure: PublicError | None = None,
+    ) -> dict[str, Any]:
+        """Terminal payload for a failed run, carrying its own attribution.
+
+        ``pipeline_failed`` is projected from this event, so the trigger and the
+        root cause must travel with it instead of only living on the preceding
+        ``step_failed``. Without that, several structurally identical terminals
+        cannot be told apart when auditing failure density.
+        """
+        data: dict[str, Any] = {
+            "total_steps": self.state_machine.total_steps,
+            "failed": True,
+            "failure_trigger": failure_trigger,
+        }
+        if failure is not None:
+            data["error"] = failure.summary
+            data["error_summary"] = failure.summary
+            data["error_details"] = failure.details
+        return data
 
     def _persistence_failure_event(self, exc: PipelineStatePersistenceError) -> PipelineEvent:
         step_id = exc.step_id
@@ -3708,6 +3732,7 @@ class PipelineRunner:
         is_first_step = True
         terminal_pipeline_telemetry_emitted = False
         terminal_backup_completed = False
+        terminal_failure: PublicError | None = None
         step_result: StepResult | None = None
         restored_step_user_input = self._consume_restored_current_step_user_input() if user_input is None else None
         restored_resume_messages, restored_precompleted_tools = (
@@ -3854,6 +3879,7 @@ class PipelineRunner:
                         yield blocked_event
                         return
                     terminal_backup_completed = True
+                    terminal_failure = failure
                     self._observability.step_failed(
                         step_id=step.step_id,
                         duration_ms=self._observability.duration_ms(step_started_at),
@@ -4066,6 +4092,7 @@ class PipelineRunner:
                     yield blocked_event
                     return
                 terminal_backup_completed = True
+                terminal_failure = failure
                 self._observability.step_failed(
                     step_id=step.step_id,
                     duration_ms=self._observability.duration_ms(step_started_at),
@@ -4250,7 +4277,10 @@ class PipelineRunner:
                         type=PipelineEventType.PIPELINE_COMPLETED,
                         step_id=step.step_id,
                         timestamp=time.time(),
-                        data={"total_steps": self.state_machine.total_steps, "failed": True},
+                        data=self._failed_pipeline_completed_data(
+                            failure_trigger="invalid_rollback_target",
+                            failure=failure,
+                        ),
                     )
                     return
                 self._mark_attempt_status(current_attempt_id, "rolled_back")
@@ -4443,7 +4473,10 @@ class PipelineRunner:
                 type=PipelineEventType.PIPELINE_COMPLETED,
                 step_id=step.step_id,
                 timestamp=time.time(),
-                data={"total_steps": self.state_machine.total_steps, "failed": True},
+                data=self._failed_pipeline_completed_data(
+                    failure_trigger="step_failed",
+                    failure=terminal_failure,
+                ),
             )
 
     def clear_sidecar(self) -> None:

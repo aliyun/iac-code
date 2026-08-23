@@ -4366,6 +4366,9 @@ class TestInvalidRollbackTarget:
         assert "empty" in failed[0].data["error"]
         assert len(completed) == 1
         assert completed[0].data.get("failed") is True
+        assert completed[0].data.get("failure_trigger") == "step_failed"
+        assert completed[0].data.get("error_summary") == failed[0].data["error_summary"]
+        assert completed[0].data.get("error_details") == failed[0].data["error_details"]
         runner._observability.step_failed.assert_called_once()
 
     @pytest.mark.asyncio
@@ -4446,6 +4449,9 @@ class TestInvalidRollbackTarget:
         ]
         assert len(completed) == 1, f"Expected one PIPELINE_COMPLETED, got: {events}"
         assert completed[0].data.get("failed") is True
+        assert completed[0].data.get("failure_trigger") == "invalid_rollback_target"
+        assert completed[0].data.get("error_summary") == error_msg
+        assert completed[0].data.get("error_details", {}).get("error_id")
 
         # Order: STEP_FAILED comes before PIPELINE_COMPLETED
         step_failed_idx = events.index(failed[0])

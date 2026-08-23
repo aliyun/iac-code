@@ -2319,14 +2319,19 @@ class IacCodeA2APipelineExecutor:
             permanent=event_type == "pipeline_canceled",
         )
         try:
+            recovery_data: dict[str, Any] = {
+                "sidecarStatus": sidecar_status,
+                "recovered": True,
+            }
+            if event_type == "pipeline_failed":
+                # Replaying a restored terminal must not read as a newly observed
+                # failure, otherwise recovery inflates the failure density.
+                recovery_data["failureTrigger"] = "sidecar_recovery"
             published = await publisher.publish_manual(
                 event_type,
                 "pipeline",
                 status=status,
-                data={
-                    "sidecarStatus": sidecar_status,
-                    "recovered": True,
-                },
+                data=recovery_data,
             )
         except _PipelineBackupBlockedTransitionError:
             await self._reopen_sub_pipeline_permissions_after_terminal_fallback(closing_token)
@@ -2954,6 +2959,7 @@ class IacCodeA2APipelineExecutor:
                     status="failed",
                     data={
                         "source": "executor",
+                        "failureTrigger": "executor_exception",
                         "errorSummary": text,
                         "errorDetails": _public_error_details_for_a2a(failure.details) if failure is not None else {},
                     },

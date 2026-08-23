@@ -2630,3 +2630,65 @@ def test_sanitize_tool_input_passthrough_keeps_template_and_conclusion() -> None
     assert result == tool_input
     assert "[REDACTED]" not in json.dumps(result)
     assert "***" not in json.dumps(result)
+
+
+def test_failed_terminal_projects_failure_trigger_and_root_cause() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    [envelope] = translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.PIPELINE_COMPLETED,
+            step_id="confirm_and_select",
+            timestamp=time.time(),
+            data={
+                "total_steps": 4,
+                "failed": True,
+                "failure_trigger": "step_failed",
+                "error": "generate_template exploded",
+                "error_summary": "generate_template exploded",
+                "error_details": {"type": "StepFailed", "error_id": "abc123abc123"},
+            },
+        )
+    )
+
+    assert envelope["eventType"] == "pipeline_failed"
+    assert envelope["status"] == "failed"
+    assert envelope["data"]["failureTrigger"] == "step_failed"
+    assert envelope["data"]["errorSummary"] == "generate_template exploded"
+    assert envelope["data"]["errorDetails"]["errorId"] == "abc123abc123"
+
+
+@pytest.mark.parametrize(
+    "failure_trigger",
+    ["step_failed", "invalid_rollback_target", "interrupted_failed_sidecar"],
+)
+def test_every_engine_failure_trigger_reaches_the_a2a_event(failure_trigger: str) -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    [envelope] = translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.PIPELINE_COMPLETED,
+            step_id="confirm_and_select",
+            timestamp=time.time(),
+            data={"total_steps": 4, "failed": True, "failure_trigger": failure_trigger},
+        )
+    )
+
+    assert envelope["eventType"] == "pipeline_failed"
+    assert envelope["data"]["failureTrigger"] == failure_trigger
+
+
+def test_successful_terminal_carries_no_failure_trigger() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    [envelope] = translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.PIPELINE_COMPLETED,
+            step_id=None,
+            timestamp=time.time(),
+            data={"total_steps": 4},
+        )
+    )
+
+    assert envelope["eventType"] == "pipeline_completed"
+    assert "failureTrigger" not in envelope["data"]

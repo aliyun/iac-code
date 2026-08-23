@@ -57,6 +57,7 @@ _TOP_LEVEL_DATA_KEY_ALIASES = {
     "early_exit": "earlyExit",
     "error_details": "errorDetails",
     "error_summary": "errorSummary",
+    "failure_trigger": "failureTrigger",
     "from_step": "fromStep",
     "parent_step_id": "parentStepId",
     "pipeline_type": "pipelineType",
