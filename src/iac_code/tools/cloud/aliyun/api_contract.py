@@ -67,6 +67,8 @@ _AUTH_TYPES = {"AK", "Anonymous"}
 _OPENMETA_CACHE_STATUSES = {"memory_fresh", "disk_fresh", "remote", "disk_stale", "negative_hit", "miss"}
 _OSS_OPENMETA_FALLBACK_REASON = "oss_openmeta_required_for_complete_request"
 _MAX_PARAMETER_SCHEMA_DEPTH = 32
+_COERCIBLE_INTEGER = re.compile(r"^-?(?:0|[1-9][0-9]{0,18})$")
+_COERCIBLE_DECIMAL = re.compile(r"^-?(?:0|[1-9][0-9]{0,18})\.[0-9]{1,18}$")
 _DATA_DIR = Path(__file__).parent / "data"
 _OVERRIDES_PATH = _DATA_DIR / "openmeta" / "api_overrides.yml"
 _ENDPOINT_OVERRIDES_PATH = _DATA_DIR / "endpoints" / "overrides.yml"
@@ -985,7 +987,9 @@ class RequestBuilder:
         for name, value in params.items():
             parameter = metadata.get(name)
             if parameter is not None:
-                _validate_parameter(parameter, value)
+                coerced = _coerce_parameter_value(parameter, value)
+                _validate_parameter(parameter, coerced)
+                params[name] = coerced
 
         pathname = contract.pathname
         query: dict[str, str] = {}
@@ -1060,9 +1064,11 @@ class RequestBuilder:
         elif body_present:
             _validate_content_type(content_type, "json", contract.consumes)
             declared_body = [parameter for parameter in contract.parameters if parameter.location == "body"]
+            body_value = tool_input["body"]
             if len(declared_body) == 1:
-                _validate_parameter(declared_body[0], tool_input["body"])
-            body = _json_bytes(tool_input["body"])
+                body_value = _coerce_parameter_value(declared_body[0], body_value)
+                _validate_parameter(declared_body[0], body_value)
+            body = _json_bytes(body_value)
             content_type = content_type or _preferred_media(contract.consumes, "json") or "application/json"
         elif body_parameters:
             _validate_content_type(content_type, "json", contract.consumes)
@@ -1184,6 +1190,52 @@ def _validate_pathname(pathname: str) -> None:
 def _validate_parameter(parameter: ParameterMetadata, value: Any) -> None:
     schema = parameter.schema or {}
     _validate_parameter_schema(parameter, value, schema, depth=_MAX_PARAMETER_SCHEMA_DEPTH)
+
+
+def _schema_declared_types(schema: Mapping[str, Any], *, depth: int) -> set[str]:
+    if depth <= 0 or not isinstance(schema, Mapping):
+        return set()
+    types: set[str] = set()
+    expected = schema.get("type")
+    if isinstance(expected, str):
+        types.add(expected)
+    branches = schema.get("allOf")
+    if isinstance(branches, list | tuple):
+        for branch in branches:
+            types |= _schema_declared_types(branch, depth=depth - 1)
+    return types
+
+
+def _coerce_parameter_value(parameter: ParameterMetadata, value: Any) -> Any:
+    """Normalize an unambiguous JSON-type mismatch to the declared schema type.
+
+    Callers routinely send `"2"` for an `integer` field or a bare string for an
+    `array` field. The wire encoding of those shapes is identical either way, so
+    coercing here turns a tool error plus a retry into a single successful call.
+    Only lossless conversions are applied; anything ambiguous (numeric strings
+    that are not numbers, object/array interchange, conflicting `allOf` types)
+    is left untouched so `_validate_parameter` still rejects it. Scalars are not
+    widened into `string`, so a declared `string` field keeps rejecting numbers.
+    """
+
+    types = _schema_declared_types(parameter.schema or {}, depth=_MAX_PARAMETER_SCHEMA_DEPTH)
+    if len(types) != 1:
+        return value
+    expected = next(iter(types))
+    if expected == "array":
+        # `bool` is an `int` subclass, and a bare boolean is not a meaningful element.
+        if isinstance(value, str | int | float) and not isinstance(value, bool):
+            return [value]
+        return value
+    if not isinstance(value, str):
+        return value
+    if expected in {"integer", "number"} and _COERCIBLE_INTEGER.fullmatch(value):
+        return int(value)
+    if expected == "number" and _COERCIBLE_DECIMAL.fullmatch(value):
+        return float(value)
+    if expected == "boolean" and value in {"true", "false"}:
+        return value == "true"
+    return value
 
 
 def _validate_parameter_schema(
