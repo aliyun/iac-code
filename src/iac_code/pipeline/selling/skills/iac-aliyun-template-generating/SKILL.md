@@ -47,8 +47,9 @@ conclusion_schema:
 4. 生成 ROS YAML 模板（库存相关属性按 [references/cloud-products/](references/cloud-products/) 与 [references/template-parameters.md](references/template-parameters.md) 定义为 Parameters，所有 Parameters 必须添加 AssociationProperty）并写入文件
    - 生成的模板默认放在当前工作目录；仅当用户指定其他路径时才写入该路径，不要默认使用 `/tmp` 等工作目录外路径
 5. 调用 `ros_validate_template` 校验；`template_url` 使用刚写入的模板文件路径，已有具体地域时传 `region_id`，否则使用工具默认地域
-6. 校验失败 → 分析错误 → 修复 → 重试（最多 5 轮）
+6. 校验失败或工具报错 → 分析错误 → 就地修复原模板文件 → 传同一 `template_url` 同名重试（最多 5 轮）；失败时不得退出、不得跳过本候选、不得返回空模板
 7. 校验通过 → 完成
+8. 达到 5 轮上限仍未通过 → 仍需写出当前最佳模板并 `complete_step` 提交**非空** `template`，在 `description` 中标注遗留校验失败原因，绝不空跳过候选
 
 > **模板路径支持本地文件**：`ros_validate_template` 的 `template_url` 可传当前工作目录内的本地文件路径（如 `./template.yml`）。避免将大模板内容直接作为参数传递。
 
@@ -103,7 +104,7 @@ conclusion_schema:
 ## 错误处理
 
 ### 校验失败
-分析错误原因 → 查 GetResourceType Schema（如需）→ 修复 → 重试（最多 5 轮）
+分析错误原因 → 查 GetResourceType Schema（如需）→ 就地修复原模板文件 → 传同一 `template_url` 重试（最多 5 轮）。失败期间不得退出、不得空跳过候选；达上限仍未通过时也要提交非空模板并在 `description` 标注遗留问题。
 
 ## 参考文件
 

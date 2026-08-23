@@ -45,7 +45,7 @@
 `complete_step` 成功返回后，基于刚提交的 `complete_step.conclusion.outputs` 渲染 Stack Outputs，再结束本步骤；不要再次调用 `complete_step`。
 
 ## 错误处理
-- 模板校验失败 → 就地修复模板后重试（最多 5 轮）
+- 模板校验失败 → 就地修复模板后重试（最多 5 轮）；失败必须继续修复重试，不得退出或停在等待态
 - 部署失败或等待超时 → 按技能的参数补全与 `ros_deploy` 恢复策略处理
 - 架构层面必须变更（如产品组合不可行）→ rollback_request 到 `architecture_planning`
 
