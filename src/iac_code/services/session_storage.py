@@ -12,12 +12,17 @@ Each ``session.jsonl`` file is a stream of two kinds of JSONL lines:
 
 * **Message rows** — one per :class:`Message`, with extra stamp fields
   (``session_id``, ``cwd``, ``git_branch``, ``version``) appended at write
-  time. ``Message.from_dict`` ignores unknown fields, so loading is
-  schema-agnostic.
+  time, plus a ``metadata.createdAt`` timestamp. ``Message.from_dict``
+  ignores unknown fields, so loading is schema-agnostic.
 
 * **Lite-meta rows** — special rows without a ``role``, identified by a
   ``type`` field (``last-prompt``, …). They are appended for the picker
-  to read via tail-scan, without being part of the conversation.
+  to read via tail-scan, without being part of the conversation. They
+  carry a top-level ``createdAt`` timestamp.
+
+Every row therefore carries its own timestamp, so a session transcript can
+be attributed to an analysis time window per message rather than only at
+session granularity.
 """
 
 from __future__ import annotations
@@ -59,6 +64,33 @@ from iac_code.utils.state_io import append_jsonl_locked, atomic_write_text, safe
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+CREATED_AT_KEY = "createdAt"
+
+
+def ensure_message_created_at(message: Message) -> str:
+    """Stamp ``message.metadata['createdAt']`` if missing, returning the timestamp.
+
+    The timestamp is written onto the message itself rather than only onto the
+    serialized row, so that rewrites (``save`` after compaction) and reloads
+    keep the moment the message was first persisted instead of drifting to the
+    rewrite time.
+    """
+    existing = message.metadata.get(CREATED_AT_KEY)
+    if isinstance(existing, str) and existing:
+        return existing
+    created_at = _utc_now()
+    message.metadata[CREATED_AT_KEY] = created_at
+    return created_at
+
+
+def stamp_meta_row_created_at(entry: dict[str, Any]) -> dict[str, Any]:
+    """Stamp a lite-meta row with ``createdAt`` unless the caller supplied one."""
+    existing = entry.get(CREATED_AT_KEY)
+    if not isinstance(existing, str) or not existing:
+        entry[CREATED_AT_KEY] = _utc_now()
+    return entry
 
 
 def _long_project_dir_hash_suffix(project_dir: Path) -> str | None:
@@ -667,6 +699,7 @@ class SessionStorage:
         """Append a single message (real-time persistence)."""
         path, was_new = self._prepare_session_write(cwd, session_id)
         ensure_private_dir(path.parent)
+        ensure_message_created_at(message)
         data = self._stamp(message.to_dict(), cwd, session_id, git_branch)
         append_jsonl_locked(path, [data])
         ensure_private_file(path)
@@ -680,6 +713,7 @@ class SessionStorage:
         ensure_private_dir(path.parent)
         entry = dict(meta_entry)
         entry["session_id"] = session_id
+        stamp_meta_row_created_at(entry)
         append_jsonl_locked(path, [entry])
         ensure_private_file(path)
         self._ensure_new_session_metadata(cwd, session_id, git_branch=None, was_new=was_new)
@@ -700,6 +734,7 @@ class SessionStorage:
         ensure_private_dir(path.parent)
         lines = []
         for msg in messages:
+            ensure_message_created_at(msg)
             data = self._stamp(msg.to_dict(), cwd, session_id, git_branch)
             lines.append(json.dumps(data, ensure_ascii=False) + "\n")
         atomic_write_text(path, "".join(lines), durable=True)

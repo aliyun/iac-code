@@ -138,6 +138,58 @@ class TestSessionStorage:
         assert obj["git_branch"] == "dev"
         assert "version" in obj
 
+    def test_every_message_row_carries_created_at(self, storage, sample_messages):
+        storage.append(CWD, "created-at", Message(role="user", content="appended"), git_branch="main")
+        storage.save(CWD, "created-at", sample_messages, git_branch="main")
+        storage.append(CWD, "created-at", Message(role="assistant", content="after save"), git_branch="main")
+
+        path = storage.session_path(CWD, "created-at")
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+        assert len(rows) == len(sample_messages) + 1
+        for row in rows:
+            created_at = row["metadata"]["createdAt"]
+            assert isinstance(created_at, str) and created_at.endswith("Z")
+
+    def test_meta_rows_carry_created_at(self, storage):
+        storage.append_meta(CWD, "created-at-meta", {"type": "last-prompt", "last_prompt": "hi"})
+
+        path = storage.session_path(CWD, "created-at-meta")
+        row = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+
+        assert isinstance(row["createdAt"], str) and row["createdAt"].endswith("Z")
+
+    def test_meta_row_created_at_is_not_overwritten(self, storage):
+        storage.append_meta(
+            CWD,
+            "created-at-meta-explicit",
+            {"type": "pipeline_init", "createdAt": "2026-08-19T06:30:00Z"},
+        )
+
+        path = storage.session_path(CWD, "created-at-meta-explicit")
+        row = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+
+        assert row["createdAt"] == "2026-08-19T06:30:00Z"
+
+    def test_save_preserves_original_created_at_on_rewrite(self, storage):
+        message = Message(role="user", content="first")
+        storage.append(CWD, "created-at-rewrite", message, git_branch="main")
+        original = message.metadata["createdAt"]
+
+        storage.save(CWD, "created-at-rewrite", storage.load(CWD, "created-at-rewrite"), git_branch="main")
+
+        path = storage.session_path(CWD, "created-at-rewrite")
+        row = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+
+        assert row["metadata"]["createdAt"] == original
+
+    def test_created_at_survives_load_round_trip(self, storage):
+        storage.append(CWD, "created-at-roundtrip", Message(role="user", content="hi"), git_branch=None)
+
+        loaded = storage.load(CWD, "created-at-roundtrip")
+
+        assert loaded[0].metadata["createdAt"]
+
     def test_tool_use_preserved(self, storage, sample_messages):
         storage.save(CWD, "tools", sample_messages, git_branch=None)
         loaded = storage.load(CWD, "tools")
@@ -293,7 +345,8 @@ def test_new_session_uses_directory_format(storage):
     assert session_dir.is_dir()
     assert (session_dir / SESSION_JSONL_FILENAME).exists()
     assert not legacy_path.exists()
-    assert storage.load(CWD, "dir-session") == [Message(role="user", content="hi")]
+    loaded = storage.load(CWD, "dir-session")
+    assert [(message.role, message.content) for message in loaded] == [("user", "hi")]
 
 
 def test_recalled_memory_metadata_round_trips(tmp_path):

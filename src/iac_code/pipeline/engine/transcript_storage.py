@@ -12,7 +12,12 @@ from iac_code import __version__
 from iac_code.agent.message import Message
 from iac_code.services.session_layout import ensure_session_owned_parent, require_supported_session_layout
 from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, session_metadata_entry_exists
-from iac_code.services.session_storage import SessionStorage, merge_preserved_cleanup_prompts
+from iac_code.services.session_storage import (
+    SessionStorage,
+    ensure_message_created_at,
+    merge_preserved_cleanup_prompts,
+    stamp_meta_row_created_at,
+)
 from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
 from iac_code.utils.state_io import append_jsonl_locked, open_text_no_follow, write_text_no_follow
 
@@ -62,6 +67,7 @@ class PipelineTranscriptStorage:
     ) -> None:
         path = self.session_path(cwd, session_id)
         self._ensure_transcript_parent(path)
+        ensure_message_created_at(message)
         data = self._stamp(message.to_dict(), cwd, session_id, git_branch)
         append_jsonl_locked(path, [data])
         ensure_private_file(path)
@@ -73,6 +79,7 @@ class PipelineTranscriptStorage:
         self._ensure_transcript_parent(path)
         entry = dict(meta_entry)
         entry["session_id"] = session_id
+        stamp_meta_row_created_at(entry)
         append_jsonl_locked(path, [entry])
         ensure_private_file(path)
 
@@ -89,6 +96,8 @@ class PipelineTranscriptStorage:
             messages = merge_preserved_cleanup_prompts(self.load(cwd, session_id), messages)
         path = self.session_path(cwd, session_id)
         self._ensure_transcript_parent(path)
+        for message in messages:
+            ensure_message_created_at(message)
         content = "".join(
             json.dumps(self._stamp(message.to_dict(), cwd, session_id, git_branch), ensure_ascii=False) + "\n"
             for message in messages

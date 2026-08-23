@@ -1486,7 +1486,8 @@ def test_persist_pipeline_user_prompt_tags_normal_chat(tmp_path) -> None:
     stored = manager.load_resume_messages(session.session_id, cwd=cwd)
     prompts = [msg for msg in stored if msg.role == "user"]
     assert [msg.get_text() for msg in prompts] == ["流水线回合 prompt", "交接后普通对话 prompt"]
-    assert prompts[0].metadata == {"source": "pipeline"}
+    assert prompts[0].metadata.get("source") == "pipeline"
+    assert prompts[0].metadata.get("normalChat") is None
     assert prompts[1].metadata.get("source") == "pipeline"
     assert prompts[1].metadata.get("normalChat") is True
 

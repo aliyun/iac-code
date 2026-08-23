@@ -174,6 +174,24 @@ def test_append_stamps_required_fields(tmp_path: Path):
     assert row["cwd"] == "/repo"
     assert row["git_branch"] == "main"
     assert row["version"] == __version__
+    assert row["metadata"]["createdAt"].endswith("Z")
+
+
+def test_save_stamps_created_at_on_every_message(tmp_path: Path):
+    storage = PipelineTranscriptStorage(tmp_path / "pipeline")
+
+    storage.save(
+        "/repo",
+        "transcript_att_0001",
+        [Message(role="user", content="one"), Message(role="assistant", content="two")],
+        git_branch="main",
+    )
+
+    lines = storage.session_path("/repo", "transcript_att_0001").read_text(encoding="utf-8").splitlines()
+    rows = [json.loads(line) for line in lines if line]
+    assert len(rows) == 2
+    for row in rows:
+        assert row["metadata"]["createdAt"].endswith("Z")
 
 
 def test_append_meta_requires_type(tmp_path: Path):
@@ -193,7 +211,9 @@ def test_append_meta_stamps_session_and_is_skipped_by_load(tmp_path: Path):
     storage.append_meta("/repo", "transcript_att_0001", {"type": "pipeline_init"})
 
     row = json.loads(storage.session_path("/repo", "transcript_att_0001").read_text(encoding="utf-8"))
-    assert row == {"type": "pipeline_init", "session_id": "transcript_att_0001"}
+    assert row["type"] == "pipeline_init"
+    assert row["session_id"] == "transcript_att_0001"
+    assert row["createdAt"].endswith("Z")
     assert storage.load("/repo", "transcript_att_0001") == []
 
 
