@@ -222,6 +222,16 @@ _ZHIPU_GLM53_EFFORTS: tuple[EffortLevel, ...] = (
 
 _NONE_SPEC = ThinkingSpec(family=ThinkingFamily.NONE)
 
+# qwen3.7-max thinks without a server-side length bound unless a budget is sent,
+# which lets a single turn spend minutes inside the thinking phase. Cap it so the
+# reasoning length is bounded at the source; an explicitly configured
+# ``thinkingBudget`` still wins (see ``_effective_thinking_budget_for_spec``).
+_DASHSCOPE_QWEN37_MAX_SPEC = ThinkingSpec(
+    ThinkingFamily.DASHSCOPE,
+    default_thinking_budget=16384,
+    supports_thinking_budget=True,
+)
+
 _DASHSCOPE_KIMI_K27_CODE_SPEC = ThinkingSpec(
     ThinkingFamily.DASHSCOPE,
     default_thinking_budget=8192,
@@ -362,7 +372,7 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
     },
     "dashscope": {
         "qwen3.8-max": _DASHSCOPE_QWEN38_SPEC,
-        "qwen3.7-max": ThinkingSpec(ThinkingFamily.DASHSCOPE),
+        "qwen3.7-max": _DASHSCOPE_QWEN37_MAX_SPEC,
         "qwen3.7-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.7-flash": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.6-max-preview": ThinkingSpec(ThinkingFamily.DASHSCOPE),
@@ -410,7 +420,7 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
     "dashscope_token_plan": {
         "qwen3.8-max": _DASHSCOPE_QWEN38_SPEC,
         "qwen3.8-max-preview": _DASHSCOPE_QWEN38_PREVIEW_SPEC,
-        "qwen3.7-max": ThinkingSpec(ThinkingFamily.DASHSCOPE),
+        "qwen3.7-max": _DASHSCOPE_QWEN37_MAX_SPEC,
         "qwen3.7-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.6-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.6-flash": ThinkingSpec(ThinkingFamily.DASHSCOPE),

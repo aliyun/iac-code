@@ -133,6 +133,26 @@ class TestDashScopeBuildThinkingKwargs:
         p = DashScopeProvider(model="not-real", api_key="k")
         assert p._build_thinking_kwargs() == {}
 
+    def test_qwen37_max_sends_bounded_thinking_budget(self):
+        # 长尾延迟收敛:默认必须带 thinking_budget,否则服务端推理长度无界。
+        for provider_key in ("dashscope", "dashscope_token_plan"):
+            p = DashScopeProvider(model="qwen3.7-max", api_key="k", provider_key=provider_key)
+            assert p._build_thinking_kwargs() == {
+                "extra_body": {
+                    "enable_thinking": True,
+                    "preserve_thinking": True,
+                    "thinking_budget": 16384,
+                },
+            }, provider_key
+
+    def test_qwen37_max_explicit_budget_wins(self):
+        p = DashScopeProvider(model="qwen3.7-max", api_key="k", thinking_budget=4096)
+        assert p._build_thinking_kwargs()["extra_body"]["thinking_budget"] == 4096
+
+    def test_qwen37_max_disabled_thinking_sends_no_budget(self):
+        p = DashScopeProvider(model="qwen3.7-max", api_key="k", thinking_enabled=False)
+        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": False}}
+
     def test_effort_request_kwargs_delegates(self):
         p = DashScopeProvider(model="qwen3.6-plus", api_key="k")
         assert p._effort_request_kwargs() == p._build_thinking_kwargs()
@@ -262,7 +282,12 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         call_kwargs = client.chat.completions.calls[0]
         assert call_kwargs["max_tokens"] == 8192
         assert "max_completion_tokens" not in call_kwargs
-        assert call_kwargs["extra_body"] == {"enable_thinking": True, "preserve_thinking": True}
+        # 思考预算走 extra_body,不参与可见输出上限,故 max_tokens 保持原值。
+        assert call_kwargs["extra_body"] == {
+            "enable_thinking": True,
+            "preserve_thinking": True,
+            "thinking_budget": 16384,
+        }
 
     async def test_token_plan_glm52_uses_same_budget_free_request_policy(self):
         chunks = [

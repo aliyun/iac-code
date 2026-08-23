@@ -247,6 +247,7 @@ class TestCreateProvider:
             "thinking_budget": 2048,
             "max_completion_tokens": 10000,
             "stream_idle_timeout": 12.5,
+            "thinking_phase_timeout": 300.0,
             "endpoint_origin": "https://dashscope.aliyuncs.com",
             "endpoint_custom": False,
         }

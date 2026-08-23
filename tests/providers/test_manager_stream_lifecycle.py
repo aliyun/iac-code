@@ -12,9 +12,16 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 from iac_code.providers.base import Message, NonStreamingResponse
 from iac_code.providers.manager import ProviderManager
+from iac_code.providers.stream_watchdog import DEFAULT_THINKING_PHASE_TIMEOUT
 from iac_code.services.telemetry.names import Events, IacCodeAttr, PipelineAttr
 from iac_code.services.telemetry.scope import get_span_attributes, use_span_attributes
-from iac_code.types.stream_events import MessageEndEvent, MessageStartEvent, TextDeltaEvent, Usage
+from iac_code.types.stream_events import (
+    MessageEndEvent,
+    MessageStartEvent,
+    TextDeltaEvent,
+    ThinkingDeltaEvent,
+    Usage,
+)
 
 
 class FatalProviderError(BaseException):
@@ -864,3 +871,108 @@ async def test_qwenpaw_configuration_check_still_runs_on_first_consumption(monke
     await anext(stream)
 
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_continuous_thinking_beyond_phase_budget_falls_back_with_thinking_off(monkeypatch) -> None:
+    """长尾 thinking 场景:空闲看门狗不响,阶段看门狗必须截断并降级产出。"""
+    iterator = ControlledIterator(
+        [
+            MessageStartEvent(message_id="thinking-tail"),
+            ThinkingDeltaEvent(text="step 1"),
+            ThinkingDeltaEvent(text="step 2"),
+            ThinkingDeltaEvent(text="step 3"),
+            MessageEndEvent(stop_reason="end_turn", usage=Usage()),
+        ]
+    )
+    provider = FakeProvider(iterator)
+    manager = _manager(monkeypatch, provider)
+    # 预算设为 0 让第二个 thinking delta 立即越限;idle 超时保持宽松以证明不是它触发的。
+    manager._thinking_phase_timeout = 0.0
+    fallback_provider = FakeProvider(ControlledIterator([]))
+    built_for: list[str] = []
+
+    def build_thinking_disabled(model: str):
+        built_for.append(model)
+        return fallback_provider
+
+    monkeypatch.setattr(manager, "_thinking_disabled_provider", build_thinking_disabled)
+    span = RecordingSpan()
+    _install_span(monkeypatch, span)
+    events, _metrics = _record_telemetry(monkeypatch)
+
+    output = [event async for event in manager.stream([Message.user("hi")], "system")]
+
+    failures = [attrs for name, attrs in events if name == Events.API_REQUEST_FAILED]
+    assert len(failures) == 1
+    assert failures[0]["error_type"] == "ThinkingPhaseTimeoutError"
+    # 降级请求走的是 thinking 关闭的 provider,不是原 provider。
+    assert built_for == ["claude-sonnet-4-6"]
+    assert fallback_provider.complete_calls == 1
+    assert provider.complete_calls == 0
+    assert any(event.type == "tombstone" for event in output)
+    assert output[-1].type == "message_end"
+
+
+@pytest.mark.asyncio
+async def test_thinking_interleaved_with_output_does_not_trip_phase_budget(monkeypatch) -> None:
+    """可见输出会结束思考阶段,分段思考不应被累加成一次越限。"""
+    iterator = ControlledIterator(
+        [
+            MessageStartEvent(message_id="interleaved"),
+            ThinkingDeltaEvent(text="think a"),
+            TextDeltaEvent(text="answer a"),
+            ThinkingDeltaEvent(text="think b"),
+            TextDeltaEvent(text="answer b"),
+            MessageEndEvent(stop_reason="end_turn", usage=Usage()),
+        ]
+    )
+    provider = FakeProvider(iterator)
+    manager = _manager(monkeypatch, provider)
+    manager._thinking_phase_timeout = 0.0
+    span = RecordingSpan()
+    _install_span(monkeypatch, span)
+    events, _metrics = _record_telemetry(monkeypatch)
+
+    output = [event async for event in manager.stream([Message.user("hi")], "system")]
+
+    assert [name for name, _ in events].count(Events.API_REQUEST_FAILED) == 0
+    assert provider.complete_calls == 0
+    assert output[-1].type == "message_end"
+
+
+@pytest.mark.asyncio
+async def test_thinking_disabled_fallback_provider_forces_thinking_off(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_create_provider(model, credentials, **kwargs):
+        captured.update(kwargs)
+        captured["model"] = model
+        return FakeProvider(ControlledIterator([]))
+
+    manager = _manager(monkeypatch, FakeProvider(ControlledIterator([])))
+    manager._effort_override = "high"
+    monkeypatch.setattr("iac_code.providers.manager.create_provider", fake_create_provider)
+
+    assert manager._thinking_disabled_provider("qwen3.7-max") is not None
+    assert captured["model"] == "qwen3.7-max"
+    assert captured["request_policy_override"].thinking_enabled is False
+    # effort_override 会在 create_provider 内被重新套用,必须剔除以免把思考重新打开。
+    assert "effort_override" not in captured
+
+
+@pytest.mark.asyncio
+async def test_thinking_disabled_fallback_provider_returns_none_when_unbuildable(monkeypatch) -> None:
+    manager = _manager(monkeypatch, FakeProvider(ControlledIterator([])))
+
+    def raising_create_provider(model, credentials, **kwargs):
+        raise ValueError("no api key")
+
+    monkeypatch.setattr("iac_code.providers.manager.create_provider", raising_create_provider)
+
+    assert manager._thinking_disabled_provider("qwen3.7-max") is None
+
+
+def test_session_start_settings_exposes_thinking_phase_timeout(monkeypatch) -> None:
+    manager = _manager(monkeypatch, FakeProvider(ControlledIterator([])))
+    assert manager.session_start_settings()["thinking_phase_timeout"] == DEFAULT_THINKING_PHASE_TIMEOUT

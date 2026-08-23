@@ -21,7 +21,12 @@ from iac_code.i18n import _
 from iac_code.providers.base import Message, NonStreamingResponse, Provider, ToolDefinition
 from iac_code.providers.request_policy import ProviderRequestPolicy, bool_or_none, positive_int_or_none
 from iac_code.providers.retry import RetryableError, RetryConfig, with_retry
-from iac_code.providers.stream_watchdog import StreamWatchdog
+from iac_code.providers.stream_watchdog import (
+    DEFAULT_THINKING_PHASE_TIMEOUT,
+    StreamWatchdog,
+    ThinkingPhaseTimeoutError,
+    ThinkingPhaseWatchdog,
+)
 from iac_code.services.session_logging import is_custom_endpoint, sanitize_endpoint_origin
 from iac_code.services.telemetry import (
     add_metric,
@@ -723,6 +728,7 @@ class ProviderManager:
         credentials: dict[str, str],
         retry_config: RetryConfig | None = None,
         stream_idle_timeout: float = 90.0,
+        thinking_phase_timeout: float = DEFAULT_THINKING_PHASE_TIMEOUT,
         provider_key_override: str | None = None,
         base_url_override: str | None = None,
         request_policy_override: ProviderRequestPolicy | None = None,
@@ -734,6 +740,7 @@ class ProviderManager:
         self._credentials = credentials
         self._retry_config = retry_config or RetryConfig()
         self._stream_idle_timeout = stream_idle_timeout
+        self._thinking_phase_timeout = thinking_phase_timeout
         self._provider_key_override = provider_key_override
         self._base_url_override = base_url_override
         self._effort_override = effort_override
@@ -807,6 +814,32 @@ class ProviderManager:
         if self._effort_override is not None:
             kwargs["effort_override"] = self._effort_override
         return kwargs
+
+    def _thinking_disabled_provider(self, model: str) -> Provider | None:
+        """Build a provider for ``model`` with thinking forced off.
+
+        Used by the streaming fallback after a thinking-phase timeout so the retry
+        cannot spend another unbounded stretch inside thinking. Returns None when
+        the provider cannot be built, which makes the caller fall back to the
+        normal provider rather than failing the turn.
+        """
+        kwargs = self._provider_create_kwargs()
+        policy = kwargs.get("request_policy_override")
+        base_policy = policy if isinstance(policy, ProviderRequestPolicy) else ProviderRequestPolicy()
+        kwargs["request_policy_override"] = ProviderRequestPolicy(
+            thinking_enabled=False,
+            effort=base_policy.effort,
+            thinking_budget=base_policy.thinking_budget,
+            max_completion_tokens=base_policy.max_completion_tokens,
+        )
+        # effort_override is re-applied inside create_provider and would resurrect a
+        # thinking-on effort, so let the explicit policy above be the only source.
+        kwargs.pop("effort_override", None)
+        try:
+            return create_provider(model, self._credentials, **kwargs)
+        except ValueError as exc:
+            logger.warning(f"Could not build thinking-disabled fallback provider: {exc}")
+            return None
 
     def reconfigure(
         self,
@@ -901,6 +934,7 @@ class ProviderManager:
             ),
             "max_completion_tokens": max_completion_tokens,
             "stream_idle_timeout": self._stream_idle_timeout,
+            "thinking_phase_timeout": self._thinking_phase_timeout,
             "endpoint_origin": _string_provider_attr(provider, "_session_endpoint_origin"),
             "endpoint_custom": _bool_provider_attr(provider, "_session_endpoint_custom"),
         }
@@ -1005,6 +1039,8 @@ class ProviderManager:
         refusal_detected = False
         first_token_received = False
         watchdog: StreamWatchdog | None = None
+        thinking_watchdog = ThinkingPhaseWatchdog(phase_timeout=self._thinking_phase_timeout)
+        thinking_phase_exceeded = False
         stream_iter: AsyncGenerator[StreamEvent, None] | None = None
         terminal_status: str | None = None
         close_attempted = False
@@ -1129,6 +1165,11 @@ class ProviderManager:
                     with activate_span():
                         event = await asyncio.wait_for(stream_iter.__anext__(), timeout=self._stream_idle_timeout)
                         watchdog.ping()
+                        if isinstance(event, ThinkingDeltaEvent):
+                            if not event.is_metadata_only:
+                                thinking_watchdog.on_thinking()
+                        elif isinstance(event, (TextDeltaEvent, ToolUseStartEvent, ToolUseEndEvent)):
+                            thinking_watchdog.on_output()
                         if isinstance(event, MessageStartEvent):
                             orphaned_message_ids.append(event.message_id)
                             current_message_id = event.message_id
@@ -1158,6 +1199,23 @@ class ProviderManager:
                             )
                 except StopAsyncIteration:
                     break
+                except ThinkingPhaseTimeoutError as exc:
+                    # The model kept emitting thinking deltas past the phase budget, so
+                    # the idle watchdog never fired. Abandon this stream and let the
+                    # non-streaming fallback below rerun the turn with thinking off,
+                    # which bounds the latency instead of waiting out the long tail.
+                    thinking_phase_exceeded = True
+                    logger.warning(
+                        "Provider thinking phase timeout: thinking ran {:.1f}s "
+                        "(limit={:.0f}s) without visible output; falling back with "
+                        "thinking disabled; provider={}, model={}, scope={}",
+                        exc.elapsed,
+                        exc.phase_timeout,
+                        provider_name,
+                        sanitized_model,
+                        captured_scope,
+                    )
+                    raise
                 except asyncio.TimeoutError:
                     # Stream idle watchdog fired: no event arrived within the idle
                     # window. Emit a rich diagnostic before re-raising into the generic
@@ -1296,6 +1354,10 @@ class ProviderManager:
                         system,
                         tools,
                         max_tokens,
+                        provider_override=(
+                            self._thinking_disabled_provider(model) if thinking_phase_exceeded else None
+                        ),
+                        model_override=model if thinking_phase_exceeded else None,
                         telemetry_messages=telemetry_messages,
                         refusal_detected=refusal_detected,
                     )

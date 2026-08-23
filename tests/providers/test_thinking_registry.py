@@ -246,6 +246,22 @@ class TestGetThinkingSpec:
         spec = get_thinking_spec("dashscope", "qwen3.6-max-preview")
         assert spec.family is ThinkingFamily.DASHSCOPE
 
+    def test_qwen37_max_thinking_is_budget_bounded(self):
+        # 长尾延迟收敛:qwen3.7-max 必须带思考预算下发,否则服务端推理长度无界。
+        for provider_key in ("dashscope", "dashscope_token_plan"):
+            spec = get_thinking_spec(provider_key, "qwen3.7-max")
+            assert spec.family is ThinkingFamily.DASHSCOPE, provider_key
+            assert spec.supports_thinking_budget is True, provider_key
+            assert spec.default_thinking_budget == 16384, provider_key
+            # 该模型不吃 reasoning_effort,预算是唯一收敛通路。
+            assert spec.allowed_efforts == (), provider_key
+            assert spec.uses_reasoning_effort_param is False, provider_key
+
+    def test_qwen37_max_still_thinks_by_default(self):
+        # 加预算只限制长度,不改变“默认思考”语义。
+        assert resolve_thinking_active("dashscope", "qwen3.7-max", None) is True
+        assert resolve_thinking_active("dashscope_token_plan", "qwen3.7-max", None) is True
+
     def test_unknown_provider_returns_none(self):
         spec = get_thinking_spec("nonexistent", "anything")
         assert spec.family is ThinkingFamily.NONE
@@ -269,6 +285,8 @@ class TestGetThinkingSpec:
                 if (provider_key, model) in {
                     ("dashscope", "kimi-k2.7-code"),
                     ("dashscope_token_plan", "kimi-k2.7-code"),
+                    ("dashscope", "qwen3.7-max"),
+                    ("dashscope_token_plan", "qwen3.7-max"),
                 }:
                     continue
                 assert spec.default_thinking_budget is None, (provider_key, model)
