@@ -42,6 +42,7 @@
 
 ## 输出
 部署完成后调用 `complete_step` 提交部署结果。
+部署过程中 `ros_deploy` 的创建类动作失败过、之后才成功时，必须按技能的「部署恢复记录」回填 `deployment_recovery`，不要只提交 `status: success`。
 `complete_step` 成功返回后，基于刚提交的 `complete_step.conclusion.outputs` 渲染 Stack Outputs，再结束本步骤；不要再次调用 `complete_step`。
 
 ## 错误处理

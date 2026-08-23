@@ -1461,6 +1461,152 @@ class TestCompletionGuards:
         assert "rerun validation" in result.content
 
 
+class TestDeployRecoveryGuard:
+    guard = {
+        "when_conclusion_field_equals": {"status": "success"},
+        "require_deploy_recovery_evidence": {"recovery_field": "deployment_recovery"},
+        "message_key": "deploy_recovery_record_required",
+    }
+
+    @staticmethod
+    def _tool(records):
+        return CompleteStepTool(
+            StepConfig(step_id="deploying", conclusion_field="deployment", forward=None),
+            completion_guards=[TestDeployRecoveryGuard.guard],
+            completion_guard_state={"tool_result_records": records},
+        )
+
+    @staticmethod
+    def _failed_record(action, reason):
+        return {
+            "tool_name": "ros_deploy",
+            "input": {"action": action},
+            "result": {
+                "stack_id": "stack-abc123",
+                "status": "CREATE_FAILED",
+                "status_reason": reason,
+                "is_success": False,
+            },
+            "is_error": True,
+        }
+
+    @staticmethod
+    def _succeeded_record(action):
+        return {
+            "tool_name": "ros_deploy",
+            "input": {"action": action},
+            "result": {"stack_id": "stack-abc123", "status": "CREATE_COMPLETE", "is_success": True},
+            "is_error": False,
+        }
+
+    def test_first_try_success_does_not_require_recovery_record(self):
+        tool = self._tool([self._succeeded_record("create")])
+
+        assert tool.validate_completion_input({"conclusion": {"status": "success", "stack_id": "stack-abc123"}}) is None
+
+    def test_success_after_failures_requires_recovery_record(self):
+        tool = self._tool(
+            [
+                self._failed_record("create", "code: InvalidCidrBlock.Overlapped"),
+                self._failed_record("continue_create", "code: InvalidVSwitchId.ZoneMismatch"),
+                self._succeeded_record("continue_create"),
+            ]
+        )
+
+        error = tool.validate_completion_input({"conclusion": {"status": "success", "stack_id": "stack-abc123"}})
+
+        assert error is not None
+        assert "deployment_recovery" in error
+        assert "CREATE_FAILED" in error
+
+    def test_recovery_record_matching_evidence_passes(self):
+        tool = self._tool(
+            [
+                self._failed_record("create", "code: InvalidCidrBlock.Overlapped"),
+                self._failed_record("continue_create", "code: InvalidVSwitchId.ZoneMismatch"),
+                self._succeeded_record("continue_create"),
+            ]
+        )
+        conclusion = {
+            "status": "success",
+            "stack_id": "stack-abc123",
+            "deployment_recovery": {
+                "retry_count": 2,
+                "failed_attempts": [
+                    {
+                        "action": "create",
+                        "stack_id": "stack-abc123",
+                        "status": "CREATE_FAILED",
+                        "reason": "VPC CidrBlock 与已有网段重叠",
+                    },
+                    {
+                        "action": "continue_create",
+                        "stack_id": "stack-abc123",
+                        "status": "CREATE_FAILED",
+                        "reason": "VSwitch 可用区与 ECS 可用区不一致",
+                    },
+                ],
+                "recovery_path": "create CREATE_FAILED -> edit_file 改网段 -> continue_create CREATE_FAILED "
+                "-> edit_file 改可用区 -> continue_create 成功",
+            },
+        }
+
+        assert tool.validate_completion_input({"conclusion": conclusion}) is None
+
+    def test_understated_retry_count_is_rejected(self):
+        tool = self._tool(
+            [
+                self._failed_record("create", "code: InvalidCidrBlock.Overlapped"),
+                self._failed_record("continue_create", "code: InvalidVSwitchId.ZoneMismatch"),
+                self._succeeded_record("continue_create"),
+            ]
+        )
+        conclusion = {
+            "status": "success",
+            "stack_id": "stack-abc123",
+            "deployment_recovery": {
+                "retry_count": 1,
+                "failed_attempts": [
+                    {
+                        "action": "create",
+                        "stack_id": "stack-abc123",
+                        "status": "CREATE_FAILED",
+                        "reason": "VPC CidrBlock 与已有网段重叠",
+                    }
+                ],
+                "recovery_path": "create CREATE_FAILED -> edit_file -> continue_create 成功",
+            },
+        }
+
+        error = tool.validate_completion_input({"conclusion": conclusion})
+
+        assert error is not None
+        assert "retry_count must be 2" in error
+
+    def test_failed_status_conclusion_is_not_gated(self):
+        tool = self._tool([self._failed_record("create", "code: InvalidCidrBlock.Overlapped")])
+
+        assert tool.validate_completion_input({"conclusion": {"status": "failed", "error": "CREATE_FAILED"}}) is None
+
+    @pytest.mark.asyncio
+    async def test_guard_returns_repairable_error_before_failing_step(self):
+        tool = self._tool(
+            [
+                self._failed_record("create", "code: InvalidCidrBlock.Overlapped"),
+                self._succeeded_record("continue_create"),
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "success", "stack_id": "stack-abc123"}},
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert result.metadata is None or "step_result" not in result.metadata
+        assert "deployment_recovery" in result.content
+
+
 class TestSchemaValidation:
     def test_missing_conclusion_validation_error_includes_current_step_schema(self):
         config = StepConfig(

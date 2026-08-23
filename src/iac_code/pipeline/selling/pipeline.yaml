@@ -600,6 +600,11 @@ steps:
           status_in: [CREATE_COMPLETE]
           match_conclusion_field: stack_id
         message_key: deploy_wait_create_complete
+      - when_conclusion_field_equals:
+          status: success
+        require_deploy_recovery_evidence:
+          recovery_field: deployment_recovery
+        message_key: deploy_recovery_record_required
     tools:
       include: []
       exclude:

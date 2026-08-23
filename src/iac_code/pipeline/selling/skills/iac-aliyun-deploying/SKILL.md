@@ -21,6 +21,39 @@ conclusion_schema:
         type: string
     outputs:
       type: object
+    deployment_recovery:
+      type: object
+      description: 部署过程中出现过 ros_deploy 创建失败并恢复时必填；记录累计重试次数、每次失败原因与恢复路径
+      required: [retry_count, failed_attempts, recovery_path]
+      additionalProperties: false
+      properties:
+        retry_count:
+          type: integer
+          minimum: 1
+          description: 本步骤 ros_deploy 创建类动作累计失败的次数
+        failed_attempts:
+          type: array
+          minItems: 1
+          description: 每次失败的创建类动作，按发生顺序排列
+          items:
+            type: object
+            required: [action, reason]
+            additionalProperties: false
+            properties:
+              action:
+                type: string
+                enum: [create, continue_create, delete_and_create]
+              stack_id:
+                type: string
+              status:
+                type: string
+                description: 该次失败的 Stack 状态，如 CREATE_FAILED
+              reason:
+                type: string
+                description: 该次失败的具体原因
+        recovery_path:
+          type: string
+          description: CREATE_FAILED→修复→成功 的恢复路径，说明每轮采取的修复动作
     error:
       type: string
       description: 失败原因（status 为 failed 时必填）
@@ -132,6 +165,16 @@ conclusion_schema:
 - `ros_deploy` 成功结果包含 `outputs` 时，将其原样写入 `complete_step.conclusion.outputs`；不得使用模板表达式、占位符或推断值代替真实 Stack Outputs
 
 > **template_url 支持本地文件路径**：`ros_deploy` 的创建类动作中，`template_url` 可传当前工作目录内的本地文件路径（如 `./template.yml`），工具会自动读取文件内容。避免将大模板内容直接作为参数传递。
+
+## 部署恢复记录
+
+`ros_deploy` 的创建类动作（`create` / `continue_create` / `delete_and_create`）失败过、之后才成功时，最终结论不能只写 `status: success`。必须在 `complete_step.conclusion.deployment_recovery` 回填：
+
+- `retry_count`：本步骤创建类动作累计失败的次数，与真实失败次数一致。
+- `failed_attempts`：按发生顺序逐条记录每次失败的 `action`、`stack_id`、`status`（如 `CREATE_FAILED`）和 `reason`；`reason` 写该次失败的具体原因，不得留空或写成“部署失败”这类无信息描述。
+- `recovery_path`：说明 CREATE_FAILED→修复→成功 的恢复路径，包含每轮采取的修复动作（如就地 `edit_file` 修模板、重新 `ros_validate_template`、改用 `continue_create` 或 `delete_and_create`）。
+
+一次就成功、没有失败尝试时不需要 `deployment_recovery`。
 
 ## 错误处理
 

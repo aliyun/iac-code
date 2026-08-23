@@ -3834,6 +3834,13 @@ msgstr "部署成功必须等待 ros_deploy 返回 CREATE_COMPLETE。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"A deployment that recovered from failed ros_deploy attempts must record "
+"the cumulative retry count, each failure reason, and the CREATE_FAILED to"
+" repair to success recovery path."
+msgstr "从 ros_deploy 失败尝试中恢复的部署必须记录累计重试次数、每次失败原因，以及 CREATE_FAILED→修复→成功 的恢复路径。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Every explicit user hard constraint must be covered by a satisfied check "
 "with matching parameters and evidence."
 msgstr "每个用户明确提出的硬约束都必须由一条状态为满足的检查覆盖，且参数和证据一致。"
@@ -3928,6 +3935,17 @@ msgid ""
 "{message} complete_step.conclusion must include one of these fields: "
 "{fields}."
 msgstr "{message} complete_step.conclusion 必须包含以下字段之一: {fields}。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"A deployment that recovered from failed attempts must record the recovery"
+" path, the cumulative retry count, and each failure reason."
+msgstr "从失败尝试中恢复的部署必须记录恢复路径、累计重试次数和每次失败原因。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "{message} complete_step.conclusion.{field}: {detail}"
+msgstr "{message} complete_step.conclusion.{field}：{detail}"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A completion guard is misconfigured."

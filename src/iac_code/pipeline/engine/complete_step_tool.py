@@ -13,6 +13,7 @@ import jsonschema
 
 from iac_code.i18n import _
 from iac_code.pipeline.display_names import display_step_name
+from iac_code.pipeline.engine.deploy_recovery import failed_deploy_attempts, validate_deployment_recovery
 from iac_code.pipeline.engine.hard_constraints import collect_hard_constraints, validate_hard_constraint_checks
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.tools.base import Tool, ToolContext, ToolResult
@@ -56,6 +57,10 @@ _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
         "or confirm that it should not be handled for now."
     ),
     "deploy_wait_create_complete": ("A successful deployment must wait until ros_deploy returns CREATE_COMPLETE."),
+    "deploy_recovery_record_required": (
+        "A deployment that recovered from failed ros_deploy attempts must record the cumulative retry count, "
+        "each failure reason, and the CREATE_FAILED to repair to success recovery path."
+    ),
     "hard_constraint_verification_required": (
         "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
         "and evidence."
@@ -96,6 +101,10 @@ def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
             "or confirm that it should not be handled for now."
         ),
         _("A successful deployment must wait until ros_deploy returns CREATE_COMPLETE."),
+        _(
+            "A deployment that recovered from failed ros_deploy attempts must record the cumulative retry count, "
+            "each failure reason, and the CREATE_FAILED to repair to success recovery path."
+        ),
         _(
             "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
             "and evidence."
@@ -324,6 +333,7 @@ class CompleteStepTool(Tool):
             required_tool_result = guard.get("require_tool_result")
             required_conclusion_sha256 = guard.get("require_conclusion_sha256")
             required_constraint_coverage = guard.get("require_context_constraint_coverage")
+            required_recovery_evidence = guard.get("require_deploy_recovery_evidence")
             required_field = guard.get("required_conclusion_field")
             required_any_of = guard.get("required_conclusion_any_of") or []
             successful_tools = self._completion_guard_state.get("successful_tools", set())
@@ -383,7 +393,36 @@ class CompleteStepTool(Tool):
                 )
                 if validation_error is not None:
                     return validation_error
+            if isinstance(required_recovery_evidence, dict):
+                validation_error = self._validate_deploy_recovery_evidence(
+                    required_recovery_evidence,
+                    conclusion,
+                    self._completion_guard_message(guard, None),
+                )
+                if validation_error is not None:
+                    return validation_error
         return None
+
+    def _validate_deploy_recovery_evidence(
+        self,
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        message: str | None,
+    ) -> str | None:
+        recovery_field = str(requirement.get("recovery_field") or "deployment_recovery")
+        attempts = failed_deploy_attempts(self._completion_guard_state.get("tool_result_records"))
+        detail = validate_deployment_recovery(self._resolve_dotted(conclusion, recovery_field), attempts)
+        if detail is None:
+            return None
+        base_message = message or _(
+            "A deployment that recovered from failed attempts must record the recovery path, the cumulative "
+            "retry count, and each failure reason."
+        )
+        return _("{message} complete_step.conclusion.{field}: {detail}").format(
+            message=base_message,
+            field=recovery_field,
+            detail=detail,
+        )
 
     def _validate_context_constraint_coverage(
         self,

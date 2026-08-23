@@ -4065,6 +4065,16 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"A deployment that recovered from failed ros_deploy attempts must record "
+"the cumulative retry count, each failure reason, and the CREATE_FAILED to"
+" repair to success recovery path."
+msgstr ""
+"Un déploiement rétabli après des tentatives ros_deploy en échec doit "
+"consigner le nombre cumulé de tentatives, le motif de chaque échec et le "
+"chemin de rétablissement de CREATE_FAILED à la réparation puis au succès."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Every explicit user hard constraint must be covered by a satisfied check "
 "with matching parameters and evidence."
 msgstr ""
@@ -4174,6 +4184,20 @@ msgid ""
 msgstr ""
 "{message} complete_step.conclusion doit inclure l’un de ces champs : "
 "{fields}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"A deployment that recovered from failed attempts must record the recovery"
+" path, the cumulative retry count, and each failure reason."
+msgstr ""
+"Un déploiement rétabli après des tentatives en échec doit consigner le "
+"chemin de rétablissement, le nombre cumulé de tentatives et le motif de "
+"chaque échec."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "{message} complete_step.conclusion.{field}: {detail}"
+msgstr "{message} complete_step.conclusion.{field} : {detail}"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A completion guard is misconfigured."

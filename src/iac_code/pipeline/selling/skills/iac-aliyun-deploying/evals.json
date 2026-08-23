@@ -223,6 +223,29 @@
         {"name": "skips_routine_availability_query", "check": "跳过例行可用性查询"},
         {"name": "uses_template_url", "check": "ros_deploy 参数中使用 template_url，不使用 TemplateBody"}
       ]
+    },
+    {
+      "id": 11,
+      "name": "records-recovery-after-repeated-create-failed",
+      "prompt": "继续部署这个方案",
+      "selected_plan": {
+        "candidate_id": "plan-a",
+        "template_file": "{TMPDIR}/ros-vpc-ecs-template.yml",
+        "region": "cn-hangzhou",
+        "stack_id": "stack-abc123",
+        "deploy_history": [
+          {"action": "create", "status": "CREATE_FAILED", "status_reason": "code: InvalidCidrBlock.Overlapped"},
+          {"action": "continue_create", "status": "CREATE_FAILED", "status_reason": "code: InvalidVSwitchId.ZoneMismatch"},
+          {"action": "continue_create", "status": "CREATE_FAILED", "status_reason": "code: InvalidInstanceType.OutOfStock"}
+        ]
+      },
+      "expected_behavior": "第 4 次创建成功后，complete_step 结论既写 status success 和 stack_id，也在 deployment_recovery 中回填 retry_count=3、每次 CREATE_FAILED 的具体失败原因，以及 CREATE_FAILED→修复→成功 的恢复路径",
+      "assertions": [
+        {"name": "reports_success_status", "check": "结论 status 为 success 且包含真实 stack_id"},
+        {"name": "reports_retry_count", "check": "deployment_recovery.retry_count 等于真实失败次数 3"},
+        {"name": "reports_each_failure_reason", "check": "deployment_recovery.failed_attempts 逐条记录每次 CREATE_FAILED 的 action、status 和具体 reason"},
+        {"name": "reports_recovery_path", "check": "deployment_recovery.recovery_path 描述 CREATE_FAILED→修复→成功 的恢复路径与每轮修复动作"}
+      ]
     }
   ]
 }

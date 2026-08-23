@@ -68,6 +68,68 @@ class TestSkillFrontmatter:
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate({"status": "failed"}, schema)
 
+    def test_conclusion_schema_accepts_deployment_recovery_record(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        schema = fm["conclusion_schema"]
+        recovery = {
+            "retry_count": 3,
+            "failed_attempts": [
+                {
+                    "action": "create",
+                    "stack_id": "stack-123",
+                    "status": "CREATE_FAILED",
+                    "reason": "CidrBlock overlapped",
+                },
+                {
+                    "action": "continue_create",
+                    "stack_id": "stack-123",
+                    "status": "CREATE_FAILED",
+                    "reason": "zone mismatch",
+                },
+                {
+                    "action": "continue_create",
+                    "stack_id": "stack-123",
+                    "status": "CREATE_FAILED",
+                    "reason": "InstanceType out of stock",
+                },
+            ],
+            "recovery_path": "create CREATE_FAILED -> edit_file -> ros_validate_template -> continue_create 成功",
+        }
+
+        jsonschema.validate(
+            {"status": "success", "stack_id": "stack-123", "deployment_recovery": recovery},
+            schema,
+        )
+
+    def test_conclusion_schema_rejects_incomplete_deployment_recovery(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        schema = fm["conclusion_schema"]
+
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(
+                {
+                    "status": "success",
+                    "stack_id": "stack-123",
+                    "deployment_recovery": {"retry_count": 1},
+                },
+                schema,
+            )
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(
+                {
+                    "status": "success",
+                    "stack_id": "stack-123",
+                    "deployment_recovery": {
+                        "retry_count": 1,
+                        "failed_attempts": [{"action": "create"}],
+                        "recovery_path": "create 失败后修复成功",
+                    },
+                },
+                schema,
+            )
+
 
 class TestSkillContentRosOnly:
     @pytest.fixture()
@@ -223,6 +285,15 @@ class TestSkillContentRosOnly:
     def test_contains_error_handling(self, body):
         assert "部署失败" in body
 
+    def test_documents_recovery_record_after_failed_attempts(self, body):
+        assert "部署恢复记录" in body
+        assert "deployment_recovery" in body
+        assert "retry_count" in body
+        assert "failed_attempts" in body
+        assert "recovery_path" in body
+        assert "不得留空" in body
+        assert "一次就成功、没有失败尝试时不需要 `deployment_recovery`" in body
+
     def test_no_template_generation(self, body):
         assert "模板生成流程" not in body
         assert "参数化规则" not in body
@@ -321,6 +392,12 @@ class TestDeployingPrompt:
         assert "快速创建路径见技能" in body
         assert "跳过例行 `ros_validate_template`" not in body
 
+    def test_prompt_requires_recovery_record_after_failed_attempts(self):
+        body = DEPLOYING_PROMPT_MD.read_text(encoding="utf-8")
+        assert "deployment_recovery" in body
+        assert "部署恢复记录" in body
+        assert "不要只提交 `status: success`" in body
+
 
 class TestSkillDiscovery:
     def test_discovered_by_pipeline_loader(self):
@@ -384,6 +461,17 @@ class TestEvalsJson:
         eval_text = json.dumps(data, ensure_ascii=False)
         assert "preview_ready_for_create" in eval_text
         assert "跳过例行" in eval_text
+
+    def test_evals_cover_recovery_record_after_repeated_failures(self):
+        data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))
+        evals_by_name = {ev["name"]: ev for ev in data["evals"]}
+        recovery_eval = evals_by_name["records-recovery-after-repeated-create-failed"]
+        assertion_names = {assertion["name"] for assertion in recovery_eval["assertions"]}
+
+        assert "reports_retry_count" in assertion_names
+        assert "reports_each_failure_reason" in assertion_names
+        assert "reports_recovery_path" in assertion_names
+        assert "deployment_recovery" in json.dumps(recovery_eval, ensure_ascii=False)
 
     def test_assertions_have_name_and_check(self):
         data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))
