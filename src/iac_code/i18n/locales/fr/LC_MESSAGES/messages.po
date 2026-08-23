@@ -9081,6 +9081,7 @@ msgid "non-empty String"
 msgstr "String non vide"
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/terraform_naming.py
 #, python-brace-format
 msgid "Use {} instead."
 msgstr "Utilisez {} à la place."
@@ -9841,6 +9842,33 @@ msgstr "{} nécessite un tableau"
 #: src/iac_code/tools/cloud/aliyun/ros_validation/rules/association_property.py
 msgid "the condition is invalid"
 msgstr "la condition est invalide"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/terraform_naming.py
+#, python-brace-format
+msgid "Terraform resource type {} does not exist in the alicloud provider."
+msgstr ""
+"Le type de ressource Terraform {} n'existe pas dans le fournisseur "
+"alicloud."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/terraform_naming.py
+#, python-brace-format
+msgid ""
+"{file} declares resource {name} with this type; a ROS resource type name "
+"cannot be translated into a Terraform type name literally."
+msgstr ""
+"{file} déclare la ressource {name} avec ce type ; le nom d'un type de "
+"ressource ROS ne peut pas être traduit littéralement en nom de type "
+"Terraform."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/terraform_naming.py
+#, python-brace-format
+msgid "Terraform resource {type} has no argument named {argument}."
+msgstr "La ressource Terraform {type} n'a aucun argument nommé {argument}."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/terraform_naming.py
+#, python-brace-format
+msgid "{file} sets this argument on resource {name}."
+msgstr "{file} définit cet argument sur la ressource {name}."
 
 #: src/iac_code/ui/banner.py
 #, python-brace-format

@@ -87,7 +87,7 @@ auto_trigger:
 3. **必须**阅读 [references/ros-template.md](references/ros-template.md)，了解 ROS 模板最佳实践（RunCommand、嵌套栈、条件部署、常用函数等），未阅读不得生成模板
 4. 生成模板（库存相关属性按「参数化规则」定义为 Parameters，所有 Parameters 必须添加 AssociationProperty）并写入文件
    - 生成的模板默认放在当前工作目录；仅当用户指定其他路径时才写入该路径，不要默认使用 `/tmp` 等工作目录外路径
-   - **Terraform**：生成 `.tf` 等文件后，必须先用 `tf2ros.py` 打包为 ROS Terraform 类型模板（用法见 [references/terraform-template.md](references/terraform-template.md) 的「与 ROS 集成」节），后续步骤校验/部署的都是这份打包后的 `.yml`
+   - **Terraform**：资源类型名与属性名必须符合 [references/terraform-template.md](references/terraform-template.md) 的「资源类型与属性命名规范」，不要把 ROS 类型名/属性名直译成 Terraform 名字。生成 `.tf` 等文件后，必须先用 `tf2ros.py` 打包为 ROS Terraform 类型模板（用法见 [references/terraform-template.md](references/terraform-template.md) 的「与 ROS 集成」节），后续步骤校验/部署的都是这份打包后的 `.yml`
 5. 调用 aliyun_api(product="ros", action="ValidateTemplate", params={"TemplateURL": <模板文件路径>}) 校验
 6. 校验失败 → 分析错误 → 修复 → 重试（最多 5 轮）
 7. 校验通过 → 展示模板 → 询问是否部署（**ROS 与 Terraform 一致**，禁止用 `terraform init/apply` 等本地 CLI 步骤替代部署确认）
@@ -203,6 +203,9 @@ auto_trigger:
 
 ### 校验失败
 分析错误原因 → 查 GetResourceType Schema（如需）→ 修复 → 重试（最多 5 轮）
+
+Terraform 类型模板报 `ROS1130`（资源类型不存在）或 `ROS1131`（资源没有该属性）时，
+按诊断的 `suggestion` 给出的正确名字改名，不要改成另一个凭印象拼出的名字。
 
 ### 部署失败
 分析错误原因：

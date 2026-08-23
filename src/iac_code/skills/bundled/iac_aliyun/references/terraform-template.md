@@ -51,6 +51,54 @@ data "alicloud_images" "ubuntu" {
 }
 ```
 
+## 资源类型与属性命名规范（重要）
+
+alicloud provider 的资源类型名和属性名**不是** ROS 类型名的机械转写。把 `ALIYUN::VPC::RouteEntry`
+直译成 `alicloud_vpc_route_entry`、把 ROS 的 `NextHopType` 直译成 `next_hop_type` 都会得到不存在的名字，
+模板会在 ValidateTemplate 或部署阶段失败。生成 `.tf` 前必须确认每个类型名和属性名真实存在。
+
+### 高频错配对照
+
+| 错误写法 | 正确写法 | 说明 |
+|----------|----------|------|
+| `alicloud_vpc_route_entry` | `alicloud_route_entry` | VPC 路由条目没有 `vpc_` 前缀 |
+| `next_hop_type` / `next_hop_id` | `nexthop_type` / `nexthop_id` | `alicloud_route_entry` 的下一跳属性没有中间下划线 |
+| `destination_cidr_block` | `destination_cidrblock` | 同一资源的目的网段属性同样是连写 |
+| `alicloud_alb_server_group_attachment` | `alicloud_alb_server_group` 的 `servers` 块 | ALB 后端服务器在 server group 内声明，没有独立 attachment 资源；弹性伸缩场景才用 `alicloud_ess_alb_server_group_attachment` |
+| 直接创建 TR 资源而不开通服务 | 先声明 `data "alicloud_cen_transit_router_service"` | 转发路由器需先开通服务，缺失该 data 源会导致创建失败 |
+
+ALB 后端服务器的正确写法：
+
+```hcl
+resource "alicloud_alb_server_group" "web" {
+  server_group_name = "web"
+  vpc_id            = alicloud_vpc.main.id
+
+  servers {
+    server_id   = alicloud_instance.web.id
+    server_ip   = alicloud_instance.web.private_ip
+    server_type = "Ecs"
+    port        = 80
+  }
+}
+```
+
+转发路由器（TR）先开通服务：
+
+```hcl
+data "alicloud_cen_transit_router_service" "open" {
+  enable = "On"
+}
+```
+
+### 命名不确定时怎么查
+
+- Terraform 资源属性/Schema → `aliyun_api(product="IaCService", action="GetResourceType", style="ROA", method="GET", pathname="/resourceType/<类型>")`
+- 不熟悉的资源类型/属性 → `aliyun_doc_search`（Terraform 传 `category_id=95817`）
+- **写完 `.tf` 后必须先经本地校验**：按「与 ROS 集成」打包成 ROS Terraform 类型模板再 ValidateTemplate。
+  本地校验会在调用云端之前报出 `ROS1130`（资源类型不存在）和 `ROS1131`（资源没有该属性），
+  并在 `suggestion` 中给出正确名字；按提示逐条改名后重跑，不要带着这类错配继续部署。
+
 ## 命名约定
 
 - 资源名：`{env}-{product}-{role}`，如 `prod-ecs-web`
