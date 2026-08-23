@@ -56,6 +56,11 @@ from iac_code.a2a.jsonrpc_passthrough import (
 )
 from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.persistence import A2APersistenceStore
+from iac_code.a2a.pipeline_cancellation import (
+    CANCEL_REASON_USER_INITIATED,
+    CANCEL_TRIGGER_USER,
+    pipeline_cancellation,
+)
 from iac_code.a2a.pipeline_executor import (
     _CANCEL_WAITING_INPUT_BACKUP_BLOCKED,
     WaitingInputCancelResult,
@@ -735,6 +740,11 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             context_id=task.context_id,
             task_id=task.id,
             reason=_("Task canceled while waiting for input."),
+            cancellation=pipeline_cancellation(
+                CANCEL_REASON_USER_INITIATED,
+                trigger_source=CANCEL_TRIGGER_USER,
+                detail="a2a cancelTask on waiting-input task",
+            ),
             backup_service=self._backup_service,
             task_store=self.task_store,
             task_record=task_record,

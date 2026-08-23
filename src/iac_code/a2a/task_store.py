@@ -823,19 +823,27 @@ class A2ATaskStore(TaskStore):
             if validate_protocol_id(task_id) in self._expired_task_tombstones:
                 raise ValueError(_("A2A task expired"))
 
-    async def cancel_task(self, task_id: str) -> bool:
+    async def cancel_task(self, task_id: str, *, cancellation: Any | None = None) -> bool:
         async with self._mutation_lock:
             record = self._tasks.get(validate_protocol_id(task_id))
             if record is None or record.active_task is None or record.active_task.done():
                 return False
+            record.cancellation = cancellation
             record.active_task.cancel()
             return True
 
-    async def cancel_task_and_wait(self, task_id: str, *, timeout: float | None = None) -> bool:
+    async def cancel_task_and_wait(
+        self,
+        task_id: str,
+        *,
+        timeout: float | None = None,
+        cancellation: Any | None = None,
+    ) -> bool:
         async with self._mutation_lock:
             record = self._tasks.get(validate_protocol_id(task_id))
             if record is None or record.active_task is None or record.active_task.done():
                 return False
+            record.cancellation = cancellation
             active_task = record.active_task
             active_task.cancel()
 

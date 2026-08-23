@@ -529,6 +529,8 @@ class _PipelineSnapshotReducer:
             self._snapshot["pendingTerminal"] = None
             self._snapshot["pendingInput"] = None
             self._snapshot["control"]["activeCandidateRunIds"] = []
+            if terminal_status == "canceled":
+                self._snapshot["cancellation"] = _cancellation_attribution(data)
         elif (
             event_type not in {"input_required", "input_received", *_CLEANUP_STATUS_BY_EVENT_TYPE}
             and not _is_pending_backup_publication(event)
@@ -1085,8 +1087,23 @@ def _terminal_publication(event: dict[str, Any]) -> dict[str, Any]:
         "visibility": _publication_visibility(event),
         "data": data,
     }
+    cancellation = _cancellation_attribution(data)
+    if cancellation is not None:
+        terminal["cancellation"] = cancellation
     _merge_event_coordinates(terminal, event)
     return terminal
+
+
+def _cancellation_attribution(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Lift the machine-readable cancel attribution so audits can group by it."""
+    reason_code = _string_or_none(data.get("reasonCode"))
+    if reason_code is None:
+        return None
+    attribution = {"reasonCode": reason_code, "triggerSource": _string_or_none(data.get("triggerSource"))}
+    detail = _string_or_none(data.get("detail"))
+    if detail is not None:
+        attribution["detail"] = detail
+    return attribution
 
 
 def _is_pending_backup_publication(event: dict[str, Any]) -> bool:
@@ -1315,6 +1332,7 @@ def _empty_snapshot() -> dict[str, Any]:
         "pendingNormalHandoff": None,
         "pendingTerminal": None,
         "pendingInput": None,
+        "cancellation": None,
         "control": {
             "activeCandidateRunIds": [],
             "inputHistory": [],

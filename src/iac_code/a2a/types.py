@@ -33,6 +33,9 @@ class A2ATaskRecord:
     output_text: list[str] = field(default_factory=list)
     active_task: asyncio.Task[Any] | None = None
     expired: bool = False
+    # Structured cancel attribution declared by the caller that requested the
+    # cancel, read back when the canceled run publishes its terminal event.
+    cancellation: Any | None = None
     updated_at: float = field(default_factory=time.time)
     created_at: float = field(default_factory=time.monotonic)
     last_active: float = field(default_factory=time.monotonic)

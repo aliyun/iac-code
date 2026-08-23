@@ -20,6 +20,10 @@ from a2a.utils.errors import InvalidParamsError
 from iac_code.a2a.artifacts import artifact_store_for_session
 from iac_code.a2a.backup import backup_session_async
 from iac_code.a2a.events import make_text_part, publish_mcp_warnings
+from iac_code.a2a.pipeline_cancellation import (
+    cancellation_event_data,
+    resolve_pipeline_cancellation,
+)
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_flow_monitor import (
     PipelineA2AFlowIdentity,
@@ -614,7 +618,10 @@ class IacCodeA2APipelineExecutor:
             except asyncio.CancelledError:
                 try:
                     task.state = TASK_STATE_CANCELED
-                    cancel_data = {"source": "executor", "reason": _("Task canceled.")}
+                    cancel_data = cancellation_event_data(
+                        resolve_pipeline_cancellation(getattr(task, "cancellation", None)),
+                        base={"source": "executor", "reason": _("Task canceled.")},
+                    )
                     cancel_handoff_data = {"canceled": True, "reason": _("Task canceled.")}
 
                     async def publish_cancel_terminal() -> bool:
@@ -3477,6 +3484,7 @@ def cancel_waiting_input_task_from_sidecar(
     context_id: str,
     task_id: str,
     reason: str | None = None,
+    cancellation: Any | None = None,
     backup_service: Any | None = None,
     task_store: Any | None = None,
     task_record: Any | None = None,
@@ -3493,6 +3501,7 @@ def cancel_waiting_input_task_from_sidecar(
             context_id=context_id,
             task_id=task_id,
             reason=reason,
+            cancellation=cancellation,
             backup_service=backup_service,
             task_store=task_store,
             task_record=task_record,
@@ -3508,6 +3517,7 @@ def _cancel_waiting_input_task_from_sidecar_locked(
     context_id: str,
     task_id: str,
     reason: str,
+    cancellation: Any | None = None,
     backup_service: Any | None = None,
     task_store: Any | None = None,
     task_record: Any | None = None,
@@ -3546,7 +3556,10 @@ def _cancel_waiting_input_task_from_sidecar_locked(
         "pipeline_canceled",
         "pipeline",
         status="canceled",
-        data={"source": "a2a_cancel", "reason": reason},
+        data=cancellation_event_data(
+            resolve_pipeline_cancellation(cancellation),
+            base={"source": "a2a_cancel", "reason": reason},
+        ),
     )
     high_water_sequence = max(
         [int(event.get("sequence") or 0) for event in events if isinstance(event, dict)]

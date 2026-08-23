@@ -42,6 +42,11 @@ from iac_code.a2a.parts import (
     resolve_workspace_path,
     trust_request_cwd,
 )
+from iac_code.a2a.pipeline_cancellation import (
+    CANCEL_REASON_USER_INITIATED,
+    CANCEL_TRIGGER_USER,
+    pipeline_cancellation,
+)
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_executor import (
     RICH_CANDIDATE_PRESENTATION,
@@ -1696,6 +1701,11 @@ class IacCodeA2AExecutor(AgentExecutor):
         if task_id and await self._task_store.cancel_task_and_wait(
             task_id,
             timeout=_CANCEL_ACTIVE_TASK_DRAIN_TIMEOUT_SECONDS,
+            cancellation=pipeline_cancellation(
+                CANCEL_REASON_USER_INITIATED,
+                trigger_source=CANCEL_TRIGGER_USER,
+                detail="a2a cancelTask request",
+            ),
         ):
             await self._publish_status(
                 event_queue,
