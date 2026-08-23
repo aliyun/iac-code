@@ -356,6 +356,12 @@ sub_pipelines:
               checks_field: hard_constraint_checks
               deployment_parameters_field: deployment_parameters
             message_key: hard_constraint_verification_required
+          - always: true
+            require_billing_consistency_disclosure:
+              disclosure_field: billing_consistency
+              deployment_parameters_field: deployment_parameters
+              currency_field: currency
+            message_key: billing_consistency_disclosure_required
         tools:
           include: []
           exclude:
@@ -523,6 +529,47 @@ steps:
                           type: string
                         monthly_cost:
                           type: string
+            billing_notices:
+              type: array
+              description: 来自成本预估步骤 cost.billing_consistency 的计费不一致提示；存在时必须向用户显式展示并要求二次确认
+              items:
+                type: object
+                required: [candidate_index, user_intent_charge_type, priced_charge_type, deployed_charge_type, detail]
+                additionalProperties: false
+                properties:
+                  candidate_index:
+                    type: integer
+                    description: 该提示对应的候选方案在 evaluated_candidates 中的 0 基下标
+                  user_intent_charge_type:
+                    type: string
+                    description: 用户原本选择的计费模式
+                  priced_charge_type:
+                    type: string
+                    description: 询价实际使用的计费模式
+                  deployed_charge_type:
+                    type: string
+                    description: 部署参数实际的计费模式
+                  currency:
+                    type: string
+                    description: 询价返回的货币代码；货币口径不一致时必填
+                  detail:
+                    type: string
+                    description: 向用户说明差异及其账单影响
+            billing_confirmation:
+              type: object
+              required: [confirmed, acknowledged_charge_type, user_input]
+              additionalProperties: false
+              description: 存在 billing_notices 时用户对计费口径变化的显式二次确认记录
+              properties:
+                confirmed:
+                  type: boolean
+                  description: 用户是否同意按 acknowledged_charge_type 计费部署
+                acknowledged_charge_type:
+                  type: string
+                  description: 用户确认接受的计费模式
+                user_input:
+                  type: string
+                  description: 用户表达该确认的原始文本
             user_input:
               type: string
               description: 用户选择方案时输入的原始文本；首次展示方案时可省略
@@ -541,6 +588,12 @@ steps:
     tools:
       include: [complete_step]
       exclude: []
+    completion_guards:
+      - always: true
+        require_billing_confirmation:
+          notices_field: billing_notices
+          confirmation_field: billing_confirmation
+        message_key: billing_confirmation_required
     conclusion_schema:
       type: object
       required: [user_prompt, options]
@@ -563,6 +616,47 @@ steps:
                 type: string
               candidate_index:
                 type: integer
+        billing_notices:
+          type: array
+          description: 来自成本预估步骤 cost.billing_consistency 的计费不一致提示；存在时必须向用户显式展示并要求二次确认
+          items:
+            type: object
+            required: [candidate_index, user_intent_charge_type, priced_charge_type, deployed_charge_type, detail]
+            additionalProperties: false
+            properties:
+              candidate_index:
+                type: integer
+                description: 该提示对应的候选方案在 evaluated_candidates 中的 0 基下标
+              user_intent_charge_type:
+                type: string
+                description: 用户原本选择的计费模式
+              priced_charge_type:
+                type: string
+                description: 询价实际使用的计费模式
+              deployed_charge_type:
+                type: string
+                description: 部署参数实际的计费模式
+              currency:
+                type: string
+                description: 询价返回的货币代码；货币口径不一致时必填
+              detail:
+                type: string
+                description: 向用户说明差异及其账单影响
+        billing_confirmation:
+          type: object
+          required: [confirmed, acknowledged_charge_type, user_input]
+          additionalProperties: false
+          description: 存在 billing_notices 时用户对计费口径变化的显式二次确认记录
+          properties:
+            confirmed:
+              type: boolean
+              description: 用户是否同意按 acknowledged_charge_type 计费部署
+            acknowledged_charge_type:
+              type: string
+              description: 用户确认接受的计费模式
+            user_input:
+              type: string
+              description: 用户表达该确认的原始文本
         user_input:
           type: string
           description: 用户选择方案时输入的原始文本；首次展示方案时可省略

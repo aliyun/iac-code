@@ -63,6 +63,15 @@
 
 `complete_step.conclusion.user_prompt` 必须是展示给用户的选择提示，例如“请选择要部署的方案：”。
 
+### 计费不一致提示
+
+对每个 `failed` 为 `false` 的方案，检查 `evaluated_candidates[i].cost.billing_consistency`。若其 `consistent` 为 `false`（或 `user_confirmation_required` 为 `true`），必须：
+
+- 在 `complete_step.conclusion.billing_notices` 为该方案追加一条记录，填写 `candidate_index`、`user_intent_charge_type`、`priced_charge_type`、`deployed_charge_type`，货币口径也不一致时填 `currency`，并在 `detail` 用自然语言说明差异及账单影响（例如“您选择的是后付费 CDT，但该地域当前仅预付费可询价，按此方案部署将产生预付费账单”）。
+- 在 `user_prompt` 中明确告知该方案的计费模式与您的选择不一致，请确认是否接受。
+
+不要因为计费模式可以自动改写就隐去提示；计费口径变化必须经用户显式同意。
+
 ## 收到用户选择
 
 如果当前用户消息是在选择方案（例如包含“选择方案0”、“方案1”、候选方案名称，或表达“选便宜/高可用/已有VPC”等偏好），请直接根据用户输入和上方 `evaluated_candidates` 判断最终选择，并调用 `complete_step` 提交最终结论。
@@ -100,5 +109,6 @@
 ## 约束
 - 不要读取项目文件或记忆，所需上下文已在上方提供。
 - 不要在本步骤重新询价。
+- 不要在本步骤改写计费模式；计费口径变化只能由用户通过 `billing_confirmation` 显式同意。
 - 不要修改模板 Default。
 - 不要把 `parameter_overrides` 写入模板；后续部署步骤会基于最终选择结果处理部署参数。

@@ -41,6 +41,8 @@ _SUPPORTED_COMPLETION_GUARD_KEYS = {
     "copy_tool_result_to_conclusion",
     "message",
     "message_key",
+    "require_billing_confirmation",
+    "require_billing_consistency_disclosure",
     "require_conclusion_sha256",
     "require_context_constraint_coverage",
     "require_tool",

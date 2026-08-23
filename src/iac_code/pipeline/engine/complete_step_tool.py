@@ -13,6 +13,11 @@ import jsonschema
 
 from iac_code.i18n import _
 from iac_code.pipeline.display_names import display_step_name
+from iac_code.pipeline.engine.billing_consistency import (
+    validate_billing_confirmation,
+    validate_billing_consistency,
+    validate_priced_currency,
+)
 from iac_code.pipeline.engine.hard_constraints import collect_hard_constraints, validate_hard_constraint_checks
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.tools.base import Tool, ToolContext, ToolResult
@@ -60,6 +65,13 @@ _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
         "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
         "and evidence."
     ),
+    "billing_consistency_disclosure_required": (
+        "The billing mode must stay consistent across the user's choice, the pricing result and the deployment "
+        "parameters; never repair it silently, and escalate any mismatch for explicit user confirmation."
+    ),
+    "billing_confirmation_required": (
+        "A disclosed billing inconsistency must be confirmed by the user before the plan can be selected."
+    ),
 }
 _COMPLETION_GUARD_MESSAGE_KEY_BY_TEXT = {text: key for key, text in _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY.items()}
 
@@ -100,6 +112,11 @@ def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
             "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
             "and evidence."
         ),
+        _(
+            "The billing mode must stay consistent across the user's choice, the pricing result and the deployment "
+            "parameters; never repair it silently, and escalate any mismatch for explicit user confirmation."
+        ),
+        _("A disclosed billing inconsistency must be confirmed by the user before the plan can be selected."),
     )
 
 
@@ -383,7 +400,80 @@ class CompleteStepTool(Tool):
                 )
                 if validation_error is not None:
                     return validation_error
+            required_billing_disclosure = guard.get("require_billing_consistency_disclosure")
+            if isinstance(required_billing_disclosure, dict):
+                validation_error = self._validate_billing_consistency_disclosure(
+                    required_billing_disclosure,
+                    conclusion,
+                    self._completion_guard_message(guard, None),
+                )
+                if validation_error is not None:
+                    return validation_error
+            required_billing_confirmation = guard.get("require_billing_confirmation")
+            if isinstance(required_billing_confirmation, dict):
+                validation_error = self._validate_billing_confirmation(
+                    required_billing_confirmation,
+                    conclusion,
+                    self._completion_guard_message(guard, None),
+                )
+                if validation_error is not None:
+                    return validation_error
         return None
+
+    @staticmethod
+    def _format_billing_issues(base_message: str, issues: list[Any]) -> str:
+        issue_summaries = []
+        for issue in issues:
+            issue_summaries.append(f"{issue.code}[{issue.detail}]" if issue.detail else issue.code)
+        code = issues[0].code if len(issues) == 1 else "multiple_billing_issues"
+        return _("{message} Validation issue: {code} ({detail}).").format(
+            message=base_message,
+            code=code,
+            detail="; ".join(issue_summaries),
+        )
+
+    def _validate_billing_consistency_disclosure(
+        self,
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        message: str | None,
+    ) -> str | None:
+        disclosure_field = str(requirement.get("disclosure_field") or "billing_consistency")
+        disclosure = self._resolve_dotted(conclusion, disclosure_field)
+        parameters = self._resolve_dotted(
+            conclusion,
+            str(requirement.get("deployment_parameters_field") or "deployment_parameters"),
+        )
+        issues = validate_billing_consistency(disclosure, parameters)
+        currency_field = requirement.get("currency_field")
+        if isinstance(currency_field, str) and currency_field:
+            issues = issues + validate_priced_currency(self._resolve_dotted(conclusion, currency_field), disclosure)
+        if not issues:
+            return None
+        base_message = message or _(
+            "The billing mode must stay consistent across the user's choice, the pricing result and the deployment "
+            "parameters; never repair it silently, and escalate any mismatch for explicit user confirmation."
+        )
+        return self._format_billing_issues(base_message, issues)
+
+    def _validate_billing_confirmation(
+        self,
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        message: str | None,
+    ) -> str | None:
+        notices = self._resolve_dotted(conclusion, str(requirement.get("notices_field") or "billing_notices"))
+        confirmation = self._resolve_dotted(
+            conclusion,
+            str(requirement.get("confirmation_field") or "billing_confirmation"),
+        )
+        issues = validate_billing_confirmation(notices, confirmation)
+        if not issues:
+            return None
+        base_message = message or _(
+            "A disclosed billing inconsistency must be confirmed by the user before the plan can be selected."
+        )
+        return self._format_billing_issues(base_message, issues)
 
     def _validate_context_constraint_coverage(
         self,

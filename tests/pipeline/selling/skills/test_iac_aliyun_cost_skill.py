@@ -116,6 +116,13 @@ class TestSkillFrontmatter:
             "resources": [{"type": "ALIYUN::RDS::DBInstance", "cost": "¥100/月"}],
             "template_fixed": False,
             "deployment_parameters": {"DBInstanceStorage": 120},
+            "billing_consistency": {
+                "user_intent_charge_type": "PostPaid",
+                "priced_charge_type": "PostPaid",
+                "deployed_charge_type": "PostPaid",
+                "priced_currency": "CNY",
+                "consistent": True,
+            },
             "hard_constraint_checks": [
                 {
                     "constraint": constraint,
@@ -182,6 +189,13 @@ class TestSkillFrontmatter:
             "resources": [{"type": "ALIYUN::ECS::InstanceGroup", "cost": "¥100/月"}],
             "template_fixed": False,
             "deployment_parameters": {"ZoneId": "cn-hangzhou-k"},
+            "billing_consistency": {
+                "user_intent_charge_type": "PostPaid",
+                "priced_charge_type": "PostPaid",
+                "deployed_charge_type": "PostPaid",
+                "priced_currency": "CNY",
+                "consistent": True,
+            },
             "hard_constraint_checks": [],
             "preview_validation": {
                 "succeeded": True,
@@ -208,6 +222,13 @@ class TestSkillFrontmatter:
             "resources": [],
             "template_fixed": False,
             "deployment_parameters": {},
+            "billing_consistency": {
+                "user_intent_charge_type": "PostPaid",
+                "priced_charge_type": "PostPaid",
+                "deployed_charge_type": "PostPaid",
+                "priced_currency": "CNY",
+                "consistent": True,
+            },
             "hard_constraint_checks": [],
             "preview_validation": {"succeeded": False, "error": "missing VpcId"},
         }

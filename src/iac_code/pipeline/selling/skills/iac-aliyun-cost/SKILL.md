@@ -13,6 +13,7 @@ conclusion_schema:
     - deployment_parameters
     - hard_constraint_checks
     - preview_validation
+    - billing_consistency
   additionalProperties: false
   properties:
     monthly_estimate:
@@ -20,7 +21,62 @@ conclusion_schema:
       description: 月度费用估算；询价同时返回 OriginalAmount 与 TradeAmount 时，必须同时包含列表价和合同优惠后价格（如 ¥96.80/月（列表价，合同优惠后约¥13.76/月））；询价失败时填 "询价失败"
     currency:
       type: string
-      enum: [CNY]
+      minLength: 1
+      description: 询价实际返回的货币代码，必须与账号站点一致并等于 billing_consistency.priced_currency（如国内站 CNY、国际站 USD）；不得硬编码为 CNY
+    billing_consistency:
+      type: object
+      required:
+        - user_intent_charge_type
+        - priced_charge_type
+        - deployed_charge_type
+        - priced_currency
+        - consistent
+      additionalProperties: false
+      description: 计费口径的三方一致性披露；用户选择、询价结果与部署参数任一不一致时不得静默改写，必须上抛由用户二次确认
+      properties:
+        user_intent_charge_type:
+          type: string
+          minLength: 1
+          description: 用户明确选择的计费模式原文或规范值（如 POSTPAY、后付费CDT、PREPAY）
+        priced_charge_type:
+          type: string
+          minLength: 1
+          description: 本次询价实际使用并成功返回价格的计费模式
+        deployed_charge_type:
+          type: string
+          minLength: 1
+          description: 实际写入 deployment_parameters 的计费模式；必须与其中的 InstanceChargeType 等计费参数真实取值一致
+        priced_currency:
+          type: string
+          minLength: 1
+          description: 询价 API 实际返回的 Currency，与 api_raw_summary 中记录的站点货币一致
+        consistent:
+          type: boolean
+          description: 三方计费模式是否完全一致；不得在实际存在差异时填 true
+        user_confirmation_required:
+          type: boolean
+          description: consistent 为 false 时必须填 true，表示须由 confirm_and_select 向用户显式提示并取得二次确认
+        inconsistencies:
+          type: array
+          description: consistent 为 false 时逐条说明差异；不得为空
+          items:
+            type: object
+            required: [party, expected, actual, reason]
+            additionalProperties: false
+            properties:
+              party:
+                type: string
+                enum: [user_intent, pricing, deployment_parameters, currency]
+                description: 产生差异的一方
+              expected:
+                type: string
+                description: 该方应有的计费口径
+              actual:
+                type: string
+                description: 该方实际的计费口径
+              reason:
+                type: string
+                description: 差异原因，如该地域/账号仅 PrePaid 可询价
     resources:
       type: array
       items:
@@ -177,6 +233,7 @@ conclusion_schema:
       type: string
     fix_summary:
       type: string
+      description: 模板修复内容说明；不得用于承载计费模式改写，计费口径变化一律通过 billing_consistency 上抛
     error:
       type: string
     api_raw_summary:
@@ -198,7 +255,30 @@ conclusion_schema:
 5. **按需修复问题** — 仅当询价失败且错误指向模板问题，或你必须修复/改写模板时，修改模板并写回原文件路径
 6. **修改后校验并重新询价** — 调用 `ros_validate_template` 校验改动；通过后调用 `ros_estimate_template_cost` 重新询价；失败则修复重试（最多 7 轮）
 7. **结构化传递参数** — 在 `complete_step.conclusion.deployment_parameters` 输出当前已选或已用于询价的参数字典；在 `preview_validation` 输出预览成功证明；在 `missing_deployment_parameters` 输出仍未补齐的完整部署参数缺口
-8. **输出结果** — 汇总费用并调用 `complete_step`
+8. **披露计费口径** — 按「计费口径三方一致性」填写 `billing_consistency`
+9. **输出结果** — 汇总费用并调用 `complete_step`
+
+## 计费口径三方一致性
+
+计费模式必须在**用户选择**、**询价结果**、**部署参数**三方保持一致。**禁止静默改写计费模式** —— 用户选后付费而当前地域/账号只有 PrePaid 可询价时，不要悄悄把 `InstanceChargeType` 改成 PrePaid 后继续，也不要只在 `fix_summary` 里写一句说明就当作已处理。
+
+必须在 `complete_step.conclusion.billing_consistency` 如实披露：
+
+- `user_intent_charge_type` — 用户明确选择的计费模式（如「需要后付费CDT的实例」→ POSTPAY）
+- `priced_charge_type` — 本次询价实际成功返回价格的计费模式
+- `deployed_charge_type` — 实际写入 `deployment_parameters` 的计费模式，必须与其中 `InstanceChargeType` 等计费参数的真实取值一致
+- `priced_currency` — 询价 API 实际返回的 `Currency`，与 `api_raw_summary` 记录的站点货币一致
+- `consistent` — 三方是否完全一致
+
+三方一致时填 `consistent: true`。任一不一致时：
+
+- 填 `consistent: false`、`user_confirmation_required: true`
+- 在 `inconsistencies` 逐条给出 `party` / `expected` / `actual` / `reason`
+- 把计费不一致作为候选评估结论**上抛**，由 `confirm_and_select` 向用户显式提示并取得二次确认；本步骤不代替用户决定
+
+`currency` 必须等于 `billing_consistency.priced_currency`，即询价 API 真实返回的货币；国际站账号返回 `USD` 时就填 `USD`，不得为了统一口径硬写 `CNY`。
+
+`complete_step` 会用代码校验上述披露：归一化后比对三方计费模式、核对 `deployed_charge_type` 与 `deployment_parameters` 真实取值、核对 `currency` 与 `priced_currency`。谎报 `consistent: true` 或漏报 `inconsistencies` 都会被驳回。
 
 ## 按需校验模板
 
@@ -292,6 +372,7 @@ aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<�
 - **不要**搜索定价文档或使用 `aliyun_doc_search`
 - **不要**使用 bash 执行本地命令
 - 询价失败时报告错误原因，不要编造费用数据
+- **不要**静默改写计费模式；用户选择与可询价计费模式冲突时按「计费口径三方一致性」上抛，不得只写入 `fix_summary`
 - 修复模板后**必须写回原文件路径** — 后续部署步骤直接使用此文件，未写回等于向下游传递错误模板
 - 修改后校验不通过时**不要跳过修复直接询价**，错误模板会导致后续部署失败
 
@@ -306,4 +387,5 @@ aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<�
 - `preview_validation` 填 `ros_preview_template` 的结构化状态：成功时填 `{"succeeded": true, "template_url": "<当前模板文件路径>", "parameters": <预览通过的同一参数字典>}`；失败或未执行时填 `{"succeeded": false, "error": "<原因>"}`
 - `missing_deployment_parameters` 填完整部署或 PreviewStack 仍缺少的参数及原因；没有缺口时可省略或填 `[]`
 - `parameter_set_summary` 可简要说明参数来源、可用性筛选、PreviewStack 验证结果以及是否使用软门禁继续询价
+- `billing_consistency` 按「计费口径三方一致性」如实填写；`currency` 必须等于 `billing_consistency.priced_currency`
 - 询价失败时 `monthly_estimate` 填 "询价失败"，`resources` 为空数组，`error` 说明原因

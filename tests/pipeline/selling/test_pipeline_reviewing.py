@@ -44,7 +44,16 @@ def test_review_enabled_loads_infraguard_repair_step_before_cost() -> None:
                 "deployment_parameters_field": "deployment_parameters",
             },
             "message_key": "hard_constraint_verification_required",
-        }
+        },
+        {
+            "always": True,
+            "require_billing_consistency_disclosure": {
+                "disclosure_field": "billing_consistency",
+                "deployment_parameters_field": "deployment_parameters",
+                "currency_field": "currency",
+            },
+            "message_key": "billing_consistency_disclosure_required",
+        },
     ]
 
     assert review_step.tools is not None

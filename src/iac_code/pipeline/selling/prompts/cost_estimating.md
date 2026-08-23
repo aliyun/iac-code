@@ -28,10 +28,18 @@
 - 如果修复模板后需要校验，调用 `ros_validate_template`，必须传同一个 `template_url = "{template.file_path}"`。
 - 不要调用 `aliyun_api` 的 ROS `GetTemplateParameterConstraints`、`PreviewStack`、`GetTemplateEstimateCost` 或 `ValidateTemplate` 接口；不要传 `TemplateBody`、`TemplateId` 或 `TemplateScratchId`。
 
+## 计费口径
+- 计费模式必须在用户选择、询价结果、`deployment_parameters` 三方保持一致。
+- **不得静默改写计费模式**：用户选后付费而当前地域/账号仅 PrePaid 可询价时，不要悄悄把 `InstanceChargeType` 改成 PrePaid，也不要只在 `fix_summary` 里说明就继续。
+- 必须在 `complete_step.conclusion.billing_consistency` 如实填写 `user_intent_charge_type`、`priced_charge_type`、`deployed_charge_type`、`priced_currency` 和 `consistent`。
+- 三方任一不一致时填 `consistent: false`、`user_confirmation_required: true`，并在 `inconsistencies` 逐条给出差异，把计费不一致作为候选评估结论上抛，交由 `confirm_and_select` 向用户显式提示并取得二次确认。
+- `currency` 必须等于询价 API 真实返回的 `Currency`（等于 `billing_consistency.priced_currency`），国际站账号返回 `USD` 就填 `USD`，不得硬写 `CNY`。
+
 ## 禁止事项
 - **不要**自行估算费用
 - **不要**搜索定价文档
 - **不要**使用 aliyun_doc_search
+- **不要**静默改写计费模式或货币口径
 
 ## 输出
 API 调用完成后调用 `complete_step` 提交费用预估。
