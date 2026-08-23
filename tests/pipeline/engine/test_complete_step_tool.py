@@ -1461,6 +1461,111 @@ class TestCompletionGuards:
         assert "rerun validation" in result.content
 
 
+class TestTemplateGeneratingGuards:
+    """template_generating must actually deliver a template, not just invoke the skill."""
+
+    @staticmethod
+    def _template_generating_tool(result_records: list[dict] | None = None) -> CompleteStepTool:
+        from iac_code.pipeline.engine.loader import load_pipeline_dir
+
+        selling_dir = Path(__file__).resolve().parents[3] / "src" / "iac_code" / "pipeline" / "selling"
+        loaded = load_pipeline_dir(selling_dir)
+        step = next(
+            step
+            for step in loaded.sub_pipelines["evaluate_candidate"].steps
+            if step.step_id == "template_generating"
+        )
+        config = StepConfig(
+            step_id=step.step_id,
+            conclusion_field=step.conclusion_field,
+            forward=step.forward,
+            conclusion_schema=step.conclusion_schema,
+        )
+        return CompleteStepTool(
+            config,
+            completion_guards=step.completion_guards,
+            completion_guard_state={
+                "successful_tools": set(),
+                "tool_results": {},
+                "tool_result_records": list(result_records or []),
+            },
+        )
+
+    @staticmethod
+    def _conclusion(template: str = "ROSTemplateFormatVersion: '2015-09-01'\n") -> dict:
+        return {
+            "template": template,
+            "file_path": "template.yaml",
+            "region": "cn-hangzhou",
+            "description": "demo",
+        }
+
+    def test_schema_rejects_empty_template(self):
+        tool = self._template_generating_tool()
+
+        valid, error = tool.validate_input({"conclusion": self._conclusion(template="")})
+
+        assert not valid
+        assert "template" in error
+
+    @pytest.mark.asyncio
+    async def test_rejects_conclusion_without_validate_template_result(self):
+        tool = self._template_generating_tool()
+
+        result = await tool.execute(tool_input={"conclusion": self._conclusion()}, context=ToolContext())
+
+        assert result.is_error
+        assert "ros_validate_template" in result.content
+
+    @pytest.mark.asyncio
+    async def test_accepts_conclusion_validated_for_same_file_path(self):
+        tool = self._template_generating_tool(
+            [
+                {
+                    "tool_name": "write_file",
+                    "input": {"path": "template.yaml"},
+                    "result": {"file_path": "template.yaml"},
+                    "is_error": False,
+                },
+                {
+                    "tool_name": "ros_validate_template",
+                    "input": {"template_url": "template.yaml"},
+                    "result": {"Description": "Valid"},
+                    "is_error": False,
+                },
+            ]
+        )
+
+        result = await tool.execute(tool_input={"conclusion": self._conclusion()}, context=ToolContext())
+
+        assert not result.is_error
+        assert result.metadata["step_result"].status is StepStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_rejects_when_template_rewritten_after_validation(self):
+        tool = self._template_generating_tool(
+            [
+                {
+                    "tool_name": "ros_validate_template",
+                    "input": {"template_url": "template.yaml"},
+                    "result": {"Description": "Valid"},
+                    "is_error": False,
+                },
+                {
+                    "tool_name": "write_file",
+                    "input": {"path": "template.yaml"},
+                    "result": {"file_path": "template.yaml"},
+                    "is_error": False,
+                },
+            ]
+        )
+
+        result = await tool.execute(tool_input={"conclusion": self._conclusion()}, context=ToolContext())
+
+        assert result.is_error
+        assert "rerun ros_validate_template" in result.content
+
+
 class TestSchemaValidation:
     def test_missing_conclusion_validation_error_includes_current_step_schema(self):
         config = StepConfig(

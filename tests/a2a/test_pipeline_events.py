@@ -1194,6 +1194,38 @@ def test_completion_artifact_defaults_to_final_and_supersedes_its_own_path() -> 
     assert artifact["supersedesKey"] == fingerprint_text("templates/generated.yaml")
 
 
+@pytest.mark.parametrize(
+    "conclusion",
+    [
+        {"file_path": "templates/generated.yaml", "content": ""},
+        {"file_path": "", "content": "generated ROSTemplate"},
+    ],
+)
+def test_completion_artifact_skipped_when_path_or_content_is_empty(conclusion: dict) -> None:
+    context = _ctx()
+    context.a2a_artifacts_by_step_id = {
+        "template_generating": [{"path": "conclusion.file_path", "content": "conclusion.content"}]
+    }
+    translator = PipelineEventTranslator(context)
+
+    envelopes = translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.SUB_STEP_COMPLETED,
+            step_id=None,
+            timestamp=time.time(),
+            data={
+                "sub_pipeline_id": "evaluate_candidate_abcd",
+                "candidate_index": 0,
+                "step_id": "template_generating",
+                "conclusion_field": "template",
+                "conclusion": conclusion,
+            },
+        )
+    )
+
+    assert all("artifact" not in envelope for envelope in envelopes)
+
+
 def test_candidate_step_failure_keeps_global_task_status_working() -> None:
     translator = PipelineEventTranslator(_ctx())
     translator.translate(
