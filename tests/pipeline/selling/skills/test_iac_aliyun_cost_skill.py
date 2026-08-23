@@ -112,6 +112,12 @@ class TestSkillFrontmatter:
         }
         conclusion = {
             "monthly_estimate": "¥100/月",
+            "monthly_price_breakdown": {
+                "list_price": 100,
+                "discounted_price": 100,
+                "discount_applied": False,
+                "same_price_reason": "无合同优惠",
+            },
             "currency": "CNY",
             "resources": [{"type": "ALIYUN::RDS::DBInstance", "cost": "¥100/月"}],
             "template_fixed": False,
@@ -172,12 +178,69 @@ class TestSkillFrontmatter:
         assert "OriginalAmount" in description
         assert "TradeAmount" in description
 
+    def test_conclusion_schema_requires_structured_monthly_price_breakdown(self):
+        schema = _parse_frontmatter(SKILL_MD.read_text(encoding="utf-8"))["conclusion_schema"]
+        breakdown = schema["properties"]["monthly_price_breakdown"]
+
+        assert "monthly_price_breakdown" in schema["required"]
+        assert breakdown["type"] == "object"
+        assert set(breakdown["required"]) == {"list_price", "discounted_price", "discount_applied"}
+        assert breakdown["properties"]["list_price"]["type"] == "number"
+        assert breakdown["properties"]["discounted_price"]["type"] == "number"
+        assert breakdown["properties"]["discount_applied"]["type"] == "boolean"
+        assert breakdown["properties"]["same_price_reason"]["type"] == "string"
+        assert all(value.get("description") for value in breakdown["properties"].values())
+
+    def test_monthly_price_breakdown_rejects_missing_and_extra_fields(self):
+        schema = _parse_frontmatter(SKILL_MD.read_text(encoding="utf-8"))["conclusion_schema"]
+        conclusion = {
+            "monthly_estimate": "¥96.80/月（列表价，合同优惠后约¥13.76/月）",
+            "monthly_price_breakdown": {
+                "list_price": 96.80,
+                "discounted_price": 13.76,
+                "discount_applied": True,
+            },
+            "currency": "CNY",
+            "resources": [{"type": "ALIYUN::ECS::InstanceGroup", "cost": "¥96.80/月"}],
+            "template_fixed": False,
+            "deployment_parameters": {"ZoneId": "cn-hangzhou-k"},
+            "hard_constraint_checks": [],
+            "preview_validation": {"succeeded": False, "error": "missing VpcId"},
+        }
+
+        jsonschema.validate(conclusion, schema)
+
+        missing_breakdown = {key: value for key, value in conclusion.items() if key != "monthly_price_breakdown"}
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(missing_breakdown, schema)
+
+        missing_discount_flag = json.loads(json.dumps(conclusion, ensure_ascii=False))
+        del missing_discount_flag["monthly_price_breakdown"]["discount_applied"]
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(missing_discount_flag, schema)
+
+        negative_price = json.loads(json.dumps(conclusion, ensure_ascii=False))
+        negative_price["monthly_price_breakdown"]["discounted_price"] = -1
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(negative_price, schema)
+
+        unexpected_field = json.loads(json.dumps(conclusion, ensure_ascii=False))
+        unexpected_field["monthly_price_breakdown"]["discount_rate"] = 0.5
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(unexpected_field, schema)
+
     def test_conclusion_schema_requires_full_preview_validation_when_succeeded(self):
         content = SKILL_MD.read_text(encoding="utf-8")
         fm = _parse_frontmatter(content)
         schema = fm["conclusion_schema"]
         conclusion = {
             "monthly_estimate": "¥100/月",
+            "monthly_price_breakdown": {
+                "list_price": 100,
+                "discounted_price": 100,
+                "discount_applied": False,
+                "same_price_reason": "无合同优惠",
+            },
             "currency": "CNY",
             "resources": [{"type": "ALIYUN::ECS::InstanceGroup", "cost": "¥100/月"}],
             "template_fixed": False,
@@ -204,6 +267,12 @@ class TestSkillFrontmatter:
         schema = fm["conclusion_schema"]
         conclusion = {
             "monthly_estimate": "询价失败",
+            "monthly_price_breakdown": {
+                "list_price": 0,
+                "discounted_price": 0,
+                "discount_applied": False,
+                "same_price_reason": "询价失败",
+            },
             "currency": "CNY",
             "resources": [],
             "template_fixed": False,
@@ -380,6 +449,13 @@ class TestSkillContentRosOnly:
     def test_contains_error_handling(self, body):
         assert "失败" in body
 
+    def test_forbids_filling_discounted_price_with_list_price(self, body):
+        assert "monthly_price_breakdown" in body
+        assert "禁止直接用列表价填充优惠后价字段" in body
+        assert "same_price_reason" in body
+        assert "discount_applied" in body
+        assert "代码逐条校验" in body
+
     def test_emphasizes_write_back(self, body):
         assert "写回原文件路径" in body
 
@@ -538,6 +614,14 @@ class TestCostPrompt:
         assert "列表价" in body
         assert "合同优惠后" in body
         assert "monthly_estimate" in body
+
+    def test_prompt_requires_structured_price_breakdown_without_list_price_fallback(self):
+        body = COST_PROMPT_MD.read_text(encoding="utf-8")
+
+        assert "monthly_price_breakdown" in body
+        assert "不得用列表价直接填充 `discounted_price`" in body
+        assert "same_price_reason" in body
+        assert "discount_applied" in body
 
     def test_prompt_receives_only_required_candidate_fields_without_repeating_skill_rules(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")

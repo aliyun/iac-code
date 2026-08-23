@@ -7,6 +7,7 @@ conclusion_schema:
   type: object
   required:
     - monthly_estimate
+    - monthly_price_breakdown
     - currency
     - resources
     - template_fixed
@@ -18,6 +19,26 @@ conclusion_schema:
     monthly_estimate:
       type: string
       description: 月度费用估算；询价同时返回 OriginalAmount 与 TradeAmount 时，必须同时包含列表价和合同优惠后价格（如 ¥96.80/月（列表价，合同优惠后约¥13.76/月））；询价失败时填 "询价失败"
+    monthly_price_breakdown:
+      type: object
+      required: [list_price, discounted_price, discount_applied]
+      additionalProperties: false
+      description: monthly_estimate 的结构化价格口径；complete_step 由代码校验两价分离、折扣声明与文案数值一致；询价失败时列表价与优惠后价均填 0、discount_applied 填 false、same_price_reason 填 "询价失败"
+      properties:
+        list_price:
+          type: number
+          minimum: 0
+          description: 按统一月度周期换算并汇总的列表价，来自询价结果的 OriginalAmount
+        discounted_price:
+          type: number
+          minimum: 0
+          description: 按与列表价相同月度周期换算并汇总的合同优惠后价，来自询价结果的 TradeAmount；不得直接用列表价填充，也不得高于列表价
+        discount_applied:
+          type: boolean
+          description: 是否真实存在合同优惠；两价相同时必须为 false，两价不同时必须为 true
+        same_price_reason:
+          type: string
+          description: 两价相同时必填的显式说明，例如"当前账号无合同优惠，折扣为 0"或"询价未返回 TradeAmount"
     currency:
       type: string
       enum: [CNY]
@@ -307,3 +328,4 @@ aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<�
 - `missing_deployment_parameters` 填完整部署或 PreviewStack 仍缺少的参数及原因；没有缺口时可省略或填 `[]`
 - `parameter_set_summary` 可简要说明参数来源、可用性筛选、PreviewStack 验证结果以及是否使用软门禁继续询价
 - 询价失败时 `monthly_estimate` 填 "询价失败"，`resources` 为空数组，`error` 说明原因
+- `monthly_price_breakdown` 是 `monthly_estimate` 的结构化价格口径，`list_price` 取 `OriginalAmount`、`discounted_price` 取 `TradeAmount`，两者按同一月度周期换算汇总。**禁止直接用列表价填充优惠后价字段**：询价未返回 `TradeAmount` 或折扣为 0 时，`discount_applied` 填 `false` 并在 `same_price_reason` 显式说明折扣为 0 的原因；两价不同时 `discount_applied` 填 `true`。`complete_step` 会用代码逐条校验两价合法性、折扣声明与 `monthly_estimate` 文案数值的一致性，两价相同却没有说明会被拒绝，不得通过删除字段绕过

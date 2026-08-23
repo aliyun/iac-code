@@ -4074,6 +4074,13 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"The monthly estimate must keep the list price and the contract-discounted"
+" price separated; when both are equal, declare that no discount applied "
+"and explain why."
+msgstr "L'estimation mensuelle doit conserver séparément le prix catalogue et le prix après remise contractuelle ; lorsque les deux sont égaux, déclarez qu'aucune remise n'a été appliquée et expliquez pourquoi."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -4174,6 +4181,13 @@ msgid ""
 msgstr ""
 "{message} complete_step.conclusion doit inclure l’un de ces champs : "
 "{fields}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} complete_step.conclusion.{breakdown_field} validation issue: "
+"{code} ({detail})."
+msgstr "{message} Problème de validation de complete_step.conclusion.{breakdown_field} : {code} ({detail})."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A completion guard is misconfigured."

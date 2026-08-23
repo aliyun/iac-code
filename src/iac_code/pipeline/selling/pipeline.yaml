@@ -356,6 +356,11 @@ sub_pipelines:
               checks_field: hard_constraint_checks
               deployment_parameters_field: deployment_parameters
             message_key: hard_constraint_verification_required
+          - always: true
+            require_monthly_price_disclosure:
+              estimate_field: monthly_estimate
+              breakdown_field: monthly_price_breakdown
+            message_key: monthly_price_disclosure_required
         tools:
           include: []
           exclude:

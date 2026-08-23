@@ -3876,6 +3876,13 @@ msgstr "ユーザーが明示した各ハード制約は、パラメーターと
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"The monthly estimate must keep the list price and the contract-discounted"
+" price separated; when both are equal, declare that no discount applied "
+"and explain why."
+msgstr "月額見積もりでは、定価と契約割引後価格を分けて示す必要があります。両者が同一の場合は、割引が適用されなかったことを明示し、その理由を説明してください。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -3966,6 +3973,13 @@ msgid ""
 "{message} complete_step.conclusion must include one of these fields: "
 "{fields}."
 msgstr "{message} complete_step.conclusion には次のいずれかのフィールドが必要です: {fields}。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} complete_step.conclusion.{breakdown_field} validation issue: "
+"{code} ({detail})."
+msgstr "{message} complete_step.conclusion.{breakdown_field} の検証エラー: {code} ({detail})。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A completion guard is misconfigured."

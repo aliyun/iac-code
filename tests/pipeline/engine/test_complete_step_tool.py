@@ -1461,6 +1461,112 @@ class TestCompletionGuards:
         assert "rerun validation" in result.content
 
 
+class TestMonthlyPriceDisclosureGuard:
+    GUARD = {
+        "always": True,
+        "require_monthly_price_disclosure": {
+            "estimate_field": "monthly_estimate",
+            "breakdown_field": "monthly_price_breakdown",
+        },
+        "message_key": "monthly_price_disclosure_required",
+    }
+
+    def _tool(self) -> CompleteStepTool:
+        return CompleteStepTool(
+            StepConfig(step_id="cost_estimating", conclusion_field="cost", forward=None),
+            completion_guards=[self.GUARD],
+            completion_guard_state={},
+        )
+
+    def test_identical_prices_without_zero_discount_statement_are_rejected(self):
+        conclusion = {
+            "monthly_estimate": "¥373.54/月（列表价，合同优惠后约¥373.54/月）",
+            "monthly_price_breakdown": {
+                "list_price": 373.54,
+                "discounted_price": 373.54,
+                "discount_applied": True,
+            },
+        }
+
+        error = self._tool().validate_completion_input({"conclusion": conclusion})
+
+        assert error is not None
+        assert "discount_applied_without_price_difference" in error
+        assert "missing_same_price_reason" in error
+
+    def test_identical_prices_with_zero_discount_statement_pass(self):
+        conclusion = {
+            "monthly_estimate": "¥373.54/月（列表价，合同优惠后约¥373.54/月）",
+            "monthly_price_breakdown": {
+                "list_price": 373.54,
+                "discounted_price": 373.54,
+                "discount_applied": False,
+                "same_price_reason": "当前账号无合同优惠，折扣为 0",
+            },
+        }
+
+        assert self._tool().validate_completion_input({"conclusion": conclusion}) is None
+
+    def test_real_discount_passes(self):
+        conclusion = {
+            "monthly_estimate": "¥96.80/月（列表价，合同优惠后约¥13.76/月）",
+            "monthly_price_breakdown": {
+                "list_price": 96.80,
+                "discounted_price": 13.76,
+                "discount_applied": True,
+            },
+        }
+
+        assert self._tool().validate_completion_input({"conclusion": conclusion}) is None
+
+    def test_missing_breakdown_is_rejected(self):
+        conclusion = {"monthly_estimate": "¥373.54/月"}
+
+        error = self._tool().validate_completion_input({"conclusion": conclusion})
+
+        assert error is not None
+        assert "missing_monthly_price_breakdown" in error
+
+    def test_estimate_text_must_match_breakdown(self):
+        conclusion = {
+            "monthly_estimate": "¥500/月（列表价，合同优惠后约¥13.76/月）",
+            "monthly_price_breakdown": {
+                "list_price": 96.80,
+                "discounted_price": 13.76,
+                "discount_applied": True,
+            },
+        }
+
+        error = self._tool().validate_completion_input({"conclusion": conclusion})
+
+        assert error is not None
+        assert "monthly_estimate_list_price_mismatch" in error
+
+    def test_pricing_failure_is_exempt(self):
+        conclusion = {"monthly_estimate": "询价失败", "error": "GetTemplateEstimateCost failed"}
+
+        assert self._tool().validate_completion_input({"conclusion": conclusion}) is None
+
+    @pytest.mark.asyncio
+    async def test_execute_rejects_then_accepts_corrected_breakdown(self):
+        tool = self._tool()
+        breakdown = {"list_price": 373.54, "discounted_price": 373.54, "discount_applied": True}
+        conclusion = {
+            "monthly_estimate": "¥373.54/月（列表价，合同优惠后约¥373.54/月）",
+            "monthly_price_breakdown": breakdown,
+        }
+
+        rejected = await tool.execute(tool_input={"conclusion": conclusion}, context=ToolContext())
+        assert rejected.is_error
+        assert "monthly_price_breakdown" in rejected.content
+
+        breakdown["discount_applied"] = False
+        breakdown["same_price_reason"] = "询价未返回 TradeAmount，折扣为 0"
+        accepted = await tool.execute(tool_input={"conclusion": conclusion}, context=ToolContext())
+        assert not accepted.is_error
+        assert accepted.metadata["step_result"].status == StepStatus.COMPLETED
+
+
 class TestSchemaValidation:
     def test_missing_conclusion_validation_error_includes_current_step_schema(self):
         config = StepConfig(

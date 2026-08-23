@@ -14,6 +14,7 @@ import jsonschema
 from iac_code.i18n import _
 from iac_code.pipeline.display_names import display_step_name
 from iac_code.pipeline.engine.hard_constraints import collect_hard_constraints, validate_hard_constraint_checks
+from iac_code.pipeline.engine.monthly_price import validate_monthly_price_breakdown
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.utils.public_errors import sanitize_strict_text
@@ -60,6 +61,10 @@ _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
         "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
         "and evidence."
     ),
+    "monthly_price_disclosure_required": (
+        "The monthly estimate must keep the list price and the contract-discounted price separated; "
+        "when both are equal, declare that no discount applied and explain why."
+    ),
 }
 _COMPLETION_GUARD_MESSAGE_KEY_BY_TEXT = {text: key for key, text in _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY.items()}
 
@@ -99,6 +104,10 @@ def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
         _(
             "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
             "and evidence."
+        ),
+        _(
+            "The monthly estimate must keep the list price and the contract-discounted price separated; "
+            "when both are equal, declare that no discount applied and explain why."
         ),
     )
 
@@ -324,6 +333,7 @@ class CompleteStepTool(Tool):
             required_tool_result = guard.get("require_tool_result")
             required_conclusion_sha256 = guard.get("require_conclusion_sha256")
             required_constraint_coverage = guard.get("require_context_constraint_coverage")
+            required_price_disclosure = guard.get("require_monthly_price_disclosure")
             required_field = guard.get("required_conclusion_field")
             required_any_of = guard.get("required_conclusion_any_of") or []
             successful_tools = self._completion_guard_state.get("successful_tools", set())
@@ -383,7 +393,42 @@ class CompleteStepTool(Tool):
                 )
                 if validation_error is not None:
                     return validation_error
+            if isinstance(required_price_disclosure, dict):
+                validation_error = self._validate_monthly_price_disclosure(
+                    required_price_disclosure,
+                    conclusion,
+                    self._completion_guard_message(guard, None),
+                )
+                if validation_error is not None:
+                    return validation_error
         return None
+
+    def _validate_monthly_price_disclosure(
+        self,
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        message: str | None,
+    ) -> str | None:
+        estimate_field = str(requirement.get("estimate_field") or "monthly_estimate")
+        breakdown_field = str(requirement.get("breakdown_field") or "monthly_price_breakdown")
+        issues = validate_monthly_price_breakdown(
+            self._resolve_dotted(conclusion, estimate_field),
+            self._resolve_dotted(conclusion, breakdown_field),
+        )
+        if not issues:
+            return None
+        base_message = message or _(
+            "The monthly estimate must keep the list price and the contract-discounted price separated; "
+            "when both are equal, declare that no discount applied and explain why."
+        )
+        summaries = [f"{issue.code}[{issue.detail}]" if issue.detail else issue.code for issue in issues]
+        code = issues[0].code if len(issues) == 1 else "multiple_price_issues"
+        return _("{message} complete_step.conclusion.{breakdown_field} validation issue: {code} ({detail}).").format(
+            message=base_message,
+            breakdown_field=breakdown_field,
+            code=code,
+            detail="; ".join(summaries),
+        )
 
     def _validate_context_constraint_coverage(
         self,
