@@ -172,6 +172,58 @@ class TestSkillFrontmatter:
         assert "OriginalAmount" in description
         assert "TradeAmount" in description
 
+    def test_currency_schema_admits_the_pricing_api_currencies(self):
+        schema = _parse_frontmatter(SKILL_MD.read_text(encoding="utf-8"))["conclusion_schema"]
+        currency = schema["properties"]["currency"]
+
+        assert currency["enum"] == ["CNY", "USD"]
+        assert currency.get("description")
+
+    def test_conclusion_schema_carries_source_currency_and_exchange_rate(self):
+        schema = _parse_frontmatter(SKILL_MD.read_text(encoding="utf-8"))["conclusion_schema"]
+        properties = schema["properties"]
+
+        assert properties["source_currency"]["enum"] == ["CNY", "USD"]
+        exchange_rate = properties["exchange_rate"]
+        assert exchange_rate["type"] == "object"
+        assert exchange_rate["required"] == ["from", "to", "rate"]
+        assert exchange_rate["properties"]["from"]["enum"] == ["CNY", "USD"]
+        assert exchange_rate["properties"]["to"]["enum"] == ["CNY", "USD"]
+        assert exchange_rate["properties"]["rate"]["exclusiveMinimum"] == 0
+        assert "source_currency" not in schema["required"]
+        assert "exchange_rate" not in schema["required"]
+
+    def test_conclusion_schema_accepts_both_currency_normalization_paths(self):
+        schema = _parse_frontmatter(SKILL_MD.read_text(encoding="utf-8"))["conclusion_schema"]
+        base = {
+            "monthly_estimate": "$68.00/月",
+            "currency": "USD",
+            "source_currency": "USD",
+            "resources": [{"type": "ALIYUN::GA::Accelerator", "cost": "$68.00/月"}],
+            "template_fixed": False,
+            "deployment_parameters": {},
+            "hard_constraint_checks": [],
+            "preview_validation": {"succeeded": False, "error": "missing BandwidthPackageId"},
+        }
+
+        jsonschema.validate(base, schema)
+
+        converted = dict(
+            base,
+            monthly_estimate="¥486.20/月",
+            currency="CNY",
+            resources=[{"type": "ALIYUN::GA::Accelerator", "cost": "¥486.20/月"}],
+            exchange_rate={"from": "USD", "to": "CNY", "rate": 7.15, "source": "询价结果附带汇率"},
+        )
+        jsonschema.validate(converted, schema)
+
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(dict(base, currency="EUR"), schema)
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(dict(converted, exchange_rate={"from": "USD", "to": "CNY"}), schema)
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(dict(converted, exchange_rate={"from": "USD", "to": "CNY", "rate": 0}), schema)
+
     def test_conclusion_schema_requires_full_preview_validation_when_succeeded(self):
         content = SKILL_MD.read_text(encoding="utf-8")
         fm = _parse_frontmatter(content)
@@ -380,6 +432,14 @@ class TestSkillContentRosOnly:
     def test_contains_error_handling(self, body):
         assert "失败" in body
 
+    def test_normalizes_currency_before_reporting_cost(self, body):
+        assert "## 币种归一" in body
+        assert "source_currency" in body
+        assert "exchange_rate" in body
+        assert "同一结论内不得出现两个币种" in body
+        assert "金额符号与 `currency` 一致" in body
+        assert "不要搜索定价文档或联网查汇率" in body
+
     def test_emphasizes_write_back(self, body):
         assert "写回原文件路径" in body
 
@@ -538,6 +598,16 @@ class TestCostPrompt:
         assert "列表价" in body
         assert "合同优惠后" in body
         assert "monthly_estimate" in body
+
+    def test_prompt_requires_self_consistent_currency_without_repeating_skill_rules(self):
+        body = COST_PROMPT_MD.read_text(encoding="utf-8")
+
+        assert "币种必须自洽" in body
+        assert "source_currency" in body
+        assert "exchange_rate" in body
+        assert "禁止 USD 原始价与 `currency: CNY` 共存于同一结论" in body
+        assert "符号按 `currency` 取" in body
+        assert "`¥<原价>/月（列表价，合同优惠后约¥<最终价>/月）`" not in body
 
     def test_prompt_receives_only_required_candidate_fields_without_repeating_skill_rules(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")

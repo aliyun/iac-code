@@ -13,6 +13,7 @@ import jsonschema
 
 from iac_code.i18n import _
 from iac_code.pipeline.display_names import display_step_name
+from iac_code.pipeline.engine.currency_consistency import validate_currency_consistency
 from iac_code.pipeline.engine.hard_constraints import collect_hard_constraints, validate_hard_constraint_checks
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.tools.base import Tool, ToolContext, ToolResult
@@ -60,6 +61,10 @@ _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
         "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
         "and evidence."
     ),
+    "cost_currency_consistency_required": (
+        "The cost conclusion must use a single currency; a different source currency requires an explicit "
+        "exchange rate."
+    ),
 }
 _COMPLETION_GUARD_MESSAGE_KEY_BY_TEXT = {text: key for key, text in _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY.items()}
 
@@ -99,6 +104,10 @@ def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
         _(
             "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
             "and evidence."
+        ),
+        _(
+            "The cost conclusion must use a single currency; a different source currency requires an explicit "
+            "exchange rate."
         ),
     )
 
@@ -324,6 +333,7 @@ class CompleteStepTool(Tool):
             required_tool_result = guard.get("require_tool_result")
             required_conclusion_sha256 = guard.get("require_conclusion_sha256")
             required_constraint_coverage = guard.get("require_context_constraint_coverage")
+            required_currency_consistency = guard.get("require_currency_consistency")
             required_field = guard.get("required_conclusion_field")
             required_any_of = guard.get("required_conclusion_any_of") or []
             successful_tools = self._completion_guard_state.get("successful_tools", set())
@@ -383,7 +393,69 @@ class CompleteStepTool(Tool):
                 )
                 if validation_error is not None:
                     return validation_error
+            if isinstance(required_currency_consistency, dict):
+                validation_error = self._validate_currency_consistency(
+                    required_currency_consistency,
+                    conclusion,
+                    self._completion_guard_message(guard, None),
+                )
+                if validation_error is not None:
+                    return validation_error
         return None
+
+    def _validate_currency_consistency(
+        self,
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        message: str | None,
+    ) -> str | None:
+        currency = self._resolve_dotted(conclusion, str(requirement.get("currency_field") or "currency"))
+        source_currency = self._resolve_dotted(
+            conclusion,
+            str(requirement.get("source_currency_field") or "source_currency"),
+        )
+        exchange_rate = self._resolve_dotted(
+            conclusion,
+            str(requirement.get("exchange_rate_field") or "exchange_rate"),
+        )
+        issues = validate_currency_consistency(
+            currency=currency,
+            source_currency=source_currency,
+            exchange_rate=exchange_rate,
+            amount_texts=self._collect_amount_texts(requirement, conclusion),
+        )
+        if not issues:
+            return None
+        base_message = message or _(
+            "The cost conclusion must use a single currency; a different source currency requires an explicit "
+            "exchange rate."
+        )
+        issue_summaries = [f"{issue.code}[{issue.detail}]" if issue.detail else issue.code for issue in issues]
+        code = issues[0].code if len(issues) == 1 else "multiple_currency_issues"
+        return _("{message} Validation issue: {code} ({detail}).").format(
+            message=base_message,
+            code=code,
+            detail="; ".join(issue_summaries),
+        )
+
+    def _collect_amount_texts(self, requirement: dict[str, Any], conclusion: dict[str, Any]) -> list[Any]:
+        raw_fields = requirement.get("amount_fields")
+        fields = raw_fields if isinstance(raw_fields, list) else ["monthly_estimate", "resources[].cost"]
+        texts: list[Any] = []
+        for field in fields:
+            if not isinstance(field, str) or not field:
+                continue
+            list_field, separator, item_field = field.partition("[].")
+            if not separator:
+                texts.append(self._resolve_dotted(conclusion, field))
+                continue
+            items = self._resolve_dotted(conclusion, list_field)
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if isinstance(item, dict):
+                    texts.append(self._resolve_dotted(item, item_field))
+        return [text for text in texts if isinstance(text, str) and text]
 
     def _validate_context_constraint_coverage(
         self,

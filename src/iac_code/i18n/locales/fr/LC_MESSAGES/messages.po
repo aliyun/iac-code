@@ -4074,6 +4074,12 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"The cost conclusion must use a single currency; a different source "
+"currency requires an explicit exchange rate."
+msgstr "La conclusion de coût doit utiliser une seule devise ; si la devise source est différente, un taux de change explicite est requis."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -4176,13 +4182,13 @@ msgstr ""
 "{fields}."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
-msgid "A completion guard is misconfigured."
-msgstr "Une garde de finalisation est mal configurée."
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
 msgid "{message} Validation issue: {code} ({detail})."
 msgstr "{message} Problème de validation : {code} ({detail})."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A completion guard is misconfigured."
+msgstr "Une garde de finalisation est mal configurée."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A conclusion content hash is required before completing the current step."

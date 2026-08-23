@@ -39,8 +39,13 @@ API 调用完成后调用 `complete_step` 提交费用预估。
 `complete_step.conclusion.monthly_estimate` 必须保留两个价格口径：
 - `OriginalAmount` 是原价，按统一月度周期换算并汇总为列表价。
 - `TradeAmount` 是合同优惠后的最终价，按与原价相同的月度周期换算并汇总。
-- 两个字段都存在时，使用 `¥<原价>/月（列表价，合同优惠后约¥<最终价>/月）` 格式；即使数值相同也保留两个价格口径。
+- 两个字段都存在时，使用 `<符号><原价>/月（列表价，合同优惠后约<符号><最终价>/月）` 格式；即使数值相同也保留两个价格口径。符号按 `currency` 取（CNY → `¥`，USD → `$`）。
 - 任一字段缺失时只展示可用价格，并在 `api_raw_summary` 中说明缺失字段；询价失败时仍填写 `"询价失败"`。
+
+`complete_step.conclusion` 的币种必须自洽，具体归一规则按技能执行：
+- `currency` 是 `monthly_estimate` 与 `resources[].cost` 实际使用的币种，必须与书写的金额符号一致。
+- 询价返回 USD 等非 CNY 原始价时，要么按原始币种上报（`currency` = `source_currency`，不填 `exchange_rate`），要么填 `exchange_rate` 按显式汇率换算并在 `api_raw_summary` 记录原始币种与原始金额。
+- 禁止 USD 原始价与 `currency: CNY` 共存于同一结论，也禁止无汇率的跨币种换算。不要联网查汇率。
 
 若 `ros_preview_template` 成功，在 `complete_step.conclusion.preview_validation` 写入 PreviewStack 成功证明：`succeeded: true`、`template_url: "{template.file_path}"`、`parameters: <预览通过的同一参数字典>`；失败或未执行时写入 `succeeded: false`、`error: "<原因>"`。
 

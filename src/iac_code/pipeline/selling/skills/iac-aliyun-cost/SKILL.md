@@ -17,10 +17,36 @@ conclusion_schema:
   properties:
     monthly_estimate:
       type: string
-      description: 月度费用估算；询价同时返回 OriginalAmount 与 TradeAmount 时，必须同时包含列表价和合同优惠后价格（如 ¥96.80/月（列表价，合同优惠后约¥13.76/月））；询价失败时填 "询价失败"
+      description: 月度费用估算，金额符号必须与 currency 一致（CNY 用 ¥，USD 用 $）；询价同时返回 OriginalAmount 与 TradeAmount 时，必须同时包含列表价和合同优惠后价格（如 ¥96.80/月（列表价，合同优惠后约¥13.76/月））；询价失败时填 "询价失败"
     currency:
       type: string
-      enum: [CNY]
+      enum: [CNY, USD]
+      description: monthly_estimate 与 resources[].cost 实际使用的币种；必须与实际书写的金额符号一致，不得声明未换算的其他币种
+    source_currency:
+      type: string
+      enum: [CNY, USD]
+      description: 询价 API 原始返回的币种；与 currency 不同时必须提供 exchange_rate 并已完成换算
+    exchange_rate:
+      type: object
+      description: 把 source_currency 金额换算为 currency 时使用的显式汇率；source_currency 与 currency 不一致时必填
+      required: [from, to, rate]
+      additionalProperties: false
+      properties:
+        from:
+          type: string
+          enum: [CNY, USD]
+          description: 换算前币种，必须等于 source_currency
+        to:
+          type: string
+          enum: [CNY, USD]
+          description: 换算后币种，必须等于 currency
+        rate:
+          type: number
+          exclusiveMinimum: 0
+          description: 1 单位 from 币种折算为 to 币种的数值
+        source:
+          type: string
+          description: 汇率来源说明，如询价结果字段或上下文出处
     resources:
       type: array
       items:
@@ -295,11 +321,23 @@ aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<�
 - 修复模板后**必须写回原文件路径** — 后续部署步骤直接使用此文件，未写回等于向下游传递错误模板
 - 修改后校验不通过时**不要跳过修复直接询价**，错误模板会导致后续部署失败
 
+## 币种归一
+
+询价结果的原始币种由 API 决定，跨境产品（如 GA）可能返回 USD 而非 CNY。同一结论内不得出现两个币种，只有两条合法路径：
+
+1. **按原始币种上报** — `currency` 填询价返回的币种，`source_currency` 填同一个值，不需要 `exchange_rate`。金额符号按 `currency` 书写（CNY → `¥`，USD → `$`）。
+2. **按显式汇率换算** — `source_currency` 填原始币种，`currency` 填换算后的币种，并在 `exchange_rate` 填 `{"from": <source_currency>, "to": <currency>, "rate": <数值>, "source": "<汇率出处>"}`。`monthly_estimate` 和 `resources[].cost` 写换算后的金额，`api_raw_summary` 必须记录原始币种和原始金额。
+
+硬性要求：
+- `monthly_estimate` 与所有 `resources[].cost` 必须使用同一个币种，且金额符号与 `currency` 一致；不得用 `¥` 书写 USD 原始价，也不得声明 `currency: CNY` 却填未换算的 USD 金额。
+- `source_currency` 与 `currency` 不一致时缺少 `exchange_rate`，或 `exchange_rate.from/to` 与 `source_currency`/`currency` 不对应，`complete_step` 会被代码拒绝。
+- 不要搜索定价文档或联网查汇率。汇率只能来自询价结果字段或当前上下文；拿不到可信汇率时走路径 1，按原始币种上报。
+
 ## 输出
 调用 `complete_step` 提交结论。字段定义见 tool schema。
 
 补充说明：
-- `cost` 字段为字符串，包含金额和计费周期（如 "¥800/月"、"¥0.5/小时"、"¥0"）
+- `cost` 字段为字符串，包含金额和计费周期（如 "¥800/月"、"$0.5/小时"、"¥0"），金额符号与 `currency` 一致
 - 若修复了模板，设置 `template_fixed: true` 并在 `fix_summary` 中说明修复内容；仅形成或输出 `deployment_parameters` 不算模板修复
 - `deployment_parameters` 填当前已选、已验证或已用于 `ros_estimate_template_cost` 的参数字典；PreviewStack 成功但询价失败时仍填该参数集；没有任何可用参数时填 `{}`
 - 没有硬约束时，`hard_constraint_checks` 填 `[]`；不要输出 `hard_constraints_verified`
@@ -307,3 +345,4 @@ aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<�
 - `missing_deployment_parameters` 填完整部署或 PreviewStack 仍缺少的参数及原因；没有缺口时可省略或填 `[]`
 - `parameter_set_summary` 可简要说明参数来源、可用性筛选、PreviewStack 验证结果以及是否使用软门禁继续询价
 - 询价失败时 `monthly_estimate` 填 "询价失败"，`resources` 为空数组，`error` 说明原因
+- `currency`、`source_currency`、`exchange_rate` 按「币种归一」填写；`api_raw_summary` 在发生换算时必须记录原始币种与原始金额

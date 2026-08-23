@@ -1461,6 +1461,135 @@ class TestCompletionGuards:
         assert "rerun validation" in result.content
 
 
+class TestCurrencyConsistencyGuard:
+    GUARD = {
+        "always": True,
+        "require_currency_consistency": {
+            "currency_field": "currency",
+            "source_currency_field": "source_currency",
+            "exchange_rate_field": "exchange_rate",
+            "amount_fields": ["monthly_estimate", "resources[].cost"],
+        },
+        "message_key": "cost_currency_consistency_required",
+    }
+
+    def _validate(self, conclusion: dict) -> str | None:
+        tool = CompleteStepTool(
+            StepConfig(step_id="cost_estimating", conclusion_field="cost", forward=None),
+            completion_guards=[self.GUARD],
+        )
+        return tool.validate_completion_input({"conclusion": conclusion})
+
+    def test_rejects_usd_raw_price_declared_as_cny_without_exchange_rate(self):
+        error = self._validate(
+            {
+                "currency": "CNY",
+                "source_currency": "USD",
+                "monthly_estimate": "$68.00/月",
+                "resources": [{"type": "ALIYUN::GA::Accelerator", "cost": "$68.00/月"}],
+            }
+        )
+
+        assert error is not None
+        assert "missing_exchange_rate" in error
+        assert "amount_currency_mismatch" in error
+
+    def test_accepts_reporting_in_the_original_currency(self):
+        assert (
+            self._validate(
+                {
+                    "currency": "USD",
+                    "source_currency": "USD",
+                    "monthly_estimate": "$68.00/月",
+                    "resources": [{"type": "ALIYUN::GA::Accelerator", "cost": "$68.00/月"}],
+                }
+            )
+            is None
+        )
+
+    def test_accepts_conversion_with_an_explicit_exchange_rate(self):
+        assert (
+            self._validate(
+                {
+                    "currency": "CNY",
+                    "source_currency": "USD",
+                    "exchange_rate": {"from": "USD", "to": "CNY", "rate": 7.15, "source": "询价结果附带汇率"},
+                    "monthly_estimate": "¥486.20/月",
+                    "resources": [{"type": "ALIYUN::GA::Accelerator", "cost": "¥486.20/月"}],
+                }
+            )
+            is None
+        )
+
+    def test_rejects_exchange_rate_whose_direction_does_not_match_the_declared_currencies(self):
+        error = self._validate(
+            {
+                "currency": "CNY",
+                "source_currency": "USD",
+                "exchange_rate": {"from": "CNY", "to": "USD", "rate": 7.15},
+                "monthly_estimate": "¥486.20/月",
+                "resources": [],
+            }
+        )
+
+        assert error is not None
+        assert "exchange_rate_source_mismatch" in error
+        assert "exchange_rate_target_mismatch" in error
+
+    def test_rejects_non_positive_exchange_rate(self):
+        error = self._validate(
+            {
+                "currency": "CNY",
+                "source_currency": "USD",
+                "exchange_rate": {"from": "USD", "to": "CNY", "rate": 0},
+                "monthly_estimate": "¥486.20/月",
+                "resources": [],
+            }
+        )
+
+        assert error is not None
+        assert "invalid_exchange_rate_value" in error
+
+    def test_rejects_amount_symbol_that_contradicts_currency_without_source_currency(self):
+        error = self._validate({"currency": "CNY", "monthly_estimate": "$68/月", "resources": []})
+
+        assert error is not None
+        assert "amount_currency_mismatch" in error
+
+    def test_rejects_resource_cost_in_another_currency_than_the_total(self):
+        error = self._validate(
+            {
+                "currency": "CNY",
+                "monthly_estimate": "¥486.20/月",
+                "resources": [{"type": "ALIYUN::GA::Accelerator", "cost": "$68.00/月"}],
+            }
+        )
+
+        assert error is not None
+        assert "amount_currency_mismatch" in error
+
+    def test_accepts_existing_cny_only_conclusions(self):
+        assert (
+            self._validate(
+                {
+                    "currency": "CNY",
+                    "monthly_estimate": "¥96.80/月（列表价，合同优惠后约¥13.76/月）",
+                    "resources": [{"type": "ALIYUN::ECS::InstanceGroup", "cost": "¥96.80/月"}],
+                }
+            )
+            is None
+        )
+
+    def test_accepts_pricing_failure_without_any_amount(self):
+        assert self._validate({"currency": "CNY", "monthly_estimate": "询价失败", "resources": []}) is None
+
+    def test_rejects_unsupported_currency(self):
+        error = self._validate({"currency": "EUR", "monthly_estimate": "€10/月", "resources": []})
+
+        assert error is not None
+        assert "unsupported_currency" in error
+
+
 class TestSchemaValidation:
     def test_missing_conclusion_validation_error_includes_current_step_schema(self):
         config = StepConfig(
