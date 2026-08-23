@@ -4088,6 +4088,13 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"A positive list price cannot be paired with a zero or implausible "
+"contract price; report the list price alone when the contract discount "
+"does not apply."
+msgstr "Ein positiver Listenpreis darf nicht mit einem Vertragspreis von null oder einem unplausiblen Vertragspreis kombiniert werden; geben Sie nur den Listenpreis an, wenn der Vertragsrabatt nicht gilt."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -4193,6 +4200,13 @@ msgid ""
 msgstr ""
 "{message} complete_step.conclusion muss eines dieser Felder enthalten: "
 "{fields}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} Validation issue: {code} ({detail}) in "
+"complete_step.conclusion.{field}."
+msgstr "{message} Validierungsproblem: {code} ({detail}) in complete_step.conclusion.{field}."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A completion guard is misconfigured."

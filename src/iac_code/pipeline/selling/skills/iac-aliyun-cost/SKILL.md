@@ -17,7 +17,7 @@ conclusion_schema:
   properties:
     monthly_estimate:
       type: string
-      description: 月度费用估算；询价同时返回 OriginalAmount 与 TradeAmount 时，必须同时包含列表价和合同优惠后价格（如 ¥96.80/月（列表价，合同优惠后约¥13.76/月））；询价失败时填 "询价失败"
+      description: 月度费用估算；询价同时返回 OriginalAmount 与 TradeAmount 且换算后的合同优惠后价格为正数时，必须同时包含列表价和合同优惠后价格（如 ¥96.80/月（列表价，合同优惠后约¥13.76/月））；TradeAmount 缺失、为 0 或换算后不是正数时，只展示列表价并在 api_raw_summary 说明，不得写出 ¥0/月 的后优惠价；询价失败时填 "询价失败"
     currency:
       type: string
       enum: [CNY]
@@ -300,6 +300,7 @@ aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<�
 
 补充说明：
 - `cost` 字段为字符串，包含金额和计费周期（如 "¥800/月"、"¥0.5/小时"、"¥0"）
+- 列表价为正数时，`monthly_estimate` 中的合同优惠后价格必须为正数且不高于列表价；`TradeAmount` 缺失或为 0 时回退为只展示列表价，并在 `api_raw_summary` 说明，不得输出 ¥0/月 的后优惠价
 - 若修复了模板，设置 `template_fixed: true` 并在 `fix_summary` 中说明修复内容；仅形成或输出 `deployment_parameters` 不算模板修复
 - `deployment_parameters` 填当前已选、已验证或已用于 `ros_estimate_template_cost` 的参数字典；PreviewStack 成功但询价失败时仍填该参数集；没有任何可用参数时填 `{}`
 - 没有硬约束时，`hard_constraint_checks` 填 `[]`；不要输出 `hard_constraints_verified`

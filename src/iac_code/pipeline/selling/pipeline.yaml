@@ -356,6 +356,10 @@ sub_pipelines:
               checks_field: hard_constraint_checks
               deployment_parameters_field: deployment_parameters
             message_key: hard_constraint_verification_required
+          - always: true
+            require_monthly_estimate_plausibility:
+              field: monthly_estimate
+            message_key: monthly_estimate_plausibility_required
         tools:
           include: []
           exclude:

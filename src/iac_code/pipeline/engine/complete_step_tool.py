@@ -13,6 +13,7 @@ import jsonschema
 
 from iac_code.i18n import _
 from iac_code.pipeline.display_names import display_step_name
+from iac_code.pipeline.engine.cost_estimate import validate_monthly_estimate
 from iac_code.pipeline.engine.hard_constraints import collect_hard_constraints, validate_hard_constraint_checks
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.tools.base import Tool, ToolContext, ToolResult
@@ -60,6 +61,10 @@ _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
         "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
         "and evidence."
     ),
+    "monthly_estimate_plausibility_required": (
+        "A positive list price cannot be paired with a zero or implausible contract price; report the list price "
+        "alone when the contract discount does not apply."
+    ),
 }
 _COMPLETION_GUARD_MESSAGE_KEY_BY_TEXT = {text: key for key, text in _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY.items()}
 
@@ -99,6 +104,10 @@ def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
         _(
             "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
             "and evidence."
+        ),
+        _(
+            "A positive list price cannot be paired with a zero or implausible contract price; report the list price "
+            "alone when the contract discount does not apply."
         ),
     )
 
@@ -324,6 +333,7 @@ class CompleteStepTool(Tool):
             required_tool_result = guard.get("require_tool_result")
             required_conclusion_sha256 = guard.get("require_conclusion_sha256")
             required_constraint_coverage = guard.get("require_context_constraint_coverage")
+            required_monthly_estimate = guard.get("require_monthly_estimate_plausibility")
             required_field = guard.get("required_conclusion_field")
             required_any_of = guard.get("required_conclusion_any_of") or []
             successful_tools = self._completion_guard_state.get("successful_tools", set())
@@ -383,7 +393,43 @@ class CompleteStepTool(Tool):
                 )
                 if validation_error is not None:
                     return validation_error
+            if isinstance(required_monthly_estimate, dict):
+                validation_error = self._validate_monthly_estimate_plausibility(
+                    required_monthly_estimate,
+                    conclusion,
+                    self._completion_guard_message(guard, None),
+                )
+                if validation_error is not None:
+                    return validation_error
         return None
+
+    def _validate_monthly_estimate_plausibility(
+        self,
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        message: str | None,
+    ) -> str | None:
+        field = str(requirement.get("field") or "monthly_estimate")
+        value = self._resolve_dotted(conclusion, field)
+        if value is None:
+            return None
+        skip_values = self._string_set(requirement.get("skip_values")) or {"询价失败"}
+        if isinstance(value, str) and value.strip() in skip_values:
+            return None
+        issues = validate_monthly_estimate(value)
+        if not issues:
+            return None
+        base_message = message or _(
+            "A positive list price cannot be paired with a zero or implausible contract price; report the list price "
+            "alone when the contract discount does not apply."
+        )
+        issue = issues[0]
+        return _("{message} Validation issue: {code} ({detail}) in complete_step.conclusion.{field}.").format(
+            message=base_message,
+            code=issue.code,
+            detail=issue.detail or field,
+            field=field,
+        )
 
     def _validate_context_constraint_coverage(
         self,

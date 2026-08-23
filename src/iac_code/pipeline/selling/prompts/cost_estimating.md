@@ -39,7 +39,8 @@ API 调用完成后调用 `complete_step` 提交费用预估。
 `complete_step.conclusion.monthly_estimate` 必须保留两个价格口径：
 - `OriginalAmount` 是原价，按统一月度周期换算并汇总为列表价。
 - `TradeAmount` 是合同优惠后的最终价，按与原价相同的月度周期换算并汇总。
-- 两个字段都存在时，使用 `¥<原价>/月（列表价，合同优惠后约¥<最终价>/月）` 格式；即使数值相同也保留两个价格口径。
+- 两个字段都存在且换算后的最终价为正数时，使用 `¥<原价>/月（列表价，合同优惠后约¥<最终价>/月）` 格式；即使数值相同也保留两个价格口径。
+- 列表价为正数时，后优惠价必须为正数、不得高于列表价，也不得低于列表价的合理比例（低于 1% 视为异常）。`TradeAmount` 缺失、为 0 或换算后不是正数，说明合同优惠不适用于本次询价：此时回退为只展示列表价 `¥<原价>/月（列表价）`，并在 `api_raw_summary` 说明该字段缺失或为零，**不得**输出 `合同优惠后约¥0.00/月`。
 - 任一字段缺失时只展示可用价格，并在 `api_raw_summary` 中说明缺失字段；询价失败时仍填写 `"询价失败"`。
 
 若 `ros_preview_template` 成功，在 `complete_step.conclusion.preview_validation` 写入 PreviewStack 成功证明：`succeeded: true`、`template_url: "{template.file_path}"`、`parameters: <预览通过的同一参数字典>`；失败或未执行时写入 `succeeded: false`、`error: "<原因>"`。

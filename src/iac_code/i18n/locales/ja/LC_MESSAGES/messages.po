@@ -3876,6 +3876,13 @@ msgstr "ユーザーが明示した各ハード制約は、パラメーターと
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"A positive list price cannot be paired with a zero or implausible "
+"contract price; report the list price alone when the contract discount "
+"does not apply."
+msgstr "定価が正の値のとき、契約価格を 0 や不合理な値にすることはできません。契約割引が適用されない場合は定価のみを報告してください。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -3966,6 +3973,13 @@ msgid ""
 "{message} complete_step.conclusion must include one of these fields: "
 "{fields}."
 msgstr "{message} complete_step.conclusion には次のいずれかのフィールドが必要です: {fields}。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} Validation issue: {code} ({detail}) in "
+"complete_step.conclusion.{field}."
+msgstr "{message} 検証の問題: {code}（{detail}）complete_step.conclusion.{field} にあります。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A completion guard is misconfigured."

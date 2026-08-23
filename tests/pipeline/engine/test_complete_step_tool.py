@@ -466,6 +466,71 @@ class TestCompletionGuards:
         assert "missing_constraint_check" in terminal.metadata["step_result"].error
 
     @staticmethod
+    def _monthly_estimate_guard() -> dict:
+        return {
+            "always": True,
+            "require_monthly_estimate_plausibility": {"field": "monthly_estimate"},
+            "message_key": "monthly_estimate_plausibility_required",
+        }
+
+    def _monthly_estimate_tool(self) -> CompleteStepTool:
+        return CompleteStepTool(
+            StepConfig(step_id="cost_estimating", conclusion_field="cost", forward=None),
+            completion_guards=[self._monthly_estimate_guard()],
+        )
+
+    def test_rejects_zero_contract_price_when_list_price_is_positive(self):
+        tool = self._monthly_estimate_tool()
+
+        error = tool.validate_completion_input(
+            {"conclusion": {"monthly_estimate": "¥289.81/月（列表价，合同优惠后约¥0.00/月）"}}
+        )
+
+        assert error is not None
+        assert "discounted_monthly_price_not_positive" in error
+        assert "monthly_estimate" in error
+
+    def test_accepts_plausible_contract_price_and_list_price_only_fallback(self):
+        tool = self._monthly_estimate_tool()
+
+        assert (
+            tool.validate_completion_input(
+                {"conclusion": {"monthly_estimate": "¥289.81/月（列表价，合同优惠后约¥41.20/月）"}}
+            )
+            is None
+        )
+        assert tool.validate_completion_input({"conclusion": {"monthly_estimate": "¥289.81/月（列表价）"}}) is None
+        assert tool.validate_completion_input({"conclusion": {"monthly_estimate": "询价失败"}}) is None
+
+    @pytest.mark.asyncio
+    async def test_monthly_estimate_guard_returns_repairable_error(self):
+        tool = CompleteStepTool(
+            StepConfig(
+                step_id="cost_estimating",
+                conclusion_field="cost",
+                forward=None,
+                max_conclusion_retries=2,
+            ),
+            completion_guards=[self._monthly_estimate_guard()],
+        )
+
+        rejected = await tool.execute(
+            tool_input={"conclusion": {"monthly_estimate": "¥289.81/月（列表价，合同优惠后约¥0.00/月）"}},
+            context=ToolContext(),
+        )
+
+        assert rejected.is_error is True
+        assert rejected.metadata is None
+        assert "fix it and call complete_step again" in rejected.content
+
+        repaired = await tool.execute(
+            tool_input={"conclusion": {"monthly_estimate": "¥289.81/月（列表价）"}},
+            context=ToolContext(),
+        )
+
+        assert repaired.is_error is False
+
+    @staticmethod
     def _deploying_success_guard() -> dict:
         return {
             "when_conclusion_field_equals": {"status": "success"},

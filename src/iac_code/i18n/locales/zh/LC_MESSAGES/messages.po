@@ -3840,6 +3840,13 @@ msgstr "每个用户明确提出的硬约束都必须由一条状态为满足的
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"A positive list price cannot be paired with a zero or implausible "
+"contract price; report the list price alone when the contract discount "
+"does not apply."
+msgstr "列表价为正数时，不能搭配为零或不合理的合同优惠后价格；合同优惠不适用时只报告列表价。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr "调用此工具提交结论以完成当前步骤。如需回滚到较早步骤，请设置 rollback_request。"
@@ -3928,6 +3935,13 @@ msgid ""
 "{message} complete_step.conclusion must include one of these fields: "
 "{fields}."
 msgstr "{message} complete_step.conclusion 必须包含以下字段之一: {fields}。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} Validation issue: {code} ({detail}) in "
+"complete_step.conclusion.{field}."
+msgstr "{message} 校验问题：{code}（{detail}），位于 complete_step.conclusion.{field}。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A completion guard is misconfigured."
