@@ -1744,3 +1744,83 @@ class TestNullNormalization:
         valid, error = tool.validate_input(tool_input)
         assert not valid
         assert "name" in error
+
+
+class TestTextFieldNormalization:
+    """Steps declaring normalize_text_fields recover bare text from fenced conclusions."""
+
+    TEMPLATE = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}"
+
+    @staticmethod
+    def _config(normalize_text_fields):
+        return StepConfig(
+            step_id="template_generating",
+            conclusion_field="template",
+            forward=None,
+            normalize_text_fields=normalize_text_fields,
+            conclusion_schema={
+                "type": "object",
+                "required": ["template"],
+                "additionalProperties": False,
+                "properties": {
+                    "template": {"type": "string"},
+                    "template_sha256": {"type": "string"},
+                    "file_path": {"type": "string"},
+                },
+            },
+        )
+
+    def test_declared_field_is_unwrapped(self):
+        tool = CompleteStepTool(self._config(["template"]))
+        tool_input = {"conclusion": {"template": f"```yaml\n{self.TEMPLATE}\n```"}}
+
+        valid, error = tool.validate_input(tool_input)
+
+        assert valid, f"Expected valid but got: {error}"
+        assert tool_input["conclusion"]["template"] == self.TEMPLATE
+
+    def test_undeclared_field_is_untouched(self):
+        tool = CompleteStepTool(self._config([]))
+        wrapped = f"```yaml\n{self.TEMPLATE}\n```"
+        tool_input = {"conclusion": {"template": wrapped}}
+
+        tool.validate_input(tool_input)
+
+        assert tool_input["conclusion"]["template"] == wrapped
+
+    def test_non_string_value_is_untouched(self):
+        tool = CompleteStepTool(self._config(["template"]))
+        tool_input = {"conclusion": {"template": {"Resources": {}}}}
+
+        tool.validate_input(tool_input)
+
+        assert tool_input["conclusion"]["template"] == {"Resources": {}}
+
+    @pytest.mark.asyncio
+    async def test_sha256_guard_compares_normalized_text(self):
+        config = self._config(["template"])
+        tool = CompleteStepTool(
+            config,
+            completion_guards=[
+                {
+                    "always": True,
+                    "require_conclusion_sha256": {
+                        "content_field": "template",
+                        "sha256_field": "template_sha256",
+                    },
+                }
+            ],
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "template": f"```yaml\n{self.TEMPLATE}\n```",
+                    "template_sha256": hashlib.sha256(self.TEMPLATE.encode("utf-8")).hexdigest(),
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error, result.content
+        assert result.metadata["step_result"].conclusion["template"] == self.TEMPLATE

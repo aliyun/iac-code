@@ -984,6 +984,7 @@ class StepExecutor:
             complete_step_terminal=step.complete_step_terminal,
             max_agent_turns=step.max_agent_turns,
             conclusion_schema=step.conclusion_schema,
+            normalize_text_fields=step.normalize_text_fields,
             rollback_targets=rollback_targets if rollback_targets is not None else [],
             max_conclusion_retries=step.max_conclusion_retries,
             rollback_count=rollback_count,

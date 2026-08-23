@@ -13,6 +13,7 @@ import jsonschema
 
 from iac_code.i18n import _
 from iac_code.pipeline.display_names import display_step_name
+from iac_code.pipeline.engine.conclusion_text import strip_markdown_code_fence
 from iac_code.pipeline.engine.hard_constraints import collect_hard_constraints, validate_hard_constraint_checks
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.tools.base import Tool, ToolContext, ToolResult
@@ -178,7 +179,19 @@ class CompleteStepTool(Tool):
         if isinstance(conclusion, dict):
             for key in [k for k, v in conclusion.items() if v is None]:
                 del conclusion[key]
+            self._normalize_text_fields(conclusion)
             self._copy_guard_tool_results_to_conclusion(conclusion)
+
+    def _normalize_text_fields(self, conclusion: dict[str, Any]) -> None:
+        """Recover bare text for fields the step declared as plain-text payloads.
+
+        Runs before schema, completion guard and sha256 validation so the persisted
+        conclusion, A2A artifacts and pipeline snapshot all observe the same bare text.
+        """
+        for field_name in self._step_config.normalize_text_fields:
+            value = conclusion.get(field_name)
+            if isinstance(value, str):
+                conclusion[field_name] = strip_markdown_code_fence(value)
 
     def _copy_guard_tool_results_to_conclusion(self, conclusion: dict[str, Any]) -> None:
         tool_results = self._completion_guard_state.get("tool_results", {})

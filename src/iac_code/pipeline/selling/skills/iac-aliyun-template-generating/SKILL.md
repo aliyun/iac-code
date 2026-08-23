@@ -10,7 +10,7 @@ conclusion_schema:
   properties:
     template:
       type: string
-      description: 与写入文件相同的 YAML 字符串
+      description: 与写入文件逐字一致的裸 YAML 字符串；禁止 markdown 代码围栏包裹，禁止模板前后的说明性段落或注释
     file_path:
       type: string
       description: 模板文件路径
@@ -93,6 +93,7 @@ conclusion_schema:
 - 模板格式为 YAML
 - 使用 `!Ref`、`!GetAtt` 等内置函数引用参数和资源属性，避免硬编码
 - Outputs 中所有输出变量必须定义 Label
+- `template` 字段必须是可直接结构化解析的裸 IaC 文本，与磁盘文件内容逐字一致：禁止使用 markdown 代码围栏（```` ``` ````、```` ```yaml ````）包裹，禁止在模板前后输出说明性段落、结论或非模板注释。模板自身的 YAML 注释（`#`）属于模板内容，可以保留。
 
 ## 资源和文档搜索
 

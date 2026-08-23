@@ -83,6 +83,7 @@ class StepSpec:
     max_conclusion_retries: int = 2
     interrupt_judge_failure: str = "continue"
     completion_guards: list[dict] = field(default_factory=list)
+    normalize_text_fields: list[str] = field(default_factory=list)
     description: str = ""
     exit_condition: dict | None = None
     a2a_artifacts: list[A2AArtifactSpec] = field(default_factory=list)

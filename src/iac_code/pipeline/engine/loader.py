@@ -152,6 +152,14 @@ def _parse_completion_guards(raw: object, step_id: str) -> list[dict[str, Any]]:
     return guards
 
 
+def _parse_normalize_text_fields(raw: object, step_id: str) -> list[str]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or not all(isinstance(name, str) and name for name in raw):
+        raise ValueError(f"Step '{step_id}': normalize_text_fields must be a list of non-empty strings, got {raw!r}")
+    return list(cast(list[str], raw))
+
+
 def _resolve_feature_flags(raw_flags: dict | None) -> dict[str, bool]:
     """Resolve feature flags from YAML defaults + environment variable overrides."""
     if not raw_flags:
@@ -297,6 +305,7 @@ def _parse_steps(raw_steps: list[dict]) -> list[StepSpec]:
                     raw.get("id", "?"),
                 ),
                 completion_guards=_parse_completion_guards(raw.get("completion_guards"), step_id),
+                normalize_text_fields=_parse_normalize_text_fields(raw.get("normalize_text_fields"), step_id),
                 description=raw.get("description", ""),
                 exit_condition=_parse_exit_condition(raw.get("exit_condition"), step_id),
                 a2a_artifacts=_parse_a2a_artifacts(raw.get("a2a_artifacts"), step_id),

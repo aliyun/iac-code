@@ -131,7 +131,12 @@ def test_review_step_schema_and_completion_guards_allow_clean_scan_shortcut() ->
         ],
         "additionalProperties": False,
         "properties": {
-            "template": {"type": "string"},
+            "template": {
+                "type": "string",
+                "description": (
+                    "与写入文件逐字一致的裸 YAML 字符串；禁止 markdown 代码围栏包裹，禁止模板前后的说明性段落或注释"
+                ),
+            },
             "template_sha256": {"type": "string"},
             "file_path": {"type": "string"},
             "region": {"type": "string"},

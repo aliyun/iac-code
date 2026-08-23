@@ -140,6 +140,7 @@ sub_pipelines:
       - id: template_generating
         description: "根据候选架构生成 IaC 模板代码"
         conclusion_field: template
+        normalize_text_fields: [template]
         a2a_artifacts:
           - path: conclusion.file_path
             content: conclusion.template
@@ -167,6 +168,7 @@ sub_pipelines:
         description: "审查模板的安全性和最佳实践"
         enabled_when: enable_reviewing
         conclusion_field: template
+        normalize_text_fields: [template]
         forward: cost_estimating
         skill: iac-aliyun-review
         prompt: prompts/reviewing.md
@@ -312,6 +314,7 @@ sub_pipelines:
           properties:
             template:
               type: string
+              description: 与写入文件逐字一致的裸 YAML 字符串；禁止 markdown 代码围栏包裹，禁止模板前后的说明性段落或注释
             template_sha256:
               type: string
             file_path:

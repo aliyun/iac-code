@@ -10,6 +10,7 @@ conclusion_schema:
   properties:
     template:
       type: string
+      description: 与写入文件逐字一致的裸 YAML 字符串；禁止 markdown 代码围栏包裹，禁止模板前后的说明性段落或注释
     template_sha256:
       type: string
     file_path:

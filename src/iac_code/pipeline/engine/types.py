@@ -25,6 +25,7 @@ class StepConfig:
     complete_step_terminal: bool = True
     max_agent_turns: int = 50
     conclusion_schema: dict | None = None
+    normalize_text_fields: list[str] = field(default_factory=list)
     rollback_targets: list[str] = field(default_factory=list)
     max_conclusion_retries: int = 2
     rollback_count: int = 0
