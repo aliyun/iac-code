@@ -202,6 +202,26 @@ class TestGetThinkingSpec:
         assert kimi.use_max_completion_tokens is True
         assert kimi.uses_reasoning_effort_param is False
 
+    def test_qwen37_max_has_bounded_thinking_budget_on_both_endpoints(self):
+        # 长尾治理契约:qwen3.7-max 的思考阶段必须有硬预算上限,否则服务端可能
+        # 产出 ~12 分钟级 thinking(实测 p99 728,878ms)。两个 endpoint 必须一致,
+        # 只治一个入口等于没治。
+        for provider_key in ("dashscope", "dashscope_token_plan"):
+            spec = get_thinking_spec(provider_key, "qwen3.7-max")
+            assert spec.family is ThinkingFamily.DASHSCOPE, provider_key
+            assert spec.supports_thinking_budget is True, provider_key
+            assert spec.default_thinking_budget == 8192, provider_key
+            # 预算走 extra_body.thinking_budget,不改 max_tokens 语义。
+            assert spec.use_max_completion_tokens is False, provider_key
+            assert spec.allowed_efforts == (), provider_key
+
+    def test_qwen37_siblings_keep_unbounded_thinking(self):
+        # 收敛范围校验:只有 qwen3.7-max 被声明有界,同代其他模型不受影响。
+        for model in ("qwen3.7-plus", "qwen3.7-flash"):
+            spec = get_thinking_spec("dashscope", model)
+            assert spec.supports_thinking_budget is False, model
+            assert spec.default_thinking_budget is None, model
+
     def test_thinking_budget_capability_false_for_effort_families(self):
         # UI gating contract: the 思考预算 field must NOT appear for effort-driven
         # families (Anthropic/OpenAI/Gemini). Lock the negative side so a registry
@@ -269,6 +289,8 @@ class TestGetThinkingSpec:
                 if (provider_key, model) in {
                     ("dashscope", "kimi-k2.7-code"),
                     ("dashscope_token_plan", "kimi-k2.7-code"),
+                    ("dashscope", "qwen3.7-max"),
+                    ("dashscope_token_plan", "qwen3.7-max"),
                 }:
                     continue
                 assert spec.default_thinking_budget is None, (provider_key, model)

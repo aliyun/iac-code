@@ -254,7 +254,9 @@ class TestDashScopeThinkingBudgetRequestPolicy:
             ),
         ]
         client = FakeOpenAIClient(stream_chunks=chunks)
-        provider = DashScopeProvider(model="qwen3.7-max", api_key="k")
+        # qwen3.7-plus 仍是无界思考的 qwen,用它守住「普通 qwen 不下发预算」的基线;
+        # qwen3.7-max 的有界预算由下面的专项用例覆盖。
+        provider = DashScopeProvider(model="qwen3.7-plus", api_key="k")
         provider._client = client
 
         _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
@@ -263,6 +265,61 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         assert call_kwargs["max_tokens"] == 8192
         assert "max_completion_tokens" not in call_kwargs
         assert call_kwargs["extra_body"] == {"enable_thinking": True, "preserve_thinking": True}
+
+    async def test_qwen37_max_sends_bounded_thinking_budget_without_changing_token_limit(self):
+        chunks = [
+            ns(
+                usage=ns(prompt_tokens=1, completion_tokens=1),
+                choices=[ns(finish_reason="stop", delta=ns(content="ok", tool_calls=None))],
+            ),
+        ]
+        client = FakeOpenAIClient(stream_chunks=chunks)
+        provider = DashScopeProvider(model="qwen3.7-max", api_key="k")
+        provider._client = client
+
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+
+        call_kwargs = client.chat.completions.calls[0]
+        # 思考预算走 extra_body,可见输出上限仍是 max_tokens(未切到 max_completion_tokens)。
+        assert call_kwargs["max_tokens"] == 8192
+        assert "max_completion_tokens" not in call_kwargs
+        assert call_kwargs["extra_body"] == {
+            "enable_thinking": True,
+            "preserve_thinking": True,
+            "thinking_budget": 8192,
+        }
+
+    async def test_qwen37_max_honors_caller_supplied_thinking_budget(self):
+        chunks = [
+            ns(
+                usage=ns(prompt_tokens=1, completion_tokens=1),
+                choices=[ns(finish_reason="stop", delta=ns(content="ok", tool_calls=None))],
+            ),
+        ]
+        client = FakeOpenAIClient(stream_chunks=chunks)
+        provider = DashScopeProvider(model="qwen3.7-max", api_key="k", thinking_budget=20000)
+        provider._client = client
+
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+
+        call_kwargs = client.chat.completions.calls[0]
+        assert call_kwargs["extra_body"]["thinking_budget"] == 20000
+
+    async def test_qwen37_max_disabled_thinking_omits_budget(self):
+        response = ns(
+            id="cmpl_qwen37",
+            choices=[ns(finish_reason="stop", message=ns(content="ok", tool_calls=None))],
+            usage=ns(prompt_tokens=1, completion_tokens=1),
+        )
+        client = FakeOpenAIClient(create_response=response)
+        provider = DashScopeProvider(model="qwen3.7-max", api_key="k", thinking_enabled=False)
+        provider._client = client
+
+        await provider.complete(messages=[Message.user("hi")], system="", max_tokens=8192)
+
+        call_kwargs = client.chat.completions.calls[0]
+        assert call_kwargs["extra_body"] == {"enable_thinking": False}
+        assert call_kwargs["max_tokens"] == 8192
 
     async def test_token_plan_glm52_uses_same_budget_free_request_policy(self):
         chunks = [

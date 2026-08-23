@@ -229,6 +229,18 @@ _DASHSCOPE_KIMI_K27_CODE_SPEC = ThinkingSpec(
     use_max_completion_tokens=True,
 )
 
+# qwen3.7-max is the strongest Bailian variant but leaves thinking length to the
+# server, which produced ~12-minute thinking phases (p99 728,878ms) inside
+# ~17-minute end-to-end executions. Declaring a bounded budget makes
+# ``dashscope_provider`` send ``extra_body.thinking_budget`` so the thinking
+# stage has a hard ceiling, and lets callers raise it per request through the
+# existing Web/A2A budget path when a task genuinely needs deeper reasoning.
+_DASHSCOPE_QWEN37_MAX_SPEC = ThinkingSpec(
+    ThinkingFamily.DASHSCOPE,
+    default_thinking_budget=8192,
+    supports_thinking_budget=True,
+)
+
 _DASHSCOPE_GLM52_SPEC = ThinkingSpec(
     ThinkingFamily.DASHSCOPE,
     _GLM_EFFORTS,
@@ -362,7 +374,7 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
     },
     "dashscope": {
         "qwen3.8-max": _DASHSCOPE_QWEN38_SPEC,
-        "qwen3.7-max": ThinkingSpec(ThinkingFamily.DASHSCOPE),
+        "qwen3.7-max": _DASHSCOPE_QWEN37_MAX_SPEC,
         "qwen3.7-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.7-flash": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.6-max-preview": ThinkingSpec(ThinkingFamily.DASHSCOPE),
@@ -410,7 +422,7 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
     "dashscope_token_plan": {
         "qwen3.8-max": _DASHSCOPE_QWEN38_SPEC,
         "qwen3.8-max-preview": _DASHSCOPE_QWEN38_PREVIEW_SPEC,
-        "qwen3.7-max": ThinkingSpec(ThinkingFamily.DASHSCOPE),
+        "qwen3.7-max": _DASHSCOPE_QWEN37_MAX_SPEC,
         "qwen3.7-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.6-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.6-flash": ThinkingSpec(ThinkingFamily.DASHSCOPE),
