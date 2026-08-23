@@ -6065,6 +6065,15 @@ msgstr ""
 #, python-brace-format
 msgid ""
 "Alibaba Cloud API {operation} parameter {parameter} is not an allowed "
+"value. Allowed values: {allowed}."
+msgstr ""
+"O parâmetro {parameter} da API do Alibaba Cloud {operation} não é um "
+"valor permitido. Valores permitidos: {allowed}."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} parameter {parameter} is not an allowed "
 "value."
 msgstr ""
 "O parâmetro {parameter} da API do Alibaba Cloud {operation} não é um "

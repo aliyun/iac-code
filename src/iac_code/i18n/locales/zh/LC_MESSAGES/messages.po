@@ -5728,6 +5728,13 @@ msgstr "阿里云 API {operation} 的参数 {parameter} 需要 {expected}，但�
 #, python-brace-format
 msgid ""
 "Alibaba Cloud API {operation} parameter {parameter} is not an allowed "
+"value. Allowed values: {allowed}."
+msgstr "阿里云 API {operation} 的参数 {parameter} 不是允许的值。允许的值：{allowed}。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} parameter {parameter} is not an allowed "
 "value."
 msgstr "阿里云 API {operation} 的参数 {parameter} 不是允许的值。"
 

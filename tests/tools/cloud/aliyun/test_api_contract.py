@@ -335,6 +335,124 @@ products:
     }
 
 
+def describe_available_resource_api(**schema_changes: Any) -> dict[str, Any]:
+    destination_schema: dict[str, Any] = {"type": "string", "required": True}
+    destination_schema.update(schema_changes)
+    return raw_api(
+        product="Ecs",
+        version="2014-05-26",
+        action="DescribeAvailableResource",
+        security=[{"AK": []}],
+        parameters=[
+            {"name": "RegionId", "in": "query", "schema": {"type": "string", "required": True}},
+            {"name": "DestinationResource", "in": "query", "schema": destination_schema},
+        ],
+    )
+
+
+def describe_available_resource_shape() -> ApiCallShape:
+    return shape(
+        action="DescribeAvailableResource",
+        parameter_names_by_location=MappingProxyType({"query": ("RegionId", "DestinationResource")}),
+    )
+
+
+async def resolve_with_shipped_overrides(raw: dict[str, Any]) -> CanonicalWireContract:
+    resolved = await ApiContractResolver(FakeOpenMeta(raw)).resolve(
+        describe_available_resource_shape(),
+        allow_fallback=False,
+    )
+    assert resolved.executable is True
+    return resolved
+
+
+@pytest.mark.asyncio
+async def test_reviewed_parameter_enum_rejects_out_of_range_value_before_the_request_is_sent() -> None:
+    resolved = await resolve_with_shipped_overrides(describe_available_resource_api())
+    forbidden = "instancetype"
+
+    with pytest.raises(ApiContractError, match="^invalid_parameter_enum:DestinationResource$") as raised:
+        await RequestBuilder().build(
+            resolved,
+            {"params": {"RegionId": "cn-hangzhou", "DestinationResource": forbidden}},
+        )
+
+    message = public_aliyun_error(raised.value, product="Ecs", action="DescribeAvailableResource")
+    assert message == (
+        "Alibaba Cloud API Ecs/DescribeAvailableResource parameter DestinationResource is not an allowed value. "
+        "Allowed values: Zone, IoOptimized, InstanceType, Network, ddh, SystemDisk, DataDisk."
+    )
+    assert forbidden not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_reviewed_parameter_enum_keeps_documented_values_executable() -> None:
+    resolved = await resolve_with_shipped_overrides(describe_available_resource_api())
+
+    built = await RequestBuilder().build(
+        resolved,
+        {"params": {"RegionId": "cn-hangzhou", "DestinationResource": "InstanceType"}},
+    )
+
+    assert dict(built.canonical_query) == {
+        "DestinationResource": "InstanceType",
+        "RegionId": "cn-hangzhou",
+    }
+
+
+@pytest.mark.asyncio
+async def test_upstream_enum_wins_over_a_reviewed_parameter_enum_override() -> None:
+    resolved = await resolve_with_shipped_overrides(describe_available_resource_api(enum=["InstanceType", "Zone"]))
+    destination = next(item for item in resolved.parameters if item.name == "DestinationResource")
+
+    assert destination.schema is not None
+    assert list(destination.schema["enum"]) == ["InstanceType", "Zone"]
+    with pytest.raises(ApiContractError, match="^invalid_parameter_enum:DestinationResource$"):
+        await RequestBuilder().build(
+            resolved,
+            {"params": {"RegionId": "cn-hangzhou", "DestinationResource": "SystemDisk"}},
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "values",
+    ["InstanceType", [], ["Zone", "Zone"], ["Zone", 7], [["Zone"]]],
+    ids=["not-a-list", "empty", "duplicate", "type-mismatch", "nested-container"],
+)
+async def test_invalid_parameter_enum_override_fails_closed(tmp_path: Path, values: Any) -> None:
+    overrides = tmp_path / "api_overrides.yml"
+    overrides.write_text(
+        json.dumps(
+            {
+                "contract_policy_version": 1,
+                "default_signature_scheme": "acs3",
+                "products": {
+                    "Ecs": {
+                        "versions": {
+                            "2014-05-26": {
+                                "actions": {
+                                    "DescribeAvailableResource": {
+                                        "parameter_enums": {"DestinationResource": values},
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    resolver = ApiContractResolver(
+        FakeOpenMeta(describe_available_resource_api()),
+        overrides_path=overrides,
+    )
+
+    with pytest.raises(ApiContractError, match="^invalid_api_overrides$"):
+        await resolver.resolve(describe_available_resource_shape(), allow_fallback=False)
+
+
 @pytest.mark.asyncio
 async def test_signature_scheme_can_be_overridden_for_one_exact_version(tmp_path: Path) -> None:
     overrides = tmp_path / "api_overrides.yml"

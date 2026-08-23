@@ -5809,6 +5809,13 @@ msgstr ""
 #, python-brace-format
 msgid ""
 "Alibaba Cloud API {operation} parameter {parameter} is not an allowed "
+"value. Allowed values: {allowed}."
+msgstr "Alibaba Cloud API {operation} のパラメーター {parameter} は許可された値ではありません。許可された値: {allowed}。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} parameter {parameter} is not an allowed "
 "value."
 msgstr "Alibaba Cloud API {operation} のパラメーター {parameter} は許可された値ではありません。"
 

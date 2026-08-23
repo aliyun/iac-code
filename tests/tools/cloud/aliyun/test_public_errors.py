@@ -120,6 +120,7 @@ def test_aliyun_public_error_templates_are_directly_extractable(tmp_path: Path) 
         "Alibaba Cloud API version contains unsupported characters.",
         "Alibaba Cloud API {operation} is missing required parameters.",
         "Alibaba Cloud API {operation} parameter {parameter} is not an allowed value.",
+        "Alibaba Cloud API {operation} parameter {parameter} is not an allowed value. Allowed values: {allowed}.",
         "Alibaba Cloud API {operation} parameter {parameter} expects {expected} but received {actual}.",
         "Alibaba Cloud API {operation} requires parameters {parameters}.",
         "Alibaba Cloud API {operation} requires body_file for its binary request body.",

@@ -13,10 +13,13 @@ from iac_code.tools.cloud.aliyun.api_identifiers import is_safe_api_version
 
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 _SAFE_PARAMETER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,126}(?:\*)?$")
+_SAFE_ALLOWED_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _ASCII_WHITESPACE = " \t\n\r\f\v"
 _TARGET_HTTP_ERROR = re.compile(r"^aliyun_target_http_error:(\d{3})(?::([A-Za-z0-9][A-Za-z0-9_.:-]{0,127}))?$")
 _MAX_PUBLIC_PARAMETER_NAMES = 16
 _MAX_PUBLIC_PARAMETER_LIST_CHARS = 512
+_MAX_PUBLIC_ALLOWED_VALUES = 32
+_MAX_PUBLIC_ALLOWED_VALUE_CHARS = 512
 _PROTOCOL_UNSUPPORTED_REASONS = frozenset(
     {
         "api_style_unsupported",
@@ -183,6 +186,12 @@ def public_aliyun_error(
         )
     if code.startswith("invalid_parameter_enum:"):
         parameter = _safe_parameter(code.partition(":")[2], _("the requested parameter"))
+        allowed = _safe_allowed_values(getattr(error, "suggestions", ()))
+        if allowed is not None:
+            return _(
+                "Alibaba Cloud API {operation} parameter {parameter} is not an allowed value. "
+                "Allowed values: {allowed}."
+            ).format(operation=operation, parameter=parameter, allowed=allowed)
         return _("Alibaba Cloud API {operation} parameter {parameter} is not an allowed value.").format(
             operation=operation,
             parameter=parameter,
@@ -553,6 +562,17 @@ def _safe_parameter_list(value: Any) -> str | None:
     ):
         return None
     return ",".join(names)
+
+
+def _safe_allowed_values(values: Any) -> str | None:
+    """Render a closed value set that came from the local contract, never from tool input."""
+
+    if not isinstance(values, tuple) or not values or len(values) > _MAX_PUBLIC_ALLOWED_VALUES:
+        return None
+    if any(not isinstance(value, str) or _SAFE_ALLOWED_VALUE.fullmatch(value) is None for value in values):
+        return None
+    rendered = ", ".join(values)
+    return rendered if len(rendered) <= _MAX_PUBLIC_ALLOWED_VALUE_CHARS else None
 
 
 def _safe_type(value: Any) -> str:

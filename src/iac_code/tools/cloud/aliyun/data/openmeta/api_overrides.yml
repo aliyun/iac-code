@@ -74,6 +74,22 @@ products:
       "2018-08-08":
         parameter_styles:
           DestinationResource: null
+  Ecs:
+    versions:
+      "2014-05-26":
+        actions:
+          DescribeAvailableResource:
+            parameter_enums:
+              # OpenMeta documents these values only in the parameter description, so an
+              # out-of-range value reaches the target service and returns HTTP 400 Invalid.Param.
+              DestinationResource:
+                - Zone
+                - IoOptimized
+                - InstanceType
+                - Network
+                - ddh
+                - SystemDisk
+                - DataDisk
   Oss:
     default_signature_scheme: oss_v4
     versions:

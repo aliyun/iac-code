@@ -870,11 +870,13 @@ class ApiContractResolver:
         path_parameters = _override_mapping(version_record, "path_parameters")
         parameter_styles = _override_mapping(version_record, "parameter_styles")
         parameter_locations = _override_mapping(version_record, "parameter_locations")
+        parameter_enums = _override_mapping(version_record, "parameter_enums")
         additional_parameters = _override_mapping(version_record, "additional_parameters")
         for source, target in (
             (action_record.get("path_parameters", {}) or {}, path_parameters),
             (action_record.get("parameter_styles", {}) or {}, parameter_styles),
             (action_record.get("parameter_locations", {}) or {}, parameter_locations),
+            (action_record.get("parameter_enums", {}) or {}, parameter_enums),
             (action_record.get("additional_parameters", {}) or {}, additional_parameters),
         ):
             if not isinstance(source, Mapping):
@@ -884,6 +886,7 @@ class ApiContractResolver:
             not isinstance(path_parameters, Mapping)
             or not isinstance(parameter_styles, Mapping)
             or not isinstance(parameter_locations, Mapping)
+            or not isinstance(parameter_enums, Mapping)
         ):
             raise ApiContractError("invalid_api_overrides")
         result: list[ParameterMetadata] = []
@@ -902,6 +905,11 @@ class ApiContractResolver:
                 if location not in _SAFE_PARAMETER_LOCATIONS:
                     raise ApiContractError("invalid_api_overrides")
                 replacement = replace(replacement, location=location)
+            if parameter.name in parameter_enums:
+                replacement = replace(
+                    replacement,
+                    schema=_schema_with_reviewed_enum(replacement.schema, parameter_enums[parameter.name]),
+                )
             result.append(replacement)
         existing_names = {parameter.name.casefold() for parameter in parameters}
         for name, raw in additional_parameters.items():
@@ -1213,7 +1221,11 @@ def _validate_parameter_schema(
         )
     enum = schema.get("enum")
     if isinstance(enum, list | tuple) and enum and not _enum_contains_value(enum, value, expected):
-        raise ApiContractError(f"invalid_parameter_enum:{parameter.name}")
+        raise ApiContractError(
+            f"invalid_parameter_enum:{parameter.name}",
+            parameter=parameter.name,
+            suggestions=tuple(_wire_scalar(item) for item in enum),
+        )
     if "allOf" not in schema:
         return
     branches = schema["allOf"]
@@ -1475,6 +1487,44 @@ def _override_mapping(record: Mapping[str, Any], key: str) -> dict[Any, Any]:
     if not isinstance(value, Mapping):
         raise ApiContractError("invalid_api_overrides")
     return dict(value)
+
+
+def _schema_with_reviewed_enum(schema: Mapping[str, Any] | None, values: Any) -> Mapping[str, Any]:
+    """Attach a reviewed closed value set to a parameter whose OpenMeta schema omits ``enum``.
+
+    OpenMeta documents some closed value sets only in prose, so an out-of-range value can only
+    be rejected by the target service as an HTTP 400. A reviewed override lets the request
+    builder reject it locally instead. An upstream ``enum`` always wins, so a stale override can
+    never narrow the value set OpenMeta currently declares.
+    """
+
+    if (
+        not isinstance(values, list)
+        or not values
+        or any(not isinstance(item, str | int | float | bool) for item in values)
+        or len({(type(item).__name__, item) for item in values}) != len(values)
+    ):
+        raise ApiContractError("invalid_api_overrides")
+    merged = copy.deepcopy(dict(schema)) if isinstance(schema, Mapping) else {}
+    expected = merged.get("type")
+    if expected is not None and any(not _schema_type_matches(expected, item) for item in values):
+        raise ApiContractError("invalid_api_overrides")
+    if isinstance(merged.get("enum"), list | tuple):
+        return MappingProxyType(merged)
+    merged["enum"] = list(values)
+    return MappingProxyType(merged)
+
+
+def _schema_type_matches(expected: Any, value: Any) -> bool:
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        return isinstance(value, int | float) and not isinstance(value, bool)
+    if expected == "string":
+        return isinstance(value, str)
+    return False
 
 
 def _request_body_type(
