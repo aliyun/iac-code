@@ -17,7 +17,10 @@ conclusion_schema:
   properties:
     monthly_estimate:
       type: string
-      description: 月度费用估算；询价同时返回 OriginalAmount 与 TradeAmount 时，必须同时包含列表价和合同优惠后价格（如 ¥96.80/月（列表价，合同优惠后约¥13.76/月））；询价失败时填 "询价失败"
+      description: 月度费用估算；询价同时返回 OriginalAmount 与 TradeAmount 时，必须同时包含列表价和合同优惠后价格（如 ¥96.80/月（列表价，合同优惠后约¥13.76/月））；合同优惠后价格归零或异常低于列表价时，必须在 discount_basis 说明依据，否则回退为列表价；询价失败时填 "询价失败"
+    discount_basis:
+      type: string
+      description: 合同优惠后价格归零或异常低于列表价时的折扣依据，如询价结果中的折扣字段路径、代金券或免费额度说明；无依据时不要填写，改为把优惠后价格回退为列表价
     currency:
       type: string
       enum: [CNY]
@@ -307,3 +310,4 @@ aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<�
 - `missing_deployment_parameters` 填完整部署或 PreviewStack 仍缺少的参数及原因；没有缺口时可省略或填 `[]`
 - `parameter_set_summary` 可简要说明参数来源、可用性筛选、PreviewStack 验证结果以及是否使用软门禁继续询价
 - 询价失败时 `monthly_estimate` 填 "询价失败"，`resources` 为空数组，`error` 说明原因
+- 合同优惠后月费归零或异常低于列表价（低于列表价 1%）时，必须在 `discount_basis` 给出可核对依据（询价结果中的折扣字段路径、代金券或免费额度说明）；无依据时把优惠后价格回退为列表价。运行中的基础设施月费为零不合常理，代码会在 `complete_step` 拦截无依据的归零并要求修正

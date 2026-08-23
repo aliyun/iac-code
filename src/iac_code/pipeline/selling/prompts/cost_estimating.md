@@ -40,6 +40,7 @@ API 调用完成后调用 `complete_step` 提交费用预估。
 - `OriginalAmount` 是原价，按统一月度周期换算并汇总为列表价。
 - `TradeAmount` 是合同优惠后的最终价，按与原价相同的月度周期换算并汇总。
 - 两个字段都存在时，使用 `¥<原价>/月（列表价，合同优惠后约¥<最终价>/月）` 格式；即使数值相同也保留两个价格口径。
+- 优惠后月费归零或异常低于列表价时，必须在 `discount_basis` 写明可核对依据（询价结果中的折扣字段路径、代金券或免费额度）；无依据时把优惠后价格回退为列表价，不要输出无依据的 ¥0.00/月。
 - 任一字段缺失时只展示可用价格，并在 `api_raw_summary` 中说明缺失字段；询价失败时仍填写 `"询价失败"`。
 
 若 `ros_preview_template` 成功，在 `complete_step.conclusion.preview_validation` 写入 PreviewStack 成功证明：`succeeded: true`、`template_url: "{template.file_path}"`、`parameters: <预览通过的同一参数字典>`；失败或未执行时写入 `succeeded: false`、`error: "<原因>"`。

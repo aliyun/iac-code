@@ -1461,6 +1461,94 @@ class TestCompletionGuards:
         assert "rerun validation" in result.content
 
 
+class TestCostEstimateSanityGuard:
+    ZEROED = "¥289.81/月（列表价，合同优惠后约¥0.00/月）"
+
+    def _cost_tool(self):
+        config = StepConfig(
+            step_id="cost_estimating",
+            conclusion_field="cost",
+            forward=None,
+        )
+        return CompleteStepTool(
+            config,
+            completion_guards=[
+                {
+                    "always": True,
+                    "require_cost_estimate_sanity": {
+                        "monthly_estimate_field": "monthly_estimate",
+                        "discount_basis_field": "discount_basis",
+                        "api_raw_summary_field": "api_raw_summary",
+                    },
+                    "message_key": "cost_estimate_zero_discount_basis_required",
+                }
+            ],
+        )
+
+    @pytest.mark.asyncio
+    async def test_rejects_zeroed_discount_without_basis(self):
+        result = await self._cost_tool().execute(
+            tool_input={"conclusion": {"monthly_estimate": self.ZEROED, "currency": "CNY"}},
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "discount basis" in result.content
+        assert "discounted_monthly_estimate_zeroed" in result.content
+
+    @pytest.mark.asyncio
+    async def test_accepts_zeroed_discount_with_basis(self):
+        result = await self._cost_tool().execute(
+            tool_input={
+                "conclusion": {
+                    "monthly_estimate": self.ZEROED,
+                    "currency": "CNY",
+                    "discount_basis": "Result.TradeAmount=0，账号命中免费额度",
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_accepts_list_price_fallback(self):
+        result = await self._cost_tool().execute(
+            tool_input={
+                "conclusion": {
+                    "monthly_estimate": "¥289.81/月（列表价，合同优惠后约¥289.81/月）",
+                    "currency": "CNY",
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_accepts_normal_discount(self):
+        result = await self._cost_tool().execute(
+            tool_input={
+                "conclusion": {
+                    "monthly_estimate": "¥289.81/月（列表价，合同优惠后约¥13.76/月）",
+                    "currency": "CNY",
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_does_not_block_pricing_failure(self):
+        result = await self._cost_tool().execute(
+            tool_input={"conclusion": {"monthly_estimate": "询价失败", "error": "GetTemplateEstimateCost 报错"}},
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+
 class TestSchemaValidation:
     def test_missing_conclusion_validation_error_includes_current_step_schema(self):
         config = StepConfig(

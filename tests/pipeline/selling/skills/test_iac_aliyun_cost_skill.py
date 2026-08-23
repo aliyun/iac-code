@@ -172,6 +172,21 @@ class TestSkillFrontmatter:
         assert "OriginalAmount" in description
         assert "TradeAmount" in description
 
+    def test_conclusion_schema_carries_discount_basis_for_zeroed_prices(self):
+        schema = _parse_frontmatter(SKILL_MD.read_text(encoding="utf-8"))["conclusion_schema"]
+        discount_basis = schema["properties"]["discount_basis"]
+
+        assert discount_basis["type"] == "string"
+        assert "折扣依据" in discount_basis["description"]
+        assert "discount_basis" not in schema["required"]
+
+    def test_monthly_estimate_schema_requires_basis_or_list_price_fallback(self):
+        schema = _parse_frontmatter(SKILL_MD.read_text(encoding="utf-8"))["conclusion_schema"]
+        description = schema["properties"]["monthly_estimate"]["description"]
+
+        assert "discount_basis" in description
+        assert "回退" in description
+
     def test_conclusion_schema_requires_full_preview_validation_when_succeeded(self):
         content = SKILL_MD.read_text(encoding="utf-8")
         fm = _parse_frontmatter(content)
@@ -538,6 +553,13 @@ class TestCostPrompt:
         assert "列表价" in body
         assert "合同优惠后" in body
         assert "monthly_estimate" in body
+
+    def test_prompt_requires_basis_or_list_price_fallback_for_zeroed_discount(self):
+        body = COST_PROMPT_MD.read_text(encoding="utf-8")
+
+        assert "discount_basis" in body
+        assert "归零" in body
+        assert "回退为列表价" in body
 
     def test_prompt_receives_only_required_candidate_fields_without_repeating_skill_rules(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")
