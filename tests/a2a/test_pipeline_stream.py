@@ -18,7 +18,7 @@ from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_performance import A2A_EXTREME_PERFORMANCE_ENV
-from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
+from iac_code.a2a.pipeline_snapshot import SNAPSHOT_SCHEMA_VERSION, A2APipelineSnapshotStore
 from iac_code.a2a.pipeline_stream import (
     PipelineA2AEventPublisher,
     PipelineA2APersistenceError,
@@ -353,7 +353,7 @@ async def test_publish_rebuilds_stale_schema_snapshot_from_journal_history(tmp_p
 
     snapshot = publisher.snapshot_store.load()
     assert snapshot is not None
-    assert snapshot["schemaVersion"] == "1.1"
+    assert snapshot["schemaVersion"] == SNAPSHOT_SCHEMA_VERSION
     assert snapshot["display"]["messages"][0]["text"] == "old new"
 
 

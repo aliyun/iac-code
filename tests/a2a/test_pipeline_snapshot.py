@@ -1478,5 +1478,135 @@ def test_store_returns_none_for_invalid_utf8_snapshot(tmp_path) -> None:
 
 
 def test_snapshot_schema_version_is_exported() -> None:
-    assert SNAPSHOT_SCHEMA_VERSION == "1.1"
+    assert SNAPSHOT_SCHEMA_VERSION == "1.2"
     assert "SNAPSHOT_SCHEMA_VERSION" in pipeline_snapshot.__all__
+
+
+_TOP_LEVEL_STEP_IDS = (
+    "intent_parsing",
+    "architecture_planning",
+    "evaluate_candidates",
+    "confirm_and_select",
+    "deploying",
+)
+
+
+def _completed_top_level_step_events() -> list[dict]:
+    events = [_base("evt-started", 1, "pipeline_started")]
+    events[0]["data"] = {"totalSteps": len(_TOP_LEVEL_STEP_IDS)}
+    sequence = 2
+    for index, step_id in enumerate(_TOP_LEVEL_STEP_IDS, start=1):
+        coordinate = {
+            "runId": f"{step_id}-1",
+            "id": step_id,
+            "index": index,
+            "total": len(_TOP_LEVEL_STEP_IDS),
+            "attempt": 1,
+        }
+        started = _base(f"evt-{step_id}-started", sequence, "step_started", scope="step")
+        started["step"] = coordinate
+        completed = _base(f"evt-{step_id}-completed", sequence + 1, "step_completed", scope="step")
+        completed["step"] = dict(coordinate)
+        events.extend([started, completed])
+        sequence += 2
+    return events
+
+
+def _pending_backup_terminal(event_id: str, sequence: int, event_type: str, status: str) -> dict:
+    event = _base(event_id, sequence, event_type, status=status)
+    event["visibility"] = "pending_backup"
+    return event
+
+
+def test_pending_backup_terminal_keeps_status_working_but_reports_pipeline_completed() -> None:
+    events = _completed_top_level_step_events()
+    pending_terminal = _pending_backup_terminal("evt-terminal-pending", 100, "pipeline_completed", "completed")
+    pending_handoff = _pending_backup_terminal("evt-handoff-pending", 101, "pipeline_handoff_ready", "completed")
+    pending_handoff["data"] = {
+        "action": "switch_to_normal",
+        "targetMode": "normal",
+        "outcome": "completed",
+        "summary": "[Pipeline Handoff Context]",
+    }
+
+    snapshot = reduce_pipeline_events([*events, pending_terminal, pending_handoff])
+
+    assert [step["status"] for step in snapshot["steps"]] == ["completed"] * len(_TOP_LEVEL_STEP_IDS)
+    # ``status`` still gates the A2A task on the backup_committed ack ...
+    assert snapshot["status"] == "working"
+    # ... while the pipeline outcome is no longer indistinguishable from "still running".
+    assert snapshot["pipelineStatus"] == "completed"
+    assert snapshot["backupState"] == "pending_backup"
+    assert snapshot["pendingTerminal"]["eventType"] == "pipeline_completed"
+    assert snapshot["pendingNormalHandoff"]["summary"] == "[Pipeline Handoff Context]"
+
+
+def test_committed_backup_ack_converges_status_and_pipeline_status() -> None:
+    events = _completed_top_level_step_events()
+    pending_terminal = _pending_backup_terminal("evt-terminal-pending", 100, "pipeline_completed", "completed")
+    committed_terminal = dict(pending_terminal)
+    committed_terminal["eventId"] = "evt-terminal-committed"
+    committed_terminal["sequence"] = 101
+    committed_terminal["visibility"] = "committed"
+    ack = _base("evt-ack", 102, "backup_committed", status=None)
+    ack["data"] = {
+        "committedEventId": "evt-terminal-committed",
+        "committedEventType": "pipeline_completed",
+        "committedSequence": 101,
+    }
+
+    snapshot = reduce_pipeline_events([*events, pending_terminal, committed_terminal, ack])
+
+    assert snapshot["status"] == "completed"
+    assert snapshot["pipelineStatus"] == "completed"
+    assert snapshot["backupState"] == "committed"
+    assert snapshot["pendingTerminal"] is None
+
+
+def test_in_progress_snapshot_has_no_terminal_pipeline_status() -> None:
+    events = _completed_top_level_step_events()[:4]
+
+    snapshot = reduce_pipeline_events(events)
+
+    assert snapshot["status"] == "working"
+    assert snapshot["pipelineStatus"] is None
+    assert snapshot["backupState"] == "none"
+
+
+def test_pending_backup_failed_and_canceled_report_their_own_outcome() -> None:
+    for event_type, status in (("pipeline_failed", "failed"), ("pipeline_canceled", "canceled")):
+        events = _completed_top_level_step_events()
+        pending_terminal = _pending_backup_terminal("evt-terminal-pending", 100, event_type, status)
+
+        snapshot = reduce_pipeline_events([*events, pending_terminal])
+
+        assert snapshot["status"] == "working"
+        assert snapshot["pipelineStatus"] == status
+        assert snapshot["backupState"] == "pending_backup"
+
+
+def test_backup_blocked_clears_derived_pipeline_status() -> None:
+    events = _completed_top_level_step_events()
+    pending_terminal = _pending_backup_terminal("evt-terminal-pending", 100, "pipeline_completed", "completed")
+    blocked = _base("evt-blocked", 101, "backup_blocked", status="waiting_input")
+    blocked["data"] = {"reason": "terminal", "recoverable": True}
+
+    snapshot = reduce_pipeline_events([*events, pending_terminal, blocked])
+
+    assert snapshot["status"] == "waiting_input"
+    assert snapshot["pipelineStatus"] is None
+    assert snapshot["backupState"] == "none"
+    assert snapshot["pendingTerminal"] is None
+
+
+def test_legacy_snapshot_without_derived_fields_is_rehydrated() -> None:
+    legacy = reduce_pipeline_events(_completed_top_level_step_events())
+    legacy.pop("pipelineStatus")
+    legacy.pop("backupState")
+    pending_terminal = _pending_backup_terminal("evt-terminal-pending", 100, "pipeline_completed", "completed")
+
+    snapshot = reduce_pipeline_events([pending_terminal], legacy)
+
+    assert snapshot["status"] == "working"
+    assert snapshot["pipelineStatus"] == "completed"
+    assert snapshot["backupState"] == "pending_backup"

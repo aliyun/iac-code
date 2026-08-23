@@ -21,7 +21,7 @@ from iac_code.pipeline.constants import (
 from iac_code.utils.public_errors import sanitize_strict_text
 from iac_code.utils.state_io import atomic_write_json, atomic_write_text
 
-SNAPSHOT_SCHEMA_VERSION = "1.1"
+SNAPSHOT_SCHEMA_VERSION = "1.2"
 logger = logging.getLogger(__name__)
 
 _TERMINAL_STATUS_BY_EVENT_TYPE = {
@@ -39,6 +39,10 @@ _KNOWN_CLEANUP_STATUSES = {"pending", "started", "in_progress", "completed", "fa
 _PENDING_BACKUP_VISIBILITY = "pending_backup"
 _COMMITTED_BACKUP_VISIBILITY = "committed"
 _BACKUP_COMMITTED_EVENT_TYPE = "backup_committed"
+_BACKUP_STATE_NONE = "none"
+_BACKUP_STATE_PENDING = "pending_backup"
+_BACKUP_STATE_COMMITTED = "committed"
+_TERMINAL_SNAPSHOT_STATUSES = frozenset(_TERMINAL_STATUS_BY_EVENT_TYPE.values())
 
 
 class A2APipelineSnapshotStore:
@@ -179,6 +183,7 @@ class _PipelineSnapshotReducer:
         self._cleanup_history_keys: set[str] = set()
         self._skip_sequences_through = 0
         self._hydrate_existing_snapshot(existing_snapshot)
+        self._refresh_backup_derived_state()
 
     def reduce(self, events: list[dict[str, Any]]) -> None:
         for event in sorted(events, key=_sequence_value):
@@ -508,6 +513,7 @@ class _PipelineSnapshotReducer:
                 self._snapshot["normalHandoff"] = None
                 self._snapshot["pendingNormalHandoff"] = None
                 self._snapshot["pendingTerminal"] = None
+                self._snapshot["pipelineStatus"] = None
             self._snapshot["pendingInput"] = self._pending_input(event)
             self._snapshot["status"] = "waiting_input"
         elif event_type == "input_received":
@@ -518,14 +524,22 @@ class _PipelineSnapshotReducer:
             self._snapshot["normalHandoff"] = None
             self._snapshot["pendingNormalHandoff"] = None
             self._snapshot["pendingTerminal"] = None
+            self._snapshot["pipelineStatus"] = None
             self._snapshot["pendingInput"] = self._backup_blocked_pending_input(event)
             self._snapshot["status"] = "waiting_input"
 
         terminal_status = _TERMINAL_STATUS_BY_EVENT_TYPE.get(event_type)
         if terminal_status is not None and _is_pending_backup_publication(event):
             self._snapshot["pendingTerminal"] = _terminal_publication(event)
+            # The pipeline itself already reached its terminal step; only the
+            # handoff backup is still in flight.  ``status`` intentionally stays
+            # ``working`` so the ``backup_committed`` gate keeps holding the A2A
+            # task state, while ``pipelineStatus`` exposes the real pipeline
+            # outcome for downstream observers.
+            self._snapshot["pipelineStatus"] = terminal_status
         elif terminal_status is not None:
             self._snapshot["status"] = terminal_status
+            self._snapshot["pipelineStatus"] = terminal_status
             self._snapshot["pendingTerminal"] = None
             self._snapshot["pendingInput"] = None
             self._snapshot["control"]["activeCandidateRunIds"] = []
@@ -534,10 +548,28 @@ class _PipelineSnapshotReducer:
             and not _is_pending_backup_publication(event)
             and not (
                 event_type == "pipeline_handoff_ready"
-                and self._snapshot["status"] in {"completed", "failed", "canceled"}
+                and self._snapshot["status"] in _TERMINAL_SNAPSHOT_STATUSES
             )
         ):
             self._apply_event_status(event)
+
+        self._refresh_backup_derived_state()
+
+    def _refresh_backup_derived_state(self) -> None:
+        """Keep ``pipelineStatus`` / ``backupState`` consistent with the pending
+        publication fields.
+
+        ``status`` answers "can the A2A task be handed off yet"; it stays
+        ``working`` until the protecting backup is committed.  ``pipelineStatus``
+        answers "did the pipeline itself finish", so a snapshot whose top-level
+        steps are all ``completed`` no longer reads as unfinished.
+        """
+        status = _string_or_none(self._snapshot.get("status"))
+        if status in _TERMINAL_SNAPSHOT_STATUSES:
+            self._snapshot["pipelineStatus"] = status
+        elif _string_or_none(self._snapshot.get("pipelineStatus")) not in _TERMINAL_SNAPSHOT_STATUSES:
+            self._snapshot["pipelineStatus"] = _pending_terminal_status(self._snapshot)
+        self._snapshot["backupState"] = _backup_state(self._snapshot)
 
     def _merge_pipeline_identity(self, event: dict[str, Any]) -> None:
         for key in ("pipelineRunId", "taskId", "contextId", "pipelineName"):
@@ -549,6 +581,7 @@ class _PipelineSnapshotReducer:
         self._snapshot["normalHandoff"] = None
         self._snapshot["pendingNormalHandoff"] = None
         self._snapshot["pendingTerminal"] = None
+        self._snapshot["pipelineStatus"] = None
         control = self._snapshot["control"]
         if "totalSteps" in data:
             control["totalSteps"] = data["totalSteps"]
@@ -1197,6 +1230,27 @@ def _pending_backup_publications_from_snapshot(snapshot: dict[str, Any]) -> list
     return publications
 
 
+def _pending_terminal_status(snapshot: dict[str, Any]) -> str | None:
+    """Terminal outcome carried by a ``pending_backup`` terminal publication."""
+    pending_terminal = _dict_or_none(snapshot.get("pendingTerminal"))
+    if pending_terminal is None:
+        return None
+    status = _normalized_status(pending_terminal.get("status"))
+    if status in _TERMINAL_SNAPSHOT_STATUSES:
+        return status
+    return _TERMINAL_STATUS_BY_EVENT_TYPE.get(_string_or_none(pending_terminal.get("eventType")) or "")
+
+
+def _backup_state(snapshot: dict[str, Any]) -> str:
+    if _pending_backup_publications_from_snapshot(snapshot):
+        return _BACKUP_STATE_PENDING
+    if _string_or_none(snapshot.get("status")) in _TERMINAL_SNAPSHOT_STATUSES:
+        return _BACKUP_STATE_COMMITTED
+    if _dict_or_none(snapshot.get("normalHandoff")) is not None:
+        return _BACKUP_STATE_COMMITTED
+    return _BACKUP_STATE_NONE
+
+
 def _event_matches_snapshot_task_context(event: dict[str, Any], snapshot: dict[str, Any]) -> bool:
     context_id = _string_or_none(snapshot.get("contextId"))
     if context_id is not None and event.get("contextId") != context_id:
@@ -1289,6 +1343,8 @@ def _empty_snapshot() -> dict[str, Any]:
         "contextId": None,
         "pipelineName": None,
         "status": "working",
+        "pipelineStatus": None,
+        "backupState": _BACKUP_STATE_NONE,
         "lastSequence": 0,
         "generatedAt": _utc_now(),
         "steps": [],
@@ -1397,6 +1453,8 @@ def _snapshot_from_existing(existing_snapshot: dict[str, Any] | None) -> dict[st
     snapshot["pendingTerminal"] = (
         _sanitize_cleanup_private_fields(pending_terminal) if isinstance(pending_terminal, dict) else None
     )
+    pipeline_status = _normalized_status(snapshot.get("pipelineStatus"))
+    snapshot["pipelineStatus"] = pipeline_status if pipeline_status in _TERMINAL_SNAPSHOT_STATUSES else None
     cleanup = snapshot.get("cleanup")
     if not isinstance(cleanup, dict):
         cleanup = {}
