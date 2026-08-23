@@ -120,6 +120,12 @@ class TestSkillContentRosOnly:
         assert "已有 VPC 中创建安全组" in body
         assert "forbidden_resources" not in body
 
+    def test_requires_resource_type_self_check_before_completing(self, body):
+        assert "## 资源类型自检" in body
+        assert "ALIYUN::VPC::VPC" in body
+        assert "GetResourceType" in body
+        assert "complete_step` 会在代码层复核" in body
+
     def test_preserves_product_neutral_user_hard_constraints(self, body):
         assert "candidate" in body
         assert "hard_constraints" in body

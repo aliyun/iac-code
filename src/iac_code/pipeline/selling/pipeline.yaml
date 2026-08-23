@@ -149,6 +149,22 @@ sub_pipelines:
         skill: iac-aliyun-template-generating
         prompt: prompts/template_generating.md
         context_fields: [candidate]
+        completion_guards:
+          - always: true
+            require_template_resource_type_consistency:
+              template_field: template
+              resource_intents_field: candidate.resource_intents
+            message_key: template_resource_type_consistency_required
+          - always: true
+            require_tool_result:
+              tool: ros_validate_template
+              match_conclusion_field: file_path
+              match_result_field: input.template_url
+              disallow_tool_results_after_match:
+                - tools: [write_file, edit_file]
+                  match_conclusion_field: file_path
+                  match_result_field: result.file_path
+            message_key: template_generating_validate_template_required
         tools:
           include: []
           exclude:

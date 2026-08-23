@@ -63,6 +63,21 @@ conclusion_schema:
 
 示例：`resource_intents: [{"product": "SecurityGroup", "action": "create"}, {"product": "VPC", "action": "use_existing"}]` 时，只生成 `ALIYUN::ECS::SecurityGroup`，不要生成 `ALIYUN::ECS::VPC` 或 `ALIYUN::ECS::VSwitch`。
 
+## 资源类型自检
+
+写入文件后、调用 `complete_step` 前**必须**逐条自检模板 `Resources` 的资源类型：
+
+- 每个资源的 `Type` 是真实存在的 ROS 资源类型；不确定就用
+  `aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<类型>"})` 确认。
+  常见错误是把产品名直接拼成命名空间，例如 VPC 的真实类型是 `ALIYUN::ECS::VPC`，不存在 `ALIYUN::VPC::VPC`。
+- `resource_intents` 中 `action=create` 的每个 product 都有对应资源。
+- `action=use_existing` / `reference` 的 product 没有被建成新建资源，而是通过 Parameter 引用。
+- `action=forbid` 的 product 没有出现在 `Resources` 中。
+- 没有 `resource_intents` 未声明的多余 product。
+
+自检不通过就先修模板再重新校验，不要提交一个资源类型与候选方案不一致的结论。
+`complete_step` 会在代码层复核这些条件，冲突时结论会被驳回。
+
 ## 用户硬约束
 
 候选架构的 `hard_constraints` 必须原样贯穿模板生成：

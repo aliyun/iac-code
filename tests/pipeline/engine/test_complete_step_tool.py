@@ -1744,3 +1744,106 @@ class TestNullNormalization:
         valid, error = tool.validate_input(tool_input)
         assert not valid
         assert "name" in error
+
+
+class TestTemplateResourceTypeConsistencyGuard:
+    GUARD = {
+        "always": True,
+        "require_template_resource_type_consistency": {
+            "template_field": "template",
+            "resource_intents_field": "candidate.resource_intents",
+        },
+        "message_key": "template_resource_type_consistency_required",
+    }
+    INTENTS = [
+        {"product": "SecurityGroup", "action": "create"},
+        {"product": "VPC", "action": "use_existing"},
+    ]
+
+    def _tool(self):
+        return CompleteStepTool(
+            StepConfig(step_id="template_generating", conclusion_field="template", forward=None),
+            completion_guards=[self.GUARD],
+            completion_guard_state={
+                "context_snapshot": {"candidate": {"resource_intents": self.INTENTS}},
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_template_creating_a_use_existing_product_is_rejected(self):
+        conclusion = {
+            "template": (
+                "Resources:\n"
+                "  AppVpc:\n"
+                "    Type: ALIYUN::ECS::VPC\n"
+                "    Properties: {}\n"
+                "  AppSecurityGroup:\n"
+                "    Type: ALIYUN::ECS::SecurityGroup\n"
+                "    Properties: {}\n"
+            ),
+            "file_path": "templates/1-secure.yml",
+            "region": "cn-hangzhou",
+            "description": "security group in an existing VPC",
+        }
+
+        result = await self._tool().execute(tool_input={"conclusion": conclusion}, context=ToolContext())
+
+        assert result.is_error is True
+        assert "use_existing_resource_created" in result.content
+        assert "AppVpc" in result.content
+
+    @pytest.mark.asyncio
+    async def test_compliant_template_passes_the_guard(self):
+        conclusion = {
+            "template": (
+                "Parameters:\n"
+                "  VpcId:\n"
+                "    Type: String\n"
+                "Resources:\n"
+                "  AppSecurityGroup:\n"
+                "    Type: ALIYUN::ECS::SecurityGroup\n"
+                "    Properties:\n"
+                "      VpcId: !Ref VpcId\n"
+            ),
+            "file_path": "templates/1-secure.yml",
+            "region": "cn-hangzhou",
+            "description": "security group in an existing VPC",
+        }
+
+        result = await self._tool().execute(tool_input={"conclusion": conclusion}, context=ToolContext())
+
+        assert result.is_error is False
+        assert result.metadata is not None
+        assert result.metadata["step_result"].status is StepStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_unknown_resource_type_is_rejected(self):
+        conclusion = {
+            "template": "Resources:\n  AppVpc:\n    Type: ALIYUN::VPC::VPC\n    Properties: {}\n",
+            "file_path": "templates/1-secure.yml",
+            "region": "cn-hangzhou",
+            "description": "hallucinated resource type",
+        }
+
+        result = await self._tool().execute(tool_input={"conclusion": conclusion}, context=ToolContext())
+
+        assert result.is_error is True
+        assert "unknown_resource_type" in result.content
+
+    @pytest.mark.asyncio
+    async def test_candidate_without_resource_intents_is_not_blocked(self):
+        tool = CompleteStepTool(
+            StepConfig(step_id="template_generating", conclusion_field="template", forward=None),
+            completion_guards=[self.GUARD],
+            completion_guard_state={"context_snapshot": {"candidate": {}}},
+        )
+        conclusion = {
+            "template": "Resources:\n  AppBucket:\n    Type: ALIYUN::OSS::Bucket\n    Properties: {}\n",
+            "file_path": "templates/1-bucket.yml",
+            "region": "cn-hangzhou",
+            "description": "bucket only",
+        }
+
+        result = await tool.execute(tool_input={"conclusion": conclusion}, context=ToolContext())
+
+        assert result.is_error is False

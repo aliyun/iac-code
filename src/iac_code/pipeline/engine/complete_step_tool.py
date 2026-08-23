@@ -14,6 +14,10 @@ import jsonschema
 from iac_code.i18n import _
 from iac_code.pipeline.display_names import display_step_name
 from iac_code.pipeline.engine.hard_constraints import collect_hard_constraints, validate_hard_constraint_checks
+from iac_code.pipeline.engine.resource_type_consistency import (
+    format_resource_type_issues,
+    validate_template_resource_types,
+)
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.utils.public_errors import sanitize_strict_text
@@ -60,6 +64,13 @@ _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
         "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
         "and evidence."
     ),
+    "template_resource_type_consistency_required": (
+        "Generated resource types must match the candidate resource_intents; fix the template resource types "
+        "and validate it again before completing the step."
+    ),
+    "template_generating_validate_template_required": (
+        "template_generating must validate the generated template with ros_validate_template for the same file_path."
+    ),
 }
 _COMPLETION_GUARD_MESSAGE_KEY_BY_TEXT = {text: key for key, text in _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY.items()}
 
@@ -99,6 +110,14 @@ def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
         _(
             "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
             "and evidence."
+        ),
+        _(
+            "Generated resource types must match the candidate resource_intents; fix the template resource types "
+            "and validate it again before completing the step."
+        ),
+        _(
+            "template_generating must validate the generated template with ros_validate_template "
+            "for the same file_path."
         ),
     )
 
@@ -324,6 +343,7 @@ class CompleteStepTool(Tool):
             required_tool_result = guard.get("require_tool_result")
             required_conclusion_sha256 = guard.get("require_conclusion_sha256")
             required_constraint_coverage = guard.get("require_context_constraint_coverage")
+            required_resource_type_consistency = guard.get("require_template_resource_type_consistency")
             required_field = guard.get("required_conclusion_field")
             required_any_of = guard.get("required_conclusion_any_of") or []
             successful_tools = self._completion_guard_state.get("successful_tools", set())
@@ -383,7 +403,43 @@ class CompleteStepTool(Tool):
                 )
                 if validation_error is not None:
                     return validation_error
+            if isinstance(required_resource_type_consistency, dict):
+                validation_error = self._validate_template_resource_type_consistency(
+                    required_resource_type_consistency,
+                    conclusion,
+                    self._completion_guard_message(guard, None),
+                )
+                if validation_error is not None:
+                    return validation_error
         return None
+
+    def _validate_template_resource_type_consistency(
+        self,
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        message: str | None,
+    ) -> str | None:
+        template = self._resolve_dotted(conclusion, str(requirement.get("template_field") or "template"))
+        context_snapshot = self._completion_guard_state.get("context_snapshot")
+        if not isinstance(context_snapshot, dict):
+            context_snapshot = {}
+        intents = self._resolve_dotted(
+            context_snapshot,
+            str(requirement.get("resource_intents_field") or "candidate.resource_intents"),
+        )
+        issues = validate_template_resource_types(template, intents)
+        if not issues:
+            return None
+        base_message = message or _(
+            "Generated resource types must match the candidate resource_intents; fix the template resource types "
+            "and validate it again before completing the step."
+        )
+        code = issues[0].code if len(issues) == 1 else "multiple_resource_type_issues"
+        return _("{message} Validation issue: {code} ({detail}).").format(
+            message=base_message,
+            code=code,
+            detail=format_resource_type_issues(issues),
+        )
 
     def _validate_context_constraint_coverage(
         self,
