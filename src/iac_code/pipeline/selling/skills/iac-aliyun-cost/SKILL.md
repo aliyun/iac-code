@@ -17,7 +17,7 @@ conclusion_schema:
   properties:
     monthly_estimate:
       type: string
-      description: 月度费用估算；询价同时返回 OriginalAmount 与 TradeAmount 时，必须同时包含列表价和合同优惠后价格（如 ¥96.80/月（列表价，合同优惠后约¥13.76/月））；询价失败时填 "询价失败"
+      description: 月度费用估算，为 ROS 全量询价口径（基于模板全量资源，含系统盘、带宽等，与架构规划阶段 candidate.monthly_estimate 的粗估口径不同，可能存在数倍差异）；询价同时返回 OriginalAmount 与 TradeAmount 时，必须同时包含列表价和合同优惠后价格（如 ¥96.80/月（列表价，合同优惠后约¥13.76/月））；询价失败时填 "询价失败"
     currency:
       type: string
       enum: [CNY]
@@ -306,4 +306,5 @@ aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<�
 - `preview_validation` 填 `ros_preview_template` 的结构化状态：成功时填 `{"succeeded": true, "template_url": "<当前模板文件路径>", "parameters": <预览通过的同一参数字典>}`；失败或未执行时填 `{"succeeded": false, "error": "<原因>"}`
 - `missing_deployment_parameters` 填完整部署或 PreviewStack 仍缺少的参数及原因；没有缺口时可省略或填 `[]`
 - `parameter_set_summary` 可简要说明参数来源、可用性筛选、PreviewStack 验证结果以及是否使用软门禁继续询价
+- `monthly_estimate` 是 ROS 全量询价口径（含系统盘、带宽等，区分列表价/合同优惠价），与架构规划阶段 `candidate.monthly_estimate` 的粗估口径不同。当本步骤结果与架构粗估存在显著差异（如数倍）时，应在 `api_raw_summary` 或 `parameter_set_summary` 中说明差异来源（如计费模式、系统盘、带宽等被全量计入），使两步成本结论可对照、差异可解释。
 - 询价失败时 `monthly_estimate` 填 "询价失败"，`resources` 为空数组，`error` 说明原因

@@ -42,6 +42,8 @@ API 调用完成后调用 `complete_step` 提交费用预估。
 - 两个字段都存在时，使用 `¥<原价>/月（列表价，合同优惠后约¥<最终价>/月）` 格式；即使数值相同也保留两个价格口径。
 - 任一字段缺失时只展示可用价格，并在 `api_raw_summary` 中说明缺失字段；询价失败时仍填写 `"询价失败"`。
 
+`monthly_estimate` 是 ROS 全量询价口径（含系统盘、带宽等），与架构规划阶段的粗估口径不同。当本步骤结果与架构粗估存在显著差异（如数倍）时，在 `api_raw_summary` 或 `parameter_set_summary` 中说明差异来源（如计费模式、系统盘、带宽等被全量计入），使两步成本结论可对照。
+
 若 `ros_preview_template` 成功，在 `complete_step.conclusion.preview_validation` 写入 PreviewStack 成功证明：`succeeded: true`、`template_url: "{template.file_path}"`、`parameters: <预览通过的同一参数字典>`；失败或未执行时写入 `succeeded: false`、`error: "<原因>"`。
 
 ## 注意事项
