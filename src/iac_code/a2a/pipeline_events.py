@@ -1542,7 +1542,9 @@ def _artifact_from_spec(spec: Any, root: dict[str, Any]) -> dict[str, Any] | Non
 
     path = _resolve_artifact_expression(root, path_expression)
     content = _resolve_artifact_expression(root, content_expression)
-    if not isinstance(path, str) or not isinstance(content, str):
+    # An empty template/path means the step never actually delivered a file; emitting a 0-byte
+    # artifact would make the missing deliverable look successful downstream.
+    if not isinstance(path, str) or not path or not isinstance(content, str) or not content:
         return None
 
     media_type = _artifact_spec_field(spec, "media_type") or _artifact_spec_field(spec, "mediaType") or "auto"

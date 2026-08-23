@@ -162,6 +162,20 @@ sub_pipelines:
             - ros_resource_type_registration
             - ros_tag
         inject_tools: [ros_validate_template]
+        completion_guards:
+          - always: true
+            required_conclusion_field: template
+            require_tool_result:
+              tool: ros_validate_template
+              latest_match: true
+              match_conclusion_field: file_path
+              match_result_field: input.template_url
+              disallow_tool_results_after_match:
+                - tools: [write_file, edit_file]
+                  match_conclusion_field: file_path
+                  match_result_field: result.file_path
+                  message_key: template_generating_rerun_after_validate_template_write
+            message_key: template_generating_template_required
 
       - id: reviewing
         description: "审查模板的安全性和最佳实践"

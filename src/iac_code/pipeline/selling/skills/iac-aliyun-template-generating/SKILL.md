@@ -10,9 +10,11 @@ conclusion_schema:
   properties:
     template:
       type: string
+      minLength: 1
       description: 与写入文件相同的 YAML 字符串
     file_path:
       type: string
+      minLength: 1
       description: 模板文件路径
     region:
       type: string
