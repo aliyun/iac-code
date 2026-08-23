@@ -195,9 +195,7 @@ class ResourceValueSpecRegistry:
 
     def attribute_exists(self, resource_type: str, attribute: str) -> bool | None:
         spec = self.get(resource_type)
-        if spec is None or not spec.attributes_complete or not spec.attributes:
-            # An empty documented set means the extractor found no attribute
-            # table, not that the resource exposes no attributes.
+        if spec is None or not spec.attributes_complete:
             return None
         return attribute in spec.attributes
 

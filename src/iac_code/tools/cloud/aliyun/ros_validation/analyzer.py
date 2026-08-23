@@ -3181,10 +3181,14 @@ class ExpressionAnalyzer:
         """
         if resource_type.startswith("DATASOURCE::") or resource_type == "ALIYUN::ROS::Stack":
             return False
+        spec = self.resource_specs.get(resource_type)
+        if spec is None or not spec.attributes:
+            # An empty documented set means the extractor found no attribute
+            # table, not that the resource exposes no attributes.
+            return False
         if self.resource_specs.attribute_exists(resource_type, attribute) is not False:
             return False
-        spec = self.resource_specs.get(resource_type)
-        documented = sorted(spec.attributes) if spec is not None else []
+        documented = sorted(spec.attributes)
         self.diagnostic(
             "ROS4207",
             _("Fn::GetAtt references undocumented attribute {attribute} of resource {resource}.").format(
