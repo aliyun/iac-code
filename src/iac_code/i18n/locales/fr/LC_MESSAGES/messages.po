@@ -4099,6 +4099,20 @@ msgstr "Conclusion structurée pour l’étape actuelle. Obligatoire et non vide
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
+msgid "Schema validation failed after {attempts} attempts: {error}"
+msgstr "La validation du schéma a échoué après {attempts} tentatives : {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"conclusion validation failed after exceeding the maximum retry count "
+"({max_retries}): {error}"
+msgstr ""
+"La validation de conclusion a échoué après dépassement du nombre maximal "
+"de tentatives ({max_retries}) : {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
 msgid ""
 "{error}\n"
 "Current step: {step_id}\n"
@@ -4116,6 +4130,22 @@ msgstr ""
 "conclusion au niveau supérieur.\n"
 "{schema_hint}\n"
 "Exemple d’arguments externes : {example}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message}\n"
+"You already submitted these exact arguments and they were rejected for "
+"the same reason; resubmitting them will fail again. Build the conclusion "
+"object from the schema above before calling complete_step. Remaining "
+"attempts before this step fails: {remaining}."
+msgstr ""
+"{message}\n"
+"Vous avez déjà soumis exactement ces arguments et ils ont été rejetés "
+"pour la même raison ; les resoumettre échouera de nouveau. Construisez "
+"l’objet conclusion à partir du schéma ci-dessus avant d’appeler "
+"complete_step. Tentatives restantes avant l’échec de cette étape : "
+"{remaining}."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
@@ -4348,20 +4378,6 @@ msgstr ""
 "Le nombre de cibles de retour arrière ne peut pas dépasser {limit} ; il y"
 " en a {count}. Demandez l’aide de l’utilisateur ou réduisez les cibles "
 "avant d’appeler complete_step."
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid "Schema validation failed after {attempts} attempts: {error}"
-msgstr "La validation du schéma a échoué après {attempts} tentatives : {error}"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid ""
-"conclusion validation failed after exceeding the maximum retry count "
-"({max_retries}): {error}"
-msgstr ""
-"La validation de conclusion a échoué après dépassement du nombre maximal "
-"de tentatives ({max_retries}) : {error}"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format

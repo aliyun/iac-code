@@ -943,6 +943,73 @@ class TestStepExecutor:
         assert "收到 ask_user_question 的工具结果后" in nudge
         assert "不要再次直接调用 complete_step" in nudge
 
+    def test_nudge_escalates_when_same_invalid_input_repeats(self):
+        error = "Invalid input for tool 'complete_step': 'conclusion' is a required property"
+
+        first = StepExecutor._build_complete_step_nudge(error, {}, _make_architecture_step())
+        repeated = StepExecutor._build_complete_step_nudge(
+            error,
+            {},
+            _make_architecture_step(),
+            repeated=True,
+        )
+
+        assert "你已经用同一份无效参数调用过 complete_step" not in first
+        assert "你已经用同一份无效参数调用过 complete_step" in repeated
+        assert "禁止再次提交这份参数" in repeated
+
+    @pytest.mark.asyncio
+    async def test_repeated_invalid_complete_step_triggers_escalated_nudge(self, tmp_path):
+        # First and second complete_step calls submit byte-identical invalid args;
+        # the second nudge must carry the hard "stop resubmitting" instruction.
+        events = [
+            ToolUseStartEvent(tool_use_id="tu_1", name="complete_step"),
+            ToolUseEndEvent(tool_use_id="tu_1", name="complete_step", input={"conclusion": {}}),
+            ToolResultEvent(
+                tool_use_id="tu_1",
+                tool_name="complete_step",
+                result="'conclusion' is a required property",
+                is_error=True,
+            ),
+            ToolUseStartEvent(tool_use_id="tu_2", name="complete_step"),
+            ToolUseEndEvent(tool_use_id="tu_2", name="complete_step", input={"conclusion": {}}),
+            ToolResultEvent(
+                tool_use_id="tu_2",
+                tool_name="complete_step",
+                result="'conclusion' is a required property",
+                is_error=True,
+            ),
+        ]
+
+        class RecordingAgentLoop:
+            def __init__(self, **kwargs):
+                self.prompts: list[str] = []
+
+            async def run_streaming(self, user_input):
+                self.prompts.append(user_input)
+                for event in events:
+                    yield event
+
+        created: list[RecordingAgentLoop] = []
+
+        def factory(**kwargs):
+            loop = RecordingAgentLoop(**kwargs)
+            created.append(loop)
+            return loop
+
+        executor = _make_executor(tmp_path)
+        step = _make_architecture_step()
+        step.prompt_file = "prompts/architecture_planning.md"
+        ctx = PipelineContext(SIMPLE_DEPS)
+
+        with patch("iac_code.agent.agent_loop.AgentLoop", factory):
+            async for _ in executor.execute(step, ctx, "test_session"):
+                pass
+
+        nudges = [prompt for loop in created for prompt in loop.prompts]
+        escalated = [prompt for prompt in nudges if "你已经用同一份无效参数调用过 complete_step" in prompt]
+        assert escalated, f"expected an escalated nudge, got: {nudges}"
+
     @pytest.mark.asyncio
     async def test_no_nudge_when_initial_attempt_completes(self, tmp_path, caplog):
         events = [

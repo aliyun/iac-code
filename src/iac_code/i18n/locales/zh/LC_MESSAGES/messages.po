@@ -3862,6 +3862,18 @@ msgstr "当前步骤的结构化结论。必填且不能为空。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
+msgid "Schema validation failed after {attempts} attempts: {error}"
+msgstr "Schema 校验在 {attempts} 次尝试后失败: {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"conclusion validation failed after exceeding the maximum retry count "
+"({max_retries}): {error}"
+msgstr "conclusion 校验失败，已超过最大重试次数 ({max_retries}): {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
 msgid ""
 "{error}\n"
 "Current step: {step_id}\n"
@@ -3878,6 +3890,19 @@ msgstr ""
 "字段放在顶层。\n"
 "{schema_hint}\n"
 "外层参数示例: {example}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message}\n"
+"You already submitted these exact arguments and they were rejected for "
+"the same reason; resubmitting them will fail again. Build the conclusion "
+"object from the schema above before calling complete_step. Remaining "
+"attempts before this step fails: {remaining}."
+msgstr ""
+"{message}\n"
+"你已经提交过完全相同的参数，并因同样的原因被拒绝；再次提交仍会失败。请先根据上方 schema 构造 conclusion 对象，再调用 "
+"complete_step。此步骤失败前的剩余尝试次数：{remaining}。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
@@ -4075,18 +4100,6 @@ msgid ""
 "user for help or narrow the rollback targets before calling "
 "complete_step."
 msgstr "可回滚目标数量不能超过 {limit} 个，当前有 {count} 个。请请求用户介入或收窄回滚目标后再调用 complete_step。"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid "Schema validation failed after {attempts} attempts: {error}"
-msgstr "Schema 校验在 {attempts} 次尝试后失败: {error}"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid ""
-"conclusion validation failed after exceeding the maximum retry count "
-"({max_retries}): {error}"
-msgstr "conclusion 校验失败，已超过最大重试次数 ({max_retries}): {error}"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format

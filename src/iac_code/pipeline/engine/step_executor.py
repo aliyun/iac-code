@@ -79,6 +79,14 @@ def _completion_guard_tool_result_content(event: ToolResultEvent) -> str:
         return event.result
 
 
+def _complete_step_input_fingerprint(tool_input: dict | None) -> str:
+    """Stable fingerprint of complete_step arguments, used to detect repeats."""
+    try:
+        return json.dumps(tool_input or {}, ensure_ascii=False, sort_keys=True, default=repr)
+    except (TypeError, ValueError):
+        return repr(tool_input)
+
+
 @dataclass
 class StepAgentLoopContext:
     """AgentLoop context built by the same path used for step execution."""
@@ -272,6 +280,11 @@ class StepExecutor:
         max_nudges = 2
         last_complete_step_error: str | None = None
         last_complete_step_input: dict | None = None
+        # Invalid complete_step arguments already seen in this step, so a repeat of
+        # the same rejected payload is nudged with a hard "stop resubmitting this"
+        # instruction instead of the same generic hint.
+        seen_invalid_complete_inputs: set[str] = set()
+        last_complete_step_repeated = False
 
         async def consume_complete_step_events(
             stream: AsyncIterator[Any],
@@ -279,6 +292,7 @@ class StepExecutor:
             nonlocal complete_step_input
             nonlocal last_complete_step_error
             nonlocal last_complete_step_input
+            nonlocal last_complete_step_repeated
             nonlocal terminal_failed_step_result
             try:
                 async for event in stream:
@@ -326,6 +340,9 @@ class StepExecutor:
                             else:
                                 last_complete_step_error = event.result
                                 last_complete_step_input = pending_complete_input.get(event.tool_use_id)
+                                fingerprint = _complete_step_input_fingerprint(last_complete_step_input)
+                                last_complete_step_repeated = fingerprint in seen_invalid_complete_inputs
+                                seen_invalid_complete_inputs.add(fingerprint)
                     yield event
                     if isinstance(event, MessageEndEvent) and self._current_agent_loop is not None:
                         yield ContextUsageEvent(usage=self._current_agent_loop.get_context_usage())
@@ -383,7 +400,12 @@ class StepExecutor:
                         "session_id": session_id,
                     },
                 )
-                nudge_msg = self._build_complete_step_nudge(last_complete_step_error, last_complete_step_input, step)
+                nudge_msg = self._build_complete_step_nudge(
+                    last_complete_step_error,
+                    last_complete_step_input,
+                    step,
+                    repeated=last_complete_step_repeated,
+                )
                 async for event in consume_complete_step_events(agent_loop.run_streaming(nudge_msg)):
                     yield event
             if (
@@ -754,6 +776,8 @@ class StepExecutor:
         error: str | None,
         invalid_input: dict | None,
         step: StepSpec | None = None,
+        *,
+        repeated: bool = False,
     ) -> str:
         step_line = f"当前步骤：{step.step_id}\n" if step is not None else ""
         schema_hint = StepExecutor._complete_step_schema_hint(step)
@@ -782,6 +806,14 @@ class StepExecutor:
                 "请先调用 ask_user_question 向用户澄清；收到 ask_user_question 的工具结果后，"
                 '再用 {"conclusion": {...}} 调用 complete_step。\n'
                 "不要再次直接调用 complete_step。"
+            )
+        if repeated:
+            return (
+                f"你已经用同一份无效参数调用过 complete_step，并且再次因为同样的原因失败：{error}\n"
+                f"禁止再次提交这份参数：{invalid_json}\n"
+                "不要解释、不要闲聊、不要重复无效工具调用。\n"
+                "请先按下面的 schema 逐字段构造完整的 conclusion 对象，再调用 complete_step。\n"
+                f"{wrapper_instruction}"
             )
         return (
             f"上一次 complete_step 调用失败：{error}\n"

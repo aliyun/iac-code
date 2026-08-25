@@ -3900,6 +3900,18 @@ msgstr "現在のステップの構造化された結論。必須で、空には
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
+msgid "Schema validation failed after {attempts} attempts: {error}"
+msgstr "{attempts} 回の試行後にスキーマ検証が失敗しました: {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"conclusion validation failed after exceeding the maximum retry count "
+"({max_retries}): {error}"
+msgstr "最大再試行回数 ({max_retries}) を超えた後、conclusion の検証に失敗しました: {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
 msgid ""
 "{error}\n"
 "Current step: {step_id}\n"
@@ -3916,6 +3928,20 @@ msgstr ""
 "である必要があります。空の引数を送信したり、conclusion のフィールドをトップレベルに置いたりしないでください。\n"
 "{schema_hint}\n"
 "外側の引数例: {example}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message}\n"
+"You already submitted these exact arguments and they were rejected for "
+"the same reason; resubmitting them will fail again. Build the conclusion "
+"object from the schema above before calling complete_step. Remaining "
+"attempts before this step fails: {remaining}."
+msgstr ""
+"{message}\n"
+"まったく同じ引数を既に送信しており、同じ理由で拒否されました。再送信しても再び失敗します。complete_step "
+"を呼ぶ前に、上記のスキーマに基づいて conclusion オブジェクトを構築してください。このステップが失敗するまでの残り試行回数: "
+"{remaining}。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
@@ -4124,18 +4150,6 @@ msgid ""
 msgstr ""
 "ロールバック対象数は {limit} を超えられません。現在 {count} 件あります。complete_step "
 "を呼ぶ前にユーザーに支援を求めるか、対象を絞ってください。"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid "Schema validation failed after {attempts} attempts: {error}"
-msgstr "{attempts} 回の試行後にスキーマ検証が失敗しました: {error}"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid ""
-"conclusion validation failed after exceeding the maximum retry count "
-"({max_retries}): {error}"
-msgstr "最大再試行回数 ({max_retries}) を超えた後、conclusion の検証に失敗しました: {error}"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format

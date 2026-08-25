@@ -1674,6 +1674,94 @@ class TestSchemaValidation:
         assert not result.is_error
 
 
+class TestRepeatedInvalidInput:
+    """Schema-level rejections must consume the retry budget and escalate on repeats.
+
+    Regression for the observed loop where the model resubmitted byte-identical
+    invalid complete_step arguments (empty/missing ``conclusion``) and got the
+    same error every time, retrying without bound.
+    """
+
+    @staticmethod
+    def _config(max_conclusion_retries: int = 2) -> StepConfig:
+        return StepConfig(
+            step_id="architecture_planning",
+            conclusion_field="architecture",
+            forward=None,
+            conclusion_schema={
+                "type": "object",
+                "required": ["candidates"],
+                "properties": {"candidates": {"type": "array"}},
+            },
+            max_conclusion_retries=max_conclusion_retries,
+        )
+
+    def test_repeated_identical_invalid_input_escalates_hint(self):
+        tool = CompleteStepTool(self._config())
+
+        first = tool.validation_error_result({})
+        second = tool.validation_error_result({})
+
+        assert first is not None and first.is_error
+        assert second is not None and second.is_error
+        assert "already submitted these exact arguments" not in first.content
+        assert "already submitted these exact arguments" in second.content
+        assert "Remaining attempts" in second.content
+
+    def test_validation_error_result_terminates_step_after_budget(self):
+        tool = CompleteStepTool(self._config(max_conclusion_retries=1))
+
+        r1 = tool.validation_error_result({})
+        r2 = tool.validation_error_result({})
+
+        assert r1 is not None and r1.is_error
+        assert r1.metadata is None
+        assert r2 is not None and r2.is_error
+        assert r2.metadata is not None
+        assert r2.metadata["step_result"].status == StepStatus.FAILED
+
+    def test_repeated_invalid_input_counts_once_per_rejected_call(self):
+        # ToolExecutor calls validate_input then validation_error_result for the
+        # same rejected call; that pair must cost exactly one attempt.
+        tool = CompleteStepTool(self._config(max_conclusion_retries=1))
+
+        valid, _error = tool.validate_input({})
+        assert not valid
+        result = tool.validation_error_result({})
+
+        assert result is not None and result.is_error
+        # One rejected call → not yet terminal.
+        assert result.metadata is None
+        assert tool._validation_attempts == 1
+
+    def test_valid_input_clears_invalid_fingerprint(self):
+        tool = CompleteStepTool(self._config())
+
+        valid, _error = tool.validate_input({})
+        assert not valid
+        assert tool._last_invalid_fingerprint is not None
+
+        valid, _error = tool.validate_input({"conclusion": {"candidates": []}})
+
+        assert valid
+        assert tool._last_invalid_fingerprint is None
+        assert tool._last_rejection is None
+
+    def test_different_invalid_inputs_are_not_treated_as_repeats(self):
+        tool = CompleteStepTool(self._config())
+
+        first = tool.validation_error_result({})
+        second = tool.validation_error_result({"conclusion": {}})
+
+        assert first is not None and "already submitted these exact arguments" not in first.content
+        assert second is not None and "already submitted these exact arguments" not in second.content
+
+    def test_validation_error_result_returns_none_for_valid_input(self):
+        tool = CompleteStepTool(self._config())
+
+        assert tool.validation_error_result({"conclusion": {"candidates": []}}) is None
+
+
 class TestNullNormalization:
     """LLMs pass null for optional fields — normalization strips them before validation."""
 

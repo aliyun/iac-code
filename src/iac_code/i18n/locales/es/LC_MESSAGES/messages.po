@@ -4092,6 +4092,20 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
+msgid "Schema validation failed after {attempts} attempts: {error}"
+msgstr "La validación del esquema falló tras {attempts} intentos: {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"conclusion validation failed after exceeding the maximum retry count "
+"({max_retries}): {error}"
+msgstr ""
+"La validación de conclusion falló tras superar el máximo de reintentos "
+"({max_retries}): {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
 msgid ""
 "{error}\n"
 "Current step: {step_id}\n"
@@ -4109,6 +4123,21 @@ msgstr ""
 "superior.\n"
 "{schema_hint}\n"
 "Ejemplo de argumentos externos: {example}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message}\n"
+"You already submitted these exact arguments and they were rejected for "
+"the same reason; resubmitting them will fail again. Build the conclusion "
+"object from the schema above before calling complete_step. Remaining "
+"attempts before this step fails: {remaining}."
+msgstr ""
+"{message}\n"
+"Ya enviaste exactamente estos argumentos y fueron rechazados por el mismo"
+" motivo; volver a enviarlos fallará de nuevo. Construye el objeto "
+"conclusion a partir del esquema anterior antes de llamar a complete_step."
+" Intentos restantes antes de que este paso falle: {remaining}."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
@@ -4339,20 +4368,6 @@ msgstr ""
 "La cantidad de destinos de reversión no puede superar {limit}; hay "
 "{count}. Pide ayuda al usuario o reduce los destinos antes de llamar a "
 "complete_step."
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid "Schema validation failed after {attempts} attempts: {error}"
-msgstr "La validación del esquema falló tras {attempts} intentos: {error}"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid ""
-"conclusion validation failed after exceeding the maximum retry count "
-"({max_retries}): {error}"
-msgstr ""
-"La validación de conclusion falló tras superar el máximo de reintentos "
-"({max_retries}): {error}"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format

@@ -128,6 +128,12 @@ class CompleteStepTool(Tool):
         # P-I17: _validation_attempts resets each new step (see class docstring) —
         # max_conclusion_retries is a per-step budget, not a pipeline-wide one.
         self._validation_attempts = 0
+        # Fingerprint of the last rejected tool_input. Schema-level rejections
+        # (e.g. a missing ``conclusion``) never reach execute(), so without this
+        # the model gets a byte-identical error for every repeat of the same
+        # invalid arguments and keeps resubmitting them.
+        self._last_invalid_fingerprint: str | None = None
+        self._last_rejection: tuple[str, str] | None = None
 
     @property
     def name(self) -> str:
@@ -205,17 +211,77 @@ class CompleteStepTool(Tool):
             return False, rollback_target_error
         try:
             jsonschema.validate(instance=tool_input, schema=self.input_schema)
-            return True, ""
         except jsonschema.ValidationError as e:
-            return False, self._format_input_validation_error(self._public_validation_error(e), tool_input)
+            return False, self._reject_input(self._public_validation_error(e), tool_input)
+        self._last_invalid_fingerprint = None
+        self._last_rejection = None
+        return True, ""
 
-    def _format_input_validation_error(self, error: str, tool_input: dict[str, Any]) -> str:
+    def _reject_input(self, error: str, tool_input: dict[str, Any]) -> str:
+        """Account for a schema-level rejection and build an escalating hint.
+
+        ``ToolExecutor`` calls ``validate_input`` and then ``validation_error_result``
+        for the same rejected call, so the outcome is memoized under the input
+        fingerprint to keep one rejected call worth exactly one attempt. The memo
+        is one-shot: ``validation_error_result`` clears it so that a genuinely new
+        call repeating the same arguments still escalates.
+        """
+        fingerprint = self._input_fingerprint(tool_input)
+        cached = self._last_rejection
+        if cached is not None and cached[0] == fingerprint:
+            return cached[1]
+        repeated = fingerprint == self._last_invalid_fingerprint
+        self._last_invalid_fingerprint = fingerprint
+        self._validation_attempts += 1
+        message = self._format_input_validation_error(error, tool_input, repeated=repeated)
+        self._last_rejection = (fingerprint, message)
+        return message
+
+    def validation_error_result(self, tool_input: dict[str, Any]) -> ToolResult | None:
+        """Surface the escalating hint, and terminate the step once the budget is spent."""
+        valid, error = self.validate_input(tool_input)
+        self._last_rejection = None
+        if valid:
+            return None
+        if self._validation_attempts <= self._step_config.max_conclusion_retries:
+            return ToolResult(content=error, is_error=True)
+        max_retries = self._step_config.max_conclusion_retries
+        step_result = StepResult(
+            step_id=self._step_config.step_id,
+            status=StepStatus.FAILED,
+            error=_("Schema validation failed after {attempts} attempts: {error}").format(
+                attempts=self._validation_attempts,
+                error=error,
+            ),
+        )
+        return ToolResult(
+            content=_(
+                "conclusion validation failed after exceeding the maximum retry count ({max_retries}): {error}"
+            ).format(max_retries=max_retries, error=error),
+            is_error=True,
+            metadata={"step_result": step_result},
+        )
+
+    @staticmethod
+    def _input_fingerprint(tool_input: dict[str, Any]) -> str:
+        try:
+            return json.dumps(tool_input or {}, ensure_ascii=False, sort_keys=True, default=repr)
+        except (TypeError, ValueError):
+            return repr(tool_input)
+
+    def _format_input_validation_error(
+        self,
+        error: str,
+        tool_input: dict[str, Any],
+        *,
+        repeated: bool = False,
+    ) -> str:
         invalid_json = json.dumps(tool_input or {}, ensure_ascii=False)
         example = json.dumps(
             {"conclusion": self._example_from_schema(self._step_config.conclusion_schema)},
             ensure_ascii=False,
         )
-        return _(
+        message = _(
             "{error}\n"
             "Current step: {step_id}\n"
             "Do not repeat the previous invalid arguments: {invalid_json}\n"
@@ -230,6 +296,15 @@ class CompleteStepTool(Tool):
             schema_hint=self._complete_step_schema_hint(),
             example=example,
         )
+        if not repeated:
+            return message
+        remaining = max(self._step_config.max_conclusion_retries - self._validation_attempts + 1, 0)
+        return _(
+            "{message}\n"
+            "You already submitted these exact arguments and they were rejected for the same reason; "
+            "resubmitting them will fail again. Build the conclusion object from the schema above before "
+            "calling complete_step. Remaining attempts before this step fails: {remaining}."
+        ).format(message=message, remaining=remaining)
 
     @classmethod
     def _public_validation_error(cls, error: jsonschema.ValidationError) -> str:
