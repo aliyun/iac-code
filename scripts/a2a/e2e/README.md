@@ -1,5 +1,104 @@
 # A2A E2E Session Recovery and Redaction
 
+## Real StartChat permission-wait matrix
+
+`run_start_chat_permission_wait.py` is the credential-gated, repeatable chain
+for this feature. It runs Qoder's real LLM through the installed
+`alicloud-ros-agent` Skill, its Python bridge, the native `aliyun` CLI, the
+StartChat-only HTTPS relay, local iac-code A2A servers, and real iac-code
+LLM/cloud calls. Before taking a private isolated config copy, it refreshes
+OAuth-backed STS in the caller-selected `--source-config-dir` in place. This is
+important because OAuth refresh tokens may rotate: refreshing only a disposable
+copy can invalidate the source for the next scenario. It then fixes the server
+policy at `300 / 300 / 30`, enables the shared-backup commit protocol, uses
+unique Stack/VSwitch names, and performs an exact-name cleanup fallback.
+
+The Qoder flag that bypasses host Bash/file confirmation applies only to the
+test driver. It does not approve ROS Agent permissions: the isolated iac-code
+settings use the default permission mode, explicitly allow incidental tools,
+and ask for cloud-mutating tools. The A2A servers also keep
+`auto_approve_permissions: false`, and every non-read-only cloud operation is
+answered through the correlated StartChat permission envelope.
+
+Run one scenario per fresh directory:
+
+The real headless Qoder turn timeout defaults to 900 seconds so a two-candidate
+Pipeline can finish without weakening the scenario. Override it with
+`--qoder-turn-timeout` when diagnosing a slower provider.
+
+```bash
+uv run python scripts/a2a/e2e/permission_wait/run_start_chat_permission_wait.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-pwait-normal-before \
+  --mode normal
+
+uv run python scripts/a2a/e2e/permission_wait/run_start_chat_permission_wait.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-pwait-pipeline-before \
+  --mode pipeline
+
+# Answer during the 30-second grace after the 300-second resident deadline.
+uv run python scripts/a2a/e2e/permission_wait/run_start_chat_permission_wait.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-pwait-normal-grace \
+  --mode normal \
+  --answer-delay-seconds 305
+
+# Answer after non-failure suspension.
+uv run python scripts/a2a/e2e/permission_wait/run_start_chat_permission_wait.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-pwait-pipeline-suspended \
+  --mode pipeline \
+  --answer-delay-seconds 335
+
+# Kill only the selected local A2A process at the first permission boundary,
+# restart it with the same persistence/config directories, then answer.
+uv run python scripts/a2a/e2e/permission_wait/run_start_chat_permission_wait.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-pwait-normal-restart \
+  --mode normal \
+  --restart-at-first-permission
+```
+
+Repeat the grace, suspended, and restart variants for both `normal` and
+`pipeline`. The repository prompt is
+`permission_wait/permission_wait_start_chat_prompt.md`. Each run writes bounded Qoder turn
+summaries, permission observations, relay metrics, a safe result manifest, and
+local server logs. Before exit, it derives bounded read-only evidence and removes
+the copied credential files and complete session transcripts. A read-only
+permission prompt or an out-of-scope cloud target fails the run without being
+approved. The final checks require a real non-read-only permission, local and
+shared serial checkpoint evidence, no Sub Pipeline checkpoint, native
+StartChat usage, exact resource cleanup, and retention of the pre-existing VPC
+inventory.
+
+The controlled Sub-Pipeline fixture uses a real `PipelineRunner` with two real
+`AgentLoop` candidates. One candidate parks at an actual permission Future while
+the other completes naturally; after the configured hard timeout, the parent
+aggregates both conclusions, reaches candidate selection, and completes. The
+production A2A backup hook also proves that the Sub permission itself did not
+trigger a critical permission backup. The acceptance run uses the production
+300-second value:
+
+```bash
+uv run python scripts/a2a/e2e/permission_wait/run_sub_pipeline_permission_timeout.py \
+  --run-dir /tmp/iac-pwait-sub-pipeline-300 \
+  --timeout-seconds 300
+```
+
+Its accelerated regression and the fast deterministic process-restart matrix
+are:
+
+```bash
+uv run pytest -q tests/a2a_e2e/test_sub_pipeline_permission_timeout.py
+uv run pytest -q tests/a2a_e2e/test_permission_wait_restart.py
+```
+
+The restart matrix covers Normal/Pipeline × allow/deny without real
+credentials. The Sub-Pipeline fixture asserts one denial ToolResult, continued
+Agent-loop execution, parent candidate selection/completion, and the absence of
+grace, durable permission checkpoints, and permission-critical backup.
+
 This directory contains headless end-to-end checks for A2A pipeline session
 recovery and redaction regressions. The runner drives the public A2A JSON-RPC
 streaming endpoint and records SSE events and pipeline snapshots. Recovery

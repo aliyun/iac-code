@@ -18,7 +18,20 @@ Use the single standard-library entry point at `scripts/iac_code.py`. Never inst
 
    Set `<language>` to the user's language code (`en`, `zh`, `es`, `fr`, `de`, `ja`, or `pt`). If it is unknown, use `auto`. Every job result repeats `preferredLanguage`; treat it as durable control state across all turns. Present progress, questions, permissions, candidate plans, and final results in that language; protocol field names, enums, IDs, and commands remain unchanged. When authoritative text already uses `preferredLanguage`, present it directly or summarize it in the same language—never translate Chinese user-visible content into English.
 
-   The installer or Skill distributor may place an optional `config.json` beside this `SKILL.md` with `{"channel":"<channel>"}`. Store only the channel identifier (for example `codex`); the bridge adds the `skill/` prefix before sending `skill/codex` to iac-code. It reads the config automatically when a job starts, binds the normalized channel to the new A2A context, and carries it across normal turns, Pipeline execution and handoff, cleanup, permissions, and user responses. If the file or `channel` field is absent, the bridge sends no channel override. Never derive a channel from the user's request, ask the user for it, or create, edit, or reveal this install-local configuration during an infrastructure task.
+   The installer or Skill distributor may place an optional `config.json` beside this `SKILL.md`:
+
+   ```json
+   {
+     "channel": "codex",
+     "permissionWaitPolicy": {
+       "residentTimeoutSeconds": null,
+       "subPipelineTimeoutSeconds": null,
+       "timeoutGraceSeconds": 30
+     }
+   }
+   ```
+
+   `channel` stores only the channel identifier; the bridge adds the `skill/` prefix before sending it to iac-code. `permissionWaitPolicy` applies only to the temporary A2A server owned by this Skill: `null` timeouts mean unlimited waits, positive finite values set resident/Sub Pipeline limits, and grace is a non-negative finite value. Finite values cannot exceed 10 years; use `null` instead of an arbitrarily large number for an unlimited resident or Sub Pipeline wait. The bridge validates and converts this object into server configuration; it never sends the policy through A2A message metadata. Missing fields use the defaults shown above. The bridge rejects unknown configuration fields. If the file or a field is absent, no corresponding override is applied. Never derive these values from the user's request, ask the user for them, or create, edit, or reveal this install-local configuration during an infrastructure task.
 
    Normal is the default, including concrete resource queries/changes, template work, troubleshooting, and deployment of a clear target. Use `--mode pipeline --pipeline-name selling` only when the user explicitly requests it or the request genuinely needs the fixed candidate-architecture, cost-comparison, plan-confirmation, and deployment flow. Questions, permissions, tool use, or deployment alone do not select Pipeline. When uncertain, use normal.
    Start performs a non-secret configuration preflight through the Runtime. An incomplete LLM provider/API Key returns `llm_not_configured` and stops before creating a job. Selling Pipeline also requires complete Alibaba Cloud credentials and otherwise returns `cloud_credentials_not_configured`. Normal mode may continue without cloud credentials for work that does not call cloud APIs; report its preflight warning rather than claiming cloud operations are available.

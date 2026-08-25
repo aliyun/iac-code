@@ -1,12 +1,33 @@
 from __future__ import annotations
 
 import hashlib
+import sys
 import threading
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import iac_code.mcp.storage as storage_module
 from iac_code.mcp.storage import MCPSecretStorage, _safe_lock_name
+
+
+def test_default_secret_store_never_uses_system_keyring(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    keyring_calls: list[str] = []
+    fake_keyring = SimpleNamespace(
+        set_password=lambda *_args: keyring_calls.append("set"),
+        get_password=lambda *_args: keyring_calls.append("get"),
+        delete_password=lambda *_args: keyring_calls.append("delete"),
+    )
+    monkeypatch.setitem(sys.modules, "keyring", fake_keyring)
+
+    storage = MCPSecretStorage()
+    storage.set_secret("mcp:access_token:test", "secret-token")
+
+    assert storage.get_secret("mcp:access_token:test") == "secret-token"
+    assert keyring_calls == []
+    stored_bytes = (tmp_path / "config" / "mcp" / "secrets.json.enc").read_bytes()
+    assert b"secret-token" not in stored_bytes
 
 
 def test_fallback_secret_store_uses_lock_for_file_io(monkeypatch, tmp_path: Path) -> None:
@@ -42,8 +63,8 @@ def test_safe_lock_name_does_not_use_plain_sha256() -> None:
 
 def test_storage_lock_serializes_storage_instances_in_process(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
-    first_storage = MCPSecretStorage(keyring_backend=False)
-    second_storage = MCPSecretStorage(keyring_backend=False)
+    first_storage = MCPSecretStorage()
+    second_storage = MCPSecretStorage()
     first_entered = threading.Event()
     second_attempted = threading.Event()
     second_entered = threading.Event()

@@ -1,5 +1,6 @@
 import pytest
 
+import iac_code.mcp.types as types_module
 from iac_code.mcp.types import (
     MCPConfigError,
     MCPConfigScope,
@@ -13,6 +14,26 @@ from iac_code.mcp.types import (
     MCPTransport,
     ScopedMCPServerConfig,
 )
+
+
+def test_content_signature_derivation_is_cached(monkeypatch) -> None:
+    types_module._content_signature_digest.cache_clear()
+    calls = 0
+    original = types_module.hashlib.pbkdf2_hmac
+
+    def counting_pbkdf2_hmac(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(types_module.hashlib, "pbkdf2_hmac", counting_pbkdf2_hmac)
+    config = MCPServerConfig.from_mapping("terraform", {"command": "uvx", "args": ["terraform-mcp-server"]})
+
+    first = config.content_signature()
+    second = config.content_signature()
+
+    assert first == second
+    assert calls == 1
 
 
 def test_stdio_config_defaults_to_stdio_when_command_is_present() -> None:

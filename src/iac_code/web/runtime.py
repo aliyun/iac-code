@@ -21,6 +21,8 @@ from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     MessageEndEvent,
     PermissionRequestEvent,
+    PermissionWaitOutcome,
+    PermissionWaitSuspended,
     QueuedInputSubmittedEvent,
     SubPipelineStreamEvent,
     Usage,
@@ -239,7 +241,7 @@ def agent_factory_options_for_session(
 ) -> AgentFactoryOptions:
     """Build the same AgentFactory options for every Web operation.
 
-    disable_external_services=True 用于会话切换时的离线上下文核算:不连接 MCP、不读钥匙串,
+    disable_external_services=True 用于会话切换时的离线上下文核算:不连接 MCP、不读 MCP 凭证文件,
     只算系统提示 + 本地工具定义开销(见 prime_session_context_overhead)。
     """
     selection = model_selection or model_selection_for_session(session)
@@ -290,6 +292,28 @@ def create_session_agent_runtime(
             disable_external_services=disable_external_services,
         )
     )
+
+
+def attach_session_permission_context(runtime: Any, session: WebSession) -> None:
+    """Attach the session's live permission policy to a newly built Web runtime."""
+
+    agent_loop = getattr(runtime, "agent_loop", None)
+    if agent_loop is None:
+        return
+    runtime_context = getattr(agent_loop, "_permission_context", None)
+    if session.permission_context is None and runtime_context is not None:
+        if session.permission_mode is not None:
+            runtime_context.mode = session.permission_mode
+        session.permission_context = runtime_context
+    if session.permission_context is not None:
+        setattr(agent_loop, "_permission_context", session.permission_context)
+        setattr(agent_loop, "_permission_context_getter", lambda: session.permission_context)
+        tool_registry = getattr(runtime, "tool_registry", None)
+        agent_tool = tool_registry.get("agent") if hasattr(tool_registry, "get") else None
+        if agent_tool is not None and hasattr(agent_tool, "_permission_context"):
+            setattr(agent_tool, "_permission_context", session.permission_context)
+        if agent_tool is not None and hasattr(agent_tool, "_permission_context_getter"):
+            setattr(agent_tool, "_permission_context_getter", lambda: session.permission_context)
 
 
 async def create_session_agent_runtime_in_thread(
@@ -481,6 +505,7 @@ class WebSessionRuntime:
         usage = Usage()
         agent_runtime: Any | None = None
         input_consumed = False
+        completed_permission_boundaries: list[str] = []
         async with self.session.turn_lock:
             self.session.active_turn_task = asyncio.current_task()
             # 记录本轮为「上一次操作」,让侧边栏相对时间反映真实活动(否则一直显示距创建多久)。
@@ -549,13 +574,27 @@ class WebSessionRuntime:
                                 allow_always=self._tool_supports_blanket_allow(agent_runtime, inner_event.tool_name),
                             )
                             payload.update(sub_pipeline_payload)
-                            request_id = self.manager.add_permission_request(
-                                self.session,
-                                payload,
-                                future=inner_event.response_future,
-                                audit_event=inner_event,
-                            )
-                            await self._await_permission_request(request_id, inner_event)
+                            if (
+                                sub_pipeline_payload
+                                or inner_event.response_future is None
+                                or inner_event.continuation_frame is None
+                            ):
+                                request_id = self.manager.add_permission_request(
+                                    self.session,
+                                    payload,
+                                    future=inner_event.response_future,
+                                    audit_event=inner_event,
+                                )
+                            else:
+                                request_id = await self.manager.open_permission_request(
+                                    self.session,
+                                    payload,
+                                    permission_event=inner_event,
+                                    permission_class="normal",
+                                )
+                            completed_boundary = await self._await_permission_request(request_id, inner_event)
+                            if completed_boundary is not None:
+                                completed_permission_boundaries.append(completed_boundary)
                             continue
                         if isinstance(inner_event, AskUserQuestionEvent):
                             payload = _question_request_payload(inner_event, turn_id=turn_id)
@@ -604,11 +643,26 @@ class WebSessionRuntime:
                     if final_context_usage is not None:
                         done_payload["contextUsage"] = final_context_usage
                         _cache_session_context_overhead(self.session, final_context_usage)
+                    self.manager.resolve_permission_boundaries(
+                        self.session,
+                        completed_permission_boundaries,
+                    )
                     await self.session.events.publish("turn.done", done_payload)
                     # 正常结束:若此刻无人在看(用户已切走、无活跃 SSE 订阅),标记为未读。
                     self.manager.mark_session_completed(self.session)
+                except PermissionWaitSuspended:
+                    suspended_payload = _turn_done_payload(turn_id=turn_id)
+                    suspended_payload["permissionWait"] = {"status": "suspended", "resumable": True}
+                    suspended_payload["usage"] = usage_payload(usage)
+                    await self.session.events.publish("turn.done", suspended_payload)
+                    return {
+                        "accepted": True,
+                        "reason": "permission wait suspended",
+                        "turnId": turn_id,
+                        "inputConsumed": input_consumed,
+                    }
                 except asyncio.CancelledError:
-                    self.manager.cancel_pending_requests_for_session(self.session)
+                    self.manager.cancel_pending_requests_for_session(self.session, preserve_durable=True)
                     canceled_payload = _turn_done_payload(turn_id=turn_id)
                     canceled_payload["interrupted"] = True
                     canceled_payload["canceled"] = True
@@ -621,7 +675,7 @@ class WebSessionRuntime:
                         "inputConsumed": input_consumed,
                     }
                 except Exception as exc:
-                    self.manager.cancel_pending_requests_for_session(self.session)
+                    self.manager.cancel_pending_requests_for_session(self.session, preserve_durable=True)
                     await self.session.events.publish(
                         "error",
                         {
@@ -654,6 +708,137 @@ class WebSessionRuntime:
                                 self.session.active_turn_floor_sequence = None
         return {"accepted": True, "turnId": turn_id, "inputConsumed": True}
 
+    async def resume_permission(self, checkpoint: dict[str, Any]) -> dict[str, Any]:
+        """Resume one persisted normal-Web permission without appending user input."""
+
+        boundary_id = str(checkpoint.get("boundaryId") or "")
+        if not boundary_id:
+            return {"accepted": False, "reason": "permission_resume_invalid"}
+        coordinator = self.manager.permission_wait_coordinator
+        if not await coordinator.acquire_restore(boundary_id):
+            return {"accepted": True, "duplicate": True}
+        turn_id = _turn_id()
+        usage = Usage()
+        agent_runtime: Any | None = None
+        store: Any | None = None
+        completed_permission_boundaries = [boundary_id]
+        try:
+            store = self.manager.permission_checkpoint_store(self.session)
+            record = store.load(boundary_id)
+            if record is None:
+                raise ValueError("permission_resume_invalid: checkpoint is unavailable")
+            if record.get("phase") != "RESTORING":
+                record = store.begin_restore(boundary_id)
+            async with self.session.turn_lock:
+                self.session.active_turn_task = asyncio.current_task()
+                self.manager.mark_session_running(self.session)
+                agent_runtime = await create_session_agent_runtime_in_thread(
+                    self.session,
+                    self.manager,
+                    lifecycle_owner=self.lifecycle_owner,
+                )
+                self._attach_session_permission_context(agent_runtime)
+                await self._attach_mcp_status_updates(agent_runtime)
+                self.session.active_agent_loop = agent_runtime.agent_loop
+                self.session.active_turn_id = turn_id
+                translator = WebEventTranslator(self.session.session_id)
+                try:
+                    async for stream_event in agent_runtime.agent_loop.resume_permission_boundary(record):
+                        inner_event, sub_pipeline_payload = _unwrap_sub_pipeline_event(stream_event)
+                        if isinstance(inner_event, MessageEndEvent):
+                            _accumulate_usage(usage, inner_event.usage)
+                        if isinstance(inner_event, PermissionRequestEvent):
+                            payload = _permission_request_payload(
+                                inner_event,
+                                turn_id=turn_id,
+                                allow_always=self._tool_supports_blanket_allow(
+                                    agent_runtime,
+                                    inner_event.tool_name,
+                                ),
+                            )
+                            payload.update(sub_pipeline_payload)
+                            if (
+                                sub_pipeline_payload
+                                or inner_event.response_future is None
+                                or inner_event.continuation_frame is None
+                            ):
+                                request_id = self.manager.add_permission_request(
+                                    self.session,
+                                    payload,
+                                    future=inner_event.response_future,
+                                    audit_event=inner_event,
+                                )
+                            else:
+                                request_id = await self.manager.open_permission_request(
+                                    self.session,
+                                    payload,
+                                    permission_event=inner_event,
+                                    permission_class="normal",
+                                )
+                            completed_boundary = await self._await_permission_request(request_id, inner_event)
+                            if completed_boundary is not None:
+                                completed_permission_boundaries.append(completed_boundary)
+                            continue
+                        if isinstance(inner_event, AskUserQuestionEvent):
+                            request_id = self.manager.add_question_request(
+                                self.session,
+                                _question_request_payload(inner_event, turn_id=turn_id),
+                                future=inner_event.response_future,
+                            )
+                            await self._await_question_request(request_id, inner_event)
+                            continue
+                        translated = translator.translate_stream_event(stream_event, turn_id=turn_id)
+                        await self.session.events.publish(translated["type"], translated["payload"])
+                    self.manager.resolve_permission_boundaries(
+                        self.session,
+                        completed_permission_boundaries,
+                    )
+                    await self.session.events.publish(
+                        "turn.done",
+                        {
+                            **_turn_done_payload(turn_id=turn_id),
+                            "permissionRecovered": True,
+                            "usage": usage_payload(usage),
+                        },
+                    )
+                    self.manager.mark_session_completed(self.session)
+                    return {"accepted": True, "turnId": turn_id, "permissionRecovered": True}
+                except PermissionWaitSuspended as exc:
+                    if exc.boundary_id == boundary_id:
+                        store.mark_suspended(boundary_id)
+                    await self.session.events.publish(
+                        "turn.done",
+                        {
+                            **_turn_done_payload(turn_id=turn_id),
+                            "permissionWait": {"status": "suspended", "resumable": True},
+                            "usage": usage_payload(usage),
+                        },
+                    )
+                    return {"accepted": True, "turnId": turn_id, "permissionWaitSuspended": True}
+        except Exception as exc:
+            if store is not None:
+                try:
+                    store.reconcile_deadline(
+                        boundary_id,
+                        grace_seconds=self.manager.permission_wait_policy.timeout_grace_seconds,
+                        live_owner=False,
+                    )
+                except ValueError:
+                    pass
+                self.manager.restore_permission_requests(self.session)
+            await self.session.events.publish(
+                "error",
+                {"turnId": turn_id, "message": str(exc)[:500], "retryable": False},
+            )
+            return {"accepted": False, "turnId": turn_id, "reason": "permission_resume_invalid"}
+        finally:
+            await coordinator.release_restore(boundary_id)
+            await close_agent_runtime(agent_runtime, lifecycle_owner=self.lifecycle_owner)
+            if self.session.active_turn_task is asyncio.current_task():
+                self.session.active_turn_task = None
+                self.session.active_agent_loop = None
+                self.session.active_turn_id = None
+
     async def _attach_mcp_status_updates(self, runtime: Any) -> None:
         async def publish_status(_server_name: str = "", _capability: str = "") -> None:
             status = runtime_mcp_status(runtime)
@@ -676,41 +861,38 @@ class WebSessionRuntime:
                 pass
 
     def _attach_session_permission_context(self, runtime: Any) -> None:
-        agent_loop = getattr(runtime, "agent_loop", None)
-        if agent_loop is None:
-            return
-        runtime_context = getattr(agent_loop, "_permission_context", None)
-        if self.session.permission_context is None and runtime_context is not None:
-            # 首次运行本会话：采用运行时新建的 context，但要把会话已选定的权限模式
-            # （如新会话草稿里选的「完全访问」）应用上去，否则会退回默认模式。
-            if self.session.permission_mode is not None:
-                runtime_context.mode = self.session.permission_mode
-            self.session.permission_context = runtime_context
-        if self.session.permission_context is not None:
-            setattr(agent_loop, "_permission_context", self.session.permission_context)
-            setattr(agent_loop, "_permission_context_getter", lambda: self.session.permission_context)
-            tool_registry = getattr(runtime, "tool_registry", None)
-            agent_tool = tool_registry.get("agent") if hasattr(tool_registry, "get") else None
-            if agent_tool is not None and hasattr(agent_tool, "_permission_context"):
-                setattr(agent_tool, "_permission_context", self.session.permission_context)
-            if agent_tool is not None and hasattr(agent_tool, "_permission_context_getter"):
-                setattr(agent_tool, "_permission_context_getter", lambda: self.session.permission_context)
+        attach_session_permission_context(runtime, self.session)
 
     def _tool_supports_blanket_allow(self, runtime: Any, tool_name: str) -> bool:
         tool_registry = getattr(runtime, "tool_registry", None)
         tool = tool_registry.get(tool_name) if hasattr(tool_registry, "get") else None
         return bool(getattr(tool, "supports_blanket_allow", False))
 
-    async def _await_permission_request(self, request_id: str, event: PermissionRequestEvent) -> None:
+    async def _await_permission_request(self, request_id: str, event: PermissionRequestEvent) -> str | None:
         if event.response_future is None:
             self.manager.cancel_permission_request(request_id, session_id=self.session.session_id)
-            return
+            return None
         try:
-            await asyncio.shield(event.response_future)
+            outcome = await asyncio.shield(event.response_future)
         except asyncio.CancelledError:
-            self.manager.cancel_permission_request(request_id, session_id=self.session.session_id)
+            if (
+                event.boundary_id is not None
+                and event.boundary_id in self.session.shutdown_preserved_permission_boundaries
+            ):
+                self.manager.orphan_durable_permission_request(
+                    request_id,
+                    session_id=self.session.session_id,
+                )
+            else:
+                self.manager.cancel_permission_request(request_id, session_id=self.session.session_id)
             raise
-        self.manager.discard_permission_request(request_id, session_id=self.session.session_id)
+        if outcome is PermissionWaitOutcome.SUSPEND:
+            if event.boundary_id is not None:
+                self.manager.permission_wait_coordinator.unregister_live(event.boundary_id)
+            raise PermissionWaitSuspended(event.boundary_id)
+        if event.boundary_id is None:
+            self.manager.discard_permission_request(request_id, session_id=self.session.session_id)
+        return event.boundary_id
 
     async def _await_question_request(self, request_id: str, event: AskUserQuestionEvent) -> None:
         if event.response_future is None:
@@ -824,7 +1006,7 @@ async def prime_session_context_overhead(
     维持既有行为,绝不阻断会话切换。
 
     会话切换只读展示历史会话,不应产生外部副作用,因此这里用 disable_external_services 的离线核算
-    runtime:不连接 MCP、不读取 MCP 钥匙串(避免 macOS 反复弹出 iac-code:mcp 授权窗)、不发起 Provider/
+    runtime:不连接 MCP、不读取 MCP 凭证文件、不发起 Provider/
     云请求。代价是动态 MCP 工具定义暂不计入本地基线,待首个真实回合启动正常 runtime 后用精确值自动纠正。
     """
     if session is None:

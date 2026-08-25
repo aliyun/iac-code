@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Literal, Union
 
 TOOL_RENDER_METADATA_KEY = "_iac_code_tool_render"
@@ -189,6 +190,20 @@ class ToolResultEvent:
     type: Literal["tool_result"] = "tool_result"
 
 
+class PermissionWaitOutcome(str, Enum):
+    """Internal outcomes that must not be projected as a user decision."""
+
+    SUSPEND = "suspend"
+
+
+class PermissionWaitSuspended(RuntimeError):  # noqa: N818 - domain event, not an error outcome
+    """The live permission owner was durably suspended without a decision."""
+
+    def __init__(self, boundary_id: str | None = None) -> None:
+        self.boundary_id = boundary_id
+        super().__init__("permission wait suspended")
+
+
 @dataclass
 class PermissionRequestEvent:
     """Tool execution requires user permission."""
@@ -196,10 +211,19 @@ class PermissionRequestEvent:
     tool_name: str
     tool_input: dict[str, Any]
     tool_use_id: str
-    response_future: asyncio.Future[bool] | None = field(default=None)
+    response_future: asyncio.Future[bool | PermissionWaitOutcome] | None = field(default=None)
     permission_result: Any | None = field(default=None)
     audit_context: Any | None = field(default=None, repr=False, compare=False)
     resolution_owner_managed: bool = field(default=False, repr=False, compare=False)
+    continuation_frame: dict[str, Any] | None = field(default=None, repr=False, compare=False)
+    boundary_id: str | None = field(default=None, repr=False, compare=False)
+    permission_wait_class: Literal["normal", "pipeline", "sub_pipeline"] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    permission_wait_coordinates: dict[str, Any] | None = field(default=None, repr=False, compare=False)
+    permission_decision_audited: bool = field(default=False, repr=False, compare=False)
     type: Literal["permission_request"] = "permission_request"
 
 

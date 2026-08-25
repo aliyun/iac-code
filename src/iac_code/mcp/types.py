@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import shlex
 from dataclasses import dataclass, field
 from enum import Enum
+from functools import lru_cache
 from typing import Any, Mapping, Sequence, cast
 from urllib.parse import urlparse
 
@@ -13,6 +16,8 @@ from iac_code.utils.public_errors import sanitize_public_text
 
 MCP_INITIALIZE_INSTRUCTIONS_MAX_CHARS = 4000
 MCP_INSTRUCTIONS_TRUNCATION_MARKER = "[truncated]"
+_MCP_CONFIG_SIGNATURE_SALT = b"iac-code-mcp-config-signature-v1"
+_MCP_CONFIG_SIGNATURE_ITERATIONS = 100_000
 
 
 class MCPConfigError(ValueError):
@@ -234,12 +239,20 @@ class MCPServerConfig:
             prefix = "stdio"
         else:
             prefix = "url"
-        import hashlib
-        import json
-
         data = json.dumps(material, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
-        digest = hashlib.pbkdf2_hmac("sha256", data, b"iac-code-mcp-config-signature-v1", 100_000).hex()
+        digest = _content_signature_digest(data)
         return "{}:{}".format(prefix, digest)
+
+
+@lru_cache(maxsize=8192)
+def _content_signature_digest(data: bytes) -> str:
+    """Cache the expensive derivation for immutable normalized config content."""
+    return hashlib.pbkdf2_hmac(
+        "sha256",
+        data,
+        _MCP_CONFIG_SIGNATURE_SALT,
+        _MCP_CONFIG_SIGNATURE_ITERATIONS,
+    ).hex()
 
 
 @dataclass(frozen=True)

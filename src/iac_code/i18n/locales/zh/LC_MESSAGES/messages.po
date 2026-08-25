@@ -3281,6 +3281,7 @@ msgstr "来自服务器 {server!r} 的 MCP 工具 {tool!r}。"
 #: src/iac_code/tools/bash/bash_tool.py
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py
 #: src/iac_code/web/permissions.py src/iac_code/web/runtime.py
+#: src/iac_code/web/session_manager.py
 #, python-brace-format
 msgid "Allow {}?"
 msgstr "允许 {}？"
@@ -11261,6 +11262,10 @@ msgstr "未知的模型"
 #: src/iac_code/web/session_manager.py src/iac_code/web/settings.py
 msgid "unknown effort"
 msgstr "未知的推理强度"
+
+#: src/iac_code/web/session_manager.py
+msgid "Permission wait point is no longer active."
+msgstr "权限等待点已不再处于活动状态。"
 
 #: src/iac_code/web/session_manager.py
 #, python-brace-format

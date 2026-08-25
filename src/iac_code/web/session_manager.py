@@ -10,7 +10,7 @@ import logging
 import os
 import re
 import uuid
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -36,6 +36,15 @@ from iac_code.pipeline.engine.display_replay import DISPLAY_TRANSCRIPT_FILENAME
 from iac_code.pipeline.engine.step_spec import AllowUserEscapes
 from iac_code.providers.base import ContentBlock
 from iac_code.providers.registry import PROVIDER_REGISTRY
+from iac_code.services.permission_wait import (
+    PermissionWaitCheckpointStore,
+    PermissionWaitCoordinator,
+    PermissionWaitPolicy,
+    build_permission_checkpoint,
+    canonicalize_permission_continuation_frame,
+    permission_execution_identity,
+    recover_permission_audit_boundary,
+)
 from iac_code.services.permissions.storage import apply_session_rule
 from iac_code.services.permissions.trusted_roots import build_session_trusted_read_directories
 from iac_code.services.session_index import SessionEntry, SessionIndex, _trim_title
@@ -722,6 +731,9 @@ class WebSession:
     # 打开会话(建立 SSE 订阅)时清除。持久化到 sidecar，跨设备共享。
     unread: bool = False
     pending_permissions: dict[str, WebPendingPermission] = field(default_factory=dict)
+    # Lifecycle shutdown is not a protocol/user cancellation.  Keep these
+    # durable boundaries orphan-recoverable until their turn tasks unwind.
+    shutdown_preserved_permission_boundaries: set[str] = field(default_factory=set, repr=False)
     pending_questions: dict[str, WebPendingQuestion] = field(default_factory=dict)
     pending_elicitations: dict[str, WebPendingElicitation] = field(default_factory=dict)
     queued_inputs: list[str] = field(default_factory=list)
@@ -888,12 +900,20 @@ class QueuedInputActionError(Exception):
 class WebSessionManager:
     """Create and list Web sessions while preserving CLI/REPL session storage."""
 
-    def __init__(self, *, projects_dir: Path | str | None = None, cwd: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        projects_dir: Path | str | None = None,
+        cwd: Path | str | None = None,
+        permission_wait: object | None = None,
+    ) -> None:
         self.cwd = Path(cwd or os.environ.get("IAC_CODE_CWD", os.getcwd())).expanduser().resolve()
         resolved_projects_dir = Path(projects_dir) if projects_dir is not None else None
         self.storage = SessionStorage(projects_dir=resolved_projects_dir)
         self.index = SessionIndex(projects_dir=resolved_projects_dir)
         self._sessions: dict[tuple[str, str], WebSession] = {}
+        self.permission_wait_policy = PermissionWaitPolicy.from_config(permission_wait)
+        self.permission_wait_coordinator = PermissionWaitCoordinator(self.permission_wait_policy)
         self._session_lifecycle_epoch = 0
         self._session_mutation_epochs: dict[tuple[str, str], int] = {}
         # 请求级缓存(仅在 batch_reads() 窗口内生效):外来会话可见性开关本是一次请求内
@@ -1031,6 +1051,7 @@ class WebSessionManager:
         )
         session.pending_llm_title = not storage_existed
         self._sessions[session_key] = session
+        self._restore_permission_requests(session)
         if not storage_existed:
             self._record_session_lifecycle_mutation(actual_cwd, actual_session_id)
         self.persist_web_metadata(session)
@@ -2366,6 +2387,36 @@ class WebSessionManager:
             raise ValueError(_("session not found"))
         return resolved
 
+    def permission_checkpoint_store(self, session: WebSession | str) -> PermissionWaitCheckpointStore:
+        session = self._resolve_session_arg(session)
+        return PermissionWaitCheckpointStore(session.cwd, session.session_id, storage=self.storage)
+
+    def resolve_permission_boundaries(self, session: WebSession | str, boundary_ids: list[str]) -> None:
+        session = self._resolve_session_arg(session)
+        if not boundary_ids:
+            return
+        messages = self.storage.load(session.cwd, session.session_id)
+        from iac_code.services.permission_wait import canonical_digest
+
+        result_digest = canonical_digest(messages[-1].to_dict()) if messages else ""
+        store = self.permission_checkpoint_store(session)
+        for boundary_id in dict.fromkeys(boundary_ids):
+            record = store.load(boundary_id)
+            if record is None:
+                continue
+            decision = record.get("decision")
+            value = decision.get("value") if isinstance(decision, Mapping) else None
+            store.resolve(
+                boundary_id,
+                result_digest=result_digest,
+                ack={"decision": value, "accepted": True},
+            )
+            self.permission_wait_coordinator.unregister_live(boundary_id)
+            for request_id, pending in list(session.pending_permissions.items()):
+                if pending.boundary_id == boundary_id:
+                    session.pending_permissions.pop(request_id, None)
+            session.shutdown_preserved_permission_boundaries.discard(boundary_id)
+
     def status(self, session: WebSession | str) -> dict[str, Any]:
         """Return a redacted JSON-safe status snapshot for a session."""
         session = self._resolve_session_arg(session)
@@ -2868,6 +2919,284 @@ class WebSessionManager:
         session.events.append("permission.request", pending.to_dict())
         return request_id
 
+    async def open_permission_request(
+        self,
+        session: WebSession | str,
+        payload: dict[str, Any],
+        *,
+        permission_event: Any,
+        permission_class: Literal["normal", "pipeline"],
+        pipeline_coordinates: Mapping[str, Any] | None = None,
+    ) -> str:
+        """Persist a real browser permission wait before making it visible."""
+
+        session = self._resolve_session_arg(session)
+        request_id = uuid.uuid4().hex
+        future = getattr(permission_event, "response_future", None)
+        if future is None or future.done():
+            raise ValueError(_("Permission wait point is no longer active."))
+        payload = normalize_permission_payload(payload, request_id=request_id, session_id=session.session_id)
+        pending = WebPendingPermission(
+            request_id=request_id,
+            session_id=session.session_id,
+            payload=payload,
+            future=future,
+            created_at=_utc_now(),
+            audit_event=permission_event,
+        )
+        source_frame = getattr(permission_event, "continuation_frame", None)
+        if not isinstance(source_frame, Mapping):
+            raise ValueError("permission_resume_invalid: continuation frame is missing")
+        store = PermissionWaitCheckpointStore(session.cwd, session.session_id, storage=self.storage)
+        audit_context = permission_event.audit_context if isinstance(permission_event.audit_context, Mapping) else {}
+        frame = canonicalize_permission_continuation_frame(source_frame, audit_context=audit_context)
+        principal_ref = audit_context.get("principal_ref")
+        region = audit_context.get("region")
+        record = build_permission_checkpoint(
+            session_id=session.session_id,
+            task_id=session.task_id if permission_class == "pipeline" else None,
+            context_id=session.context_id or session.web_session_id,
+            input_id=request_id,
+            tool_use_id=str(permission_event.tool_use_id),
+            tool_name=str(permission_event.tool_name),
+            tool_input=permission_event.tool_input,
+            permission_class=permission_class,
+            continuation_frame=frame,
+            policy=self.permission_wait_policy,
+            principal_ref=principal_ref if isinstance(principal_ref, str) else None,
+            region=region if isinstance(region, str) else None,
+            pipeline_coordinates=pipeline_coordinates,
+        )
+        previous_boundary_id = frame.get("previousBoundaryId")
+        if isinstance(previous_boundary_id, str) and previous_boundary_id:
+            store.create_successor(record, previous_boundary_id=previous_boundary_id)
+            self._release_replaced_permission_boundary(session, previous_boundary_id)
+        else:
+            store.create(record)
+        pending.boundary_id = str(record["boundaryId"])
+        pending.checkpoint_store = store
+        permission_event.boundary_id = pending.boundary_id
+        self.permission_wait_coordinator.register_live(record=record, store=store, future=future)
+        session.pending_permissions[request_id] = pending
+        session.events.append("permission.request", pending.to_dict())
+        return request_id
+
+    def _release_replaced_permission_boundary(self, session: WebSession, boundary_id: str) -> None:
+        """Mirror an atomic successor checkpoint swap in process-local Web state."""
+
+        self.permission_wait_coordinator.unregister_live(boundary_id)
+        for request_id, pending in list(session.pending_permissions.items()):
+            if pending.boundary_id == boundary_id:
+                session.pending_permissions.pop(request_id, None)
+        session.shutdown_preserved_permission_boundaries.discard(boundary_id)
+
+    def _restore_permission_requests(self, session: WebSession) -> None:
+        """Rehydrate safe browser prompts from orphaned local checkpoints."""
+
+        try:
+            store = PermissionWaitCheckpointStore(session.cwd, session.session_id, storage=self.storage)
+            records = store.list_active()
+        except ValueError:
+            return
+        for record in records:
+            if record.get("permissionClass") not in {"normal", "pipeline"}:
+                continue
+            if record.get("permissionClass") == "pipeline" and session.mode != "pipeline":
+                continue
+            boundary_id = str(record.get("boundaryId") or "")
+            input_id = str(record.get("inputId") or "")
+            if not boundary_id or not input_id or input_id in session.pending_permissions:
+                continue
+            try:
+                record = store.reconcile_deadline(
+                    boundary_id,
+                    grace_seconds=self.permission_wait_policy.timeout_grace_seconds,
+                    live_owner=False,
+                )
+            except ValueError:
+                continue
+            payload = normalize_permission_payload(
+                {
+                    "turnId": "",
+                    "toolName": str(record.get("toolName") or ""),
+                    "toolUseId": str(record.get("toolUseId") or ""),
+                    "toolInput": {},
+                    "message": _("Allow {}?").format(str(record.get("toolName") or "tool")),
+                    "suggestions": [],
+                    "allowAlways": False,
+                    "resumable": True,
+                    "permissionWaitStatus": str(record.get("phase") or "").lower(),
+                },
+                request_id=input_id,
+                session_id=session.session_id,
+            )
+            session.pending_permissions[input_id] = WebPendingPermission(
+                request_id=input_id,
+                session_id=session.session_id,
+                payload=payload,
+                future=_new_future(),
+                created_at=str(record.get("createdAt") or _utc_now()),
+                boundary_id=boundary_id,
+                checkpoint_store=store,
+            )
+
+    def restore_permission_requests(self, session: WebSession | str) -> None:
+        self._restore_permission_requests(self._resolve_session_arg(session))
+
+    async def resolve_durable_permission(
+        self,
+        request_id: str,
+        answer: dict[str, Any],
+        *,
+        session_id: str,
+        audit_event_rebuilder: Callable[[WebSession, Mapping[str, Any], Any], Awaitable[Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Claim a durable browser decision and report whether runtime recovery is needed."""
+
+        session = next(
+            (
+                candidate
+                for candidate in self._sessions.values()
+                if candidate.session_id == session_id and request_id in candidate.pending_permissions
+            ),
+            None,
+        )
+        if session is None:
+            session = next(
+                (candidate for candidate in self._sessions.values() if candidate.session_id == session_id),
+                None,
+            )
+            if session is None:
+                return {"requestId": request_id, "resolved": False}
+            store = self.permission_checkpoint_store(session)
+            receipt = store.find_by_input_id(request_id)
+            if receipt is None:
+                return {"requestId": request_id, "resolved": False}
+            choice = str(answer["choice"])
+            requested_value = "allow_once" if permission_choice_to_allowed(choice) else "deny"
+            decision = receipt.get("decision")
+            if not isinstance(decision, Mapping) or decision.get("value") != requested_value:
+                raise ValueError("permission_resume_invalid: permission response conflicts with receipt")
+            return {
+                "requestId": request_id,
+                "resolved": True,
+                "duplicate": True,
+                "decision": decision["value"],
+                "needsRecovery": receipt.get("phase") != "RESOLVED",
+                "checkpoint": receipt if receipt.get("phase") != "RESOLVED" else None,
+                "webSessionId": session.web_session_id,
+            }
+        pending = session.pending_permissions.get(request_id)
+        if pending is None or pending.boundary_id is None or pending.checkpoint_store is None:
+            return self.resolve_permission(request_id, answer, session_id=session_id)
+        choice = str(answer["choice"])
+        requested_value = "allow_once" if permission_choice_to_allowed(choice) else "deny"
+        coordinator = self.permission_wait_coordinator
+        store = pending.checkpoint_store
+        boundary_id = pending.boundary_id
+        checkpoint = store.load(boundary_id)
+        if checkpoint is None:
+            raise ValueError("permission_resume_invalid: permission checkpoint is unavailable")
+        persisted_decision = checkpoint.get("decision")
+        audit_already_final = False
+        if isinstance(persisted_decision, Mapping) and persisted_decision.get("status") in {"claimed", "applied"}:
+            if persisted_decision.get("value") != requested_value:
+                raise ValueError("permission_resume_invalid: permission response conflicts with checkpoint")
+            audit_already_final = persisted_decision.get("auditStatus") in {"recorded", "failed"}
+        recovered_audit_event = pending.audit_event
+        if recovered_audit_event is None and not audit_already_final:
+            recovered = recover_permission_audit_boundary(
+                checkpoint,
+                cwd=session.cwd,
+                session_id=session.session_id,
+                storage=self.storage,
+            )
+            if recovered is None:
+                raise ValueError("permission_resume_invalid: canonical permission request changed")
+            if audit_event_rebuilder is None:
+                raise ValueError("permission_resume_invalid: permission audit runtime is unavailable")
+            recovered_audit_event = await audit_event_rebuilder(session, checkpoint, recovered)
+        if recovered_audit_event is not None:
+            permission_audit = getattr(recovered_audit_event.permission_result, "audit", None)
+            principal_ref, region = permission_execution_identity(
+                tool_name=recovered_audit_event.tool_name,
+                tool_input=recovered_audit_event.tool_input,
+                permission_audit=permission_audit,
+            )
+            if principal_ref != checkpoint.get("principalRef") or region != checkpoint.get("region"):
+                raise ValueError("permission_resume_invalid: cloud execution identity changed")
+
+        def audit_new_claim(value: str) -> bool:
+            if recovered_audit_event is None:
+                return audit_already_final
+            from iac_code.services.permissions.audit import emit_permission_boundary_audit
+
+            emitted = emit_permission_boundary_audit(
+                recovered_audit_event,
+                session_id=session.session_id,
+                decision="allow" if value == "allow_once" else "deny",
+                scope="session_rule" if choice in {PERMISSION_ALWAYS_ALLOW, PERMISSION_ALWAYS_DENY} else "once",
+                source="web_prompt",
+                reason_type="prompt_selection",
+                reason_detail=choice,
+                rule=_permission_audit_rule(pending.payload),
+            )
+            if emitted:
+                recovered_audit_event.permission_decision_audited = True
+            return emitted
+
+        needs_recovery = not coordinator.has_live_boundary(boundary_id)
+        decision_created = False
+        if needs_recovery:
+            record = store.reconcile_deadline(
+                boundary_id,
+                grace_seconds=self.permission_wait_policy.timeout_grace_seconds,
+                live_owner=False,
+            )
+            record, decision_created = store.claim_decision(boundary_id, value=requested_value, source="user")
+            decision = record.get("decision")
+            if isinstance(decision, Mapping):
+                claim_id = str(record["decision"]["claimId"])
+                record, _audit_created = store.run_claim_audit_once(
+                    boundary_id,
+                    claim_id=claim_id,
+                    audit=audit_new_claim,
+                )
+        else:
+            record, decision_created = await coordinator.claim_live(
+                boundary_id=boundary_id,
+                value=requested_value,
+                source="user",
+                on_new_claim=audit_new_claim,
+            )
+            needs_recovery = record.get("phase") in {"SUSPENDING", "SUSPENDED", "RESTORING"}
+        decision = record.get("decision")
+        accepted_value = decision.get("value") if isinstance(decision, Mapping) else requested_value
+        audit_status = decision.get("auditStatus") if isinstance(decision, Mapping) else None
+        if (
+            decision_created
+            and choice in {PERMISSION_ALWAYS_ALLOW, PERMISSION_ALWAYS_DENY}
+            and accepted_value == requested_value
+            and (accepted_value != "allow_once" or audit_status == "recorded")
+        ):
+            self._apply_permission_choice(session, pending, choice)
+        if needs_recovery:
+            session.pending_permissions.pop(request_id, None)
+        if decision_created:
+            session.events.append(
+                "permission.resolved",
+                {"requestId": request_id, "answer": {"choice": choice}},
+            )
+        return {
+            "requestId": request_id,
+            "resolved": True,
+            "duplicate": not decision_created,
+            "needsRecovery": needs_recovery,
+            "decision": accepted_value,
+            "checkpoint": record if needs_recovery else None,
+            "webSessionId": session.web_session_id,
+        }
+
     def get_pending_permission(
         self,
         request_id: str,
@@ -2982,6 +3311,30 @@ class WebSessionManager:
             session.pending_permissions.pop(request_id, None)
             return
 
+    def orphan_durable_permission_request(self, request_id: str, *, session_id: str | None = None) -> None:
+        """Release only process-local ownership, preserving restart recovery."""
+
+        for session in self._sessions.values():
+            pending = session.pending_permissions.get(request_id)
+            if pending is None:
+                continue
+            if session_id is not None and pending.session_id != session_id:
+                return
+            if pending.boundary_id is None or pending.checkpoint_store is None:
+                return
+            self.permission_wait_coordinator.unregister_live(pending.boundary_id)
+            try:
+                pending.checkpoint_store.reconcile_deadline(
+                    pending.boundary_id,
+                    grace_seconds=self.permission_wait_policy.timeout_grace_seconds,
+                    live_owner=False,
+                )
+            except ValueError:
+                # A concurrent answer/receipt is authoritative; shutdown must
+                # never overwrite it with cancellation state.
+                pass
+            return
+
     def cancel_permission_request(self, request_id: str, *, session_id: str | None = None) -> None:
         """Resolve a pending permission as canceled so browser state can clear it."""
         for session in self._sessions.values():
@@ -2990,8 +3343,19 @@ class WebSessionManager:
                 continue
             if session_id is not None and pending.session_id != session_id:
                 return
+            if pending.boundary_id is not None and pending.checkpoint_store is not None:
+                try:
+                    pending.checkpoint_store.cancel(pending.boundary_id)
+                except ValueError:
+                    # A decision already claimed under the same checkpoint lock
+                    # wins; do not hide or cancel its continuation.
+                    return
+                self.permission_wait_coordinator.unregister_live(pending.boundary_id)
+                if not pending.future.done():
+                    pending.future.cancel()
+            else:
+                _set_future_result(pending.future, False)
             session.pending_permissions.pop(request_id, None)
-            _set_future_result(pending.future, False)
             session.events.append(
                 "permission.resolved",
                 {
@@ -3229,9 +3593,11 @@ class WebSessionManager:
         *,
         permission_result: bool = False,
         question_result: dict[str, str] | None = None,
+        preserve_durable: bool = False,
     ) -> None:
         """Resolve and clear pending futures when the owning turn cannot continue."""
         session = self._resolve_session_arg(session)
+        preserve_durable = preserve_durable or bool(session.shutdown_preserved_permission_boundaries)
         for pending in list(session.pending_elicitations.values()):
             session.pending_elicitations.pop(pending.request_id, None)
             _set_future_result(pending.future, {"action": "cancel"})
@@ -3243,8 +3609,23 @@ class WebSessionManager:
                 },
             )
         for pending in list(session.pending_permissions.values()):
+            if pending.boundary_id is not None and preserve_durable:
+                self.orphan_durable_permission_request(
+                    pending.request_id,
+                    session_id=session.session_id,
+                )
+                continue
+            if pending.boundary_id is not None and pending.checkpoint_store is not None:
+                try:
+                    pending.checkpoint_store.cancel(pending.boundary_id)
+                except ValueError:
+                    continue
+                self.permission_wait_coordinator.unregister_live(pending.boundary_id)
+                if not pending.future.done():
+                    pending.future.cancel()
+            else:
+                _set_future_result(pending.future, permission_result)
             session.pending_permissions.pop(pending.request_id, None)
-            _set_future_result(pending.future, permission_result)
             session.events.append(
                 "permission.resolved",
                 {
@@ -3263,6 +3644,15 @@ class WebSessionManager:
                     "answer": answer,
                 },
             )
+
+    def cancel_pending_requests_for_shutdown(self, session: WebSession | str) -> None:
+        """Cancel ephemeral inputs while leaving durable permissions orphan-recoverable."""
+
+        session = self._resolve_session_arg(session)
+        session.shutdown_preserved_permission_boundaries.update(
+            pending.boundary_id for pending in session.pending_permissions.values() if pending.boundary_id is not None
+        )
+        self.cancel_pending_requests_for_session(session)
 
     def classify_queued_input(self, session: WebSession | str, text: str) -> dict[str, Any]:
         """Classify mid-turn user input as a queued message or composer draft."""

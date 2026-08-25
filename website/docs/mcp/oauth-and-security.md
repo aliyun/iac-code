@@ -72,11 +72,13 @@ The model can call that tool to provide the user with the OAuth URL. After the f
 
 IaC Code stores OAuth tokens and MCP client secrets through `MCPSecretStorage`:
 
-1. It tries the operating-system keyring when available.
-2. If keyring is disabled or unavailable, it stores encrypted fallback data under `<config-dir>/mcp/`.
-3. File permissions are restricted for the fallback key and encrypted secret store.
+1. It stores encrypted data in `<config-dir>/mcp/secrets.json.enc`.
+2. The encryption key is stored in `<config-dir>/mcp/secrets.key`.
+3. File permissions are restricted for both files.
 
-Set `IAC_CODE_MCP_DISABLE_KEYRING=1` to force encrypted fallback storage, which is useful for isolated tests.
+MCP secret storage does not access the operating-system keyring, avoiding system authorization prompts during
+background status checks. Auth state that existed only in the keyring is not migrated automatically; authorize the
+MCP server once to create the encrypted local entry.
 
 Use this command to clear stored auth state:
 
@@ -93,7 +95,7 @@ iac-code mcp remove secure-reviewer --scope user
 ```
 
 Use `reset-auth` when you want to reauthorize an existing server. Use `mcp remove` when the server config itself
-should disappear; both paths clear keyring and encrypted-fallback entries managed by `MCPSecretStorage`.
+should disappear; both paths clear encrypted entries managed by `MCPSecretStorage`.
 
 ## Project Trust
 

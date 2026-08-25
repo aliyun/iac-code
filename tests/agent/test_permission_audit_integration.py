@@ -252,6 +252,8 @@ async def test_agent_loop_prompt_event_carries_internal_audit_context(tmp_path):
         "cwd": str(tmp_path),
         "settings": settings,
         "metadata": metadata,
+        "principal_ref": None,
+        "region": None,
     }
 
 
@@ -430,6 +432,8 @@ async def test_agent_loop_prompt_event_carries_transcript_audit_context(tmp_path
         "cwd": str(tmp_path),
         "settings": settings,
         "metadata": metadata,
+        "principal_ref": None,
+        "region": None,
         "audit_log_path": str(audit_log_path),
     }
 
@@ -780,6 +784,68 @@ async def test_agent_loop_no_prompt_audit_populates_redacted_input_when_enabled(
         fingerprint_text("access_key_secret"): {"redacted": True},
     }
     assert settings_seen == [settings]
+
+
+@pytest.mark.asyncio
+async def test_restart_audit_event_rebuilds_current_metadata_settings_and_rejects_snapshot(tmp_path):
+    metadata = _audit_metadata(
+        scope="settings_rule",
+        rule_source="project_settings",
+        rule="fake_permission(payload)",
+        reason_detail="current rule",
+    )
+    settings = PermissionAuditSettings(include_tool_input=True, max_file_bytes=321, max_files=3)
+
+    class PreparedPermissionTool(FakePermissionTool):
+        def prepare_invocation_input(self, tool_input: dict[str, Any]) -> dict[str, Any]:
+            return {**tool_input, "region_id": "cn-current"}
+
+    registry = ToolRegistry()
+    registry.register(
+        PreparedPermissionTool(
+            PermissionResult(
+                behavior="ask",
+                audit=metadata,
+                snapshot_id="snapshot-audit-only",
+            )
+        )
+    )
+    loop = AgentLoop(
+        provider_manager=FakeProvider([]),
+        system_prompt="test",
+        tool_registry=registry,
+        cwd=str(tmp_path),
+        session_id="session-restart-audit",
+        permission_context=ToolPermissionContext(cwd=str(tmp_path), audit_settings=settings),
+    )
+    rejected: list[str | None] = []
+    original_reject = loop._reject_owned_contract_snapshot
+
+    def capture_reject(snapshot_id: str | None) -> None:
+        rejected.append(snapshot_id)
+        original_reject(snapshot_id)
+
+    loop._reject_owned_contract_snapshot = capture_reject
+
+    event = await loop.rebuild_permission_audit_event(
+        tool_name="fake_permission",
+        tool_input={"payload": "raw"},
+        tool_use_id="tool-restart",
+        audit_context={
+            "session_id": "session-restart-audit",
+            "cwd": str(tmp_path),
+            "audit_log_path": str(tmp_path / "canonical-audit.jsonl"),
+        },
+    )
+
+    assert event.tool_input == {"payload": "raw", "region_id": "cn-current"}
+    assert event.permission_result is not None
+    assert event.permission_result.audit is metadata
+    assert event.audit_context["metadata"] is metadata
+    assert event.audit_context["settings"] is settings
+    assert event.audit_context["audit_log_path"] == str(tmp_path / "canonical-audit.jsonl")
+    assert rejected == ["snapshot-audit-only"]
+    assert "snapshot-audit-only" not in loop._owned_contract_snapshot_ids
 
 
 @pytest.mark.asyncio

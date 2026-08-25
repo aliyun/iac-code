@@ -656,6 +656,105 @@ class TestPipeline:
         assert r.audit.is_read_only is False
 
     @pytest.mark.asyncio
+    async def test_bare_aliyun_api_ask_does_not_prompt_for_read_only_action(self):
+        r = await check_tool_permission(
+            AliyunApi(),
+            {"product": "ecs", "action": "DescribeAvailableResource"},
+            _ctx(ask={"user_settings": ["aliyun_api"]}),
+        )
+
+        assert r.behavior == "allow"
+        assert r.reason is not None
+        assert r.reason.type == "read_only"
+        assert r.audit is not None
+        assert r.audit.scope == "read_only"
+        assert r.audit.operation["action"] == "DescribeAvailableResource"
+        assert r.audit.is_read_only is True
+
+    @pytest.mark.asyncio
+    async def test_bare_aliyun_api_ask_still_prompts_for_write_action(self):
+        r = await check_tool_permission(
+            AliyunApi(),
+            {"product": "ros", "action": "CreateStack"},
+            _ctx(ask={"user_settings": ["aliyun_api"]}),
+        )
+
+        assert r.behavior == "ask"
+        assert r.audit is not None
+        assert r.audit.rule_source == "user_settings"
+        assert r.audit.operation["action"] == "CreateStack"
+        assert r.audit.is_read_only is False
+
+    @pytest.mark.asyncio
+    async def test_bare_operation_scoped_ask_does_not_prompt_for_read_only_action(self):
+        read_audit = PermissionAuditMetadata(
+            scope="read_only",
+            source="tool",
+            reason_type="read_only",
+            is_read_only=True,
+            operation={"product": "ros", "action": "GetTemplate"},
+        )
+        result = PermissionResult(
+            behavior="allow",
+            reason=PermissionDecisionReason(type="read_only", detail="read-only operation"),
+            audit=read_audit,
+        )
+
+        r = await check_tool_permission(
+            RuntimeOperationScopedResultTool(result),
+            {"action": "GetTemplate"},
+            _ctx(ask={"user_settings": ["ros_template"]}),
+        )
+
+        assert r is result
+
+    @pytest.mark.asyncio
+    async def test_bare_operation_scoped_ask_still_prompts_for_write_action(self):
+        write_audit = PermissionAuditMetadata(
+            scope="once",
+            source="tool",
+            is_read_only=False,
+            operation={"product": "ros", "action": "UpdateTemplate"},
+        )
+        result = PermissionResult(behavior="allow", audit=write_audit)
+
+        r = await check_tool_permission(
+            RuntimeOperationScopedResultTool(result),
+            {"action": "UpdateTemplate"},
+            _ctx(ask={"user_settings": ["ros_template"]}),
+        )
+
+        assert r.behavior == "ask"
+        assert r.audit is not None
+        assert r.audit.rule == "ros_template"
+        assert r.audit.is_read_only is False
+
+    @pytest.mark.asyncio
+    async def test_explicit_non_cloud_auto_allow_keeps_only_non_read_only_aliyun_api_interactive(self):
+        ctx = _ctx(
+            allow={"user_settings": ["read_file", "write_file"]},
+            ask={"user_settings": ["aliyun_api"]},
+        )
+
+        assert (await check_tool_permission(FakeReadTool(), {}, ctx)).behavior == "allow"
+        assert (await check_tool_permission(FakeWriteTool(), {}, ctx)).behavior == "allow"
+        read_only = await check_tool_permission(
+            AliyunApi(),
+            {"product": "ecs", "action": "DescribeAvailableResource"},
+            ctx,
+        )
+        cloud_write = await check_tool_permission(
+            AliyunApi(),
+            {"product": "ros", "action": "CreateStack"},
+            ctx,
+        )
+
+        assert read_only.behavior == "allow"
+        assert read_only.audit is not None and read_only.audit.is_read_only is True
+        assert cloud_write.behavior == "ask"
+        assert cloud_write.audit is not None and cloud_write.audit.is_read_only is False
+
+    @pytest.mark.asyncio
     async def test_bypass_mode_allows(self):
         ctx = _ctx(mode=PermissionMode.BYPASS_PERMISSIONS)
         r = await check_tool_permission(FakeWriteTool(), {}, ctx)
@@ -725,7 +824,29 @@ class TestPipeline:
         assert r.audit is rule_audit
 
     @pytest.mark.asyncio
-    async def test_operation_scoped_bypass_preserves_sticky_safety_ask(self):
+    async def test_operation_scoped_bypass_preserves_explicit_ask_rule(self):
+        rule_audit = PermissionAuditMetadata(
+            scope="settings_rule",
+            source="permission_pipeline",
+            rule_source="user_settings",
+            rule="create:run-stack",
+            reason_type="rule",
+            is_read_only=False,
+            operation={"product": "ros", "action": "CreateStack"},
+        )
+        reason = PermissionDecisionReason(type="rule", detail="matched ask rule")
+        result = PermissionResult(behavior="ask", reason=reason, audit=rule_audit)
+
+        r = await check_tool_permission(
+            RuntimeOperationScopedResultTool(result),
+            {"action": "CreateStack"},
+            _ctx(mode=PermissionMode.BYPASS_PERMISSIONS),
+        )
+
+        assert r is result
+
+    @pytest.mark.asyncio
+    async def test_operation_scoped_bypass_allows_sticky_safety_ask_without_explicit_rule(self):
         reason = PermissionDecisionReason(type="path_constraint", detail="path_constraint")
         r = await check_tool_permission(
             RuntimeOperationScopedResultTool(PermissionResult(behavior="ask", reason=reason)),
@@ -733,8 +854,24 @@ class TestPipeline:
             _ctx(mode=PermissionMode.BYPASS_PERMISSIONS),
         )
 
-        assert r.behavior == "ask"
-        assert r.reason is reason
+        assert r.behavior == "allow"
+        assert r.reason is None
+        assert r.audit is not None
+        assert r.audit.reason_type == "bypass_permissions"
+
+    @pytest.mark.asyncio
+    async def test_bypass_mode_allows_non_cloud_safety_check(self):
+        reason = PermissionDecisionReason(type="safety_check", detail="safety_check")
+        r = await check_tool_permission(
+            RuntimeResultTool(PermissionResult(behavior="ask", reason=reason)),
+            {},
+            _ctx(mode=PermissionMode.BYPASS_PERMISSIONS),
+        )
+
+        assert r.behavior == "allow"
+        assert r.reason is None
+        assert r.audit is not None
+        assert r.audit.reason_type == "bypass_permissions"
 
     @pytest.mark.parametrize(
         ("tool", "tool_input"),

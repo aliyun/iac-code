@@ -72,11 +72,13 @@ Das Modell kann dieses Tool aufrufen, um dem Benutzer die OAuth-URL bereitzustel
 
 IaC-Code speichert OAuth-Tokens und MCP-Client-Geheimnisse über `MCPSecretStorage`:
 
-1. Es versucht den Betriebssystemschlüsselbund, sofern verfügbar.
-2. Wenn der Schlüsselring deaktiviert oder nicht verfügbar ist, speichert er verschlüsselte Fallback-Daten unter `<config-dir>/mcp/`.
-3. Die Dateiberechtigungen sind für den Fallback-Schlüssel und den verschlüsselten Geheimspeicher eingeschränkt.
+1. Verschlüsselte Daten werden in `<config-dir>/mcp/secrets.json.enc` gespeichert.
+2. Der Verschlüsselungsschlüssel liegt in `<config-dir>/mcp/secrets.key`.
+3. Die Dateiberechtigungen sind für beide Dateien eingeschränkt.
 
-Legen Sie `IAC_CODE_MCP_DISABLE_KEYRING=1` fest, um einen verschlüsselten Fallback-Speicher zu erzwingen, was für isolierte Tests nützlich ist.
+Der MCP-Geheimspeicher greift nicht auf den Betriebssystemschlüsselbund zu. Dadurch entstehen bei
+Statusprüfungen im Hintergrund keine Systemdialoge. Nur im Schlüsselbund vorhandene Anmeldedaten werden nicht
+automatisch migriert; autorisieren Sie den MCP-Server einmal neu, um den lokalen verschlüsselten Eintrag anzulegen.
 
 Verwenden Sie diesen Befehl, um den gespeicherten Authentifizierungsstatus zu löschen:
 
@@ -93,8 +95,8 @@ iac-code mcp remove secure-reviewer --scope user
 ```
 
 Verwenden Sie `reset-auth`, wenn Sie einen bestehenden server neu autorisieren moechten. Verwenden Sie `mcp remove`,
-wenn auch der server config verschwinden soll; beide Pfade loeschen keyring und encrypted fallback entries, die
-`MCPSecretStorage` verwaltet.
+wenn auch der server config verschwinden soll; beide Pfade loeschen die von `MCPSecretStorage` verwalteten
+verschluesselten Eintraege.
 
 ## Project Trust
 

@@ -8,7 +8,7 @@ import os
 import time
 import uuid
 from collections import deque
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -26,6 +26,7 @@ from iac_code.agent.message import (
 )
 from iac_code.i18n import _
 from iac_code.services.context_manager import ContextManager
+from iac_code.services.permission_wait import canonical_digest, permission_execution_identity
 from iac_code.services.permissions.audit import (
     PermissionAuditRecord,
     build_input_summary,
@@ -61,6 +62,8 @@ from iac_code.types.stream_events import (
     CompactionEvent,
     MessageEndEvent,
     PermissionRequestEvent,
+    PermissionWaitOutcome,
+    PermissionWaitSuspended,
     QueuedInputSubmittedEvent,
     StreamEvent,
     SubAgentToolEvent,
@@ -1084,6 +1087,519 @@ class AgentLoop:
                         serialize_output_messages("".join(final_text_chunks), final_stop_reason),
                     )
 
+    async def resume_permission_boundary(
+        self,
+        checkpoint: dict[str, Any],
+    ) -> AsyncGenerator[StreamEvent, None]:
+        """Resume the exact trailing assistant tool batch from a durable wait.
+
+        This intentionally bypasses ``SessionStorage.repair_interrupted``.  The
+        trailing assistant message is not an interrupted execution: it is the
+        canonical source for a permission continuation frame.
+        """
+
+        from iac_code.agent.message import Message
+
+        frame = checkpoint.get("continuationFrame")
+        decision = checkpoint.get("decision")
+        if not isinstance(frame, dict) or not isinstance(decision, dict):
+            raise ValueError("permission_resume_invalid: continuation frame is missing")
+        if decision.get("status") not in {"claimed", "applied"} or decision.get("value") not in {
+            "allow_once",
+            "deny",
+        }:
+            raise ValueError("permission_resume_invalid: permission decision is missing")
+
+        messages = self.context_manager.get_messages()
+        if not messages or messages[-1].role != "assistant":
+            raise ValueError("permission_resume_invalid: assistant tool message is missing")
+        message_index = len(messages) - 1
+        expected_message_ref = f"session.jsonl:{message_index}"
+        if self._transcript_id is not None:
+            expected_message_ref = f"pipeline/transcripts/{self._transcript_id}/session.jsonl:{message_index}"
+        if frame.get("assistantMessageRef") != expected_message_ref:
+            raise ValueError("permission_resume_invalid: assistant message reference changed")
+        assistant_message = messages[-1]
+        tool_uses = assistant_message.get_tool_use_blocks()
+        ordered_ids = [tool_use.id for tool_use in tool_uses]
+        if ordered_ids != frame.get("orderedToolUseIds"):
+            raise ValueError("permission_resume_invalid: tool ordering changed")
+        assistant_digest = canonical_digest(
+            [block.model_dump(mode="json") for block in assistant_message.content]
+            if isinstance(assistant_message.content, list)
+            else assistant_message.content
+        )
+        if assistant_digest != frame.get("assistantMessageDigest"):
+            raise ValueError("permission_resume_invalid: assistant message changed")
+        current_index = frame.get("currentIndex")
+        if isinstance(current_index, bool) or not isinstance(current_index, int):
+            raise ValueError("permission_resume_invalid: current tool index is invalid")
+        if current_index < 0 or current_index >= len(tool_uses):
+            raise ValueError("permission_resume_invalid: current tool index is invalid")
+        if tool_uses[current_index].id != checkpoint.get("toolUseId"):
+            raise ValueError("permission_resume_invalid: current tool correlation changed")
+        if canonical_digest(
+            {"name": tool_uses[current_index].name, "input": tool_uses[current_index].input}
+        ) != checkpoint.get("payloadDigest"):
+            raise ValueError("permission_resume_invalid: tool payload changed")
+        frame_payload_digest = frame.get("currentPayloadDigest")
+        if frame_payload_digest is not None and frame_payload_digest != checkpoint.get("payloadDigest"):
+            raise ValueError("permission_resume_invalid: continuation payload changed")
+
+        requests: list[ToolCallRequest] = []
+        event_queues: dict[str, asyncio.Queue[Any]] = {}
+        tools_with_progress = {"agent", "ros_stack", "ros_stack_instances"}
+        for tool_use in tool_uses:
+            tool = self.tool_registry.get(tool_use.name)
+            invocation_input = tool_use.input
+            prepare_invocation_input = getattr(tool, "prepare_invocation_input", None)
+            if callable(prepare_invocation_input):
+                invocation_input = prepare_invocation_input(invocation_input)
+            queue = None
+            if tool_use.name in tools_with_progress or (tool is not None and tool.needs_event_queue()):
+                queue = asyncio.Queue()
+                event_queues[tool_use.id] = queue
+            requests.append(
+                ToolCallRequest(
+                    id=tool_use.id,
+                    name=tool_use.name,
+                    input=invocation_input,
+                    event_queue=queue,
+                    invocation_binding=InvocationBinding(
+                        runtime_nonce=self._runtime_nonce,
+                        session_id=self._session_id,
+                        tool_use_id=tool_use.id,
+                        tool_name=tool_use.name,
+                        canonical_input_sha256=canonical_input_sha256(invocation_input),
+                    ),
+                )
+            )
+
+        context = ToolContext(
+            cwd=self._cwd,
+            trusted_read_directories=list(self._tool_context_trusted_read_directories),
+            relative_read_directories=list(self._tool_context_relative_read_directories),
+            pipeline_mode=self._pipeline_mode,
+            env_overrides=dict(self._tool_context_env_overrides),
+            telemetry_attributes=dict(self._telemetry_attributes),
+        )
+        recorded_decisions = frame.get("decisions")
+        if not isinstance(recorded_decisions, list) or len(recorded_decisions) != len(requests):
+            raise ValueError("permission_resume_invalid: tool decisions changed")
+
+        allowed_requests: list[ToolCallRequest] = []
+        denied_by_id: dict[str, ToolResult] = {}
+        continuation_decisions = [dict(item) for item in recorded_decisions if isinstance(item, dict)]
+        if len(continuation_decisions) != len(requests):
+            raise ValueError("permission_resume_invalid: tool decisions changed")
+
+        for request_index, request in enumerate(requests):
+            permission, audit_context = await self._permission_for_recovered_request(request, context)
+            recorded = continuation_decisions[request_index]
+            state = recorded.get("state")
+            source = recorded.get("source")
+            if request_index == current_index:
+                if permission is None:
+                    raise ValueError("permission_resume_invalid: current tool is unavailable")
+                principal_ref, region = permission_execution_identity(
+                    tool_name=request.name,
+                    tool_input=request.input,
+                    permission_audit=getattr(permission, "audit", None),
+                )
+                if principal_ref != checkpoint.get("principalRef") or region != checkpoint.get("region"):
+                    raise ValueError("permission_resume_invalid: cloud execution identity changed")
+                state = "allow" if decision["value"] == "allow_once" else "deny"
+                source = "user"
+                if permission.behavior != "deny":
+                    additional_decision: Literal["allow", "deny"] = "allow" if state == "allow" else "deny"
+                    additional_audit_ok = _emit_permission_audit_items(
+                        session_id=self._session_id,
+                        cwd=context.cwd,
+                        request=request,
+                        audits=_permission_audits(permission, include_primary=False),
+                        decision=additional_decision,
+                        settings=audit_context.get("settings"),
+                        audit_log_path=audit_context.get("audit_log_path"),
+                    )
+                    if state == "allow" and not additional_audit_ok:
+                        state = "deny"
+                        source = "audit_failure"
+                        recorded["deniedResult"] = _("Permission denied.")
+                if state == "allow":
+                    recorded.update(principalRef=principal_ref, region=region)
+            elif request_index < current_index and state == "allow":
+                if permission is None:
+                    state = "deny"
+                    source = "missing_tool"
+                    recorded["deniedResult"] = _("Permission denied.")
+                elif source == "user":
+                    principal_ref, region = permission_execution_identity(
+                        tool_name=request.name,
+                        tool_input=request.input,
+                        permission_audit=getattr(permission, "audit", None),
+                    )
+                    if (
+                        "principalRef" not in recorded
+                        or "region" not in recorded
+                        or principal_ref != recorded.get("principalRef")
+                        or region != recorded.get("region")
+                    ):
+                        state = "deny"
+                        source = "identity_changed"
+                        recorded["deniedResult"] = _("Permission denied.")
+                elif source != "policy":
+                    state = "deny"
+                    source = "permission_changed"
+                    recorded["deniedResult"] = _("Permission denied.")
+
+                if (
+                    state == "allow"
+                    and permission is not None
+                    and permission.behavior not in {"allow", "deny"}
+                    and source == "policy"
+                ):
+                    state = "deny"
+                    source = "permission_changed"
+                    recorded["deniedResult"] = _("Permission denied.")
+            elif request_index > current_index:
+                if permission is None:
+                    state = "allow"
+                    source = "missing_tool"
+                elif permission.behavior == "allow":
+                    audit_ok = _emit_no_prompt_permission_audit(
+                        session_id=self._session_id,
+                        cwd=context.cwd,
+                        request=request,
+                        permission=permission,
+                        decision="allow",
+                        settings=audit_context.get("settings"),
+                        audit_log_path=audit_context.get("audit_log_path"),
+                    )
+                    if audit_ok:
+                        state = "allow"
+                        source = "policy"
+                    else:
+                        state = "deny"
+                        source = "audit_failure"
+                        recorded["deniedResult"] = _("Permission denied.")
+                elif permission.behavior == "deny":
+                    _emit_no_prompt_permission_audit(
+                        session_id=self._session_id,
+                        cwd=context.cwd,
+                        request=request,
+                        permission=permission,
+                        decision="deny",
+                        settings=audit_context.get("settings"),
+                        audit_log_path=audit_context.get("audit_log_path"),
+                    )
+                    state = "deny"
+                    source = "policy"
+                    recorded["deniedResult"] = permission.message or _("Permission denied.")
+                else:
+                    state = "pending"
+                    source = None
+                    recorded.update(state=state, source=source)
+                    response_future: asyncio.Future[bool | PermissionWaitOutcome] = (
+                        asyncio.get_running_loop().create_future()
+                    )
+                    permission_event = PermissionRequestEvent(
+                        tool_name=request.name,
+                        tool_input=request.input,
+                        tool_use_id=request.id,
+                        response_future=response_future,
+                        permission_result=permission,
+                        audit_context=audit_context,
+                        continuation_frame={
+                            **frame,
+                            "currentIndex": request_index,
+                            "currentPayloadDigest": canonical_digest(
+                                {"name": tool_uses[request_index].name, "input": tool_uses[request_index].input}
+                            ),
+                            "decisions": [dict(item) for item in continuation_decisions],
+                            "previousBoundaryId": checkpoint.get("boundaryId"),
+                        },
+                    )
+                    yield permission_event
+                    outcome = await asyncio.shield(response_future)
+                    if outcome is PermissionWaitOutcome.SUSPEND:
+                        raise PermissionWaitSuspended(permission_event.boundary_id)
+                    state = "allow" if bool(outcome) else "deny"
+                    source = "user"
+                    additional_audit_ok = _emit_permission_audit_items(
+                        session_id=self._session_id,
+                        cwd=context.cwd,
+                        request=request,
+                        audits=_permission_audits(permission, include_primary=False),
+                        decision="allow" if state == "allow" else "deny",
+                        settings=audit_context.get("settings"),
+                        audit_log_path=audit_context.get("audit_log_path"),
+                    )
+                    if state == "allow" and not additional_audit_ok:
+                        state = "deny"
+                        source = "audit_failure"
+                        recorded["deniedResult"] = _("Permission denied.")
+                    if state == "allow":
+                        principal_ref, region = permission_execution_identity(
+                            tool_name=request.name,
+                            tool_input=request.input,
+                            permission_audit=getattr(permission, "audit", None),
+                        )
+                        recorded.update(principalRef=principal_ref, region=region)
+
+            # A recovered user decision never overrides a policy that has since
+            # become a hard deny.  Persist that transition in the continuation
+            # frame before a later permission can create a successor boundary.
+            if state == "allow" and permission is not None and permission.behavior == "deny":
+                _emit_no_prompt_permission_audit(
+                    session_id=self._session_id,
+                    cwd=context.cwd,
+                    request=request,
+                    permission=permission,
+                    decision="deny",
+                    settings=audit_context.get("settings"),
+                    audit_log_path=audit_context.get("audit_log_path"),
+                )
+                state = "deny"
+                source = "policy"
+                recorded["deniedResult"] = permission.message or _("Permission denied.")
+            if state == "deny":
+                recorded.pop("principalRef", None)
+                recorded.pop("region", None)
+            recorded.update(state=state, source=source)
+            if state == "allow":
+                allowed_requests.append(request)
+            elif state == "deny":
+                denied_by_id[request.id] = ToolResult.error(
+                    str(recorded.get("deniedResult") or _("Permission denied."))
+                )
+                self._reject_owned_contract_snapshot(request.snapshot_id)
+            else:
+                raise ValueError("permission_resume_invalid: prior tool decision is incomplete")
+
+        public_path_roots = build_public_path_roots(
+            cwd=context.cwd,
+            additional_directories=context.additional_directories,
+            trusted_read_directories=context.trusted_read_directories,
+            relative_read_directories=context.relative_read_directories,
+        )
+        for request in requests:
+            denied = denied_by_id.get(request.id)
+            if denied is not None:
+                yield ToolResultEvent(
+                    tool_use_id=request.id,
+                    tool_name=request.name,
+                    result=denied.content,
+                    is_error=True,
+                    public_path_roots=public_path_roots,
+                )
+
+        executed_by_id: dict[str, ToolResult] = {}
+        if allowed_requests:
+            results = await self._tool_executor.execute_batch(allowed_requests, context)
+            for request, result in zip(allowed_requests, results):
+                executed_by_id[request.id] = result
+                processed = self._result_storage.process(request.id, result.content)
+                self._mark_read_memory_tool_result(request, result)
+                result_metadata = self._tool_result_event_metadata(result.metadata, processed)
+                result_metadata = self._tool_result_render_metadata(
+                    result_metadata,
+                    self.tool_registry.get(request.name),
+                    processed.content,
+                    is_error=result.is_error,
+                    tool_name=request.name,
+                    tool_input=request.input,
+                )
+                yield ToolResultEvent(
+                    tool_use_id=request.id,
+                    tool_name=request.name,
+                    result=processed.content,
+                    is_error=result.is_error,
+                    public_path_roots=public_path_roots,
+                    metadata=result_metadata,
+                )
+                result.content = processed.content
+                result.metadata = result_metadata
+
+        result_blocks: list[ToolResultBlock] = []
+        for request in requests:
+            denied = denied_by_id.get(request.id)
+            if denied is not None:
+                result_blocks.append(ToolResultBlock(tool_use_id=request.id, content=denied.content, is_error=True))
+                continue
+            result = executed_by_id.get(request.id)
+            if result is None:
+                raise ValueError("permission_resume_invalid: tool result is missing")
+            result_blocks.append(
+                ToolResultBlock(
+                    tool_use_id=request.id,
+                    content=result.content,
+                    is_error=result.is_error,
+                    metadata=result.metadata or {},
+                )
+            )
+        self.context_manager.add_tool_results(result_blocks)
+        if self._session_storage:
+            result_content: list[ContentBlock] = list(result_blocks)
+            self._session_storage.append(
+                self._cwd,
+                self._session_id,
+                Message(role="user", content=result_content),
+                git_branch=self._current_git_branch,
+            )
+
+        for request in requests:
+            result = executed_by_id.get(request.id)
+            if result is None:
+                continue
+            for raw_message in result.new_messages:
+                injected = self.context_manager.add_raw_message(raw_message)
+                if self._session_storage:
+                    self._session_storage.append(
+                        self._cwd,
+                        self._session_id,
+                        injected,
+                        git_branch=self._current_git_branch,
+                    )
+            if result.context_modifier is not None:
+                self._apply_context_modifier(result.context_modifier)
+
+        async for event in self.continue_streaming():
+            yield event
+
+    async def _permission_for_recovered_request(
+        self,
+        request: ToolCallRequest,
+        context: ToolContext,
+    ) -> tuple[PermissionResult | None, dict[str, Any]]:
+        tool = self.tool_registry.get(request.name)
+        if tool is None:
+            return None, {}
+        perm_ctx = self._permission_context_getter() if self._permission_context_getter is not None else None
+        if perm_ctx is None:
+            perm_ctx = self._permission_context
+        if perm_ctx is not None:
+            from iac_code.services.permissions.pipeline import check_tool_permission
+
+            effective_perm_ctx = _with_tool_read_directories(
+                perm_ctx,
+                trusted_directories=self._tool_context_trusted_read_directories,
+                relative_directories=self._tool_context_relative_read_directories,
+            )
+            if isinstance(effective_perm_ctx, ToolPermissionContext):
+                effective_perm_ctx = replace(
+                    effective_perm_ctx,
+                    invocation_binding=request.invocation_binding,
+                    pipeline_mode=self._pipeline_mode,
+                )
+            _extend_unique(context.additional_directories, list(effective_perm_ctx.additional_directories))
+            _extend_unique(context.trusted_read_directories, list(effective_perm_ctx.trusted_read_directories))
+            _extend_unique(context.relative_read_directories, list(effective_perm_ctx.relative_read_directories))
+            _extend_unique(
+                context.strict_read_directories,
+                list(getattr(effective_perm_ctx, "strict_read_directories", [])),
+            )
+            context.read_path_violation_behavior = getattr(
+                effective_perm_ctx,
+                "read_path_violation_behavior",
+                context.read_path_violation_behavior,
+            )
+            context.set_permission_context(effective_perm_ctx)
+            permission = await check_tool_permission(tool, request.input, effective_perm_ctx)
+        else:
+            permission = await tool.check_permissions(
+                request.input,
+                ToolPermissionContext(
+                    cwd=context.cwd,
+                    invocation_binding=request.invocation_binding,
+                    pipeline_mode=self._pipeline_mode,
+                ),
+            )
+        permission = _with_prompt_permission_metadata(tool, request.input, permission)
+        request.snapshot_id = permission.snapshot_id
+        request.security_digest = permission.security_digest
+        request.execution_class = permission.execution_class
+        if permission.invocation_binding is not None:
+            request.invocation_binding = permission.invocation_binding
+        if request.snapshot_id is not None:
+            self._owned_contract_snapshot_ids.add(request.snapshot_id)
+        audit_context = {
+            "session_id": self._session_id,
+            "cwd": context.cwd,
+            "settings": perm_ctx.audit_settings if perm_ctx is not None else None,
+            "metadata": permission.audit,
+        }
+        principal_ref, region = permission_execution_identity(
+            tool_name=request.name,
+            tool_input=request.input,
+            permission_audit=permission.audit,
+        )
+        audit_context.update(principal_ref=principal_ref, region=region)
+        if self._has_session_hierarchy:
+            audit_context["root_session_id"] = self._root_session_id
+            audit_context["transcript_id"] = self._transcript_id
+        if self._audit_log_path is not None:
+            audit_context["audit_log_path"] = self._audit_log_path
+        return permission, audit_context
+
+    async def rebuild_permission_audit_event(
+        self,
+        *,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        tool_use_id: str,
+        audit_context: Mapping[str, Any],
+    ) -> PermissionRequestEvent:
+        """Recheck one canonical request only to rebuild restart audit data.
+
+        The returned event is not an execution authorization. Any process-local
+        execution-contract snapshot created by the permission check is rejected;
+        the real continuation must rebuild its own contract again.
+        """
+
+        tool = self.tool_registry.get(tool_name)
+        if tool is None:
+            raise ValueError("permission_resume_invalid: current tool is unavailable")
+        invocation_input = dict(tool_input)
+        prepare_invocation_input = getattr(tool, "prepare_invocation_input", None)
+        if callable(prepare_invocation_input):
+            invocation_input = prepare_invocation_input(invocation_input)
+        request = ToolCallRequest(
+            id=tool_use_id,
+            name=tool_name,
+            input=invocation_input,
+            invocation_binding=InvocationBinding(
+                runtime_nonce=self._runtime_nonce,
+                session_id=self._session_id,
+                tool_use_id=tool_use_id,
+                tool_name=tool_name,
+                canonical_input_sha256=canonical_input_sha256(invocation_input),
+            ),
+        )
+        context = ToolContext(
+            cwd=self._cwd,
+            trusted_read_directories=list(self._tool_context_trusted_read_directories),
+            relative_read_directories=list(self._tool_context_relative_read_directories),
+            pipeline_mode=self._pipeline_mode,
+            env_overrides=dict(self._tool_context_env_overrides),
+            telemetry_attributes=dict(self._telemetry_attributes),
+        )
+        try:
+            permission, rebuilt_context = await self._permission_for_recovered_request(
+                request,
+                context,
+            )
+            if permission is None:
+                raise ValueError("permission_resume_invalid: current tool is unavailable")
+            return PermissionRequestEvent(
+                tool_name=tool_name,
+                tool_input=invocation_input,
+                tool_use_id=tool_use_id,
+                permission_result=permission,
+                audit_context={**rebuilt_context, **dict(audit_context)},
+            )
+        finally:
+            self._reject_owned_contract_snapshot(request.snapshot_id)
+
     async def _stream_provider(
         self,
         *,
@@ -1354,7 +1870,20 @@ class AgentLoop:
 
                 allowed_requests: list[ToolCallRequest] = []
                 denied_results: list[tuple[ToolCallRequest, ToolResult]] = []
-                for request in requests:
+                assistant_message_digest = canonical_digest(
+                    [block.model_dump(mode="json") for block in assistant_blocks]
+                )
+                continuation_decisions: list[dict[str, Any]] = [
+                    {
+                        "toolUseId": request.id,
+                        "state": "not_evaluated",
+                        "source": None,
+                        "deniedResult": None,
+                    }
+                    for request in requests
+                ]
+                previous_permission_boundary_id: str | None = None
+                for request_index, request in enumerate(requests):
                     tool = self.tool_registry.get(request.name)
                     if tool is None:
                         allowed_requests.append(request)
@@ -1424,6 +1953,12 @@ class AgentLoop:
                         "settings": perm_ctx.audit_settings if perm_ctx is not None else None,
                         "metadata": permission.audit,
                     }
+                    principal_ref, region = permission_execution_identity(
+                        tool_name=request.name,
+                        tool_input=request.input,
+                        permission_audit=permission.audit,
+                    )
+                    audit_context.update(principal_ref=principal_ref, region=region)
                     if self._has_session_hierarchy:
                         audit_context["root_session_id"] = self._root_session_id
                         audit_context["transcript_id"] = self._transcript_id
@@ -1443,8 +1978,14 @@ class AgentLoop:
                         if not audit_ok:
                             self._reject_owned_contract_snapshot(request.snapshot_id)
                             denied_results.append((request, ToolResult.error(_("Permission denied."))))
+                            continuation_decisions[request_index].update(
+                                state="deny",
+                                source="audit_failure",
+                                deniedResult=_("Permission denied."),
+                            )
                             continue
                         allowed_requests.append(request)
+                        continuation_decisions[request_index].update(state="allow", source="policy")
                         continue
                     if permission.behavior == "deny":
                         _emit_no_prompt_permission_audit(
@@ -1459,9 +2000,17 @@ class AgentLoop:
                         self._reject_owned_contract_snapshot(request.snapshot_id)
                         msg = permission.message or _("Permission denied.")
                         denied_results.append((request, ToolResult.error(msg)))
+                        continuation_decisions[request_index].update(
+                            state="deny",
+                            source="policy",
+                            deniedResult=msg,
+                        )
                         continue
 
-                    response_future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+                    continuation_decisions[request_index].update(state="pending", source=None)
+                    response_future: asyncio.Future[bool | PermissionWaitOutcome] = (
+                        asyncio.get_running_loop().create_future()
+                    )
                     permission_event = PermissionRequestEvent(
                         tool_name=request.name,
                         tool_input=request.input,
@@ -1469,14 +2018,38 @@ class AgentLoop:
                         response_future=response_future,
                         permission_result=permission,
                         audit_context=audit_context,
+                        continuation_frame={
+                            "assistantMessageRef": "session.jsonl:{}".format(
+                                len(self.context_manager.get_messages()) - 1
+                            ),
+                            "assistantMessageDigest": assistant_message_digest,
+                            "orderedToolUseIds": [item.id for item in requests],
+                            "currentIndex": request_index,
+                            "currentPayloadDigest": canonical_digest(
+                                {
+                                    "name": completed_tools[request_index]["name"],
+                                    "input": completed_tools[request_index].get("input", {}),
+                                }
+                            ),
+                            "decisions": [dict(item) for item in continuation_decisions],
+                            **(
+                                {"previousBoundaryId": previous_permission_boundary_id}
+                                if previous_permission_boundary_id is not None
+                                else {}
+                            ),
+                        },
                     )
                     yield permission_event
                     try:
-                        approved = await asyncio.shield(response_future)
+                        outcome = await asyncio.shield(response_future)
                     except asyncio.CancelledError:
                         if not permission_event.resolution_owner_managed and not response_future.done():
                             response_future.set_result(False)
                         raise
+                    if outcome is PermissionWaitOutcome.SUSPEND:
+                        raise PermissionWaitSuspended(permission_event.boundary_id)
+                    previous_permission_boundary_id = permission_event.boundary_id
+                    approved = bool(outcome)
                     additional_audit_ok = _emit_permission_audit_items(
                         session_id=self._session_id,
                         cwd=context.cwd,
@@ -1490,9 +2063,20 @@ class AgentLoop:
                         approved = False
                     if approved:
                         allowed_requests.append(request)
+                        continuation_decisions[request_index].update(
+                            state="allow",
+                            source="user",
+                            principalRef=principal_ref,
+                            region=region,
+                        )
                     else:
                         self._reject_owned_contract_snapshot(request.snapshot_id)
                         denied_results.append((request, ToolResult.error(_("Permission denied."))))
+                        continuation_decisions[request_index].update(
+                            state="deny",
+                            source="user",
+                            deniedResult=_("Permission denied."),
+                        )
 
                 public_path_roots = build_public_path_roots(
                     cwd=context.cwd,
@@ -1655,9 +2239,15 @@ class AgentLoop:
                     )
 
                 for req, result in zip(requests, results):
-                    if result.new_messages:
-                        for msg in result.new_messages:
-                            self.context_manager.add_raw_message(msg)
+                    for msg in result.new_messages:
+                        injected = self.context_manager.add_raw_message(msg)
+                        if self._session_storage:
+                            self._session_storage.append(
+                                self._cwd,
+                                self._session_id,
+                                injected,
+                                git_branch=self._current_git_branch,
+                            )
                     if result.context_modifier is not None:
                         self._apply_context_modifier(result.context_modifier)
 

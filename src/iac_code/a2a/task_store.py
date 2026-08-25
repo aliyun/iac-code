@@ -79,6 +79,10 @@ class A2ATaskStore(TaskStore):
         self._context_execution_starts: dict[str, dict[str, asyncio.Task[Any]]] = {}
         self._owner_resolver = owner_resolver
         self._backup_service = backup_service or SessionBackupService()
+        self._permission_wait_active_probe: Callable[[], bool] | None = None
+
+    def set_permission_wait_active_probe(self, probe: Callable[[], bool] | None) -> None:
+        self._permission_wait_active_probe = probe
 
     async def get(self, task_id: str, context: ServerCallContext | None = None) -> Task | None:
         owner = self._owner(context)
@@ -864,14 +868,13 @@ class A2ATaskStore(TaskStore):
                 any(record.active_task is not None and not record.active_task.done() for record in self._tasks.values())
                 or any(not task.done() for task in self._context_runtime_tasks.values())
                 or any(
-                    not task.done()
-                    for starts in self._context_execution_starts.values()
-                    for task in starts.values()
+                    not task.done() for starts in self._context_execution_starts.values() for task in starts.values()
                 )
                 or any(self._context_reconciliation_waiters.values())
                 or any(lock.locked() for lock in self._reconciliation_locks.values())
                 or any(count > 0 for count in self._context_runtime_waiters.values())
                 or any(not task.done() for task in self._discarded_context_runtime_tasks)
+                or bool(self._permission_wait_active_probe and self._permission_wait_active_probe())
             )
 
     def mirror_task(self, record: A2ATaskRecord) -> None:

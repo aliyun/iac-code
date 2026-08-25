@@ -72,11 +72,13 @@ Le modèle peut appeler cet outil pour fournir à l'utilisateur l'URL OAuth. Une
 
 IaC Code stocke les jetons OAuth et les secrets du client MCP via `MCPSecretStorage` :
 
-1. Il essaie le trousseau de clés du système d'exploitation lorsqu'il est disponible.
-2. Si le trousseau de clés est désactivé ou indisponible, il stocke les données de secours chiffrées sous `<config-dir>/mcp/`.
-3. Les autorisations de fichiers sont limitées pour la clé de secours et le magasin de secrets chiffrés.
+1. Les données chiffrées sont stockées dans `<config-dir>/mcp/secrets.json.enc`.
+2. La clé de chiffrement est stockée dans `<config-dir>/mcp/secrets.key`.
+3. Les autorisations des deux fichiers sont restreintes.
 
-Définissez `IAC_CODE_MCP_DISABLE_KEYRING=1` pour forcer le stockage de secours chiffré, ce qui est utile pour les tests isolés.
+Le stockage des secrets MCP n'accède pas au trousseau du système d'exploitation. Les contrôles d'état en
+arrière-plan ne déclenchent donc pas de demandes d'autorisation système. Un état présent uniquement dans le
+trousseau n'est pas migré automatiquement ; autorisez le serveur MCP une fois pour créer l'entrée locale chiffrée.
 
 Utilisez cette commande pour effacer l'état d'authentification stocké :
 
@@ -93,7 +95,7 @@ iac-code mcp remove secure-reviewer --scope user
 ```
 
 Utilisez `reset-auth` pour reautoriser un server existant. Utilisez `mcp remove` lorsque le server config doit aussi
-disparaitre; les deux chemins nettoient les entrees keyring et encrypted fallback entries gerees par `MCPSecretStorage`.
+disparaitre; les deux chemins suppriment les entrees chiffrees gerees par `MCPSecretStorage`.
 
 ## Project Trust
 

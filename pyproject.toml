@@ -146,6 +146,9 @@ default = true
 
 [tool.pytest.ini_options]
 timeout = 30
+markers = [
+    "integration: process-level integration tests that use local services only",
+]
 
 [tool.coverage.run]
 source_pkgs = ["iac_code"]

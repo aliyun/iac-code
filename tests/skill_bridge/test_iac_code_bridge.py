@@ -105,6 +105,7 @@ def test_bridge_parses_as_python_38_and_uses_only_standard_library_imports() -> 
         "fcntl",
         "hashlib",
         "json",
+        "math",
         "msvcrt",
         "os",
         "pathlib",
@@ -542,12 +543,10 @@ def test_bridge_automatically_runs_cleanup_only_task_and_restores_pipeline_resul
 
     assert len(captured_payloads) == 2
     assert all(
-        payload["params"]["message"]["metadata"]["iac_code"]["cleanupOnly"] is True
-        for payload in captured_payloads
+        payload["params"]["message"]["metadata"]["iac_code"]["cleanupOnly"] is True for payload in captured_payloads
     )
     assert all(
-        payload["params"]["message"]["metadata"]["iac_code"]["channel"] == "skill/host"
-        for payload in captured_payloads
+        payload["params"]["message"]["metadata"]["iac_code"]["channel"] == "skill/host" for payload in captured_payloads
     )
     assert captured_payloads[0]["params"]["message"]["contextId"] == "ctx-pipeline-1"
     assert result["state"] == "completed"
@@ -862,6 +861,15 @@ def test_runtime_identity_is_shared_across_workspaces() -> None:
     assert normal_record != pipeline_record
 
 
+def test_default_permission_wait_policy_preserves_legacy_runtime_identity() -> None:
+    target = "darwin-arm64-macos-cp312"
+    legacy_identity = "\0".join([bridge.RUNTIME_TAG, target, "normal", ""])
+    legacy_key = hashlib.sha256(legacy_identity.encode("utf-8")).hexdigest()[:24]
+
+    assert bridge._runtime_key("normal", "", target) == legacy_key
+    assert bridge._runtime_key("normal", "", target, None) == legacy_key
+
+
 def test_ensure_server_uses_stable_root_and_skill_cwd_policy(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setattr(bridge, "_free_port", lambda: 41242)
@@ -892,6 +900,48 @@ def test_ensure_server_uses_stable_root_and_skill_cwd_policy(monkeypatch, tmp_pa
     assert "IACCODE_A2A_ALLOWED_CWDS" not in kwargs["env"]
     config = bridge._load_json(Path(first["logPath"]).with_name("a2a.json"))
     assert config["idle_shutdown_seconds"] == 1800
+
+
+def test_ensure_server_projects_permission_wait_policy_only_into_server_config(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr(bridge, "_free_port", lambda: 41243)
+    monkeypatch.setattr(bridge, "_runtime_matches", lambda *_args: True)
+
+    class Process:
+        pid = 12346
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(bridge.subprocess, "Popen", lambda *_args, **_kwargs: Process())
+    artifact = {"target": "darwin-arm64-macos-cp312"}
+    policy = {
+        "residentTimeoutSeconds": 300.0,
+        "subPipelineTimeoutSeconds": 300.0,
+        "timeoutGraceSeconds": 30.0,
+    }
+
+    record = bridge.ensure_server(tmp_path / "iac-code", artifact, "normal", "", policy)
+
+    config = bridge._load_json(Path(record["logPath"]).with_name("a2a.json"))
+    assert config["permission_wait"] == {
+        "resident_timeout_seconds": 300.0,
+        "sub_pipeline_timeout_seconds": 300.0,
+        "timeout_grace_seconds": 30.0,
+    }
+    assert record["permissionWaitPolicy"] == policy
+    assert bridge._runtime_record_path("normal", "", artifact["target"], policy) != bridge._runtime_record_path(
+        "normal", "", artifact["target"]
+    )
+    payload = bridge._worker_payload(
+        {
+            "workspace": "/tmp/work",
+            "preferredLanguage": "en",
+            "permissionWaitPolicy": policy,
+        },
+        prompt="Deploy a VPC",
+    )
+    assert "permissionWaitPolicy" not in payload["params"]["message"]["metadata"]["iac_code"]
 
 
 def test_ensure_server_terminates_failed_spawn_and_removes_record(monkeypatch, tmp_path: Path) -> None:
@@ -1138,9 +1188,7 @@ def test_candidate_presentation_survives_bounded_bridge_projection() -> None:
                                     "summary": "单 ECS 低成本方案。",
                                     "architectureDiagram": "flowchart LR\nU[用户] --> E[ECS]",
                                     "totalMonthlyCost": "¥88/月",
-                                    "costItems": [
-                                        {"name": "ECS", "spec": "2核4G", "monthlyCost": "¥88/月"}
-                                    ],
+                                    "costItems": [{"name": "ECS", "spec": "2核4G", "monthlyCost": "¥88/月"}],
                                 }
                             ],
                             "required": True,
@@ -1204,6 +1252,59 @@ def test_installed_skill_channel_config_is_optional_and_validated(monkeypatch, t
     (installed_skill / "config.json").write_text('{"channel":"  "}', encoding="utf-8")
     with pytest.raises(bridge.BridgeError, match="non-empty string"):
         bridge._skill_telemetry_channel()
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ({}, {"residentTimeoutSeconds": None, "subPipelineTimeoutSeconds": None, "timeoutGraceSeconds": 30.0}),
+        (
+            {
+                "residentTimeoutSeconds": 300,
+                "subPipelineTimeoutSeconds": 120.5,
+                "timeoutGraceSeconds": 0,
+            },
+            {
+                "residentTimeoutSeconds": 300.0,
+                "subPipelineTimeoutSeconds": 120.5,
+                "timeoutGraceSeconds": 0.0,
+            },
+        ),
+    ],
+)
+def test_skill_permission_wait_policy_is_normalized(raw, expected) -> None:
+    assert bridge._normalize_permission_wait_policy(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        [],
+        {"unknown": 1},
+        {"residentTimeoutSeconds": 0},
+        {"residentTimeoutSeconds": True},
+        {"subPipelineTimeoutSeconds": -1},
+        {"timeoutGraceSeconds": None},
+        {"timeoutGraceSeconds": float("inf")},
+        {"residentTimeoutSeconds": 10**1000},
+        {"subPipelineTimeoutSeconds": bridge.MAX_PERMISSION_WAIT_SECONDS + 1},
+        {"timeoutGraceSeconds": bridge.MAX_PERMISSION_WAIT_SECONDS + 1},
+    ],
+)
+def test_skill_permission_wait_policy_rejects_invalid_values(raw) -> None:
+    with pytest.raises(bridge.BridgeError) as error:
+        bridge._normalize_permission_wait_policy(raw)
+    assert error.value.code == "skill_configuration_invalid"
+
+
+def test_installed_skill_config_rejects_unknown_top_level_fields(monkeypatch, tmp_path: Path) -> None:
+    installed_skill = tmp_path / "installed-skill"
+    installed_skill.mkdir()
+    (installed_skill / "config.json").write_text('{"channel":"codex","unexpected":true}', encoding="utf-8")
+    monkeypatch.setattr(bridge, "SKILL_ROOT", installed_skill)
+
+    with pytest.raises(bridge.BridgeError, match="Unknown installed Skill config fields"):
+        bridge._skill_config()
 
 
 def test_job_results_repeat_preferred_language(monkeypatch, tmp_path: Path) -> None:
@@ -2545,9 +2646,11 @@ def test_skill_contract_uses_implicit_trigger_normal_default_and_follow() -> Non
     assert "`llm_not_configured`" in skill
     assert "`cloud_credentials_not_configured`" in skill
     assert "optional `config.json` beside this `SKILL.md`" in skill
-    assert '{"channel":"<channel>"}' in skill
+    assert '"permissionWaitPolicy"' in skill
+    assert '"residentTimeoutSeconds"' in skill
+    assert "never sends the policy through A2A message metadata" in skill
     assert "adds the `skill/` prefix" in skill
-    assert "Never derive a channel from the user's request" in skill
+    assert "Never derive these values from the user's request" in skill
     assert "python3 scripts/iac_code.py cache list" in skill
     assert "cache clean --candidates --confirm" in skill
     assert "remove only downloaded Runtime packages" in skill

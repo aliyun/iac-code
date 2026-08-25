@@ -1,5 +1,85 @@
 # A2A 会话恢复与脱敏 E2E
 
+## 真实 StartChat 权限等待矩阵
+
+`run_start_chat_permission_wait.py` 是本功能可重复执行、受凭证开关保护的真实链路：Qoder 真实 LLM
+→ 安装后的 `alicloud-ros-agent` Skill → Python bridge → 原生 `aliyun` CLI → 只暴露 StartChat/StopChat
+的本地 HTTPS relay → 本地 iac-code A2A server → 真实 iac-code LLM 和云调用。Runner 会先在调用方指定的
+`--source-config-dir` 中原地刷新 OAuth STS，再把最新凭证复制到权限受限的独立 config dir。这样可避免只在
+一次性副本中刷新并轮换 OAuth refresh token，导致源配置在下一个场景失效。随后把服务端策略固定为
+`300 / 300 / 30`，启用共享备份提交协议，使用唯一的 Stack/VSwitch 名称，并在结束时仅按精确名称做兜底清理。
+
+Qoder 的 host 权限绕过只用于允许测试驱动执行本地 Bash/文件操作，不会批准 ROS Agent 权限。隔离的 iac-code
+配置使用默认权限模式，显式允许辅助工具并要求云资源变更工具确认；A2A server 同时保持
+`auto_approve_permissions: false`，非只读云操作仍必须通过带完整关联字段的 StartChat 权限回答。
+
+每个场景使用新的目录：
+
+真实 headless Qoder 的单轮超时默认是 900 秒，保证双 candidate Pipeline 不会被测试驱动过早终止；
+provider 更慢时可通过 `--qoder-turn-timeout` 显式覆盖，不会削减 Pipeline 场景。
+
+```bash
+uv run python scripts/a2a/e2e/permission_wait/run_start_chat_permission_wait.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-pwait-normal-before \
+  --mode normal
+
+uv run python scripts/a2a/e2e/permission_wait/run_start_chat_permission_wait.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-pwait-pipeline-before \
+  --mode pipeline
+
+# resident 300 秒到期后，在 30 秒 grace 内回答。
+uv run python scripts/a2a/e2e/permission_wait/run_start_chat_permission_wait.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-pwait-normal-grace \
+  --mode normal \
+  --answer-delay-seconds 305
+
+# 等非失败挂起完成后再回答。
+uv run python scripts/a2a/e2e/permission_wait/run_start_chat_permission_wait.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-pwait-pipeline-suspended \
+  --mode pipeline \
+  --answer-delay-seconds 335
+
+# 在首个权限等待点只终止当前模式的本地 A2A 进程，用同一 config/persistence 目录重启后回答。
+uv run python scripts/a2a/e2e/permission_wait/run_start_chat_permission_wait.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-pwait-normal-restart \
+  --mode normal \
+  --restart-at-first-permission
+```
+
+Normal 和 Pipeline 都要分别运行 grace、挂起后恢复和进程重启变体。仓库内 prompt 是
+`permission_wait/permission_wait_start_chat_prompt.md`。每次运行只保存有界 Qoder turn 摘要、权限观察、relay metrics、
+安全结果清单和本地服务日志；退出前会先提取有界只读证据，再删除复制的凭证文件和完整会话 transcript。
+发现只读权限弹窗或范围外云写入时，Runner 会直接失败，
+不会替用户批准。最终断言要求：真实非只读权限、Normal/顶层 Pipeline 本地与共享 checkpoint、Sub Pipeline 无
+checkpoint、确实经过原生 StartChat、精确清理本次资源，以及全部原有 VPC 仍存在。
+
+受控 Sub Pipeline fixture 使用真实 `PipelineRunner` 和两个真实 `AgentLoop` candidate：一个 candidate
+停在真实权限 Future，另一个自然完成；到达配置的硬超时后，父 Pipeline 聚合两个 conclusion、进入 candidate
+选择并自然完成。fixture 同时安装生产 A2A 备份 hook，证明 Sub 权限本身不会触发权限关键备份。验收运行使用
+生产环境的 300 秒配置：
+
+```bash
+uv run python scripts/a2a/e2e/permission_wait/run_sub_pipeline_permission_timeout.py \
+  --run-dir /tmp/iac-pwait-sub-pipeline-300 \
+  --timeout-seconds 300
+```
+
+对应的加速回归和无真实凭证的快速进程重启矩阵为：
+
+```bash
+uv run pytest -q tests/a2a_e2e/test_sub_pipeline_permission_timeout.py
+uv run pytest -q tests/a2a_e2e/test_permission_wait_restart.py
+```
+
+进程重启矩阵覆盖 Normal/Pipeline × allow/deny。Sub Pipeline fixture 断言只生成一次拒绝 ToolResult、
+Agent loop 继续、父 Pipeline 进入 candidate 选择并完成，且全程没有 grace、持久化 permission checkpoint
+或权限关键备份。
+
 本目录包含用于 A2A pipeline 会话恢复和脱敏回归的 headless 端到端检查。Runner 会驱动公开的
 A2A JSON-RPC streaming endpoint 并记录 SSE 事件和 pipeline snapshot。恢复场景会用 `SIGKILL`
 杀掉 A2A server，再用相同持久化目录重启；`redaction-step4` 则在候选方案选择处停止，不重启、

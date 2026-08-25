@@ -169,6 +169,7 @@ class MCPManager:
         self._needs_auth_cache = needs_auth_cache or MCPNeedsAuthCache()
         self._session_id = session_id
         self._change_listeners: list[ChangeListener] = []
+        self._status_revision = 0
         self._elicitation_handler: ElicitationHandler = _default_elicitation_handler
         self._reconnect_tasks: dict[str, asyncio.Task[None]] = {}
         self._connections = {
@@ -201,10 +202,10 @@ class MCPManager:
         record: MCPConnectionRecord,
         previous_state: MCPConnectionState,
     ) -> None:
-        if (
-            previous_state in {MCPConnectionState.DISABLED, MCPConnectionState.PENDING}
-            or previous_state is record.state
-        ):
+        if previous_state is record.state:
+            return
+        self._mark_status_changed()
+        if previous_state in {MCPConnectionState.DISABLED, MCPConnectionState.PENDING}:
             return
         if record.state is MCPConnectionState.NEEDS_AUTH:
             await self._notify_changed(record.name, "auth")
@@ -212,6 +213,7 @@ class MCPManager:
             await self._notify_changed(record.name, "connection")
 
     async def disconnect_all(self) -> None:
+        status_changed = False
         for task in list(self._reconnect_tasks.values()):
             task.cancel()
         for task in list(self._reconnect_tasks.values()):
@@ -219,6 +221,7 @@ class MCPManager:
                 await task
         self._reconnect_tasks.clear()
         for record in self._connections.values():
+            status_changed = status_changed or record.state is not MCPConnectionState.DISABLED
             try:
                 if record.client is not None:
                     await record.client.close()
@@ -243,6 +246,8 @@ class MCPManager:
                 record.prompts = []
                 record.capability_errors = {}
                 record.metadata = _metadata_for_record(record)
+        if status_changed:
+            self._mark_status_changed()
 
     async def reconnect_failed(self, server_name: str) -> None:
         record = self.connection(server_name)
@@ -282,6 +287,11 @@ class MCPManager:
 
     def status_metadata(self, warnings: list[Any] | None = None) -> dict[str, Any] | None:
         return mcp_status_metadata(self, warnings=warnings)
+
+    @property
+    def status_revision(self) -> int:
+        """Monotonic revision for public MCP status-affecting changes."""
+        return self._status_revision
 
     def list_tools(self) -> list[MCPToolRecord]:
         return [tool for record in self._connections.values() for tool in record.tools]
@@ -438,10 +448,14 @@ class MCPManager:
         await self._notify_changed(server_name, capability)
 
     async def _notify_changed(self, server_name: str, capability: str) -> None:
+        self._mark_status_changed()
         for listener in list(self._change_listeners):
             result = listener(server_name, capability)
             if inspect.isawaitable(result):
                 await result
+
+    def _mark_status_changed(self) -> None:
+        self._status_revision += 1
 
     async def list_roots(self) -> list[str]:
         return [root.resolve().as_uri() for root in self._roots]

@@ -1,0 +1,2 @@
+alibabacloud-credentials>=1.0.8,<2
+aliyun-python-sdk-core>=2.16,<3

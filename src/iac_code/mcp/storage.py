@@ -24,13 +24,9 @@ _PROCESS_LOCK_STRIPES = tuple(threading.RLock() for _ in range(64))
 
 class MCPSecretStorage:
     def __init__(self, *, keyring_backend: Any | None = None, service_name: str = "iac-code:mcp") -> None:
-        if keyring_backend is None and os.environ.get("IAC_CODE_MCP_DISABLE_KEYRING") != "1":
-            try:
-                import keyring
-
-                keyring_backend = keyring
-            except Exception:
-                keyring_backend = None
+        # Production storage is always the encrypted local file below. An explicit
+        # backend remains as a test seam only; never auto-discover the OS keyring,
+        # because even reads can trigger disruptive macOS Keychain prompts.
         self._keyring = keyring_backend
         self._service_name = service_name
 

@@ -42,6 +42,8 @@ class WebPendingPermission:
     future: asyncio.Future[Any]
     created_at: str
     audit_event: Any | None = None
+    boundary_id: str | None = None
+    checkpoint_store: Any | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {

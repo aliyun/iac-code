@@ -72,11 +72,13 @@ O modelo pode chamar essa ferramenta para fornecer ao usuário a URL do OAuth. A
 
 O Código IaC armazena tokens OAuth e segredos do cliente MCP por meio de `MCPSecretStorage`:
 
-1. Ele testa o chaveiro do sistema operacional quando disponível.
-2. Se o chaveiro estiver desabilitado ou indisponível, ele armazena dados de fallback criptografados em `<config-dir>/mcp/`.
-3. As permissões de arquivo são restritas para a chave substituta e o armazenamento secreto criptografado.
+1. Os dados criptografados são armazenados em `<config-dir>/mcp/secrets.json.enc`.
+2. A chave de criptografia é armazenada em `<config-dir>/mcp/secrets.key`.
+3. As permissões de ambos os arquivos são restritas.
 
-Defina `IAC_CODE_MCP_DISABLE_KEYRING=1` para forçar o armazenamento alternativo criptografado, o que é útil para testes isolados.
+O armazenamento de segredos MCP não acessa o chaveiro do sistema operacional. Assim, verificações de estado em
+segundo plano não exibem pedidos de autorização do sistema. O estado que existia apenas no chaveiro não é
+migrado automaticamente; autorize o servidor MCP uma vez para criar a entrada local criptografada.
 
 Use este comando para limpar o estado de autenticação armazenado:
 
@@ -93,7 +95,7 @@ iac-code mcp remove secure-reviewer --scope user
 ```
 
 Use `reset-auth` para reautorizar um server existente. Use `mcp remove` quando o server config tambem deve sumir;
-ambos os caminhos limpam keyring e encrypted fallback entries gerenciadas por `MCPSecretStorage`.
+ambos os caminhos removem as entradas criptografadas gerenciadas por `MCPSecretStorage`.
 
 ## Project Trust
 

@@ -14,6 +14,14 @@ from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.runtime_overrides import get_a2a_preferred_language
 from iac_code.i18n import translate_message
+from iac_code.services.permission_wait import (
+    PermissionWaitCheckpointStore,
+    PermissionWaitCoordinator,
+    PermissionWaitPolicy,
+    build_permission_checkpoint,
+    canonicalize_permission_continuation_frame,
+    permission_execution_identity,
+)
 from iac_code.services.permissions.audit import (
     build_prompt_tool_input,
     emit_permission_boundary_audit,
@@ -23,6 +31,7 @@ from iac_code.types.stream_events import PermissionRequestEvent
 
 PERMISSION_SCHEMA_VERSION = 1
 PERMISSION_DECISIONS = frozenset({"allow_once", "deny"})
+PERMISSION_QUERY_PREFIX = "IAC_CODE_PERMISSION:"
 _SAFE_SUMMARY_MAX_CHARS = 1200
 _DISPLAY_FIELD_MAX_CHARS = 500
 
@@ -48,6 +57,17 @@ class PendingPermission:
     scope: str = "pipeline"
     coordinates: dict[str, Any] | None = None
     state: str = "pending"
+    boundary_id: str | None = None
+    checkpoint_store: PermissionWaitCheckpointStore | None = field(default=None, repr=False)
+    claim_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    timeout_task: asyncio.Task[None] | None = field(default=None, repr=False)
+    continuation: Any | None = field(default=None, repr=False)
+    continuation_claimed: bool = field(default=False, repr=False)
+    suspend_callback: Any | None = field(default=None, repr=False)
+    backup_cwd: str | None = field(default=None, repr=False)
+    backup_session_id: str | None = field(default=None, repr=False)
+    backup_service: Any | None = field(default=None, repr=False)
+    backup_metrics: Any | None = field(default=None, repr=False)
 
     def envelope(self) -> dict[str, Any]:
         return permission_input_envelope(
@@ -178,35 +198,29 @@ def permission_display_fields(request: PermissionRequestEvent, *, language: str 
             command = safe_input.get("command") or safe_input.get("cmd")
         if isinstance(command, str) and command.strip():
             command_fallback = translate_message("shell command", language=language)
-            target = translate_message(
-                "the current local workspace; command: {command}", language=language
-            ).format(command=_display_text(command, fallback=command_fallback, maximum=240))
+            target = translate_message("the current local workspace; command: {command}", language=language).format(
+                command=_display_text(command, fallback=command_fallback, maximum=240)
+            )
         else:
             target = translate_message("the current local workspace", language=language)
         effect = "read" if is_read_only else ("local_execution" if read_only_known else "unknown")
     elif tool_name in {"write_file", "edit_file"}:
         title = translate_message("Change a workspace file", language=language)
-        purpose = translate_message(
-            "Write a file needed for the requested infrastructure task.", language=language
-        )
+        purpose = translate_message("Write a file needed for the requested infrastructure task.", language=language)
         target = _safe_input_target(safe_input, language=language) or translate_message(
             "a file in the current workspace", language=language
         )
         effect = "file_change"
     elif tool_name in {"read_file", "glob", "grep"} or is_read_only:
         title = translate_message("Read workspace data with {tool}", language=language).format(tool=public_tool)
-        purpose = translate_message(
-            "Read local data needed for the requested infrastructure task.", language=language
-        )
+        purpose = translate_message("Read local data needed for the requested infrastructure task.", language=language)
         target = _safe_input_target(safe_input, language=language) or translate_message(
             "the current local workspace", language=language
         )
         effect = "read"
     else:
         title = translate_message("Run {tool}", language=language).format(tool=public_tool)
-        purpose = translate_message(
-            "Run this operation for the requested infrastructure task.", language=language
-        )
+        purpose = translate_message("Run this operation for the requested infrastructure task.", language=language)
         target = _safe_input_target(safe_input, language=language) or translate_message(
             "the current task workspace or cloud account", language=language
         )
@@ -319,9 +333,7 @@ def _cloud_operation_title(product: str, action: str, *, is_read_only: bool, lan
     if action == "CreateStack":
         return translate_message("Create {product} stack", language=language).format(product=product_label)
     if action == "ContinueCreateStack":
-        return translate_message("Continue creating {product} stack", language=language).format(
-            product=product_label
-        )
+        return translate_message("Continue creating {product} stack", language=language).format(product=product_label)
     if action == "UpdateStack":
         return translate_message("Update {product} stack", language=language).format(product=product_label)
     if action == "DeleteStack":
@@ -344,27 +356,43 @@ def _safe_input_target(value: Any, *, language: str) -> str:
     for key in ("file_path", "filePath", "path", "region_id", "regionId", "resource_id", "resourceId"):
         candidate = value.get(key)
         if isinstance(candidate, str) and candidate.strip():
-            return _display_text(
-                candidate, fallback=translate_message("the current task scope", language=language)
-            )
+            return _display_text(candidate, fallback=translate_message("the current task scope", language=language))
     return ""
 
 
 def parse_permission_response(message: Message | None) -> PermissionResponse | None:
     if not isinstance(message, Message):
         return None
-    decoded_parts = [_json_data_part(part) for part in message.parts]
-    permission_parts = [
-        value for value in decoded_parts if isinstance(value, dict) and value.get("kind") == "permission"
+    data_permission_parts = [
+        value
+        for part in message.parts
+        if (value := _json_data_part(part)) is not None and value.get("kind") == "permission"
     ]
-    if not permission_parts:
+    text_permission_parts = [
+        value
+        for part in message.parts
+        if (value := _json_text_part(part)) is not None and value.get("kind") == "permission"
+    ]
+    if not data_permission_parts and not text_permission_parts:
         return None
     if message.role != Role.ROLE_USER:
         raise InvalidParamsError("Permission responses must use ROLE_USER.")
-    if len(message.parts) != 1 or len(permission_parts) != 1:
+
+    text_transport = bool(text_permission_parts)
+    if data_permission_parts and text_permission_parts:
+        raise InvalidParamsError("Permission responses must use exactly one supported JSON transport.")
+    if data_permission_parts and (len(message.parts) != 1 or len(data_permission_parts) != 1):
         raise InvalidParamsError("Permission responses must contain exactly one application/json DataPart.")
-    payload = permission_parts[0]
+    if text_permission_parts and (len(message.parts) != 1 or len(text_permission_parts) != 1):
+        raise InvalidParamsError("Permission responses must contain exactly one JSON TextPart.")
+
+    payload = text_permission_parts[0] if text_transport else data_permission_parts[0]
     expected_keys = {"schemaVersion", "kind", "requestTaskId", "inputId", "toolUseId", "decision"}
+    if text_transport:
+        # Some gateways, including ROS StartChat, can only forward user input as
+        # an A2A TextPart. A fixed prefix keeps ordinary chat on the fast path;
+        # the exact JSON object after that prefix carries the full correlation.
+        expected_keys.add("contextId")
     if set(payload) != expected_keys:
         raise InvalidParamsError("Permission response payload fields do not match schemaVersion 1.")
     if payload.get("schemaVersion") != PERMISSION_SCHEMA_VERSION:
@@ -377,6 +405,11 @@ def parse_permission_response(message: Message | None) -> PermissionResponse | N
     request_task_id = payload.get("requestTaskId")
     input_id = payload.get("inputId")
     tool_use_id = payload.get("toolUseId")
+    if text_transport and not outer_task_id and isinstance(request_task_id, str):
+        # Text-only gateways may preserve the A2A context while omitting taskId
+        # on follow-up messages. The registry still validates every opaque
+        # correlation field against an active pending permission.
+        outer_task_id = request_task_id
     values = (outer_task_id, outer_context_id, request_task_id, input_id, tool_use_id)
     if not all(isinstance(value, str) and value for value in values):
         raise InvalidParamsError("Permission response correlation fields are required.")
@@ -387,6 +420,8 @@ def parse_permission_response(message: Message | None) -> PermissionResponse | N
     assert isinstance(tool_use_id, str)
     if outer_task_id != request_task_id:
         raise InvalidParamsError("Permission response taskId does not match requestTaskId.")
+    if text_transport and payload.get("contextId") != outer_context_id:
+        raise InvalidParamsError("Permission response contextId does not match message contextId.")
     return PermissionResponse(
         task_id=outer_task_id,
         context_id=outer_context_id,
@@ -419,6 +454,49 @@ def permission_ack_message(response: PermissionResponse, *, approved: bool) -> M
     )
 
 
+async def backup_permission_wait_checkpoint(
+    *,
+    store: PermissionWaitCheckpointStore,
+    boundary_id: str,
+    cwd: str,
+    session_id: str,
+    backup_service: Any,
+    metrics: Any | None = None,
+) -> Any | None:
+    """Commit one permission checkpoint under the permission/backup lock order."""
+
+    from iac_code.a2a.backup import backup_session_async
+    from iac_code.services.session_backup import BackupReason, SessionBackupBlocked
+
+    record = store.load(boundary_id)
+    if record is None:
+        raise RuntimeError("permission checkpoint is unavailable for critical backup")
+    generation = int(record["generation"])
+
+    def fenced_backup(_cwd: str, _session_id: str, **kwargs: Any) -> Any:
+        return store.run_generation_fenced(
+            boundary_id,
+            expected_generation=generation,
+            operation=lambda: backup_service.backup_session(_cwd, _session_id, **kwargs),
+        )
+
+    try:
+        result = await backup_session_async(
+            backup_service,
+            cwd,
+            session_id,
+            reason=BackupReason.INPUT_REQUIRED,
+            critical=True,
+            metrics=metrics,
+            backup_call=fenced_backup,
+        )
+    except ValueError as exc:
+        raise SessionBackupBlocked("Permission checkpoint changed during critical backup.") from exc
+    if getattr(result, "enabled", False) and not getattr(result, "shared_committed", False):
+        raise SessionBackupBlocked("Critical permission backup did not reach the shared target.")
+    return result
+
+
 class PermissionInputRegistry:
     """Coordinate legacy input-required and concurrent Sub Pipeline permissions."""
 
@@ -426,6 +504,166 @@ class PermissionInputRegistry:
         self._condition = asyncio.Condition()
         self._pending: dict[tuple[str, str], PendingPermission] = {}
         self._closing_tasks: dict[str, _PermissionTaskClosingState] = {}
+        self._permission_wait_coordinator: PermissionWaitCoordinator | None = None
+
+    def set_permission_wait_coordinator(self, coordinator: PermissionWaitCoordinator | None) -> None:
+        self._permission_wait_coordinator = coordinator
+
+    @property
+    def durable_permission_wait_enabled(self) -> bool:
+        return self._permission_wait_coordinator is not None
+
+    @property
+    def permission_wait_policy(self) -> PermissionWaitPolicy:
+        coordinator = self._permission_wait_coordinator
+        return coordinator.policy if coordinator is not None else PermissionWaitPolicy()
+
+    async def open_durable_boundary(
+        self,
+        pending: PendingPermission,
+        *,
+        cwd: str,
+        session_id: str,
+        permission_class: str,
+        backup_service: Any,
+        metrics: Any | None = None,
+        pipeline_coordinates: dict[str, Any] | None = None,
+        perform_backup: bool = True,
+    ) -> dict[str, Any]:
+        """Persist and critically back up a real external wait before publication."""
+
+        coordinator = self._permission_wait_coordinator
+        if coordinator is None:
+            raise RuntimeError("permission wait coordinator is unavailable")
+        source_frame = pending.request.continuation_frame
+        if not isinstance(source_frame, dict):
+            raise RuntimeError("permission_resume_invalid: continuation frame is unavailable")
+        store = PermissionWaitCheckpointStore(cwd, session_id)
+        audit_context = pending.request.audit_context if isinstance(pending.request.audit_context, dict) else {}
+        try:
+            frame = canonicalize_permission_continuation_frame(source_frame, audit_context=audit_context)
+        except ValueError as exc:
+            raise RuntimeError(f"permission_resume_invalid: {exc}") from exc
+        principal_ref = audit_context.get("principal_ref")
+        region = audit_context.get("region")
+        record = build_permission_checkpoint(
+            session_id=session_id,
+            task_id=pending.task_id,
+            context_id=pending.context_id,
+            input_id=pending.input_id,
+            tool_use_id=pending.request.tool_use_id,
+            tool_name=pending.request.tool_name,
+            tool_input=pending.request.tool_input,
+            permission_class="pipeline" if permission_class == "pipeline" else "normal",
+            continuation_frame=frame,
+            policy=coordinator.policy,
+            principal_ref=principal_ref if isinstance(principal_ref, str) else None,
+            region=region if isinstance(region, str) else None,
+            pipeline_coordinates=pipeline_coordinates,
+        )
+        previous_boundary_id = frame.get("previousBoundaryId")
+        if isinstance(previous_boundary_id, str) and previous_boundary_id:
+            store.create_successor(record, previous_boundary_id=previous_boundary_id)
+            await self._release_replaced_durable_boundary(previous_boundary_id)
+        else:
+            store.create(record)
+        pending.boundary_id = record["boundaryId"]
+        pending.checkpoint_store = store
+        pending.request.boundary_id = pending.boundary_id
+        pending.backup_cwd = cwd
+        pending.backup_session_id = session_id
+        pending.backup_service = backup_service
+        pending.backup_metrics = metrics
+
+        if perform_backup:
+            await self.backup_durable_boundary(
+                pending,
+                cwd,
+                session_id,
+                backup_service=backup_service,
+                metrics=metrics,
+            )
+            current = store.load(pending.boundary_id)
+            if current is None:
+                raise RuntimeError("permission checkpoint is unavailable after critical backup")
+            self.activate_durable_boundary(pending, current)
+        return record
+
+    async def _release_replaced_durable_boundary(self, boundary_id: str) -> None:
+        """Mirror a successor checkpoint swap in registry/coordinator state."""
+
+        replaced: list[PendingPermission] = []
+        async with self._condition:
+            for key, pending in list(self._pending.items()):
+                if pending.boundary_id != boundary_id:
+                    continue
+                self._pending.pop(key, None)
+                pending.state = "completed"
+                replaced.append(pending)
+            if replaced:
+                self._condition.notify_all()
+        for pending in replaced:
+            if pending.timeout_task is not None and pending.timeout_task is not asyncio.current_task():
+                pending.timeout_task.cancel()
+        if self._permission_wait_coordinator is not None:
+            self._permission_wait_coordinator.unregister_live(boundary_id)
+
+    async def backup_durable_boundary(
+        self,
+        pending: PendingPermission,
+        cwd: str,
+        session_id: str,
+        *,
+        backup_service: Any,
+        metrics: Any | None = None,
+    ) -> Any | None:
+        """Commit the critical shared copy under the documented lock order."""
+
+        store = pending.checkpoint_store
+        boundary_id = pending.boundary_id
+        if store is None or boundary_id is None:
+            raise RuntimeError("permission checkpoint is unavailable for critical backup")
+        pending.backup_cwd = cwd
+        pending.backup_session_id = session_id
+        pending.backup_service = backup_service
+        pending.backup_metrics = metrics
+        return await backup_permission_wait_checkpoint(
+            store=store,
+            boundary_id=boundary_id,
+            cwd=cwd,
+            session_id=session_id,
+            backup_service=backup_service,
+            metrics=metrics,
+        )
+
+    def activate_durable_boundary(
+        self,
+        pending: PendingPermission,
+        record: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        coordinator = self._permission_wait_coordinator
+        store = pending.checkpoint_store
+        if coordinator is None or store is None or pending.boundary_id is None:
+            raise RuntimeError("permission checkpoint is unavailable")
+        current = record or store.load(pending.boundary_id)
+        if current is None:
+            raise RuntimeError("permission checkpoint is unavailable")
+        future = pending.request.response_future
+        if future is None or future.done():
+            raise RuntimeError("permission wait point is unavailable after critical backup")
+
+        async def on_suspend() -> None:
+            callback = pending.suspend_callback
+            if callback is not None:
+                result = callback()
+                if asyncio.iscoroutine(result):
+                    await result
+
+        coordinator.register_live(record=current, store=store, future=future, on_suspend=on_suspend)
+        return current
+
+    async def pending_for_response(self, response: PermissionResponse) -> PendingPermission:
+        return await self._lookup(response)
 
     async def register(
         self,
@@ -452,7 +690,11 @@ class PermissionInputRegistry:
                 request.response_future.set_result(False)
                 raise InvalidParamsError("permission_resume_invalid: task cancellation is already in progress.")
             while resolution_owner is None and any(
-                pending.task_id == task_id and pending.resolution_owner is None for pending in self._pending.values()
+                pending.task_id == task_id
+                and pending.resolution_owner is None
+                and pending.request.response_future is not None
+                and not pending.request.response_future.done()
+                for pending in self._pending.values()
             ):
                 await self._condition.wait()
             input_id = _permission_input_id()
@@ -477,6 +719,36 @@ class PermissionInputRegistry:
         if pending.resolution_owner is not None:
             return await pending.resolution_owner.resolve_permission(pending, response)
 
+        coordinator = self._permission_wait_coordinator
+        if coordinator is not None and pending.boundary_id is not None:
+            self._validate_live_execution_identity(pending)
+
+            def audit_new_claim(value: str) -> bool:
+                return emit_permission_boundary_audit(
+                    pending.request,
+                    decision="allow" if value == "allow_once" else "deny",
+                    scope="a2a_input_required",
+                    source="a2a_user_permission",
+                    reason_type="user_decision",
+                    reason_detail=value,
+                )
+
+            try:
+                record, _created = await coordinator.claim_live(
+                    boundary_id=pending.boundary_id,
+                    value="allow_once" if response.decision == "allow_once" else "deny",
+                    source="user",
+                    on_new_claim=audit_new_claim,
+                    before_delivery=lambda _record: self._backup_claim_before_delivery(pending),
+                )
+            except (LookupError, ValueError) as exc:
+                raise InvalidParamsError(f"permission_resume_invalid: {exc}") from exc
+            decision = record.get("decision")
+            approved = isinstance(decision, dict) and decision.get("value") == "allow_once"
+            if record.get("phase") in {"SUSPENDING", "SUSPENDED", "RESTORING"}:
+                pending.state = "suspended_decision_claimed"
+            return approved
+
         async with self._condition:
             self._validate_response(pending, response)
             future = pending.request.response_future
@@ -495,6 +767,41 @@ class PermissionInputRegistry:
                 approved = False
             future.set_result(approved)
             return approved
+
+    @staticmethod
+    def _validate_live_execution_identity(pending: PendingPermission) -> None:
+        store = pending.checkpoint_store
+        boundary_id = pending.boundary_id
+        if store is None or boundary_id is None:
+            return
+        record = store.load(boundary_id)
+        if record is None:
+            raise InvalidParamsError("permission_resume_invalid: permission checkpoint is unavailable.")
+        permission_audit = getattr(pending.request.permission_result, "audit", None)
+        principal_ref, region = permission_execution_identity(
+            tool_name=pending.request.tool_name,
+            tool_input=pending.request.tool_input,
+            permission_audit=permission_audit,
+        )
+        if principal_ref != record.get("principalRef") or region != record.get("region"):
+            raise InvalidParamsError("permission_resume_invalid: cloud execution identity changed.")
+
+    async def _backup_claim_before_delivery(self, pending: PendingPermission) -> None:
+        store = pending.checkpoint_store
+        boundary_id = pending.boundary_id
+        cwd = pending.backup_cwd
+        session_id = pending.backup_session_id
+        backup_service = pending.backup_service
+        if store is None or boundary_id is None or cwd is None or session_id is None or backup_service is None:
+            return
+        await backup_permission_wait_checkpoint(
+            store=store,
+            boundary_id=boundary_id,
+            cwd=cwd,
+            session_id=session_id,
+            backup_service=backup_service,
+            metrics=pending.backup_metrics,
+        )
 
     async def is_sideband_response(self, response: PermissionResponse) -> bool:
         try:
@@ -521,9 +828,7 @@ class PermissionInputRegistry:
             claimed = [
                 pending
                 for pending in self._pending.values()
-                if pending.task_id == task_id
-                and pending.resolution_owner is owner
-                and pending.state in {"pending", "resolving"}
+                if pending.task_id == task_id and pending.resolution_owner is owner and pending.state == "pending"
             ]
             for pending in claimed:
                 pending.state = "canceling"
@@ -575,7 +880,14 @@ class PermissionInputRegistry:
         for owner in owners:
             await owner.cancel_permissions(task_id)
         for pending in legacy:
-            await self.fail(pending)
+            coordinator = self._permission_wait_coordinator
+            canceled = bool(
+                coordinator is not None
+                and pending.boundary_id is not None
+                and await coordinator.cancel_live(pending.boundary_id)
+            )
+            if not canceled:
+                await self.fail(pending)
             await self.complete(pending)
         return token
 
@@ -597,6 +909,20 @@ class PermissionInputRegistry:
         if pending.resolution_owner is not None:
             await pending.resolution_owner.fail_permission(pending)
             return
+        # This cleanup is serialized by the same per-boundary resolution lock
+        # used for answers and cancellation.  It prevents a failed critical
+        # backup/publication from leaving a recoverable checkpoint for an
+        # INPUT_REQUIRED boundary that was never externally visible.
+        coordinator = self._permission_wait_coordinator
+        if pending.boundary_id is not None and pending.checkpoint_store is not None:
+            canceled = bool(coordinator is not None and await coordinator.cancel_live(pending.boundary_id))
+            if not canceled:
+                try:
+                    pending.checkpoint_store.cancel(pending.boundary_id)
+                except ValueError:
+                    # A concurrently claimed decision remains authoritative;
+                    # recovery will finish applying that decision.
+                    pass
         future = pending.request.response_future
         if future is not None and not future.done():
             emit_permission_boundary_audit(
@@ -616,6 +942,28 @@ class PermissionInputRegistry:
                 self._pending.pop(key, None)
                 pending.state = "completed"
                 self._condition.notify_all()
+        if pending.timeout_task is not None and pending.timeout_task is not asyncio.current_task():
+            pending.timeout_task.cancel()
+        if pending.boundary_id is not None and self._permission_wait_coordinator is not None:
+            self._permission_wait_coordinator.unregister_live(pending.boundary_id)
+
+    async def claim_continuation(self, pending: PendingPermission) -> Any | None:
+        """Claim a detached serial permission continuation exactly once.
+
+        Durable decision claiming is idempotent, but invoking the live
+        continuation is not.  Keep this one-shot ownership under the registry
+        lock so concurrent/retried permission answers can only return the
+        existing acknowledgement.
+        """
+
+        async with self._condition:
+            key = (pending.task_id, pending.input_id)
+            if self._pending.get(key) is not pending:
+                return None
+            if pending.continuation is None or pending.continuation_claimed:
+                return None
+            pending.continuation_claimed = True
+            return pending.continuation
 
     async def _lookup(self, response: PermissionResponse) -> PendingPermission:
         async with self._condition:
@@ -647,11 +995,30 @@ def _json_data_part(part: Any) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _json_text_part(part: Any) -> dict[str, Any] | None:
+    try:
+        has_text = part.HasField("text")
+    except (AttributeError, ValueError):
+        has_text = False
+    text = getattr(part, "text", None)
+    if not has_text or not isinstance(text, str) or not text.startswith(PERMISSION_QUERY_PREFIX):
+        return None
+    payload_text = text[len(PERMISSION_QUERY_PREFIX) :].lstrip()
+    if not payload_text:
+        return None
+    try:
+        value = json.loads(payload_text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
 def _permission_input_id() -> str:
     return "permission-{}".format(uuid.uuid4().hex)
 
 
 __all__ = [
+    "PERMISSION_QUERY_PREFIX",
     "PendingPermission",
     "PermissionInputRegistry",
     "PermissionResolutionOwner",

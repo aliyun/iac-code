@@ -72,11 +72,11 @@ mcp__<server>__authenticate
 
 IaC 代码通过 `MCPSecretStorage` 存储 OAuth 令牌和 MCP 客户端机密：
 
-1. 它会尝试操作系统密钥环（如果可用）。
-2. 如果密钥环被禁用或不可用，它将在 `<config-dir>/mcp/` 下存储加密的后备数据。
-3. 后备密钥和加密秘密存储的文件权限受到限制。
+1. 加密数据存储在 `<config-dir>/mcp/secrets.json.enc`。
+2. 加密密钥存储在 `<config-dir>/mcp/secrets.key`。
+3. 两个文件都会限制访问权限。
 
-设置 `IAC_CODE_MCP_DISABLE_KEYRING=1` 以强制加密回退存储，这对于隔离测试很有用。
+MCP 密钥存储不会访问操作系统密钥环，从而避免后台状态检查引发系统授权弹窗。仅存在于密钥环中的旧认证状态不会自动迁移；重新授权一次 MCP server 即可创建本地加密记录。
 
 使用此命令清除存储的身份验证状态：
 
@@ -93,7 +93,7 @@ iac-code mcp remove secure-reviewer --scope user
 ```
 
 当你只想重新授权现有 server 时使用 `reset-auth`。当 server config 本身也应消失时使用 `mcp remove`；
-两条路径都会清理 `MCPSecretStorage` 管理的 keyring 和 encrypted fallback entries。
+两条路径都会清理 `MCPSecretStorage` 管理的本地加密记录。
 
 ## Project Trust
 

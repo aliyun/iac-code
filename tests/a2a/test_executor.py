@@ -14,6 +14,7 @@ from google.protobuf.json_format import MessageToDict
 from iac_code.a2a.backup import backup_session_async
 from iac_code.a2a.executor import IacCodeA2AExecutor, _normal_handoff_has_backup_ack
 from iac_code.a2a.exposure import A2AExposureType
+from iac_code.a2a.input_required import PermissionResponse
 from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2ATaskSnapshot
 from iac_code.a2a.pipeline_executor import recoverable_task_id_from_sidecar
@@ -33,6 +34,7 @@ from iac_code.mcp.types import (
     ScopedMCPServerConfig,
 )
 from iac_code.pipeline.engine.user_input import PipelineUserInput
+from iac_code.services.permission_wait import RecoveredPermissionAuditBoundary
 from iac_code.services.session_backup import (
     BackupReason,
     BackupResult,
@@ -1869,6 +1871,9 @@ async def test_executor_passes_artifact_store_to_stream_event_publisher(
         auto_approve_permissions=False,
         exposure_types=None,
         iac_code_session_id=None,
+        permission_wait_cwd=None,
+        permission_wait_backup_service=None,
+        permission_wait_metrics=None,
     ):
         seen_artifact_stores.append(artifact_store)
         assert permission_input_registry is not None
@@ -3788,12 +3793,10 @@ class TestResolveCandidatePresentation:
         executor = self._make_executor()
 
         assert (
-            executor._resolve_candidate_presentation({"iac_code": {"candidatePresentation": " rich-v1 "}})
-            == "rich-v1"
+            executor._resolve_candidate_presentation({"iac_code": {"candidatePresentation": " rich-v1 "}}) == "rich-v1"
         )
         assert (
-            executor._resolve_candidate_presentation({"iac_code": {"candidate_presentation": "RICH-V1"}})
-            == "rich-v1"
+            executor._resolve_candidate_presentation({"iac_code": {"candidate_presentation": "RICH-V1"}}) == "rich-v1"
         )
 
     def test_rejects_unknown_or_missing_presentation(self) -> None:
@@ -4249,3 +4252,244 @@ async def test_executor_refreshes_cloud_tools_with_aliyun_metadata_for_reused_co
     await executor.execute(context, FakeEventQueue())
 
     assert seen_access_key_ids == ["client-id"]
+
+
+@pytest.mark.asyncio
+async def test_suspending_permission_answer_waits_for_owner_then_resumes_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id="pwi-test",
+        tool_use_id="tool-1",
+        decision="allow_once",
+    )
+    pending = SimpleNamespace(state="suspended_decision_claimed", boundary_id="pwb-test")
+    waits = [False, False, True]
+    completed: list[object] = []
+    resumed: list[PermissionResponse] = []
+    published: list[dict] = []
+
+    async def pending_for_response(_response):
+        return pending
+
+    async def answer(_response):
+        return True
+
+    async def wait_for_suspended_owner(_boundary_id):
+        return waits.pop(0)
+
+    async def complete(value):
+        completed.append(value)
+
+    async def resume(_context, _queue, *, response):
+        resumed.append(response)
+        return True
+
+    async def publish(_queue, **kwargs):
+        published.append(kwargs)
+
+    monkeypatch.setattr("iac_code.a2a.executor.parse_permission_response", lambda _message: response)
+    monkeypatch.setattr(executor._permission_input_registry, "pending_for_response", pending_for_response)
+    monkeypatch.setattr(executor._permission_input_registry, "answer", answer)
+    monkeypatch.setattr(
+        executor._permission_wait_coordinator,
+        "wait_for_suspended_owner",
+        wait_for_suspended_owner,
+    )
+    monkeypatch.setattr(executor._permission_input_registry, "complete", complete)
+    monkeypatch.setattr(executor, "_resume_persisted_permission", resume)
+    monkeypatch.setattr(executor, "_publish_status", publish)
+
+    await executor._execute(
+        FakeRequestContext(task_id="task-1", context_id="ctx-1"),
+        FakeEventQueue(),
+        context_id="ctx-1",
+    )
+
+    assert waits == []
+    assert completed == [pending]
+    assert resumed == [response]
+    assert len(published) == 1
+    assert published[0]["metadata"]["iac_code"]["permissionAck"]["recoveryPending"] is True
+
+
+@pytest.mark.asyncio
+async def test_normal_persisted_permission_recovery_publishes_final_and_terminal_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class RecoveryLoop:
+        async def resume_permission_boundary(self, _checkpoint):
+            yield MessageStartEvent(message_id="final")
+            yield TextDeltaEvent(text="Cleanup completed.")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+    checkpoint = {
+        "boundaryId": "pwb-boundary1",
+        "phase": "SUSPENDED",
+        "permissionClass": "normal",
+        "decision": {
+            "status": "claimed",
+            "value": "allow_once",
+            "claimId": "claim-1",
+            "auditStatus": "recorded",
+            "backupStatus": "committed",
+        },
+    }
+    resolved: list[dict] = []
+
+    class CheckpointStore:
+        def find(self, **_kwargs):
+            return checkpoint
+
+        def reconcile_deadline(self, *_args, **_kwargs):
+            return checkpoint
+
+        def claim_decision(self, *_args, **_kwargs):
+            return checkpoint, False
+
+        def run_claim_audit_once(self, *_args, **_kwargs):
+            return checkpoint, False
+
+        def begin_restore(self, _boundary_id):
+            checkpoint["phase"] = "RESTORING"
+            return checkpoint
+
+        def resolve(self, _boundary_id, **kwargs):
+            checkpoint["phase"] = "RESOLVED"
+            resolved.append(kwargs)
+            return checkpoint
+
+    backup_service = SnapshotReadingBackupService()
+    task_store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    context_record = await task_store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda session_id: FakeRuntime(session_id=session_id),
+    )
+    SessionStorage().append(
+        str(tmp_path),
+        context_record.session_id,
+        Message(role="user", content="delete the stack"),
+    )
+    task_record = await task_store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task_record.state = "input-required"
+    task_store.mirror_task(task_record)
+    runtime = FakeRuntime(agent_loop=RecoveryLoop(), session_id=context_record.session_id)
+    monkeypatch.setattr("iac_code.a2a.executor.PermissionWaitCheckpointStore", lambda *_args: CheckpointStore())
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda _options: runtime)
+
+    executor = IacCodeA2AExecutor(
+        task_store=task_store,
+        model="qwen3.6-plus",
+        backup_service=backup_service,
+    )
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id="input-1",
+        tool_use_id="tool-1",
+        decision="allow_once",
+    )
+    queue = FakeEventQueue()
+
+    assert await executor._resume_persisted_permission(
+        FakeRequestContext(task_id="task-1", context_id="ctx-1"),
+        queue,
+        response=response,
+    )
+
+    states = [dump(event)["status"]["state"] for event in queue.events if isinstance(event, TaskStatusUpdateEvent)]
+    final_events = [
+        dump(event)
+        for event in queue.events
+        if isinstance(event, TaskStatusUpdateEvent)
+        and dump(event).get("metadata", {}).get("iac_code", {}).get("assistantFinal", {}).get("complete") is True
+    ]
+    assert states[-1] == "TASK_STATE_INPUT_REQUIRED"
+    assert final_events[0]["status"]["message"]["parts"][0]["text"] == "Cleanup completed."
+    assert "".join(task_record.output_text) == "Cleanup completed."
+    assert task_record.state == "input-required"
+    assert checkpoint["phase"] == "RESOLVED"
+    assert len(resolved) == 1
+    assert backup_service.calls == [(str(tmp_path), context_record.session_id, BackupReason.NORMAL_TURN_END, False)]
+
+
+@pytest.mark.asyncio
+async def test_restart_audit_rebuild_failure_precedes_permission_claim_and_backup(monkeypatch, tmp_path) -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    task_record = SimpleNamespace(context_id="ctx-1")
+    context_record = SimpleNamespace(cwd=str(tmp_path), session_id="session-1")
+
+    async def get_task_record(_task_id):
+        return task_record
+
+    async def get_context_record(_context_id):
+        return context_record
+
+    monkeypatch.setattr(store, "get_task_record", get_task_record)
+    monkeypatch.setattr(store, "get_context_record", get_context_record)
+    checkpoint = {
+        "boundaryId": "pwb-boundary1",
+        "phase": "SUSPENDED",
+        "permissionClass": "normal",
+        "decision": {"status": "none", "value": None},
+        "principalRef": None,
+        "region": None,
+    }
+    store_calls: list[str] = []
+
+    class CheckpointStore:
+        def find(self, **_kwargs):
+            return checkpoint
+
+        def reconcile_deadline(self, *_args, **_kwargs):
+            store_calls.append("reconcile")
+            return checkpoint
+
+        def claim_decision(self, *_args, **_kwargs):
+            store_calls.append("claim")
+            return checkpoint, True
+
+    monkeypatch.setattr(
+        "iac_code.a2a.executor.PermissionWaitCheckpointStore",
+        lambda *_args, **_kwargs: CheckpointStore(),
+    )
+    monkeypatch.setattr(
+        "iac_code.a2a.executor.recover_permission_audit_boundary",
+        lambda *_args, **_kwargs: RecoveredPermissionAuditBoundary(
+            tool_name="write_file",
+            tool_input={"path": "template.yml"},
+            tool_use_id="tool-1",
+            audit_context={"session_id": "session-1", "cwd": str(tmp_path)},
+        ),
+    )
+
+    async def fail_rebuild(**_kwargs):
+        raise ValueError("current tool unavailable")
+
+    monkeypatch.setattr(executor, "_rebuild_normal_permission_audit_event", fail_rebuild)
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id="input-1",
+        tool_use_id="tool-1",
+        decision="allow_once",
+    )
+
+    with pytest.raises(InvalidParamsError, match="permission_resume_invalid"):
+        await executor._resume_persisted_permission(
+            FakeRequestContext(task_id="task-1", context_id="ctx-1"),
+            FakeEventQueue(),
+            response=response,
+        )
+
+    assert store_calls == []

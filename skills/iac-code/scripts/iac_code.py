@@ -11,6 +11,7 @@ import ctypes
 import errno
 import hashlib
 import json
+import math
 import os
 import pathlib
 import platform
@@ -56,6 +57,7 @@ MAX_FOLLOW_PROGRESS_BYTES = 4096
 MAX_AUTO_CLEANUP_TASKS_PER_FOLLOW = 4
 MAX_CHANNEL_LENGTH = 128
 MAX_SKILL_CONFIG_BYTES = 16 * 1024
+MAX_PERMISSION_WAIT_SECONDS = 10 * 365 * 24 * 60 * 60
 SKILL_CHANNEL_PREFIX = "skill/"
 FOLLOW_HEARTBEAT_SECONDS = 12.0
 DEFAULT_FOLLOW_SECONDS = 60.0
@@ -791,13 +793,18 @@ def clean_runtime_cache(args):
     }
 
 
-def _runtime_key(mode, pipeline_name, target):
-    identity = "\0".join([RUNTIME_TAG, target, mode, pipeline_name or ""])
+def _runtime_key(mode, pipeline_name, target, permission_wait_policy=None):
+    identity_parts = [RUNTIME_TAG, target, mode, pipeline_name or ""]
+    if permission_wait_policy is not None:
+        identity_parts.append(json.dumps(permission_wait_policy, sort_keys=True, separators=(",", ":")))
+    identity = "\0".join(identity_parts)
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
 
 
-def _runtime_record_path(mode, pipeline_name, target):
-    return _bridge_root() / "servers" / _runtime_key(mode, pipeline_name, target) / "runtime.json"
+def _runtime_record_path(mode, pipeline_name, target, permission_wait_policy=None):
+    return (
+        _bridge_root() / "servers" / _runtime_key(mode, pipeline_name, target, permission_wait_policy) / "runtime.json"
+    )
 
 
 def _pid_alive(pid):
@@ -914,13 +921,14 @@ def _runtime_configuration_readiness(record, require_cloud):
     return readiness
 
 
-def _runtime_matches(record, mode, pipeline_name, target):
+def _runtime_matches(record, mode, pipeline_name, target, permission_wait_policy=None):
     expected = {
         "runtimeTag": RUNTIME_TAG,
         "iacCodeVersion": IAC_CODE_VERSION,
         "target": target,
         "mode": mode,
         "pipelineName": pipeline_name or "",
+        "permissionWaitPolicy": permission_wait_policy,
     }
     if any(record.get(key) != value for key, value in expected.items()) or not _pid_alive(record.get("pid")):
         return False
@@ -953,7 +961,7 @@ def _runtime_record_for_job(job):
     record = _load_json(pathlib.Path(record_path), "runtime_identity_mismatch")
     if record.get("generation") != job.get("runtimeGeneration"):
         raise BridgeError("runtime_identity_mismatch", "The Skill job runtime generation is no longer active.")
-    if not _runtime_matches(record, mode, pipeline_name, target):
+    if not _runtime_matches(record, mode, pipeline_name, target, job.get("permissionWaitPolicy")):
         raise BridgeError("runtime_identity_mismatch", "The Skill job runtime identity no longer matches.")
     return record
 
@@ -992,10 +1000,10 @@ def _remove_runtime_record(record_path, generation):
             record_path.unlink()
 
 
-def ensure_server(executable, artifact, mode, pipeline_name):
+def ensure_server(executable, artifact, mode, pipeline_name, permission_wait_policy=None):
     runtimes = _bridge_root() / "servers"
     _secure_directory(runtimes)
-    key = _runtime_key(mode, pipeline_name, artifact["target"])
+    key = _runtime_key(mode, pipeline_name, artifact["target"], permission_wait_policy)
     root = runtimes / key
     _secure_directory(root)
     record_path = root / "runtime.json"
@@ -1003,7 +1011,7 @@ def ensure_server(executable, artifact, mode, pipeline_name):
         if record_path.is_file():
             with contextlib.suppress(BridgeError):
                 record = _load_json(record_path, "runtime_identity_mismatch")
-                if _runtime_matches(record, mode, pipeline_name, artifact["target"]):
+                if _runtime_matches(record, mode, pipeline_name, artifact["target"], permission_wait_policy):
                     return record
         token = secrets.token_urlsafe(32)
         port = _free_port()
@@ -1021,6 +1029,12 @@ def ensure_server(executable, artifact, mode, pipeline_name):
             "log_to_stdout": False,
             "idle_shutdown_seconds": RUNTIME_IDLE_TIMEOUT_SECONDS,
         }
+        if permission_wait_policy is not None:
+            config["permission_wait"] = {
+                "resident_timeout_seconds": permission_wait_policy["residentTimeoutSeconds"],
+                "sub_pipeline_timeout_seconds": permission_wait_policy["subPipelineTimeoutSeconds"],
+                "timeout_grace_seconds": permission_wait_policy["timeoutGraceSeconds"],
+            }
         config_path = root / "a2a.json"
         _atomic_json(config_path, config)
         log_path = root / "runtime.log"
@@ -1067,6 +1081,7 @@ def ensure_server(executable, artifact, mode, pipeline_name):
                 "generation": generation,
                 "mode": mode,
                 "pipelineName": pipeline_name or "",
+                "permissionWaitPolicy": permission_wait_policy,
                 "pid": process.pid,
                 "port": port,
                 "token": token,
@@ -1078,7 +1093,7 @@ def ensure_server(executable, artifact, mode, pipeline_name):
             while time.monotonic() < deadline:
                 if process.poll() is not None:
                     break
-                if _runtime_matches(record, mode, pipeline_name, artifact["target"]):
+                if _runtime_matches(record, mode, pipeline_name, artifact["target"], permission_wait_policy):
                     ready = True
                     return record
                 time.sleep(0.15)
@@ -2063,12 +2078,8 @@ def _append_projection(job_id, projection, turn_text=""):
             job["cleanupOnlyActive"] = True
         _append_turn_text(root, job, turn_text)
         if isinstance(original.get("artifacts"), list):
-            public_artifacts = [
-                _public_workspace_artifact(value, job["workspace"]) for value in original["artifacts"]
-            ]
-            job["turnArtifacts"] = _deduplicated_artifacts(
-                list(job.get("turnArtifacts") or []) + public_artifacts
-            )
+            public_artifacts = [_public_workspace_artifact(value, job["workspace"]) for value in original["artifacts"]]
+            job["turnArtifacts"] = _deduplicated_artifacts(list(job.get("turnArtifacts") or []) + public_artifacts)
         if original.get("type") == "input-required":
             job["inputRequired"] = original.get("inputRequired")
             job["state"] = "input-required"
@@ -2308,9 +2319,13 @@ def _worker_payload(job, prompt=None, response=None, cleanup_only=False):
                 "parts": [{"text": answer if isinstance(answer, str) else json.dumps(answer, ensure_ascii=False)}],
             }
         )
-    sideband_permission = response is not None and response.get("kind") == "permission" and any(
-        isinstance(value, dict) and value.get("inputId") == response.get("inputId")
-        for value in job.get("pendingPermissions", [])
+    sideband_permission = (
+        response is not None
+        and response.get("kind") == "permission"
+        and any(
+            isinstance(value, dict) and value.get("inputId") == response.get("inputId")
+            for value in job.get("pendingPermissions", [])
+        )
     )
     return _jsonrpc_payload(
         "SendMessage" if sideband_permission else "SendStreamingMessage",
@@ -2481,12 +2496,83 @@ def _normalize_telemetry_channel(value):
     raise BridgeError("skill_configuration_invalid", "The Skill telemetry channel must be a non-empty string.")
 
 
-def _skill_telemetry_channel():
+def _permission_wait_number(value, name, allow_zero):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise BridgeError(
+            "skill_configuration_invalid",
+            "{} must be a finite {} number no greater than {} seconds or null.".format(
+                name,
+                "non-negative" if allow_zero else "positive",
+                MAX_PERMISSION_WAIT_SECONDS,
+            ),
+        )
+    try:
+        number = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise BridgeError(
+            "skill_configuration_invalid",
+            "{} must be a finite number no greater than {} seconds or null.".format(
+                name,
+                MAX_PERMISSION_WAIT_SECONDS,
+            ),
+        ) from exc
+    if (
+        not math.isfinite(number)
+        or number < 0
+        or (number == 0 and not allow_zero)
+        or number > MAX_PERMISSION_WAIT_SECONDS
+    ):
+        raise BridgeError(
+            "skill_configuration_invalid",
+            "{} must be a finite {} number no greater than {} seconds or null.".format(
+                name,
+                "non-negative" if allow_zero else "positive",
+                MAX_PERMISSION_WAIT_SECONDS,
+            ),
+        )
+    return number
+
+
+def _normalize_permission_wait_policy(value):
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise BridgeError("skill_configuration_invalid", "permissionWaitPolicy must be a JSON object.")
+    allowed = {"residentTimeoutSeconds", "subPipelineTimeoutSeconds", "timeoutGraceSeconds"}
+    unknown = sorted(str(key) for key in value if key not in allowed)
+    if unknown:
+        raise BridgeError(
+            "skill_configuration_invalid",
+            "Unknown permissionWaitPolicy fields: {}.".format(", ".join(unknown)),
+        )
+
+    def optional_timeout(name):
+        raw = value.get(name)
+        return None if raw is None else _permission_wait_number(raw, "permissionWaitPolicy." + name, False)
+
+    grace = value.get("timeoutGraceSeconds", 30)
+    if grace is None:
+        raise BridgeError(
+            "skill_configuration_invalid",
+            "permissionWaitPolicy.timeoutGraceSeconds must be a finite non-negative number.",
+        )
+    return {
+        "residentTimeoutSeconds": optional_timeout("residentTimeoutSeconds"),
+        "subPipelineTimeoutSeconds": optional_timeout("subPipelineTimeoutSeconds"),
+        "timeoutGraceSeconds": _permission_wait_number(
+            grace,
+            "permissionWaitPolicy.timeoutGraceSeconds",
+            True,
+        ),
+    }
+
+
+def _skill_config():
     config_path = SKILL_ROOT / "config.json"
     try:
         encoded = config_path.read_bytes()
     except FileNotFoundError:
-        return None
+        return {"channel": None, "permissionWaitPolicy": None}
     except OSError as exc:
         raise BridgeError("skill_configuration_invalid", "The installed Skill config could not be read.") from exc
     if len(encoded) > MAX_SKILL_CONFIG_BYTES:
@@ -2497,9 +2583,20 @@ def _skill_telemetry_channel():
         raise BridgeError("skill_configuration_invalid", "The installed Skill config is not valid UTF-8 JSON.") from exc
     if not isinstance(config, dict):
         raise BridgeError("skill_configuration_invalid", "The installed Skill config must be a JSON object.")
-    if config.get("channel") is None:
-        return None
-    return _normalize_telemetry_channel(config.get("channel"))
+    unknown = sorted(str(key) for key in config if key not in {"channel", "permissionWaitPolicy"})
+    if unknown:
+        raise BridgeError(
+            "skill_configuration_invalid",
+            "Unknown installed Skill config fields: {}.".format(", ".join(unknown)),
+        )
+    return {
+        "channel": _normalize_telemetry_channel(config.get("channel")) if config.get("channel") is not None else None,
+        "permissionWaitPolicy": _normalize_permission_wait_policy(config.get("permissionWaitPolicy")),
+    }
+
+
+def _skill_telemetry_channel():
+    return _skill_config()["channel"]
 
 
 def _identity_result(job_id, job, cursor, worker_pid):
@@ -2562,10 +2659,18 @@ def start_job(args):
     prompt = _read_workspace_prompt(workspace, args.prompt_file)
     preferred_language = _preferred_language(prompt, args.language)
     _set_output_language(preferred_language)
-    channel = _skill_telemetry_channel()
+    skill_config = _skill_config()
+    channel = skill_config["channel"]
+    permission_wait_policy = skill_config["permissionWaitPolicy"]
     artifact, executable, cache_hit = ensure_runtime()
     _progress("start", "Starting or reusing the local A2A runtime")
-    record = ensure_server(executable, artifact, args.mode, args.pipeline_name)
+    record = ensure_server(
+        executable,
+        artifact,
+        args.mode,
+        args.pipeline_name,
+        permission_wait_policy,
+    )
     readiness = _runtime_configuration_readiness(
         record,
         require_cloud=args.mode == "pipeline" and args.pipeline_name == "selling",
@@ -2576,7 +2681,12 @@ def start_job(args):
     spool.touch()
     if os.name != "nt":
         os.chmod(str(spool), 0o600)
-    runtime_record = _runtime_record_path(args.mode, args.pipeline_name, artifact["target"])
+    runtime_record = _runtime_record_path(
+        args.mode,
+        args.pipeline_name,
+        artifact["target"],
+        permission_wait_policy,
+    )
     job = {
         "schemaVersion": 1,
         "jobId": job_id,
@@ -2600,6 +2710,8 @@ def start_job(args):
     }
     if channel is not None:
         job["channel"] = channel
+    if permission_wait_policy is not None:
+        job["permissionWaitPolicy"] = permission_wait_policy
     _atomic_json(job_path, job)
     payload = _worker_payload(job, prompt=prompt)
     worker_pid = _spawn_worker(job_id, payload)
@@ -2642,11 +2754,20 @@ def _ensure_job_runtime(job_id):
     if artifact.get("target") != target:
         raise BridgeError("runtime_identity_mismatch", "The Skill job Runtime target is no longer available.")
     _progress("start", "Starting or reusing the local A2A runtime")
-    record = ensure_server(executable, artifact, mode, pipeline_name)
-    runtime_record = _runtime_record_path(mode, pipeline_name, target)
+    permission_wait_policy = job.get("permissionWaitPolicy")
+    record = ensure_server(executable, artifact, mode, pipeline_name, permission_wait_policy)
+    runtime_record = _runtime_record_path(mode, pipeline_name, target, permission_wait_policy)
     with InstallLock(root / ".job.lock", timeout=10):
         current = _load_json(job_path)
-        immutable = ("runtimeIdentityVersion", "runtimeTag", "target", "mode", "pipelineName", "workspace")
+        immutable = (
+            "runtimeIdentityVersion",
+            "runtimeTag",
+            "target",
+            "mode",
+            "pipelineName",
+            "workspace",
+            "permissionWaitPolicy",
+        )
         if any(current.get(key) != job.get(key) for key in immutable):
             raise BridgeError("runtime_identity_mismatch", "The Skill job runtime identity changed during recovery.")
         current["runtimeGeneration"] = record["generation"]
@@ -2722,11 +2843,7 @@ def _job_result(
     current_task_id = job.get("taskId")
     for item in unseen:
         item_task_id = item.get("taskId")
-        if (
-            isinstance(current_task_id, str)
-            and isinstance(item_task_id, str)
-            and item_task_id != current_task_id
-        ):
+        if isinstance(current_task_id, str) and isinstance(item_task_id, str) and item_task_id != current_task_id:
             folded["stale_task_event"] = folded.get("stale_task_event", 0) + 1
             continue
         if isinstance(item.get("text"), str):
@@ -2780,16 +2897,16 @@ def _job_result(
         not boundary_reached
         and isinstance(job.get("pipelineResult"), dict)
         and cleanup_status not in CLEANUP_PENDING_STATES
-        and (
-            (job.get("mode") == "pipeline" and state in TERMINAL_STATES)
-            or cleanup_status in CLEANUP_TERMINAL_STATES
-        )
+        and ((job.get("mode") == "pipeline" and state in TERMINAL_STATES) or cleanup_status in CLEANUP_TERMINAL_STATES)
     ):
         result["pipelineResult"] = job["pipelineResult"]
         result.pop("latestText", None)
-    if include_heartbeat and not unseen and state not in TERMINAL_STATES and state not in INPUT_STATES | {
-        TURN_COMPLETED_STATE
-    }:
+    if (
+        include_heartbeat
+        and not unseen
+        and state not in TERMINAL_STATES
+        and state not in INPUT_STATES | {TURN_COMPLETED_STATE}
+    ):
         elapsed = max(0, int(time.time()) - int(job.get("turnStartedAt", job.get("createdAt", time.time()))))
         result["heartbeat"] = (
             "iac-code 仍在处理中（{} 秒）。".format(elapsed)
@@ -3325,10 +3442,7 @@ def respond_job(args):
     input_file = getattr(args, "input_file", None)
     inline_decision = getattr(args, "decision", None)
     if input_file:
-        if any(
-            getattr(args, key, None)
-            for key in ("input_id", "tool_use_id", "decision")
-        ):
+        if any(getattr(args, key, None) for key in ("input_id", "tool_use_id", "decision")):
             raise BridgeError(
                 "input_response_mismatch",
                 "Use either an input file or an inline permission decision, not both.",
@@ -3415,9 +3529,13 @@ def continue_job(args):
             "input_response_mismatch",
             "Only a normal conversation or a completed Pipeline handoff can continue with a new turn.",
         )
-    pipeline_handoff = job.get("mode") == "pipeline" and job.get("state") in TERMINAL_STATES and (
-        job.get("normalHandoffReady") is True
-        or (job.get("state") == "completed" and job.get("pipelineName") in PIPELINE_NORMAL_HANDOFFS)
+    pipeline_handoff = (
+        job.get("mode") == "pipeline"
+        and job.get("state") in TERMINAL_STATES
+        and (
+            job.get("normalHandoffReady") is True
+            or (job.get("state") == "completed" and job.get("pipelineName") in PIPELINE_NORMAL_HANDOFFS)
+        )
     )
     expected_state = job.get("state")
     if (job.get("state") != TURN_COMPLETED_STATE and not pipeline_handoff) or isinstance(

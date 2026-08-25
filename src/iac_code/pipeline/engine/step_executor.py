@@ -207,6 +207,7 @@ class StepExecutor:
         rollback_targets: list[str] | None = None,
         rollback_count: int = 0,
         max_rollbacks: int = 5,
+        permission_checkpoint: dict[str, Any] | None = None,
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         """Execute a step, yielding AgentLoop events and a final StepResult."""
         preserved_selection = self._preserved_candidate_selection(
@@ -337,7 +338,9 @@ class StepExecutor:
 
         try:
             first_stream_had_event = False
-            if agent_context.resume_messages and user_message is None:
+            if permission_checkpoint is not None:
+                first_stream = agent_loop.resume_permission_boundary(permission_checkpoint)
+            elif agent_context.resume_messages and user_message is None:
                 first_stream = agent_loop.continue_streaming()
             else:
                 first_stream = await mcp_prompt_command_stream(
