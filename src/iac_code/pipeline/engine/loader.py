@@ -343,9 +343,7 @@ def _parse_surface_overrides(raw: object, step_id: str) -> dict[str, StepSurface
 
         conclusion_schema = override.get("conclusion_schema")
         if conclusion_schema is not None and not isinstance(conclusion_schema, dict):
-            raise ValueError(
-                f"Step '{step_id}': surface_overrides.{surface}.conclusion_schema must be a mapping"
-            )
+            raise ValueError(f"Step '{step_id}': surface_overrides.{surface}.conclusion_schema must be a mapping")
 
         overrides[surface] = StepSurfaceOverride(
             prompt_file=prompt,
