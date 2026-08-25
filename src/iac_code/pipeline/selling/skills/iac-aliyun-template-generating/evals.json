@@ -72,6 +72,23 @@
         {"name": "redis_params", "check": "Redis 的 ZoneId 和 InstanceClass 定义为 Parameters"},
         {"name": "has_association_property", "check": "Parameters 中包含 AssociationProperty 定义"}
       ]
+    },
+    {
+      "id": 5,
+      "name": "conclusion-matches-final-template",
+      "prompt": "根据架构方案生成 ROS 模板：VPC + ECS + RDS MySQL，生成过程中把 ECS 规格从 1vCPU/1GB 上调到 2vCPU/4GB",
+      "candidate_context": {
+        "name": "均衡型方案",
+        "products": ["VPC", "ECS", "RDS"],
+        "topology": "单可用区，VPC 内 ECS 运行应用，RDS 提供 MySQL 数据库"
+      },
+      "expected_behavior": "结论描述最终落盘模板：template 与文件内容一致、template_sha256 为其 sha256，description 中的 ECS/RDS 规格取自最终模板而非中间草案",
+      "assertions": [
+        {"name": "conclusion_matches_file", "check": "结论 template 字段与 file_path 指向的模板文件内容逐字相同"},
+        {"name": "sha256_matches_template", "check": "结论 template_sha256 等于 template 字符串的 sha256"},
+        {"name": "description_specs_from_final_template", "check": "description 中的 ECS/RDS 规格与最终模板的 Parameters 默认值一致，不出现 1vCPU/1GB 等被推翻的草案规格"},
+        {"name": "validated_after_last_write", "check": "最后一次写文件之后调用了 ros_validate_template"}
+      ]
     }
   ]
 }

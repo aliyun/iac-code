@@ -51,6 +51,14 @@ class TestSkillFrontmatter:
         fm = _parse_frontmatter(content)
         assert "ROS" in fm["description"]
 
+    def test_conclusion_schema_anchors_conclusion_to_final_template(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        schema = fm["conclusion_schema"]
+        assert "template_sha256" in schema["required"]
+        assert schema["properties"]["template_sha256"]["type"] == "string"
+        assert "最终模板" in schema["properties"]["description"]["description"]
+
 
 class TestSkillContentRosOnly:
     @pytest.fixture()
@@ -133,6 +141,13 @@ class TestSkillContentRosOnly:
         assert "以下属性**不需要**参数化，直接使用合理默认值" in body
         assert "对用户未指定的参数直接使用合理默认值" not in body
 
+    def test_prompt_orders_write_validate_then_conclusion_from_final_template(self):
+        body = TEMPLATE_PROMPT_MD.read_text(encoding="utf-8")
+        assert "template_sha256" in body
+        assert "最终落盘文件" in body
+        assert "必须重新校验" in body
+        assert "不得沿用生成过程中被推翻的中间设想" in body
+
     def test_file_write_details_stay_in_step_prompt(self, body):
         assert "并写入文件" in body
         assert "生成的模板默认放在当前工作目录" in body
@@ -142,6 +157,12 @@ class TestSkillContentRosOnly:
         assert "无需提前创建目录" not in body
         assert "bash" not in body.lower()
         assert "mkdir" not in body.lower()
+
+    def test_requires_conclusion_specs_to_come_from_final_template(self, body):
+        assert "## 结论一致性" in body
+        assert "template_sha256" in body
+        assert "逐字相同" in body
+        assert "重新计算 `template_sha256`" in body
 
 
 class TestSkillDiscovery:

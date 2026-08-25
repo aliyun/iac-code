@@ -5,12 +5,15 @@ when_to_use: 当需要根据架构方案生成阿里云 ROS 模板时
 user_invocable: false
 conclusion_schema:
   type: object
-  required: [template, file_path, region, description]
+  required: [template, template_sha256, file_path, region, description]
   additionalProperties: false
   properties:
     template:
       type: string
       description: 与写入文件相同的 YAML 字符串
+    template_sha256:
+      type: string
+      description: template 字符串的 sha256，用于确认结论与磁盘模板一致
     file_path:
       type: string
       description: 模板文件路径
@@ -19,7 +22,7 @@ conclusion_schema:
       description: 部署地域
     description:
       type: string
-      description: 模板简要描述
+      description: 模板简要描述，其中的实例规格必须取自最终模板
 ---
 
 # ROS 模板生成
@@ -93,6 +96,17 @@ conclusion_schema:
 - 模板格式为 YAML
 - 使用 `!Ref`、`!GetAtt` 等内置函数引用参数和资源属性，避免硬编码
 - Outputs 中所有输出变量必须定义 Label
+
+## 结论一致性
+
+结论必须描述**最终落盘的那一版模板**，不得沿用生成过程中被推翻的中间设想：
+
+- `template` 必须与 `file_path` 指向的模板文件内容逐字相同。
+- `template_sha256` 必须精确等于 `template` 字符串的 sha256；两者不一致时无法完成本步骤。
+- `description` 与其他结论文字中出现的实例规格（如 ECS 的 vCPU/内存、RDS 规格）必须取自最终模板的 Parameters 默认值或资源属性。修改过模板规格后，必须同步更新描述，不能保留早期草案的规格。
+- 校验通过后如果又调整了模板，必须重新校验并重新计算 `template_sha256`，再提交结论。
+
+下游成本步骤读取的是真实模板文件；结论描述与模板不一致会让同一候选出现互相矛盾的规格。
 
 ## 资源和文档搜索
 

@@ -161,6 +161,21 @@ sub_pipelines:
             - ros_diagnostic
             - ros_resource_type_registration
             - ros_tag
+        completion_guards:
+          - always: true
+            require_conclusion_sha256:
+              content_field: template
+              sha256_field: template_sha256
+            require_tool_result:
+              tool: ros_validate_template
+              match_conclusion_field: file_path
+              match_result_field: input.template_url
+              disallow_tool_results_after_match:
+                - tools: [write_file, edit_file]
+                  match_conclusion_field: file_path
+                  match_result_field: result.file_path
+                  message_key: template_generating_rerun_after_validate_template_write
+            message_key: template_generating_template_consistency_required
         inject_tools: [ros_validate_template]
 
       - id: reviewing

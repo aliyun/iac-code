@@ -278,6 +278,36 @@ def test_cost_prompt_injects_only_required_candidate_fields() -> None:
     assert "must-not-render-candidate-topology" not in rendered
 
 
+def test_template_generating_guards_require_conclusion_to_match_validated_template() -> None:
+    loaded = _load_selling(enable_reviewing=False)
+    template_step = loaded.sub_pipelines["evaluate_candidate"].steps[0]
+
+    assert template_step.step_id == "template_generating"
+    assert template_step.completion_guards == [
+        {
+            "always": True,
+            "require_conclusion_sha256": {
+                "content_field": "template",
+                "sha256_field": "template_sha256",
+            },
+            "require_tool_result": {
+                "tool": "ros_validate_template",
+                "match_conclusion_field": "file_path",
+                "match_result_field": "input.template_url",
+                "disallow_tool_results_after_match": [
+                    {
+                        "tools": ["write_file", "edit_file"],
+                        "match_conclusion_field": "file_path",
+                        "match_result_field": "result.file_path",
+                        "message_key": "template_generating_rerun_after_validate_template_write",
+                    }
+                ],
+            },
+            "message_key": "template_generating_template_consistency_required",
+        }
+    ]
+
+
 def test_selling_completion_guards_use_message_keys_not_raw_messages() -> None:
     raw = yaml.safe_load((_selling_dir() / "pipeline.yaml").read_text(encoding="utf-8"))
 

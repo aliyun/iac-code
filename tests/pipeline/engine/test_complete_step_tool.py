@@ -588,6 +588,31 @@ class TestCompletionGuards:
         )
 
     @staticmethod
+    def _selling_template_generating_tool(result_records: list[dict] | None = None) -> CompleteStepTool:
+        from iac_code.pipeline.engine.loader import load_pipeline_dir
+
+        selling_dir = Path(__file__).resolve().parents[3] / "src" / "iac_code" / "pipeline" / "selling"
+        loaded = load_pipeline_dir(selling_dir, feature_flag_overrides={"enable_reviewing": False})
+        step = next(
+            step for step in loaded.sub_pipelines["evaluate_candidate"].steps if step.step_id == "template_generating"
+        )
+        config = StepConfig(
+            step_id=step.step_id,
+            conclusion_field=step.conclusion_field,
+            forward=step.forward,
+            conclusion_schema=step.conclusion_schema,
+        )
+        return CompleteStepTool(
+            config,
+            completion_guards=step.completion_guards,
+            completion_guard_state={
+                "successful_tools": set(),
+                "tool_results": {},
+                "tool_result_records": list(result_records or []),
+            },
+        )
+
+    @staticmethod
     def _validate_template_record(
         file_path: str = "oss://bucket/template.yaml",
         *,
@@ -1213,6 +1238,100 @@ class TestCompletionGuards:
         assert result.is_error
         assert "edit_file" in result.content
         assert "infraguard_scan" in result.content
+
+    @pytest.mark.asyncio
+    async def test_template_generating_guard_rejects_conclusion_describing_superseded_template(self):
+        draft = "ROSTemplateFormatVersion: '2015-09-01'\n# ecs 1vCPU 1GB\n"
+        final = "ROSTemplateFormatVersion: '2015-09-01'\n# ecs 2vCPU 4GB\n"
+        tool = self._selling_template_generating_tool([self._validate_template_record("templates/balanced.yml")])
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "template": final,
+                    "template_sha256": self._sha256(draft),
+                    "file_path": "templates/balanced.yml",
+                    "region": "cn-hangzhou",
+                    "description": "ECS 1vCPU/1GB + RDS 1c2g",
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "template_sha256" in result.content
+
+    @pytest.mark.asyncio
+    async def test_template_generating_guard_rejects_conclusion_without_validate_template(self):
+        final = "ROSTemplateFormatVersion: '2015-09-01'\n# ecs 2vCPU 4GB\n"
+        tool = self._selling_template_generating_tool()
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "template": final,
+                    "template_sha256": self._sha256(final),
+                    "file_path": "templates/balanced.yml",
+                    "region": "cn-hangzhou",
+                    "description": "ECS 2vCPU/4GB + RDS 2vCPU/4GB",
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "ros_validate_template" in result.content
+
+    @pytest.mark.asyncio
+    async def test_template_generating_guard_rejects_write_after_validate_template(self):
+        final = "ROSTemplateFormatVersion: '2015-09-01'\n# ecs 2vCPU 4GB\n"
+        tool = self._selling_template_generating_tool(
+            [
+                self._validate_template_record("templates/balanced.yml"),
+                {
+                    "tool_name": "write_file",
+                    "input": {"path": "templates/balanced.yml"},
+                    "result": {"file_path": "templates/balanced.yml"},
+                    "is_error": False,
+                },
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "template": final,
+                    "template_sha256": self._sha256(final),
+                    "file_path": "templates/balanced.yml",
+                    "region": "cn-hangzhou",
+                    "description": "ECS 2vCPU/4GB + RDS 2vCPU/4GB",
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "ros_validate_template" in result.content
+
+    @pytest.mark.asyncio
+    async def test_template_generating_guard_accepts_validated_final_template(self):
+        final = "ROSTemplateFormatVersion: '2015-09-01'\n# ecs 2vCPU 4GB\n"
+        tool = self._selling_template_generating_tool([self._validate_template_record("templates/balanced.yml")])
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "template": final,
+                    "template_sha256": self._sha256(final),
+                    "file_path": "templates/balanced.yml",
+                    "region": "cn-hangzhou",
+                    "description": "ECS 2vCPU/4GB + RDS 2vCPU/4GB",
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
 
     @pytest.mark.asyncio
     async def test_conclusion_sha256_guard_rejects_template_hash_mismatch(self):

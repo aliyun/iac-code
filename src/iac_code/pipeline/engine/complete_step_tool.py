@@ -26,6 +26,14 @@ logger = logging.getLogger(__name__)
 MAX_PARALLEL_CANDIDATES = 5
 MAX_ROLLBACK_TARGETS = 5
 _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
+    "template_generating_rerun_after_validate_template_write": (
+        "template_generating ran write_file/edit_file after ros_validate_template; "
+        "rerun ros_validate_template and resubmit template/template_sha256 for the final file."
+    ),
+    "template_generating_template_consistency_required": (
+        "template_generating must submit the validated final template: conclusion template/template_sha256 have to "
+        "match the file at file_path, and every instance spec in the description has to come from that template."
+    ),
     "reviewing_rerun_after_validate_template_write": (
         "reviewing ran write_file/edit_file after ros_validate_template; "
         "rerun ros_validate_template and infraguard_scan for the same file_path."
@@ -72,6 +80,15 @@ def _completion_guard_message_from_key(key: str) -> str | None:
 def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
     """Keep YAML-selected completion guard messages visible to Babel."""
     return (
+        _(
+            "template_generating ran write_file/edit_file after ros_validate_template; "
+            "rerun ros_validate_template and resubmit template/template_sha256 for the final file."
+        ),
+        _(
+            "template_generating must submit the validated final template: conclusion template/template_sha256 have "
+            "to match the file at file_path, and every instance spec in the description has to come from that "
+            "template."
+        ),
         _(
             "reviewing ran write_file/edit_file after ros_validate_template; "
             "rerun ros_validate_template and infraguard_scan for the same file_path."

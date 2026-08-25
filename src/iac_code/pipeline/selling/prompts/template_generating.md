@@ -21,9 +21,15 @@
 生成后的模板文件路径就是 `{candidate.output_path}`。调用 `ros_validate_template` 校验时，必须传 `template_url = "{candidate.output_path}"`。不要调用 `aliyun_api` 的 ROS `ValidateTemplate` 接口，不要传 `TemplateBody`、`TemplateId` 或 `TemplateScratchId`。
 
 ## 输出
-文件写入完成后调用 `complete_step` 提交结论。
+按顺序完成：
+
+1. 写文件：把最终模板写入 `{candidate.output_path}`。
+2. 校验：对同一路径调用 `ros_validate_template`；若校验后又修改了模板，必须重新校验。
+3. 提交结论：`template` 取自**最终落盘文件**的内容，`template_sha256` 为该字符串的 sha256，`file_path` 为 `{candidate.output_path}`。
+4. `description` 及结论中出现的实例规格（ECS 的 vCPU/内存、RDS 规格等）必须逐一对照最终模板的 Parameters 默认值或资源属性重新确认，不得沿用生成过程中被推翻的中间设想。
 
 > 注意：`template` 字段为 YAML 字符串（与磁盘文件内容一致），不是 JSON 对象。
+> 下游成本步骤读取真实模板文件，结论与模板不一致会让同一候选出现互相矛盾的规格。
 
 ## 注意事项
 - 仅按技能要求读取引用文件；不要读取无关项目文件或记忆。
