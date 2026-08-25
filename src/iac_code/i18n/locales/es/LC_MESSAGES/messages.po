@@ -4065,6 +4065,14 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"Every resource declared in the user intent must be covered, or recorded "
+"as an explicit gap with a reason."
+msgstr ""
+"Cada recurso declarado en la intención del usuario debe estar cubierto o "
+"registrado como una brecha explícita con un motivo."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""

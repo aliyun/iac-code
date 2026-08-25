@@ -466,6 +466,145 @@ class TestCompletionGuards:
         assert "missing_constraint_check" in terminal.metadata["step_result"].error
 
     @staticmethod
+    def _resource_intent_guard(items_field: str, covered_products_fields: list[str]) -> dict:
+        return {
+            "always": True,
+            "require_resource_intent_coverage": {
+                "source_fields": ["intent.resource_intents"],
+                "items_field": items_field,
+                "covered_products_fields": covered_products_fields,
+                "gaps_field": "resource_intent_gaps",
+            },
+            "message_key": "resource_intent_coverage_required",
+        }
+
+    @staticmethod
+    def _intent_snapshot() -> dict:
+        return {
+            "intent": {
+                "resource_intents": [
+                    {"product": "ECS", "action": "create"},
+                    {"product": "NATGateway", "action": "create"},
+                    {"product": "EIP", "action": "create"},
+                ]
+            }
+        }
+
+    def _architecture_tool(self) -> CompleteStepTool:
+        return CompleteStepTool(
+            StepConfig(step_id="architecture_planning", conclusion_field="architecture", forward=None),
+            completion_guards=[self._resource_intent_guard("candidates", ["resource_intents", "products"])],
+            completion_guard_state={"context_snapshot": self._intent_snapshot()},
+        )
+
+    def _confirm_tool(self) -> CompleteStepTool:
+        return CompleteStepTool(
+            StepConfig(step_id="confirm_and_select", conclusion_field="selected_plan", forward=None),
+            completion_guards=[self._resource_intent_guard("options", ["covered_products"])],
+            completion_guard_state={"context_snapshot": self._intent_snapshot()},
+        )
+
+    @pytest.mark.asyncio
+    async def test_resource_intent_guard_rejects_candidate_dropping_declared_resources(self):
+        result = await self._architecture_tool().execute(
+            tool_input={
+                "conclusion": {
+                    "candidates": [
+                        {
+                            "name": "ECS+NAT 公网方案",
+                            "products": ["VPC", "VSwitch"],
+                            "resource_intents": [
+                                {"product": "VPC", "action": "create"},
+                                {"product": "VSwitch", "action": "create"},
+                            ],
+                        }
+                    ]
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "declared in the user intent" in result.content
+        assert "uncovered_resource_intent[ECS, 0]" in result.content
+        assert "uncovered_resource_intent[NATGateway, 0]" in result.content
+        assert "uncovered_resource_intent[EIP, 0]" in result.content
+
+    @pytest.mark.asyncio
+    async def test_resource_intent_guard_accepts_candidate_covering_all_declared_resources(self):
+        result = await self._architecture_tool().execute(
+            tool_input={
+                "conclusion": {
+                    "candidates": [
+                        {
+                            "name": "ECS+NAT 公网方案",
+                            "products": ["VPC", "VSwitch", "ECS", "NAT Gateway", "EIP"],
+                        }
+                    ]
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_resource_intent_guard_accepts_candidate_with_annotated_gap(self):
+        result = await self._architecture_tool().execute(
+            tool_input={
+                "conclusion": {
+                    "candidates": [
+                        {
+                            "name": "先建网络（部分满足）",
+                            "products": ["ECS", "NATGateway"],
+                            "resource_intent_gaps": [{"product": "EIP", "reason": "第二期随 NAT 带宽包一起交付"}],
+                        }
+                    ]
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_resource_intent_guard_rejects_options_missing_declared_resources(self):
+        result = await self._confirm_tool().execute(
+            tool_input={
+                "conclusion": {
+                    "user_prompt": "请选择要部署的方案：",
+                    "options": [
+                        {
+                            "name": "ECS+NAT 公网方案",
+                            "summary": "VPC 与交换机",
+                            "candidate_index": 0,
+                            "covered_products": ["VPC", "VSwitch"],
+                        }
+                    ],
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "uncovered_resource_intent[ECS, 0]" in result.content
+
+    @pytest.mark.asyncio
+    async def test_resource_intent_guard_skips_selection_only_round(self):
+        result = await self._confirm_tool().execute(
+            tool_input={
+                "conclusion": {
+                    "selected_candidate_name": "ECS+NAT 公网方案",
+                    "selected_candidate_index": 0,
+                    "selected_evaluated_candidate_index": 0,
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @staticmethod
     def _deploying_success_guard() -> dict:
         return {
             "when_conclusion_field_equals": {"status": "success"},

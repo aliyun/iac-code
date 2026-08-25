@@ -5,6 +5,11 @@
 ## 任务
 基于候选方案评估结果生成可选择方案列表，并在用户选择后提交最终选择结果。
 
+## 用户意图（资源覆盖基准）
+```json
+{intent}
+```
+
 ## 评估结果
 ```json
 {evaluated_candidates}
@@ -22,6 +27,8 @@
 - `options[].name`：候选方案名称，取 `candidate.name`
 - `options[].summary`：使用用户当前语言撰写 2-3 句方案描述，说明核心产品组合、架构特点和主要取舍
 - `options[].candidate_index`：候选方案在 `evaluated_candidates` 数组中的 0 基下标
+- `options[].covered_products`：本方案实际交付的产品列表；必须覆盖 `intent.resource_intents` 中所有 `action != forbid` 的资源
+- `options[].resource_intent_gaps`：本方案未覆盖的 intent 资源，每项包含 `product` 和 `reason`；全部覆盖时省略该字段。存在缺口时必须在 `summary` 中标注「部分满足」及缺失资源和原因，且不得作为唯一推荐
 - `options[].architecture_diagram`：紧凑 Mermaid `flowchart` 源码，只使用当前 `candidate`、`template` 和拓扑中已有的事实；最多 12 个节点，不要添加 Markdown 代码围栏
 - `options[].total_monthly_cost`：原样取 `evaluated_candidates[i].cost.monthly_estimate`
 - `options[].cost_items`：逐项取 `evaluated_candidates[i].cost.resources`，每项包含 `name`、可选 `spec` 和 `monthly_cost`；`monthly_cost` 原样取资源的 `cost`

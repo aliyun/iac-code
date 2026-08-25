@@ -3876,6 +3876,12 @@ msgstr "ユーザーが明示した各ハード制約は、パラメーターと
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"Every resource declared in the user intent must be covered, or recorded "
+"as an explicit gap with a reason."
+msgstr "ユーザーインテントで宣言されたすべてのリソースは、カバーされるか、理由付きの明示的なギャップとして記録される必要があります。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""

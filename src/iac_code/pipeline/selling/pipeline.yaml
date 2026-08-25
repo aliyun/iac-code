@@ -453,6 +453,14 @@ steps:
     skill: iac-aliyun-architecture
     prompt: prompts/architecture_planning.md
     context_fields: [intent]
+    completion_guards:
+      - always: true
+        require_resource_intent_coverage:
+          source_fields: [intent.resource_intents]
+          items_field: candidates
+          covered_products_fields: [resource_intents, products]
+          gaps_field: resource_intent_gaps
+        message_key: resource_intent_coverage_required
     tools:
       include: [read_memory, read_file, list_files, glob, grep, web_fetch, aliyun_doc_search]
       exclude: []
@@ -470,10 +478,18 @@ steps:
     conclusion_field: selected_plan
     forward: deploying
     prompt: prompts/confirm_and_select.md
-    context_fields: [evaluated_candidates]
+    context_fields: [intent, evaluated_candidates]
     auto_advance: false
     ui_mode: candidate_selection
     inject_tools: [show_architecture_diagram, show_candidate_detail]
+    completion_guards:
+      - always: true
+        require_resource_intent_coverage:
+          source_fields: [intent.resource_intents]
+          items_field: options
+          covered_products_fields: [covered_products]
+          gaps_field: resource_intent_gaps
+        message_key: resource_intent_coverage_required
     surface_overrides:
       a2a:
         prompt: prompts/confirm_and_select.a2a.md
@@ -494,7 +510,7 @@ steps:
               minItems: 1
               items:
                 type: object
-                required: [name, summary, candidate_index, architecture_diagram, total_monthly_cost, cost_items]
+                required: [name, summary, candidate_index, covered_products, architecture_diagram, total_monthly_cost, cost_items]
                 additionalProperties: false
                 properties:
                   name:
@@ -503,6 +519,23 @@ steps:
                     type: string
                   candidate_index:
                     type: integer
+                  covered_products:
+                    type: array
+                    description: 本方案实际交付的产品列表；必须覆盖 intent.resource_intents 中所有非 forbid 资源
+                    items:
+                      type: string
+                  resource_intent_gaps:
+                    type: array
+                    description: 本方案未覆盖的 intent 资源及原因；缺口必须显式登记，不得静默丢弃
+                    items:
+                      type: object
+                      required: [product, reason]
+                      additionalProperties: false
+                      properties:
+                        product:
+                          type: string
+                        reason:
+                          type: string
                   architecture_diagram:
                     type: string
                     description: A2A 富展示使用的紧凑 Mermaid 架构图
@@ -554,7 +587,7 @@ steps:
           minItems: 1
           items:
             type: object
-            required: [name, summary, candidate_index]
+            required: [name, summary, candidate_index, covered_products]
             additionalProperties: false
             properties:
               name:
@@ -563,6 +596,23 @@ steps:
                 type: string
               candidate_index:
                 type: integer
+              covered_products:
+                type: array
+                description: 本方案实际交付的产品列表；必须覆盖 intent.resource_intents 中所有非 forbid 资源
+                items:
+                  type: string
+              resource_intent_gaps:
+                type: array
+                description: 本方案未覆盖的 intent 资源及原因；缺口必须显式登记，不得静默丢弃
+                items:
+                  type: object
+                  required: [product, reason]
+                  additionalProperties: false
+                  properties:
+                    product:
+                      type: string
+                    reason:
+                      type: string
         user_input:
           type: string
           description: 用户选择方案时输入的原始文本；首次展示方案时可省略

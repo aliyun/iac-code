@@ -14,6 +14,10 @@ import jsonschema
 from iac_code.i18n import _
 from iac_code.pipeline.display_names import display_step_name
 from iac_code.pipeline.engine.hard_constraints import collect_hard_constraints, validate_hard_constraint_checks
+from iac_code.pipeline.engine.resource_intent_coverage import (
+    collect_resource_intents,
+    validate_resource_intent_coverage,
+)
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.utils.public_errors import sanitize_strict_text
@@ -60,6 +64,9 @@ _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
         "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
         "and evidence."
     ),
+    "resource_intent_coverage_required": (
+        "Every resource declared in the user intent must be covered, or recorded as an explicit gap with a reason."
+    ),
 }
 _COMPLETION_GUARD_MESSAGE_KEY_BY_TEXT = {text: key for key, text in _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY.items()}
 
@@ -100,6 +107,7 @@ def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
             "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
             "and evidence."
         ),
+        _("Every resource declared in the user intent must be covered, or recorded as an explicit gap with a reason."),
     )
 
 
@@ -324,6 +332,7 @@ class CompleteStepTool(Tool):
             required_tool_result = guard.get("require_tool_result")
             required_conclusion_sha256 = guard.get("require_conclusion_sha256")
             required_constraint_coverage = guard.get("require_context_constraint_coverage")
+            required_intent_coverage = guard.get("require_resource_intent_coverage")
             required_field = guard.get("required_conclusion_field")
             required_any_of = guard.get("required_conclusion_any_of") or []
             successful_tools = self._completion_guard_state.get("successful_tools", set())
@@ -383,7 +392,64 @@ class CompleteStepTool(Tool):
                 )
                 if validation_error is not None:
                     return validation_error
+            if isinstance(required_intent_coverage, dict):
+                validation_error = self._validate_resource_intent_coverage(
+                    required_intent_coverage,
+                    conclusion,
+                    self._completion_guard_message(guard, None),
+                )
+                if validation_error is not None:
+                    return validation_error
         return None
+
+    def _validate_resource_intent_coverage(
+        self,
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        message: str | None,
+    ) -> str | None:
+        source_fields = requirement.get("source_fields") or []
+        covered_products_fields = requirement.get("covered_products_fields") or []
+        items_field = str(requirement.get("items_field") or "")
+        if (
+            not items_field
+            or not isinstance(source_fields, list)
+            or not all(isinstance(field, str) for field in source_fields)
+            or not isinstance(covered_products_fields, list)
+            or not all(isinstance(field, str) for field in covered_products_fields)
+        ):
+            return message or _("A completion guard is misconfigured.")
+        items = self._resolve_dotted(conclusion, items_field)
+        if items is None:
+            # A later round may submit a compact conclusion without the presented items
+            # (e.g. the selection-only round of candidate selection); nothing to validate.
+            return None
+        context_snapshot = self._completion_guard_state.get("context_snapshot")
+        if not isinstance(context_snapshot, dict):
+            context_snapshot = {}
+        intents, source_issues = collect_resource_intents(context_snapshot, source_fields)
+        issues = source_issues + validate_resource_intent_coverage(
+            intents,
+            items,
+            covered_products_fields=covered_products_fields,
+            gaps_field=str(requirement.get("gaps_field") or "resource_intent_gaps"),
+        )
+        if not issues:
+            return None
+        base_message = message or _(
+            "Every resource declared in the user intent must be covered, or recorded as an explicit gap with a reason."
+        )
+        issue_summaries = []
+        for issue in issues:
+            specifics = ", ".join(value for value in (issue.product, issue.detail) if value)
+            issue_summaries.append(f"{issue.code}[{specifics}]" if specifics else issue.code)
+        code = issues[0].code if len(issues) == 1 else "multiple_resource_intent_issues"
+        detail = "; ".join(issue_summaries)
+        return _("{message} Validation issue: {code} ({detail}).").format(
+            message=base_message,
+            code=code,
+            detail=detail,
+        )
 
     def _validate_context_constraint_coverage(
         self,

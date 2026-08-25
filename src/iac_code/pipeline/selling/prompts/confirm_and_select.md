@@ -5,6 +5,11 @@
 ## 任务
 基于候选方案评估结果生成可选择方案列表，并在用户选择后提交最终选择结果。
 
+## 用户意图（资源覆盖基准）
+```json
+{intent}
+```
+
 ## 评估结果
 ```json
 {evaluated_candidates}
@@ -60,6 +65,15 @@
 - `options[].name`：候选方案名称，取 `candidate.name`
 - `options[].summary`：候选方案摘要
 - `options[].candidate_index`：候选方案在 `evaluated_candidates` 数组中的 0 基下标
+- `options[].covered_products`：本方案实际交付的产品列表，取自 `candidate.resource_intents` 和模板中真实存在的资源；必须覆盖 `intent.resource_intents` 中所有 `action != forbid` 的资源
+- `options[].resource_intent_gaps`：本方案未覆盖的 intent 资源，每项包含 `product` 和 `reason`；全部覆盖时省略该字段
+
+### 资源一致性校验（提交前必做）
+逐个 option 对照 `intent.resource_intents`：
+
+- 缺失资源必须写入 `resource_intent_gaps`，并在 `summary` 中明确标注「部分满足」及缺失的资源和原因（例如分期交付范围）。
+- 存在缺口的方案不得作为唯一推荐；若所有方案都缺同一资源，在 `user_prompt` 中说明当前没有完整覆盖意图的方案，让用户决定是否调整范围。
+- 方案名称与 `summary` 不得宣称未实际交付的资源。
 
 `complete_step.conclusion.user_prompt` 必须是展示给用户的选择提示，例如“请选择要部署的方案：”。
 

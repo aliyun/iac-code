@@ -3840,6 +3840,12 @@ msgstr "每个用户明确提出的硬约束都必须由一条状态为满足的
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"Every resource declared in the user intent must be covered, or recorded "
+"as an explicit gap with a reason."
+msgstr "用户意图中声明的每个资源都必须被覆盖，或作为带原因的显式缺口记录下来。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr "调用此工具提交结论以完成当前步骤。如需回滚到较早步骤，请设置 rollback_request。"

@@ -41,6 +41,7 @@ def test_confirm_rich_a2a_schema_requires_skill_presentation_fields():
         "name",
         "summary",
         "candidate_index",
+        "covered_products",
         "architecture_diagram",
         "total_monthly_cost",
         "cost_items",

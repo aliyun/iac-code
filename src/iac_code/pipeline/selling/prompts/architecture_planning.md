@@ -15,6 +15,11 @@
 ## 输出
 调用 `complete_step` 提交候选方案列表。
 
+### 资源覆盖校对（提交前必做）
+逐项对照 `intent.resource_intents`：所有 `action != forbid` 的资源都必须出现在每个 candidate 的 `resource_intents` 中。
+确实无法覆盖时，在该 candidate 的 `resource_intent_gaps` 写入 `product` 和 `reason`，并在 `cons` 中说明为部分满足。
+不得只保留基础网络资源而丢掉用户明确要求的 ECS、NAT、EIP、SLB 等资源。
+
 ### output_path 命名规则
 - 格式：`templates/{index}-{英文简写}.yml`
 - index 从 1 开始

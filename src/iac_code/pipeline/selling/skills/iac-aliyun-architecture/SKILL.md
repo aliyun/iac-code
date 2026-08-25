@@ -11,7 +11,7 @@ conclusion_schema:
       minItems: 1
       items:
         type: object
-        required: [name, output_path, products, hard_constraints, topology, monthly_estimate, pros, cons]
+        required: [name, output_path, products, resource_intents, hard_constraints, topology, monthly_estimate, pros, cons]
         properties:
           name:
             type: string
@@ -42,6 +42,19 @@ conclusion_schema:
                 notes:
                   type: string
             description: 本方案中每个资源的新建、复用、引用或禁止语义；从 intent.resource_intents 继承或收窄
+          resource_intent_gaps:
+            type: array
+            description: 本方案未覆盖的 intent 资源及原因；缺口必须显式登记，不得静默丢弃
+            items:
+              type: object
+              required: [product, reason]
+              additionalProperties: false
+              properties:
+                product:
+                  type: string
+                reason:
+                  type: string
+                  description: 未覆盖原因，例如分期交付范围或与其他资源互斥
           hard_constraints:
             type: array
             description: 当前候选采用的用户硬约束完整快照；以进入本步骤后的最新用户要求为准，不得加入推断规格或方案推荐值
@@ -129,7 +142,7 @@ conclusion_schema:
 
 - 方案名称（体现核心差异，如"Serverless 轻量方案"而非泛泛的"方案一"）
 - 核心阿里云产品组合（只列必要的产品）
-- 资源生命周期：`resource_intents`
+- 资源生命周期：`resource_intents`（必须覆盖 intent 中所有非 forbid 资源）
 - 拓扑描述（简述部署架构）
 - 月度费用估算范围
 - 优势和局限
@@ -138,12 +151,17 @@ conclusion_schema:
 
 如果 intent 中存在 `resource_intents`，它是架构设计的硬约束：
 
+- `resource_intents` 是**覆盖清单**：intent 中所有 `action != forbid` 的资源都必须出现在每个 candidate 的 `resource_intents` 中，并保留原 `action`。方案名称、`products` 和 `topology` 只能描述实际覆盖的资源，不得宣称未覆盖的资源。
+- 确有理由无法覆盖某个资源（例如用户要求的分期交付范围、与本方案其他取舍互斥）时，必须在该 candidate 的 `resource_intent_gaps` 中登记 `product` 和 `reason`，并在 `cons` 中说明这是部分满足；不得静默丢弃资源。
+- 所有方案都存在同一缺口时，说明当前意图无法被完整满足：优先重新设计方案以覆盖全部资源，只有确实不可覆盖才逐个方案登记缺口。
 - 只有 `action=create` 的资源可以作为本方案要新建的资源。不要把 `action=use_existing` 或 `action=reference` 的资源设计成新建资源。
 - `action=use_existing/reference` 必须作为已有资源引用，后续模板中应通过参数（如 `VpcId`）或用户提供 ID 引用，不得生成对应的新建资源。换句话说，use_existing/reference 必须作为已有资源引用。
 - `action=forbid` 的资源不得出现在候选方案的新增资源里，也不得作为“顺手补齐”的依赖加入。
 - 将 `resource_intents` 原样或按方案收窄后写入每个 candidate，供模板生成步骤继续执行同一约束。
 
 示例：intent 表示“已有 VPC 中创建安全组”时，candidate 应包含 `resource_intents: [{"product": "VPC", "action": "use_existing"}, {"product": "SecurityGroup", "action": "create"}]`。不得生成 VSwitch，也不得设计成“创建 VPC + VSwitch + SecurityGroup”。
+
+示例：intent 声明 `ECS(create)` + `NATGateway(create)` + `EIP(create)` 时，每个 candidate 的 `resource_intents` 必须同时包含这三个产品；只保留 VPC/VSwitch 而丢掉 ECS/NAT/EIP 是错误输出，即使方案名叫「ECS+NAT 公网方案」也不成立。
 
 ## 用户硬约束
 
