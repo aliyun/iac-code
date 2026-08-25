@@ -1152,6 +1152,12 @@ class PipelineRunner:
             return
         self._execution[_PENDING_INPUT_KIND_KEY] = kind
 
+    def _discard_pending_ask_user_question(self) -> None:
+        """Drop an unanswered question so a failed step cannot look like waiting_input."""
+        self._execution.pop(_PENDING_ASK_USER_QUESTION_INPUT_KEY, None)
+        if self.pending_input_kind() == _ASK_USER_QUESTION_KIND:
+            self._set_pending_input_kind(None)
+
     async def restore_from_sidecar(self) -> RestoreResult:
         return self.restore_from_sidecar_sync()
 
@@ -4056,6 +4062,7 @@ class PipelineRunner:
                     extra_details={"step_id": step.step_id},
                 )
                 error_summary = failure.summary
+                self._discard_pending_ask_user_question()
                 try:
                     await self._save_failed(step.step_id, reason)
                 except PipelineStatePersistenceError as exc:

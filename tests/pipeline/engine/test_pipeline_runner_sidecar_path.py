@@ -1560,6 +1560,33 @@ async def test_pending_ask_user_question_answer_is_durable_until_resume_stream_s
     assert restored.pending_ask_user_question()["answer"] == answer
 
 
+@pytest.mark.asyncio
+async def test_failed_step_clears_pending_ask_user_question(tmp_path):
+    """步骤失败后不能再残留未应答的问题，否则外部只看到 waiting_input。"""
+    runner = _build_two_step_runner(tmp_path)
+    await runner.persist_pending_ask_user_question(
+        AskUserQuestionEvent(
+            tool_use_id="ask-1",
+            question="请提供部署目标",
+            options=[{"id": "skip", "label": "暂不处理"}],
+        )
+    )
+    assert runner.sidecar_status == "waiting_input"
+    assert runner.pending_ask_user_question() is not None
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        yield StepResult(step_id=step.step_id, status=StepStatus.FAILED, error="guard 校验失败")
+
+    runner._step_executor.execute = fake_execute
+
+    async for _event in runner._continue_from_current():
+        pass
+
+    assert runner.sidecar_status == "failed"
+    assert runner.pending_ask_user_question() is None
+    assert runner.pending_input_kind() is None
+
+
 def test_resume_from_sidecar_accepts_list_valued_context_fields(tmp_path):
     runner = _build_two_step_runner(tmp_path)
     sidecar_dir = runner.session.session_dir

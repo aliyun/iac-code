@@ -225,7 +225,7 @@ class TestCompleteStepToolExecute:
 
         assert result.is_error
         assert "Candidate count cannot exceed 5" in result.content
-        assert result.metadata is None
+        assert "step_result" not in (result.metadata or {})
 
     @pytest.mark.asyncio
     async def test_rejects_rollback_when_budget_is_exhausted_before_step_result(self):
@@ -419,11 +419,11 @@ class TestCompletionGuards:
         second = await tool.execute(tool_input={"conclusion": invalid_conclusion}, context=ToolContext())
 
         assert first.is_error is True
-        assert first.metadata is None
+        assert "step_result" not in (first.metadata or {})
         assert "fix it and call complete_step again" in first.content
         assert "missing_constraint_check" in first.content
         assert second.is_error is True
-        assert second.metadata is None
+        assert "step_result" not in (second.metadata or {})
 
         valid_conclusion = {
             "deployment_parameters": {"NodeCount": 2},
@@ -1534,7 +1534,7 @@ class TestSchemaValidation:
         )
         assert result.is_error
         assert "name" in result.content
-        assert result.metadata is None
+        assert "step_result" not in (result.metadata or {})
 
     def test_invalid_tool_input_error_preserves_previous_invalid_input_for_llm_retry(self):
         config = StepConfig(
@@ -1656,7 +1656,7 @@ class TestSchemaValidation:
         # First call: invalid (attempt 1)
         r1 = await tool.execute(tool_input={"conclusion": {}}, context=ToolContext())
         assert r1.is_error
-        assert r1.metadata is None
+        assert "step_result" not in (r1.metadata or {})
         # Second call: still invalid (attempt 2 = max_retries exceeded)
         r2 = await tool.execute(tool_input={"conclusion": {}}, context=ToolContext())
         assert r2.is_error

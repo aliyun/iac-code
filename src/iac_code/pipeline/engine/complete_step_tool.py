@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 
 MAX_PARALLEL_CANDIDATES = 5
 MAX_ROLLBACK_TARGETS = 5
+# Marks a complete_step tool result whose failure came from conclusion schema /
+# completion_guard validation, so the step executor can pick a recovery strategy
+# without matching localized error text.
+CONCLUSION_VALIDATION_FAILED_METADATA_KEY = "conclusion_validation_failed"
 _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
     "reviewing_rerun_after_validate_template_write": (
         "reviewing ran write_file/edit_file after ros_validate_template; "
@@ -1171,6 +1175,7 @@ class CompleteStepTool(Tool):
                     error=validation_error
                 ),
                 is_error=True,
+                metadata={CONCLUSION_VALIDATION_FAILED_METADATA_KEY: True},
             )
 
         step_result = StepResult(

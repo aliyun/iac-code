@@ -16,7 +16,10 @@ from typing import Any
 from iac_code.agent.message import ContentBlock, Message
 from iac_code.agent.system_prompt import SECTION_BUILDERS, build_base_sections
 from iac_code.mcp.prompt_dispatch import mcp_prompt_command_stream
-from iac_code.pipeline.engine.complete_step_tool import CompleteStepTool
+from iac_code.pipeline.engine.complete_step_tool import (
+    CONCLUSION_VALIDATION_FAILED_METADATA_KEY,
+    CompleteStepTool,
+)
 from iac_code.pipeline.engine.completion_guard_state import (
     ensure_completion_guard_state,
     record_completion_guard_tool_result,
@@ -272,6 +275,7 @@ class StepExecutor:
         max_nudges = 2
         last_complete_step_error: str | None = None
         last_complete_step_input: dict | None = None
+        last_complete_step_validation_failed = False
 
         async def consume_complete_step_events(
             stream: AsyncIterator[Any],
@@ -279,6 +283,7 @@ class StepExecutor:
             nonlocal complete_step_input
             nonlocal last_complete_step_error
             nonlocal last_complete_step_input
+            nonlocal last_complete_step_validation_failed
             nonlocal terminal_failed_step_result
             try:
                 async for event in stream:
@@ -326,6 +331,9 @@ class StepExecutor:
                             else:
                                 last_complete_step_error = event.result
                                 last_complete_step_input = pending_complete_input.get(event.tool_use_id)
+                                last_complete_step_validation_failed = bool(
+                                    (event.metadata or {}).get(CONCLUSION_VALIDATION_FAILED_METADATA_KEY)
+                                )
                     yield event
                     if isinstance(event, MessageEndEvent) and self._current_agent_loop is not None:
                         yield ContextUsageEvent(usage=self._current_agent_loop.get_context_usage())
@@ -393,6 +401,7 @@ class StepExecutor:
                 and self._should_try_fresh_complete_step_recovery(
                     last_complete_step_error,
                     last_complete_step_input,
+                    conclusion_validation_failed=last_complete_step_validation_failed,
                 )
             ):
                 recovery_context = self.build_agent_loop_context(
@@ -443,7 +452,7 @@ class StepExecutor:
             step_result = StepResult(
                 step_id=step.step_id,
                 status=StepStatus.FAILED,
-                error="No conclusion extracted",
+                error=self._no_conclusion_error(last_complete_step_error),
             )
 
         yield step_result
@@ -791,10 +800,27 @@ class StepExecutor:
         )
 
     @staticmethod
-    def _should_try_fresh_complete_step_recovery(error: str | None, invalid_input: dict | None) -> bool:
+    def _no_conclusion_error(last_complete_step_error: str | None) -> str:
+        """Keep the last complete_step error in the terminal reason so failures stay diagnosable."""
+        if not last_complete_step_error:
+            return "No conclusion extracted"
+        return f"No conclusion extracted; last complete_step error: {last_complete_step_error}"
+
+    @staticmethod
+    def _should_try_fresh_complete_step_recovery(
+        error: str | None,
+        invalid_input: dict | None,
+        *,
+        conclusion_validation_failed: bool = False,
+    ) -> bool:
         if not error:
             return False
         if invalid_input == {}:
+            return True
+        # conclusion schema / completion_guard 校验失败同样值得一次 fresh 恢复：
+        # 否则 guard 类失败（例如需要先调用 ask_user_question）在 nudge 用尽后
+        # 直接以 FAILED 收场，步骤没有任何恢复入口。
+        if conclusion_validation_failed:
             return True
         return (
             "'conclusion' is a required property" in error

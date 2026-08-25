@@ -2564,7 +2564,7 @@ class TestStepExecutorValidationRespect:
         results = [e for e in collected if isinstance(e, StepResult)]
         assert len(results) == 1
         assert results[0].status == StepStatus.FAILED
-        assert results[0].error == "No conclusion extracted"
+        assert results[0].error == "No conclusion extracted; last complete_step error: 校验失败"
 
     @pytest.mark.asyncio
     async def test_terminal_failed_step_result_stops_without_nudge(self, tmp_path):
@@ -3326,3 +3326,113 @@ async def test_resumed_step_rebuilds_ask_user_question_guard_state(monkeypatch, 
 
     assert captured_guard_state["successful_tools"] == {"ask_user_question"}
     assert captured_guard_state["tool_results"]["ask_user_question"]["free_text"] == "budget 500"
+
+
+class TestCompleteStepValidationRecovery:
+    """complete_step 结论校验失败（含 completion_guard）后必须有恢复入口和可诊断终态。"""
+
+    def test_guard_validation_failure_allows_fresh_recovery(self):
+        assert StepExecutor._should_try_fresh_complete_step_recovery(
+            "conclusion 校验失败；请修正后重新调用 complete_step: 需要先调用 ask_user_question",
+            {"conclusion": {"is_infra_intent": False}},
+            conclusion_validation_failed=True,
+        )
+
+    def test_unrelated_tool_error_still_skips_fresh_recovery(self):
+        assert not StepExecutor._should_try_fresh_complete_step_recovery(
+            "回滚次数不能超过 3 次",
+            {"conclusion": {"is_infra_intent": False}},
+        )
+
+    def test_wrapper_shape_error_still_allows_fresh_recovery(self):
+        assert StepExecutor._should_try_fresh_complete_step_recovery(
+            "'conclusion' is a required property",
+            {"is_infra_intent": False},
+        )
+
+    @pytest.mark.asyncio
+    async def test_guard_failure_recovers_in_fresh_loop(self, tmp_path):
+        """guard 校验失败在 nudge 用尽后仍应获得一次 fresh loop 恢复并成功收口。"""
+        attempts = [0]
+
+        class FakeAgentLoop:
+            def __init__(self, **kwargs):
+                self.system_prompt = kwargs.get("system_prompt", "")
+                self.tool_registry = kwargs.get("tool_registry")
+
+            async def run_streaming(self, user_input):
+                attempts[0] += 1
+                tool_use_id = f"tu_{attempts[0]}"
+                yield ToolUseStartEvent(tool_use_id=tool_use_id, name="complete_step")
+                yield ToolUseEndEvent(
+                    tool_use_id=tool_use_id,
+                    name="complete_step",
+                    input={"conclusion": {"is_infra_intent": False}},
+                )
+                if attempts[0] <= 3:
+                    yield ToolResultEvent(
+                        tool_use_id=tool_use_id,
+                        tool_name="complete_step",
+                        result="conclusion 校验失败；请修正后重新调用 complete_step: 需要先调用 ask_user_question",
+                        is_error=True,
+                        metadata={"conclusion_validation_failed": True},
+                    )
+                else:
+                    yield ToolResultEvent(
+                        tool_use_id=tool_use_id,
+                        tool_name="complete_step",
+                        result="ok",
+                    )
+
+        executor = _make_executor(tmp_path)
+        step = _make_step()
+        ctx = PipelineContext(SIMPLE_DEPS)
+
+        collected = []
+        with patch("iac_code.agent.agent_loop.AgentLoop", FakeAgentLoop):
+            async for event in executor.execute(step, ctx, "test_session"):
+                collected.append(event)
+
+        results = [event for event in collected if isinstance(event, StepResult)]
+        # 1 次初始 + 2 次 nudge + 1 次 fresh 恢复
+        assert attempts[0] == 4
+        assert results[-1].status == StepStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_unrecoverable_guard_failure_reports_last_error(self, tmp_path):
+        """恢复用尽后失败终态必须带上最后一次 complete_step 错误，而不是只有通用文案。"""
+        guard_error = "conclusion 校验失败；请修正后重新调用 complete_step: 需要先调用 ask_user_question"
+
+        class FakeAgentLoop:
+            def __init__(self, **kwargs):
+                self.system_prompt = kwargs.get("system_prompt", "")
+                self.tool_registry = kwargs.get("tool_registry")
+
+            async def run_streaming(self, user_input):
+                yield ToolUseStartEvent(tool_use_id="tu_1", name="complete_step")
+                yield ToolUseEndEvent(
+                    tool_use_id="tu_1",
+                    name="complete_step",
+                    input={"conclusion": {"is_infra_intent": False}},
+                )
+                yield ToolResultEvent(
+                    tool_use_id="tu_1",
+                    tool_name="complete_step",
+                    result=guard_error,
+                    is_error=True,
+                    metadata={"conclusion_validation_failed": True},
+                )
+
+        executor = _make_executor(tmp_path)
+        step = _make_step()
+        ctx = PipelineContext(SIMPLE_DEPS)
+
+        collected = []
+        with patch("iac_code.agent.agent_loop.AgentLoop", FakeAgentLoop):
+            async for event in executor.execute(step, ctx, "test_session"):
+                collected.append(event)
+
+        results = [event for event in collected if isinstance(event, StepResult)]
+        assert len(results) == 1
+        assert results[0].status == StepStatus.FAILED
+        assert guard_error in results[0].error
