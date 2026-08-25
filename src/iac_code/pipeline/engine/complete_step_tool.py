@@ -64,6 +64,33 @@ _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
 _COMPLETION_GUARD_MESSAGE_KEY_BY_TEXT = {text: key for key, text in _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY.items()}
 
 
+def is_empty_conclusion(conclusion: Any) -> bool:
+    """Return True when a conclusion carries no field at all.
+
+    ``None``, a non-mapping value and ``{}`` all mean the step produced nothing
+    usable for downstream steps, so they must never be accepted as a successful
+    outcome. A conclusion that declares fields (even with empty values such as
+    ``candidates: []``) is a real answer and stays valid.
+    """
+    return not isinstance(conclusion, dict) or not conclusion
+
+
+def empty_conclusion_error(step_id: str, conclusion_field: str) -> str:
+    """Diagnostic message for a complete_step call that submitted a blank conclusion."""
+    return _(
+        "Step {step_id} submitted an empty conclusion, so {conclusion_field} cannot be derived. "
+        "Submit a non-empty conclusion; when the result cannot be derived, state the explicit reason "
+        "in the conclusion instead of leaving it blank."
+    ).format(step_id=step_id, conclusion_field=conclusion_field)
+
+
+def missing_conclusion_error(step_id: str, conclusion_field: str) -> str:
+    """Diagnostic message for a step that ended without any complete_step conclusion."""
+    return _(
+        "Step {step_id} ended without a complete_step conclusion, so {conclusion_field} was never produced."
+    ).format(step_id=step_id, conclusion_field=conclusion_field)
+
+
 def _completion_guard_message_from_key(key: str) -> str | None:
     text = _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY.get(key)
     return _(text) if text is not None else None
@@ -300,6 +327,12 @@ class CompleteStepTool(Tool):
 
     def _validate_conclusion(self, conclusion: dict) -> str | None:
         """Validate conclusion against schema. Returns error message or None."""
+        if is_empty_conclusion(conclusion):
+            logger.warning(
+                "Empty conclusion rejected for step %s",
+                sanitize_strict_text(self._step_config.step_id),
+            )
+            return empty_conclusion_error(self._step_config.step_id, self._step_config.conclusion_field)
         schema = self._step_config.conclusion_schema
         if not schema:
             return None

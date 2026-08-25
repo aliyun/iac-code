@@ -8,6 +8,7 @@ import pytest
 
 from iac_code.agent.message import Message, ToolResultBlock, ToolUseBlock
 from iac_code.commands.registry import PromptCommand
+from iac_code.pipeline.engine.complete_step_tool import empty_conclusion_error, missing_conclusion_error
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.step_executor import StepExecutor
 from iac_code.pipeline.engine.step_spec import IncludeExcludeConfig, LoadedPipeline, StepSpec, StepSurfaceOverride
@@ -636,7 +637,31 @@ class TestStepExecutor:
 
         results = [e for e in collected if isinstance(e, StepResult)]
         assert len(results) == 1
-        assert results[0].error == "No conclusion extracted"
+        assert results[0].error == missing_conclusion_error("intent_parsing", "intent")
+
+    @pytest.mark.asyncio
+    async def test_failed_when_complete_step_succeeds_with_empty_conclusion(self, tmp_path):
+        """A successful complete_step carrying an empty conclusion must fail loudly, not complete with null."""
+        events = [
+            ToolUseStartEvent(tool_use_id="tu_1", name="complete_step"),
+            ToolUseEndEvent(tool_use_id="tu_1", name="complete_step", input={"conclusion": {}}),
+            ToolResultEvent(tool_use_id="tu_1", tool_name="complete_step", result="ok"),
+        ]
+        fake_loop = _make_fake_agent_loop_class(events)
+        executor = _make_executor(tmp_path)
+        step = _make_step()
+        ctx = PipelineContext(SIMPLE_DEPS)
+
+        collected = []
+        with patch("iac_code.agent.agent_loop.AgentLoop", fake_loop):
+            async for event in executor.execute(step, ctx, "test_session"):
+                collected.append(event)
+
+        results = [e for e in collected if isinstance(e, StepResult)]
+        assert len(results) == 1
+        assert results[0].status == StepStatus.FAILED
+        assert results[0].error == empty_conclusion_error("intent_parsing", "intent")
+        assert ctx.get_conclusion(step.conclusion_field) is None
 
     @pytest.mark.asyncio
     async def test_nudge_retry_succeeds_on_second_attempt(self, tmp_path, caplog):
@@ -991,7 +1016,8 @@ class TestStepExecutor:
         results = [e for e in collected if isinstance(e, StepResult)]
         assert len(results) == 1
         assert results[0].status == StepStatus.FAILED
-        assert results[0].error == "No conclusion extracted"
+        assert results[0].error == missing_conclusion_error("intent_parsing", "intent")
+
         assert call_count[0] == 3
         assert executor._observability.step_nudged.call_args_list == [
             call(step_id="intent_parsing", nudge_count=1, max_nudges=2, session_id="test_session"),
@@ -2564,7 +2590,7 @@ class TestStepExecutorValidationRespect:
         results = [e for e in collected if isinstance(e, StepResult)]
         assert len(results) == 1
         assert results[0].status == StepStatus.FAILED
-        assert results[0].error == "No conclusion extracted"
+        assert results[0].error == missing_conclusion_error("intent_parsing", "intent")
 
     @pytest.mark.asyncio
     async def test_terminal_failed_step_result_stops_without_nudge(self, tmp_path):
@@ -3151,13 +3177,8 @@ async def test_resumed_step_returns_reconstructed_complete_step(monkeypatch, tmp
 
 
 @pytest.mark.asyncio
-async def test_resumed_completed_step_sets_empty_conclusion_and_calls_on_exit(monkeypatch, tmp_path):
-    class FailIfAgentLoopIsCreated:
-        def __init__(self, *args, **kwargs):
-            raise AssertionError("AgentLoop should not be created for already-completed transcript")
-
-    monkeypatch.setattr("iac_code.agent.agent_loop.AgentLoop", FailIfAgentLoopIsCreated)
-
+async def test_resumed_empty_conclusion_is_not_restored_as_completed(tmp_path):
+    """An empty resumed conclusion must not be replayed as a silent COMPLETED null result."""
     executor = _make_executor(tmp_path)
     step = _make_step()
     step.on_exit = MagicMock()
@@ -3170,23 +3191,34 @@ async def test_resumed_completed_step_sets_empty_conclusion_and_calls_on_exit(mo
         Message(role="user", content=[ToolResultBlock(tool_use_id="tu_complete", content="ok", is_error=False)]),
     ]
 
+    class FakeAgentLoopNoConclusion:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def continue_streaming(self):
+            yield TextDeltaEvent(text="no conclusion this time")
+
+        async def run_streaming(self, user_input):
+            yield TextDeltaEvent(text="still no conclusion")
+
     results = []
-    async for event in executor.execute(
-        step,
-        ctx,
-        session_id="root",
-        attempt_id="att_0001",
-        transcript_id="transcript_att_0001",
-        resume_messages=resume_messages,
-    ):
-        if isinstance(event, StepResult):
-            results.append(event)
+    with patch("iac_code.agent.agent_loop.AgentLoop", FakeAgentLoopNoConclusion):
+        async for event in executor.execute(
+            step,
+            ctx,
+            session_id="root",
+            attempt_id="att_0001",
+            transcript_id="transcript_att_0001",
+            resume_messages=resume_messages,
+        ):
+            if isinstance(event, StepResult):
+                results.append(event)
 
     assert len(results) == 1
-    assert results[0].status == StepStatus.COMPLETED
-    assert results[0].conclusion == {}
-    assert ctx.get_conclusion(step.conclusion_field) == {}
-    step.on_exit.assert_called_once_with(ctx, {})
+    assert results[0].status == StepStatus.FAILED
+    assert results[0].error == missing_conclusion_error("intent_parsing", "intent")
+    assert ctx.get_conclusion(step.conclusion_field) is None
+    step.on_exit.assert_not_called()
 
 
 @pytest.mark.asyncio

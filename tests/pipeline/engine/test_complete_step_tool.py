@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from iac_code.pipeline.engine.complete_step_tool import CompleteStepTool
+from iac_code.pipeline.engine.complete_step_tool import CompleteStepTool, empty_conclusion_error
 from iac_code.pipeline.engine.types import StepConfig, StepStatus
 from iac_code.tools.base import ToolContext
 
@@ -1672,6 +1672,44 @@ class TestSchemaValidation:
             context=ToolContext(),
         )
         assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_empty_conclusion_rejected_without_schema(self):
+        """A schema-less step must still refuse an empty conclusion instead of completing with null."""
+        config = StepConfig(step_id="intent_parsing", conclusion_field="intent", forward=None)
+        tool = CompleteStepTool(config)
+        result = await tool.execute(tool_input={"conclusion": {}}, context=ToolContext())
+        assert result.is_error
+        assert result.metadata is None
+        assert empty_conclusion_error("intent_parsing", "intent") in result.content
+
+    @pytest.mark.asyncio
+    async def test_explicit_failure_reason_conclusion_accepted(self):
+        """When no intent can be derived, an explicit reason is a valid, diagnosable conclusion."""
+        config = StepConfig(
+            step_id="intent_parsing",
+            conclusion_field="intent",
+            forward=None,
+            conclusion_schema={
+                "type": "object",
+                "required": ["is_infra_intent", "confidence"],
+                "properties": {
+                    "is_infra_intent": {"type": "boolean"},
+                    "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                    "rejection_reason": {"type": "string"},
+                },
+            },
+        )
+        tool = CompleteStepTool(config)
+        conclusion = {
+            "is_infra_intent": False,
+            "confidence": "high",
+            "rejection_reason": "无法从用户请求中派生部署目标",
+        }
+        result = await tool.execute(tool_input={"conclusion": conclusion}, context=ToolContext())
+        assert not result.is_error
+        assert result.metadata["step_result"].status == StepStatus.COMPLETED
+        assert result.metadata["step_result"].conclusion == conclusion
 
 
 class TestNullNormalization:

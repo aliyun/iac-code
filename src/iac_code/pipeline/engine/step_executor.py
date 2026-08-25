@@ -16,7 +16,12 @@ from typing import Any
 from iac_code.agent.message import ContentBlock, Message
 from iac_code.agent.system_prompt import SECTION_BUILDERS, build_base_sections
 from iac_code.mcp.prompt_dispatch import mcp_prompt_command_stream
-from iac_code.pipeline.engine.complete_step_tool import CompleteStepTool
+from iac_code.pipeline.engine.complete_step_tool import (
+    CompleteStepTool,
+    empty_conclusion_error,
+    is_empty_conclusion,
+    missing_conclusion_error,
+)
 from iac_code.pipeline.engine.completion_guard_state import (
     ensure_completion_guard_state,
     record_completion_guard_tool_result,
@@ -428,22 +433,29 @@ class StepExecutor:
         elif complete_step_input is not None:
             conclusion = complete_step_input.get("conclusion", {})
             conclusion = self._merge_preserved_candidate_selection(preserved_selection, conclusion)
-            rollback = complete_step_input.get("rollback_request")
-            rollback_tuple = (rollback["target_step"], rollback["reason"]) if rollback else None
-            step_result = StepResult(
-                step_id=step.step_id,
-                status=StepStatus.COMPLETED,
-                conclusion=conclusion,
-                rollback_request=rollback_tuple,
-            )
-            context.set_conclusion(step.conclusion_field, conclusion)
-            if step.on_exit:
-                step.on_exit(context, conclusion)
+            if is_empty_conclusion(conclusion):
+                step_result = StepResult(
+                    step_id=step.step_id,
+                    status=StepStatus.FAILED,
+                    error=empty_conclusion_error(step.step_id, step.conclusion_field),
+                )
+            else:
+                rollback = complete_step_input.get("rollback_request")
+                rollback_tuple = (rollback["target_step"], rollback["reason"]) if rollback else None
+                step_result = StepResult(
+                    step_id=step.step_id,
+                    status=StepStatus.COMPLETED,
+                    conclusion=conclusion,
+                    rollback_request=rollback_tuple,
+                )
+                context.set_conclusion(step.conclusion_field, conclusion)
+                if step.on_exit:
+                    step.on_exit(context, conclusion)
         else:
             step_result = StepResult(
                 step_id=step.step_id,
                 status=StepStatus.FAILED,
-                error="No conclusion extracted",
+                error=missing_conclusion_error(step.step_id, step.conclusion_field),
             )
 
         yield step_result

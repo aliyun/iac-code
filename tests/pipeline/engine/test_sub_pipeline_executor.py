@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from iac_code.agent.message import ImageBlock, Message, ToolResultBlock, ToolUseBlock
+from iac_code.pipeline.engine.complete_step_tool import missing_conclusion_error
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.state_machine import StateMachine
@@ -1171,7 +1172,7 @@ class TestSubPipelineExecutor:
             )
 
         assert result.failed is True
-        assert result.error == "No conclusion extracted"
+        assert result.error == missing_conclusion_error("template_generating", "template")
 
     @pytest.mark.asyncio
     async def test_execute_streaming_failed_step_emits_sub_step_failed_before_terminal(self, tmp_path, monkeypatch):
