@@ -28,6 +28,8 @@
 
 不要使用 `evaluated_candidates[i].candidate.monthly_estimate`，它只是架构规划阶段的粗略估算。不要重新询价或自行补算价格。若费用明细没有规格字段，省略 `spec`，不要猜测。
 
+如果 `evaluated_candidates[i].cost.budget_deviation.status` 是 `above` 或 `below`，必须在 `summary` 末尾追加一句偏离标注，说明实际费用相对规划预算区间的方向和 `note` 内容。同理，`cost.spec_reconciliation.matches_plan` 为 `false` 时，在 `summary` 中说明最终规格与规划规格的差异。`status` 为 `within` 或字段缺失时不要添加任何偏离描述。
+
 `user_prompt`、`summary` 和 Mermaid 节点标签应使用用户当前语言；字段名、枚举值和其他协议字段保持上面的固定形式。
 
 `complete_step.conclusion.user_prompt` 必须是展示给用户的选择提示，例如“请选择要部署的方案：”。

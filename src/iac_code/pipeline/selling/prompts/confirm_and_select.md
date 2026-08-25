@@ -50,6 +50,8 @@
 
 不要使用 `evaluated_candidates[i].candidate.monthly_estimate`，该字段是架构规划阶段的粗略估算。不要重新询价，也不要重新估算价格。
 
+如果 `evaluated_candidates[i].cost.budget_deviation.status` 是 `above` 或 `below`，必须在 `summary` 末尾追加一句偏离标注，说明实际费用相对规划预算区间的方向和 `note` 内容（例如"实际 ¥443.29/月，超出规划的 ¥200-300/月 区间"）。同理，`cost.spec_reconciliation.matches_plan` 为 `false` 时，在 `summary` 中说明最终规格与规划规格的差异。`status` 为 `within` 或字段缺失时不要添加任何偏离描述。
+
 如果多个方案都需要展示，必须对每个方案都调用一次“架构图 + 方案详情”的并行展示；不要为了架构图优化额外阻塞方案详情展示。
 
 - 不要用文字输出对比表格或方案信息 — 所有展示数据通过上述工具传递

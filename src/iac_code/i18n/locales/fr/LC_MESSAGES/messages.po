@@ -4074,6 +4074,17 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"The final instance spec must match the architecture plan, budget "
+"deviation must be disclosed, and a contract discount must only be "
+"reported when it actually reduces the price."
+msgstr ""
+"La spécification finale de l’instance doit correspondre au plan "
+"d’architecture, tout écart budgétaire doit être signalé, et une remise "
+"contractuelle ne peut être mentionnée que si elle réduit réellement le "
+"prix."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -4176,13 +4187,13 @@ msgstr ""
 "{fields}."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
-msgid "A completion guard is misconfigured."
-msgstr "Une garde de finalisation est mal configurée."
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
 msgid "{message} Validation issue: {code} ({detail})."
 msgstr "{message} Problème de validation : {code} ({detail})."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A completion guard is misconfigured."
+msgstr "Une garde de finalisation est mal configurée."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A conclusion content hash is required before completing the current step."

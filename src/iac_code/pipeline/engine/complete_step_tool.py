@@ -13,6 +13,7 @@ import jsonschema
 
 from iac_code.i18n import _
 from iac_code.pipeline.display_names import display_step_name
+from iac_code.pipeline.engine.cost_consistency import validate_cost_consistency
 from iac_code.pipeline.engine.hard_constraints import collect_hard_constraints, validate_hard_constraint_checks
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.tools.base import Tool, ToolContext, ToolResult
@@ -60,6 +61,10 @@ _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
         "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
         "and evidence."
     ),
+    "cost_plan_consistency_required": (
+        "The final instance spec must match the architecture plan, budget deviation must be disclosed, "
+        "and a contract discount must only be reported when it actually reduces the price."
+    ),
 }
 _COMPLETION_GUARD_MESSAGE_KEY_BY_TEXT = {text: key for key, text in _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY.items()}
 
@@ -99,6 +104,10 @@ def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
         _(
             "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
             "and evidence."
+        ),
+        _(
+            "The final instance spec must match the architecture plan, budget deviation must be disclosed, "
+            "and a contract discount must only be reported when it actually reduces the price."
         ),
     )
 
@@ -324,6 +333,7 @@ class CompleteStepTool(Tool):
             required_tool_result = guard.get("require_tool_result")
             required_conclusion_sha256 = guard.get("require_conclusion_sha256")
             required_constraint_coverage = guard.get("require_context_constraint_coverage")
+            required_cost_consistency = guard.get("require_cost_consistency")
             required_field = guard.get("required_conclusion_field")
             required_any_of = guard.get("required_conclusion_any_of") or []
             successful_tools = self._completion_guard_state.get("successful_tools", set())
@@ -383,7 +393,53 @@ class CompleteStepTool(Tool):
                 )
                 if validation_error is not None:
                     return validation_error
+            if isinstance(required_cost_consistency, dict):
+                validation_error = self._validate_cost_consistency(
+                    required_cost_consistency,
+                    conclusion,
+                    self._completion_guard_message(guard, None),
+                )
+                if validation_error is not None:
+                    return validation_error
         return None
+
+    def _validate_cost_consistency(
+        self,
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        message: str | None,
+    ) -> str | None:
+        context_snapshot = self._completion_guard_state.get("context_snapshot")
+        if not isinstance(context_snapshot, dict):
+            context_snapshot = {}
+        planned_compute = self._resolve_dotted(
+            context_snapshot,
+            str(requirement.get("planned_compute_field") or "candidate.planned_compute"),
+        )
+        planned_budget = self._resolve_dotted(
+            context_snapshot,
+            str(requirement.get("planned_budget_field") or "candidate.planned_budget"),
+        )
+        issues = validate_cost_consistency(
+            planned_compute,
+            planned_budget,
+            conclusion,
+            spec_reconciliation_field=str(requirement.get("spec_reconciliation_field") or "spec_reconciliation"),
+            budget_deviation_field=str(requirement.get("budget_deviation_field") or "budget_deviation"),
+        )
+        if not issues:
+            return None
+        base_message = message or _(
+            "The final instance spec must match the architecture plan, budget deviation must be disclosed, "
+            "and a contract discount must only be reported when it actually reduces the price."
+        )
+        issue_summaries = [f"{issue.code}[{issue.detail}]" if issue.detail else issue.code for issue in issues]
+        code = issues[0].code if len(issues) == 1 else "multiple_cost_consistency_issues"
+        return _("{message} Validation issue: {code} ({detail}).").format(
+            message=base_message,
+            code=code,
+            detail="; ".join(issue_summaries),
+        )
 
     def _validate_context_constraint_coverage(
         self,

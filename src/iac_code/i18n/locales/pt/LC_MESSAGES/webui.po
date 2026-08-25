@@ -542,6 +542,14 @@ msgid "{n}y"
 msgstr "{n}a"
 
 #: src/iac_code/web/static/js/app.js
+msgid "Operation failed"
+msgstr "Falha na operação"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Archive failed"
+msgstr "Falha ao arquivar"
+
+#: src/iac_code/web/static/js/app.js
 msgid "Read-only"
 msgstr "Somente leitura"
 
@@ -556,14 +564,6 @@ msgstr "Insira o conteúdo"
 #: src/iac_code/web/static/js/app.js
 msgid "Please enter a name"
 msgstr "Insira um nome"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Operation failed"
-msgstr "Falha na operação"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Archive failed"
-msgstr "Falha ao arquivar"
 
 #: src/iac_code/web/static/js/app.js
 #, python-brace-format

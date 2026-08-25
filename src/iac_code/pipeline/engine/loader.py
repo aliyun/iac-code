@@ -43,6 +43,7 @@ _SUPPORTED_COMPLETION_GUARD_KEYS = {
     "message_key",
     "require_conclusion_sha256",
     "require_context_constraint_coverage",
+    "require_cost_consistency",
     "require_tool",
     "require_tool_result",
     "required_conclusion_any_of",

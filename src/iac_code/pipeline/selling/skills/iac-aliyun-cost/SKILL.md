@@ -17,7 +17,44 @@ conclusion_schema:
   properties:
     monthly_estimate:
       type: string
-      description: 月度费用估算；询价同时返回 OriginalAmount 与 TradeAmount 时，必须同时包含列表价和合同优惠后价格（如 ¥96.80/月（列表价，合同优惠后约¥13.76/月））；询价失败时填 "询价失败"
+      description: 月度费用估算；询价返回的 TradeAmount 低于 OriginalAmount 时必须同时包含列表价和合同优惠后价格（如 ¥96.80/月（列表价，合同优惠后约¥13.76/月）），两者相等表示账户无合同折扣、只填列表价（如 ¥96.80/月（列表价））；询价失败时填 "询价失败"
+    spec_reconciliation:
+      type: object
+      required: [matches_plan]
+      additionalProperties: false
+      description: 最终采用的计算规格与 candidate.planned_compute 的核对结果；candidate 提供了规划规格时必填
+      properties:
+        instance_type:
+          type: string
+          description: 最终用于询价和预览的 ECS 实例类型
+        image_id:
+          type: string
+          description: 最终用于询价和预览的镜像 ID
+        matches_plan:
+          type: boolean
+          description: 最终规格是否与 candidate.planned_compute 完全一致
+        deviation_note:
+          type: string
+          description: matches_plan 为 false 时必填，说明偏离的原因与影响
+    budget_deviation:
+      type: object
+      required: [status]
+      additionalProperties: false
+      description: 实际询价结果与 candidate.planned_budget 的比对结论；candidate 提供了规划预算时必填
+      properties:
+        status:
+          type: string
+          enum: [within, above, below, unknown]
+          description: 实际月度费用相对规划区间的位置
+        planned_range:
+          type: string
+          description: 规划预算区间的可读表示，如 "¥50-100/月"
+        actual_monthly:
+          type: number
+          description: 从 monthly_estimate 归一化出的实际月度列表价数值
+        note:
+          type: string
+          description: status 为 above 或 below 时必填，显式说明偏离幅度与原因
     currency:
       type: string
       enum: [CNY]
@@ -198,7 +235,22 @@ conclusion_schema:
 5. **按需修复问题** — 仅当询价失败且错误指向模板问题，或你必须修复/改写模板时，修改模板并写回原文件路径
 6. **修改后校验并重新询价** — 调用 `ros_validate_template` 校验改动；通过后调用 `ros_estimate_template_cost` 重新询价；失败则修复重试（最多 7 轮）
 7. **结构化传递参数** — 在 `complete_step.conclusion.deployment_parameters` 输出当前已选或已用于询价的参数字典；在 `preview_validation` 输出预览成功证明；在 `missing_deployment_parameters` 输出仍未补齐的完整部署参数缺口
-8. **输出结果** — 汇总费用并调用 `complete_step`
+8. **核对规划基线** — 按「规划基线一致性核对」比对 `candidate.planned_compute` 与 `candidate.planned_budget`，输出 `spec_reconciliation` 和 `budget_deviation`
+9. **输出结果** — 汇总费用并调用 `complete_step`
+
+## 规划基线一致性核对
+
+`candidate.planned_compute` 和 `candidate.planned_budget` 是 architecture_planning 传下来的规划基线。`complete_step` 会用代码逐项核对，删字段或改写结论都无法绕过。
+
+**规格一致性**：规划给出 `instance_type`（或 `image_id`）时，它就是本步骤的默认规格。同一个值必须贯穿 `ros_preview_template`、`ros_estimate_template_cost`、`deployment_parameters` 和 `preview_validation.parameters`，不得在询价时换成另一档规格。
+
+- 规划规格能满足全部硬约束和库存可用性时，直接沿用，`spec_reconciliation.matches_plan` 填 `true`。
+- 规划规格确实不可用时（违反用户硬约束、库存不足、`AllowedValues` 不包含），才允许改用其它规格，此时 `matches_plan` 填 `false` 并在 `deviation_note` 说明真实原因（如"规划的 ecs.t6-c1m1.large 不满足用户 4 vCPU 硬约束，改用 ecs.c6.xlarge"）。不得在没有实际阻碍时"顺手升配"。
+- `spec_reconciliation.instance_type` / `image_id` 必须填最终真实用于询价和预览的值，不是规划值。
+
+**预算偏离标注**：规划给出 `planned_budget` 时，把询价得到的月度列表价与 `[monthly_min, monthly_max]` 比对，在 `budget_deviation.status` 填 `within` / `above` / `below`，`actual_monthly` 填归一化后的数值。超出或低于区间时必须在 `note` 里显式说明偏离幅度与原因，不得静默通过。
+
+**合同优惠真实性**：`TradeAmount` 等于 `OriginalAmount` 表示该账户没有产生任何减免，此时 `monthly_estimate` 只输出列表价口径，禁止再写"合同优惠后约¥X"——那会让用户误以为存在不存在的折扣。只有 `TradeAmount` 确实低于 `OriginalAmount` 时才输出两个口径。
 
 ## 按需校验模板
 
@@ -306,4 +358,6 @@ aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<�
 - `preview_validation` 填 `ros_preview_template` 的结构化状态：成功时填 `{"succeeded": true, "template_url": "<当前模板文件路径>", "parameters": <预览通过的同一参数字典>}`；失败或未执行时填 `{"succeeded": false, "error": "<原因>"}`
 - `missing_deployment_parameters` 填完整部署或 PreviewStack 仍缺少的参数及原因；没有缺口时可省略或填 `[]`
 - `parameter_set_summary` 可简要说明参数来源、可用性筛选、PreviewStack 验证结果以及是否使用软门禁继续询价
+- `spec_reconciliation` 在 candidate 提供 `planned_compute` 时必填，`matches_plan` 为 `false` 时同时填 `deviation_note`
+- `budget_deviation` 在 candidate 提供 `planned_budget` 时必填，`status` 为 `above` 或 `below` 时同时填 `note`
 - 询价失败时 `monthly_estimate` 填 "询价失败"，`resources` 为空数组，`error` 说明原因

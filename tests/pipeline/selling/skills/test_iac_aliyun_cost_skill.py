@@ -172,6 +172,30 @@ class TestSkillFrontmatter:
         assert "OriginalAmount" in description
         assert "TradeAmount" in description
 
+    def test_monthly_estimate_schema_forbids_discount_caliber_without_reduction(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        description = fm["conclusion_schema"]["properties"]["monthly_estimate"]["description"]
+
+        assert "两者相等" in description
+        assert "只填列表价" in description
+
+    def test_conclusion_schema_carries_plan_reconciliation_fields(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        properties = fm["conclusion_schema"]["properties"]
+
+        spec = properties["spec_reconciliation"]
+        assert spec["required"] == ["matches_plan"]
+        assert set(spec["properties"]) == {"instance_type", "image_id", "matches_plan", "deviation_note"}
+        assert "planned_compute" in spec["description"]
+
+        budget = properties["budget_deviation"]
+        assert budget["required"] == ["status"]
+        assert budget["properties"]["status"]["enum"] == ["within", "above", "below", "unknown"]
+        assert set(budget["properties"]) == {"status", "planned_range", "actual_monthly", "note"}
+        assert "planned_budget" in budget["description"]
+
     def test_conclusion_schema_requires_full_preview_validation_when_succeeded(self):
         content = SKILL_MD.read_text(encoding="utf-8")
         fm = _parse_frontmatter(content)
@@ -538,6 +562,21 @@ class TestCostPrompt:
         assert "列表价" in body
         assert "合同优惠后" in body
         assert "monthly_estimate" in body
+
+    def test_prompt_forbids_reporting_a_discount_that_does_not_reduce_the_price(self):
+        body = COST_PROMPT_MD.read_text(encoding="utf-8")
+
+        assert "即使数值相同也保留两个价格口径" not in body
+        assert "两者相等表示账户没有产生任何减免" in body
+        assert "不得标注合同优惠后价格" in body
+
+    def test_prompt_passes_planning_baselines_and_requires_reconciliation(self):
+        body = COST_PROMPT_MD.read_text(encoding="utf-8")
+
+        assert "{candidate.planned_compute}" in body
+        assert "{candidate.planned_budget}" in body
+        assert "spec_reconciliation" in body
+        assert "budget_deviation" in body
 
     def test_prompt_receives_only_required_candidate_fields_without_repeating_skill_rules(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")

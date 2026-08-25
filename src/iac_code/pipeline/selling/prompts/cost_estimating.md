@@ -6,6 +6,14 @@
 
 ## 当前候选方案
 - 名称：`{candidate.name}`
+- 规划计算规格：
+```json
+{candidate.planned_compute}
+```
+- 规划月度预算：
+```json
+{candidate.planned_budget}
+```
 - 资源生命周期：
 ```json
 {candidate.resource_intents}
@@ -36,11 +44,14 @@
 ## 输出
 API 调用完成后调用 `complete_step` 提交费用预估。
 
-`complete_step.conclusion.monthly_estimate` 必须保留两个价格口径：
+`complete_step.conclusion.monthly_estimate` 的价格口径：
 - `OriginalAmount` 是原价，按统一月度周期换算并汇总为列表价。
 - `TradeAmount` 是合同优惠后的最终价，按与原价相同的月度周期换算并汇总。
-- 两个字段都存在时，使用 `¥<原价>/月（列表价，合同优惠后约¥<最终价>/月）` 格式；即使数值相同也保留两个价格口径。
+- `TradeAmount` 低于 `OriginalAmount` 时，使用 `¥<原价>/月（列表价，合同优惠后约¥<最终价>/月）` 格式。
+- 两者相等表示账户没有产生任何减免，只输出 `¥<原价>/月（列表价）`，不得标注合同优惠后价格。
 - 任一字段缺失时只展示可用价格，并在 `api_raw_summary` 中说明缺失字段；询价失败时仍填写 `"询价失败"`。
+
+上方给出了 `candidate.planned_compute` 和 `candidate.planned_budget` 时，还必须按技能的「规划基线一致性核对」输出 `spec_reconciliation` 和 `budget_deviation`：最终规格必须与规划规格一致，确有阻碍才允许偏离并说明原因；实际月度费用超出或低于规划区间时必须显式标注。
 
 若 `ros_preview_template` 成功，在 `complete_step.conclusion.preview_validation` 写入 PreviewStack 成功证明：`succeeded: true`、`template_url: "{template.file_path}"`、`parameters: <预览通过的同一参数字典>`；失败或未执行时写入 `succeeded: false`、`error: "<原因>"`。
 

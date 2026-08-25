@@ -83,6 +83,33 @@ conclusion_schema:
             type: string
           monthly_estimate:
             type: string
+          planned_compute:
+            type: object
+            additionalProperties: false
+            description: 本方案规划的 ECS 计算规格基线；后续成本步骤必须与它 reconcile。方案不包含 ECS 计算资源时省略
+            properties:
+              instance_type:
+                type: string
+                description: 规划采用的 ECS 实例类型，如 ecs.t6-c1m1.large；尚未确定具体规格时省略
+              image_id:
+                type: string
+                description: 规划采用的镜像 ID；尚未确定时省略
+          planned_budget:
+            type: object
+            required: [monthly_min, monthly_max, currency]
+            additionalProperties: false
+            description: monthly_estimate 的结构化区间；后续成本步骤按它判定预算偏离
+            properties:
+              monthly_min:
+                type: number
+                description: 规划月度费用下界，与 monthly_estimate 文本一致
+              monthly_max:
+                type: number
+                description: 规划月度费用上界，与 monthly_estimate 文本一致
+              currency:
+                type: string
+                enum: [CNY]
+                description: 预算币种，固定为 CNY
           pros:
             type: array
             items:
@@ -133,6 +160,13 @@ conclusion_schema:
 - 拓扑描述（简述部署架构）
 - 月度费用估算范围
 - 优势和局限
+
+## 规划基线：规格与预算
+
+`planned_compute` 和 `planned_budget` 是本步骤向成本估算步骤传递的**可核对基线**，成本步骤会按它们判定规格漂移和预算偏离。
+
+- `planned_compute`：方案包含 ECS 计算资源时，填写你规划采用的 `instance_type`（必要时含 `image_id`）。这是后续 `cost_estimating`、`ros_preview_template` 必须沿用的同一规格；不要在这里填一个小规格却预期后续用大规格。方案不含 ECS 计算资源时省略该字段。
+- `planned_budget`：把 `monthly_estimate` 的文本区间同步为结构化的 `monthly_min` / `monthly_max`，两者必须一致（如 `monthly_estimate: "¥50-100/月"` 对应 `monthly_min: 50`、`monthly_max: 100`）。区间要覆盖你对该方案的真实预期，不要为了让后续询价结果落在区间内而人为放宽。
 
 ## 资源生命周期约束
 

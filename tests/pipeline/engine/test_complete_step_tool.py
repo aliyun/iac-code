@@ -1460,6 +1460,94 @@ class TestCompletionGuards:
         assert result.is_error
         assert "rerun validation" in result.content
 
+    @staticmethod
+    def _cost_consistency_tool(planned_compute, planned_budget):
+        return CompleteStepTool(
+            StepConfig(step_id="cost_estimating", conclusion_field="cost", forward=None),
+            completion_guards=[
+                {
+                    "always": True,
+                    "require_cost_consistency": {
+                        "planned_compute_field": "candidate.planned_compute",
+                        "planned_budget_field": "candidate.planned_budget",
+                        "spec_reconciliation_field": "spec_reconciliation",
+                        "budget_deviation_field": "budget_deviation",
+                    },
+                    "message_key": "cost_plan_consistency_required",
+                }
+            ],
+            completion_guard_state={
+                "context_snapshot": {
+                    "candidate": {"planned_compute": planned_compute, "planned_budget": planned_budget}
+                }
+            },
+        )
+
+    def test_cost_consistency_guard_accepts_reconciled_conclusion(self):
+        tool = self._cost_consistency_tool(
+            {"instance_type": "ecs.t6-c1m1.large"},
+            {"monthly_min": 200, "monthly_max": 300, "currency": "CNY"},
+        )
+
+        error = tool.validate_completion_input(
+            {
+                "conclusion": {
+                    "monthly_estimate": "¥281.77/月（列表价）",
+                    "deployment_parameters": {"InstanceType": "ecs.t6-c1m1.large"},
+                    "spec_reconciliation": {"instance_type": "ecs.t6-c1m1.large", "matches_plan": True},
+                    "budget_deviation": {"status": "within", "actual_monthly": 281.77},
+                }
+            }
+        )
+
+        assert error is None
+
+    def test_cost_consistency_guard_blocks_unreconciled_spec_drift(self):
+        tool = self._cost_consistency_tool(
+            {"instance_type": "ecs.t6-c1m1.large"},
+            {"monthly_min": 50, "monthly_max": 100, "currency": "CNY"},
+        )
+
+        error = tool.validate_completion_input(
+            {
+                "conclusion": {
+                    "monthly_estimate": "¥281.77/月（列表价）",
+                    "deployment_parameters": {"InstanceType": "ecs.g5.large"},
+                    "spec_reconciliation": {"instance_type": "ecs.g5.large", "matches_plan": True},
+                    "budget_deviation": {"status": "within", "actual_monthly": 281.77},
+                }
+            }
+        )
+
+        assert error is not None
+        assert "multiple_cost_consistency_issues" in error
+        assert "spec_deviates_from_plan" in error
+        assert "budget_deviation_status_mismatch" in error
+
+    def test_cost_consistency_guard_blocks_ineffective_contract_discount(self):
+        tool = self._cost_consistency_tool(None, None)
+
+        error = tool.validate_completion_input(
+            {"conclusion": {"monthly_estimate": "¥443.29/月（列表价，合同优惠后约¥443.29/月）"}}
+        )
+
+        assert error is not None
+        assert "discount_without_reduction" in error
+
+    def test_cost_consistency_guard_skips_candidates_without_baseline(self):
+        tool = self._cost_consistency_tool(None, None)
+
+        error = tool.validate_completion_input(
+            {
+                "conclusion": {
+                    "monthly_estimate": "¥443.29/月（列表价）",
+                    "deployment_parameters": {"InstanceType": "ecs.g5.large"},
+                }
+            }
+        )
+
+        assert error is None
+
 
 class TestSchemaValidation:
     def test_missing_conclusion_validation_error_includes_current_step_schema(self):

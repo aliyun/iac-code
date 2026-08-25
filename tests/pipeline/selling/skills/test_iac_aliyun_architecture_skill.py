@@ -48,6 +48,31 @@ def test_architecture_hard_constraint_schema_describes_every_field():
     assert all(value.get("description") for value in properties.values())
 
 
+def test_architecture_candidate_schema_declares_planning_baselines():
+    body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+    end = body.index("---", 3)
+    schema = yaml.safe_load(body[3:end])["conclusion_schema"]
+    properties = schema["properties"]["candidates"]["items"]["properties"]
+
+    planned_compute = properties["planned_compute"]
+    assert set(planned_compute["properties"]) == {"instance_type", "image_id"}
+    assert planned_compute["additionalProperties"] is False
+
+    planned_budget = properties["planned_budget"]
+    assert planned_budget["required"] == ["monthly_min", "monthly_max", "currency"]
+    assert planned_budget["properties"]["currency"]["enum"] == ["CNY"]
+    assert all(value.get("description") for value in planned_budget["properties"].values())
+
+
+def test_architecture_body_requires_truthful_planning_baselines():
+    body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "## 规划基线：规格与预算" in body
+    assert "planned_compute" in body
+    assert "planned_budget" in body
+    assert "monthly_estimate" in body
+
+
 def test_architecture_prompt_guides_optional_memory_lookup_for_planning_context():
     body = PROMPT_FILE.read_text(encoding="utf-8")
 

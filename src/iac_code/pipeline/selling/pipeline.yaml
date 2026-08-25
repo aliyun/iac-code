@@ -356,6 +356,13 @@ sub_pipelines:
               checks_field: hard_constraint_checks
               deployment_parameters_field: deployment_parameters
             message_key: hard_constraint_verification_required
+          - always: true
+            require_cost_consistency:
+              planned_compute_field: candidate.planned_compute
+              planned_budget_field: candidate.planned_budget
+              spec_reconciliation_field: spec_reconciliation
+              budget_deviation_field: budget_deviation
+            message_key: cost_plan_consistency_required
         tools:
           include: []
           exclude:
