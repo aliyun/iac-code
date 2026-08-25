@@ -589,6 +589,9 @@ steps:
     interrupt_judge_failure: pause
     context_fields: [intent, selected_plan, evaluated_candidates]
     hooks_file: hooks/deploying.py
+    failure_condition:
+      field: status
+      values: [failed]
     completion_guards:
       - when_conclusion_field_equals:
           status: success

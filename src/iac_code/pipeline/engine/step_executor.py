@@ -79,6 +79,20 @@ def _completion_guard_tool_result_content(event: ToolResultEvent) -> str:
         return event.result
 
 
+def _failure_condition_error(step: StepSpec, conclusion: dict) -> str | None:
+    """Return the failure reason when the conclusion matches the step's failure_condition."""
+    condition = step.failure_condition
+    if not condition:
+        return None
+    value = conclusion.get(condition["field"])
+    if not isinstance(value, str) or value not in condition["values"]:
+        return None
+    error = conclusion.get("error")
+    if isinstance(error, str) and error:
+        return error
+    return f"Step '{step.step_id}' reported {condition['field']}={value}"
+
+
 @dataclass
 class StepAgentLoopContext:
     """AgentLoop context built by the same path used for step execution."""
@@ -430,11 +444,13 @@ class StepExecutor:
             conclusion = self._merge_preserved_candidate_selection(preserved_selection, conclusion)
             rollback = complete_step_input.get("rollback_request")
             rollback_tuple = (rollback["target_step"], rollback["reason"]) if rollback else None
+            failure_error = _failure_condition_error(step, conclusion)
             step_result = StepResult(
                 step_id=step.step_id,
-                status=StepStatus.COMPLETED,
+                status=StepStatus.FAILED if failure_error is not None else StepStatus.COMPLETED,
                 conclusion=conclusion,
                 rollback_request=rollback_tuple,
+                error=failure_error,
             )
             context.set_conclusion(step.conclusion_field, conclusion)
             if step.on_exit:

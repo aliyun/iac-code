@@ -299,6 +299,7 @@ def _parse_steps(raw_steps: list[dict]) -> list[StepSpec]:
                 completion_guards=_parse_completion_guards(raw.get("completion_guards"), step_id),
                 description=raw.get("description", ""),
                 exit_condition=_parse_exit_condition(raw.get("exit_condition"), step_id),
+                failure_condition=_parse_failure_condition(raw.get("failure_condition"), step_id),
                 a2a_artifacts=_parse_a2a_artifacts(raw.get("a2a_artifacts"), step_id),
                 surface_overrides=_parse_surface_overrides(raw.get("surface_overrides"), step_id),
                 config=_parse_mapping(raw.get("config"), "config", step_id),
@@ -407,6 +408,21 @@ def _parse_exit_condition(raw: dict | None, step_id: str) -> dict | None:
         return None
     if not isinstance(raw, dict) or "field" not in raw or "value" not in raw:
         raise ValueError(f"Step '{step_id}': exit_condition must be a dict with 'field' and 'value' keys, got {raw!r}")
+    return raw
+
+
+def _parse_failure_condition(raw: dict | None, step_id: str) -> dict | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or "field" not in raw or "values" not in raw:
+        raise ValueError(
+            f"Step '{step_id}': failure_condition must be a dict with 'field' and 'values' keys, got {raw!r}"
+        )
+    values = raw["values"]
+    if not isinstance(values, list) or not values or not all(isinstance(v, str) for v in values):
+        raise ValueError(
+            f"Step '{step_id}': failure_condition.values must be a non-empty list of strings, got {values!r}"
+        )
     return raw
 
 
