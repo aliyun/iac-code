@@ -1744,3 +1744,94 @@ class TestNullNormalization:
         valid, error = tool.validate_input(tool_input)
         assert not valid
         assert "name" in error
+
+
+class TestInputValidationRetryBudget:
+    """Missing conclusion is rejected before execute(), so the schema gate must own the budget."""
+
+    @staticmethod
+    def _config(**overrides):
+        params = {
+            "step_id": "intent_parsing",
+            "conclusion_field": "intent",
+            "forward": "architecture_planning",
+            "conclusion_schema": {
+                "type": "object",
+                "required": ["is_infra_intent"],
+                "properties": {"is_infra_intent": {"type": "boolean"}},
+            },
+        }
+        params.update(overrides)
+        return StepConfig(**params)
+
+    def test_valid_input_defers_to_executor_default(self):
+        tool = CompleteStepTool(self._config())
+
+        assert tool.validation_error_result({"conclusion": {"is_infra_intent": True}}) is None
+
+    def test_missing_conclusion_returns_actionable_error(self):
+        tool = CompleteStepTool(self._config())
+
+        result = tool.validation_error_result({})
+
+        assert result is not None
+        assert result.is_error
+        assert result.metadata is None
+        assert "'conclusion' is a required property" in result.content
+        assert "is_infra_intent" in result.content
+
+    def test_repeated_identical_invalid_input_escalates_message(self):
+        tool = CompleteStepTool(self._config(max_conclusion_retries=5))
+
+        first = tool.validation_error_result({"is_infra_intent": True})
+        second = tool.validation_error_result({"is_infra_intent": True})
+
+        assert first is not None and second is not None
+        assert "exactly the same invalid" not in first.content
+        assert "exactly the same invalid" in second.content
+
+    def test_different_invalid_input_is_not_flagged_as_repeat(self):
+        tool = CompleteStepTool(self._config(max_conclusion_retries=5))
+
+        tool.validation_error_result({"is_infra_intent": True})
+        third = tool.validation_error_result({"confidence": "high"})
+
+        assert third is not None
+        assert "exactly the same invalid" not in third.content
+
+    def test_exceeding_retry_budget_returns_terminal_step_result(self):
+        tool = CompleteStepTool(self._config(max_conclusion_retries=1))
+
+        assert tool.validation_error_result({}).metadata is None
+        terminal = tool.validation_error_result({})
+
+        assert terminal is not None
+        assert terminal.is_error
+        step_result = terminal.metadata["step_result"]
+        assert step_result.status == StepStatus.FAILED
+        assert step_result.step_id == "intent_parsing"
+        assert "Schema validation failed after 2 attempts" in step_result.error
+
+    @pytest.mark.asyncio
+    async def test_budget_is_shared_with_execute(self):
+        tool = CompleteStepTool(self._config(max_conclusion_retries=1))
+
+        tool.validation_error_result({})
+        result = await tool.execute(
+            tool_input={"conclusion": {"is_infra_intent": "not-a-bool"}},
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert result.metadata["step_result"].status == StepStatus.FAILED
+
+    def test_budget_resets_for_a_new_step_instance(self):
+        config = self._config(max_conclusion_retries=1)
+
+        exhausted = CompleteStepTool(config)
+        exhausted.validation_error_result({})
+        exhausted.validation_error_result({})
+
+        fresh = CompleteStepTool(config)
+
+        assert fresh.validation_error_result({}).metadata is None

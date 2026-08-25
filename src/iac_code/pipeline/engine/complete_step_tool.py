@@ -127,7 +127,11 @@ class CompleteStepTool(Tool):
         self._user_message = user_message or ""
         # P-I17: _validation_attempts resets each new step (see class docstring) —
         # max_conclusion_retries is a per-step budget, not a pipeline-wide one.
+        # The budget is shared between the pre-execute schema gate (validate_input ->
+        # validation_error_result) and execute(); the two paths are mutually exclusive
+        # because the executor skips execute() whenever validate_input fails.
         self._validation_attempts = 0
+        self._last_invalid_input_fingerprint: str | None = None
 
     @property
     def name(self) -> str:
@@ -208,6 +212,56 @@ class CompleteStepTool(Tool):
             return True, ""
         except jsonschema.ValidationError as e:
             return False, self._format_input_validation_error(self._public_validation_error(e), tool_input)
+
+    def validation_error_result(self, tool_input: dict[str, Any]) -> ToolResult | None:
+        """Charge input-schema failures to the per-step retry budget and force convergence.
+
+        ``ToolExecutor`` calls this after ``validate_input`` fails, before ``execute`` would
+        run. Without it, a call missing ``conclusion`` is rejected by the schema gate only —
+        it never reaches ``execute``, so it never consumes ``max_conclusion_retries`` and the
+        model can repeat byte-identical invalid arguments indefinitely.
+        """
+        valid, error = self.validate_input(tool_input)
+        if valid:
+            return None
+
+        fingerprint = hashlib.sha256(
+            json.dumps(tool_input or {}, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        repeated = fingerprint == self._last_invalid_input_fingerprint
+        self._last_invalid_input_fingerprint = fingerprint
+
+        self._validation_attempts += 1
+        content = _("Invalid input for tool 'complete_step': {error}").format(error=error)
+        if repeated:
+            content = (
+                _(
+                    "You submitted exactly the same invalid complete_step arguments as the previous call. "
+                    "Repeating them will keep failing — rebuild the arguments strictly from the schema below."
+                )
+                + "\n"
+                + content
+            )
+
+        if self._validation_attempts > self._step_config.max_conclusion_retries:
+            max_retries = self._step_config.max_conclusion_retries
+            step_result = StepResult(
+                step_id=self._step_config.step_id,
+                status=StepStatus.FAILED,
+                error=_("Schema validation failed after {attempts} attempts: {error}").format(
+                    attempts=self._validation_attempts,
+                    error=error,
+                ),
+            )
+            return ToolResult(
+                content=_(
+                    "conclusion validation failed after exceeding the maximum retry count ({max_retries}): {error}"
+                ).format(max_retries=max_retries, error=content),
+                is_error=True,
+                metadata={"step_result": step_result},
+            )
+
+        return ToolResult(content=content, is_error=True)
 
     def _format_input_validation_error(self, error: str, tool_input: dict[str, Any]) -> str:
         invalid_json = json.dumps(tool_input or {}, ensure_ascii=False)
