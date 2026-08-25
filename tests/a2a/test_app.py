@@ -760,6 +760,24 @@ def _pipeline_pending_ask_event() -> dict:
     return event
 
 
+def _pipeline_intent_completed_event() -> dict:
+    """A completed ``intent_parsing`` step so the cancel handoff gate is satisfied.
+
+    ``selling`` declares ``on_complete.require_conclusions: [intent]``; without a
+    non-empty ``intent`` conclusion in the sidecar the cancel path suppresses
+    ``pipeline_handoff_ready`` on purpose.
+    """
+    event = _pipeline_event(1, "evt-intent")
+    event["eventType"] = "step_completed"
+    event["scope"] = "step"
+    event["step"] = {"runId": "step-intent_parsing-1", "id": "intent_parsing", "attempt": 1}
+    event["data"] = {
+        "conclusionField": "intent",
+        "conclusion": {"summary": "部署 nginx", "is_infra_intent": True},
+    }
+    return event
+
+
 def _pipeline_cost_event(sequence: int, event_id: str, total_monthly_cost: float) -> dict:
     event = _pipeline_event(sequence, event_id)
     event["eventType"] = "candidate_detail_shown"
@@ -2177,9 +2195,12 @@ async def test_cancel_input_required_pipeline_task_after_restart_marks_canceled(
     SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), session_id)
 
     pipeline_dir = SessionStorage().session_dir(str(tmp_path), session_id) / "a2a" / "pipeline"
+    intent_completed = _pipeline_intent_completed_event()
     pending = _pipeline_pending_ask_event()
+    pending["sequence"] = 2
+    A2APipelineJournal(pipeline_dir).append(intent_completed)
     A2APipelineJournal(pipeline_dir).append(pending)
-    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([intent_completed, pending]))
 
     components = create_runtime_components(
         model="qwen3.6-plus",
@@ -2321,8 +2342,11 @@ async def test_cancel_input_required_pipeline_task_backup_blocked_returns_input_
 
     pipeline_dir = SessionStorage().session_dir(str(tmp_path), session_id) / "a2a" / "pipeline"
     pending = _pipeline_pending_ask_event()
+    pending["sequence"] = 2
+    intent_completed = _pipeline_intent_completed_event()
+    A2APipelineJournal(pipeline_dir).append(intent_completed)
     A2APipelineJournal(pipeline_dir).append(pending)
-    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([intent_completed, pending]))
 
     class BlockingBackupService:
         def __init__(self) -> None:
@@ -2423,8 +2447,11 @@ async def test_cancel_input_required_pipeline_task_backup_blocked_persist_failur
 
     pipeline_dir = SessionStorage().session_dir(str(tmp_path), session_id) / "a2a" / "pipeline"
     pending = _pipeline_pending_ask_event()
+    pending["sequence"] = 2
+    intent_completed = _pipeline_intent_completed_event()
+    A2APipelineJournal(pipeline_dir).append(intent_completed)
     A2APipelineJournal(pipeline_dir).append(pending)
-    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([intent_completed, pending]))
 
     class BlockingBackupService:
         def backup_session(
@@ -2465,6 +2492,7 @@ async def test_cancel_input_required_pipeline_task_backup_blocked_persist_failur
         assert persistence.load_task("task-1").state == "input-required"
         events = A2APipelineJournal(pipeline_dir).read_all_repairing_tail()
         assert [event["eventType"] for event in events] == [
+            "step_completed",
             "input_required",
             "pipeline_canceled",
             "pipeline_handoff_ready",
@@ -2472,7 +2500,7 @@ async def test_cancel_input_required_pipeline_task_backup_blocked_persist_failur
             "pipeline_handoff_ready",
             "input_required",
         ]
-        assert [event.get("visibility") for event in events[1:5]] == [
+        assert [event.get("visibility") for event in events[2:6]] == [
             "pending_backup",
             "pending_backup",
             "committed",
