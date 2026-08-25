@@ -11,6 +11,7 @@ from typing import Any, AsyncGenerator, AsyncIterator, cast
 
 import httpx
 from a2a.server.agent_execution.active_task import INTERRUPTED_TASK_STATES, TERMINAL_TASK_STATES
+from a2a.server.events.event_queue import EventQueue
 from a2a.server.events.event_queue_v2 import QueueShutDown
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import create_jsonrpc_routes
@@ -90,6 +91,7 @@ from iac_code.a2a.runtime_registry import A2ARuntimeOwner, A2ARuntimeRegistratio
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.i18n import _
 from iac_code.pipeline.config import RunMode, get_run_mode
+from iac_code.services.permission_wait import PermissionWaitCheckpointStore
 from iac_code.services.session_backup import SessionBackupService
 from iac_code.services.session_backup_staging import (
     SessionBackupStagingProcess,
@@ -108,6 +110,16 @@ class _ASGIResponseChunk:
     body: bytes
     more_body: bool
     consumed: asyncio.Future[None]
+
+
+class _DetachedPermissionEventQueue(EventQueue):
+    """Minimal producer queue for resuming an already-persisted A2A task."""
+
+    def __init__(self, queue: asyncio.Queue[Any]) -> None:
+        self._queue = queue
+
+    async def enqueue_event(self, event: Any) -> None:
+        await self._queue.put(event)
 
 
 class _StreamingASGIResponseStream(httpx.AsyncByteStream):
@@ -339,10 +351,14 @@ def create_runtime_components(
     supported_interfaces: list[dict[str, str]] | None = None,
     agent_extensions: object | None = None,
     auto_approve_permissions: bool = False,
+    permission_wait: object | None = None,
     thinking_exposure: object | None = None,
     backup_service: Any | None = None,
 ) -> A2ARuntimeComponents:
+    from iac_code.services.permission_wait import PermissionWaitPolicy
+
     metrics = NoOpA2AMetrics()
+    permission_wait_policy = PermissionWaitPolicy.from_config(permission_wait)
     thinking_exposure_types = normalize_a2a_exposure_types(thinking_exposure)
     backup_staging_process = None
     if backup_service is None:
@@ -401,6 +417,7 @@ def create_runtime_components(
         metrics=metrics,
         artifact_store=artifact_store,
         auto_approve_permissions=auto_approve_permissions,
+        permission_wait_policy=permission_wait_policy,
         thinking_exposure_types=thinking_exposure_types,
         backup_service=backup_service,
     )
@@ -478,11 +495,26 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         self._validate_pipeline_message_request(params)
         permission_response = parse_permission_response(params.message)
         if permission_response is not None:
+            if not params.message.task_id:
+                params.message.task_id = permission_response.task_id
             resolve = getattr(getattr(self, "agent_executor", None), "resolve_sideband_permission", None)
             if callable(resolve):
                 ack = await resolve(permission_response)
                 if ack is not None:
                     return ack
+            if isinstance(self.task_store, A2ATaskStore) and not await self.task_store.is_task_active(
+                permission_response.task_id
+            ):
+                task = await self.task_store.get(permission_response.task_id, context)
+                if task is not None:
+                    async for _event in self._on_inactive_permission_send_stream(
+                        params,
+                        context,
+                        task=task,
+                    ):
+                        pass
+                    refreshed = await self.task_store.get(permission_response.task_id, context)
+                    return refreshed or task
         await self._hydrate_recoverable_pipeline_task_id(params)
         await self._reconcile_recoverable_pipeline_task(params, context)
         return await super().on_message_send(params, context)
@@ -492,6 +524,8 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         self._validate_pipeline_message_request(params)
         permission_response = parse_permission_response(params.message)
         if permission_response is not None:
+            if not params.message.task_id:
+                params.message.task_id = permission_response.task_id
             resolve = getattr(getattr(self, "agent_executor", None), "resolve_sideband_permission", None)
             if callable(resolve):
                 ack = await resolve(permission_response)
@@ -523,6 +557,16 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                 finally:
                     await active_stream.aclose()
                 return
+        if permission_response is not None and isinstance(self.task_store, A2ATaskStore):
+            task = await self.task_store.get(permission_response.task_id, context)
+            if task is not None:
+                direct_stream = self._on_inactive_permission_send_stream(params, context, task=task)
+                try:
+                    async for event in direct_stream:
+                        yield event
+                finally:
+                    await direct_stream.aclose()
+                return
         base_stream = super().on_message_send_stream(params, context)
         tracked_stream = (
             base_stream
@@ -540,6 +584,69 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                 acknowledge_pipeline_transport_delivery(event)
         finally:
             await tracked_stream.aclose()
+
+    async def _on_inactive_permission_send_stream(self, params: SendMessageRequest, context, *, task: Task):
+        """Resume an existing input boundary without asking the SDK to recreate its task."""
+
+        request_context = await self._request_context_builder.build(
+            params=params,
+            task_id=task.id,
+            context_id=params.message.context_id,
+            task=task,
+            context=context,
+        )
+        completed = object()
+        queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=1024)
+
+        async def run_permission_response() -> None:
+            try:
+                await self.agent_executor.execute(request_context, _DetachedPermissionEventQueue(queue))
+            except BaseException as exc:
+                await queue.put(exc)
+            finally:
+                await queue.put(completed)
+
+        producer = asyncio.create_task(run_permission_response())
+        handed_off = False
+        try:
+            while True:
+                event = await queue.get()
+                if event is completed:
+                    break
+                if isinstance(event, BaseException):
+                    raise event
+                if isinstance(event, Task):
+                    self._validate_task_id_match(task.id, event.id)
+                    yield apply_history_length(event, params.configuration)
+                else:
+                    yield event
+            await producer
+        except (asyncio.CancelledError, GeneratorExit):
+            # The decision may already be committed. Let the same continuation
+            # finish exactly once even if the response transport disappears.
+            handed_off = True
+            asyncio.create_task(self._drain_inactive_permission_response(queue, producer, completed))
+            raise
+        finally:
+            if not handed_off and not producer.done():
+                producer.cancel()
+                with suppress(asyncio.CancelledError):
+                    await producer
+
+    @staticmethod
+    async def _drain_inactive_permission_response(
+        queue: asyncio.Queue[Any],
+        producer: asyncio.Task[None],
+        completed: object,
+    ) -> None:
+        try:
+            while True:
+                value = await queue.get()
+                if value is completed:
+                    break
+            await producer
+        except BaseException:
+            logger.debug("Detached permission response continuation failed", exc_info=True)
 
     async def _on_active_message_send_stream(self, params: SendMessageRequest, context, *, task: Task, active_task):
         request_context = await self._request_context_builder.build(
@@ -708,6 +815,13 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         if task is None:
             raise TaskNotFoundError(f"Task {params.id} not found")
         if isinstance(self.task_store, A2ATaskStore) and not await self.task_store.is_task_active(params.id):
+            durable_cancel = await self._claim_inactive_durable_permission_cancel(task)
+            if durable_cancel == "lost":
+                return await self._reconcile_inactive_pipeline_input_required_task(task, context)
+            if durable_cancel == "normal":
+                canceled = await self._reconcile_inactive_terminal_task(task, context, "canceled")
+                await self.task_store.discard_context_runtime(task.context_id)
+                return canceled
             canceled_task = await self._cancel_inactive_pipeline_waiting_input_task(task, context)
             if canceled_task is not None:
                 return canceled_task
@@ -716,6 +830,44 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                 return canceled_task
             raise TaskNotCancelableError
         return await super().on_cancel_task(params, context)
+
+    async def _claim_inactive_durable_permission_cancel(self, task: Task) -> str | None:
+        """Let the checkpoint lock decide a restart-time answer/cancel race."""
+
+        if not isinstance(self.task_store, A2ATaskStore) or not _task_is_input_required(task):
+            return None
+        try:
+            context_record = await self.task_store.get_context_record(task.context_id)
+            store = PermissionWaitCheckpointStore(context_record.cwd, context_record.session_id)
+            record = next(
+                (
+                    value
+                    for value in store.list_active()
+                    if value.get("taskId") == task.id and value.get("contextId") == task.context_id
+                ),
+                None,
+            )
+        except Exception:
+            logger.debug("Failed to inspect durable permission wait during cancellation", exc_info=True)
+            return None
+        if record is None:
+            return None
+        boundary_id = str(record.get("boundaryId") or "")
+        try:
+            canceled = await asyncio.to_thread(store.cancel, boundary_id)
+        except ValueError:
+            # The same checkpoint file lock serializes this with a permission
+            # decision. A claimed decision wins and cancellation must not
+            # terminalize the task underneath its recovery.
+            try:
+                current = await asyncio.to_thread(store.load, boundary_id)
+            except ValueError:
+                current = None
+            if isinstance(current, dict) and current.get("phase") == "CANCELED":
+                canceled = current
+            else:
+                return "lost"
+        return "normal" if canceled.get("permissionClass") == "normal" else "pipeline"
 
     async def _cancel_inactive_pipeline_waiting_input_task(self, task: Task, context) -> Task | None:
         if not isinstance(self.task_store, A2ATaskStore) or not _task_is_input_required(task):

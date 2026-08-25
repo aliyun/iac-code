@@ -11,7 +11,7 @@ import os
 import stat
 import time
 from collections import deque
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
@@ -46,6 +46,7 @@ from iac_code.pipeline.engine.user_input import (
     PipelineUserInput,
     normalize_pipeline_user_input,
 )
+from iac_code.services.permission_wait import RecoveredPermissionAuditBoundary
 from iac_code.services.session_backup import BackupReason, SessionBackupBlocked, SessionBackupService
 from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, SESSION_METADATA_FILENAME
 from iac_code.types.stream_events import (
@@ -93,6 +94,8 @@ _REAL_RESTORE_FAILURE_REASONS = {
 
 def _is_a2a_surface(surface: str) -> bool:
     return surface == "a2a" or surface.startswith("a2a_")
+
+
 _SIDECAR_ROOT_DIRS = {"a2a", "image-cache", "pipeline", "tool-results"}
 _SIDECAR_ROOT_FILES = {
     ".backup-state.json",
@@ -570,6 +573,7 @@ class PipelineRunner:
         self._mcp_manager = mcp_manager
         self._mcp_config_warnings = mcp_config_warnings if mcp_config_warnings is not None else []
         self._mcp_status_event_signature: str | None = None
+        self._mcp_status_revision: int | None = None
         self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
 
         self._pipeline_dir = pipeline_dir
@@ -1334,7 +1338,12 @@ class PipelineRunner:
     def _mcp_status_event(self, *, force: bool = False) -> PipelineEvent | None:
         from iac_code.mcp.manager import mcp_status_metadata
 
+        status_revision = getattr(self._mcp_manager, "status_revision", None)
+        if not force and isinstance(status_revision, int) and self._mcp_status_revision == status_revision:
+            return None
         status_metadata = mcp_status_metadata(self._mcp_manager, warnings=self._mcp_config_warnings)
+        if isinstance(status_revision, int):
+            self._mcp_status_revision = status_revision
         if status_metadata is None:
             return None
         status_signature = repr(status_metadata)
@@ -1787,6 +1796,106 @@ class PipelineRunner:
             return None
         loaded = self._session_storage.load(self._cwd, transcript_id)
         return self._session_storage.repair_interrupted(loaded) if isinstance(loaded, list) and loaded else None
+
+    def _load_unrepaired_resume_messages(self, transcript_id: str | None) -> list | None:
+        if not transcript_id:
+            return None
+        if self._transcript_storage is not None:
+            loaded = self._transcript_storage.load(self._cwd, transcript_id)
+            if isinstance(loaded, list) and loaded:
+                return loaded
+        if self._session_storage is None:
+            return None
+        loaded = self._session_storage.load(self._cwd, transcript_id)
+        return loaded if isinstance(loaded, list) and loaded else None
+
+    async def resume_permission_boundary(
+        self,
+        checkpoint: dict[str, Any],
+    ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
+        """Resume the current top-level step from its unrepaired transcript."""
+
+        transcript_id = self._execution.get("transcript_id") if isinstance(self._execution, dict) else None
+        transcript_id = transcript_id if isinstance(transcript_id, str) else None
+        messages = self._load_unrepaired_resume_messages(transcript_id)
+        if not messages:
+            raise ValueError("permission_resume_invalid: pipeline transcript is unavailable")
+        async for event in self._continue_from_current(
+            resume_messages=messages,
+            resume_running_step=True,
+            permission_checkpoint=checkpoint,
+        ):
+            yield event
+
+    async def rebuild_permission_audit_event(
+        self,
+        checkpoint: Mapping[str, Any],
+        recovered: RecoveredPermissionAuditBoundary,
+    ) -> PermissionRequestEvent:
+        """Rebuild restart audit data from the exact active parent step runtime."""
+
+        execution = self._execution if isinstance(self._execution, dict) else {}
+        current_step = self.state_machine.current_step
+        step_id = current_step.step_id
+        attempt_id = execution.get("active_attempt_id")
+        transcript_id = execution.get("transcript_id")
+        if (
+            execution.get("kind") != "step"
+            or execution.get("step_id") != step_id
+            or not isinstance(attempt_id, str)
+            or not isinstance(transcript_id, str)
+            or recovered.audit_context.get("transcript_id") != transcript_id
+        ):
+            raise ValueError("permission_resume_invalid: pipeline execution changed")
+
+        attempt = self._attempts.get("items", {}).get(attempt_id)
+        if (
+            not isinstance(attempt, dict)
+            or attempt.get("attempt_id") != attempt_id
+            or attempt.get("scope") != "parent"
+            or attempt.get("step_id") != step_id
+            or attempt.get("status") != "running"
+            or attempt.get("transcript_id") != transcript_id
+        ):
+            raise ValueError("permission_resume_invalid: pipeline attempt changed")
+
+        coordinates = checkpoint.get("pipelineCoordinates")
+        if coordinates is not None:
+            if not isinstance(coordinates, Mapping):
+                raise ValueError("permission_resume_invalid: pipeline coordinates changed")
+            if "candidate" in coordinates or "candidateStep" in coordinates:
+                raise ValueError("permission_resume_invalid: pipeline coordinates changed")
+            step_coordinate = coordinates.get("step")
+            if step_coordinate is not None:
+                if not isinstance(step_coordinate, Mapping) or step_coordinate.get("id") != step_id:
+                    raise ValueError("permission_resume_invalid: pipeline coordinates changed")
+                step_attempt = self._current_step_attempt(step_id)
+                coordinate_attempt = step_coordinate.get("attempt")
+                if coordinate_attempt is not None and coordinate_attempt != step_attempt:
+                    raise ValueError("permission_resume_invalid: pipeline coordinates changed")
+                coordinate_run_id = step_coordinate.get("runId")
+                if coordinate_run_id is not None and coordinate_run_id != f"step-{step_id}-{step_attempt}":
+                    raise ValueError("permission_resume_invalid: pipeline coordinates changed")
+
+        messages = self._load_unrepaired_resume_messages(transcript_id)
+        if not messages:
+            raise ValueError("permission_resume_invalid: pipeline transcript is unavailable")
+        agent_context = self._step_executor.build_agent_loop_context(
+            current_step,
+            self.context,
+            self._session_id,
+            attempt_id=attempt_id,
+            transcript_id=transcript_id,
+            resume_messages=messages,
+        )
+        if agent_context.agent_loop is None:
+            raise ValueError("permission_resume_invalid: pipeline step already completed")
+        return await agent_context.agent_loop.rebuild_permission_audit_event(
+            tool_name=recovered.tool_name,
+            tool_input=recovered.tool_input,
+            tool_use_id=recovered.tool_use_id,
+            audit_context=recovered.audit_context,
+        )
 
     def _attempt_has_resume_transcript(self, attempt: dict[str, Any] | None) -> bool:
         if not attempt:
@@ -3704,6 +3813,7 @@ class PipelineRunner:
         precompleted_tools: dict[str, dict[str, Any]] | None = None,
         resume_waiting_step: bool = False,
         resume_running_step: bool = False,
+        permission_checkpoint: dict[str, Any] | None = None,
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         is_first_step = True
         terminal_pipeline_telemetry_emitted = False
@@ -3962,7 +4072,11 @@ class PipelineRunner:
                 is_first_step = False
                 step_resume_messages = first_step_resume_messages if first_step else None
                 step_precompleted_tools = first_step_precompleted_tools if first_step else None
-                if self._transcript_storage is not None and attempt.get("status") == "running":
+                if (
+                    self._transcript_storage is not None
+                    and attempt.get("status") == "running"
+                    and not (first_step and permission_checkpoint is not None)
+                ):
                     loaded = self._transcript_storage.load(self._cwd, attempt["transcript_id"])
                     repaired_resume_messages = self._transcript_storage.repair_interrupted(loaded)
                     step_resume_messages = reconcile_resume_messages(
@@ -3993,6 +4107,7 @@ class PipelineRunner:
                     "rollback_targets": self.state_machine.completed_non_future_rollback_targets(),
                     "rollback_count": self.state_machine.rollback_count,
                     "max_rollbacks": self.state_machine.max_rollbacks,
+                    "permission_checkpoint": permission_checkpoint if first_step else None,
                 }
                 if step_precompleted_tools is not None:
                     execute_kwargs["precompleted_tools"] = step_precompleted_tools

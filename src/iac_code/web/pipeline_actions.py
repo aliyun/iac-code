@@ -61,6 +61,25 @@ class PipelineActionRunner(Protocol):
         permission_resolver: PipelinePermissionResolver | None = None,
     ) -> "PipelineActionResult": ...
 
+    async def resume_permission(
+        self,
+        session: Any,
+        checkpoint: dict[str, Any],
+        *,
+        model_selection: WebModelSelection | None = None,
+        event_sink: PipelineEventSink | None = None,
+        permission_resolver: PipelinePermissionResolver | None = None,
+    ) -> "PipelineActionResult": ...
+
+    async def rebuild_permission_audit_event(
+        self,
+        session: Any,
+        checkpoint: dict[str, Any],
+        recovered: Any,
+        *,
+        model_selection: WebModelSelection | None = None,
+    ) -> Any: ...
+
 
 @dataclass(frozen=True)
 class PipelineActionResult:
@@ -215,6 +234,29 @@ class A2APipelineActionRunner:
             permission_resolver=permission_resolver,
         )
 
+    async def resume_permission(
+        self,
+        session: Any,
+        checkpoint: dict[str, Any],
+        *,
+        model_selection: WebModelSelection | None = None,
+        event_sink: PipelineEventSink | None = None,
+        permission_resolver: PipelinePermissionResolver | None = None,
+    ) -> PipelineActionResult:
+        unavailable = await self._unavailable_result(session)
+        if unavailable is not None:
+            return unavailable
+        return await self._execute(
+            session,
+            "",
+            action="permission_recovered",
+            events=[{"kind": "permission.recovered"}],
+            model_selection=model_selection,
+            event_sink=event_sink,
+            permission_resolver=permission_resolver,
+            permission_checkpoint=checkpoint,
+        )
+
     async def _unavailable_result(
         self,
         session: Any,
@@ -261,18 +303,13 @@ class A2APipelineActionRunner:
             return mode in (PermissionMode.BYPASS_PERMISSIONS, PermissionMode.DONT_ASK)
         return str(mode or "").strip().lower() in ("bypass_permissions", "dont_ask")
 
-    async def _execute(
+    def _executor_for_session(
         self,
         session: Any,
-        pipeline_input: str | PipelineInputContent,
         *,
-        action: str,
-        events: list[dict[str, Any]],
-        model_selection: WebModelSelection | None = None,
-        event_sink: PipelineEventSink | None = None,
-        permission_resolver: PipelinePermissionResolver | None = None,
-        envelope_observer: Callable[[Mapping[str, Any]], None] | None = None,
-    ) -> PipelineActionResult:
+        model_selection: WebModelSelection | None,
+        permission_resolver: PipelinePermissionResolver | None,
+    ) -> Any:
         from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
 
         if model_selection is not None:
@@ -303,14 +340,9 @@ class A2APipelineActionRunner:
             provider_config_override = None
             effort_override = getattr(session, "effort", None)
 
-        # Issue 6: the pipeline executor denies every tool when it has no resolver and
-        # auto-approve is off. When the session opts into a non-interactive mode we keep
-        # the silent auto-approve path (resolver=None + auto_approve=True); otherwise we
-        # thread the session-bound web resolver so tool permission prompts surface in the
-        # browser and block on the user's answer instead of auto-denying.
         auto_approve = self._resolve_auto_approve(session)
         resolver = None if auto_approve else (permission_resolver or self._owner.permission_resolver)
-        executor = IacCodeA2APipelineExecutor(
+        return IacCodeA2APipelineExecutor(
             task_store=self._task_store,
             model=session_model,
             provider_key_override=provider_key_override,
@@ -325,6 +357,50 @@ class A2APipelineActionRunner:
             permission_resolver=resolver,
             auto_approve_permissions=auto_approve,
             thinking_exposure_types=self._owner.thinking_exposure_types,
+        )
+
+    async def rebuild_permission_audit_event(
+        self,
+        session: Any,
+        checkpoint: dict[str, Any],
+        recovered: Any,
+        *,
+        model_selection: WebModelSelection | None = None,
+    ) -> Any:
+        executor = self._executor_for_session(
+            session,
+            model_selection=model_selection,
+            permission_resolver=None,
+        )
+        return await executor.rebuild_permission_audit_event(
+            cwd=session.cwd,
+            session_id=session.session_id,
+            checkpoint=checkpoint,
+            recovered=recovered,
+        )
+
+    async def _execute(
+        self,
+        session: Any,
+        pipeline_input: str | PipelineInputContent,
+        *,
+        action: str,
+        events: list[dict[str, Any]],
+        model_selection: WebModelSelection | None = None,
+        event_sink: PipelineEventSink | None = None,
+        permission_resolver: PipelinePermissionResolver | None = None,
+        envelope_observer: Callable[[Mapping[str, Any]], None] | None = None,
+        permission_checkpoint: dict[str, Any] | None = None,
+    ) -> PipelineActionResult:
+        # Issue 6: the pipeline executor denies every tool when it has no resolver and
+        # auto-approve is off. When the session opts into a non-interactive mode we keep
+        # the silent auto-approve path (resolver=None + auto_approve=True); otherwise we
+        # thread the session-bound web resolver so tool permission prompts surface in the
+        # browser and block on the user's answer instead of auto-denying.
+        executor = self._executor_for_session(
+            session,
+            model_selection=model_selection,
+            permission_resolver=permission_resolver,
         )
         task = await self._task_store.get_or_create_task(task_id=session.task_id, context_id=session.context_id)
         event_queue = (
@@ -341,6 +417,7 @@ class A2APipelineActionRunner:
                 context_id=session.context_id,
                 cwd=session.cwd,
                 pipeline_input=normalize_pipeline_user_input(pipeline_input),
+                permission_checkpoint=permission_checkpoint,
             )
         except Exception as exc:
             return _action_error(str(exc)[:500], status_code=500)

@@ -1332,6 +1332,8 @@ class AliyunApi(BaseCloudApi):
             ("ask", context.ask_rules),
             ("allow", context.allow_rules),
         ):
+            if behavior == "ask" and is_read_only:
+                continue
             if behavior == "allow" and not supports_persistent_allow:
                 continue
             match = self._matching_rule(input, rules_by_source, require_exact=behavior == "allow" and not is_read_only)
@@ -1505,6 +1507,7 @@ class AliyunApi(BaseCloudApi):
             )
         ask_source: str | None = None
         ask_rule: str | None = None
+        ask_rule_reasons: list[PermissionDecisionReason] = []
         ask_match = self._matching_rule(
             normalized,
             context.ask_rules,
@@ -1512,7 +1515,7 @@ class AliyunApi(BaseCloudApi):
         )
         if ask_match is not None:
             ask_source, ask_rule = ask_match.source, ask_match.rule_content
-            pending_reasons.append(
+            ask_rule_reasons.append(
                 PermissionDecisionReason(
                     type="rule",
                     detail=_("matched ask rule(s): {}").format(ask_rule),
@@ -1600,7 +1603,7 @@ class AliyunApi(BaseCloudApi):
             )
             if canonical_ask is not None:
                 ask_source, ask_rule = canonical_ask.source, canonical_ask.rule_content
-                pending_reasons.append(
+                ask_rule_reasons.append(
                     PermissionDecisionReason(
                         type="rule",
                         detail=_("matched ask rule(s): {}").format(ask_rule),
@@ -1628,6 +1631,12 @@ class AliyunApi(BaseCloudApi):
             metadata_contract,
         )
         execution_class: ExecutionClass = "concurrent" if is_read_only else "serial"
+        if is_read_only:
+            ask_source = None
+            ask_rule = None
+            ask_match = None
+        else:
+            pending_reasons.extend(ask_rule_reasons)
         allow_match = self._matching_rule(
             normalized,
             context.allow_rules,

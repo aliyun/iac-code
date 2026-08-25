@@ -1921,8 +1921,7 @@ def _oauth_auth_flow_marker_is_current(
 
 
 def oauth_storage_key(config: MCPServerConfig, *, scope: MCPConfigScope | str | None = None) -> str:
-    # 一个 MCP 的完整 OAuth 状态存进单个钥匙串条目(JSON blob),而不是按字段拆成多条。
-    # 这样 macOS「始终允许」只需授权一次即可覆盖 access_token / refresh_token / client_* 等全部字段。
+    # 一个 MCP 的完整 OAuth 状态存进单个加密 JSON blob，而不是按字段拆成多条。
     return _oauth_storage_key_for_signature(config.name, config.content_signature(), scope=scope)
 
 
@@ -1933,7 +1932,7 @@ def get_oauth_storage_secret(
     *,
     scope: MCPConfigScope | str | None = None,
 ) -> str | None:
-    # 读路径无锁:keyring 单次读取返回的是完整 blob,要么是旧的完整值要么是新的完整值,不会读到半写状态。
+    # 存储层以文件锁保证单次读取返回完整 blob，不会读到半写状态。
     blob = _read_oauth_blob(storage, oauth_storage_key(config, scope=scope))
     return blob.get(kind)
 

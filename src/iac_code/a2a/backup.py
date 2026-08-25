@@ -41,13 +41,14 @@ async def backup_session_async(
     critical: bool,
     metrics: Any | None = None,
     publication_proofs: dict[str, BackupPublicationProof] | None = None,
+    backup_call: Callable[..., Any] | None = None,
 ) -> Any | None:
     failed_recorded = False
     try:
         kwargs: dict[str, Any] = {"reason": reason, "critical": critical}
         if publication_proofs is not None:
             kwargs["publication_proofs"] = publication_proofs
-        result = await run_sync_fenced(backup_service.backup_session, cwd, session_id, **kwargs)
+        result = await run_sync_fenced(backup_call or backup_service.backup_session, cwd, session_id, **kwargs)
         retry_count = _retry_count(result)
         if getattr(result, "enabled", False) and not getattr(result, "succeeded", True):
             message = str(

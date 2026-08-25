@@ -10,7 +10,7 @@ from unittest.mock import ANY, MagicMock, call, patch
 import pytest
 import yaml
 
-from iac_code.agent.message import Message, ToolResultBlock, create_compaction_summary_message
+from iac_code.agent.message import Message, ToolResultBlock, ToolUseBlock, create_compaction_summary_message
 from iac_code.mcp.types import (
     MCPConfigScope,
     MCPConnectionMetadata,
@@ -27,6 +27,7 @@ from iac_code.pipeline.engine.state_machine import StateMachine
 from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorage
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.services.context_manager import ContextManager
+from iac_code.services.permission_wait import RecoveredPermissionAuditBoundary
 from iac_code.services.session_backup import BackupReason, BackupResult, SessionBackupBlocked
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import ResourceObservedEvent
@@ -453,6 +454,90 @@ def test_parent_attempt_created_on_step_start(tmp_path):
     assert runner._execution["active_attempt_id"] == "att_0001"
 
 
+@pytest.mark.asyncio
+async def test_rebuild_permission_audit_event_uses_exact_parent_attempt_and_unrepaired_transcript(tmp_path):
+    storage = DirectorySessionStorage(tmp_path / "projects")
+    runner = _build_two_step_runner(tmp_path, storage=storage, surface="a2a")
+    attempt = runner._ensure_parent_attempt("a")
+    runner._step_attempts["a"] = 2
+    messages = [Message(role="assistant", content=[ToolUseBlock(id="tool-1", name="write_test", input={})])]
+    assert runner._transcript_storage is not None
+    runner._transcript_storage.save(str(tmp_path), attempt["transcript_id"], messages)
+    expected_event = object()
+    captured = {}
+
+    class AuditAgentLoop:
+        async def rebuild_permission_audit_event(self, **kwargs):
+            captured["audit_kwargs"] = kwargs
+            return expected_event
+
+    def build_agent_loop_context(step, context, session_id, **kwargs):
+        captured.update(step=step, context=context, session_id=session_id, build_kwargs=kwargs)
+        return types.SimpleNamespace(agent_loop=AuditAgentLoop())
+
+    runner._step_executor.build_agent_loop_context = build_agent_loop_context
+    recovered = RecoveredPermissionAuditBoundary(
+        tool_name="write_test",
+        tool_input={"value": "raw"},
+        tool_use_id="tool-1",
+        audit_context={"transcript_id": attempt["transcript_id"]},
+    )
+    checkpoint = {
+        "pipelineCoordinates": {
+            "step": {"id": "a", "runId": "step-a-2", "attempt": 2},
+        }
+    }
+
+    event = await runner.rebuild_permission_audit_event(checkpoint, recovered)
+
+    assert event is expected_event
+    assert captured["step"] is runner.state_machine.current_step
+    assert captured["context"] is runner.context
+    assert captured["session_id"] == "test"
+    assert captured["build_kwargs"] == {
+        "attempt_id": attempt["attempt_id"],
+        "transcript_id": attempt["transcript_id"],
+        "resume_messages": messages,
+    }
+    assert captured["audit_kwargs"] == {
+        "tool_name": "write_test",
+        "tool_input": {"value": "raw"},
+        "tool_use_id": "tool-1",
+        "audit_context": {"transcript_id": attempt["transcript_id"]},
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda runner, attempt: runner._execution.update(transcript_id="transcript-other"),
+        lambda runner, attempt: runner._attempts["items"][attempt["attempt_id"]].update(status="completed"),
+        lambda runner, attempt: runner._step_attempts.update(a=3),
+    ],
+)
+async def test_rebuild_permission_audit_event_rejects_changed_pipeline_identity(tmp_path, mutation):
+    storage = DirectorySessionStorage(tmp_path / "projects")
+    runner = _build_two_step_runner(tmp_path, storage=storage, surface="a2a")
+    attempt = runner._ensure_parent_attempt("a")
+    runner._step_attempts["a"] = 2
+    assert runner._transcript_storage is not None
+    runner._transcript_storage.save(str(tmp_path), attempt["transcript_id"], [Message(role="assistant", content="x")])
+    recovered = RecoveredPermissionAuditBoundary(
+        tool_name="write_test",
+        tool_input={},
+        tool_use_id="tool-1",
+        audit_context={"transcript_id": attempt["transcript_id"]},
+    )
+    mutation(runner, attempt)
+
+    with pytest.raises(ValueError, match="permission_resume_invalid"):
+        await runner.rebuild_permission_audit_event(
+            {"pipelineCoordinates": {"step": {"id": "a", "runId": "step-a-2", "attempt": 2}}},
+            recovered,
+        )
+
+
 def test_rollback_to_same_step_creates_new_attempt(tmp_path):
     runner = _build_two_step_runner(tmp_path)
 
@@ -692,6 +777,44 @@ def test_pipeline_runner_mcp_status_uses_live_warning_list(tmp_path):
 
     assert event is not None
     assert event.data["mcp_status"]["warnings"][0]["code"] == "prompts_failed"
+
+
+def test_pipeline_runner_rebuilds_mcp_status_only_after_revision_changes(tmp_path):
+    state = {"value": MCPConnectionState.FAILED}
+    list_connections_calls = 0
+
+    def list_connections():
+        nonlocal list_connections_calls
+        list_connections_calls += 1
+        return [
+            SimpleNamespace(
+                name="remote",
+                state=state["value"],
+                error="initial failure" if state["value"] is MCPConnectionState.FAILED else None,
+                capability_errors={},
+                tools=[],
+                resources=[],
+                prompts=[],
+                retry_count=0,
+                metadata=None,
+            )
+        ]
+
+    manager = SimpleNamespace(status_revision=0, list_connections=list_connections)
+    runner = _build_two_step_runner(tmp_path, mcp_manager=manager)
+
+    assert runner._mcp_status_event(force=True) is not None
+    for _ in range(2_000):
+        assert runner._mcp_status_event() is None
+    assert list_connections_calls == 1
+
+    state["value"] = MCPConnectionState.CONNECTED
+    manager.status_revision += 1
+    event = runner._mcp_status_event()
+
+    assert event is not None
+    assert event.data["mcp_status"]["servers"][0]["state"] == "connected"
+    assert list_connections_calls == 2
 
 
 @pytest.mark.asyncio
@@ -2240,6 +2363,42 @@ async def test_restored_running_parent_attempt_loads_sidecar_transcript_for_resu
     assert not any(
         isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_STARTED for event in events
     )
+
+
+@pytest.mark.asyncio
+async def test_permission_checkpoint_resume_bypasses_interrupted_transcript_repair(tmp_path, monkeypatch):
+    storage = DirectorySessionStorage(tmp_path / "projects")
+    runner = _build_two_step_runner(tmp_path, storage=storage)
+    resume_messages = [Message(role="assistant", content="pending tool batch")]
+    checkpoint = {"boundaryId": "pwb_checkpoint", "phase": "RESTORING"}
+    captured = {}
+
+    def fail_repair(_messages):
+        raise AssertionError("permission recovery must not synthesize interrupted tool results")
+
+    assert runner._transcript_storage is not None
+    monkeypatch.setattr(runner._transcript_storage, "repair_interrupted", fail_repair)
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        captured["resume_messages"] = kwargs["resume_messages"]
+        captured["permission_checkpoint"] = kwargs["permission_checkpoint"]
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"ok": True})
+
+    runner._step_executor.execute = fake_execute
+    stream = runner._continue_from_current(
+        resume_messages=resume_messages,
+        resume_running_step=True,
+        permission_checkpoint=checkpoint,
+    )
+    try:
+        async for _event in stream:
+            if captured:
+                break
+    finally:
+        await stream.aclose()
+
+    assert captured["resume_messages"] == resume_messages
+    assert captured["permission_checkpoint"] is checkpoint
 
 
 def test_fresh_runner_after_terminal_sidecar_allocates_new_attempt(tmp_path):

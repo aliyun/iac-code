@@ -420,6 +420,20 @@ class BackgroundStream:
     def start(self) -> None:
         self._thread.start()
 
+    def wait_until_request_started(self, *, timeout: float) -> None:
+        deadline = time.monotonic() + timeout
+        with self._condition:
+            while self.request_started_monotonic is None:
+                if self._done:
+                    if self.exception is not None:
+                        message = f"{self.name} ended before request dispatch: {self.exception}"
+                        raise RuntimeError(message) from self.exception
+                    raise RuntimeError(f"{self.name} ended before request dispatch")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(f"Timed out waiting for request dispatch in {self.name}")
+                self._condition.wait(min(remaining, 0.1))
+
     def join(self, timeout: float | None = None) -> StreamSummary:
         self._thread.join(timeout)
         if self._thread.is_alive():
@@ -464,8 +478,10 @@ class BackgroundStream:
             message_id=str(uuid.uuid4()),
             images=self.images,
         )
-        self.request_started_at = time.time()
-        self.request_started_monotonic = time.monotonic()
+        with self._condition:
+            self.request_started_at = time.time()
+            self.request_started_monotonic = time.monotonic()
+            self._condition.notify_all()
         _append_jsonl(
             self.run_dir / "requests.jsonl",
             {"name": self.name, "payload": payload, "at": _utc_now()},
@@ -549,8 +565,17 @@ class ScenarioHarness:
                 value for value in (fixture_path, existing_pythonpath) if value
             )
             self.server_env["IAC_CODE_E2E_BACKUP_DELAY_SECONDS"] = str(BACKUP_DELAY_SECONDS)
-            self.server_env["IAC_CODE_E2E_BACKUP_DELAY_CONTROL"] = str(
-                (self.run_dir / "selection-backup-delay").resolve()
+            control = (self.run_dir / "selection-backup-delay").resolve()
+            self.server_env["IAC_CODE_E2E_BACKUP_DELAY_CONTROL"] = str(control)
+            for marker in ("arm", "started", "finished"):
+                _backup_delay_marker_path(control, marker).unlink(missing_ok=True)
+            _write_json(
+                _backup_delay_marker_path(control, "arm"),
+                {
+                    "armedAt": time.time(),
+                    "scenario": scenario,
+                    "delaySeconds": BACKUP_DELAY_SECONDS,
+                },
             )
             self.notes.append(f"armed E2E-only input_required backup delay fixture for {BACKUP_DELAY_SECONDS:.0f}s")
         if args.deterministic:
@@ -660,6 +685,7 @@ class ScenarioHarness:
         context_id: str | None = None,
         task_id: str | None = None,
         images: list[dict[str, Any]] | None = None,
+        wait_for_identity: bool = True,
     ) -> BackgroundStream:
         stream = BackgroundStream(
             server_url=self.server_url,
@@ -674,12 +700,14 @@ class ScenarioHarness:
             redaction_env=self.server_env,
         )
         stream.start()
-        stream.wait_for(
-            lambda _event, summary: bool(summary.context_id and summary.task_id),
-            description="task identity",
-            timeout=self.args.event_timeout,
-        )
-        self._remember_identity(stream.summary)
+        stream.wait_until_request_started(timeout=self.args.event_timeout)
+        if wait_for_identity:
+            stream.wait_for(
+                lambda _event, summary: bool(summary.context_id and summary.task_id),
+                description="task identity",
+                timeout=self.args.event_timeout,
+            )
+            self._remember_identity(stream.summary)
         self.summaries[name] = stream.summary
         return stream
 
@@ -1148,37 +1176,33 @@ def run_selection_waiting(args: argparse.Namespace, scenario: str) -> int:
 
 def run_selection_during_backup(args: argparse.Namespace, scenario: str) -> int:
     def callback(h: ScenarioHarness) -> None:
+        control = _backup_delay_control_path(h)
+        initial_stream = h.start_stream(prompt=args.initial_prompt, name="01-initial", context_id="", task_id="")
+        started = _wait_for_backup_delay_marker(control, "started", timeout=args.event_timeout)
+        h.snapshots["backup_delay_started"] = started
+        h.checks["input_required backup delay started"] = started.get("delaySeconds") == BACKUP_DELAY_SECONDS
+        h.checks["initial stream was open when backup delay started"] = not initial_stream.done
+
+        h.checks["backup was unfinished when selection request was dispatched"] = not _backup_delay_marker_path(
+            control, "finished"
+        ).exists()
+        selection_stream = h.start_stream(
+            prompt=args.selection_prompt,
+            name="02-select-during-backup",
+            wait_for_identity=False,
+        )
+
         initial_streams = _wait_for_with_intervening_ask_inputs(
             h,
-            [h.start_stream(prompt=args.initial_prompt, name="01-initial", context_id="", task_id="")],
+            [initial_stream],
             _input_required_step("confirm_and_select"),
             description="step4 candidate selection input_required",
             timeout=args.event_timeout,
             name_prefix="01-initial",
         )
-        h.checks["initial reached step4 input_required before stream completed"] = any(
-            stream.summary.last_input_required_step_id == "confirm_and_select" and not stream.done
-            for stream in initial_streams
+        h.checks["initial reached step4 input_required"] = any(
+            stream.summary.last_input_required_step_id == "confirm_and_select" for stream in initial_streams
         )
-
-        control = _backup_delay_control_path(h)
-        arm_path = _backup_delay_marker_path(control, "arm")
-        _write_json(
-            arm_path,
-            {
-                "armedAt": time.time(),
-                "scenario": scenario,
-                "delaySeconds": BACKUP_DELAY_SECONDS,
-            },
-        )
-        started = _wait_for_backup_delay_marker(control, "started", timeout=min(10.0, args.event_timeout))
-        h.snapshots["backup_delay_started"] = started
-        h.checks["input_required backup delay started"] = started.get("delaySeconds") == BACKUP_DELAY_SECONDS
-
-        h.checks["backup was unfinished when selection request was dispatched"] = not _backup_delay_marker_path(
-            control, "finished"
-        ).exists()
-        selection_stream = h.start_stream(prompt=args.selection_prompt, name="02-select-during-backup")
 
         for stream in initial_streams:
             stream.join(timeout=args.stream_timeout)

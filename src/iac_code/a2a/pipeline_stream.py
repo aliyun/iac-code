@@ -47,11 +47,18 @@ from iac_code.pipeline.constants import (
     PIPELINE_EVENT_CLEANUP_PROGRESS,
     PIPELINE_EVENT_CLEANUP_STARTED,
 )
+from iac_code.services.permission_wait import canonical_digest
 from iac_code.services.permissions.audit import (
     emit_permission_boundary_audit,
     is_aliyun_api_non_read_only_permission_event,
 )
-from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent, ToolResultEvent
+from iac_code.types.stream_events import (
+    MessageStartEvent,
+    PermissionRequestEvent,
+    PermissionWaitOutcome,
+    SubPipelineStreamEvent,
+    ToolResultEvent,
+)
 from iac_code.utils.public_errors import sanitize_strict_text
 
 PipelinePermissionResolver = Callable[[PermissionRequestEvent], bool | Awaitable[bool]]
@@ -162,6 +169,8 @@ class PipelineA2AEventPublisher:
         backup_commit_gate: PipelineBackupCommitGate | None = None,
         extreme_performance: bool | None = None,
         flow_monitor: Any | None = None,
+        permission_wait_cwd: str | None = None,
+        permission_wait_session_id: str | None = None,
     ) -> None:
         self.event_queue = event_queue
         self.translator = translator
@@ -178,6 +187,8 @@ class PipelineA2AEventPublisher:
         self.after_backup_commit = after_backup_commit
         self.backup_commit_gate = backup_commit_gate
         self.flow_monitor = flow_monitor
+        self.permission_wait_cwd = permission_wait_cwd
+        self.permission_wait_session_id = permission_wait_session_id
         self._sequence_lock = asyncio.Lock()
         self._delivery_lock = asyncio.Lock()
         self._delivery_lock_owner: asyncio.Task[Any] | None = None
@@ -192,6 +203,42 @@ class PipelineA2AEventPublisher:
         self._extreme_pending_journal_events: list[dict[str, Any]] = []
         self._extreme_pending_snapshot_events: list[dict[str, Any]] = []
         self.permission_resolution_owner = _PipelinePermissionResolutionOwner(self)
+        self.pending_durable_permission: PendingPermission | None = None
+        self._consumed_durable_permissions: list[PendingPermission] = []
+
+    async def _finish_consumed_durable_permissions(self, *, results_persisted: bool) -> None:
+        """Compact live top-level receipts only after their tool-result batch is durable."""
+
+        registry = self.permission_input_registry
+        if registry is None or not self._consumed_durable_permissions:
+            return
+        remaining: list[PendingPermission] = []
+        for pending in self._consumed_durable_permissions:
+            store = pending.checkpoint_store
+            boundary_id = pending.boundary_id
+            if store is None or boundary_id is None:
+                await registry.complete(pending)
+                continue
+            record = store.load(boundary_id)
+            if record is None:
+                await registry.complete(pending)
+                continue
+            if results_persisted and record.get("phase") != "RESOLVED":
+                decision = record.get("decision")
+                snapshot = self.snapshot_store.load() or {}
+                record = store.resolve(
+                    boundary_id,
+                    result_digest=canonical_digest(snapshot),
+                    ack={
+                        "decision": decision.get("value") if isinstance(decision, dict) else None,
+                        "accepted": True,
+                    },
+                )
+            if record.get("phase") == "RESOLVED":
+                await registry.complete(pending)
+            else:
+                remaining.append(pending)
+        self._consumed_durable_permissions = remaining
 
     async def publish_sub_pipeline_permission(self, event: Any) -> str | None:
         """Publish only a wrapped Sub Pipeline permission without waiting for its Future."""
@@ -234,6 +281,11 @@ class PipelineA2AEventPublisher:
         except BaseException:
             await self.permission_resolution_owner.fail_permission(pending)
             raise
+        timeout = self.permission_input_registry.permission_wait_policy.sub_pipeline_timeout_seconds
+        if timeout is not None:
+            pending.timeout_task = asyncio.create_task(
+                self.permission_resolution_owner.timeout_permission(pending, timeout)
+            )
         return None
 
     async def _commit_permission_control_event(
@@ -268,6 +320,8 @@ class PipelineA2AEventPublisher:
         *,
         decision: str,
         canceled: bool = False,
+        automatic: bool = False,
+        timed_out: bool = False,
     ) -> bool:
         permission = {
             "permissionId": pending.input_id,
@@ -279,6 +333,10 @@ class PipelineA2AEventPublisher:
         }
         if canceled:
             permission["canceled"] = True
+        if automatic:
+            permission["automatic"] = True
+        if timed_out:
+            permission["timedOut"] = True
         envelope = self.translator.manual_event(
             "permission_resolved",
             pending.scope,
@@ -297,7 +355,13 @@ class PipelineA2AEventPublisher:
         *,
         permission_resolver: PipelinePermissionResolver | None = None,
         auto_approve_permissions: bool = False,
-    ) -> str | None:
+        prepare_detached_permission: Callable[[PendingPermission], None] | None = None,
+    ) -> str | PendingPermission | None:
+        if isinstance(_unwrap_stream_event(event), MessageStartEvent):
+            # AgentLoop appends the ordered ToolResult batch immediately before
+            # it starts the next model message, making this the first safe
+            # compaction boundary for a live top-level permission.
+            await self._finish_consumed_durable_permissions(results_persisted=True)
         if (
             _sub_pipeline_permission_request_from(event) is not None
             and self.permission_input_registry is not None
@@ -306,9 +370,29 @@ class PipelineA2AEventPublisher:
         ):
             return await self.publish_sub_pipeline_permission(event)
         envelopes = self.translator.translate(event)
+        if any(
+            envelope.get("eventType")
+            in {"step_completed", "step_failed", "pipeline_completed", "pipeline_failed", "pipeline_canceled"}
+            for envelope in envelopes
+        ):
+            # Custom Pipeline steps need not expose the AgentLoop message
+            # boundary. A committed step/terminal transition is also proof
+            # that the permission-controlled work has left its waiting frame.
+            await self._finish_consumed_durable_permissions(results_persisted=True)
         permission_request = _permission_request_from(event)
         tool_result = _tool_result_from(event)
         text_parts: list[str] = []
+        if permission_request is not None and permission_resolver is not None:
+            permission_request.permission_wait_class = (
+                "sub_pipeline" if _sub_pipeline_permission_request_from(event) is not None else "pipeline"
+            )
+            coordinates: dict[str, Any] = {}
+            for candidate_envelope in envelopes:
+                for key in ("step", "candidate", "candidateStep"):
+                    value = candidate_envelope.get(key)
+                    if isinstance(value, dict):
+                        coordinates[key] = dict(value)
+            permission_request.permission_wait_coordinates = coordinates
         interactive_permission = (
             permission_request is not None
             and self.permission_input_registry is not None
@@ -322,7 +406,33 @@ class PipelineA2AEventPublisher:
                 task_id=self.translator.context.task_id,
                 context_id=self.translator.context.context_id,
             )
+            if prepare_detached_permission is not None:
+                prepare_detached_permission(pending_permission)
+            coordinates: dict[str, Any] = {}
+            for candidate_envelope in envelopes:
+                for key in ("step", "candidate", "candidateStep"):
+                    value = candidate_envelope.get(key)
+                    if isinstance(value, dict):
+                        coordinates[key] = dict(value)
+            if bool(getattr(self.permission_input_registry, "durable_permission_wait_enabled", False)):
+                if self.permission_wait_cwd is None or self.permission_wait_session_id is None:
+                    raise PipelineA2APersistenceError("Pipeline permission checkpoint session is unavailable")
+                await self.permission_input_registry.open_durable_boundary(
+                    pending_permission,
+                    cwd=self.permission_wait_cwd,
+                    session_id=self.permission_wait_session_id,
+                    permission_class="pipeline",
+                    backup_service=None,
+                    pipeline_coordinates=coordinates,
+                    perform_backup=False,
+                )
+                self.pending_durable_permission = pending_permission
+                # A successor creation atomically turns the previous boundary
+                # into a receipt. Its process-local owner can now be released.
+                await self._finish_consumed_durable_permissions(results_persisted=False)
 
+        retain_consumed_permission = False
+        retain_detached_permission = False
         try:
             for envelope in envelopes:
                 if _should_skip_envelope(envelope, exposure_types=self.exposure_types):
@@ -413,8 +523,18 @@ class PipelineA2AEventPublisher:
                 if future is None:
                     assert pending_permission is not None
                     await self.permission_input_registry.fail(pending_permission)
+                elif prepare_detached_permission is not None:
+                    assert pending_permission is not None
+                    retain_detached_permission = True
                 else:
-                    await asyncio.shield(future)
+                    outcome = await asyncio.shield(future)
+                    retain_consumed_permission = (
+                        outcome is not PermissionWaitOutcome.SUSPEND
+                        and pending_permission is not None
+                        and pending_permission.boundary_id is not None
+                    )
+                    if retain_consumed_permission:
+                        self._consumed_durable_permissions.append(pending_permission)
         except BaseException:
             if pending_permission is not None:
                 assert self.permission_input_registry is not None
@@ -423,8 +543,13 @@ class PipelineA2AEventPublisher:
         finally:
             if pending_permission is not None:
                 assert self.permission_input_registry is not None
-                await self.permission_input_registry.complete(pending_permission)
+                if not retain_consumed_permission and not retain_detached_permission:
+                    await self.permission_input_registry.complete(pending_permission)
+                if self.pending_durable_permission is pending_permission:
+                    self.pending_durable_permission = None
 
+        if retain_detached_permission:
+            return pending_permission
         return "".join(text_parts) if text_parts else None
 
     async def publish_batch(self, events: list[Any]) -> None:
@@ -1331,57 +1456,92 @@ class PipelineA2AEventPublisher:
 
 
 class _PipelinePermissionResolutionOwner:
-    """Serialize replies, cancellation, journal order, and Future completion for one Task."""
+    """Resolve each Sub Pipeline permission independently and at most once."""
 
     def __init__(self, publisher: PipelineA2AEventPublisher) -> None:
         self.publisher = publisher
-        self._lock = asyncio.Lock()
 
     async def resolve_permission(self, pending: PendingPermission, response: PermissionResponse) -> bool:
         registry = self.publisher.permission_input_registry
         if registry is None:
             raise PipelineA2APersistenceError("Sub Pipeline permission registry is unavailable")
-        async with self._lock:
+        async with pending.claim_lock:
             await registry.claim(pending, response)
-            approved = response.decision == "allow_once"
-            audit_ok = emit_permission_boundary_audit(
-                pending.request,
-                decision="allow" if approved else "deny",
-                scope="a2a_sub_pipeline_permission",
-                source="a2a_user_permission",
-                reason_type="user_decision",
-                reason_detail=response.decision,
-            )
-            if approved and not audit_ok:
-                approved = False
-            decision = "allow_once" if approved else "deny"
-            try:
-                committed = await self.publisher.publish_permission_resolution(pending, decision=decision)
-            except BaseException:
-                await self._finish_failed(pending)
-                raise
-            if not committed:
-                await self._finish_failed(pending)
-                raise PipelineA2APersistenceError("Failed to publish Sub Pipeline permission resolution")
-            future = pending.request.response_future
-            if future is None or future.done():
-                await registry.complete(pending)
-                raise PipelineA2APersistenceError("Sub Pipeline permission wait point is unavailable")
-            future.set_result(approved)
+        approved = response.decision == "allow_once"
+        audit_ok = emit_permission_boundary_audit(
+            pending.request,
+            decision="allow" if approved else "deny",
+            scope="a2a_sub_pipeline_permission",
+            source="a2a_user_permission",
+            reason_type="user_decision",
+            reason_detail=response.decision,
+        )
+        if approved and not audit_ok:
+            approved = False
+        decision = "allow_once" if approved else "deny"
+        try:
+            committed = await self.publisher.publish_permission_resolution(pending, decision=decision)
+        except BaseException:
+            await self._finish_failed(pending)
+            raise
+        if not committed:
+            await self._finish_failed(pending)
+            raise PipelineA2APersistenceError("Failed to publish Sub Pipeline permission resolution")
+        future = pending.request.response_future
+        if future is None or future.done():
             await registry.complete(pending)
-            return approved
+            raise PipelineA2APersistenceError("Sub Pipeline permission wait point is unavailable")
+        future.set_result(approved)
+        await registry.complete(pending)
+        return approved
+
+    async def timeout_permission(self, pending: PendingPermission, timeout_seconds: float) -> None:
+        registry = self.publisher.permission_input_registry
+        if registry is None:
+            return
+        try:
+            await asyncio.sleep(timeout_seconds)
+            async with pending.claim_lock:
+                if pending.state != "pending":
+                    return
+                pending.state = "resolving"
+            emit_permission_boundary_audit(
+                pending.request,
+                decision="deny",
+                scope="a2a_sub_pipeline_permission",
+                source="timeout",
+                reason_type="permission_wait_timeout",
+                reason_detail="Sub Pipeline permission wait timed out",
+            )
+            committed = await self.publisher.publish_permission_resolution(
+                pending,
+                decision="deny",
+                automatic=True,
+                timed_out=True,
+            )
+            if not committed:
+                raise PipelineA2APersistenceError("Failed to publish Sub Pipeline permission timeout")
+            future = pending.request.response_future
+            if future is not None and not future.done():
+                future.set_result(False)
+            await registry.complete(pending)
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.warning("Failed to resolve timed-out Sub Pipeline permission", exc_info=True)
+            await self._finish_failed(pending)
 
     async def fail_permission(self, pending: PendingPermission) -> None:
-        async with self._lock:
+        async with pending.claim_lock:
             await self._finish_failed(pending)
 
     async def cancel_permissions(self, task_id: str) -> None:
         registry = self.publisher.permission_input_registry
         if registry is None:
             return
-        async with self._lock:
-            pending_permissions = await registry.claim_for_cancel(task_id, self)
-            for pending in pending_permissions:
+        pending_permissions = await registry.claim_for_cancel(task_id, self)
+        for pending in pending_permissions:
+            async with pending.claim_lock:
                 emit_permission_boundary_audit(
                     pending.request,
                     decision="deny",
@@ -1399,9 +1559,9 @@ class _PipelinePermissionResolutionOwner:
                     if future is not None and not future.done():
                         future.set_result(False)
                     await registry.complete(pending)
-            if self.publisher.task_store is not None:
-                remaining = await registry.pending_envelopes(task_id)
-                await self.publisher.task_store.set_pending_permissions(task_id, remaining)
+        if self.publisher.task_store is not None:
+            remaining = await registry.pending_envelopes(task_id)
+            await self.publisher.task_store.set_pending_permissions(task_id, remaining)
 
     async def _finish_failed(self, pending: PendingPermission) -> None:
         registry = self.publisher.permission_input_registry
@@ -1549,6 +1709,10 @@ def committed_backup_publication_envelope(
     if isinstance(created_at, str) and created_at:
         envelope["createdAt"] = created_at
     for key in ("step", "candidate", "candidateStep"):
+        value = pending_envelope.get(key)
+        if isinstance(value, dict):
+            envelope[key] = dict(value)
+    for key in ("permission", "input"):
         value = pending_envelope.get(key)
         if isinstance(value, dict):
             envelope[key] = dict(value)

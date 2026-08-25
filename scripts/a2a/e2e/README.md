@@ -1,5 +1,104 @@
 # A2A E2E Session Recovery and Redaction
 
+## Real StartChat permission-wait matrix
+
+`run_start_chat_permission_wait.py` is the credential-gated, repeatable chain
+for this feature. It runs Qoder's real LLM through the installed
+`alicloud-ros-agent` Skill, its Python bridge, the native `aliyun` CLI, the
+StartChat-only HTTPS relay, local iac-code A2A servers, and real iac-code
+LLM/cloud calls. Before taking a private isolated config copy, it refreshes
+OAuth-backed STS in the caller-selected `--source-config-dir` in place. This is
+important because OAuth refresh tokens may rotate: refreshing only a disposable
+copy can invalidate the source for the next scenario. It then fixes the server
+policy at `300 / 300 / 30`, enables the shared-backup commit protocol, uses
+unique Stack/VSwitch names, and performs an exact-name cleanup fallback.
+
+The Qoder flag that bypasses host Bash/file confirmation applies only to the
+test driver. It does not approve ROS Agent permissions: the isolated iac-code
+settings use the default permission mode, explicitly allow incidental tools,
+and ask for cloud-mutating tools. The A2A servers also keep
+`auto_approve_permissions: false`, and every non-read-only cloud operation is
+answered through the correlated StartChat permission envelope.
+
+Run one scenario per fresh directory:
+
+The real headless Qoder turn timeout defaults to 900 seconds so a two-candidate
+Pipeline can finish without weakening the scenario. Override it with
+`--qoder-turn-timeout` when diagnosing a slower provider.
+
+```bash
+uv run python scripts/a2a/e2e/permission_wait/run_start_chat_permission_wait.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-pwait-normal-before \
+  --mode normal
+
+uv run python scripts/a2a/e2e/permission_wait/run_start_chat_permission_wait.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-pwait-pipeline-before \
+  --mode pipeline
+
+# Answer during the 30-second grace after the 300-second resident deadline.
+uv run python scripts/a2a/e2e/permission_wait/run_start_chat_permission_wait.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-pwait-normal-grace \
+  --mode normal \
+  --answer-delay-seconds 305
+
+# Answer after non-failure suspension.
+uv run python scripts/a2a/e2e/permission_wait/run_start_chat_permission_wait.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-pwait-pipeline-suspended \
+  --mode pipeline \
+  --answer-delay-seconds 335
+
+# Kill only the selected local A2A process at the first permission boundary,
+# restart it with the same persistence/config directories, then answer.
+uv run python scripts/a2a/e2e/permission_wait/run_start_chat_permission_wait.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-pwait-normal-restart \
+  --mode normal \
+  --restart-at-first-permission
+```
+
+Repeat the grace, suspended, and restart variants for both `normal` and
+`pipeline`. The repository prompt is
+`permission_wait/permission_wait_start_chat_prompt.md`. Each run writes bounded Qoder turn
+summaries, permission observations, relay metrics, a safe result manifest, and
+local server logs. Before exit, it derives bounded read-only evidence and removes
+the copied credential files and complete session transcripts. A read-only
+permission prompt or an out-of-scope cloud target fails the run without being
+approved. The final checks require a real non-read-only permission, local and
+shared serial checkpoint evidence, no Sub Pipeline checkpoint, native
+StartChat usage, exact resource cleanup, and retention of the pre-existing VPC
+inventory.
+
+The controlled Sub-Pipeline fixture uses a real `PipelineRunner` with two real
+`AgentLoop` candidates. One candidate parks at an actual permission Future while
+the other completes naturally; after the configured hard timeout, the parent
+aggregates both conclusions, reaches candidate selection, and completes. The
+production A2A backup hook also proves that the Sub permission itself did not
+trigger a critical permission backup. The acceptance run uses the production
+300-second value:
+
+```bash
+uv run python scripts/a2a/e2e/permission_wait/run_sub_pipeline_permission_timeout.py \
+  --run-dir /tmp/iac-pwait-sub-pipeline-300 \
+  --timeout-seconds 300
+```
+
+Its accelerated regression and the fast deterministic process-restart matrix
+are:
+
+```bash
+uv run pytest -q tests/a2a_e2e/test_sub_pipeline_permission_timeout.py
+uv run pytest -q tests/a2a_e2e/test_permission_wait_restart.py
+```
+
+The restart matrix covers Normal/Pipeline × allow/deny without real
+credentials. The Sub-Pipeline fixture asserts one denial ToolResult, continued
+Agent-loop execution, parent candidate selection/completion, and the absence of
+grace, durable permission checkpoints, and permission-critical backup.
+
 This directory contains headless end-to-end checks for A2A pipeline session
 recovery and redaction regressions. The runner drives the public A2A JSON-RPC
 streaming endpoint and records SSE events and pipeline snapshots. Recovery
@@ -105,9 +204,10 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --scenario selection-during-backup
 ```
 
-An E2E-only fixture delays the Step 4 `input_required` backup by at least 10
-seconds. The client submits its selection as soon as the event arrives. The
-scenario proves that dispatch happened inside the backup started/finished
+The runner arms an E2E-only fixture before the initial request so that the Step
+4 `input_required` backup is delayed by at least 10 seconds. It submits the
+selection as soon as the backup started marker appears and continues to verify
+the candidate-selection event. The scenario proves that dispatch happened inside the backup started/finished
 window, the message was consumed as candidate input, and no
 `interrupt_received` / `interrupt_classified` event was emitted.
 
@@ -170,7 +270,7 @@ the rest of the tests.
 | `redaction-step4` | Force A2A safe mode and stop when the real mini-app backend/database task reaches step 4 candidate selection | None; no candidate selection is submitted | Canonical password parameters are not placeholders; public A2A passwords equal canonical values; token counters stay numeric when present; known server paths become `[PATH]` only in the public copy; deployment never starts. |
 | `scenario1` | After pipeline completion and one normal-chat follow-up | Ask what the previous normal-chat question was | Normal-chat history survives restart; VSwitch evidence exists. |
 | `scenario1-performance-backup` | Full `scenario1` with `IAC_CODE_A2A_EXTREME_PERFORMANCE=true` and `IAC_CODE_CONFIG_BACKUP_DIR=<run-dir>/session-backup` | After the Step4 backup is durable, stop the server, remove the matching primary session under `projects`, restart, and select without `taskId`; later normal-chat recovery also omits `taskId` | Only the backup session exists before restart; restart alone does not recreate the primary session; selection without `taskId` restores the primary session from backup and hydrates the recovered task; full scenario1 passes. |
-| `selection-during-backup` | Step 4 `input_required` is published, then an E2E fixture blocks its backup for at least 10 seconds | Immediately send `你随便选一个方案。` with the active pipeline `taskId` while backup is running | Dispatch falls inside the backup started/finished window; the request is queued and consumed as candidate input; no interrupt events are emitted; the pipeline completes. |
+| `selection-during-backup` | Arm the E2E fixture before the initial request; when the Step 4 `input_required` backup starts, it writes a started marker and blocks for at least 10 seconds | Immediately send `你随便选一个方案。` with the active pipeline `taskId` while backup is running, then verify the Step 4 event | Dispatch falls inside the backup started/finished window; the request is queued and consumed as candidate input; no interrupt events are emitted; the pipeline completes. |
 | `selection-waiting` | Step 4 waits for candidate selection | `你随便选一个方案。` without `taskId` | Waiting step4 task is recovered and selected; VSwitch evidence exists. |
 | `ask-waiting` | `ask_user_question` waits for user input | Clarification answers without `taskId` | Pending ask input is recovered and pipeline completes; VSwitch evidence exists. |
 | `image-initial` | Initial user message is the static `initial.png` image fixture | Candidate selection text | The image starts the pipeline, reaches step4 selection, completes, and produces VSwitch evidence. |

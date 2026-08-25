@@ -288,6 +288,9 @@ async def publish_stream_event(
     auto_approve_permissions: bool = False,
     exposure_types: Any = None,
     iac_code_session_id: str | None = None,
+    permission_wait_cwd: str | None = None,
+    permission_wait_backup_service: Any | None = None,
+    permission_wait_metrics: Any | None = None,
 ) -> str | None:
     enabled_exposure_types = normalize_a2a_exposure_types(exposure_types)
 
@@ -437,56 +440,18 @@ async def publish_stream_event(
     permission_event = _permission_request_event(event)
     if permission_event is not None:
         if permission_input_registry is not None and permission_resolver is None and not auto_approve_permissions:
-            pending = await permission_input_registry.register(
-                permission_event,
+            await publish_interactive_permission_boundary(
+                event_queue,
+                permission_event=permission_event,
+                permission_input_registry=permission_input_registry,
                 task_id=task_id,
                 context_id=context_id,
+                iac_code_session_id=iac_code_session_id,
+                permission_wait_cwd=permission_wait_cwd,
+                permission_wait_backup_service=permission_wait_backup_service,
+                permission_wait_metrics=permission_wait_metrics,
+                wait_for_response=True,
             )
-            try:
-                await _enqueue_status(
-                    event_queue,
-                    task_id=task_id,
-                    context_id=context_id,
-                    state=TaskState.TASK_STATE_INPUT_REQUIRED,
-                    metadata={
-                        "iac_code": {
-                            "input": pending.envelope(),
-                            "permission": {
-                                "autoApproved": False,
-                                "pending": True,
-                                "toolName": permission_event.tool_name,
-                                "toolUseId": permission_event.tool_use_id,
-                            },
-                        }
-                    },
-                    iac_code_session_id=iac_code_session_id,
-                )
-                future = permission_event.response_future
-                if future is None:
-                    await permission_input_registry.fail(pending)
-                    return None
-                await asyncio.shield(future)
-                await _enqueue_status(
-                    event_queue,
-                    task_id=task_id,
-                    context_id=context_id,
-                    state=TaskState.TASK_STATE_WORKING,
-                    metadata={
-                        "iac_code": {
-                            "inputReceived": {
-                                "kind": "permission",
-                                "inputId": pending.input_id,
-                                "toolUseId": permission_event.tool_use_id,
-                            }
-                        }
-                    },
-                    iac_code_session_id=iac_code_session_id,
-                )
-            except BaseException:
-                await permission_input_registry.fail(pending)
-                raise
-            finally:
-                await permission_input_registry.complete(pending)
             return None
         approved = auto_approve_permissions
         if permission_resolver is not None:
@@ -571,6 +536,107 @@ async def publish_stream_event(
     return None
 
 
+async def publish_interactive_permission_boundary(
+    event_queue: Any,
+    *,
+    permission_event: PermissionRequestEvent,
+    permission_input_registry: Any,
+    task_id: str,
+    context_id: str,
+    iac_code_session_id: str | None,
+    permission_wait_cwd: str | None,
+    permission_wait_backup_service: Any | None,
+    permission_wait_metrics: Any | None = None,
+    wait_for_response: bool,
+) -> Any:
+    """Publish one real external permission wait, optionally detaching Normal SSE."""
+
+    pending = await permission_input_registry.register(
+        permission_event,
+        task_id=task_id,
+        context_id=context_id,
+    )
+    try:
+        if (
+            iac_code_session_id is not None
+            and permission_wait_cwd is not None
+            and permission_wait_backup_service is not None
+        ):
+            await permission_input_registry.open_durable_boundary(
+                pending,
+                cwd=permission_wait_cwd,
+                session_id=iac_code_session_id,
+                permission_class="normal",
+                backup_service=permission_wait_backup_service,
+                metrics=permission_wait_metrics,
+            )
+        await _enqueue_status(
+            event_queue,
+            task_id=task_id,
+            context_id=context_id,
+            state=TaskState.TASK_STATE_INPUT_REQUIRED,
+            metadata={
+                "iac_code": {
+                    "input": pending.envelope(),
+                    "permission": {
+                        "autoApproved": False,
+                        "pending": True,
+                        "toolName": permission_event.tool_name,
+                        "toolUseId": permission_event.tool_use_id,
+                    },
+                }
+            },
+            iac_code_session_id=iac_code_session_id,
+        )
+        if not wait_for_response:
+            return pending
+        future = permission_event.response_future
+        if future is None:
+            await permission_input_registry.fail(pending)
+            return pending
+        outcome = await asyncio.shield(future)
+        from iac_code.types.stream_events import PermissionWaitOutcome
+
+        if outcome is PermissionWaitOutcome.SUSPEND:
+            return pending
+        await publish_permission_input_received(
+            event_queue,
+            pending=pending,
+            iac_code_session_id=iac_code_session_id,
+        )
+        return pending
+    except BaseException:
+        await permission_input_registry.fail(pending)
+        raise
+    finally:
+        if wait_for_response:
+            await permission_input_registry.complete(pending)
+
+
+async def publish_permission_input_received(
+    event_queue: Any,
+    *,
+    pending: Any,
+    iac_code_session_id: str | None,
+) -> None:
+    await _enqueue_status(
+        event_queue,
+        task_id=pending.task_id,
+        context_id=pending.context_id,
+        state=TaskState.TASK_STATE_WORKING,
+        metadata={
+            "iac_code": {
+                "inputReceived": {
+                    "kind": "permission",
+                    "inputId": pending.input_id,
+                    "toolUseId": pending.request.tool_use_id,
+                }
+            }
+        },
+        iac_code_session_id=iac_code_session_id,
+    )
+
+
 def _emit_auto_permission_audit(
     request: PermissionRequestEvent,
     approved: bool,
@@ -601,6 +667,8 @@ def _emit_resolver_permission_audit(
     *,
     persistence_failure: bool = False,
 ) -> bool:
+    if request.permission_decision_audited and not persistence_failure:
+        return True
     source = "a2a_resolver"
     reason_type = "a2a_resolver"
     reason_detail = "allow" if approved else "deny"

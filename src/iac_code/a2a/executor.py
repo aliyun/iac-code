@@ -21,7 +21,9 @@ from iac_code.a2a.backup import backup_session_async, run_sync_fenced
 from iac_code.a2a.events import (
     iac_code_session_metadata,
     make_text_part,
+    publish_interactive_permission_boundary,
     publish_mcp_warnings,
+    publish_permission_input_received,
     publish_stream_event,
     with_iac_code_session_metadata,
 )
@@ -29,6 +31,7 @@ from iac_code.a2a.exposure import normalize_a2a_exposure_types
 from iac_code.a2a.input_required import (
     PermissionInputRegistry,
     PermissionResponse,
+    backup_permission_wait_checkpoint,
     parse_permission_response,
     permission_ack_message,
 )
@@ -98,6 +101,14 @@ from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pip
 from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.capabilities.multimodal import is_model_multimodal
+from iac_code.services.permission_wait import (
+    PermissionWaitCheckpointStore,
+    RecoveredPermissionAuditBoundary,
+    canonical_digest,
+    permission_execution_identity,
+    recover_permission_audit_boundary,
+)
+from iac_code.services.permissions.audit import emit_permission_boundary_audit
 from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredential
 from iac_code.services.session_backup import (
     BackupReason,
@@ -112,7 +123,13 @@ from iac_code.services.session_backup_state import (
 )
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.telemetry.attributes import normalize_telemetry_channel
-from iac_code.types.stream_events import MessageEndEvent, MessageStartEvent, TextDeltaEvent
+from iac_code.types.stream_events import (
+    MessageEndEvent,
+    MessageStartEvent,
+    PermissionRequestEvent,
+    PermissionWaitSuspended,
+    TextDeltaEvent,
+)
 from iac_code.utils.file_security import atomic_write_text, ensure_private_dir, ensure_private_file
 from iac_code.utils.public_errors import sanitize_strict_text
 from iac_code.utils.public_paths import build_public_path_roots
@@ -1007,6 +1024,7 @@ class IacCodeA2AExecutor(AgentExecutor):
         permission_resolver: A2APermissionResolver | None = None,
         permission_input_registry: PermissionInputRegistry | None = None,
         auto_approve_permissions: bool = False,
+        permission_wait_policy: Any | None = None,
         thinking_exposure_types: Any = None,
         backup_service: Any | None = None,
     ) -> None:
@@ -1018,6 +1036,12 @@ class IacCodeA2AExecutor(AgentExecutor):
         self._permission_resolver = permission_resolver
         self._permission_input_registry = permission_input_registry or PermissionInputRegistry()
         self._auto_approve_permissions = auto_approve_permissions
+        from iac_code.services.permission_wait import PermissionWaitCoordinator, PermissionWaitPolicy
+
+        self._permission_wait_policy = permission_wait_policy or PermissionWaitPolicy()
+        self._permission_wait_coordinator = PermissionWaitCoordinator(self._permission_wait_policy)
+        self._permission_input_registry.set_permission_wait_coordinator(self._permission_wait_coordinator)
+        self._task_store.set_permission_wait_active_probe(self._permission_wait_coordinator.has_live_owners)
         self._thinking_exposure_types = normalize_a2a_exposure_types(thinking_exposure_types)
         self._metadata_echo_redactor = A2AMetadataEchoRedactor()
         self._backup_service = backup_service or SessionBackupService()
@@ -1048,7 +1072,67 @@ class IacCodeA2AExecutor(AgentExecutor):
         task_id = requested_task_id or "task-" + uuid.uuid4().hex[:12]
         permission_response = parse_permission_response(getattr(context, "message", None))
         if permission_response is not None:
-            approved = await self._permission_input_registry.answer(permission_response)
+            try:
+                pending = await self._permission_input_registry.pending_for_response(permission_response)
+                approved = await self._permission_input_registry.answer(permission_response)
+            except InvalidParamsError:
+                if await self._resume_persisted_permission(
+                    context,
+                    event_queue,
+                    response=permission_response,
+                ):
+                    return
+                raise
+            if pending.state == "suspended_decision_claimed":
+                if pending.boundary_id is not None:
+                    owner_released = await self._permission_wait_coordinator.wait_for_suspended_owner(
+                        pending.boundary_id
+                    )
+                    if not owner_released:
+                        await self._publish_status(
+                            event_queue,
+                            task_id=permission_response.task_id,
+                            context_id=permission_response.context_id,
+                            state=TaskState.TASK_STATE_WORKING,
+                            metadata={
+                                "iac_code": {
+                                    "permissionAck": {
+                                        "schemaVersion": 1,
+                                        "kind": "permission_ack",
+                                        "inputId": permission_response.input_id,
+                                        "toolUseId": permission_response.tool_use_id,
+                                        "decision": "allow_once" if approved else "deny",
+                                        "accepted": True,
+                                        "recoveryPending": True,
+                                    },
+                                    "permissionWait": {"status": "suspending", "resumable": True},
+                                }
+                            },
+                        )
+                        # Keep this single correlated response alive while the
+                        # old owner finishes cleanup.  Each wait is bounded and
+                        # holds no resolution/file lock; once owner completion
+                        # arrives this same request performs the one recovery,
+                        # so the user never has to repeat an accepted decision.
+                        while not await self._permission_wait_coordinator.wait_for_suspended_owner(pending.boundary_id):
+                            pass
+                await self._permission_input_registry.complete(pending)
+                if await self._resume_persisted_permission(
+                    context,
+                    event_queue,
+                    response=permission_response,
+                ):
+                    return
+                raise InvalidParamsError("permission_resume_invalid: suspended permission is unavailable.")
+            continuation = await self._permission_input_registry.claim_continuation(pending)
+            if continuation is not None:
+                await publish_permission_input_received(
+                    event_queue,
+                    pending=pending,
+                    iac_code_session_id=None,
+                )
+                await continuation(event_queue, pending)
+                return
             await self._publish_status(
                 event_queue,
                 task_id=permission_response.task_id,
@@ -1061,10 +1145,23 @@ class IacCodeA2AExecutor(AgentExecutor):
                             "inputId": permission_response.input_id,
                             "toolUseId": permission_response.tool_use_id,
                             "decision": "allow_once" if approved else "deny",
-                        }
+                        },
+                        "permissionAck": {
+                            "schemaVersion": 1,
+                            "kind": "permission_ack",
+                            "inputId": permission_response.input_id,
+                            "toolUseId": permission_response.tool_use_id,
+                            "decision": "allow_once" if approved else "deny",
+                            "accepted": True,
+                        },
                     }
                 },
             )
+            # A live top-level Pipeline reply is delivered on a separate
+            # StartChat/A2A reentry stream while progress remains owned by the
+            # parent stream.  Return the same compact acknowledgement used by
+            # sideband permissions so that the reentry caller can prove its
+            # correlated decision was accepted without taking over progress.
             return
         task = None
         initial_task_published = False
@@ -1295,7 +1392,20 @@ class IacCodeA2AExecutor(AgentExecutor):
             resume_messages = None
             if session_storage.exists(cwd, session_id):
                 loaded = session_storage.load(cwd, session_id)
-                resume_messages = SessionStorage.repair_interrupted(loaded) if loaded else None
+                has_permission_checkpoint = False
+                try:
+                    has_permission_checkpoint = bool(
+                        PermissionWaitCheckpointStore(cwd, session_id, storage=session_storage).list_active()
+                    )
+                except ValueError:
+                    has_permission_checkpoint = False
+                resume_messages = (
+                    loaded
+                    if loaded and has_permission_checkpoint
+                    else SessionStorage.repair_interrupted(loaded)
+                    if loaded
+                    else None
+                )
             return create_agent_runtime(
                 AgentFactoryOptions(
                     model=model,
@@ -1486,100 +1596,216 @@ class IacCodeA2AExecutor(AgentExecutor):
                     )
                     current_assistant_text: list[str] = []
                     final_assistant_text = ""
-                    async for event in stream:
-                        if isinstance(event, MessageStartEvent):
-                            current_assistant_text = []
-                        elif isinstance(event, TextDeltaEvent):
-                            current_assistant_text.append(event.text)
-                        elif isinstance(event, MessageEndEvent):
-                            if event.stop_reason not in {"tool_use", "tool_calls"}:
-                                final_assistant_text = "".join(current_assistant_text)
-                            current_assistant_text = []
+                    detached_permission = None
+
+                    async def finalize_normal_turn(target_queue: EventQueue) -> None:
+                        nonlocal final_assistant_text
+                        if current_assistant_text:
+                            final_assistant_text = "".join(current_assistant_text)
                         await publish_mcp_warnings(
-                            event_queue,
+                            target_queue,
                             task_id=task_id,
                             context_id=context_id,
                             runtime=runtime,
                             iac_code_session_id=ctx.session_id,
                         )
                         await self._publish_mcp_status(
-                            event_queue,
+                            target_queue,
                             task_id=task_id,
                             context_id=context_id,
                             runtime=runtime,
                             session_id=ctx.session_id,
                         )
-                        text_chunk = await publish_stream_event(
-                            event_queue,
+                        final_metadata: dict[str, Any] = {"assistantFinal": {"complete": True}}
+                        if cleanup_only:
+                            final_metadata[_CLEANUP_ONLY_METADATA_KEY] = _cleanup_only_summary(cleanup_ledger)
+                        await self._publish_status(
+                            target_queue,
                             task_id=task_id,
                             context_id=context_id,
-                            event=event,
-                            artifact_store=self._artifact_store,
-                            permission_resolver=self._permission_resolver,
-                            permission_input_registry=self._permission_input_registry,
-                            auto_approve_permissions=self._auto_approve_permissions,
-                            exposure_types=self._thinking_exposure_types,
-                            iac_code_session_id=ctx.session_id,
+                            state=TaskState.TASK_STATE_WORKING,
+                            text=final_assistant_text or None,
+                            metadata={"iac_code": final_metadata},
+                            session_id=ctx.session_id,
                         )
-                        if text_chunk:
-                            task.output_text.append(text_chunk)
-                    if current_assistant_text:
-                        final_assistant_text = "".join(current_assistant_text)
-                    await publish_mcp_warnings(
-                        event_queue,
-                        task_id=task_id,
-                        context_id=context_id,
-                        runtime=runtime,
-                        iac_code_session_id=ctx.session_id,
-                    )
-                    await self._publish_mcp_status(
-                        event_queue,
-                        task_id=task_id,
-                        context_id=context_id,
-                        runtime=runtime,
-                        session_id=ctx.session_id,
-                    )
-                    final_metadata: dict[str, Any] = {"assistantFinal": {"complete": True}}
-                    if cleanup_only:
-                        final_metadata[_CLEANUP_ONLY_METADATA_KEY] = _cleanup_only_summary(cleanup_ledger)
-                    await self._publish_status(
-                        event_queue,
-                        task_id=task_id,
-                        context_id=context_id,
-                        state=TaskState.TASK_STATE_WORKING,
-                        text=final_assistant_text or None,
-                        metadata={"iac_code": final_metadata},
-                        session_id=ctx.session_id,
-                    )
-                task.state = TASK_STATE_INPUT_REQUIRED
-                ctx.active_task_id = None
-                task.touch()
-                ctx.touch()
-                self._task_store.mirror_task(task)
-                self._task_store.mirror_context(ctx)
-                await backup_session_async(
-                    self._backup_service,
-                    cwd,
-                    ctx.session_id,
-                    reason=BackupReason.NORMAL_TURN_END,
-                    critical=False,
-                    metrics=self._metrics,
-                )
-                terminal_metadata = None
-                if cleanup_only:
-                    terminal_metadata = {
-                        "iac_code": {_CLEANUP_ONLY_METADATA_KEY: _cleanup_only_summary(cleanup_ledger)}
-                    }
-                await self._publish_status(
-                    event_queue,
-                    task_id=task_id,
-                    context_id=context_id,
-                    state=TaskState.TASK_STATE_INPUT_REQUIRED,
-                    metadata=terminal_metadata,
-                    session_id=ctx.session_id,
-                )
-                await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
-                self._metrics.record_turn_completed()
+                        task.state = TASK_STATE_INPUT_REQUIRED
+                        ctx.active_task_id = None
+                        task.touch()
+                        ctx.touch()
+                        self._task_store.mirror_task(task)
+                        self._task_store.mirror_context(ctx)
+                        await backup_session_async(
+                            self._backup_service,
+                            cwd,
+                            ctx.session_id,
+                            reason=BackupReason.NORMAL_TURN_END,
+                            critical=False,
+                            metrics=self._metrics,
+                        )
+                        terminal_metadata = None
+                        if cleanup_only:
+                            terminal_metadata = {
+                                "iac_code": {_CLEANUP_ONLY_METADATA_KEY: _cleanup_only_summary(cleanup_ledger)}
+                            }
+                        await self._publish_status(
+                            target_queue,
+                            task_id=task_id,
+                            context_id=context_id,
+                            state=TaskState.TASK_STATE_INPUT_REQUIRED,
+                            metadata=terminal_metadata,
+                            session_id=ctx.session_id,
+                        )
+                        await self._notify_terminal_task(
+                            task_id=task.task_id,
+                            context_id=task.context_id,
+                            state=task.state,
+                        )
+                        self._metrics.record_turn_completed()
+
+                    async def mark_detached_input_required() -> None:
+                        task.state = TASK_STATE_INPUT_REQUIRED
+                        ctx.active_task_id = None
+                        task.touch()
+                        ctx.touch()
+                        self._task_store.mirror_task(task)
+                        self._task_store.mirror_context(ctx)
+                        await self._notify_terminal_task(
+                            task_id=task.task_id,
+                            context_id=task.context_id,
+                            state=task.state,
+                        )
+
+                    async def resolve_consumed_boundary(pending: Any) -> None:
+                        checkpoint_store = pending.checkpoint_store
+                        if checkpoint_store is not None and pending.boundary_id is not None:
+                            persisted = SessionStorage().load(cwd, ctx.session_id)
+                            digest = canonical_digest(persisted[-1].to_dict()) if persisted else ""
+                            decision_record = checkpoint_store.load(pending.boundary_id)
+                            decision = decision_record.get("decision") if isinstance(decision_record, dict) else {}
+                            checkpoint_store.resolve(
+                                pending.boundary_id,
+                                result_digest=digest,
+                                ack={
+                                    "decision": decision.get("value"),
+                                    "accepted": True,
+                                },
+                            )
+                        await self._permission_input_registry.complete(pending)
+
+                    async def resume_detached_normal(target_queue: EventQueue, pending: Any) -> None:
+                        if ctx.lock is None:
+                            ctx.lock = asyncio.Lock()
+                        await ctx.lock.acquire()
+                        try:
+                            ctx.active_task_id = task.task_id
+                            task.active_task = asyncio.current_task()
+                            task.state = TASK_STATE_WORKING
+                            self._task_store.mirror_task(task)
+                            self._task_store.mirror_context(ctx)
+                            with a2a_request_context(
+                                session_id=ctx.session_id,
+                                user_id=user_id,
+                                aliyun_credential=aliyun_credential,
+                                preferred_language=preferred_language,
+                            ):
+                                completed = await consume_normal_stream(target_queue)
+                            await resolve_consumed_boundary(pending)
+                            if completed:
+                                await finalize_normal_turn(target_queue)
+                            else:
+                                await mark_detached_input_required()
+                        finally:
+                            task.active_task = None
+                            ctx.active_task_id = None
+                            ctx.touch()
+                            task.touch()
+                            self._task_store.mirror_task(task)
+                            self._task_store.mirror_context(ctx)
+                            ctx.lock.release()
+
+                    async def consume_normal_stream(target_queue: EventQueue) -> bool:
+                        nonlocal current_assistant_text, final_assistant_text, detached_permission
+                        async for event in stream:
+                            if isinstance(event, MessageStartEvent):
+                                current_assistant_text = []
+                            elif isinstance(event, TextDeltaEvent):
+                                current_assistant_text.append(event.text)
+                            elif isinstance(event, MessageEndEvent):
+                                if event.stop_reason not in {"tool_use", "tool_calls"}:
+                                    final_assistant_text = "".join(current_assistant_text)
+                                current_assistant_text = []
+                            await publish_mcp_warnings(
+                                target_queue,
+                                task_id=task_id,
+                                context_id=context_id,
+                                runtime=runtime,
+                                iac_code_session_id=ctx.session_id,
+                            )
+                            await self._publish_mcp_status(
+                                target_queue,
+                                task_id=task_id,
+                                context_id=context_id,
+                                runtime=runtime,
+                                session_id=ctx.session_id,
+                            )
+                            interactive_permission = (
+                                isinstance(event, PermissionRequestEvent)
+                                and self._permission_resolver is None
+                                and not self._auto_approve_permissions
+                            )
+                            if interactive_permission:
+                                pending = await publish_interactive_permission_boundary(
+                                    target_queue,
+                                    permission_event=event,
+                                    permission_input_registry=self._permission_input_registry,
+                                    task_id=task_id,
+                                    context_id=context_id,
+                                    iac_code_session_id=ctx.session_id,
+                                    permission_wait_cwd=cwd,
+                                    permission_wait_backup_service=self._backup_service,
+                                    permission_wait_metrics=self._metrics,
+                                    wait_for_response=False,
+                                )
+                                detached_permission = pending
+                                pending.continuation = resume_detached_normal
+
+                                async def suspend_detached(pending_permission: Any = pending) -> None:
+                                    pending_permission.continuation = None
+                                    close_stream = getattr(stream, "aclose", None)
+                                    if callable(close_stream):
+                                        with contextlib.suppress(RuntimeError):
+                                            await close_stream()
+                                    try:
+                                        await self._task_store.discard_context_runtime(context_id)
+                                    finally:
+                                        await self._permission_input_registry.complete(pending_permission)
+
+                                pending.suspend_callback = suspend_detached
+                                return False
+                            text_chunk = await publish_stream_event(
+                                target_queue,
+                                task_id=task_id,
+                                context_id=context_id,
+                                event=event,
+                                artifact_store=self._artifact_store,
+                                permission_resolver=self._permission_resolver,
+                                permission_input_registry=self._permission_input_registry,
+                                auto_approve_permissions=self._auto_approve_permissions,
+                                exposure_types=self._thinking_exposure_types,
+                                iac_code_session_id=ctx.session_id,
+                                permission_wait_cwd=cwd,
+                                permission_wait_backup_service=self._backup_service,
+                                permission_wait_metrics=self._metrics,
+                            )
+                            if text_chunk:
+                                task.output_text.append(text_chunk)
+                        return True
+
+                    completed = await consume_normal_stream(event_queue)
+                if completed:
+                    await finalize_normal_turn(event_queue)
+                else:
+                    await mark_detached_input_required()
             except asyncio.CancelledError:
                 task.state = TASK_STATE_CANCELED
                 ctx.active_task_id = None
@@ -1688,6 +1914,468 @@ class IacCodeA2AExecutor(AgentExecutor):
         finally:
             lock.release()
 
+    async def _resume_persisted_permission(
+        self,
+        context: RequestContext,
+        event_queue: EventQueue,
+        *,
+        response: PermissionResponse,
+    ) -> bool:
+        """Claim and resume a permission whose process-local registry was lost."""
+
+        try:
+            task_record = await self._task_store.get_task_record(response.task_id)
+            context_record = await self._task_store.get_context_record(response.context_id)
+        except ValueError:
+            return False
+        if task_record.context_id != response.context_id:
+            raise InvalidParamsError("input_response_mismatch: permission task context changed.")
+        store = PermissionWaitCheckpointStore(context_record.cwd, context_record.session_id)
+        record = store.find(
+            task_id=response.task_id,
+            context_id=response.context_id,
+            input_id=response.input_id,
+            tool_use_id=response.tool_use_id,
+        )
+        if record is None:
+            return False
+        expected_value = "allow_once" if response.decision == "allow_once" else "deny"
+        boundary_id = str(record["boundaryId"])
+        if record.get("phase") == "RESOLVED":
+            decision = record.get("decision")
+            if not isinstance(decision, dict) or decision.get("value") != expected_value:
+                raise InvalidParamsError("permission_resume_invalid: permission decision conflicts with receipt.")
+            await self._publish_permission_recovery_ack(
+                event_queue,
+                response=response,
+                decision=expected_value,
+                duplicate=True,
+            )
+            return True
+
+        if record.get("phase") == "RESTORING":
+            decision = record.get("decision")
+            if not isinstance(decision, dict) or decision.get("value") != expected_value:
+                raise InvalidParamsError(
+                    "permission_resume_invalid: permission decision conflicts with active recovery."
+                )
+            await self._publish_permission_recovery_ack(
+                event_queue,
+                response=response,
+                decision=str(decision["value"]),
+                duplicate=True,
+                session_id=context_record.session_id,
+            )
+            return True
+
+        metadata = getattr(context, "metadata", None) or getattr(getattr(context, "message", None), "metadata", None)
+        model = self._resolve_model(metadata) or self._model
+        metadata_api_key = self._resolve_api_key(metadata)
+        request_policy_override = self._resolve_request_policy(metadata)
+        user_id = self._resolve_user_id(metadata)
+        preferred_language = self._resolve_preferred_language(metadata)
+        aliyun_credential = self._resolve_aliyun_credential(metadata)
+
+        def make_pipeline_executor() -> IacCodeA2APipelineExecutor:
+            return IacCodeA2APipelineExecutor(
+                task_store=self._task_store,
+                model=model,
+                metrics=self._metrics,
+                artifact_store=self._artifact_store,
+                push_notifier=self._push_notifier,
+                permission_resolver=self._permission_resolver,
+                permission_input_registry=self._permission_input_registry,
+                auto_approve_permissions=self._auto_approve_permissions,
+                thinking_exposure_types=self._thinking_exposure_types,
+                user_id=user_id,
+                aliyun_credential=aliyun_credential,
+                preferred_language=preferred_language,
+                candidate_presentation=self._resolve_candidate_presentation(metadata),
+                model_from_metadata=self._resolve_model(metadata) is not None,
+                metadata_api_key=metadata_api_key,
+                request_policy_override=request_policy_override,
+                backup_service=self._backup_service,
+            )
+
+        persisted_decision = record.get("decision")
+        audit_already_final = False
+        if isinstance(persisted_decision, Mapping) and persisted_decision.get("status") in {"claimed", "applied"}:
+            if persisted_decision.get("value") != expected_value:
+                raise InvalidParamsError("permission_resume_invalid: permission response conflicts with checkpoint.")
+            audit_already_final = persisted_decision.get("auditStatus") in {"recorded", "failed"}
+        pipeline_executor: IacCodeA2APipelineExecutor | None = None
+        audit_event: PermissionRequestEvent | None = None
+        if not audit_already_final:
+            recovered = recover_permission_audit_boundary(
+                record,
+                cwd=context_record.cwd,
+                session_id=context_record.session_id,
+            )
+            if recovered is None:
+                raise InvalidParamsError("permission_resume_invalid: canonical permission request changed.")
+            try:
+                if record.get("permissionClass") == "pipeline":
+                    pipeline_executor = make_pipeline_executor()
+                    audit_event = await pipeline_executor.rebuild_permission_audit_event(
+                        cwd=context_record.cwd,
+                        session_id=context_record.session_id,
+                        checkpoint=record,
+                        recovered=recovered,
+                    )
+                else:
+                    audit_event = await self._rebuild_normal_permission_audit_event(
+                        recovered=recovered,
+                        cwd=context_record.cwd,
+                        session_id=context_record.session_id,
+                        model=model,
+                        model_from_metadata=self._resolve_model(metadata) is not None,
+                        metadata_api_key=metadata_api_key,
+                        request_policy_override=request_policy_override,
+                        user_id=user_id,
+                        aliyun_credential=aliyun_credential,
+                        preferred_language=preferred_language,
+                    )
+            except InvalidParamsError:
+                raise
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                raise InvalidParamsError(f"permission_resume_invalid: {exc}") from exc
+
+            permission_audit = getattr(audit_event.permission_result, "audit", None)
+            principal_ref, region = permission_execution_identity(
+                tool_name=audit_event.tool_name,
+                tool_input=audit_event.tool_input,
+                permission_audit=permission_audit,
+            )
+            if principal_ref != record.get("principalRef") or region != record.get("region"):
+                raise InvalidParamsError("permission_resume_invalid: cloud execution identity changed.")
+
+        record = store.reconcile_deadline(
+            boundary_id,
+            grace_seconds=self._permission_wait_policy.timeout_grace_seconds,
+            live_owner=False,
+        )
+        try:
+            record, _created = store.claim_decision(
+                boundary_id,
+                value=expected_value,
+                source="user",
+            )
+        except ValueError as exc:
+            raise InvalidParamsError(f"permission_resume_invalid: {exc}") from exc
+        decision = record.get("decision")
+        if isinstance(decision, dict):
+            claim_id = str(decision.get("claimId") or "")
+
+            def audit_claim(value: str) -> bool:
+                if audit_event is None:
+                    return audit_already_final
+                return emit_permission_boundary_audit(
+                    audit_event,
+                    session_id=context_record.session_id,
+                    decision="allow" if value == "allow_once" else "deny",
+                    scope="a2a_input_required",
+                    source="a2a_user_permission",
+                    reason_type="user_decision",
+                    reason_detail=value,
+                )
+
+            record, _audit_created = store.run_claim_audit_once(
+                boundary_id,
+                claim_id=claim_id,
+                audit=audit_claim,
+            )
+            expected_value = str(record["decision"]["value"])
+        decision = record.get("decision")
+        if isinstance(decision, dict) and decision.get("backupStatus") != "committed":
+            claim_id = str(decision.get("claimId") or "")
+            await backup_permission_wait_checkpoint(
+                store=store,
+                boundary_id=boundary_id,
+                cwd=context_record.cwd,
+                session_id=context_record.session_id,
+                backup_service=self._backup_service,
+                metrics=self._metrics,
+            )
+            record = store.mark_claim_backed_up(boundary_id, claim_id=claim_id)
+        if not await self._permission_wait_coordinator.acquire_restore(boundary_id):
+            await self._publish_permission_recovery_ack(
+                event_queue,
+                response=response,
+                decision=expected_value,
+                duplicate=True,
+                session_id=context_record.session_id,
+            )
+            return True
+        try:
+            record = store.begin_restore(boundary_id)
+        except ValueError as exc:
+            await self._permission_wait_coordinator.release_restore(boundary_id)
+            raise InvalidParamsError(f"permission_resume_invalid: {exc}") from exc
+
+        await self._publish_status(
+            event_queue,
+            task_id=response.task_id,
+            context_id=response.context_id,
+            state=TaskState.TASK_STATE_WORKING,
+            metadata={
+                "iac_code": {
+                    "permissionRecovered": {
+                        "inputId": response.input_id,
+                        "toolUseId": response.tool_use_id,
+                    }
+                }
+            },
+            session_id=context_record.session_id,
+        )
+        normal_final_assistant_text: str | None = None
+        try:
+            if record.get("permissionClass") == "pipeline":
+                task = await self._task_store.get_or_create_task(
+                    task_id=response.task_id,
+                    context_id=response.context_id,
+                    restore_interrupted=False,
+                )
+                if pipeline_executor is None:
+                    pipeline_executor = make_pipeline_executor()
+                await pipeline_executor.execute(
+                    context=context,
+                    event_queue=event_queue,
+                    task=task,
+                    task_id=response.task_id,
+                    context_id=response.context_id,
+                    cwd=context_record.cwd,
+                    pipeline_input="",
+                    permission_checkpoint=record,
+                )
+            else:
+                storage = SessionStorage()
+                messages = storage.load(context_record.cwd, context_record.session_id)
+                if not messages:
+                    raise InvalidParamsError("permission_resume_invalid: session transcript is unavailable.")
+                runtime = create_agent_runtime(
+                    AgentFactoryOptions(
+                        model=model,
+                        session_id=context_record.session_id,
+                        cwd=context_record.cwd,
+                        resume_messages=messages,
+                        a2a_safe_mode=_a2a_safe_mode_enabled(),
+                        source="a2a",
+                    )
+                )
+                configure_runtime_model(
+                    runtime,
+                    model,
+                    from_metadata=self._resolve_model(metadata) is not None,
+                    metadata_api_key=metadata_api_key,
+                    request_policy_override=request_policy_override,
+                )
+                refresh_runtime_cloud_tools(runtime)
+                task = await self._task_store.get_or_create_task(
+                    task_id=response.task_id,
+                    context_id=response.context_id,
+                )
+                current_assistant_text: list[str] = []
+                normal_final_assistant_text = ""
+                try:
+                    with a2a_request_context(
+                        session_id=context_record.session_id,
+                        user_id=user_id,
+                        aliyun_credential=aliyun_credential,
+                        preferred_language=preferred_language,
+                    ):
+                        async for event in runtime.agent_loop.resume_permission_boundary(record):
+                            if isinstance(event, MessageStartEvent):
+                                current_assistant_text = []
+                            elif isinstance(event, TextDeltaEvent):
+                                current_assistant_text.append(event.text)
+                            elif isinstance(event, MessageEndEvent):
+                                if event.stop_reason not in {"tool_use", "tool_calls"}:
+                                    normal_final_assistant_text = "".join(current_assistant_text)
+                                current_assistant_text = []
+                            text_chunk = await publish_stream_event(
+                                event_queue,
+                                task_id=response.task_id,
+                                context_id=response.context_id,
+                                event=event,
+                                artifact_store=self._artifact_store,
+                                permission_resolver=self._permission_resolver,
+                                permission_input_registry=self._permission_input_registry,
+                                auto_approve_permissions=self._auto_approve_permissions,
+                                exposure_types=self._thinking_exposure_types,
+                                iac_code_session_id=context_record.session_id,
+                                permission_wait_cwd=context_record.cwd,
+                                permission_wait_backup_service=self._backup_service,
+                                permission_wait_metrics=self._metrics,
+                            )
+                            if text_chunk:
+                                task.output_text.append(text_chunk)
+                        if current_assistant_text:
+                            normal_final_assistant_text = "".join(current_assistant_text)
+                finally:
+                    await _close_runtime(runtime)
+        except PermissionWaitSuspended:
+            store.mark_suspended(boundary_id)
+            await self._publish_status(
+                event_queue,
+                task_id=response.task_id,
+                context_id=response.context_id,
+                state=TaskState.TASK_STATE_INPUT_REQUIRED,
+                metadata={
+                    "iac_code": {
+                        "permissionWait": {"status": "suspended", "resumable": True},
+                    }
+                },
+                session_id=context_record.session_id,
+            )
+            return True
+        except BaseException:
+            with contextlib.suppress(ValueError):
+                store.reconcile_deadline(
+                    boundary_id,
+                    grace_seconds=self._permission_wait_policy.timeout_grace_seconds,
+                    live_owner=False,
+                )
+            raise
+        finally:
+            await self._permission_wait_coordinator.release_restore(boundary_id)
+
+        storage = SessionStorage()
+        persisted_messages = storage.load(context_record.cwd, context_record.session_id)
+        result_digest = canonical_digest(persisted_messages[-1].to_dict()) if persisted_messages else ""
+        store.resolve(
+            boundary_id,
+            result_digest=result_digest,
+            ack={"decision": expected_value, "accepted": True},
+        )
+        task = await self._task_store.get_or_create_task(
+            task_id=response.task_id,
+            context_id=response.context_id,
+        )
+        task.state = TASK_STATE_INPUT_REQUIRED
+        self._task_store.mirror_task(task)
+        await self._publish_permission_recovery_ack(
+            event_queue,
+            response=response,
+            decision=expected_value,
+            duplicate=False,
+            session_id=context_record.session_id,
+        )
+        if normal_final_assistant_text is not None:
+            await self._publish_status(
+                event_queue,
+                task_id=response.task_id,
+                context_id=response.context_id,
+                state=TaskState.TASK_STATE_WORKING,
+                text=normal_final_assistant_text or None,
+                metadata={"iac_code": {"assistantFinal": {"complete": True}}},
+                session_id=context_record.session_id,
+            )
+            await backup_session_async(
+                self._backup_service,
+                context_record.cwd,
+                context_record.session_id,
+                reason=BackupReason.NORMAL_TURN_END,
+                critical=False,
+                metrics=self._metrics,
+            )
+            await self._publish_status(
+                event_queue,
+                task_id=response.task_id,
+                context_id=response.context_id,
+                state=TaskState.TASK_STATE_INPUT_REQUIRED,
+                session_id=context_record.session_id,
+            )
+            await self._notify_terminal_task(
+                task_id=task.task_id,
+                context_id=task.context_id,
+                state=task.state,
+            )
+            self._metrics.record_turn_completed()
+        return True
+
+    async def _rebuild_normal_permission_audit_event(
+        self,
+        *,
+        recovered: RecoveredPermissionAuditBoundary,
+        cwd: str,
+        session_id: str,
+        model: str,
+        model_from_metadata: bool,
+        metadata_api_key: str | None,
+        request_policy_override: ProviderRequestPolicy | None,
+        user_id: str | None,
+        aliyun_credential: AliyunCredential | None,
+        preferred_language: str | None,
+    ) -> PermissionRequestEvent:
+        """Use a current Normal runtime to rebuild restart audit metadata/settings."""
+
+        storage = SessionStorage()
+        messages = storage.load(cwd, session_id)
+        if not messages:
+            raise ValueError("permission_resume_invalid: session transcript is unavailable")
+        runtime = create_agent_runtime(
+            AgentFactoryOptions(
+                model=model,
+                session_id=session_id,
+                cwd=cwd,
+                resume_messages=messages,
+                a2a_safe_mode=_a2a_safe_mode_enabled(),
+                source="a2a",
+            )
+        )
+        try:
+            configure_runtime_model(
+                runtime,
+                model,
+                from_metadata=model_from_metadata,
+                metadata_api_key=metadata_api_key,
+                request_policy_override=request_policy_override,
+            )
+            refresh_runtime_cloud_tools(runtime)
+            with a2a_request_context(
+                session_id=session_id,
+                user_id=user_id,
+                aliyun_credential=aliyun_credential,
+                preferred_language=preferred_language,
+            ):
+                return await runtime.agent_loop.rebuild_permission_audit_event(
+                    tool_name=recovered.tool_name,
+                    tool_input=recovered.tool_input,
+                    tool_use_id=recovered.tool_use_id,
+                    audit_context=recovered.audit_context,
+                )
+        finally:
+            await _close_runtime(runtime)
+
+    async def _publish_permission_recovery_ack(
+        self,
+        event_queue: EventQueue,
+        *,
+        response: PermissionResponse,
+        decision: str,
+        duplicate: bool,
+        session_id: str | None = None,
+    ) -> None:
+        await self._publish_status(
+            event_queue,
+            task_id=response.task_id,
+            context_id=response.context_id,
+            state=TaskState.TASK_STATE_WORKING,
+            metadata={
+                "iac_code": {
+                    "inputReceived": {
+                        "kind": "permission",
+                        "inputId": response.input_id,
+                        "toolUseId": response.tool_use_id,
+                        "decision": decision,
+                        "recovered": True,
+                        "duplicate": duplicate,
+                    }
+                }
+            },
+            session_id=session_id,
+        )
+
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         task_id = context.task_id
         context_id = context.context_id or "unknown"
@@ -1731,9 +2419,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             raise ValueError("Invalid A2A workspace metadata.")
         logical_cwd = os.path.normpath(cwd)
         resolved_cwd = resolve_workspace_path(Path(logical_cwd))
-        if not trust_request_cwd() and not any(
-            _is_relative_to(resolved_cwd, root) for root in _allowed_cwd_roots()
-        ):
+        if not trust_request_cwd() and not any(_is_relative_to(resolved_cwd, root) for root in _allowed_cwd_roots()):
             raise ValueError("Invalid A2A workspace metadata.")
         if resolved_cwd.exists():
             if not resolved_cwd.is_dir():

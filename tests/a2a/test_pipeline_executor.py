@@ -36,6 +36,11 @@ from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.interrupt import InterruptVerdict
 from iac_code.pipeline.engine.prerequisites import PrerequisiteDecision, PrerequisiteResolution
 from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pipeline_user_input
+from iac_code.services.permission_wait import (
+    PermissionWaitCheckpointStore,
+    PermissionWaitPolicy,
+    RecoveredPermissionAuditBoundary,
+)
 from iac_code.services.session_backup import BackupReason, BackupResult, SessionBackupBlocked
 from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
 from iac_code.services.session_layout import UnsupportedSessionLayoutError
@@ -44,6 +49,8 @@ from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     PermissionRequestEvent,
+    PermissionWaitOutcome,
+    PermissionWaitSuspended,
     SubPipelineStreamEvent,
     TextDeltaEvent,
 )
@@ -903,6 +910,57 @@ class SpyMetrics(NoOpA2AMetrics):
 
 def _fake_runtime():
     return SimpleNamespace(provider_manager=object(), tool_registry=FakeToolRegistry())
+
+
+@pytest.mark.asyncio
+async def test_pipeline_restart_audit_rebuild_uses_restored_pipeline_and_closes_runtime(monkeypatch, tmp_path):
+    from iac_code.a2a import pipeline_executor as pipeline_executor_module
+
+    calls: list[str] = []
+    expected_event = object()
+
+    class AuditRuntime:
+        provider_manager = object()
+        tool_registry = FakeToolRegistry()
+
+        async def aclose(self):
+            calls.append("close")
+
+    class AuditPipeline:
+        async def rebuild_permission_audit_event(self, checkpoint, recovered):
+            calls.append("rebuild")
+            assert checkpoint == {"boundaryId": "pwb-boundary"}
+            assert recovered.tool_use_id == "tool-1"
+            return expected_event
+
+    class Backup:
+        def restore_session(self, cwd, session_id):
+            calls.append("restore")
+            assert cwd == str(tmp_path)
+            assert session_id == "session-1"
+
+    executor = _pipeline_executor()
+    executor._backup_service = Backup()
+    runtime = AuditRuntime()
+    monkeypatch.setattr(pipeline_executor_module, "create_agent_runtime", lambda _options: runtime)
+    monkeypatch.setattr(executor, "_configure_agent_runtime_for_request", lambda value: calls.append("configure"))
+    monkeypatch.setattr(executor, "_create_pipeline", lambda **_kwargs: AuditPipeline())
+    recovered = RecoveredPermissionAuditBoundary(
+        tool_name="aliyun_api",
+        tool_input={"product": "ROS", "action": "CreateStack"},
+        tool_use_id="tool-1",
+        audit_context={"transcript_id": "transcript_att_0001"},
+    )
+
+    event = await executor.rebuild_permission_audit_event(
+        cwd=str(tmp_path),
+        session_id="session-1",
+        checkpoint={"boundaryId": "pwb-boundary"},
+        recovered=recovered,
+    )
+
+    assert event is expected_event
+    assert calls == ["restore", "configure", "rebuild", "close"]
 
 
 def _status_events(queue: FakeEventQueue) -> list[dict]:
@@ -2995,7 +3053,7 @@ async def test_executor_publishes_normal_handoff_ready_after_failed_pipeline_whe
 
 
 @pytest.mark.asyncio
-async def test_pipeline_executor_runs_critical_backup_after_input_required_publication(
+async def test_pipeline_executor_runs_critical_backup_before_input_required_publication(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -3015,13 +3073,13 @@ async def test_pipeline_executor_runs_critical_backup_after_input_required_publi
     monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
     queue = FakeEventQueue()
 
-    def assert_input_required_published(reason: BackupReason) -> None:
+    def assert_input_required_not_yet_published(reason: BackupReason) -> None:
         if reason == BackupReason.INPUT_REQUIRED:
-            assert _pipeline_status_events(queue)[-1]["eventType"] == "input_required"
+            assert not _pipeline_status_events(queue)
 
     backup_service = RecordingBackupService(
         expected_task_states={BackupReason.INPUT_REQUIRED: "input-required"},
-        on_backup=assert_input_required_published,
+        on_backup=assert_input_required_not_yet_published,
     )
 
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
@@ -3032,7 +3090,10 @@ async def test_pipeline_executor_runs_critical_backup_after_input_required_publi
     assert [(reason, critical) for *_ids, reason, critical in backup_service.calls] == [
         (BackupReason.INPUT_REQUIRED, True)
     ]
-    assert _pipeline_status_events(queue)[-1]["eventType"] == "input_required"
+    assert [event["eventType"] for event in _pipeline_status_events(queue)][-2:] == [
+        "input_required",
+        "backup_committed",
+    ]
     assert _status_events(queue)[-1]["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
 
 
@@ -3054,6 +3115,21 @@ async def test_pipeline_permission_pauses_agent_loops_and_uses_existing_critical
                         tool_input={"cmd": "rm /tmp/demo"},
                         tool_use_id="tool-1",
                         response_future=future,
+                        continuation_frame={
+                            "assistantMessageRef": "pipeline/transcripts/transcript_att_0001/session.jsonl:0",
+                            "assistantMessageDigest": "a" * 64,
+                            "orderedToolUseIds": ["tool-1"],
+                            "currentIndex": 0,
+                            "decisions": [
+                                {
+                                    "toolUseId": "tool-1",
+                                    "state": "pending",
+                                    "source": None,
+                                    "deniedResult": None,
+                                }
+                            ],
+                        },
+                        audit_context={"transcript_id": "transcript_att_0001"},
                     )
                 ],
                 session_dir=tmp_path / "sidecar",
@@ -3066,6 +3142,11 @@ async def test_pipeline_permission_pauses_agent_loops_and_uses_existing_critical
 
         def resume_agent_loops(self) -> None:
             self.resume_calls += 1
+
+        async def resume_permission_boundary(self, checkpoint):
+            del checkpoint
+            if False:
+                yield None
 
     pipeline = PermissionPipeline()
     monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: pipeline)
@@ -3091,20 +3172,95 @@ async def test_pipeline_permission_pauses_agent_loops_and_uses_existing_critical
         and dump(event).get("metadata", {}).get("iac_code", {}).get("input", {}).get("kind") == "permission"
     )
 
-    approved = await executor._permission_input_registry.answer(
-        PermissionResponse(
-            task_id="task-1",
-            context_id="ctx-1",
-            request_task_id="task-1",
-            input_id=permission_input["inputId"],
-            tool_use_id="tool-1",
-            decision="deny",
-        )
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id=permission_input["inputId"],
+        tool_use_id="tool-1",
+        decision="deny",
     )
+    pending = await executor._permission_input_registry.pending_for_response(response)
+    approved = await executor._permission_input_registry.answer(response)
     assert approved is False
     await execution
+    continuation = await executor._permission_input_registry.claim_continuation(pending)
+    assert continuation is not None
+    await continuation(queue, pending)
     assert future.result() is False
     assert pipeline.resume_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_pipeline_permission_resident_timer_survives_full_executor_publication(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    future = asyncio.get_running_loop().create_future()
+
+    class PermissionPipeline(FakePipeline):
+        def __init__(self) -> None:
+            super().__init__(
+                [
+                    PermissionRequestEvent(
+                        tool_name="bash",
+                        tool_input={"cmd": "rm /tmp/demo"},
+                        tool_use_id="tool-timer",
+                        response_future=future,
+                        continuation_frame={
+                            "assistantMessageRef": "pipeline/transcripts/transcript_att_0001/session.jsonl:0",
+                            "assistantMessageDigest": "a" * 64,
+                            "orderedToolUseIds": ["tool-timer"],
+                            "currentIndex": 0,
+                            "decisions": [
+                                {
+                                    "toolUseId": "tool-timer",
+                                    "state": "pending",
+                                    "source": None,
+                                    "deniedResult": None,
+                                }
+                            ],
+                        },
+                        audit_context={"transcript_id": "transcript_att_0001"},
+                    )
+                ],
+                session_dir=tmp_path / "sidecar",
+            )
+
+        def pause_agent_loops(self) -> None:
+            return
+
+        def resume_agent_loops(self) -> None:
+            return
+
+    pipeline = PermissionPipeline()
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+    backup_service = RecordingBackupService(expected_task_states={BackupReason.INPUT_REQUIRED: "input-required"})
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        backup_service=backup_service,
+        permission_wait_policy=PermissionWaitPolicy(
+            # Leave enough time for critical backup and publication to finish
+            # so the test measures timer ownership rather than runner speed.
+            resident_timeout_seconds=2,
+            timeout_grace_seconds=0.1,
+        ),
+    )
+    queue = FakeEventQueue()
+
+    await asyncio.wait_for(
+        executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue),
+        timeout=3,
+    )
+
+    assert await asyncio.wait_for(future, timeout=3) is PermissionWaitOutcome.SUSPEND
+    context_record = await store.get_context_record("ctx-1")
+    checkpoint = PermissionWaitCheckpointStore(str(tmp_path), context_record.session_id).list_active()[0]
+    assert checkpoint["phase"] == "SUSPENDED"
 
 
 @pytest.mark.asyncio
@@ -3338,7 +3494,7 @@ async def test_pipeline_executor_runs_critical_backups_for_terminal_and_handoff_
 
 
 @pytest.mark.asyncio
-async def test_pipeline_backup_blocked_after_input_required_publishes_recoverable_state(
+async def test_pipeline_backup_blocked_prevents_input_required_visibility(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -3372,8 +3528,8 @@ async def test_pipeline_backup_blocked_after_input_required_publishes_recoverabl
     await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
 
     pipeline_events = _pipeline_status_events(queue)
-    assert [event["eventType"] for event in pipeline_events] == ["input_required", "backup_blocked"]
-    blocked = pipeline_events[1]
+    assert [event["eventType"] for event in pipeline_events] == ["backup_blocked"]
+    blocked = pipeline_events[0]
     assert blocked["status"] == "input_required"
     assert blocked["data"]["reason"] == "input_required"
     assert blocked["data"]["recoverable"] is True
@@ -3385,10 +3541,13 @@ async def test_pipeline_backup_blocked_after_input_required_publishes_recoverabl
     assert fake_pipeline.sidecar_status == "backup_blocked"
     assert metrics.task_failed == 0
     assert metrics.backup_blocked == [("input_required", True)]
-    assert [event["eventType"] for event in A2APipelineJournal(session_dir).read_all()] == [
+    journal_events = A2APipelineJournal(session_dir).read_all()
+    assert [event["eventType"] for event in journal_events] == [
+        "input_required",
         "input_required",
         "backup_blocked",
     ]
+    assert [event.get("visibility") for event in journal_events[:2]] == ["pending_backup", "committed"]
     snapshot = A2APipelineSnapshotStore(session_dir).load()
     assert snapshot is not None
     assert snapshot["status"] == "waiting_input"
@@ -3432,7 +3591,7 @@ async def test_pipeline_backup_blocked_sidecar_persist_failure_is_not_reported_r
 
     await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
 
-    assert [event["eventType"] for event in _pipeline_status_events(queue)] == ["input_required"]
+    assert _pipeline_status_events(queue) == []
     record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
     assert record.state == "input-required"
     assert fake_pipeline.sidecar_status is None
@@ -6287,10 +6446,14 @@ async def test_executor_preserves_running_sidecar_pause_as_input_required(
 
     assert fake_pipeline.continue_calls == 1
     events = A2APipelineJournal(tmp_path / "sidecar").read_all()
-    assert events[-1]["eventType"] == "input_required"
-    assert events[-1]["status"] == "input_required"
-    assert events[-1]["data"]["kind"] == "pipeline_pause_confirmation"
-    assert "timeout" in events[-1]["data"]["reason"]
+    committed_input = next(
+        event
+        for event in reversed(events)
+        if event["eventType"] == "input_required" and event.get("visibility") == "committed"
+    )
+    assert committed_input["status"] == "input_required"
+    assert committed_input["data"]["kind"] == "pipeline_pause_confirmation"
+    assert "timeout" in committed_input["data"]["reason"]
     statuses = _status_events(queue)
     assert statuses[-1]["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
 
@@ -10759,3 +10922,131 @@ async def test_pending_ask_user_question_resume_preserves_image_input(tmp_path: 
 
     assert events
     assert received["supplemental_input"] == pipeline_input
+
+
+@pytest.mark.asyncio
+async def test_pipeline_permission_checkpoint_uses_dedicated_resume_stream(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A persisted tool permission must not be routed as ordinary Pipeline input."""
+
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+
+    class PermissionResumePipeline(FakePipeline):
+        def __init__(self, *, session_dir: Path) -> None:
+            super().__init__([], session_dir=session_dir)
+            self.sidecar_status = "waiting_input"
+            self.permission_checkpoints: list[dict] = []
+
+        async def resume_permission_boundary(self, checkpoint):
+            self.permission_checkpoints.append(checkpoint)
+            yield TextDeltaEvent(text="permission resumed")
+
+    pipeline = PermissionResumePipeline(session_dir=tmp_path / "sidecar")
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    queue = FakeEventQueue()
+    executor = IacCodeA2APipelineExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+    checkpoint = {
+        "boundaryId": "pwb_boundary1",
+        "permissionClass": "pipeline",
+        "continuationFrame": {"currentIndex": 0},
+    }
+
+    await executor.execute(
+        context=FakeRequestContext(task_id="task-1", context_id="ctx-1"),
+        event_queue=queue,
+        task=task,
+        task_id="task-1",
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        pipeline_input="",
+        permission_checkpoint=checkpoint,
+    )
+
+    assert pipeline.permission_checkpoints == [checkpoint]
+    assert pipeline.run_prompts == []
+    assert pipeline.resume_prompts == []
+    assert "permission resumed" in task.output_text
+
+
+@pytest.mark.asyncio
+async def test_top_pipeline_permission_suspension_stays_input_required_without_failure_or_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+
+    class SuspendedPermissionPipeline(FakePipeline):
+        def __init__(self, *, session_dir: Path) -> None:
+            super().__init__([], session_dir=session_dir)
+            self.sidecar_status = "running"
+            self.received_checkpoint = None
+
+        async def resume_permission_boundary(self, checkpoint):
+            self.received_checkpoint = checkpoint
+            raise PermissionWaitSuspended(checkpoint["boundaryId"])
+            if False:  # pragma: no cover - make this an async generator
+                yield
+
+    pipeline = SuspendedPermissionPipeline(session_dir=tmp_path / "sidecar")
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    queue = FakeEventQueue()
+    executor = IacCodeA2APipelineExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+    checkpoint = {
+        "boundaryId": "pwb_boundary1",
+        "permissionClass": "pipeline",
+        "pipelineCoordinates": {"step": {"id": "deploy", "runId": "step-deploy-1", "attempt": 1}},
+    }
+
+    await executor.execute(
+        context=FakeRequestContext(task_id="task-1", context_id="ctx-1"),
+        event_queue=queue,
+        task=task,
+        task_id="task-1",
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        pipeline_input="",
+        permission_checkpoint=checkpoint,
+    )
+
+    assert pipeline.received_checkpoint is checkpoint
+    assert checkpoint["pipelineCoordinates"]["step"]["id"] == "deploy"
+    assert task.state == "input-required"
+    dumped = [dump(event) for event in queue.events if isinstance(event, TaskStatusUpdateEvent)]
+    assert any(
+        event["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+        and event.get("metadata", {}).get("iac_code", {}).get("permissionWait")
+        == {"status": "suspended", "resumable": True}
+        for event in dumped
+    )
+    assert all(event["status"]["state"] != "TASK_STATE_FAILED" for event in dumped)
+    assert not any(
+        event.get("metadata", {}).get("iac_code", {}).get("pipeline", {}).get("eventType", "").startswith("rollback_")
+        for event in dumped
+    )

@@ -15,6 +15,8 @@ import iac_code.a2a.pipeline_stream as pipeline_stream
 from iac_code.a2a.artifacts import A2AArtifactStore
 from iac_code.a2a.events import _METADATA_MAX_CHARS
 from iac_code.a2a.exposure import A2AExposureType
+from iac_code.a2a.input_required import PermissionInputRegistry
+from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_performance import A2A_EXTREME_PERFORMANCE_ENV
@@ -34,8 +36,15 @@ from iac_code.a2a.pipeline_transport_delivery import (
     pipeline_transport_delivery_required,
     pipeline_transport_delivery_tracking,
 )
+from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.services.permission_wait import (
+    PermissionWaitCheckpointStore,
+    PermissionWaitCoordinator,
+    PermissionWaitPolicy,
+)
 from iac_code.services.permissions.audit import fingerprint_text
+from iac_code.services.session_storage import SessionStorage
 from iac_code.types.permissions import PermissionAuditMetadata
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
@@ -781,6 +790,118 @@ async def test_publish_nested_sub_pipeline_permission_resolves_inner_future(tmp_
     assert permission["toolUseId"] == "toolu-nested"
     assert permission["inputSummary"]["tool_name"] == "aliyun_api"
     assert permission["approved"] is False
+
+
+@pytest.mark.asyncio
+async def test_two_sub_pipeline_candidates_continue_while_one_permission_times_out(tmp_path: Path) -> None:
+    queue = FakeEventQueue()
+    context = PipelineA2AContext(
+        pipeline_run_id="run-1",
+        task_id="task-1",
+        context_id="ctx-1",
+        pipeline_name="selling",
+        parent_step_order=["evaluate_candidates"],
+        candidate_step_order=["template_generating"],
+    )
+    registry = PermissionInputRegistry()
+    registry.set_permission_wait_coordinator(
+        PermissionWaitCoordinator(PermissionWaitPolicy(sub_pipeline_timeout_seconds=0.02))
+    )
+    task_store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    task_record = await task_store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task_record.state = "working"
+    task_store.mirror_task(task_record)
+    session_id = "session-1"
+    SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), session_id)
+    pipeline_dir = tmp_path / "pipeline"
+    publisher = PipelineA2AEventPublisher(
+        event_queue=queue,
+        translator=PipelineEventTranslator(context),
+        journal=A2APipelineJournal(pipeline_dir),
+        snapshot_store=A2APipelineSnapshotStore(pipeline_dir),
+        permission_input_registry=registry,
+        task_store=task_store,
+        permission_wait_cwd=str(tmp_path),
+        permission_wait_session_id=session_id,
+    )
+    await publisher.publish(
+        PipelineEvent(
+            type=PipelineEventType.SUB_PIPELINE_STARTED,
+            step_id=None,
+            timestamp=1717821600.0,
+            data={
+                "sub_pipeline_id": "candidate-a",
+                "candidate_index": 0,
+                "candidate_name": "A",
+                "parent_step_id": "evaluate_candidates",
+                "total_steps": 1,
+            },
+        )
+    )
+    permission_result: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+
+    await publisher.publish(
+        SubPipelineStreamEvent(
+            sub_pipeline_id="candidate-a",
+            candidate_index=0,
+            inner=PermissionRequestEvent(
+                tool_name="aliyun_api",
+                tool_input={"product": "ros", "action": "CreateStack"},
+                tool_use_id="tool-candidate-a",
+                response_future=permission_result,
+            ),
+        )
+    )
+    await publisher.publish(
+        PipelineEvent(
+            type=PipelineEventType.SUB_PIPELINE_STARTED,
+            step_id=None,
+            timestamp=1717821601.0,
+            data={
+                "sub_pipeline_id": "candidate-b",
+                "candidate_index": 1,
+                "candidate_name": "B",
+                "parent_step_id": "evaluate_candidates",
+                "total_steps": 1,
+            },
+        )
+    )
+    await publisher.publish(
+        PipelineEvent(
+            type=PipelineEventType.SUB_PIPELINE_COMPLETED,
+            step_id=None,
+            timestamp=1717821602.0,
+            data={
+                "sub_pipeline_id": "candidate-b",
+                "candidate_index": 1,
+                "candidate_name": "B",
+                "parent_step_id": "evaluate_candidates",
+            },
+        )
+    )
+
+    assert permission_result.done() is False
+    await asyncio.wait_for(asyncio.shield(permission_result), timeout=0.5)
+
+    assert permission_result.result() is False
+    events = publisher.journal.read_all_repairing_tail()
+    b_completed_index = next(
+        index
+        for index, event in enumerate(events)
+        if event.get("eventType") == "candidate_completed" and event.get("candidate", {}).get("name") == "B"
+    )
+    timeout_index = next(
+        index
+        for index, event in enumerate(events)
+        if event.get("eventType") == "permission_resolved" and event.get("permission", {}).get("timedOut") is True
+    )
+    assert b_completed_index < timeout_index
+    timeout = events[timeout_index]
+    assert timeout["permission"]["decision"] == "deny"
+    assert timeout["permission"]["automatic"] is True
+    task = await task_store.get_task_record("task-1")
+    assert task.state == "working"
+    assert PermissionWaitCheckpointStore(str(tmp_path), session_id).list_active() == []
 
 
 @pytest.mark.asyncio

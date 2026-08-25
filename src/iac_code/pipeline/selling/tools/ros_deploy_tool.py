@@ -165,6 +165,10 @@ class RosDeployTool(Tool):
     def supports_blanket_allow(self) -> bool:
         return False
 
+    @property
+    def uses_operation_scoped_permissions(self) -> bool:
+        return True
+
     def is_read_only(self, input: dict | None = None) -> bool:
         return isinstance(input, dict) and input.get("action") == "wait"
 

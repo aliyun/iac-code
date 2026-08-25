@@ -1074,6 +1074,11 @@ def test_selection_during_backup_configures_e2e_only_delay(tmp_path: Path) -> No
         (tmp_path / "run" / "selection-backup-delay").resolve()
     )
     assert str(runner.BACKUP_DELAY_FIXTURE_ROOT.resolve()) == harness.server_env["PYTHONPATH"].split(os.pathsep)[0]
+    arm = json.loads(
+        runner._backup_delay_marker_path(tmp_path / "run" / "selection-backup-delay", "arm").read_text(encoding="utf-8")
+    )
+    assert arm["scenario"] == runner.SELECTION_DURING_BACKUP_SCENARIO
+    assert arm["delaySeconds"] == 10.0
 
 
 def test_backup_delay_sitecustomize_delays_armed_input_required_backup(tmp_path: Path) -> None:

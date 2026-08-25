@@ -356,6 +356,7 @@ async def test_handle_list_changed_refreshes_discovery_cache() -> None:
     client = FakeClient(tools=[{"name": "first", "inputSchema": {"type": "object"}}])
     manager = MCPManager([scoped], client_factory=lambda config: client)
     await manager.connect_all()
+    initial_status_revision = manager.status_revision
 
     client.tools = [{"name": "second", "description": "Second", "inputSchema": {"type": "object"}}]
     await manager.handle_list_changed("ros", capability="tools")
@@ -367,6 +368,7 @@ async def test_handle_list_changed_refreshes_discovery_cache() -> None:
     assert record.latest_refresh_at is not None
     assert record.latest_refresh_failure_reason is None
     assert record.metadata is not None
+    assert manager.status_revision > initial_status_revision
     assert manager.status_metadata() == {
         "servers": [
             {

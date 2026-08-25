@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 
 import pytest
@@ -12,6 +13,7 @@ from google.protobuf.struct_pb2 import Value
 from iac_code.a2a.events import publish_stream_event
 from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.input_required import (
+    PERMISSION_QUERY_PREFIX,
     PermissionInputRegistry,
     PermissionResponse,
     parse_permission_response,
@@ -24,6 +26,13 @@ from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
 from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher, _unified_input_projection
 from iac_code.a2a.runtime_overrides import a2a_request_context
 from iac_code.a2a.task_store import A2ATaskStore
+from iac_code.services.permission_wait import (
+    PermissionWaitCheckpointStore,
+    PermissionWaitCoordinator,
+    PermissionWaitPolicy,
+    build_permission_checkpoint,
+)
+from iac_code.services.session_storage import SessionStorage
 from iac_code.types.permissions import PermissionAuditMetadata, PermissionResult
 from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent
 
@@ -59,6 +68,38 @@ def _permission_message(
     )
 
 
+def _text_permission_message(
+    *,
+    decision: str = "allow_once",
+    context_id: str = "ctx-1",
+    extra_part: bool = False,
+    extra_payload: dict[str, object] | None = None,
+    include_task_id: bool = True,
+) -> Message:
+    payload: dict[str, object] = {
+        "schemaVersion": 1,
+        "kind": "permission",
+        "requestTaskId": "task-1",
+        "contextId": context_id,
+        "inputId": "permission-task-1-tool-1",
+        "toolUseId": "tool-1",
+        "decision": decision,
+    }
+    payload.update(extra_payload or {})
+    parts = [Part(text="{} {}".format(PERMISSION_QUERY_PREFIX, json.dumps(payload)))]
+    if extra_part:
+        parts.append(Part(text="also allow"))
+    message = Message(
+        message_id="message-1",
+        context_id="ctx-1",
+        role=Role.ROLE_USER,
+        parts=parts,
+    )
+    if include_task_id:
+        message.task_id = "task-1"
+    return message
+
+
 def test_permission_parser_requires_unique_json_part_and_exact_correlation() -> None:
     response = parse_permission_response(_permission_message())
     assert response is not None
@@ -73,6 +114,60 @@ def test_permission_parser_requires_unique_json_part_and_exact_correlation() -> 
     extra_field.parts[0].data.struct_value.update({"unexpected": "value"})
     with pytest.raises(InvalidParamsError, match="payload fields"):
         parse_permission_response(extra_field)
+
+
+def test_permission_parser_accepts_exact_json_text_part_for_text_only_gateways() -> None:
+    response = parse_permission_response(_text_permission_message(include_task_id=False))
+
+    assert response is not None
+    assert response.task_id == "task-1"
+    assert response.context_id == "ctx-1"
+    assert response.input_id == "permission-task-1-tool-1"
+    assert response.decision == "allow_once"
+
+
+def test_json_text_permission_response_fails_closed_on_schema_or_correlation_mismatch() -> None:
+    with pytest.raises(InvalidParamsError, match="exactly one JSON TextPart"):
+        parse_permission_response(_text_permission_message(extra_part=True))
+    with pytest.raises(InvalidParamsError, match="allow_once or deny"):
+        parse_permission_response(_text_permission_message(decision="always"))
+    with pytest.raises(InvalidParamsError, match="payload fields"):
+        parse_permission_response(_text_permission_message(extra_payload={"unexpected": "value"}))
+    with pytest.raises(InvalidParamsError, match="contextId"):
+        parse_permission_response(_text_permission_message(context_id="ctx-other"))
+
+
+def test_non_control_text_continues_to_generic_input_path() -> None:
+    for text in (
+        "allow",
+        '{"kind":"permission"}',
+        'prefix {"kind":"permission"}',
+        ' IAC_CODE_PERMISSION: {"kind":"permission"}',
+    ):
+        message = Message(
+            message_id="message-1",
+            task_id="task-1",
+            context_id="ctx-1",
+            role=Role.ROLE_USER,
+            parts=[Part(text=text)],
+        )
+        assert parse_permission_response(message) is None
+
+
+def test_non_prefixed_text_does_not_attempt_json_decode(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_json_loads(_value: str):
+        raise AssertionError("ordinary query must not enter JSON decoding")
+
+    monkeypatch.setattr("iac_code.a2a.input_required.json.loads", fail_json_loads)
+    message = Message(
+        message_id="message-1",
+        task_id="task-1",
+        context_id="ctx-1",
+        role=Role.ROLE_USER,
+        parts=[Part(text='ordinary query containing {"kind":"permission"}')],
+    )
+
+    assert parse_permission_response(message) is None
 
 
 def test_other_json_data_parts_continue_to_generic_input_path() -> None:
@@ -145,6 +240,204 @@ async def test_permission_mismatch_and_duplicate_reply_fail_closed(monkeypatch) 
     await registry.complete(pending)
     with pytest.raises(InvalidParamsError, match="pending permission"):
         await registry.answer(parsed)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_duplicate_normal_answers_claim_live_continuation_once(monkeypatch, tmp_path) -> None:
+    registry = PermissionInputRegistry()
+    coordinator = PermissionWaitCoordinator(PermissionWaitPolicy())
+    registry.set_permission_wait_coordinator(coordinator)
+    future = pending_future()
+    request = PermissionRequestEvent(
+        tool_name="aliyun_api",
+        tool_input={"product": "ros", "action": "CreateStack"},
+        tool_use_id="tool-1",
+        response_future=future,
+    )
+    pending = await registry.register(request, task_id="task-1", context_id="ctx-1", scope="normal")
+    SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), "session-1")
+    checkpoint_store = PermissionWaitCheckpointStore(str(tmp_path), "session-1")
+    record = checkpoint_store.create(
+        build_permission_checkpoint(
+            session_id="session-1",
+            task_id="task-1",
+            context_id="ctx-1",
+            input_id=pending.input_id,
+            tool_use_id="tool-1",
+            tool_name="aliyun_api",
+            tool_input=request.tool_input,
+            permission_class="normal",
+            continuation_frame={
+                "assistantMessageRef": "session.jsonl:0",
+                "assistantMessageDigest": "a" * 64,
+                "orderedToolUseIds": ["tool-1"],
+                "currentIndex": 0,
+                "decisions": [{"toolUseId": "tool-1", "state": "pending", "source": None, "deniedResult": None}],
+            },
+            policy=PermissionWaitPolicy(),
+        )
+    )
+    pending.boundary_id = record["boundaryId"]
+    pending.checkpoint_store = checkpoint_store
+    registry.activate_durable_boundary(pending, record)
+    monkeypatch.setattr("iac_code.a2a.input_required.emit_permission_boundary_audit", lambda *_a, **_k: True)
+
+    continuation_calls = 0
+
+    async def continuation() -> None:
+        nonlocal continuation_calls
+        continuation_calls += 1
+        await asyncio.sleep(0)
+
+    pending.continuation = continuation
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id=pending.input_id,
+        tool_use_id="tool-1",
+        decision="allow_once",
+    )
+
+    async def answer_and_continue() -> bool:
+        approved = await registry.answer(response)
+        claimed = await registry.claim_continuation(pending)
+        if claimed is not None:
+            await claimed()
+        return approved
+
+    assert await asyncio.gather(answer_and_continue(), answer_and_continue()) == [True, True]
+    assert continuation_calls == 1
+    assert checkpoint_store.load(record["boundaryId"])["decision"]["status"] == "applied"
+    await registry.complete(pending)
+
+
+@pytest.mark.asyncio
+async def test_top_pipeline_durable_boundary_persists_canonical_transcript_reference(tmp_path) -> None:
+    registry = PermissionInputRegistry()
+    registry.set_permission_wait_coordinator(PermissionWaitCoordinator(PermissionWaitPolicy()))
+    SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), "session-pipeline-ref")
+    request = PermissionRequestEvent(
+        tool_name="aliyun_api",
+        tool_input={"action": "CreateStack"},
+        tool_use_id="tool-1",
+        response_future=pending_future(),
+        audit_context={
+            "root_session_id": "session-pipeline-ref",
+            "transcript_id": "transcript_att_0001",
+        },
+        continuation_frame={
+            "assistantMessageRef": "session.jsonl:2",
+            "assistantMessageDigest": "a" * 64,
+            "orderedToolUseIds": ["tool-1"],
+            "currentIndex": 0,
+            "decisions": [{"toolUseId": "tool-1", "state": "pending", "source": None}],
+        },
+    )
+    pending = await registry.register(request, task_id="task-1", context_id="ctx-1", scope="pipeline")
+
+    record = await registry.open_durable_boundary(
+        pending,
+        cwd=str(tmp_path),
+        session_id="session-pipeline-ref",
+        permission_class="pipeline",
+        backup_service=None,
+        perform_backup=False,
+    )
+
+    assert record["continuationFrame"]["assistantMessageRef"] == (
+        "pipeline/transcripts/transcript_att_0001/session.jsonl:2"
+    )
+
+
+@pytest.mark.asyncio
+async def test_normal_successor_releases_old_registry_owner_before_publication(monkeypatch, tmp_path) -> None:
+    class BackupService:
+        def backup_session(self, *_args, **_kwargs) -> None:
+            return None
+
+    registry = PermissionInputRegistry()
+    coordinator = PermissionWaitCoordinator(PermissionWaitPolicy())
+    registry.set_permission_wait_coordinator(coordinator)
+    SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), "session-successor")
+    common = {
+        "assistantMessageRef": "session.jsonl:0",
+        "assistantMessageDigest": "a" * 64,
+        "orderedToolUseIds": ["tool-1", "tool-2"],
+    }
+    first_request = PermissionRequestEvent(
+        tool_name="aliyun_api",
+        tool_input={"action": "CreateStack"},
+        tool_use_id="tool-1",
+        response_future=pending_future(),
+        continuation_frame={
+            **common,
+            "currentIndex": 0,
+            "decisions": [
+                {"toolUseId": "tool-1", "state": "pending", "source": None, "deniedResult": None},
+                {"toolUseId": "tool-2", "state": "not_evaluated", "source": None, "deniedResult": None},
+            ],
+        },
+    )
+    first = await registry.register(first_request, task_id="task-1", context_id="ctx-1", scope="normal")
+    first_record = await registry.open_durable_boundary(
+        first,
+        cwd=str(tmp_path),
+        session_id="session-successor",
+        permission_class="normal",
+        backup_service=BackupService(),
+        perform_backup=False,
+    )
+    registry.activate_durable_boundary(first, first_record)
+    monkeypatch.setattr("iac_code.a2a.input_required.emit_permission_boundary_audit", lambda *_a, **_k: True)
+    first_response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id=first.input_id,
+        tool_use_id="tool-1",
+        decision="allow_once",
+    )
+    assert await registry.answer(first_response) is True
+
+    second_request = PermissionRequestEvent(
+        tool_name="aliyun_api",
+        tool_input={"action": "DeleteStack"},
+        tool_use_id="tool-2",
+        response_future=pending_future(),
+        continuation_frame={
+            **common,
+            "currentIndex": 1,
+            "decisions": [
+                {
+                    "toolUseId": "tool-1",
+                    "state": "allow",
+                    "source": "user",
+                    "principalRef": None,
+                    "region": None,
+                    "deniedResult": None,
+                },
+                {"toolUseId": "tool-2", "state": "pending", "source": None, "deniedResult": None},
+            ],
+            "previousBoundaryId": first_record["boundaryId"],
+        },
+    )
+    second = await registry.register(second_request, task_id="task-1", context_id="ctx-1", scope="normal")
+    await registry.open_durable_boundary(
+        second,
+        cwd=str(tmp_path),
+        session_id="session-successor",
+        permission_class="normal",
+        backup_service=BackupService(),
+        perform_backup=False,
+    )
+
+    assert coordinator.has_live_boundary(first_record["boundaryId"]) is False
+    with pytest.raises(InvalidParamsError, match="pending permission"):
+        await registry.pending_for_response(first_response)
+    receipt = PermissionWaitCheckpointStore(str(tmp_path), "session-successor").load(first_record["boundaryId"])
+    assert receipt["phase"] == "RESOLVED"
+    assert receipt["ack"]["nextBoundaryId"] == second.boundary_id
 
 
 def test_safe_summary_preserves_decision_values_and_redacts_secret() -> None:
@@ -240,9 +533,7 @@ def test_ros_deployment_permission_is_localized_and_preserves_safe_plan_summary(
                         "stackName": "demo-stack",
                         "template": "templates/demo.yml",
                         "totalMonthlyCost": "¥88/月",
-                        "resources": [
-                            {"name": "ECS", "spec": "2 vCPU / 4 GiB", "monthlyCost": "¥88/月"}
-                        ],
+                        "resources": [{"name": "ECS", "spec": "2 vCPU / 4 GiB", "monthlyCost": "¥88/月"}],
                     },
                 },
             ),
@@ -325,7 +616,10 @@ def test_unknown_bash_permission_is_not_mislabeled_as_read_only() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pipeline_permission_uses_same_input_envelope_and_waits_serially(monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize(("decision", "allowed"), [("allow_once", True), ("deny", False)])
+async def test_pipeline_permission_uses_same_input_envelope_and_waits_serially(
+    monkeypatch, tmp_path, decision: str, allowed: bool
+) -> None:
     registry = PermissionInputRegistry()
     queue = FakeEventQueue()
     before_enqueue: list[dict[str, object]] = []
@@ -376,21 +670,19 @@ async def test_pipeline_permission_uses_same_input_envelope_and_waits_serially(m
     assert before_enqueue[0]["status"] == "input_required"
 
     parsed = parse_permission_response(
-        _permission_message(decision="deny", input_id=dumped["metadata"]["iac_code"]["input"]["inputId"])
+        _permission_message(decision=decision, input_id=dumped["metadata"]["iac_code"]["input"]["inputId"])
     )
     assert parsed is not None
-    assert await registry.answer(parsed) is False
+    assert await registry.answer(parsed) is allowed
     await publishing
-    assert future.result() is False
+    assert future.result() is allowed
 
 
 @pytest.mark.asyncio
 async def test_sub_pipeline_permissions_stay_working_and_resolve_independently(monkeypatch, tmp_path) -> None:
     registry = PermissionInputRegistry()
     store = A2ATaskStore()
-    await store.save(
-        Task(id="task-1", context_id="ctx-1", status=TaskStatus(state=TaskState.TASK_STATE_WORKING))
-    )
+    await store.save(Task(id="task-1", context_id="ctx-1", status=TaskStatus(state=TaskState.TASK_STATE_WORKING)))
     queue = FakeEventQueue()
     publisher = PipelineA2AEventPublisher(
         event_queue=queue,
@@ -466,9 +758,7 @@ async def test_sub_pipeline_permissions_stay_working_and_resolve_independently(m
     task = await store.get("task-1")
     assert task is not None
     task_metadata = MessageToDict(task.metadata, preserving_proto_field_name=False)
-    assert [item["inputId"] for item in task_metadata["iac_code"]["pendingPermissions"]] == [
-        requests[1]["inputId"]
-    ]
+    assert [item["inputId"] for item in task_metadata["iac_code"]["pendingPermissions"]] == [requests[1]["inputId"]]
     remaining = task_metadata["iac_code"]["pendingPermissions"][0]
     assert remaining["language"] == "zh"
     assert remaining["prompt"] == "是否允许本次操作：运行本地 Shell 命令？"

@@ -1618,7 +1618,7 @@ async def test_runtime_permission_pipeline_preserves_sanitized_audit_for_each_me
 
 
 @pytest.mark.asyncio
-async def test_global_bypass_cannot_auto_allow_sensitive_body_file_cloud_write(tmp_path) -> None:
+async def test_global_bypass_auto_allows_sensitive_body_file_cloud_write_with_audit(tmp_path) -> None:
     project = tmp_path / "project"
     project.mkdir()
     body_file = project / ".env"
@@ -1644,16 +1644,20 @@ async def test_global_bypass_cannot_auto_allow_sensitive_body_file_cloud_write(t
 
     result = await check_tool_permission(tool, tool_input, context)
 
-    assert result.behavior == "ask"
-    assert result.reasons is not None
-    assert [reason.type for reason in result.reasons] == ["safety_check", "untrusted_write"]
+    assert result.behavior == "allow"
+    assert result.reasons is None
+    assert result.audit is not None
+    assert result.audit.reason_type == "bypass_permissions"
+    assert result.audit.is_read_only is False
+    assert result.audit.operation["product"] == "ecs"
+    assert result.audit.operation["action"] == "CreateInstance"
     assert result.snapshot_id is not None
     assert len(runtime.contract_resolver.calls) == 1
     assert runtime.contract_store.size == 1
 
 
 @pytest.mark.asyncio
-async def test_global_bypass_cannot_auto_allow_out_of_project_body_file_cloud_write(tmp_path) -> None:
+async def test_global_bypass_auto_allows_out_of_project_body_file_cloud_write_with_audit(tmp_path) -> None:
     project = tmp_path / "project"
     outside = tmp_path / "outside"
     project.mkdir()
@@ -1681,9 +1685,13 @@ async def test_global_bypass_cannot_auto_allow_out_of_project_body_file_cloud_wr
 
     result = await check_tool_permission(tool, tool_input, context)
 
-    assert result.behavior == "ask"
-    assert result.reasons is not None
-    assert [reason.type for reason in result.reasons] == ["path_constraint", "untrusted_write"]
+    assert result.behavior == "allow"
+    assert result.reasons is None
+    assert result.audit is not None
+    assert result.audit.reason_type == "bypass_permissions"
+    assert result.audit.is_read_only is False
+    assert result.audit.operation["product"] == "ecs"
+    assert result.audit.operation["action"] == "CreateInstance"
     assert result.snapshot_id is not None
     assert len(runtime.contract_resolver.calls) == 1
     assert runtime.contract_store.size == 1

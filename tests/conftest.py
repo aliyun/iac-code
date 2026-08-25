@@ -21,10 +21,6 @@ os.environ["TERM"] = "dumb"
 # var to exercise that default.
 os.environ.setdefault("IAC_CODE_A2A_EXTREME_PERFORMANCE", "0")
 
-# Tests must never touch the developer's OS keychain. Explicit fake keyring
-# backends still exercise keyring behavior where needed.
-os.environ.setdefault("IAC_CODE_MCP_DISABLE_KEYRING", "1")
-
 # Re-initialize i18n with English locale
 from iac_code.i18n import setup_i18n  # noqa: E402
 

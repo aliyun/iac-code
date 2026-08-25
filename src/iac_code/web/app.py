@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -210,6 +210,7 @@ def create_app(
         WebModelSelection,
         WebSessionRuntime,
         WebTurnRequest,
+        attach_session_permission_context,
         close_agent_runtime,
         create_session_agent_runtime_in_thread,
         flush_web_telemetry,
@@ -440,7 +441,7 @@ def create_app(
         try:
             for session in sessions:
                 try:
-                    manager.cancel_pending_requests_for_session(session)
+                    manager.cancel_pending_requests_for_shutdown(session)
                 except BaseException as error:
                     record_cleanup_error(error)
 
@@ -1573,6 +1574,7 @@ def create_app(
         多个 sub-pipeline 并发触发时各自拿到独立 request_id/future,前端逐个排队审批。回合被
         取消时 future 被 cancel:清理该 pending 并向上抛,让执行器把该工具当作拒绝处理。
         """
+        from iac_code.types.stream_events import PermissionWaitOutcome, PermissionWaitSuspended
         from iac_code.web.runtime import _permission_request_payload
 
         async def resolver(event: Any) -> bool:
@@ -1581,13 +1583,37 @@ def create_app(
                 turn_id=session.active_turn_id or "",
                 allow_always=False,
             )
-            future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
-            request_id = manager.add_permission_request(session, payload, future=future)
+            permission_class = getattr(event, "permission_wait_class", None)
+            legacy_permission = permission_class == "sub_pipeline" or event.continuation_frame is None
+            if legacy_permission:
+                future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+                request_id = manager.add_permission_request(
+                    session,
+                    payload,
+                    future=future,
+                    audit_event=event,
+                )
+            else:
+                future = event.response_future
+                if future is None:
+                    raise ValueError("Permission wait point is no longer active.")
+                request_id = await manager.open_permission_request(
+                    session,
+                    payload,
+                    permission_event=event,
+                    permission_class="pipeline",
+                    pipeline_coordinates=getattr(event, "permission_wait_coordinates", None),
+                )
             try:
                 result = await asyncio.shield(future)
             except asyncio.CancelledError:
-                manager.cancel_permission_request(request_id, session_id=session.session_id)
+                if legacy_permission:
+                    manager.cancel_permission_request(request_id, session_id=session.session_id)
                 raise
+            if result is PermissionWaitOutcome.SUSPEND:
+                if event.boundary_id is not None:
+                    manager.permission_wait_coordinator.unregister_live(event.boundary_id)
+                raise PermissionWaitSuspended(event.boundary_id)
             return bool(result)
 
         return resolver
@@ -4726,6 +4752,100 @@ def create_app(
             if shell_task is not None:
                 session.active_local_tasks.discard(shell_task)
 
+    async def rebuild_permission_audit_event(
+        session: WebSession,
+        checkpoint: Mapping[str, Any],
+        recovered: Any,
+    ) -> Any:
+        if session.mode == "pipeline":
+            rebuild = getattr(pipeline_action_runner, "rebuild_permission_audit_event", None)
+            if not callable(rebuild):
+                raise ValueError("permission_resume_invalid: Pipeline audit runtime is unavailable")
+            return await rebuild(
+                session,
+                checkpoint,
+                recovered,
+                model_selection=active_model_selection(session),
+            )
+        runtime = None
+        try:
+            runtime = await create_session_agent_runtime_in_thread(
+                session,
+                manager,
+                lifecycle_owner=desktop_runtime_lifecycle,
+            )
+            attach_session_permission_context(runtime, session)
+            return await runtime.agent_loop.rebuild_permission_audit_event(
+                tool_name=recovered.tool_name,
+                tool_input=recovered.tool_input,
+                tool_use_id=recovered.tool_use_id,
+                audit_context=recovered.audit_context,
+            )
+        finally:
+            await close_agent_runtime(runtime, lifecycle_owner=desktop_runtime_lifecycle)
+
+    async def recover_pipeline_permission(session: WebSession, checkpoint: dict[str, Any]) -> None:
+        boundary_id = str(checkpoint.get("boundaryId") or "")
+        coordinator = manager.permission_wait_coordinator
+        if not boundary_id or not await coordinator.acquire_restore(boundary_id):
+            return
+        store = manager.permission_checkpoint_store(session)
+        try:
+            current = store.load(boundary_id)
+            if current is None:
+                raise ValueError("permission_resume_invalid: checkpoint is unavailable")
+            if current.get("phase") != "RESTORING":
+                current = store.begin_restore(boundary_id)
+            async with session.turn_lock:
+                session.active_turn_task = asyncio.current_task()
+                session.status = "running"
+                result = await pipeline_action_runner.resume_permission(
+                    session,
+                    current,
+                    model_selection=active_model_selection(session),
+                    event_sink=lambda evs: publish_pipeline_live_events(session, evs),
+                    permission_resolver=make_pipeline_permission_resolver(session),
+                )
+                await publish_pipeline_action_events(
+                    session,
+                    list(result.events),
+                    base_payload={
+                        "contextId": session.context_id,
+                        "taskId": session.task_id,
+                        "mode": "pipeline",
+                        "permissionRecovered": True,
+                    },
+                )
+                if not result.accepted:
+                    raise ValueError(result.response.get("error") or "permission_resume_invalid")
+                from iac_code.services.permission_wait import canonical_digest
+
+                snapshot = await load_pipeline_snapshot(context_id=session.context_id, task_id=session.task_id)
+                store.resolve(
+                    boundary_id,
+                    result_digest=canonical_digest(snapshot or {}),
+                    ack={"decision": current["decision"]["value"], "accepted": True},
+                )
+        except Exception as exc:
+            try:
+                store.reconcile_deadline(
+                    boundary_id,
+                    grace_seconds=manager.permission_wait_policy.timeout_grace_seconds,
+                    live_owner=False,
+                )
+            except ValueError:
+                pass
+            manager.restore_permission_requests(session)
+            await session.events.publish(
+                "error",
+                {"message": public_exception_message(exc), "retryable": False},
+            )
+        finally:
+            await coordinator.release_restore(boundary_id)
+            session.status = "idle"
+            if session.active_turn_task is asyncio.current_task():
+                session.active_turn_task = None
+
     async def answer_permission(request):
         request_id = request.path_params["request_id"]
         try:
@@ -4734,12 +4854,43 @@ def create_app(
         except ValueError as exc:
             return json_error(str(exc), 400)
         pending = manager.get_pending_permission(request_id, session_id=answer["sessionId"])
-        if pending is None:
-            return JSONResponse({"requestId": request_id, "resolved": False}, status_code=404)
-        if answer["choice"] not in offered_permission_choice_ids(pending.payload):
+        if pending is not None and answer["choice"] not in offered_permission_choice_ids(pending.payload):
             return json_error(_("choice was not offered"), 400)
-        result = manager.resolve_permission(request_id, {"choice": answer["choice"]}, session_id=answer["sessionId"])
-        status_code = 200 if result["resolved"] else 404
+        if pending is not None and pending.boundary_id is None:
+            result = manager.resolve_permission(
+                request_id,
+                {"choice": answer["choice"]},
+                session_id=answer["sessionId"],
+            )
+            status_code = 200 if result["resolved"] else 404
+            return JSONResponse(result, status_code=status_code)
+        try:
+            result = await manager.resolve_durable_permission(
+                request_id,
+                {"choice": answer["choice"]},
+                session_id=answer["sessionId"],
+                audit_event_rebuilder=rebuild_permission_audit_event,
+            )
+        except ValueError as exc:
+            return json_error(str(exc), 409)
+        checkpoint = result.pop("checkpoint", None)
+        web_session_id = result.pop("webSessionId", None)
+        if result.get("needsRecovery") and isinstance(checkpoint, dict) and isinstance(web_session_id, str):
+            session = manager.get_session(web_session_id)
+            if session is None:
+                return JSONResponse({"requestId": request_id, "resolved": False}, status_code=404)
+            if session.mode == "pipeline":
+                task = asyncio.create_task(recover_pipeline_permission(session, checkpoint))
+            else:
+                runtime = make_runtime(session)
+                resume_permission = getattr(runtime, "resume_permission", None)
+                if not callable(resume_permission):
+                    return json_error("permission_resume_invalid", 409)
+                task = asyncio.create_task(resume_permission(checkpoint))
+            session.active_local_tasks.add(task)
+            task.add_done_callback(session.active_local_tasks.discard)
+            result["recoveryStarted"] = True
+        status_code = 202 if result.get("recoveryStarted") else (200 if result["resolved"] else 404)
         return JSONResponse(result, status_code=status_code)
 
     async def answer_question(request):

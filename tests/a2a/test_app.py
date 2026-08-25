@@ -46,6 +46,11 @@ from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.a2a.transports.dispatcher import create_runtime_components
 from iac_code.mcp.errors import MCPNeedsAuthError
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.services.permission_wait import (
+    PermissionWaitCheckpointStore,
+    PermissionWaitPolicy,
+    build_permission_checkpoint,
+)
 from iac_code.services.session_backup import BackupReason, SessionBackupBlocked
 from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
 from iac_code.services.session_storage import SessionStorage
@@ -2175,6 +2180,27 @@ async def test_cancel_input_required_pipeline_task_after_restart_marks_canceled(
     persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
     persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
     SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), session_id)
+    permission_store = PermissionWaitCheckpointStore(str(tmp_path), session_id)
+    permission = permission_store.create(
+        build_permission_checkpoint(
+            session_id=session_id,
+            task_id="task-1",
+            context_id="ctx-1",
+            input_id="permission-1",
+            tool_use_id="tool-1",
+            tool_name="aliyun_api",
+            tool_input={"action": "CreateStack"},
+            permission_class="pipeline",
+            continuation_frame={
+                "assistantMessageRef": "pipeline/transcripts/transcript-step-1/session.jsonl:0",
+                "assistantMessageDigest": "a" * 64,
+                "orderedToolUseIds": ["tool-1"],
+                "currentIndex": 0,
+                "decisions": [{"toolUseId": "tool-1", "state": "pending", "source": None, "deniedResult": None}],
+            },
+            policy=PermissionWaitPolicy(),
+        )
+    )
 
     pipeline_dir = SessionStorage().session_dir(str(tmp_path), session_id) / "a2a" / "pipeline"
     pending = _pipeline_pending_ask_event()
@@ -2195,6 +2221,7 @@ async def test_cancel_input_required_pipeline_task_after_restart_marks_canceled(
         assert isinstance(task, Task)
         assert task.status.state == TaskState.TASK_STATE_CANCELED
         assert persistence.load_task("task-1").state == "canceled"
+        assert permission_store.load(permission["boundaryId"])["phase"] == "CANCELED"
         snapshot = A2APipelineSnapshotStore(pipeline_dir).load()
         assert snapshot["status"] == "canceled"
         assert snapshot["normalHandoff"]["action"] == "switch_to_normal"
@@ -2212,6 +2239,54 @@ async def test_cancel_input_required_pipeline_task_after_restart_marks_canceled(
             "pipeline_canceled",
             "pipeline_handoff_ready",
         ]
+    finally:
+        await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_cancel_inactive_permission_wait_loses_to_claimed_decision(tmp_path: Path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    session_id = "session-ctx-1"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+    SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), session_id)
+    permission_store = PermissionWaitCheckpointStore(str(tmp_path), session_id)
+    permission = permission_store.create(
+        build_permission_checkpoint(
+            session_id=session_id,
+            task_id="task-1",
+            context_id="ctx-1",
+            input_id="permission-1",
+            tool_use_id="tool-1",
+            tool_name="aliyun_api",
+            tool_input={"action": "CreateStack"},
+            permission_class="normal",
+            continuation_frame={
+                "assistantMessageRef": "session.jsonl:0",
+                "assistantMessageDigest": "a" * 64,
+                "orderedToolUseIds": ["tool-1"],
+                "currentIndex": 0,
+                "decisions": [{"toolUseId": "tool-1", "state": "pending", "source": None, "deniedResult": None}],
+            },
+            policy=PermissionWaitPolicy(),
+        )
+    )
+    permission_store.claim_decision(permission["boundaryId"], value="allow_once", source="user")
+    components = create_runtime_components(
+        model="qwen3.6-plus",
+        host="127.0.0.1",
+        port=41242,
+        persistence_dir=persistence_dir,
+    )
+
+    try:
+        task = await components.handler.on_cancel_task(CancelTaskRequest(id="task-1"), ServerCallContext())
+
+        assert isinstance(task, Task)
+        assert task.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+        assert persistence.load_task("task-1").state == "input-required"
+        assert permission_store.load(permission["boundaryId"])["decision"]["status"] == "claimed"
     finally:
         await components.aclose()
 

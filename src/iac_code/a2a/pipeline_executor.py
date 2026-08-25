@@ -16,10 +16,12 @@ import httpx
 import yaml
 from a2a.types import Message, Role, TaskState, TaskStatus, TaskStatusUpdateEvent
 from a2a.utils.errors import InvalidParamsError
+from google.protobuf.json_format import ParseDict
 
 from iac_code.a2a.artifacts import artifact_store_for_session
 from iac_code.a2a.backup import backup_session_async
 from iac_code.a2a.events import make_text_part, publish_mcp_warnings
+from iac_code.a2a.input_required import PendingPermission
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_flow_monitor import (
     PipelineA2AFlowIdentity,
@@ -45,6 +47,7 @@ from iac_code.a2a.runtime_overrides import (
     configure_runtime_model,
     refresh_runtime_cloud_tools,
 )
+from iac_code.a2a.task_store import _close_runtime
 from iac_code.a2a.types import (
     TASK_STATE_CANCELED,
     TASK_STATE_COMPLETED,
@@ -66,6 +69,7 @@ from iac_code.pipeline.engine.session import PipelineSession
 from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pipeline_user_input
 from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
+from iac_code.services.permission_wait import RecoveredPermissionAuditBoundary, canonical_digest
 from iac_code.services.providers.aliyun import AliyunCredential
 from iac_code.services.session_backup import BackupReason, SessionBackupBlocked, SessionBackupService
 from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
@@ -74,6 +78,7 @@ from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     PermissionRequestEvent,
+    PermissionWaitSuspended,
     SubPipelineStreamEvent,
     TextDeltaEvent,
 )
@@ -112,6 +117,10 @@ def _new_set_asyncio_event() -> asyncio.Event:
     event = asyncio.Event()
     event.set()
     return event
+
+
+async def _async_noop() -> None:
+    return None
 
 
 class WaitingInputCancelResult(str, Enum):
@@ -173,6 +182,63 @@ class _StreamConsumeResult:
     had_events: bool
     restart_requested: bool
     terminal_handoff_unavailable: bool = False
+    detached_permission: "_DetachedPipelinePermission | None" = None
+
+
+@dataclass
+class _DetachedPipelinePermission:
+    """One top-level permission whose continuation will move to a new SSE."""
+
+    stream: Any
+    registry: Any
+    on_suspend: Callable[[], Awaitable[None]]
+    resume_agent_loops: Callable[[], Any] | None = None
+    pending: PendingPermission | None = None
+    _continuation: Callable[[Any, PendingPermission], Awaitable[None]] | None = None
+    _ready: asyncio.Event = field(default_factory=asyncio.Event)
+    _close_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    _closed: bool = False
+    _loops_resumed: bool = False
+
+    def prepare(self, pending: PendingPermission) -> None:
+        self.pending = pending
+        pending.continuation = self._run
+        pending.suspend_callback = self._suspend
+
+    def install(self, continuation: Callable[[Any, PendingPermission], Awaitable[None]]) -> None:
+        self._continuation = continuation
+        self._ready.set()
+
+    async def close_stream(self) -> None:
+        async with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+            if not self._loops_resumed and callable(self.resume_agent_loops):
+                self._loops_resumed = True
+                await _maybe_await(self.resume_agent_loops())
+            close = getattr(self.stream, "aclose", None)
+            if callable(close):
+                with contextlib.suppress(RuntimeError):
+                    await close()
+
+    async def _run(self, event_queue: Any, pending: PendingPermission) -> None:
+        await self._ready.wait()
+        continuation = self._continuation
+        if continuation is None:
+            raise RuntimeError("detached Pipeline permission continuation is unavailable")
+        await continuation(event_queue, pending)
+
+    async def _suspend(self) -> None:
+        pending = self.pending
+        if pending is None:
+            return
+        pending.continuation = None
+        await self.close_stream()
+        try:
+            await self.on_suspend()
+        finally:
+            await self.registry.complete(pending)
 
 
 @dataclass(frozen=True)
@@ -302,6 +368,52 @@ class IacCodeA2APipelineExecutor:
         self._backup_service = backup_service or SessionBackupService()
         self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
 
+    async def rebuild_permission_audit_event(
+        self,
+        *,
+        cwd: str,
+        session_id: str,
+        checkpoint: dict[str, Any],
+        recovered: RecoveredPermissionAuditBoundary,
+    ) -> PermissionRequestEvent:
+        """Use the exact restored Pipeline step runtime for restart audit data."""
+
+        session_storage = SessionStorage()
+        restore_session = getattr(self._backup_service, "restore_session", None)
+        if restore_session is None:
+            SessionBackupService(session_storage=session_storage).restore_session(cwd, session_id)
+        else:
+            restore_session(cwd, session_id)
+        runtime = create_agent_runtime(
+            AgentFactoryOptions(
+                model=self._model,
+                session_id=session_id,
+                cwd=cwd,
+                provider_key_override=self._provider_key_override,
+                provider_api_key_override=self._provider_api_key_override,
+                provider_base_url_override=self._provider_base_url_override,
+                provider_config_frozen=self._provider_config_frozen,
+                provider_config_override=self._provider_config_override,
+                effort_override=self._effort_override,
+                source="a2a-pipeline",
+            )
+        )
+        try:
+            with self._request_context(session_id=session_id):
+                self._configure_agent_runtime_for_request(runtime)
+                pipeline = self._create_pipeline(
+                    session_id=session_id,
+                    cwd=cwd,
+                    runtime=runtime,
+                    session_storage=session_storage,
+                )
+                rebuild = getattr(pipeline, "rebuild_permission_audit_event", None)
+                if not callable(rebuild):
+                    raise ValueError("permission_resume_invalid: Pipeline cannot rebuild permission audit")
+                return await rebuild(checkpoint, recovered)
+        finally:
+            await _close_runtime(runtime)
+
     async def execute(
         self,
         *,
@@ -314,6 +426,7 @@ class IacCodeA2APipelineExecutor:
         pipeline_input: PipelineUserInput | str | None = None,
         prompt: str | None = None,
         active_followup_only: bool = False,
+        permission_checkpoint: dict[str, Any] | None = None,
     ) -> bool | None:
         if pipeline_input is None:
             pipeline_input = prompt or ""
@@ -518,15 +631,24 @@ class IacCodeA2APipelineExecutor:
                     else:
                         fresh_pipeline_factory = create_fresh_pipeline
 
-                    selected = await self._select_stream(
-                        pipeline,
-                        prompt,
-                        pipeline_input=pipeline_input,
-                        publisher=publisher,
-                        task_id=task_id,
-                        context_id=context_id,
-                        fresh_pipeline_factory=fresh_pipeline_factory,
-                    )
+                    if permission_checkpoint is not None:
+                        resume_permission = getattr(pipeline, "resume_permission_boundary", None)
+                        if not callable(resume_permission):
+                            raise RuntimeError("permission_resume_invalid: Pipeline cannot resume permissions")
+                        selected = _SelectedPipelineStream(
+                            pipeline=pipeline,
+                            stream=resume_permission(permission_checkpoint),
+                        )
+                    else:
+                        selected = await self._select_stream(
+                            pipeline,
+                            prompt,
+                            pipeline_input=pipeline_input,
+                            publisher=publisher,
+                            task_id=task_id,
+                            context_id=context_id,
+                            fresh_pipeline_factory=fresh_pipeline_factory,
+                        )
                 if selected.pipeline is not pipeline:
                     pipeline = selected.pipeline
                     publisher = self._publisher(
@@ -550,6 +672,11 @@ class IacCodeA2APipelineExecutor:
                 self._task_store.mirror_context(ctx)
                 stream_had_events = False
                 terminal_handoff_unavailable = False
+                detached_permission: _DetachedPipelinePermission | None = None
+
+                async def release_detached_runtime() -> None:
+                    await self._task_store.discard_context_runtime(context_id)
+
                 with self._request_context(session_id=ctx.session_id):
                     while True:
                         stream_result = await self._consume_stream_until_restart(
@@ -557,16 +684,73 @@ class IacCodeA2APipelineExecutor:
                             runtime=pipeline_runtime,
                             publisher=publisher,
                             task=task,
+                            on_detached_permission_suspend=release_detached_runtime,
                         )
                         stream_had_events = stream_had_events or stream_result.had_events
                         terminal_handoff_unavailable = (
                             terminal_handoff_unavailable or stream_result.terminal_handoff_unavailable
                         )
 
+                        if stream_result.detached_permission is not None:
+                            detached_permission = stream_result.detached_permission
+                            break
+
                         if not stream_result.restart_requested:
                             break
 
                         stream = self._continue_after_interrupt_stream(pipeline, pipeline_input)
+
+                if detached_permission is not None:
+                    pending = detached_permission.pending
+                    permission_input_registry = self._permission_input_registry
+                    if pending is None or permission_input_registry is None:
+                        raise RuntimeError("detached Pipeline permission is unavailable")
+
+                    async def resume_detached_pipeline(target_queue: Any, resumed: PendingPermission) -> None:
+                        store = resumed.checkpoint_store
+                        boundary_id = resumed.boundary_id
+                        if store is None or boundary_id is None:
+                            raise RuntimeError("permission checkpoint is unavailable")
+                        await detached_permission.close_stream()
+                        record = store.load(boundary_id)
+                        if record is None:
+                            raise RuntimeError("permission checkpoint is unavailable")
+                        try:
+                            await self.execute(
+                                context=context,
+                                event_queue=target_queue,
+                                task=task,
+                                task_id=task_id,
+                                context_id=context_id,
+                                cwd=cwd,
+                                pipeline_input="",
+                                permission_checkpoint=record,
+                            )
+                            persisted = SessionStorage().load(cwd, ctx.session_id)
+                            digest = canonical_digest(persisted[-1].to_dict()) if persisted else ""
+                            decision = record.get("decision")
+                            value = decision.get("value") if isinstance(decision, dict) else None
+                            store.resolve(
+                                boundary_id,
+                                result_digest=digest,
+                                ack={"decision": value, "accepted": True},
+                            )
+                        finally:
+                            await permission_input_registry.complete(resumed)
+
+                    detached_permission.install(resume_detached_pipeline)
+                    task.state = TASK_STATE_INPUT_REQUIRED
+                    ctx.active_task_id = None
+                    task.touch()
+                    ctx.touch()
+                    self._task_store.mirror_task(task)
+                    self._task_store.mirror_context(ctx)
+                    await self._notify_terminal_task(
+                        task_id=task.task_id,
+                        context_id=task.context_id,
+                        state=task.state,
+                    )
+                    return
 
                 terminal_status_published = False
                 terminal_sidecar = _is_terminal_sidecar_status(getattr(pipeline, "sidecar_status", None))
@@ -687,6 +871,30 @@ class IacCodeA2APipelineExecutor:
             except _PipelineBackupBlockedTransitionError:
                 task_persistence_started = True
                 await self._complete_backup_blocked_transition(task=task, ctx=ctx)
+            except PermissionWaitSuspended:
+                task_persistence_started = True
+                task.state = TASK_STATE_INPUT_REQUIRED
+                ctx.active_task_id = None
+                task.touch()
+                ctx.touch()
+                self._task_store.mirror_task(task)
+                self._task_store.mirror_context(ctx)
+                await self._publish_status(
+                    event_queue,
+                    task_id=task_id,
+                    context_id=context_id,
+                    state=TaskState.TASK_STATE_INPUT_REQUIRED,
+                    metadata={
+                        "iac_code": {
+                            "permissionWait": {"status": "suspended", "resumable": True},
+                        }
+                    },
+                )
+                await self._notify_terminal_task(
+                    task_id=task.task_id,
+                    context_id=task.context_id,
+                    state=task.state,
+                )
             except Exception as exc:
                 task_persistence_started = True
                 try:
@@ -1175,6 +1383,25 @@ class IacCodeA2APipelineExecutor:
             self._record_state(task.state)
         except _PipelineBackupBlockedTransitionError:
             await self._complete_backup_blocked_transition(task=task, ctx=ctx)
+        except PermissionWaitSuspended:
+            task.state = TASK_STATE_INPUT_REQUIRED
+            ctx.active_task_id = None
+            task.touch()
+            ctx.touch()
+            self._task_store.mirror_task(task)
+            self._task_store.mirror_context(ctx)
+            await self._publish_status(
+                event_queue,
+                task_id=task_id,
+                context_id=context_id,
+                state=TaskState.TASK_STATE_INPUT_REQUIRED,
+                metadata={
+                    "iac_code": {
+                        "permissionWait": {"status": "suspended", "resumable": True},
+                    }
+                },
+            )
+            await self._notify_terminal_task(task_id=task_id, context_id=context_id, state=task.state)
         except Exception as exc:
             try:
                 await self._publish_exception_status(
@@ -1235,11 +1462,7 @@ class IacCodeA2APipelineExecutor:
             def permission_context_getter() -> Any:
                 return getattr(agent_loop, "_permission_context", None)
 
-        surface = (
-            A2A_RICH_CANDIDATE_SURFACE
-            if self._candidate_presentation == RICH_CANDIDATE_PRESENTATION
-            else "a2a"
-        )
+        surface = A2A_RICH_CANDIDATE_SURFACE if self._candidate_presentation == RICH_CANDIDATE_PRESENTATION else "a2a"
         return create_pipeline(
             pipeline_name,
             provider_manager=runtime.provider_manager,
@@ -1476,6 +1699,7 @@ class IacCodeA2APipelineExecutor:
         runtime: A2APipelineRuntime,
         publisher: PipelineA2AEventPublisher,
         task: Any,
+        on_detached_permission_suspend: Callable[[], Awaitable[None]] | None = None,
     ) -> "_StreamConsumeResult":
         had_events = False
         outbound = PipelineA2AOutboundQueue(publisher) if publisher.extreme_performance else None
@@ -1621,17 +1845,33 @@ class IacCodeA2APipelineExecutor:
                                 await outbound.flush()
                             pause_agent_loops = getattr(runtime.pipeline, "pause_agent_loops", None)
                             resume_agent_loops = getattr(runtime.pipeline, "resume_agent_loops", None)
+                            detached_permission = _DetachedPipelinePermission(
+                                stream=stream_iter,
+                                registry=self._permission_input_registry,
+                                on_suspend=on_detached_permission_suspend or _async_noop,
+                                resume_agent_loops=(resume_agent_loops if callable(resume_agent_loops) else None),
+                            )
                             if callable(pause_agent_loops):
                                 await _maybe_await(pause_agent_loops())
                             try:
-                                text = await publisher.publish(
+                                published = await publisher.publish(
                                     event,
                                     permission_resolver=self._permission_resolver,
                                     auto_approve_permissions=self._auto_approve_permissions,
+                                    prepare_detached_permission=detached_permission.prepare,
                                 )
-                            finally:
+                            except BaseException:
                                 if callable(resume_agent_loops):
                                     await _maybe_await(resume_agent_loops())
+                                raise
+                            if published is not detached_permission.pending:
+                                raise RuntimeError("Pipeline permission could not detach from its current stream")
+                            return _StreamConsumeResult(
+                                had_events=had_events,
+                                restart_requested=False,
+                                terminal_handoff_unavailable=terminal_handoff_unavailable,
+                                detached_permission=detached_permission,
+                            )
                         elif outbound is not None:
                             delivery_text = _text_delta_output(event)
                             await outbound.submit(
@@ -1746,6 +1986,8 @@ class IacCodeA2APipelineExecutor:
                     permission_resolver=self._permission_resolver,
                     auto_approve_permissions=self._auto_approve_permissions,
                 )
+                if isinstance(text, PendingPermission):
+                    raise RuntimeError("terminal Pipeline event produced a permission boundary")
                 self._track_pending_question(runtime, publisher, event)
                 await self._maybe_publish_normal_handoff_ready(runtime.pipeline, publisher, event)
                 return handoff, text
@@ -1873,6 +2115,8 @@ class IacCodeA2APipelineExecutor:
             task_store=self._task_store,
             backup_commit_gate=_requires_backup_committed_publication,
             flow_monitor=flow_monitor,
+            permission_wait_cwd=cwd,
+            permission_wait_session_id=session_id,
         )
 
     def _install_backup_hook(
@@ -1928,8 +2172,6 @@ class IacCodeA2APipelineExecutor:
         reason = _backup_reason_for_pipeline_envelope(envelope)
         if reason is None:
             return True
-        if reason in {BackupReason.INPUT_REQUIRED, BackupReason.WAITING_INPUT}:
-            return True
         if reason in {BackupReason.TERMINAL, BackupReason.HANDOFF_READY}:
             if _is_pending_backup_publication_event(envelope):
                 return True
@@ -1945,6 +2187,10 @@ class IacCodeA2APipelineExecutor:
             ctx=ctx,
             reason=reason,
         )
+        if reason == BackupReason.INPUT_REQUIRED:
+            pending = publisher.pending_durable_permission
+            if pending is not None and self._permission_input_registry is not None:
+                self._permission_input_registry.activate_durable_boundary(pending)
         return True
 
     async def _backup_after_pipeline_publication(
@@ -1961,17 +2207,11 @@ class IacCodeA2APipelineExecutor:
         reason = _backup_reason_for_pipeline_envelope(envelope)
         if reason not in {BackupReason.INPUT_REQUIRED, BackupReason.WAITING_INPUT}:
             return
-        self._mirror_a2a_snapshots_for_pipeline_publication(envelope, task=task, ctx=ctx)
-        await self._backup_pipeline_publication(
-            envelope,
-            publisher=publisher,
-            pipeline=pipeline,
-            cwd=cwd,
-            session_id=session_id,
-            task=task,
-            ctx=ctx,
-            reason=reason,
-        )
+        # INPUT_REQUIRED/WAITING_INPUT are backup-gated now. Their critical
+        # commit happened in ``before_enqueue`` after journal persistence and
+        # before external visibility; repeating it here would create a second
+        # generation after publication.
+        return
 
     async def _backup_pipeline_publication(
         self,
@@ -1991,15 +2231,25 @@ class IacCodeA2APipelineExecutor:
                 NORMAL_HANDOFF_PROOF_KEY: BackupPublicationProof.from_envelope(envelope),
             }
         try:
-            await backup_session_async(
-                self._backup_service,
-                cwd,
-                session_id,
-                reason=reason,
-                critical=True,
-                metrics=self._metrics,
-                publication_proofs=publication_proofs,
-            )
+            pending = publisher.pending_durable_permission if reason == BackupReason.INPUT_REQUIRED else None
+            if pending is not None and self._permission_input_registry is not None:
+                await self._permission_input_registry.backup_durable_boundary(
+                    pending,
+                    cwd,
+                    session_id,
+                    backup_service=self._backup_service,
+                    metrics=self._metrics,
+                )
+            else:
+                await backup_session_async(
+                    self._backup_service,
+                    cwd,
+                    session_id,
+                    reason=reason,
+                    critical=True,
+                    metrics=self._metrics,
+                    publication_proofs=publication_proofs,
+                )
         except SessionBackupBlocked as exc:
             sidecar_synced = await _sync_pipeline_backup_blocked_sidecar(
                 pipeline,
@@ -2991,6 +3241,7 @@ class IacCodeA2APipelineExecutor:
         context_id: str,
         state: int,
         text: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         message = None
         if text:
@@ -3003,7 +3254,10 @@ class IacCodeA2APipelineExecutor:
             )
         status = TaskStatus(state=TaskState.Name(state), message=message)
         status.timestamp.GetCurrentTime()
-        await event_queue.enqueue_event(TaskStatusUpdateEvent(task_id=task_id, context_id=context_id, status=status))
+        update = TaskStatusUpdateEvent(task_id=task_id, context_id=context_id, status=status)
+        if metadata is not None:
+            ParseDict(metadata, update.metadata)
+        await event_queue.enqueue_event(update)
 
     async def _notify_terminal_task(self, *, task_id: str, context_id: str, state: str) -> None:
         if self._push_notifier is None:
@@ -3158,7 +3412,12 @@ def _backup_retry_count_from_exception(exc: BaseException) -> int:
 def _requires_backup_committed_publication(envelope: dict[str, Any]) -> bool:
     if _publication_visibility_from_event(envelope) in {_PENDING_BACKUP_VISIBILITY, _COMMITTED_BACKUP_VISIBILITY}:
         return False
-    return _backup_reason_for_pipeline_envelope(envelope) in {BackupReason.TERMINAL, BackupReason.HANDOFF_READY}
+    return _backup_reason_for_pipeline_envelope(envelope) in {
+        BackupReason.INPUT_REQUIRED,
+        BackupReason.WAITING_INPUT,
+        BackupReason.TERMINAL,
+        BackupReason.HANDOFF_READY,
+    }
 
 
 def _pending_backup_publication_envelope(envelope: dict[str, Any]) -> dict[str, Any]:

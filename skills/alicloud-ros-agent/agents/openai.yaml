@@ -1,0 +1,4 @@
+interface:
+  display_name: "Alibaba Cloud ROS Agent"
+  short_description: "Operate the remote ROS agent through Alibaba Cloud CLI"
+  default_prompt: "Use $alicloud-ros-agent to handle this Alibaba Cloud infrastructure task with the remote ROS Agent."

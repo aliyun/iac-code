@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from iac_code.services.permissions.pipeline import check_tool_permission
 from iac_code.services.providers.aliyun import AliyunCredential
 from iac_code.services.providers.aliyun_credentials_runtime import ECS_CREDENTIAL_ERROR_CODES
 from iac_code.services.providers.aliyun_oauth import AliyunOAuthError, AliyunOAuthReloginRequired
@@ -41,7 +42,7 @@ from iac_code.tools.cloud.aliyun.public_errors import public_aliyun_error
 from iac_code.tools.cloud.aliyun.result_contract import ALIYUN_BODY_CONTRACT_VERSION, ALIYUN_HTTP_METADATA_KEY
 from iac_code.tools.cloud.aliyun.retry_policy import RetryBudget, RetryExhausted, RetryReason, TransportFailure
 from iac_code.tools.tool_executor import ToolCallRequest, ToolExecutor
-from iac_code.types.permissions import InvocationBinding, ToolPermissionContext
+from iac_code.types.permissions import InvocationBinding, PermissionMode, ToolPermissionContext
 from iac_code.types.stream_events import ResourceObservedEvent
 from tests.tools.cloud.aliyun._ecs_ram_role_fakes import FakeEcsRuntime
 
@@ -1809,6 +1810,90 @@ async def test_canonical_product_rechecks_deny_rules_after_alias_resolution() ->
     assert permission.behavior == "deny"
     assert permission.audit is not None and permission.audit.rule == "Ecs:*"
     assert ("api", "Ecs", "2014-05-26", "DescribeInstances") in openmeta.calls
+    assert endpoint_resolver.calls == []
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_read_only_action_ignores_aliyun_api_ask_rule() -> None:
+    services, _, endpoint_resolver, transport = _production_services()
+    tool = AliyunApi(services=services)
+    tool_input = tool.prepare_invocation_input(
+        {
+            "product": "Ecs",
+            "action": "DescribeInstances",
+            "region_id": "cn-hangzhou",
+        }
+    )
+    binding = InvocationBinding(
+        "runtime",
+        "session",
+        "read-only-ask",
+        "aliyun_api",
+        canonical_input_sha256(tool_input),
+    )
+
+    permission = await check_tool_permission(
+        tool,
+        tool_input,
+        ToolPermissionContext(
+            invocation_binding=binding,
+            ask_rules={
+                "user_settings": [
+                    "aliyun_api",
+                    "aliyun_api(Ecs:DescribeInstances)",
+                ]
+            },
+        ),
+    )
+
+    assert permission.behavior == "allow"
+    assert permission.reason is not None and permission.reason.type == "read_only"
+    assert permission.audit is not None and permission.audit.is_read_only is True
+    assert endpoint_resolver.calls == []
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_write_action_honors_aliyun_api_ask_rule() -> None:
+    services, _, endpoint_resolver, transport = _production_services()
+    tool = AliyunApi(services=services)
+    tool_input = tool.prepare_invocation_input(
+        {
+            "product": "ROS",
+            "action": "CreateStack",
+            "params": {"StackName": "test-stack"},
+            "region_id": "cn-hangzhou",
+        }
+    )
+    binding = InvocationBinding(
+        "runtime",
+        "session",
+        "write-ask",
+        "aliyun_api",
+        canonical_input_sha256(tool_input),
+    )
+
+    permission = await check_tool_permission(
+        tool,
+        tool_input,
+        ToolPermissionContext(
+            mode=PermissionMode.BYPASS_PERMISSIONS,
+            invocation_binding=binding,
+            ask_rules={
+                "user_settings": [
+                    "aliyun_api",
+                    "aliyun_api(ROS:CreateStack)",
+                ]
+            },
+        ),
+    )
+
+    assert permission.behavior == "ask"
+    assert permission.audit is not None
+    assert permission.audit.is_read_only is False
+    assert permission.audit.rule_source == "user_settings"
+    assert {reason.type for reason in permission.reasons or []} == {"rule", "untrusted_write"}
     assert endpoint_resolver.calls == []
     assert transport.calls == []
 

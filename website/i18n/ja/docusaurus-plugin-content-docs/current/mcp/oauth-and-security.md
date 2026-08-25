@@ -72,11 +72,11 @@ mcp__<server>__authenticate
 
 IaC コードは、`MCPSecretStorage`を通じて OAuth トークンと MCP クライアント シークレットを保存します。
 
-1. 利用可能な場合は、オペレーティング システムのキーリングを試行します。
-2. キーリングが無効になっているか使用できない場合は、暗号化されたフォールバック データが `<config-dir>/mcp/` に保存されます。
-3. ファイルのアクセス許可は、フォールバック キーと暗号化されたシークレット ストアに対して制限されます。
+1. 暗号化データは `<config-dir>/mcp/secrets.json.enc` に保存されます。
+2. 暗号化キーは `<config-dir>/mcp/secrets.key` に保存されます。
+3. 両方のファイルのアクセス権限が制限されます。
 
-`IAC_CODE_MCP_DISABLE_KEYRING=1`を設定すると、暗号化されたフォールバック ストレージが強制的に使用されます。これは、分離されたテストに役立ちます。
+MCP シークレットストレージは OS のキーリングにアクセスしないため、バックグラウンドの状態確認でシステムの認可ダイアログは表示されません。キーリングにのみ存在した認証状態は自動移行されないため、MCP server を一度再認可してローカルの暗号化エントリを作成してください。
 
 保存されている認証状態をクリアするには、次のコマンドを使用します。
 
@@ -93,7 +93,7 @@ iac-code mcp remove secure-reviewer --scope user
 ```
 
 既存 server を再認可したいだけなら `reset-auth` を使います。server config 自体も消す場合は `mcp remove` を使います。
-どちらの経路も `MCPSecretStorage` が管理する keyring と encrypted fallback entries を消去します。
+どちらの経路も `MCPSecretStorage` が管理する暗号化エントリを消去します。
 
 ## Project Trust
 

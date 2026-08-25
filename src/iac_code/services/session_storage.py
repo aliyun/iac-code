@@ -468,6 +468,7 @@ class SessionStorage:
         allowed_dirs = {
             "a2a",
             "image-cache",
+            "permission-waits",
             "pipeline",
             "tool-results",
         }

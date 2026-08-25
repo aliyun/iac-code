@@ -11,6 +11,7 @@ from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.types import Message, Part, Role, SubscribeToTaskRequest, Task, TaskState, TaskStatus, TaskStatusUpdateEvent
 from google.protobuf.struct_pb2 import Value
 
+from iac_code.a2a.input_required import PERMISSION_QUERY_PREFIX
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
@@ -530,23 +531,20 @@ async def test_message_stream_routes_permission_response_to_active_input_require
         context_id="ctx-1",
         status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
     )
-    data = Value()
-    data.struct_value.update(
-        {
-            "schemaVersion": 1,
-            "kind": "permission",
-            "requestTaskId": "task-1",
-            "inputId": "permission-task-1-tool-1",
-            "toolUseId": "tool-1",
-            "decision": "allow_once",
-        }
-    )
+    response = {
+        "schemaVersion": 1,
+        "kind": "permission",
+        "requestTaskId": "task-1",
+        "contextId": "ctx-1",
+        "inputId": "permission-task-1-tool-1",
+        "toolUseId": "tool-1",
+        "decision": "allow_once",
+    }
     message = Message(
         message_id="message-1",
-        task_id="task-1",
         context_id="ctx-1",
         role=Role.ROLE_USER,
-        parts=[Part(data=data, media_type="application/json")],
+        parts=[Part(text="{} {}".format(PERMISSION_QUERY_PREFIX, json.dumps(response)))],
     )
     active_stream_called = False
 
@@ -583,28 +581,26 @@ async def test_message_stream_routes_permission_response_to_active_input_require
 
     assert events == [update]
     assert active_stream_called is True
+    assert message.task_id == "task-1"
 
 
 @pytest.mark.asyncio
-async def test_sideband_permission_response_returns_one_short_ack_without_tapping_task(monkeypatch) -> None:
+async def test_text_gateway_sideband_permission_response_hydrates_task_and_returns_short_ack(monkeypatch) -> None:
     call_context = ServerCallContext()
-    data = Value()
-    data.struct_value.update(
-        {
-            "schemaVersion": 1,
-            "kind": "permission",
-            "requestTaskId": "task-1",
-            "inputId": "permission-opaque",
-            "toolUseId": "tool-1",
-            "decision": "allow_once",
-        }
-    )
+    response = {
+        "schemaVersion": 1,
+        "kind": "permission",
+        "requestTaskId": "task-1",
+        "contextId": "ctx-1",
+        "inputId": "permission-opaque",
+        "toolUseId": "tool-1",
+        "decision": "allow_once",
+    }
     message = Message(
         message_id="message-1",
-        task_id="task-1",
         context_id="ctx-1",
         role=Role.ROLE_USER,
-        parts=[Part(data=data, media_type="application/json")],
+        parts=[Part(text="{} {}".format(PERMISSION_QUERY_PREFIX, json.dumps(response)))],
     )
     ack_data = Value()
     ack_data.struct_value.update(
@@ -645,6 +641,7 @@ async def test_sideband_permission_response_returns_one_short_ack_without_tappin
     params = SimpleNamespace(message=message)
 
     assert await handler.on_message_send(params, call_context) is ack
+    assert message.task_id == "task-1"
     assert await _collect_async(handler.on_message_send_stream(params, call_context)) == [ack]
 
 
@@ -658,6 +655,13 @@ async def test_dispatcher_permission_followup_resumes_live_normal_stream(monkeyp
                 tool_input={"cmd": "pwd"},
                 tool_use_id="tool-1",
                 response_future=future,
+                continuation_frame={
+                    "assistantMessageRef": "session.jsonl:0",
+                    "assistantMessageDigest": "a" * 64,
+                    "orderedToolUseIds": ["tool-1"],
+                    "currentIndex": 0,
+                    "decisions": [{"toolUseId": "tool-1", "state": "pending", "source": None, "deniedResult": None}],
+                },
             ),
             TextDeltaEvent(text="after permission"),
         ]
@@ -706,8 +710,8 @@ async def test_dispatcher_permission_followup_resumes_live_normal_stream(monkeyp
         await asyncio.sleep(0.01)
     assert input_event is not None
     assert envelope is not None
-    assert await components.task_store.is_task_active(envelope["requestTaskId"])
-    assert await components.handler._active_task_registry.get(envelope["requestTaskId"]) is not None
+    await asyncio.wait_for(first_task, timeout=_STREAM_TEST_TIMEOUT)
+    assert not await components.task_store.is_task_active(envelope["requestTaskId"])
 
     async def consume_second_stream() -> list[dict]:
         return [
@@ -721,19 +725,23 @@ async def test_dispatcher_permission_followup_resumes_live_normal_stream(monkeyp
                         "message": {
                             "messageId": "permission-message-second",
                             "role": "ROLE_USER",
-                            "taskId": envelope["requestTaskId"],
                             "contextId": envelope["contextId"],
                             "parts": [
                                 {
-                                    "mediaType": "application/json",
-                                    "data": {
-                                        "schemaVersion": 1,
-                                        "kind": "permission",
-                                        "requestTaskId": envelope["requestTaskId"],
-                                        "inputId": envelope["inputId"],
-                                        "toolUseId": envelope["toolUseId"],
-                                        "decision": "allow_once",
-                                    },
+                                    "text": "{} {}".format(
+                                        PERMISSION_QUERY_PREFIX,
+                                        json.dumps(
+                                            {
+                                                "schemaVersion": 1,
+                                                "kind": "permission",
+                                                "requestTaskId": envelope["requestTaskId"],
+                                                "contextId": envelope["contextId"],
+                                                "inputId": envelope["inputId"],
+                                                "toolUseId": envelope["toolUseId"],
+                                                "decision": "allow_once",
+                                            },
+                                        ),
+                                    )
                                 }
                             ],
                             "metadata": {"iac_code": {"cwd": str(tmp_path)}},
@@ -754,7 +762,7 @@ async def test_dispatcher_permission_followup_resumes_live_normal_stream(monkeyp
         assert future.done() and future.result() is True
         second_events = await asyncio.wait_for(second_task, timeout=_STREAM_TEST_TIMEOUT)
         assert all("error" not in event for event in second_events)
-        await asyncio.wait_for(first_task, timeout=_STREAM_TEST_TIMEOUT)
+        assert any("after permission" in json.dumps(event, ensure_ascii=False) for event in second_events)
     finally:
         if not second_task.done():
             second_task.cancel()

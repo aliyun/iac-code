@@ -1,7 +1,9 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 from a2a.types import TaskArtifactUpdateEvent
+from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.events import (
@@ -9,10 +11,21 @@ from iac_code.a2a.events import (
     _METADATA_MAX_CHARS,
     _tool_result_metadata,
     _truncate,
+    publish_interactive_permission_boundary,
     publish_stream_event,
 )
 from iac_code.a2a.exposure import A2AExposureType
+from iac_code.a2a.input_required import PermissionInputRegistry, PermissionResponse
+from iac_code.services.permission_wait import (
+    PermissionWaitCheckpointStore,
+    PermissionWaitCoordinator,
+    PermissionWaitPolicy,
+    permission_execution_identity,
+)
 from iac_code.services.permissions.audit import fingerprint_text
+from iac_code.services.providers.aliyun import AliyunCredential, AliyunCredentials
+from iac_code.services.session_backup import BackupReason, SessionBackupBlocked
+from iac_code.services.session_storage import SessionStorage
 from iac_code.tools.cloud.aliyun.result_contract import ALIYUN_HTTP_METADATA_KEY
 from iac_code.types.stream_events import (
     ErrorEvent,
@@ -30,6 +43,62 @@ from iac_code.types.stream_events import (
 )
 
 from .fakes import FakeEventQueue, UnknownEvent, pending_future
+
+
+class _ObservedBoundaryBackup:
+    def __init__(
+        self,
+        queue: FakeEventQueue,
+        store: PermissionWaitCheckpointStore,
+        *,
+        fail: bool = False,
+        shared_committed: bool = True,
+    ) -> None:
+        self.queue = queue
+        self.store = store
+        self.fail = fail
+        self.shared_committed = shared_committed
+        self.calls: list[tuple[BackupReason, bool]] = []
+
+    def backup_session(self, _cwd, _session_id, *, reason, critical):
+        self.calls.append((reason, critical))
+        if len(self.calls) == 1:
+            assert self.queue.events == []
+        paths = list(self.store.paths.permission_waits_dir.glob("pwb_*.json"))
+        assert len(paths) == 1
+        assert json.loads(paths[0].read_text(encoding="utf-8"))["phase"] == "WAITING"
+        if self.fail:
+            raise RuntimeError("shared backup failed")
+        return SimpleNamespace(
+            enabled=True,
+            succeeded=True,
+            retry_count=0,
+            shared_committed=self.shared_committed,
+        )
+
+
+def _durable_permission_fixture(tmp_path, monkeypatch):
+    config_dir = tmp_path / "config"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    monkeypatch.setattr(AliyunCredentials, "load", staticmethod(lambda: None))
+    session_id = "session-1"
+    SessionStorage().ensure_v2_session_dir_for_new_session(str(workspace), session_id)
+    store = PermissionWaitCheckpointStore(str(workspace), session_id)
+    registry = PermissionInputRegistry()
+    registry.set_permission_wait_coordinator(PermissionWaitCoordinator(PermissionWaitPolicy()))
+    return workspace, session_id, store, registry
+
+
+def _permission_frame(tool_use_id: str) -> dict:
+    return {
+        "assistantMessageRef": "session.jsonl:0",
+        "assistantMessageDigest": "a" * 64,
+        "orderedToolUseIds": [tool_use_id],
+        "currentIndex": 0,
+        "decisions": [{"toolUseId": tool_use_id, "state": "pending", "source": None, "deniedResult": None}],
+    }
 
 
 def dump(event):
@@ -336,6 +405,312 @@ async def test_permission_request_uses_async_resolver() -> None:
     assert future.result() is True
     dumped = dump(queue.events[0])
     assert dumped["metadata"]["iac_code"]["permission"]["autoApproved"] is True
+
+
+@pytest.mark.asyncio
+async def test_external_permission_is_backed_up_before_input_required_is_visible(tmp_path, monkeypatch) -> None:
+    workspace, session_id, store, registry = _durable_permission_fixture(tmp_path, monkeypatch)
+    queue = FakeEventQueue()
+    backup = _ObservedBoundaryBackup(queue, store)
+    future = pending_future()
+    event = PermissionRequestEvent(
+        tool_name="aliyun_api",
+        tool_input={"product": "ros", "action": "CreateStack", "params": {"StackName": "demo"}},
+        tool_use_id="tool-write",
+        response_future=future,
+        continuation_frame=_permission_frame("tool-write"),
+        audit_context={"principal_ref": "aliyun:principal-fingerprint", "region": "cn-shanghai"},
+    )
+
+    pending = await publish_interactive_permission_boundary(
+        queue,
+        permission_event=event,
+        permission_input_registry=registry,
+        task_id="task-1",
+        context_id="ctx-1",
+        iac_code_session_id=session_id,
+        permission_wait_cwd=str(workspace),
+        permission_wait_backup_service=backup,
+        wait_for_response=False,
+    )
+
+    assert backup.calls == [(BackupReason.INPUT_REQUIRED, True)]
+    assert len(queue.events) == 1
+    assert dump(queue.events[0])["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+    checkpoint = store.list_active()
+    assert len(checkpoint) == 1
+    assert checkpoint[0]["phase"] == "WAITING"
+    assert checkpoint[0]["principalRef"] == "aliyun:principal-fingerprint"
+    assert checkpoint[0]["region"] == "cn-shanghai"
+    await registry.complete(pending)
+    future.cancel()
+
+
+@pytest.mark.asyncio
+async def test_external_permission_decision_is_backed_up_before_future_delivery(tmp_path, monkeypatch) -> None:
+    workspace, session_id, store, registry = _durable_permission_fixture(tmp_path, monkeypatch)
+    queue = FakeEventQueue()
+    backup = _ObservedBoundaryBackup(queue, store)
+    future = pending_future()
+    event = PermissionRequestEvent(
+        tool_name="aliyun_api",
+        tool_input={"product": "ros", "action": "CreateStack", "params": {"StackName": "demo"}},
+        tool_use_id="tool-write",
+        response_future=future,
+        continuation_frame=_permission_frame("tool-write"),
+    )
+    pending = await publish_interactive_permission_boundary(
+        queue,
+        permission_event=event,
+        permission_input_registry=registry,
+        task_id="task-1",
+        context_id="ctx-1",
+        iac_code_session_id=session_id,
+        permission_wait_cwd=str(workspace),
+        permission_wait_backup_service=backup,
+        wait_for_response=False,
+    )
+
+    approved = await registry.answer(
+        PermissionResponse(
+            task_id="task-1",
+            context_id="ctx-1",
+            request_task_id="task-1",
+            input_id=pending.input_id,
+            tool_use_id="tool-write",
+            decision="allow_once",
+        )
+    )
+
+    assert approved is True
+    assert backup.calls == [(BackupReason.INPUT_REQUIRED, True), (BackupReason.INPUT_REQUIRED, True)]
+    assert future.result() is True
+    checkpoint = store.load(str(pending.boundary_id))
+    assert checkpoint["decision"]["backupStatus"] == "committed"
+    assert checkpoint["decision"]["status"] == "applied"
+    await registry.complete(pending)
+
+
+@pytest.mark.asyncio
+async def test_failed_decision_backup_keeps_claim_retriable_without_delivering_future(tmp_path, monkeypatch) -> None:
+    workspace, session_id, store, registry = _durable_permission_fixture(tmp_path, monkeypatch)
+    queue = FakeEventQueue()
+    backup = _ObservedBoundaryBackup(queue, store)
+    future = pending_future()
+    event = PermissionRequestEvent(
+        tool_name="aliyun_api",
+        tool_input={"product": "ros", "action": "CreateStack"},
+        tool_use_id="tool-write",
+        response_future=future,
+        continuation_frame=_permission_frame("tool-write"),
+    )
+    pending = await publish_interactive_permission_boundary(
+        queue,
+        permission_event=event,
+        permission_input_registry=registry,
+        task_id="task-1",
+        context_id="ctx-1",
+        iac_code_session_id=session_id,
+        permission_wait_cwd=str(workspace),
+        permission_wait_backup_service=backup,
+        wait_for_response=False,
+    )
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id=pending.input_id,
+        tool_use_id="tool-write",
+        decision="allow_once",
+    )
+
+    backup.fail = True
+    with pytest.raises(RuntimeError, match="shared backup failed"):
+        await registry.answer(response)
+    assert future.done() is False
+    checkpoint = store.load(str(pending.boundary_id))
+    assert checkpoint["decision"]["status"] == "claimed"
+    assert checkpoint["decision"]["backupStatus"] == "pending"
+
+    backup.fail = False
+    assert await registry.answer(response) is True
+    assert future.result() is True
+    checkpoint = store.load(str(pending.boundary_id))
+    assert checkpoint["decision"]["backupStatus"] == "committed"
+    assert checkpoint["decision"]["status"] == "applied"
+    await registry.complete(pending)
+
+
+@pytest.mark.asyncio
+async def test_live_cloud_permission_rejects_changed_principal_before_claim(tmp_path, monkeypatch) -> None:
+    workspace, session_id, store, registry = _durable_permission_fixture(tmp_path, monkeypatch)
+    queue = FakeEventQueue()
+    backup = _ObservedBoundaryBackup(queue, store)
+    original = AliyunCredential(
+        mode="StsToken",
+        access_key_id="original-access-key-id",
+        access_key_secret="secret",
+        sts_token="token",
+        region_id="cn-hangzhou",
+    )
+    monkeypatch.setattr(AliyunCredentials, "load", staticmethod(lambda: original))
+    tool_input = {"product": "ros", "action": "CreateStack", "region_id": "cn-hangzhou"}
+    principal_ref, region = permission_execution_identity(tool_name="aliyun_api", tool_input=tool_input)
+    future = pending_future()
+    event = PermissionRequestEvent(
+        tool_name="aliyun_api",
+        tool_input=tool_input,
+        tool_use_id="tool-write",
+        response_future=future,
+        continuation_frame=_permission_frame("tool-write"),
+        audit_context={"principal_ref": principal_ref, "region": region},
+    )
+    pending = await publish_interactive_permission_boundary(
+        queue,
+        permission_event=event,
+        permission_input_registry=registry,
+        task_id="task-1",
+        context_id="ctx-1",
+        iac_code_session_id=session_id,
+        permission_wait_cwd=str(workspace),
+        permission_wait_backup_service=backup,
+        wait_for_response=False,
+    )
+    changed = AliyunCredential(
+        mode="StsToken",
+        access_key_id="changed-access-key-id",
+        access_key_secret="secret",
+        sts_token="token",
+        region_id="cn-hangzhou",
+    )
+    monkeypatch.setattr(AliyunCredentials, "load", staticmethod(lambda: changed))
+
+    with pytest.raises(InvalidParamsError, match="cloud execution identity changed"):
+        await registry.answer(
+            PermissionResponse(
+                task_id="task-1",
+                context_id="ctx-1",
+                request_task_id="task-1",
+                input_id=pending.input_id,
+                tool_use_id="tool-write",
+                decision="allow_once",
+            )
+        )
+
+    assert future.done() is False
+    assert store.load(str(pending.boundary_id))["decision"]["status"] == "none"
+    await registry.complete(pending)
+    future.cancel()
+
+
+@pytest.mark.asyncio
+async def test_failed_critical_permission_backup_is_not_visible_or_recoverable(tmp_path, monkeypatch) -> None:
+    workspace, session_id, store, registry = _durable_permission_fixture(tmp_path, monkeypatch)
+    queue = FakeEventQueue()
+    backup = _ObservedBoundaryBackup(queue, store, fail=True)
+    future = pending_future()
+    event = PermissionRequestEvent(
+        tool_name="aliyun_api",
+        tool_input={"product": "ros", "action": "CreateStack"},
+        tool_use_id="tool-write",
+        response_future=future,
+        continuation_frame=_permission_frame("tool-write"),
+    )
+
+    with pytest.raises(RuntimeError, match="shared backup failed"):
+        await publish_interactive_permission_boundary(
+            queue,
+            permission_event=event,
+            permission_input_registry=registry,
+            task_id="task-1",
+            context_id="ctx-1",
+            iac_code_session_id=session_id,
+            permission_wait_cwd=str(workspace),
+            permission_wait_backup_service=backup,
+            wait_for_response=False,
+        )
+
+    assert queue.events == []
+    assert store.list_active() == []
+    assert future.result() is False
+
+
+@pytest.mark.asyncio
+async def test_uncommitted_shared_permission_backup_is_not_visible_or_recoverable(tmp_path, monkeypatch) -> None:
+    workspace, session_id, store, registry = _durable_permission_fixture(tmp_path, monkeypatch)
+    queue = FakeEventQueue()
+    backup = _ObservedBoundaryBackup(queue, store, shared_committed=False)
+    future = pending_future()
+    event = PermissionRequestEvent(
+        tool_name="aliyun_api",
+        tool_input={"product": "ros", "action": "CreateStack"},
+        tool_use_id="tool-write",
+        response_future=future,
+        continuation_frame=_permission_frame("tool-write"),
+    )
+
+    with pytest.raises(SessionBackupBlocked, match="did not reach the shared target"):
+        await publish_interactive_permission_boundary(
+            queue,
+            permission_event=event,
+            permission_input_registry=registry,
+            task_id="task-1",
+            context_id="ctx-1",
+            iac_code_session_id=session_id,
+            permission_wait_cwd=str(workspace),
+            permission_wait_backup_service=backup,
+            wait_for_response=False,
+        )
+
+    assert queue.events == []
+    assert store.list_active() == []
+    assert future.result() is False
+
+
+@pytest.mark.parametrize("resolution", ["auto_approve", "resolver_allow", "resolver_deny"])
+@pytest.mark.asyncio
+async def test_a2a_internal_permission_resolution_creates_no_checkpoint_or_critical_backup(
+    tmp_path,
+    monkeypatch,
+    resolution,
+) -> None:
+    workspace, session_id, store, registry = _durable_permission_fixture(tmp_path, monkeypatch)
+    queue = FakeEventQueue()
+    backup = _ObservedBoundaryBackup(queue, store)
+    future = pending_future()
+    event = PermissionRequestEvent(
+        tool_name="bash",
+        tool_input={"cmd": "pwd"},
+        tool_use_id="tool-1",
+        response_future=future,
+    )
+    resolver = None
+    auto_approve = resolution == "auto_approve"
+    if resolution == "resolver_allow":
+
+        def resolver(_request):
+            return True
+    elif resolution == "resolver_deny":
+
+        def resolver(_request):
+            return False
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=event,
+        permission_resolver=resolver,
+        permission_input_registry=registry,
+        auto_approve_permissions=auto_approve,
+        iac_code_session_id=session_id,
+        permission_wait_cwd=str(workspace),
+        permission_wait_backup_service=backup,
+    )
+
+    assert future.result() is (resolution != "resolver_deny")
+    assert store.list_active() == []
+    assert backup.calls == []
 
 
 @pytest.mark.asyncio

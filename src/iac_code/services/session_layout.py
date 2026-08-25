@@ -172,6 +172,14 @@ class SessionPaths:
         return self.session_dir / "tool-results"
 
     @property
+    def permission_waits_dir(self) -> Path:
+        return self.session_dir / "permission-waits"
+
+    @property
+    def permission_waits_lock_path(self) -> Path:
+        return self.permission_waits_dir / ".lock"
+
+    @property
     def a2a_dir(self) -> Path:
         return self.session_dir / "a2a"
 

@@ -372,6 +372,43 @@ def cross_process_append_lock(path: Path) -> Iterator[None]:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
+@contextmanager
+def cross_process_file_lock(lock_path: Path) -> Iterator[None]:
+    """Acquire the exact cross-process lock file supplied by the caller.
+
+    Unlike :func:`cross_process_append_lock`, this helper does not derive a
+    sibling name.  Recovery protocols that define a stable lock path can use
+    it without accidentally creating ``..lock.lock`` files.
+    """
+
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with _open_lock_binary(lock_path) as lock_file:
+        if sys.platform == "win32":
+            import msvcrt
+
+            try:
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+            except OSError as exc:
+                raise RuntimeError(f"could not acquire file lock {lock_path}") from exc
+            try:
+                yield
+            finally:
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            except OSError as exc:
+                raise RuntimeError(f"could not acquire file lock {lock_path}") from exc
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
 _cross_process_append_lock = cross_process_append_lock
 
 

@@ -392,6 +392,7 @@ def create_app(
     supported_interfaces: list[dict[str, str]] | None = None,
     agent_extensions: object | None = None,
     auto_approve_permissions: bool = False,
+    permission_wait: object | None = None,
     thinking_exposure: object | None = None,
     idle_shutdown_seconds: float = 0,
     idle_shutdown_callback: Callable[[], None] | None = None,
@@ -423,6 +424,7 @@ def create_app(
         supported_interfaces=supported_interfaces,
         agent_extensions=agent_extensions,
         auto_approve_permissions=auto_approve_permissions,
+        permission_wait=permission_wait,
         thinking_exposure=thinking_exposure,
     )
     from iac_code.a2a.pipeline_recovery import A2APipelineRecoveryService
@@ -607,6 +609,7 @@ def run_server(
     push_consumer_name: str | None = None,
     push_lease_timeout_ms: int = 300_000,
     auto_approve_permissions: bool = False,
+    permission_wait: object | None = None,
     thinking_exposure: object | None = None,
     idle_shutdown_seconds: float = 0,
 ) -> None:
@@ -678,6 +681,7 @@ def run_server(
         "push_lease_timeout_ms": push_lease_timeout_ms,
         "supported_interfaces": supported_interfaces,
         "auto_approve_permissions": auto_approve_permissions,
+        "permission_wait": permission_wait,
         "thinking_exposure": thinking_exposure,
     }
 
@@ -783,6 +787,7 @@ def run_server(
             push_lease_timeout_ms=push_lease_timeout_ms,
             supported_interfaces=supported_interfaces,
             auto_approve_permissions=auto_approve_permissions,
+            permission_wait=permission_wait,
             thinking_exposure=thinking_exposure,
             idle_shutdown_seconds=idle_shutdown_seconds,
             idle_shutdown_callback=request_idle_shutdown,

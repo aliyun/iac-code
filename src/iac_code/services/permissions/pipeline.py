@@ -40,10 +40,32 @@ def _is_explicit_operation_write_allow(result: PermissionResult, tool: Tool) -> 
     )
 
 
+def _is_explicit_operation_ask(result: PermissionResult, tool: Tool) -> bool:
+    """Keep an operation-scoped ask rule authoritative in bypass mode."""
+
+    return (
+        _uses_operation_scoped_permissions(tool)
+        and result.behavior == "ask"
+        and result.audit is not None
+        and result.audit.reason_type == "rule"
+    )
+
+
 def _uses_operation_scoped_permissions(tool: Tool) -> bool:
     """Read the optional capability without breaking legacy duck-typed tools."""
 
     return bool(getattr(tool, "uses_operation_scoped_permissions", False))
+
+
+def _is_read_only_operation_allow(result: PermissionResult, tool: Tool) -> bool:
+    """Keep metadata-confirmed operation reads automatic despite a bare ask rule."""
+
+    return (
+        _uses_operation_scoped_permissions(tool)
+        and result.behavior == "allow"
+        and result.audit is not None
+        and result.audit.is_read_only is True
+    )
 
 
 def _get_tool_rule(tool_name: str, rules_by_source: dict[str, list[str]]) -> tuple[str, str] | None:
@@ -139,7 +161,7 @@ async def check_tool_permission(
     if result.behavior == "deny":
         return result
 
-    if _is_safety_check_ask(result):
+    if _is_safety_check_ask(result) and context.mode != PermissionMode.BYPASS_PERMISSIONS:
         return _with_prompt_audit(tool, input, result)
 
     if result.behavior == "ask" and ask_rule is not None:
@@ -160,7 +182,7 @@ async def check_tool_permission(
             ),
         )
 
-    if result.behavior == "allow" and ask_rule is not None:
+    if result.behavior == "allow" and ask_rule is not None and not _is_read_only_operation_allow(result, tool):
         source, rule = ask_rule
         detail = _("matched ask rule(s): {}").format(tool.name)
         return replace(
@@ -180,14 +202,14 @@ async def check_tool_permission(
             ),
         )
 
-    if _uses_operation_scoped_permissions(tool) and _is_sticky_ask(result):
+    if _is_explicit_operation_ask(result, tool) or (
+        context.mode != PermissionMode.BYPASS_PERMISSIONS
+        and _uses_operation_scoped_permissions(tool)
+        and _is_sticky_ask(result)
+    ):
         return _with_prompt_audit(tool, input, result)
 
-    if (
-        context.mode == PermissionMode.BYPASS_PERMISSIONS
-        and not _is_safety_check_ask(result)
-        and not _is_explicit_operation_write_allow(result, tool)
-    ):
+    if context.mode == PermissionMode.BYPASS_PERMISSIONS and not _is_explicit_operation_write_allow(result, tool):
         return replace(
             result,
             behavior="allow",
