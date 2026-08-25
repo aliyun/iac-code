@@ -110,6 +110,13 @@ def _strict_log_value(value: Any) -> Any:
     return value
 
 
+def _has_substantive_conclusion(step_result: StepResult) -> bool:
+    """Guard the state machine against tool success that persisted no conclusion."""
+    if step_result.rollback_request:
+        return True
+    return isinstance(step_result.conclusion, dict) and bool(step_result.conclusion)
+
+
 def _entry_exists_no_follow(path: Path) -> bool:
     try:
         path.stat(follow_symlinks=False)
@@ -4041,15 +4048,20 @@ class PipelineRunner:
                                 return
                         yield event
 
-            if (
-                step_result is not None
-                and step_result.status == StepStatus.COMPLETED
-                and not step_result.rollback_request
-            ):
-                self._mark_attempt_status(attempt.get("attempt_id"), "completed")
-
             if step_result is None or step_result.status == StepStatus.FAILED:
                 reason = (step_result.error if step_result else None) or "No result"
+            elif not _has_substantive_conclusion(step_result):
+                reason = (
+                    f"Step {step.step_id} reported completion without a non-empty conclusion; "
+                    "refusing to advance the pipeline"
+                )
+            else:
+                reason = None
+
+            if reason is None and not step_result.rollback_request:
+                self._mark_attempt_status(attempt.get("attempt_id"), "completed")
+
+            if reason is not None:
                 failure = public_error(
                     message=reason,
                     error_type="StepFailed",

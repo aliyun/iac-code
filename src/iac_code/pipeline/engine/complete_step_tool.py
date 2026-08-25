@@ -300,6 +300,9 @@ class CompleteStepTool(Tool):
 
     def _validate_conclusion(self, conclusion: dict) -> str | None:
         """Validate conclusion against schema. Returns error message or None."""
+        non_empty_error = self._validate_conclusion_non_empty(conclusion)
+        if non_empty_error is not None:
+            return non_empty_error
         schema = self._step_config.conclusion_schema
         if not schema:
             return None
@@ -314,6 +317,26 @@ class CompleteStepTool(Tool):
                 sanitize_strict_text(str(e.validator)),
             )
             return public_message
+
+    def _validate_conclusion_non_empty(self, conclusion: Any) -> str | None:
+        """Reject conclusions that carry no content at all.
+
+        Steps without a ``conclusion_schema`` would otherwise skip validation
+        entirely, letting ``complete_step`` report success while persisting a
+        null/empty conclusion and leaving the step stuck in ``working``.
+        ``normalize_input`` strips ``None`` values, so ``{"field": None}``
+        reaches this check as ``{}``.
+        """
+        if not isinstance(conclusion, dict):
+            return _(
+                "complete_step.conclusion must be a non-empty object describing the outcome of step {step_id}."
+            ).format(step_id=self._step_config.step_id)
+        if not conclusion:
+            return _(
+                "complete_step.conclusion for step {step_id} is empty. "
+                "Submit the actual step outcome; an empty conclusion cannot complete the step."
+            ).format(step_id=self._step_config.step_id)
+        return None
 
     def _validate_completion_guards(self, conclusion: dict) -> str | None:
         for guard in self._completion_guards:
@@ -943,7 +966,7 @@ class CompleteStepTool(Tool):
         if rollback_target_error is not None:
             return rollback_target_error
 
-        conclusion = tool_input["conclusion"]
+        conclusion = tool_input.get("conclusion")
         rollback = tool_input.get("rollback_request")
         rollback_tuple = (rollback["target_step"], rollback["reason"]) if rollback else None
         if rollback_tuple and self._step_config.rollback_count >= self._step_config.max_rollbacks:
@@ -1123,7 +1146,7 @@ class CompleteStepTool(Tool):
         if rollback_target_error is not None:
             return ToolResult(content=rollback_target_error, is_error=True)
 
-        conclusion = tool_input["conclusion"]
+        conclusion = tool_input.get("conclusion")
         rollback = tool_input.get("rollback_request")
         rollback_tuple = (rollback["target_step"], rollback["reason"]) if rollback else None
 

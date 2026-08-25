@@ -1516,6 +1516,41 @@ async def test_final_completed_save_failure_yields_persistence_failure_event(tmp
 
 
 @pytest.mark.asyncio
+async def test_completed_step_without_conclusion_does_not_advance(tmp_path):
+    """A COMPLETED result with an empty conclusion must not move the state machine.
+
+    ``complete_step`` reporting success is not sufficient evidence that the step
+    really finished: without a persisted conclusion the step would advance while
+    its conclusion stayed null.
+    """
+    runner = _build_two_step_runner(tmp_path)
+    executed_steps = []
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        executed_steps.append(step.step_id)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={})
+
+    runner._step_executor.execute = fake_execute
+
+    events = []
+    async for event in runner._continue_from_current():
+        events.append(event)
+
+    assert executed_steps == ["a"]
+    assert runner.state_machine.current_step.step_id == "a"
+    assert any(
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.STEP_FAILED
+        and event.step_id == "a"
+        and "non-empty conclusion" in str(event.data)
+        for event in events
+    )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_COMPLETED for event in events
+    )
+
+
+@pytest.mark.asyncio
 async def test_resume_input_save_failure_stops_before_input_received_event(tmp_path):
     runner = _build_two_step_runner(tmp_path, auto_advance_first=False)
     runner.session = FailingUserInputCheckpointPipelineSession()

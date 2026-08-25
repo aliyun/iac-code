@@ -639,6 +639,36 @@ class TestStepExecutor:
         assert results[0].error == "No conclusion extracted"
 
     @pytest.mark.asyncio
+    async def test_failed_when_complete_step_succeeds_without_conclusion(self, tmp_path):
+        """A complete_step success carrying no conclusion must not complete the step.
+
+        The tool result is not an error, so the executor used to coerce the
+        missing conclusion to ``{}`` and still report ``COMPLETED``, leaving the
+        persisted conclusion null while the step never advanced.
+        """
+        events = [
+            ToolUseStartEvent(tool_use_id="tu_complete", name="complete_step"),
+            ToolUseEndEvent(tool_use_id="tu_complete", name="complete_step", input={}),
+            ToolResultEvent(tool_use_id="tu_complete", tool_name="complete_step", result="ok", is_error=False),
+        ]
+        fake_loop = _make_fake_agent_loop_class(events)
+        executor = _make_executor(tmp_path)
+        step = _make_step()
+        step.on_exit = MagicMock()
+        ctx = PipelineContext(SIMPLE_DEPS)
+
+        collected = []
+        with patch("iac_code.agent.agent_loop.AgentLoop", fake_loop):
+            async for event in executor.execute(step, ctx, "test_session"):
+                collected.append(event)
+
+        results = [e for e in collected if isinstance(e, StepResult)]
+        assert [result.status for result in results] == [StepStatus.FAILED]
+        assert results[0].error == "complete_step reported success without a non-empty conclusion"
+        assert ctx.get_conclusion(step.conclusion_field) is None
+        step.on_exit.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_nudge_retry_succeeds_on_second_attempt(self, tmp_path, caplog):
         """When LLM forgets complete_step on first attempt, nudge makes it call on retry."""
         call_count = [0]
@@ -3143,16 +3173,15 @@ async def test_resumed_step_returns_reconstructed_complete_step(monkeypatch, tmp
 
 
 @pytest.mark.asyncio
-async def test_resumed_completed_step_sets_empty_conclusion_and_calls_on_exit(monkeypatch, tmp_path):
-    class FailIfAgentLoopIsCreated:
-        def __init__(self, *args, **kwargs):
-            raise AssertionError("AgentLoop should not be created for already-completed transcript")
+async def test_resumed_completed_step_rejects_empty_conclusion(tmp_path):
+    """An empty conclusion must not be restored as a completed step.
 
-    monkeypatch.setattr("iac_code.agent.agent_loop.AgentLoop", FailIfAgentLoopIsCreated)
-
+    ``complete_step`` returning success with no conclusion previously produced a
+    ``COMPLETED`` result carrying ``{}``, leaving the step's persisted
+    conclusion null while the step never really advanced.
+    """
     executor = _make_executor(tmp_path)
     step = _make_step()
-    step.on_exit = MagicMock()
     ctx = PipelineContext(SIMPLE_DEPS)
     resume_messages = [
         Message(
@@ -3161,24 +3190,9 @@ async def test_resumed_completed_step_sets_empty_conclusion_and_calls_on_exit(mo
         ),
         Message(role="user", content=[ToolResultBlock(tool_use_id="tu_complete", content="ok", is_error=False)]),
     ]
+    tool_registry = executor._build_step_tools(step, ctx, "start", {})
 
-    results = []
-    async for event in executor.execute(
-        step,
-        ctx,
-        session_id="root",
-        attempt_id="att_0001",
-        transcript_id="transcript_att_0001",
-        resume_messages=resume_messages,
-    ):
-        if isinstance(event, StepResult):
-            results.append(event)
-
-    assert len(results) == 1
-    assert results[0].status == StepStatus.COMPLETED
-    assert results[0].conclusion == {}
-    assert ctx.get_conclusion(step.conclusion_field) == {}
-    step.on_exit.assert_called_once_with(ctx, {})
+    assert executor._restore_completed_step_result(step, tool_registry, resume_messages) is None
 
 
 @pytest.mark.asyncio

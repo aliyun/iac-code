@@ -79,6 +79,11 @@ def _completion_guard_tool_result_content(event: ToolResultEvent) -> str:
         return event.result
 
 
+def _is_substantive_conclusion(conclusion: Any) -> bool:
+    """A step may only be marked completed when its conclusion carries content."""
+    return isinstance(conclusion, dict) and bool(conclusion)
+
+
 @dataclass
 class StepAgentLoopContext:
     """AgentLoop context built by the same path used for step execution."""
@@ -426,19 +431,26 @@ class StepExecutor:
         if terminal_failed_step_result is not None:
             step_result = terminal_failed_step_result
         elif complete_step_input is not None:
-            conclusion = complete_step_input.get("conclusion", {})
+            conclusion = complete_step_input.get("conclusion")
             conclusion = self._merge_preserved_candidate_selection(preserved_selection, conclusion)
-            rollback = complete_step_input.get("rollback_request")
-            rollback_tuple = (rollback["target_step"], rollback["reason"]) if rollback else None
-            step_result = StepResult(
-                step_id=step.step_id,
-                status=StepStatus.COMPLETED,
-                conclusion=conclusion,
-                rollback_request=rollback_tuple,
-            )
-            context.set_conclusion(step.conclusion_field, conclusion)
-            if step.on_exit:
-                step.on_exit(context, conclusion)
+            if not _is_substantive_conclusion(conclusion):
+                step_result = StepResult(
+                    step_id=step.step_id,
+                    status=StepStatus.FAILED,
+                    error="complete_step reported success without a non-empty conclusion",
+                )
+            else:
+                rollback = complete_step_input.get("rollback_request")
+                rollback_tuple = (rollback["target_step"], rollback["reason"]) if rollback else None
+                step_result = StepResult(
+                    step_id=step.step_id,
+                    status=StepStatus.COMPLETED,
+                    conclusion=conclusion,
+                    rollback_request=rollback_tuple,
+                )
+                context.set_conclusion(step.conclusion_field, conclusion)
+                if step.on_exit:
+                    step.on_exit(context, conclusion)
         else:
             step_result = StepResult(
                 step_id=step.step_id,
@@ -604,7 +616,9 @@ class StepExecutor:
         elif complete_step_tool is not None:
             complete_step_tool.normalize_input(normalized_input)
 
-        conclusion = normalized_input.get("conclusion", {})
+        conclusion = normalized_input.get("conclusion")
+        if not _is_substantive_conclusion(conclusion):
+            return None
         rollback = normalized_input.get("rollback_request")
         rollback_tuple = None
         if isinstance(rollback, dict) and rollback.get("target_step") and rollback.get("reason"):
@@ -613,7 +627,7 @@ class StepExecutor:
         return StepResult(
             step_id=step.step_id,
             status=StepStatus.COMPLETED,
-            conclusion=conclusion if isinstance(conclusion, dict) else {},
+            conclusion=conclusion,
             rollback_request=rollback_tuple,
         )
 

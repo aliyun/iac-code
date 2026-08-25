@@ -270,6 +270,54 @@ class TestCompleteStepToolExecute:
         assert result.metadata is None
         assert "Rollback target count cannot exceed 5" in result.content
 
+    @pytest.mark.asyncio
+    async def test_rejects_empty_conclusion_for_step_without_schema(self, tool):
+        result = await tool.execute(tool_input={"conclusion": {}}, context=ToolContext())
+
+        assert result.is_error
+        assert result.metadata is None
+        assert "intent_parsing" in result.content
+
+    @pytest.mark.asyncio
+    async def test_rejects_conclusion_whose_fields_are_all_null(self, tool):
+        # normalize_input strips None values, so this reaches validation as {}.
+        result = await tool.execute(
+            tool_input={"conclusion": {"is_infra_intent": None, "confidence": None}},
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert result.metadata is None
+
+    @pytest.mark.asyncio
+    async def test_rejects_non_object_conclusion(self, tool):
+        result = await tool.execute(tool_input={"conclusion": "done"}, context=ToolContext())
+
+        assert result.is_error
+        assert result.metadata is None
+
+    @pytest.mark.asyncio
+    async def test_empty_conclusion_fails_the_step_after_retry_budget(self):
+        config = StepConfig(
+            step_id="intent_parsing",
+            conclusion_field="intent",
+            forward=None,
+            max_conclusion_retries=1,
+        )
+        tool = CompleteStepTool(config)
+
+        first = await tool.execute(tool_input={"conclusion": {}}, context=ToolContext())
+        second = await tool.execute(tool_input={"conclusion": {}}, context=ToolContext())
+
+        assert first.is_error
+        assert first.metadata is None
+        assert second.is_error
+        assert second.metadata["step_result"].status == StepStatus.FAILED
+
+    def test_validate_completion_input_rejects_empty_conclusion(self, tool):
+        assert tool.validate_completion_input({"conclusion": {}}) is not None
+        assert tool.validate_completion_input({"conclusion": {"is_infra_intent": True}}) is None
+
 
 class TestCompletionGuards:
     @staticmethod
