@@ -1554,7 +1554,7 @@ def test_run_chat_consumes_fake_cli_stream_without_network(monkeypatch, tmp_path
     result = bridge.run_chat(args)
     assert result["state"] == "turn-completed"
     assert result["finalText"] == "done"
-    assert captured["cwd"] == str(tmp_path)
+    assert os.path.normcase(captured["cwd"]) == os.path.normcase(str(tmp_path))
     assert captured["command"][captured["command"].index("--Query") + 1] == "hello"
 
 

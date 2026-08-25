@@ -250,12 +250,22 @@ def _pid_alive(pid: Any) -> bool:
     if os.name == "nt":
         try:
             import ctypes
+            from ctypes import wintypes
 
-            handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel32.OpenProcess.restype = wintypes.HANDLE
+            kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+            kernel32.WaitForSingleObject.restype = wintypes.DWORD
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.CloseHandle.restype = wintypes.BOOL
+            handle = kernel32.OpenProcess(0x00100000, False, pid)
             if not handle:
                 return False
-            ctypes.windll.kernel32.CloseHandle(handle)
-            return True
+            try:
+                return kernel32.WaitForSingleObject(handle, 0) == 0x00000102
+            finally:
+                kernel32.CloseHandle(handle)
         except (AttributeError, OSError):
             return False
     try:
