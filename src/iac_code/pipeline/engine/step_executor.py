@@ -15,6 +15,7 @@ from typing import Any
 
 from iac_code.agent.message import ContentBlock, Message
 from iac_code.agent.system_prompt import SECTION_BUILDERS, build_base_sections
+from iac_code.i18n import _
 from iac_code.mcp.prompt_dispatch import mcp_prompt_command_stream
 from iac_code.pipeline.engine.complete_step_tool import CompleteStepTool
 from iac_code.pipeline.engine.completion_guard_state import (
@@ -77,6 +78,28 @@ def _completion_guard_tool_result_content(event: ToolResultEvent) -> str:
     except OSError:
         logger.warning("Failed to read externalized tool result for completion guard", exc_info=True)
         return event.result
+
+
+def _failure_error_from_conclusion(step: StepSpec, conclusion: Any) -> str | None:
+    """Return a user-facing error when the conclusion matches the step failure condition."""
+    condition = step.failure_condition
+    if not condition or not isinstance(conclusion, dict):
+        return None
+
+    expected = condition.get("value")
+    actual = conclusion.get(str(condition.get("field", "")))
+    matched = actual is expected if isinstance(expected, bool) else actual == expected
+    if not matched:
+        return None
+
+    reason_fields = condition.get("reason_fields") or []
+    reasons = []
+    for name in reason_fields:
+        value = conclusion.get(name)
+        if isinstance(value, str) and value.strip():
+            reasons.append(f"{name}={value.strip()}")
+    reason = "; ".join(reasons) if reasons else _("no failure reason reported")
+    return _("Step {step_id} reported a failed conclusion: {reason}").format(step_id=step.step_id, reason=reason)
 
 
 @dataclass
@@ -430,15 +453,17 @@ class StepExecutor:
             conclusion = self._merge_preserved_candidate_selection(preserved_selection, conclusion)
             rollback = complete_step_input.get("rollback_request")
             rollback_tuple = (rollback["target_step"], rollback["reason"]) if rollback else None
-            step_result = StepResult(
-                step_id=step.step_id,
-                status=StepStatus.COMPLETED,
-                conclusion=conclusion,
-                rollback_request=rollback_tuple,
-            )
             context.set_conclusion(step.conclusion_field, conclusion)
             if step.on_exit:
                 step.on_exit(context, conclusion)
+            failure_error = None if rollback_tuple else _failure_error_from_conclusion(step, conclusion)
+            step_result = StepResult(
+                step_id=step.step_id,
+                status=StepStatus.FAILED if failure_error else StepStatus.COMPLETED,
+                conclusion=conclusion,
+                rollback_request=rollback_tuple,
+                error=failure_error,
+            )
         else:
             step_result = StepResult(
                 step_id=step.step_id,
@@ -610,11 +635,14 @@ class StepExecutor:
         if isinstance(rollback, dict) and rollback.get("target_step") and rollback.get("reason"):
             rollback_tuple = (str(rollback["target_step"]), str(rollback["reason"]))
 
+        conclusion = conclusion if isinstance(conclusion, dict) else {}
+        failure_error = None if rollback_tuple else _failure_error_from_conclusion(step, conclusion)
         return StepResult(
             step_id=step.step_id,
-            status=StepStatus.COMPLETED,
-            conclusion=conclusion if isinstance(conclusion, dict) else {},
+            status=StepStatus.FAILED if failure_error else StepStatus.COMPLETED,
+            conclusion=conclusion,
             rollback_request=rollback_tuple,
+            error=failure_error,
         )
 
     def _build_full_system_prompt(self, step: StepSpec, context: PipelineContext) -> str:

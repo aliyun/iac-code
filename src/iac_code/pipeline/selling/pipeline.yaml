@@ -589,6 +589,10 @@ steps:
     interrupt_judge_failure: pause
     context_fields: [intent, selected_plan, evaluated_candidates]
     hooks_file: hooks/deploying.py
+    failure_condition:
+      field: status
+      value: failed
+      reason_fields: [status_reason, error]
     completion_guards:
       - when_conclusion_field_equals:
           status: success
@@ -600,6 +604,10 @@ steps:
           status_in: [CREATE_COMPLETE]
           match_conclusion_field: stack_id
         message_key: deploy_wait_create_complete
+      - when_conclusion_field_equals:
+          status: failed
+        required_conclusion_field: status_reason
+        message_key: deploy_report_failure_reason
     tools:
       include: []
       exclude:

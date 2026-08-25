@@ -56,6 +56,10 @@ _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
         "or confirm that it should not be handled for now."
     ),
     "deploy_wait_create_complete": ("A successful deployment must wait until ros_deploy returns CREATE_COMPLETE."),
+    "deploy_report_failure_reason": (
+        "A failed deployment must report the ROS status_reason to the user and then retry, "
+        "roll back, or return to candidate selection."
+    ),
     "hard_constraint_verification_required": (
         "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
         "and evidence."
@@ -96,6 +100,10 @@ def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
             "or confirm that it should not be handled for now."
         ),
         _("A successful deployment must wait until ros_deploy returns CREATE_COMPLETE."),
+        _(
+            "A failed deployment must report the ROS status_reason to the user and then retry, "
+            "roll back, or return to candidate selection."
+        ),
         _(
             "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
             "and evidence."

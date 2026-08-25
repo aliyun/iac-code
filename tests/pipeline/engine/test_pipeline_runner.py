@@ -4195,6 +4195,78 @@ class TestExitCondition:
         assert completed[0].data.get("early_exit") is None
 
 
+class TestFailureCondition:
+    @staticmethod
+    def _write_pipeline_with_failure_condition(tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "step1.md").write_text("Step1.", encoding="utf-8")
+        (tmp_path / "prompts" / "step2.md").write_text("Step2.", encoding="utf-8")
+        (tmp_path / "pipeline.yaml").write_text(
+            dedent("""\
+            name: test
+            context_dependencies:
+              intent: []
+              deployment: [intent]
+            max_rollbacks: 1
+            steps:
+              - id: intent_parsing
+                conclusion_field: intent
+                forward: deploying
+                prompt: prompts/step1.md
+              - id: deploying
+                conclusion_field: deployment
+                forward: null
+                prompt: prompts/step2.md
+                failure_condition:
+                  field: status
+                  value: failed
+                  reason_fields: [status_reason]
+        """),
+            encoding="utf-8",
+        )
+
+    @pytest.mark.asyncio
+    async def test_failed_deployment_conclusion_emits_step_failed(self, tmp_path):
+        self._write_pipeline_with_failure_condition(tmp_path)
+        runner = PipelineRunner(
+            pipeline_dir=tmp_path,
+            provider_manager=MagicMock(),
+            base_tool_registry=MagicMock(),
+            session_storage=FakeSessionStorage(),
+            session_id="test123",
+        )
+
+        async def mock_execute(step, context, session_id, *, user_message=None, **kwargs):
+            if step.step_id == "intent_parsing":
+                conclusion = {"requirement": "deploy"}
+                context.set_conclusion(step.conclusion_field, conclusion)
+                yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+                return
+            conclusion = {"status": "failed", "status_reason": "CREATE_FAILED: quota exceeded"}
+            context.set_conclusion(step.conclusion_field, conclusion)
+            yield StepResult(
+                step_id=step.step_id,
+                status=StepStatus.FAILED,
+                conclusion=conclusion,
+                error="Step deploying reported a failed conclusion: status_reason=CREATE_FAILED: quota exceeded",
+            )
+
+        runner._step_executor.execute = mock_execute
+
+        events = [event async for event in runner.run("部署一个网站")]
+
+        failed = [e for e in events if isinstance(e, PipelineEvent) and e.type == PipelineEventType.STEP_FAILED]
+        assert len(failed) == 1
+        assert failed[0].step_id == "deploying"
+        assert "CREATE_FAILED: quota exceeded" in failed[0].data["error"]
+
+        completed = [
+            e for e in events if isinstance(e, PipelineEvent) and e.type == PipelineEventType.PIPELINE_COMPLETED
+        ]
+        assert len(completed) == 1
+        assert completed[0].data.get("failed") is True
+
+
 class TestInvalidRollbackTarget:
     """Regression: hallucinated rollback target must not crash the stream (P-C3)."""
 

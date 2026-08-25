@@ -1,5 +1,6 @@
 import json
 import logging
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
@@ -352,6 +353,131 @@ class TestStepExecutor:
 
         results = [e for e in collected if isinstance(e, StepResult)]
         assert results[0].rollback_request == ("spec_recommending", "cost_too_high")
+
+    @pytest.mark.asyncio
+    async def test_failure_condition_maps_conclusion_to_failed_step_result(self, tmp_path):
+        events = [
+            ToolUseStartEvent(tool_use_id="tu_1", name="complete_step"),
+            ToolUseEndEvent(
+                tool_use_id="tu_1",
+                name="complete_step",
+                input={
+                    "conclusion": {
+                        "status": "failed",
+                        "status_reason": "CREATE_FAILED: quota exceeded",
+                        "error": "deployment failed",
+                    }
+                },
+            ),
+            ToolResultEvent(tool_use_id="tu_1", tool_name="complete_step", result="ok"),
+        ]
+        fake_loop = _make_fake_agent_loop_class(events)
+        executor = _make_executor(tmp_path)
+        step = replace(
+            _make_step(),
+            failure_condition={
+                "field": "status",
+                "value": "failed",
+                "reason_fields": ["status_reason", "error"],
+            },
+        )
+        ctx = PipelineContext(SIMPLE_DEPS)
+
+        collected = []
+        with patch("iac_code.agent.agent_loop.AgentLoop", fake_loop):
+            async for event in executor.execute(step, ctx, "test_session"):
+                collected.append(event)
+
+        results = [e for e in collected if isinstance(e, StepResult)]
+        assert results[0].status == StepStatus.FAILED
+        assert "CREATE_FAILED: quota exceeded" in results[0].error
+        assert "deployment failed" in results[0].error
+        assert results[0].conclusion["status"] == "failed"
+        assert ctx.get_conclusion("intent")["status"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_failure_condition_keeps_completed_when_condition_not_met(self, tmp_path):
+        events = [
+            ToolUseStartEvent(tool_use_id="tu_1", name="complete_step"),
+            ToolUseEndEvent(
+                tool_use_id="tu_1",
+                name="complete_step",
+                input={"conclusion": {"status": "success", "stack_id": "stack-1"}},
+            ),
+            ToolResultEvent(tool_use_id="tu_1", tool_name="complete_step", result="ok"),
+        ]
+        fake_loop = _make_fake_agent_loop_class(events)
+        executor = _make_executor(tmp_path)
+        step = replace(_make_step(), failure_condition={"field": "status", "value": "failed"})
+        ctx = PipelineContext(SIMPLE_DEPS)
+
+        collected = []
+        with patch("iac_code.agent.agent_loop.AgentLoop", fake_loop):
+            async for event in executor.execute(step, ctx, "test_session"):
+                collected.append(event)
+
+        results = [e for e in collected if isinstance(e, StepResult)]
+        assert results[0].status == StepStatus.COMPLETED
+        assert results[0].error is None
+
+    @pytest.mark.asyncio
+    async def test_failure_condition_preserves_rollback_request(self, tmp_path):
+        events = [
+            ToolUseStartEvent(tool_use_id="tu_1", name="complete_step"),
+            ToolUseEndEvent(
+                tool_use_id="tu_1",
+                name="complete_step",
+                input={
+                    "conclusion": {"status": "failed", "status_reason": "CREATE_FAILED: no stock"},
+                    "rollback_request": {"target_step": "confirm_and_select", "reason": "no stock"},
+                },
+            ),
+            ToolResultEvent(tool_use_id="tu_1", tool_name="complete_step", result="ok"),
+        ]
+        fake_loop = _make_fake_agent_loop_class(events)
+        executor = _make_executor(tmp_path)
+        step = replace(
+            _make_step(),
+            failure_condition={"field": "status", "value": "failed", "reason_fields": ["status_reason"]},
+        )
+        ctx = PipelineContext(SIMPLE_DEPS)
+
+        collected = []
+        with patch("iac_code.agent.agent_loop.AgentLoop", fake_loop):
+            async for event in executor.execute(step, ctx, "test_session"):
+                collected.append(event)
+
+        results = [e for e in collected if isinstance(e, StepResult)]
+        assert results[0].status == StepStatus.COMPLETED
+        assert results[0].rollback_request == ("confirm_and_select", "no stock")
+
+    @pytest.mark.asyncio
+    async def test_failure_condition_without_reason_still_fails(self, tmp_path):
+        events = [
+            ToolUseStartEvent(tool_use_id="tu_1", name="complete_step"),
+            ToolUseEndEvent(
+                tool_use_id="tu_1",
+                name="complete_step",
+                input={"conclusion": {"status": "failed"}},
+            ),
+            ToolResultEvent(tool_use_id="tu_1", tool_name="complete_step", result="ok"),
+        ]
+        fake_loop = _make_fake_agent_loop_class(events)
+        executor = _make_executor(tmp_path)
+        step = replace(
+            _make_step(),
+            failure_condition={"field": "status", "value": "failed", "reason_fields": ["status_reason"]},
+        )
+        ctx = PipelineContext(SIMPLE_DEPS)
+
+        collected = []
+        with patch("iac_code.agent.agent_loop.AgentLoop", fake_loop):
+            async for event in executor.execute(step, ctx, "test_session"):
+                collected.append(event)
+
+        results = [e for e in collected if isinstance(e, StepResult)]
+        assert results[0].status == StepStatus.FAILED
+        assert results[0].error
 
     @pytest.mark.asyncio
     async def test_completion_guard_records_deep_copy_of_nested_tool_input(self, tmp_path):

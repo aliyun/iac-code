@@ -62,11 +62,13 @@ class TestSkillFrontmatter:
         schema = fm["conclusion_schema"]
 
         jsonschema.validate({"status": "success", "stack_id": "stack-123"}, schema)
-        jsonschema.validate({"status": "failed", "error": "CREATE_FAILED"}, schema)
+        jsonschema.validate({"status": "failed", "error": "CREATE_FAILED", "status_reason": "CREATE_FAILED"}, schema)
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate({"status": "success"}, schema)
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate({"status": "failed"}, schema)
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({"status": "failed", "error": "CREATE_FAILED"}, schema)
 
 
 class TestSkillContentRosOnly:

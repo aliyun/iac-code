@@ -86,3 +86,45 @@ def test_deploying_renders_stack_outputs_after_complete_step() -> None:
     assert deploying_step.complete_step_terminal is False
     assert "`complete_step` 成功返回后" in prompt
     assert "`complete_step.conclusion.outputs` 渲染 Stack Outputs" in prompt
+
+
+def test_deploying_step_declares_failure_condition_and_failure_reason_guard() -> None:
+    loaded = load_pipeline_dir(_selling_dir())
+    deploying_step = next(step for step in loaded.steps if step.step_id == "deploying")
+
+    assert deploying_step.failure_condition == {
+        "field": "status",
+        "value": "failed",
+        "reason_fields": ["status_reason", "error"],
+    }
+
+    failure_guard = next(
+        guard
+        for guard in deploying_step.completion_guards
+        if guard.get("when_conclusion_field_equals", {}).get("status") == "failed"
+    )
+    assert failure_guard["required_conclusion_field"] == "status_reason"
+    assert failure_guard["message_key"] == "deploy_report_failure_reason"
+
+
+def test_deploying_prompt_requires_reporting_status_reason_and_recovery() -> None:
+    selling_dir = _selling_dir()
+    loaded = load_pipeline_dir(selling_dir)
+    deploying_step = next(step for step in loaded.steps if step.step_id == "deploying")
+    prompt = (selling_dir / deploying_step.prompt_file).read_text(encoding="utf-8")
+
+    assert "status_reason" in prompt
+    assert "rollback_request" in prompt
+    assert "confirm_and_select" in prompt
+
+
+def test_deploying_skill_requires_status_reason_for_failed_conclusion() -> None:
+    loaded = load_pipeline_dir(_selling_dir())
+    deploying_step = next(step for step in loaded.steps if step.step_id == "deploying")
+    schema = deploying_step.conclusion_schema
+
+    assert "status_reason" in schema["properties"]
+    failed_branch = next(
+        branch for branch in schema["allOf"] if branch["if"]["properties"]["status"]["const"] == "failed"
+    )
+    assert set(failed_branch["then"]["required"]) == {"error", "status_reason"}

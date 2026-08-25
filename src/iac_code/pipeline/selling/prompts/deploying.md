@@ -46,8 +46,9 @@
 
 ## 错误处理
 - 模板校验失败 → 就地修复模板后重试（最多 5 轮）
-- 部署失败或等待超时 → 按技能的参数补全与 `ros_deploy` 恢复策略处理
-- 架构层面必须变更（如产品组合不可行）→ rollback_request 到 `architecture_planning`
+- 部署失败或等待超时 → 先把 `ros_deploy` 结果中的 `status` 与 `status_reason` 原文报告给用户，再按技能的参数补全与 `ros_deploy` 恢复策略重试
+- 恢复动作用尽仍不能创建成功 → 用 rollback_request 回到 `confirm_and_select` 重新选择方案/参数，或在架构层面必须变更（如产品组合不可行）时回到 `architecture_planning`
+- 确实无法恢复时才提交 `status: failed`，并同时填写 `status_reason`（ROS 原文）与 `error`（结论摘要）；不得用 `status: success` 或省略 `status_reason` 掩盖失败
 
 ## 注意事项
 - 不要读取项目文件或记忆，所需的上下文已在上方提供。

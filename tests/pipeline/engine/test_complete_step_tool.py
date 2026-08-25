@@ -66,6 +66,50 @@ class TestCompleteStepToolMeta:
         assert "deployment or cloud resource request" in result.content
         assert "intent_not_deployment_request" not in result.content
 
+    @pytest.mark.asyncio
+    async def test_failed_deployment_without_status_reason_is_rejected(self, step_config):
+        tool = CompleteStepTool(
+            step_config,
+            completion_guards=[
+                {
+                    "when_conclusion_field_equals": {"status": "failed"},
+                    "required_conclusion_field": "status_reason",
+                    "message_key": "deploy_report_failure_reason",
+                }
+            ],
+            completion_guard_state={},
+        )
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "failed", "error": "deploy failed"}},
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "status_reason" in result.content
+        assert "deploy_report_failure_reason" not in result.content
+
+    @pytest.mark.asyncio
+    async def test_failed_deployment_with_status_reason_is_accepted(self, step_config):
+        tool = CompleteStepTool(
+            step_config,
+            completion_guards=[
+                {
+                    "when_conclusion_field_equals": {"status": "failed"},
+                    "required_conclusion_field": "status_reason",
+                    "message_key": "deploy_report_failure_reason",
+                }
+            ],
+            completion_guard_state={},
+        )
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "failed", "status_reason": "CREATE_FAILED: no stock"}},
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
 
 class TestDynamicInputSchema:
     def test_schema_with_conclusion_schema(self):

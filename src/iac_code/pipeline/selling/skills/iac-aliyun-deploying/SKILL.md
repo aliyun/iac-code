@@ -24,6 +24,9 @@ conclusion_schema:
     error:
       type: string
       description: 失败原因（status 为 failed 时必填）
+    status_reason:
+      type: string
+      description: ROS 返回的失败原因原文，例如 CREATE_FAILED 的 status_reason（status 为 failed 时必填）
   allOf:
     - if:
         properties:
@@ -38,7 +41,7 @@ conclusion_schema:
             const: failed
         required: [status]
       then:
-        required: [error]
+        required: [error, status_reason]
 ---
 
 # 阿里云 ROS 部署技能
@@ -136,11 +139,18 @@ conclusion_schema:
 ## 错误处理
 
 ### 部署失败
+`ros_deploy` 返回 `is_success: false` 或 Stack 进入 `CREATE_FAILED` 等失败终态时，先把结果中的 `status`、`status_reason` 原文告知用户，再选择恢复动作；不得在未报告失败原因的情况下收口。
+
 分析错误原因：
 - 工具调用超时但已有 `stack_id`，且 Stack 仍在创建 → 调用 `ros_deploy` 的 `wait`
 - 权限/配额 → 告知用户处理
 - 模板/参数 → 修复后调用 `ros_deploy` 的 `continue_create`
 - `continue_create` 返回 `ContinueCreateStackValidationFailed` → 告知用户需要重建本步骤创建的失败 Stack，再调用 `ros_deploy` 的 `delete_and_create`
+
+恢复动作全部用尽仍无法创建成功时：
+- 需要更换架构 → 用 `rollback_request` 回到 `architecture_planning`
+- 需要用户重新选择方案或调整参数 → 用 `rollback_request` 回到 `confirm_and_select`
+- 均不适用时，返回 `status: failed`，并同时填写 `error`（结论摘要）和 `status_reason`（ROS 原文）。此时本步骤会被判定为失败终态，不得用 `status: success` 或省略 `status_reason` 掩盖失败。
 
 ### 删除并重建
 仅在 `continue_create` 返回 `ContinueCreateStackValidationFailed` 后使用 `delete_and_create`。调用时：

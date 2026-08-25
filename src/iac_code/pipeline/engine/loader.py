@@ -299,6 +299,7 @@ def _parse_steps(raw_steps: list[dict]) -> list[StepSpec]:
                 completion_guards=_parse_completion_guards(raw.get("completion_guards"), step_id),
                 description=raw.get("description", ""),
                 exit_condition=_parse_exit_condition(raw.get("exit_condition"), step_id),
+                failure_condition=_parse_failure_condition(raw.get("failure_condition"), step_id),
                 a2a_artifacts=_parse_a2a_artifacts(raw.get("a2a_artifacts"), step_id),
                 surface_overrides=_parse_surface_overrides(raw.get("surface_overrides"), step_id),
                 config=_parse_mapping(raw.get("config"), "config", step_id),
@@ -407,6 +408,31 @@ def _parse_exit_condition(raw: dict | None, step_id: str) -> dict | None:
         return None
     if not isinstance(raw, dict) or "field" not in raw or "value" not in raw:
         raise ValueError(f"Step '{step_id}': exit_condition must be a dict with 'field' and 'value' keys, got {raw!r}")
+    return raw
+
+
+def _parse_failure_condition(raw: dict | None, step_id: str) -> dict | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or "field" not in raw or "value" not in raw:
+        raise ValueError(
+            f"Step '{step_id}': failure_condition must be a dict with 'field' and 'value' keys, got {raw!r}"
+        )
+    unsupported = set(raw) - {"field", "value", "reason_fields"}
+    if unsupported:
+        unknown = ", ".join(sorted(str(key) for key in unsupported))
+        raise ValueError(
+            f"Step '{step_id}': failure_condition has unsupported keys: {unknown}; "
+            "supported: field, reason_fields, value"
+        )
+    reason_fields = raw.get("reason_fields")
+    if reason_fields is not None and (
+        not isinstance(reason_fields, list) or not all(isinstance(name, str) and name for name in reason_fields)
+    ):
+        raise ValueError(
+            f"Step '{step_id}': failure_condition.reason_fields must be a list of non-empty strings, "
+            f"got {reason_fields!r}"
+        )
     return raw
 
 

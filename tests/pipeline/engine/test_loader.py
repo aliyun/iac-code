@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from iac_code.pipeline.engine.loader import _parse_exit_condition, load_pipeline_dir
+from iac_code.pipeline.engine.loader import _parse_exit_condition, _parse_failure_condition, load_pipeline_dir
 
 
 def _write_pipeline(tmp_path: Path, yaml_content: str, prompts: dict[str, str] | None = None):
@@ -845,3 +845,40 @@ class TestParseExitCondition:
     def test_error_message_includes_step_id(self):
         with pytest.raises(ValueError, match="step_x"):
             _parse_exit_condition("wrong", "step_x")
+
+
+class TestParseFailureCondition:
+    def test_none_returns_none(self):
+        assert _parse_failure_condition(None, "step_x") is None
+
+    def test_valid_dict_returned_unchanged(self):
+        raw = {"field": "status", "value": "failed", "reason_fields": ["status_reason"]}
+        assert _parse_failure_condition(raw, "step_x") is raw
+
+    def test_non_dict_raises(self):
+        with pytest.raises(ValueError, match="must be a dict"):
+            _parse_failure_condition("wrong", "step_x")
+
+    def test_missing_value_raises(self):
+        with pytest.raises(ValueError, match="must be a dict"):
+            _parse_failure_condition({"field": "status"}, "step_x")
+
+    def test_unsupported_key_raises(self):
+        with pytest.raises(ValueError, match="unsupported keys: retry"):
+            _parse_failure_condition({"field": "status", "value": "failed", "retry": True}, "step_x")
+
+    def test_invalid_reason_fields_raises(self):
+        with pytest.raises(ValueError, match="reason_fields"):
+            _parse_failure_condition({"field": "status", "value": "failed", "reason_fields": "status_reason"}, "step_x")
+
+    def test_loads_failure_condition_from_yaml(self, tmp_path):
+        yaml_content = MINIMAL_YAML.replace(
+            "    skill: skill-x\n",
+            "    skill: skill-x\n    failure_condition:\n      field: status\n      value: failed\n",
+        )
+        _write_pipeline(tmp_path, yaml_content, {"step_a.md": "Do A", "step_b.md": "Do B with {intent}"})
+
+        loaded = load_pipeline_dir(tmp_path)
+
+        assert loaded.steps[0].failure_condition == {"field": "status", "value": "failed"}
+        assert loaded.steps[1].failure_condition is None

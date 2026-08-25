@@ -4065,6 +4065,15 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"A failed deployment must report the ROS status_reason to the user and "
+"then retry, roll back, or return to candidate selection."
+msgstr ""
+"Un déploiement en échec doit signaler le status_reason ROS à "
+"l'utilisateur, puis réessayer, revenir en arrière ou retourner à la "
+"sélection des candidats."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Every explicit user hard constraint must be covered by a satisfied check "
 "with matching parameters and evidence."
 msgstr ""
@@ -4579,6 +4588,15 @@ msgstr "Le chemin du fichier de modèle doit être relatif au répertoire de tra
 #: src/iac_code/pipeline/engine/show_diagram_tool.py
 msgid "Template file path cannot escape the working directory"
 msgstr "Le chemin du fichier de modèle ne peut pas sortir du répertoire de travail"
+
+#: src/iac_code/pipeline/engine/step_executor.py
+msgid "no failure reason reported"
+msgstr "aucune raison d'échec signalée"
+
+#: src/iac_code/pipeline/engine/step_executor.py
+#, python-brace-format
+msgid "Step {step_id} reported a failed conclusion: {reason}"
+msgstr "L'étape {step_id} a signalé une conclusion en échec : {reason}"
 
 #: src/iac_code/pipeline/engine/user_input.py
 msgid "[Image input]"

@@ -1,6 +1,11 @@
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.ui_contract import encode_selected_candidate, parse_selected_candidate
-from iac_code.pipeline.selling.hooks.deploying import normalize_selected_plan, on_enter, resolve_selected_candidate
+from iac_code.pipeline.selling.hooks.deploying import (
+    normalize_selected_plan,
+    on_enter,
+    on_exit,
+    resolve_selected_candidate,
+)
 
 
 def _evaluated_candidates():
@@ -334,3 +339,30 @@ def test_on_enter_normalizes_selected_plan_in_context():
     selected_plan = context.get_conclusion("selected_plan")
     assert selected_plan["selection_valid"] is True
     assert selected_plan["selected_candidate"]["output_path"] == "templates/a.yml"
+
+
+def test_on_exit_backfills_status_reason_from_error_for_failed_deployment():
+    context = PipelineContext({"selected_plan": [], "evaluated_candidates": []})
+    conclusion = {"status": "failed", "error": "CREATE_FAILED: ECS quota exceeded"}
+
+    on_exit(context, conclusion)
+
+    assert conclusion["status_reason"] == "CREATE_FAILED: ECS quota exceeded"
+
+
+def test_on_exit_keeps_existing_status_reason():
+    context = PipelineContext({"selected_plan": [], "evaluated_candidates": []})
+    conclusion = {"status": "failed", "status_reason": "CREATE_FAILED: no stock", "error": "summary"}
+
+    on_exit(context, conclusion)
+
+    assert conclusion["status_reason"] == "CREATE_FAILED: no stock"
+
+
+def test_on_exit_ignores_successful_deployment():
+    context = PipelineContext({"selected_plan": [], "evaluated_candidates": []})
+    conclusion = {"status": "success", "stack_id": "stack-1"}
+
+    on_exit(context, conclusion)
+
+    assert "status_reason" not in conclusion

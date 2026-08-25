@@ -250,6 +250,19 @@ def on_enter(ctx: PipelineContext) -> None:
     ctx.set_conclusion("selected_plan", normalized)
 
 
+def on_exit(ctx: PipelineContext, conclusion: dict[str, Any]) -> None:
+    """Make sure a failed deployment conclusion always carries a ROS failure reason."""
+    _ = ctx
+    if not isinstance(conclusion, dict) or conclusion.get("status") != "failed":
+        return
+    status_reason = conclusion.get("status_reason")
+    if isinstance(status_reason, str) and status_reason.strip():
+        return
+    error = conclusion.get("error")
+    if isinstance(error, str) and error.strip():
+        conclusion["status_reason"] = error.strip()
+
+
 def on_resource_observed(
     ctx: PipelineContext,
     event: ResourceObservedEvent,

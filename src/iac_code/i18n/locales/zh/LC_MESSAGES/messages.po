@@ -3834,6 +3834,12 @@ msgstr "部署成功必须等待 ros_deploy 返回 CREATE_COMPLETE。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"A failed deployment must report the ROS status_reason to the user and "
+"then retry, roll back, or return to candidate selection."
+msgstr "部署失败必须向用户报告 ROS 返回的 status_reason，然后重试、回滚或返回方案选择。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Every explicit user hard constraint must be covered by a satisfied check "
 "with matching parameters and evidence."
 msgstr "每个用户明确提出的硬约束都必须由一条状态为满足的检查覆盖，且参数和证据一致。"
@@ -4279,6 +4285,15 @@ msgstr "模板文件路径必须是相对于工作目录的路径"
 #: src/iac_code/pipeline/engine/show_diagram_tool.py
 msgid "Template file path cannot escape the working directory"
 msgstr "模板文件路径不能跳出工作目录"
+
+#: src/iac_code/pipeline/engine/step_executor.py
+msgid "no failure reason reported"
+msgstr "未报告失败原因"
+
+#: src/iac_code/pipeline/engine/step_executor.py
+#, python-brace-format
+msgid "Step {step_id} reported a failed conclusion: {reason}"
+msgstr "步骤 {step_id} 提交了失败结论：{reason}"
 
 #: src/iac_code/pipeline/engine/user_input.py
 msgid "[Image input]"

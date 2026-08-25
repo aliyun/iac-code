@@ -3870,6 +3870,12 @@ msgstr "デプロイ成功には、ros_deploy が CREATE_COMPLETE を返すま�
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"A failed deployment must report the ROS status_reason to the user and "
+"then retry, roll back, or return to candidate selection."
+msgstr "デプロイ失敗時は ROS の status_reason をユーザーに報告し、その後リトライ、ロールバック、または候補選択に戻る必要があります。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Every explicit user hard constraint must be covered by a satisfied check "
 "with matching parameters and evidence."
 msgstr "ユーザーが明示した各ハード制約は、パラメーターと根拠が一致する「満たしている」チェックで網羅する必要があります。"
@@ -4334,6 +4340,15 @@ msgstr "テンプレートファイルのパスは作業ディレクトリから
 #: src/iac_code/pipeline/engine/show_diagram_tool.py
 msgid "Template file path cannot escape the working directory"
 msgstr "テンプレートファイルのパスは作業ディレクトリの外に出られません"
+
+#: src/iac_code/pipeline/engine/step_executor.py
+msgid "no failure reason reported"
+msgstr "失敗理由が報告されていません"
+
+#: src/iac_code/pipeline/engine/step_executor.py
+#, python-brace-format
+msgid "Step {step_id} reported a failed conclusion: {reason}"
+msgstr "ステップ {step_id} が失敗の結論を報告しました: {reason}"
 
 #: src/iac_code/pipeline/engine/user_input.py
 msgid "[Image input]"

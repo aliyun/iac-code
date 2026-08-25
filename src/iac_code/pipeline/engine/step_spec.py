@@ -85,6 +85,7 @@ class StepSpec:
     completion_guards: list[dict] = field(default_factory=list)
     description: str = ""
     exit_condition: dict | None = None
+    failure_condition: dict | None = None
     a2a_artifacts: list[A2AArtifactSpec] = field(default_factory=list)
     surface_overrides: dict[str, StepSurfaceOverride] = field(default_factory=dict)
     config: dict[str, Any] = field(default_factory=dict)

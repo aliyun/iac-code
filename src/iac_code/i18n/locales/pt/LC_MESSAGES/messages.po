@@ -4038,6 +4038,14 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"A failed deployment must report the ROS status_reason to the user and "
+"then retry, roll back, or return to candidate selection."
+msgstr ""
+"Uma implantação com falha deve informar o status_reason do ROS ao usuário"
+" e depois tentar novamente, reverter ou voltar à seleção de candidatos."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Every explicit user hard constraint must be covered by a satisfied check "
 "with matching parameters and evidence."
 msgstr ""
@@ -4543,6 +4551,15 @@ msgstr ""
 #: src/iac_code/pipeline/engine/show_diagram_tool.py
 msgid "Template file path cannot escape the working directory"
 msgstr "O caminho do arquivo de template não pode sair do diretório de trabalho"
+
+#: src/iac_code/pipeline/engine/step_executor.py
+msgid "no failure reason reported"
+msgstr "nenhum motivo de falha informado"
+
+#: src/iac_code/pipeline/engine/step_executor.py
+#, python-brace-format
+msgid "Step {step_id} reported a failed conclusion: {reason}"
+msgstr "A etapa {step_id} informou uma conclusão com falha: {reason}"
 
 #: src/iac_code/pipeline/engine/user_input.py
 msgid "[Image input]"
