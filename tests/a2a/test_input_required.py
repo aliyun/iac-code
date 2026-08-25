@@ -240,9 +240,7 @@ def test_ros_deployment_permission_is_localized_and_preserves_safe_plan_summary(
                         "stackName": "demo-stack",
                         "template": "templates/demo.yml",
                         "totalMonthlyCost": "¥88/月",
-                        "resources": [
-                            {"name": "ECS", "spec": "2 vCPU / 4 GiB", "monthlyCost": "¥88/月"}
-                        ],
+                        "resources": [{"name": "ECS", "spec": "2 vCPU / 4 GiB", "monthlyCost": "¥88/月"}],
                     },
                 },
             ),
@@ -388,9 +386,7 @@ async def test_pipeline_permission_uses_same_input_envelope_and_waits_serially(m
 async def test_sub_pipeline_permissions_stay_working_and_resolve_independently(monkeypatch, tmp_path) -> None:
     registry = PermissionInputRegistry()
     store = A2ATaskStore()
-    await store.save(
-        Task(id="task-1", context_id="ctx-1", status=TaskStatus(state=TaskState.TASK_STATE_WORKING))
-    )
+    await store.save(Task(id="task-1", context_id="ctx-1", status=TaskStatus(state=TaskState.TASK_STATE_WORKING)))
     queue = FakeEventQueue()
     publisher = PipelineA2AEventPublisher(
         event_queue=queue,
@@ -466,9 +462,7 @@ async def test_sub_pipeline_permissions_stay_working_and_resolve_independently(m
     task = await store.get("task-1")
     assert task is not None
     task_metadata = MessageToDict(task.metadata, preserving_proto_field_name=False)
-    assert [item["inputId"] for item in task_metadata["iac_code"]["pendingPermissions"]] == [
-        requests[1]["inputId"]
-    ]
+    assert [item["inputId"] for item in task_metadata["iac_code"]["pendingPermissions"]] == [requests[1]["inputId"]]
     remaining = task_metadata["iac_code"]["pendingPermissions"][0]
     assert remaining["language"] == "zh"
     assert remaining["prompt"] == "是否允许本次操作：运行本地 Shell 命令？"

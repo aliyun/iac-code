@@ -2776,11 +2776,15 @@ class TestStepExecutorSchemaWiring:
             surface="a2a_rich",
         )
 
-        tool_schema = executor._build_step_tools(
-            step,
-            context,
-            compact_candidate_selection=True,
-        ).get("complete_step").input_schema
+        tool_schema = (
+            executor._build_step_tools(
+                step,
+                context,
+                compact_candidate_selection=True,
+            )
+            .get("complete_step")
+            .input_schema
+        )
         conclusion_schema = tool_schema["properties"]["conclusion"]
         assert conclusion_schema["required"] == [
             "selected_candidate_name",
@@ -2863,11 +2867,15 @@ class TestStepExecutorSchemaWiring:
             context,
             resume_candidate_selection=True,
         )
-        tool_schema = executor._build_step_tools(
-            step,
-            context,
-            compact_candidate_selection=preserved is not None,
-        ).get("complete_step").input_schema
+        tool_schema = (
+            executor._build_step_tools(
+                step,
+                context,
+                compact_candidate_selection=preserved is not None,
+            )
+            .get("complete_step")
+            .input_schema
+        )
 
         assert preserved is None
         conclusion_schema = tool_schema["properties"]["conclusion"]
