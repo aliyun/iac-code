@@ -1480,3 +1480,197 @@ def test_store_returns_none_for_invalid_utf8_snapshot(tmp_path) -> None:
 def test_snapshot_schema_version_is_exported() -> None:
     assert SNAPSHOT_SCHEMA_VERSION == "1.1"
     assert "SNAPSHOT_SCHEMA_VERSION" in pipeline_snapshot.__all__
+
+
+def _step_event(event_id: str, sequence: int, event_type: str, step_id: str, index: int) -> dict:
+    event = _base(event_id, sequence, event_type, scope="step")
+    event["step"] = {
+        "runId": f"step-{step_id}-1",
+        "id": step_id,
+        "index": index,
+        "total": 3,
+        "attempt": 1,
+    }
+    return event
+
+
+def _non_terminal_residue(snapshot: dict) -> list[dict]:
+    """Every step/candidate/sub-step still ``working`` without a conclusion — the
+    acceptance criterion for this fix."""
+    residue = []
+    for step in snapshot["steps"]:
+        items = [step]
+        for candidate in step.get("candidates", []):
+            items.append(candidate)
+            items.extend(candidate.get("steps", []))
+        for item in items:
+            if item.get("status") == "working" and not item.get("conclusion"):
+                residue.append(item)
+    return residue
+
+
+def test_pipeline_canceled_moves_working_step_to_terminal_with_conclusion() -> None:
+    started = _step_event("evt-1", 1, "step_started", "intent_parsing", 1)
+    canceled = _base("evt-2", 2, "pipeline_canceled", status="canceled")
+
+    snapshot = reduce_pipeline_events([started, canceled])
+
+    assert snapshot["status"] == "canceled"
+    step = snapshot["steps"][0]
+    assert step["id"] == "intent_parsing"
+    assert step["status"] == "canceled"
+    assert step["canceledAt"] == "2026-06-08T10:00:00Z"
+    assert step["conclusionField"] == "conclusion"
+    assert step["conclusion"]["outcome"] == "canceled"
+    assert step["conclusion"]["previousStatus"] == "working"
+    assert step["conclusion"]["terminatedBy"] == "pipeline_canceled"
+    assert step["conclusion"]["reason"]
+    assert _non_terminal_residue(snapshot) == []
+
+
+def test_pipeline_canceled_propagates_to_candidates_and_candidate_steps() -> None:
+    done = _step_event("evt-1", 1, "step_completed", "intent_parsing", 1)
+    done["data"] = {"conclusion": {"intent": "add vswitch"}}
+    evaluating = _step_event("evt-2", 2, "step_started", "evaluate_candidates", 2)
+    candidate_started = _base("evt-3", 3, "candidate_started", scope="candidate")
+    candidate_started["step"] = evaluating["step"]
+    candidate_started["candidate"] = {"runId": "cand-0-1", "id": "candidate-0", "index": 0, "attempt": 1}
+    cost = _base("evt-4", 4, "candidate_step_started", scope="candidate_step")
+    cost["step"] = evaluating["step"]
+    cost["candidate"] = candidate_started["candidate"]
+    cost["candidateStep"] = {"runId": "cstep-cost-1", "id": "cost_estimating", "index": 1, "attempt": 1}
+    canceled = _base("evt-5", 5, "pipeline_canceled", status="canceled")
+
+    snapshot = reduce_pipeline_events([done, evaluating, candidate_started, cost, canceled])
+
+    intent, evaluate = snapshot["steps"]
+    # A step that reached its own conclusion keeps it untouched.
+    assert intent["status"] == "completed"
+    assert intent["conclusion"] == {"intent": "add vswitch"}
+
+    assert evaluate["status"] == "canceled"
+    candidate = evaluate["candidates"][0]
+    assert candidate["status"] == "canceled"
+    assert candidate["conclusion"]["outcome"] == "canceled"
+    candidate_step = candidate["steps"][0]
+    assert candidate_step["id"] == "cost_estimating"
+    assert candidate_step["status"] == "canceled"
+    assert candidate_step["conclusion"]["outcome"] == "canceled"
+    assert snapshot["control"]["activeCandidateRunIds"] == []
+    assert _non_terminal_residue(snapshot) == []
+
+
+def test_pipeline_canceled_twice_keeps_first_terminal_conclusion() -> None:
+    started = _step_event("evt-1", 1, "step_started", "intent_parsing", 1)
+    first = _base("evt-2", 2, "pipeline_canceled", status="canceled")
+    second = _base("evt-3", 3, "pipeline_canceled", status="canceled")
+    second["createdAt"] = "2026-06-08T11:00:00Z"
+
+    snapshot = reduce_pipeline_events([started, first, second])
+
+    step = snapshot["steps"][0]
+    assert step["status"] == "canceled"
+    assert step["canceledAt"] == "2026-06-08T10:00:00Z"
+    assert step["conclusion"]["terminatedBySequence"] == 2
+    assert _non_terminal_residue(snapshot) == []
+
+
+def test_pipeline_failed_propagates_failed_status_to_working_items() -> None:
+    started = _step_event("evt-1", 1, "step_started", "deploying", 3)
+    failed = _base("evt-2", 2, "pipeline_failed", status="failed")
+
+    snapshot = reduce_pipeline_events([started, failed])
+
+    step = snapshot["steps"][0]
+    assert snapshot["status"] == "failed"
+    assert step["status"] == "failed"
+    assert step["failedAt"] == "2026-06-08T10:00:00Z"
+    assert step["conclusion"]["outcome"] == "failed"
+    assert _non_terminal_residue(snapshot) == []
+
+
+def test_pipeline_canceled_finalizes_step_waiting_on_input() -> None:
+    started = _step_event("evt-1", 1, "step_started", "confirm_and_select", 2)
+    waiting = _base("evt-2", 2, "input_required", scope="input", status="waiting_input")
+    waiting["step"] = started["step"]
+    waiting["input"] = {"inputId": "input-1", "kind": "candidate_selection", "prompt": "请选择方案"}
+    canceled = _base("evt-3", 3, "pipeline_canceled", status="canceled")
+
+    snapshot = reduce_pipeline_events([started, waiting, canceled])
+
+    step = snapshot["steps"][0]
+    assert step["status"] == "canceled"
+    assert step["conclusion"]["previousStatus"] == "waiting_input"
+    assert snapshot["pendingInput"] is None
+    assert _non_terminal_residue(snapshot) == []
+
+
+def test_rollback_completed_marks_superseded_items_rolled_back() -> None:
+    started = _step_event("evt-1", 1, "step_started", "evaluate_candidates", 2)
+    candidate_started = _base("evt-2", 2, "candidate_started", scope="candidate")
+    candidate_started["step"] = started["step"]
+    candidate_started["candidate"] = {"runId": "cand-0-1", "id": "candidate-0", "index": 0, "attempt": 1}
+    rollback = _base("evt-3", 3, "rollback_completed", scope="interrupt")
+    rollback["data"] = {"rollbackScope": "parent", "toStepId": "confirm_and_select", "reason": "重新选择"}
+
+    snapshot = reduce_pipeline_events([started, candidate_started, rollback])
+
+    step = snapshot["steps"][0]
+    assert step["status"] == "rolled_back"
+    assert step["rolledBackAt"] == "2026-06-08T10:00:00Z"
+    assert step["conclusion"]["outcome"] == "rolled_back"
+    assert step["conclusion"]["terminatedBy"] == "rollback_completed"
+    assert step["candidates"][0]["status"] == "rolled_back"
+    # Rollback still records exactly one history entry.
+    assert len(snapshot["control"]["rollbackHistory"]) == 1
+    assert _non_terminal_residue(snapshot) == []
+
+
+def test_rollback_then_rerun_keeps_new_attempt_working() -> None:
+    started = _step_event("evt-1", 1, "step_started", "evaluate_candidates", 2)
+    rollback = _base("evt-2", 2, "rollback_completed", scope="interrupt")
+    rerun = _base("evt-3", 3, "step_started", scope="step")
+    rerun["step"] = {
+        "runId": "step-evaluate_candidates-2",
+        "id": "evaluate_candidates",
+        "index": 2,
+        "total": 3,
+        "attempt": 2,
+    }
+
+    snapshot = reduce_pipeline_events([started, rollback, rerun])
+
+    first, second = snapshot["steps"]
+    assert first["attempt"] == 1
+    assert first["status"] == "rolled_back"
+    assert second["attempt"] == 2
+    assert second["status"] == "working"
+    assert snapshot["status"] == "working"
+
+
+def test_pending_backup_terminal_does_not_finalize_steps_yet() -> None:
+    started = _step_event("evt-1", 1, "step_started", "deploying", 3)
+    pending = _base("evt-2", 2, "pipeline_canceled", status="canceled")
+    pending["visibility"] = "pending_backup"
+
+    snapshot = reduce_pipeline_events([started, pending])
+
+    step = snapshot["steps"][0]
+    assert snapshot["pendingTerminal"] is not None
+    assert snapshot["status"] != "canceled"
+    assert step["status"] == "working"
+    assert "conclusion" not in step
+
+
+def test_incremental_reduce_finalizes_steps_from_existing_snapshot() -> None:
+    started = _step_event("evt-1", 1, "step_started", "cost_estimating", 2)
+    existing = reduce_pipeline_events([started])
+    assert existing["steps"][0]["status"] == "working"
+
+    canceled = _base("evt-2", 2, "pipeline_canceled", status="canceled")
+    snapshot = reduce_pipeline_events([canceled], existing)
+
+    step = snapshot["steps"][0]
+    assert step["status"] == "canceled"
+    assert step["conclusion"]["outcome"] == "canceled"
+    assert _non_terminal_residue(snapshot) == []

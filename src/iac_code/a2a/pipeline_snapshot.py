@@ -36,6 +36,16 @@ _CLEANUP_STATUS_BY_EVENT_TYPE = {
     PIPELINE_EVENT_CLEANUP_FAILED: "failed",
 }
 _KNOWN_CLEANUP_STATUSES = {"pending", "started", "in_progress", "completed", "failed", "skipped"}
+# A step/candidate/sub-step in one of these states has already reached its own
+# conclusion, so run-level termination and rollback must leave it untouched.
+_TERMINAL_ITEM_STATUSES = {"completed", "failed", "canceled", "rolled_back"}
+_ROLLED_BACK_ITEM_STATUS = "rolled_back"
+_TERMINAL_ITEM_TIME_KEYS = {
+    "completed": "completedAt",
+    "failed": "failedAt",
+    "canceled": "canceledAt",
+    _ROLLED_BACK_ITEM_STATUS: "rolledBackAt",
+}
 _PENDING_BACKUP_VISIBILITY = "pending_backup"
 _COMMITTED_BACKUP_VISIBILITY = "committed"
 _BACKUP_COMMITTED_EVENT_TYPE = "backup_committed"
@@ -501,6 +511,7 @@ class _PipelineSnapshotReducer:
             self._apply_cleanup_event(event)
         elif event_type == "rollback_completed":
             self._append_rollback(event)
+            self._finalize_non_terminal_items(_ROLLED_BACK_ITEM_STATUS, event)
         elif event_type == "candidate_restart_requested":
             self._append_candidate_restart(event)
         elif event_type == "input_required":
@@ -529,6 +540,7 @@ class _PipelineSnapshotReducer:
             self._snapshot["pendingTerminal"] = None
             self._snapshot["pendingInput"] = None
             self._snapshot["control"]["activeCandidateRunIds"] = []
+            self._finalize_non_terminal_items(terminal_status, event)
         elif (
             event_type not in {"input_required", "input_received", *_CLEANUP_STATUS_BY_EVENT_TYPE}
             and not _is_pending_backup_publication(event)
@@ -749,6 +761,27 @@ class _PipelineSnapshotReducer:
             candidate_step["status"] = "failed"
             _set_time(candidate_step, "failedAt", created_at)
             _merge_completion_data(candidate_step, event)
+
+    def _finalize_non_terminal_items(self, terminal_status: str, event: dict[str, Any]) -> None:
+        """Propagate a run-level terminal (or rollback) outcome down to every
+        step/candidate/sub-step that never reached its own conclusion.
+
+        Per-item terminal events (``step_failed``, ``candidate_completed`` ...) stop
+        arriving once the run is canceled/rolled back, so without this pass an
+        in-flight ``intent_parsing`` / ``evaluate_candidates`` / ``cost_estimating``
+        stays ``working`` with a ``null`` conclusion forever and the snapshot
+        contradicts the run status. ``web/pipeline_transcript.py`` already does the
+        equivalent via ``_finalize_active_markers``; this keeps the A2A snapshot
+        projection consistent with it.
+
+        Items that already carry a terminal status keep their real conclusion.
+        """
+        for step in _dict_list(self._snapshot.get("steps")):
+            _finalize_item(step, terminal_status, event)
+            for candidate in _dict_list(step.get("candidates")):
+                _finalize_item(candidate, terminal_status, event)
+                for candidate_step in _dict_list(candidate.get("steps")):
+                    _finalize_item(candidate_step, terminal_status, event)
 
     def _apply_text_delta(self, event: dict[str, Any]) -> None:
         text = _dict_or_empty(event.get("data")).get("text")
@@ -1756,6 +1789,31 @@ def _merge_completion_data(target: dict[str, Any], event: dict[str, Any]) -> Non
     ):
         if key in data:
             target[key] = copy.deepcopy(data[key])
+
+
+def _finalize_item(item: dict[str, Any], terminal_status: str, event: dict[str, Any]) -> None:
+    """Move one non-terminal snapshot item to ``terminal_status`` with a non-empty
+    conclusion. Already-terminal items are left exactly as they are."""
+    if _string_or_none(item.get("status")) in _TERMINAL_ITEM_STATUSES:
+        return
+
+    previous_status = _string_or_none(item.get("status")) or "working"
+    item["status"] = terminal_status
+    _set_time(item, _TERMINAL_ITEM_TIME_KEYS[terminal_status], _string_or_none(event.get("createdAt")))
+    item["conclusionField"] = "conclusion"
+    item["conclusion"] = {
+        "outcome": terminal_status,
+        "previousStatus": previous_status,
+        "terminatedBy": _string_or_none(event.get("eventType")),
+        "terminatedBySequence": _sequence_value(event),
+        "reason": _finalize_reason(terminal_status),
+    }
+
+
+def _finalize_reason(terminal_status: str) -> str:
+    if terminal_status == _ROLLED_BACK_ITEM_STATUS:
+        return "Superseded by a pipeline rollback before this item reached a conclusion."
+    return f"Pipeline reached terminal status '{terminal_status}' before this item reached a conclusion."
 
 
 def _append_unique(values: list[Any], value: Any) -> None:
