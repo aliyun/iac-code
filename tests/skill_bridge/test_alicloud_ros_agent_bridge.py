@@ -2164,9 +2164,9 @@ def test_manager_idle_countdown_starts_after_sse_worker_exits(monkeypatch, tmp_p
         + "print('', flush=True)\n",
     )
 
-    # Leave enough startup headroom for a loaded Windows runner; this test is
-    # about when the idle countdown starts, not sub-second process startup.
-    manager = bridge.ensure_manager(1.5)
+    # Leave enough scheduling headroom for a loaded Windows xdist runner; this
+    # test is about when the idle countdown starts, not sub-second timing.
+    manager = bridge.ensure_manager(5.0)
     started = bridge._manager_request(
         manager,
         "/start",
@@ -2194,7 +2194,7 @@ def test_manager_idle_countdown_starts_after_sse_worker_exits(monkeypatch, tmp_p
     time.sleep(0.08)
     assert bridge._pid_alive(manager["pid"])
 
-    _wait_for_pid_exit(manager["pid"])
+    _wait_for_pid_exit(manager["pid"], timeout=8.0)
     assert not bridge._pid_alive(manager["pid"])
 
 
