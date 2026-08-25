@@ -2630,3 +2630,92 @@ def test_sanitize_tool_input_passthrough_keeps_template_and_conclusion() -> None
     assert result == tool_input
     assert "[REDACTED]" not in json.dumps(result)
     assert "***" not in json.dumps(result)
+
+
+def test_terminal_event_identity_ignores_event_id_and_visibility() -> None:
+    from iac_code.a2a.pipeline_events import terminal_event_identity
+
+    pending = {
+        "eventId": "evt-pending",
+        "eventType": "pipeline_completed",
+        "pipelineRunId": "ctx-1",
+        "visibility": "pending_backup",
+    }
+    committed = {**pending, "eventId": "evt-committed", "visibility": "committed"}
+
+    assert terminal_event_identity(pending) == "pipeline_completed:ctx-1"
+    assert terminal_event_identity(committed) == terminal_event_identity(pending)
+    assert terminal_event_identity({"eventType": "step_started", "pipelineRunId": "ctx-1"}) is None
+    assert (
+        terminal_event_identity({"eventType": "step_completed", "step": {"runId": "step-intent_parsing-1"}})
+        == "step_completed:step-intent_parsing-1"
+    )
+
+
+def test_terminal_event_marker_is_idempotent_per_object() -> None:
+    translator = PipelineEventTranslator(_ctx())
+    completed = {"eventType": "pipeline_completed", "pipelineRunId": "ctx-1"}
+    other_run = {"eventType": "pipeline_completed", "pipelineRunId": "ctx-2"}
+
+    assert not translator.has_emitted_terminal_event(completed)
+    translator.mark_terminal_event_emitted(completed)
+    assert translator.has_emitted_terminal_event(completed)
+    assert not translator.has_emitted_terminal_event(other_run)
+    assert not translator.has_emitted_terminal_event({"eventType": "pipeline_failed", "pipelineRunId": "ctx-1"})
+
+
+def test_hydrate_restores_emitted_terminal_events_for_acknowledged_publication() -> None:
+    translator = PipelineEventTranslator(_ctx())
+    base = {"taskId": "task-1", "contextId": "ctx-1", "pipelineRunId": "ctx-1"}
+    translator.hydrate_from_events(
+        [
+            {**base, "eventId": "evt-1", "sequence": 1, "eventType": "pipeline_started"},
+            {
+                **base,
+                "eventId": "evt-2",
+                "sequence": 2,
+                "eventType": "pipeline_completed",
+                "visibility": "pending_backup",
+            },
+            {**base, "eventId": "evt-3", "sequence": 3, "eventType": "pipeline_completed", "visibility": "committed"},
+            {
+                **base,
+                "eventId": "evt-4",
+                "sequence": 4,
+                "eventType": "backup_committed",
+                "data": {"committedEventId": "evt-3"},
+            },
+        ]
+    )
+
+    assert translator.has_emitted_terminal_event({"eventType": "pipeline_completed", "pipelineRunId": "ctx-1"})
+
+
+def test_hydrate_keeps_unacknowledged_committed_terminal_replayable() -> None:
+    translator = PipelineEventTranslator(_ctx())
+    base = {"taskId": "task-1", "contextId": "ctx-1", "pipelineRunId": "ctx-1"}
+    translator.hydrate_from_events(
+        [
+            {
+                **base,
+                "eventId": "evt-1",
+                "sequence": 1,
+                "eventType": "pipeline_completed",
+                "visibility": "pending_backup",
+            },
+            {**base, "eventId": "evt-2", "sequence": 2, "eventType": "pipeline_completed", "visibility": "committed"},
+        ]
+    )
+
+    assert not translator.has_emitted_terminal_event({"eventType": "pipeline_completed", "pipelineRunId": "ctx-1"})
+
+
+def test_pipeline_started_clears_emitted_terminal_events_for_new_run() -> None:
+    translator = PipelineEventTranslator(_ctx())
+    translator.mark_terminal_event_emitted({"eventType": "pipeline_completed", "pipelineRunId": "ctx-1"})
+
+    translator.translate(
+        PipelineEvent(type=PipelineEventType.PIPELINE_STARTED, step_id=None, timestamp=1717821600.0, data={})
+    )
+
+    assert not translator.has_emitted_terminal_event({"eventType": "pipeline_completed", "pipelineRunId": "ctx-1"})

@@ -10759,3 +10759,157 @@ async def test_pending_ask_user_question_resume_preserves_image_input(tmp_path: 
 
     assert events
     assert received["supplemental_input"] == pipeline_input
+
+
+@pytest.mark.asyncio
+async def test_publish_normal_handoff_ready_is_idempotent_per_run(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+    from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher
+
+    pipeline_dir = tmp_path / "pipeline"
+    translator = PipelineEventTranslator(
+        PipelineA2AContext(
+            pipeline_run_id="ctx-1",
+            task_id="task-1",
+            context_id="ctx-1",
+            pipeline_name="selling",
+        )
+    )
+    publisher = PipelineA2AEventPublisher(
+        event_queue=FakeEventQueue(),
+        translator=translator,
+        journal=A2APipelineJournal(pipeline_dir),
+        snapshot_store=A2APipelineSnapshotStore(pipeline_dir),
+    )
+    pipeline = FakePipeline([], session_dir=pipeline_dir)
+    pipeline.handoff_enabled = True
+    executor = IacCodeA2APipelineExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    await executor._publish_normal_handoff_ready(pipeline, publisher, {})
+    await executor._publish_normal_handoff_ready(pipeline, publisher, {})
+
+    journal_types = [event["eventType"] for event in publisher.journal.read_all()]
+    assert journal_types.count("pipeline_handoff_ready") == 1
+
+
+@pytest.mark.asyncio
+async def test_publish_pipeline_terminal_event_skips_already_emitted_terminal(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+    from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher
+
+    pipeline_dir = tmp_path / "pipeline"
+    translator = PipelineEventTranslator(
+        PipelineA2AContext(
+            pipeline_run_id="ctx-1",
+            task_id="task-1",
+            context_id="ctx-1",
+            pipeline_name="selling",
+        )
+    )
+    publisher = PipelineA2AEventPublisher(
+        event_queue=FakeEventQueue(),
+        translator=translator,
+        journal=A2APipelineJournal(pipeline_dir),
+        snapshot_store=A2APipelineSnapshotStore(pipeline_dir),
+    )
+    executor = IacCodeA2APipelineExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    first = await executor._publish_pipeline_terminal_event(
+        publisher,
+        event_type="pipeline_canceled",
+        status="canceled",
+        data={"source": "executor"},
+    )
+    second = await executor._publish_pipeline_terminal_event(
+        publisher,
+        event_type="pipeline_canceled",
+        status="canceled",
+        data={"source": "executor"},
+    )
+
+    assert first is True
+    # 终态已可用，重复调用不再发射，避免 pipeline_canceled 计数翻倍。
+    assert second is True
+    journal_types = [event["eventType"] for event in publisher.journal.read_all()]
+    assert journal_types.count("pipeline_canceled") == 1
+
+
+@pytest.mark.asyncio
+async def test_executor_emits_symmetric_run_terminal_events_for_completed_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    session_dir = tmp_path / "sidecar"
+    fake_pipeline = FakePipeline(
+        [
+            PipelineEvent(
+                type=PipelineEventType.PIPELINE_STARTED,
+                step_id=None,
+                timestamp=1717821600.0,
+                data={"total_steps": 1},
+            ),
+            PipelineEvent(
+                type=PipelineEventType.STEP_STARTED,
+                step_id="intent_parsing",
+                timestamp=1717821601.0,
+                data={"index": 1, "total": 1},
+            ),
+            PipelineEvent(
+                type=PipelineEventType.STEP_COMPLETED,
+                step_id="intent_parsing",
+                timestamp=1717821602.0,
+                data={"index": 1, "total": 1},
+            ),
+            PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=1717821603.0,
+                data={"total_steps": 1},
+            ),
+        ],
+        session_dir=session_dir,
+    )
+    fake_pipeline.handoff_enabled = True
+
+    def fake_create_pipeline(*args, **kwargs):
+        fake_pipeline._session_storage = kwargs["session_storage"]
+        fake_pipeline._session_id = kwargs["session_id"]
+        fake_pipeline._cwd = kwargs["cwd"]
+        return fake_pipeline
+
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", fake_create_pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+
+    executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), FakeEventQueue())
+
+    # 备份门控协议要求同一逻辑终态先落 pending_backup 再落 committed，两条都在 journal 里；
+    # 计数对称性以「已发布的 committed 终态」为准，不应出现第二个 committed 终态。
+    events = A2APipelineJournal(session_dir).read_all()
+    published = [event for event in events if event.get("visibility") != "pending_backup"]
+    published_types = [event["eventType"] for event in published]
+    assert published_types.count("pipeline_started") == 1
+    assert published_types.count("pipeline_completed") == 1
+    assert published_types.count("pipeline_handoff_ready") == 1
+    assert published_types.count("step_started") == published_types.count("step_completed") == 1

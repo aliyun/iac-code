@@ -48,6 +48,21 @@ PIPELINE_METADATA_SCHEMA_VERSION = "1.0"
 CandidateLookupKey = tuple[str, int]
 CandidateAttemptKey = tuple[str, int, int]
 
+# run/step 级终态事件：同一对象的同一终态只允许发射一次，否则启停计数不对称。
+TERMINAL_EVENT_TYPES = frozenset(
+    {
+        "step_completed",
+        "step_failed",
+        "pipeline_completed",
+        "pipeline_failed",
+        "pipeline_canceled",
+        "pipeline_handoff_ready",
+    }
+)
+_PENDING_BACKUP_VISIBILITY = "pending_backup"
+_COMMITTED_BACKUP_VISIBILITY = "committed"
+_BACKUP_COMMITTED_EVENT_TYPE = "backup_committed"
+
 _TOP_LEVEL_DATA_KEY_ALIASES = {
     "candidate_index": "candidateIndex",
     "candidate_name": "candidateName",
@@ -143,6 +158,7 @@ class PipelineEventTranslator:
         self._current_parent_step_id: str | None = None
         self._tool_inputs: dict[str, dict[str, Any]] = {}
         self._emitted_candidate_detail_tool_ids: set[str] = set()
+        self._emitted_terminal_event_keys: set[str] = set()
 
     @property
     def last_sequence(self) -> int:
@@ -152,7 +168,17 @@ class PipelineEventTranslator:
     def context(self) -> PipelineA2AContext:
         return self._context
 
+    def has_emitted_terminal_event(self, envelope: dict[str, Any]) -> bool:
+        identity = terminal_event_identity(envelope)
+        return identity is not None and identity in self._emitted_terminal_event_keys
+
+    def mark_terminal_event_emitted(self, envelope: dict[str, Any]) -> None:
+        identity = terminal_event_identity(envelope)
+        if identity is not None:
+            self._emitted_terminal_event_keys.add(identity)
+
     def hydrate_from_events(self, events: list[dict[str, Any]]) -> None:
+        acknowledged = _backup_committed_acknowledgements(events)
         latest_parent_step_sequence = -1
         for event in events:
             if not isinstance(event, dict):
@@ -163,6 +189,11 @@ class PipelineEventTranslator:
             sequence = _int_or_none(event.get("sequence")) or 0
             self._sequence = max(self._sequence, sequence)
             self._hydrate_candidate_state(event)
+            if event.get("eventType") == "pipeline_started":
+                # 同一 context 内重新起跑视为新的 run，先前的终态记录不应压制新 run 的终态。
+                self._emitted_terminal_event_keys.clear()
+            if _terminal_event_publication_settled(event, acknowledged):
+                self.mark_terminal_event_emitted(event)
 
             step = event.get("step")
             if not isinstance(step, dict):
@@ -917,6 +948,9 @@ class PipelineEventTranslator:
         *,
         created_at: str | None = None,
     ) -> dict[str, Any]:
+        if event_type == "pipeline_started":
+            # 同一 context 内重新起跑视为新的 run，先前的终态记录不应压制新 run 的终态。
+            self._emitted_terminal_event_keys.clear()
         self._sequence += 1
         envelope = {
             "schemaVersion": PIPELINE_METADATA_SCHEMA_VERSION,
@@ -1215,6 +1249,53 @@ def _string_or_none(value: Any) -> str | None:
     if isinstance(value, str) and value:
         return value
     return None
+
+
+def _backup_committed_acknowledgements(events: list[dict[str, Any]]) -> set[str]:
+    """已被 ``backup_committed`` 确认的 committed 信封 eventId 集合。"""
+    acknowledged: set[str] = set()
+    for event in events:
+        if not isinstance(event, dict) or event.get("eventType") != _BACKUP_COMMITTED_EVENT_TYPE:
+            continue
+        data = event.get("data")
+        committed_event_id = _string_or_none(data.get("committedEventId")) if isinstance(data, dict) else None
+        if committed_event_id is not None:
+            acknowledged.add(committed_event_id)
+    return acknowledged
+
+
+def _terminal_event_publication_settled(event: dict[str, Any], acknowledged: set[str]) -> bool:
+    """该历史终态信封是否代表一次已完成的发布（据此压制重复发射）。
+
+    ``pending_backup`` 只是备份门控的预告，未真正发布；``committed`` 若缺少 ``backup_committed``
+    确认说明事务在提交前中断，重启恢复路径仍需补发，因此都不算已发射。
+    """
+    visibility = _string_or_none(event.get("visibility"))
+    if visibility == _PENDING_BACKUP_VISIBILITY:
+        return False
+    if visibility == _COMMITTED_BACKUP_VISIBILITY:
+        event_id = _string_or_none(event.get("eventId"))
+        return event_id is not None and event_id in acknowledged
+    return True
+
+
+def terminal_event_identity(envelope: dict[str, Any]) -> str | None:
+    """终态事件的逻辑身份：同一对象（step run / pipeline run）的同一终态类型只应发射一次。
+
+    与 ``eventId`` 不同，该身份跨备份门控的 pending/committed 双信封、跨 handoff 恢复保持稳定，
+    因此可用于发射端幂等判重。非终态事件返回 ``None``（不参与判重）。
+    """
+    event_type = _string_or_none(envelope.get("eventType"))
+    if event_type not in TERMINAL_EVENT_TYPES:
+        return None
+    if event_type in {"step_completed", "step_failed"}:
+        step = envelope.get("step")
+        run_id = _string_or_none(step.get("runId")) if isinstance(step, dict) else None
+    else:
+        run_id = _string_or_none(envelope.get("pipelineRunId"))
+    if run_id is None:
+        return None
+    return f"{event_type}:{run_id}"
 
 
 def _first_string_value(data: dict[str, Any], keys: tuple[str, ...]) -> str | None:
@@ -1691,7 +1772,9 @@ def _diagram_data(event: DiagramEvent) -> dict[str, Any]:
 __all__ = [
     "PIPELINE_EVENTS_EXTENSION_URI",
     "PIPELINE_METADATA_SCHEMA_VERSION",
+    "TERMINAL_EVENT_TYPES",
     "PipelineA2AContext",
     "PipelineEventTranslator",
     "safe_permission_metadata",
+    "terminal_event_identity",
 ]

@@ -973,6 +973,10 @@ class PipelineA2AEventPublisher:
         require_durable_metadata: bool = False,
         require_journal_metadata: bool = False,
     ) -> dict[str, Any] | None:
+        # 同一对象的同一终态只发一次：重复发射会让 run/step 启停计数不对称，
+        # 并让快照里并存多个终态信号。返回原信封表示「终态已可用」，而非发布失败。
+        if self.translator.has_emitted_terminal_event(envelope):
+            return envelope
         if self._requires_backup_commit(envelope):
             return await self._persist_backup_gated_publication(
                 envelope,
@@ -994,6 +998,7 @@ class PipelineA2AEventPublisher:
             local_envelope=envelope,
         ):
             return None
+        self.translator.mark_terminal_event_emitted(envelope)
         return safe_envelope
 
     async def _persist_backup_gated_publication(
@@ -1044,6 +1049,8 @@ class PipelineA2AEventPublisher:
             ):
                 return None
             await self._run_after_backup_commit_hook(committed_safe_envelope)
+            # 仅在 committed 阶段登记：pending_backup 只是备份门控的预告信封。
+            self.translator.mark_terminal_event_emitted(committed_envelope)
             return committed_safe_envelope
 
     async def persist_backup_committed_ack(self, committed_envelope: dict[str, Any]) -> dict[str, Any] | None:

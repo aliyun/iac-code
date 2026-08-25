@@ -2376,6 +2376,15 @@ class IacCodeA2APipelineExecutor:
     ) -> bool:
         if publisher is None:
             return False
+        # 同一 run 的同一终态已发射过（例如 handoff 事务已提交、cancel fallback 再次进入）时，
+        # 直接视为「终态可用」，不重复发射。
+        if publisher.translator.has_emitted_terminal_event(
+            {
+                "eventType": event_type,
+                "pipelineRunId": publisher.translator.context.pipeline_run_id,
+            }
+        ):
+            return True
         closing_token = None
         try:
             closing_token = await self._drain_sub_pipeline_permissions_before_terminal(
@@ -2429,6 +2438,10 @@ class IacCodeA2APipelineExecutor:
         if terminal_envelope is None:
             logger.warning("Skipping A2A pipeline handoff transaction because terminal envelope was not translated")
             return _TerminalHandoffPublishResult(attempted=True, terminal_available=False)
+        # 终态已发射过（stream 消费循环的终态/非终态分支都可能处理同一个 PIPELINE_COMPLETED）时
+        # 不再重开事务，终态与 handoff 都已可用。
+        if publisher.translator.has_emitted_terminal_event(terminal_envelope):
+            return _TerminalHandoffPublishResult(attempted=True, terminal_available=True)
 
         terminal_available = await self._publish_terminal_handoff_transaction(
             pipeline,
@@ -2587,6 +2600,7 @@ class IacCodeA2APipelineExecutor:
                 )
                 return False
             await publisher._run_after_backup_commit_hook(terminal_safe_envelope)
+            publisher.translator.mark_terminal_event_emitted(committed_terminal_envelope)
             if handoff_ack_envelope is None:
                 await self._persist_and_enqueue_handoff_publication_unavailable(
                     publisher,
@@ -2614,6 +2628,7 @@ class IacCodeA2APipelineExecutor:
                     )
                     return True
                 await publisher._run_after_backup_commit_hook(handoff_safe_envelope)
+                publisher.translator.mark_terminal_event_emitted(committed_handoff_envelope)
                 _persist_normal_handoff_summary(pipeline, publication.summary)
             else:
                 await self._persist_handoff_publication_unavailable(
@@ -2765,6 +2780,15 @@ class IacCodeA2APipelineExecutor:
     ) -> None:
         publication = self._normal_handoff_publication(pipeline, event_data)
         if publication is None:
+            return
+        # 同一 run 的 handoff_ready 存在多条发射路径（stream 消费循环的终态/非终态分支、
+        # cancel fallback、重启恢复补发）。按 run 维度幂等，避免重复发射。
+        if publisher.translator.has_emitted_terminal_event(
+            {
+                "eventType": "pipeline_handoff_ready",
+                "pipelineRunId": publisher.translator.context.pipeline_run_id,
+            }
+        ):
             return
 
         try:

@@ -2301,6 +2301,12 @@ async def test_publish_pipeline_canceled_envelope_maps_to_canceled_state(tmp_pat
         def translate(self, _event: Any) -> list[dict[str, Any]]:
             return [_envelope("pipeline_canceled", status="canceled")]
 
+        def has_emitted_terminal_event(self, _envelope: dict[str, Any]) -> bool:
+            return False
+
+        def mark_terminal_event_emitted(self, _envelope: dict[str, Any]) -> None:
+            return None
+
     queue = FakeEventQueue()
     pipeline_dir = tmp_path / "pipeline"
     publisher = PipelineA2AEventPublisher(
@@ -2365,3 +2371,65 @@ async def test_publish_hard_interrupt_false_parent_without_candidate_does_not_em
 
     event_types = [event["eventType"] for event in publisher.journal.read_all()]
     assert event_types == ["interrupt_received", "interrupt_classified"]
+
+
+@pytest.mark.asyncio
+async def test_publish_skips_duplicate_step_completed_for_same_step_run(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+    step_completed = PipelineEvent(
+        type=PipelineEventType.STEP_COMPLETED,
+        step_id="evaluate_candidates",
+        timestamp=1717821600.0,
+        data={"index": 1, "total": 2},
+    )
+
+    await publisher.publish(step_completed)
+    await publisher.publish(step_completed)
+
+    journal_types = [event["eventType"] for event in publisher.journal.read_all()]
+    assert journal_types.count("step_completed") == 1
+    assert [dump(event)["status"]["state"] for event in queue.events].count("TASK_STATE_WORKING") >= 1
+
+
+@pytest.mark.asyncio
+async def test_publish_skips_duplicate_pipeline_completed_for_same_run(tmp_path: Path) -> None:
+    publisher, _queue = _publisher(tmp_path)
+    completed = PipelineEvent(
+        type=PipelineEventType.PIPELINE_COMPLETED,
+        step_id=None,
+        timestamp=1717821600.0,
+        data={},
+    )
+
+    await publisher.publish(completed)
+    await publisher.publish(completed)
+
+    journal_types = [event["eventType"] for event in publisher.journal.read_all()]
+    assert journal_types.count("pipeline_completed") == 1
+
+
+@pytest.mark.asyncio
+async def test_publish_allows_step_completed_for_next_attempt(tmp_path: Path) -> None:
+    publisher, _queue = _publisher(tmp_path)
+
+    await publisher.publish(
+        PipelineEvent(
+            type=PipelineEventType.STEP_COMPLETED,
+            step_id="evaluate_candidates",
+            timestamp=1717821600.0,
+            data={},
+        )
+    )
+    await publisher.publish(
+        PipelineEvent(
+            type=PipelineEventType.STEP_COMPLETED,
+            step_id="evaluate_candidates",
+            timestamp=1717821601.0,
+            data={"attempt": 2},
+        )
+    )
+
+    step_run_ids = [
+        event["step"]["runId"] for event in publisher.journal.read_all() if event["eventType"] == "step_completed"
+    ]
+    assert step_run_ids == ["step-evaluate_candidates-1", "step-evaluate_candidates-2"]
