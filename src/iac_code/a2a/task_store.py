@@ -864,9 +864,7 @@ class A2ATaskStore(TaskStore):
                 any(record.active_task is not None and not record.active_task.done() for record in self._tasks.values())
                 or any(not task.done() for task in self._context_runtime_tasks.values())
                 or any(
-                    not task.done()
-                    for starts in self._context_execution_starts.values()
-                    for task in starts.values()
+                    not task.done() for starts in self._context_execution_starts.values() for task in starts.values()
                 )
                 or any(self._context_reconciliation_waiters.values())
                 or any(lock.locked() for lock in self._reconciliation_locks.values())
