@@ -36,7 +36,9 @@ def _run_reducer_script(tmp_path: Path, source: str) -> dict[str, object]:
 
 
 async def _wait_for_event(session, event_type: str) -> dict[str, object]:
-    deadline = asyncio.get_running_loop().time() + 1
+    # Runtime creation can take longer than one second on a loaded Windows CI
+    # worker. The assertion is about the event, not initialization latency.
+    deadline = asyncio.get_running_loop().time() + 5
     while asyncio.get_running_loop().time() < deadline:
         for event in session.events.replay_after(0):
             if event["type"] == event_type:

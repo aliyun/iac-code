@@ -331,6 +331,7 @@ class StartChatRelay(ThreadingHTTPServer):
         self.metrics_path = pathlib.Path(metrics_path) if metrics_path else None
         self.metrics_lock = threading.Lock()
         self.request_metrics: list[dict[str, Any]] = []
+        ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
         self.socket = ssl_context.wrap_socket(self.socket, server_side=True)
 
     def begin_request_metric(self, session: _Session, parameters: dict[str, str]) -> dict[str, Any]:

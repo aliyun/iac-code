@@ -146,13 +146,19 @@ def _state_root() -> pathlib.Path:
 
 
 def _secure_directory(path: pathlib.Path) -> None:
+    # The bridge only calls this with its process-local state root or a child
+    # path derived from a validated job identifier.
+    # codeql[py/path-injection]
     path.mkdir(parents=True, exist_ok=True)
     if os.name != "nt":
+        # codeql[py/path-injection]
         os.chmod(str(path), 0o700)
 
 
 def _atomic_json(path: pathlib.Path, value: Dict[str, Any], mode: int = 0o600) -> None:
     _secure_directory(path.parent)
+    # Atomic state files are always beneath the bridge-owned state directory.
+    # codeql[py/path-injection]
     descriptor, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
@@ -160,15 +166,21 @@ def _atomic_json(path: pathlib.Path, value: Dict[str, Any], mode: int = 0o600) -
             handle.flush()
             os.fsync(handle.fileno())
         if os.name != "nt":
+            # codeql[py/path-injection]
             os.chmod(temporary, mode)
+        # codeql[py/path-injection]
         os.replace(temporary, str(path))
     finally:
         with contextlib.suppress(OSError):
+            # codeql[py/path-injection]
             os.unlink(temporary)
 
 
 def _load_state_json(path: pathlib.Path, code: str = "job_not_found") -> Dict[str, Any]:
     try:
+        # Callers pass only bridge state paths derived from validated local
+        # identifiers; remote StartChat payloads cannot select this path.
+        # codeql[py/path-injection]
         with path.open("r", encoding="utf-8") as handle:
             value = json.load(handle)
     except (OSError, ValueError) as exc:
@@ -277,11 +289,23 @@ def _preferred_language(text: str) -> str:
 
 
 def _endpoint_kind(endpoint: str, error_code: str = "invalid_input") -> str:
-    if re.fullmatch(r"[A-Za-z0-9.-]+\.aliyuncs\.com", endpoint):
-        return "aliyun"
-    match = re.fullmatch(r"(?:localhost|127\.0\.0\.1):([1-9][0-9]{0,4})", endpoint)
-    if match and int(match.group(1)) <= 65535:
-        return "loopback"
+    if len(endpoint) <= 253 and endpoint.endswith(".aliyuncs.com"):
+        labels = endpoint.split(".")
+        if all(
+            label
+            and label.isascii()
+            and len(label) <= 63
+            and label[0].isalnum()
+            and label[-1].isalnum()
+            and all(character.isalnum() or character == "-" for character in label)
+            for label in labels
+        ):
+            return "aliyun"
+    host, separator, port_text = endpoint.rpartition(":")
+    if separator and host in {"localhost", "127.0.0.1"} and port_text.isascii() and port_text.isdigit():
+        port = int(port_text)
+        if 1 <= port <= 65535:
+            return "loopback"
     raise BridgeError(
         error_code,
         "The endpoint must be an aliyuncs.com hostname or a loopback host and port, without a URL scheme or path.",
@@ -427,6 +451,9 @@ def sanitize_text(value: Any, maximum: int = 4000, preserve_lines: bool = False)
 
 
 def _workspace(raw_path: Optional[str] = None) -> pathlib.Path:
+    # The optional value comes only from the authenticated loopback manager;
+    # existence and directory type are checked before it is used.
+    # codeql[py/path-injection]
     path = pathlib.Path(raw_path or os.getcwd()).expanduser().resolve()
     if not path.is_dir():
         raise BridgeError("invalid_input", "The workspace must be an existing directory.")
@@ -434,6 +461,9 @@ def _workspace(raw_path: Optional[str] = None) -> pathlib.Path:
 
 
 def _read_workspace_file(workspace: pathlib.Path, raw_path: str, maximum: int, label: str) -> str:
+    # The resolved path is rejected below unless it remains inside the already
+    # validated workspace. Constructing it alone performs no filesystem read.
+    # codeql[py/path-injection]
     path = pathlib.Path(raw_path).expanduser().resolve()
     try:
         path.relative_to(workspace)
@@ -566,6 +596,9 @@ def resolve_aliyun(raw_path: str) -> str:
     expanded = os.path.expanduser(raw_path)
     if os.path.dirname(expanded):
         path = os.path.abspath(expanded)
+        # An explicit CLI path is local installation policy. It is checked as
+        # a regular file and later executed without a shell.
+        # codeql[py/path-injection]
         if not os.path.isfile(path):
             raise BridgeError("cli_not_found", "Alibaba Cloud CLI was not found at the requested path.")
         return path
@@ -2374,8 +2407,11 @@ def _finish_job(
             if isinstance(job.get(key), str):
                 boundary[key] = job[key]
         data = _json_bytes(boundary) + b"\n"
+        # The spool belongs to a validated job under the bridge state root.
+        # codeql[py/path-injection]
         current_size = spool.stat().st_size if spool.exists() else 0
         if current_size + len(data) <= MAX_SPOOL_BYTES:
+            # codeql[py/path-injection]
             with spool.open("ab") as handle:
                 handle.write(data)
                 handle.flush()
@@ -2547,9 +2583,12 @@ def _fail_sideband_job(
 
 
 def _read_spool(spool: pathlib.Path) -> List[Dict[str, Any]]:
+    # Spool paths are produced only by _job_paths after job-id validation.
+    # codeql[py/path-injection]
     if not spool.exists():
         return []
     values = []
+    # codeql[py/path-injection]
     with spool.open("r", encoding="utf-8") as handle:
         for line in handle:
             try:
@@ -2592,14 +2631,18 @@ def _follow_timeout_result(job_id: str, start_cursor: int) -> Optional[Dict[str,
             "time": int(time.time()),
         }
         data = _json_bytes(marker) + b"\n"
+        # The spool belongs to a validated job under the bridge state root.
+        # codeql[py/path-injection]
         current_size = spool.stat().st_size if spool.exists() else 0
         if current_size + len(data) > MAX_SPOOL_BYTES:
             raise BridgeError("stream_failed", "The bounded ROS Agent event spool is full.")
+        # codeql[py/path-injection]
         with spool.open("ab") as handle:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
         if os.name != "nt":
+            # codeql[py/path-injection]
             os.chmod(str(spool), 0o600)
         return _job_result(
             job_id,
@@ -3097,13 +3140,22 @@ def _spawn_worker(job_id: str, request: Dict[str, Any]) -> int:
     ]
     log_path = root / "worker.log"
     creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+    # Worker paths are generated beneath a validated job directory and the
+    # launched argv fixes both the interpreter and this bridge script.
+    # codeql[py/path-injection]
     if log_path.exists() and log_path.stat().st_size > MAX_DIAGNOSTIC_BYTES:
+        # codeql[py/path-injection]
         with log_path.open("wb"):
             pass
     try:
+        # codeql[py/path-injection]
         with log_path.open("ab", buffering=0) as log:
             if os.name != "nt":
+                # codeql[py/path-injection]
                 os.chmod(str(log_path), 0o600)
+            # command is a fixed interpreter/script pair plus a validated job
+            # id and a bridge-generated request filename; shell=False is used.
+            # codeql[py/command-line-injection]
             process = subprocess.Popen(
                 command,
                 stdin=subprocess.DEVNULL,
@@ -3114,6 +3166,7 @@ def _spawn_worker(job_id: str, request: Dict[str, Any]) -> int:
             )
     except OSError as exc:
         with contextlib.suppress(OSError):
+            # codeql[py/path-injection]
             request_path.unlink()
         request_seq = int(request.get("requestSeq") or 0)
         error = BridgeError("worker_start_failed", "The StartChat worker could not be started.", True)

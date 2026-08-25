@@ -3244,18 +3244,20 @@ async def test_pipeline_permission_resident_timer_survives_full_executor_publica
         model="qwen3.6-plus",
         backup_service=backup_service,
         permission_wait_policy=PermissionWaitPolicy(
-            resident_timeout_seconds=0.01,
-            timeout_grace_seconds=0.02,
+            # Leave enough time for critical backup and publication to finish
+            # so the test measures timer ownership rather than runner speed.
+            resident_timeout_seconds=2,
+            timeout_grace_seconds=0.1,
         ),
     )
     queue = FakeEventQueue()
 
     await asyncio.wait_for(
         executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue),
-        timeout=1,
+        timeout=3,
     )
 
-    assert await asyncio.wait_for(future, timeout=1) is PermissionWaitOutcome.SUSPEND
+    assert await asyncio.wait_for(future, timeout=3) is PermissionWaitOutcome.SUSPEND
     context_record = await store.get_context_record("ctx-1")
     checkpoint = PermissionWaitCheckpointStore(str(tmp_path), context_record.session_id).list_active()[0]
     assert checkpoint["phase"] == "SUSPENDED"

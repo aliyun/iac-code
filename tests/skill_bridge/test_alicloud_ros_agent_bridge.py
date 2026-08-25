@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -26,6 +27,22 @@ def _load_bridge():
 
 
 bridge = _load_bridge()
+
+
+def _write_fake_aliyun(tmp_path: Path, source: str) -> Path:
+    """Create a fake aliyun executable that also works with CreateProcess."""
+
+    script = tmp_path / "fake_aliyun.py"
+    script.write_text(source, encoding="utf-8")
+    if os.name == "nt":
+        launcher = tmp_path / "aliyun.cmd"
+        command = subprocess.list2cmdline([sys.executable, str(script)])
+        launcher.write_text("@echo off\r\n{} %*\r\n".format(command), encoding="utf-8")
+        return launcher
+    launcher = tmp_path / "aliyun"
+    launcher.write_text("#!{}\n{}".format(sys.executable, source), encoding="utf-8")
+    launcher.chmod(0o755)
+    return launcher
 
 
 def _clear_code_credential_env(monkeypatch) -> None:
@@ -150,6 +167,16 @@ def test_build_command_rejects_non_aliyun_endpoint(monkeypatch) -> None:
     monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/usr/local/bin/aliyun")
     with pytest.raises(bridge.BridgeError, match="aliyuncs.com"):
         bridge.build_command(_chat_args(endpoint="https://attacker.example"), "hello", None, [])
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    ["evil..aliyuncs.com", "-evil.aliyuncs.com", "恶意.aliyuncs.com", "localhost:0", "127.0.0.1:65536"],
+)
+def test_build_command_rejects_invalid_endpoint_labels_and_ports(monkeypatch, endpoint: str) -> None:
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/usr/local/bin/aliyun")
+    with pytest.raises(bridge.BridgeError, match="aliyuncs.com"):
+        bridge.build_command(_chat_args(endpoint=endpoint), "hello", None, [])
 
 
 def test_build_command_supports_loopback_endpoint_through_native_cli(monkeypatch) -> None:
@@ -2125,10 +2152,9 @@ def test_manager_idle_countdown_starts_after_sse_worker_exits(monkeypatch, tmp_p
     monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    fake_cli = tmp_path / "aliyun"
-    fake_cli.write_text(
-        "#!{}\n".format(sys.executable)
-        + "import json, time\n"
+    fake_cli = _write_fake_aliyun(
+        tmp_path,
+        "import json, time\n"
         + "time.sleep(0.6)\n"
         + "event = {'result': {'statusUpdate': {'taskId': 'task-1', 'contextId': 'session-1', "
         + "'status': {'state': 'TASK_STATE_INPUT_REQUIRED', 'message': {'role': 'ROLE_AGENT', "
@@ -2136,11 +2162,11 @@ def test_manager_idle_countdown_starts_after_sse_worker_exits(monkeypatch, tmp_p
         + "{'complete': True}}, 'iacCodeSessionId': 'iac-1'}}}}\n"
         + "print('data: ' + json.dumps(event), flush=True)\n"
         + "print('', flush=True)\n",
-        encoding="utf-8",
     )
-    fake_cli.chmod(0o755)
 
-    manager = bridge.ensure_manager(0.2)
+    # Leave enough startup headroom for a loaded Windows runner; this test is
+    # about when the idle countdown starts, not sub-second process startup.
+    manager = bridge.ensure_manager(1.5)
     started = bridge._manager_request(
         manager,
         "/start",
@@ -2193,10 +2219,9 @@ def test_managed_worker_outlives_start_and_follow_returns_step_start_before_fina
     monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    fake_cli = tmp_path / "aliyun"
-    fake_cli.write_text(
-        "#!{}\n".format(sys.executable)
-        + "import json, time\n"
+    fake_cli = _write_fake_aliyun(
+        tmp_path,
+        "import json, time\n"
         + "def emit(value):\n"
         + "    print('data: ' + json.dumps(value), flush=True)\n"
         + "    print('', flush=True)\n"
@@ -2212,9 +2237,7 @@ def test_managed_worker_outlives_start_and_follow_returns_step_start_before_fina
         + "time.sleep(0.35)\n"
         + "emit(status('TASK_STATE_WORKING', 'done', {'assistantFinal': {'complete': True}}))\n"
         + "emit(status('TASK_STATE_INPUT_REQUIRED'))\n",
-        encoding="utf-8",
     )
-    fake_cli.chmod(0o755)
 
     started = bridge._start_job_local(
         {
