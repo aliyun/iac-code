@@ -204,9 +204,10 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --scenario selection-during-backup
 ```
 
-An E2E-only fixture delays the Step 4 `input_required` backup by at least 10
-seconds. The client submits its selection as soon as the event arrives. The
-scenario proves that dispatch happened inside the backup started/finished
+The runner arms an E2E-only fixture before the initial request so that the Step
+4 `input_required` backup is delayed by at least 10 seconds. It submits the
+selection as soon as the backup started marker appears and continues to verify
+the candidate-selection event. The scenario proves that dispatch happened inside the backup started/finished
 window, the message was consumed as candidate input, and no
 `interrupt_received` / `interrupt_classified` event was emitted.
 
@@ -269,7 +270,7 @@ the rest of the tests.
 | `redaction-step4` | Force A2A safe mode and stop when the real mini-app backend/database task reaches step 4 candidate selection | None; no candidate selection is submitted | Canonical password parameters are not placeholders; public A2A passwords equal canonical values; token counters stay numeric when present; known server paths become `[PATH]` only in the public copy; deployment never starts. |
 | `scenario1` | After pipeline completion and one normal-chat follow-up | Ask what the previous normal-chat question was | Normal-chat history survives restart; VSwitch evidence exists. |
 | `scenario1-performance-backup` | Full `scenario1` with `IAC_CODE_A2A_EXTREME_PERFORMANCE=true` and `IAC_CODE_CONFIG_BACKUP_DIR=<run-dir>/session-backup` | After the Step4 backup is durable, stop the server, remove the matching primary session under `projects`, restart, and select without `taskId`; later normal-chat recovery also omits `taskId` | Only the backup session exists before restart; restart alone does not recreate the primary session; selection without `taskId` restores the primary session from backup and hydrates the recovered task; full scenario1 passes. |
-| `selection-during-backup` | Step 4 `input_required` is published, then an E2E fixture blocks its backup for at least 10 seconds | Immediately send `你随便选一个方案。` with the active pipeline `taskId` while backup is running | Dispatch falls inside the backup started/finished window; the request is queued and consumed as candidate input; no interrupt events are emitted; the pipeline completes. |
+| `selection-during-backup` | Arm the E2E fixture before the initial request; when the Step 4 `input_required` backup starts, it writes a started marker and blocks for at least 10 seconds | Immediately send `你随便选一个方案。` with the active pipeline `taskId` while backup is running, then verify the Step 4 event | Dispatch falls inside the backup started/finished window; the request is queued and consumed as candidate input; no interrupt events are emitted; the pipeline completes. |
 | `selection-waiting` | Step 4 waits for candidate selection | `你随便选一个方案。` without `taskId` | Waiting step4 task is recovered and selected; VSwitch evidence exists. |
 | `ask-waiting` | `ask_user_question` waits for user input | Clarification answers without `taskId` | Pending ask input is recovered and pipeline completes; VSwitch evidence exists. |
 | `image-initial` | Initial user message is the static `initial.png` image fixture | Candidate selection text | The image starts the pipeline, reaches step4 selection, completes, and produces VSwitch evidence. |

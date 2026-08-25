@@ -206,8 +206,8 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --scenario selection-during-backup
 ```
 
-该场景通过仅注入 server 子进程的 E2E fixture，把 step4 `input_required` backup 至少阻塞 10 秒；
-客户端收到候选选择事件后立即提交方案。场景会验证选择请求确实在 backup 的 started/finished 窗口内发出、
+该场景会在首轮请求前 arm 仅注入 server 子进程的 E2E fixture，把 step4 `input_required` backup 至少阻塞 10 秒；
+runner 收到 backup started 标记后立即提交方案，同时继续核验候选选择事件。场景会验证选择请求确实在 backup 的 started/finished 窗口内发出、
 最终被消费为 candidate selection，并且没有产生 `interrupt_received` / `interrupt_classified`。
 
 如果要跑完整真实 E2E 矩阵：
@@ -266,7 +266,7 @@ provider、tool、真实云调用场景默认会被保护住。只有确认要�
 | `redaction-step4` | 强制 A2A safe mode，真实小程序后端/数据库需求到达 step4 候选方案选择即停止 | 无；不提交方案选择 | canonical 密码参数不是脱敏占位符；A2A 密码值与 canonical 一致；存在的 token 统计仍为数字；已知服务器路径只在 A2A 副本中变成 `[PATH]`；不进入部署。 |
 | `scenario1` | pipeline 完成并完成一轮 normal-chat follow-up 后 | 询问上一条 normal-chat 问题是什么 | normal-chat 历史重启后仍可用；存在 VSwitch 证据。 |
 | `scenario1-performance-backup` | 完整 `scenario1`，并强制 `IAC_CODE_A2A_EXTREME_PERFORMANCE=true`、`IAC_CODE_CONFIG_BACKUP_DIR=<run-dir>/session-backup` | step4 backup 落盘后停服并删除主 `projects` 下对应 session，重启后不带 `taskId` 选择；后续 normal-chat 恢复也不带 `taskId` | 重启前只有 backup session；重启本身不会重建主 session；省略 `taskId` 的选择会从 backup restore 主 session 并 hydrate 到恢复 task；完整 scenario1 通过。 |
-| `selection-during-backup` | step4 `input_required` 已发出，E2E fixture 将随后执行的 backup 至少阻塞 10 秒 | backup 仍在执行时，携带原 task 的 `taskId` 立即发送 `你随便选一个方案。` | 请求时间落在 backup started/finished 窗口内；选择被排队并作为 candidate input 消费；不产生 interrupt 事件；pipeline 完成。 |
+| `selection-during-backup` | 首轮请求前 arm E2E fixture；step4 `input_required` backup 开始后至少阻塞 10 秒并写出 started 标记 | backup 仍在执行时，携带原 task 的 `taskId` 立即发送 `你随便选一个方案。`，随后核验 step4 事件 | 请求时间落在 backup started/finished 窗口内；选择被排队并作为 candidate input 消费；不产生 interrupt 事件；pipeline 完成。 |
 | `selection-waiting` | step4 等待候选方案选择时 | 不带 `taskId` 发送 `你随便选一个方案。` | 能恢复等待中的 step4 task 并完成选择；存在 VSwitch 证据。 |
 | `ask-waiting` | `ask_user_question` 等待用户输入时 | 不带 `taskId` 发送澄清回答 | 能恢复 pending ask 输入并完成 pipeline；存在 VSwitch 证据。 |
 | `image-initial` | 首轮用户消息就是静态 `initial.png` 图片 fixture | 文本选择候选方案 | 图片能启动 pipeline，进入 step4 选择，最终完成并产生 VSwitch 证据。 |
