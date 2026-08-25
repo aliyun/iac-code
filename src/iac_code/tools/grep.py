@@ -338,7 +338,9 @@ class GrepTool(Tool):
         path = resolution.path
 
         if not os.path.exists(path):
-            return ToolResult.error(f"Path not found: {path}")
+            # A missing search root is an empty result, not a tool failure: callers such as the
+            # pipeline engine routinely search directories that are only populated on demand.
+            return ToolResult.success(f"No matches (path does not exist: {path})")
 
         allowed_roots = _effective_allowed_roots(path, context)
         if _is_rg_available() and not resolution.used_relative_root and not _contains_directory_symlink(path):

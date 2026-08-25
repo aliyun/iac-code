@@ -494,7 +494,7 @@ fn grep_supports_case_insensitive_glob_filter_max_results_and_pattern_errors() {
 }
 
 #[test]
-fn grep_reports_missing_path_and_checks_read_permissions() {
+fn grep_reports_missing_path_as_no_matches_and_checks_read_permissions() {
     let workspace = TestWorkspace::new("grep-permissions");
     let project = workspace.path().join("project");
     let outside = workspace.path().join("outside");
@@ -514,8 +514,8 @@ fn grep_reports_missing_path_and_checks_read_permissions() {
                 cwd: project.to_string_lossy().into_owned(),
             },
         ),
-        ToolResult::error(format!(
-            "Path not found: {}",
+        ToolResult::success(format!(
+            "No matches (path does not exist: {})",
             project.join("missing").display()
         ))
     );

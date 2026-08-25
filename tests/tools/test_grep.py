@@ -120,14 +120,15 @@ class TestGrepExecute:
         result = await tool.execute(tool_input={"pattern": "needle", "path": str(tmp_path)}, context=context)
         assert result.content == "No matches"
 
-    async def test_path_not_found(self, tool, tmp_path):
+    async def test_missing_path_reports_no_matches_instead_of_error(self, tool, tmp_path):
         context = ToolContext(cwd=str(tmp_path))
+        missing = tmp_path / "missing"
         result = await tool.execute(
-            tool_input={"pattern": "x", "path": str(tmp_path / "missing")},
+            tool_input={"pattern": "x", "path": str(missing)},
             context=context,
         )
-        assert result.is_error is True
-        assert "not found" in result.content.lower()
+        assert result.is_error is False
+        assert result.content == f"No matches (path does not exist: {missing})"
 
     async def test_relative_path_falls_back_to_symlinked_relative_read_directory(self, tool, tmp_path, monkeypatch):
         monkeypatch.setattr("iac_code.tools.grep._is_rg_available", lambda: False)

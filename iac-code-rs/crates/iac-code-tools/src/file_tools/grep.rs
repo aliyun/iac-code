@@ -87,7 +87,12 @@ impl Tool for GrepTool {
         let max_results = integer_field(input, "max_results").unwrap_or(100).max(0) as usize;
 
         if !path.exists() {
-            return ToolResult::error(format!("Path not found: {}", path.display()));
+            // A missing search root is an empty result, not a tool failure: callers such as the
+            // pipeline engine routinely search directories that are only populated on demand.
+            return ToolResult::success(format!(
+                "No matches (path does not exist: {})",
+                path.display()
+            ));
         }
 
         let mut output = python_like_grep(
