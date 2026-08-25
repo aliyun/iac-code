@@ -1027,6 +1027,87 @@ class TestStepExecutor:
         assert ctx.get_conclusion("intent") == {"type": "e-commerce"}
 
     @pytest.mark.asyncio
+    async def test_failure_condition_marks_step_failed(self, tmp_path):
+        events = [
+            ToolUseStartEvent(tool_use_id="tu_1", name="complete_step"),
+            ToolUseEndEvent(
+                tool_use_id="tu_1",
+                name="complete_step",
+                input={"conclusion": {"status": "failed", "error": "stack CREATE_FAILED"}},
+            ),
+            ToolResultEvent(tool_use_id="tu_1", tool_name="complete_step", result="ok"),
+        ]
+        fake_loop = _make_fake_agent_loop_class(events)
+        executor = _make_executor(tmp_path)
+        step = _make_step()
+        step.failure_condition = {"field": "status", "values": ["failed"]}
+        ctx = PipelineContext(SIMPLE_DEPS)
+
+        collected = []
+        with patch("iac_code.agent.agent_loop.AgentLoop", fake_loop):
+            async for event in executor.execute(step, ctx, "test_session"):
+                collected.append(event)
+
+        results = [e for e in collected if isinstance(e, StepResult)]
+        assert len(results) == 1
+        assert results[0].status == StepStatus.FAILED
+        assert results[0].error == "stack CREATE_FAILED"
+        assert results[0].conclusion == {"status": "failed", "error": "stack CREATE_FAILED"}
+        assert ctx.get_conclusion("intent") == {"status": "failed", "error": "stack CREATE_FAILED"}
+
+    @pytest.mark.asyncio
+    async def test_failure_condition_without_error_uses_default_reason(self, tmp_path):
+        events = [
+            ToolUseStartEvent(tool_use_id="tu_1", name="complete_step"),
+            ToolUseEndEvent(
+                tool_use_id="tu_1",
+                name="complete_step",
+                input={"conclusion": {"status": "failed"}},
+            ),
+            ToolResultEvent(tool_use_id="tu_1", tool_name="complete_step", result="ok"),
+        ]
+        fake_loop = _make_fake_agent_loop_class(events)
+        executor = _make_executor(tmp_path)
+        step = _make_step()
+        step.failure_condition = {"field": "status", "values": ["failed"]}
+        ctx = PipelineContext(SIMPLE_DEPS)
+
+        results = []
+        with patch("iac_code.agent.agent_loop.AgentLoop", fake_loop):
+            async for event in executor.execute(step, ctx, "test_session"):
+                if isinstance(event, StepResult):
+                    results.append(event)
+
+        assert results[0].status == StepStatus.FAILED
+        assert results[0].error == "Step 'intent_parsing' reported status=failed"
+
+    @pytest.mark.asyncio
+    async def test_failure_condition_not_matched_stays_completed(self, tmp_path):
+        events = [
+            ToolUseStartEvent(tool_use_id="tu_1", name="complete_step"),
+            ToolUseEndEvent(
+                tool_use_id="tu_1",
+                name="complete_step",
+                input={"conclusion": {"status": "success", "stack_id": "stack-1"}},
+            ),
+            ToolResultEvent(tool_use_id="tu_1", tool_name="complete_step", result="ok"),
+        ]
+        fake_loop = _make_fake_agent_loop_class(events)
+        executor = _make_executor(tmp_path)
+        step = _make_step()
+        step.failure_condition = {"field": "status", "values": ["failed"]}
+        ctx = PipelineContext(SIMPLE_DEPS)
+
+        results = []
+        with patch("iac_code.agent.agent_loop.AgentLoop", fake_loop):
+            async for event in executor.execute(step, ctx, "test_session"):
+                if isinstance(event, StepResult):
+                    results.append(event)
+
+        assert results[0].status == StepStatus.COMPLETED
+        assert results[0].error is None
+
+    @pytest.mark.asyncio
     async def test_user_message_overrides_initial_prompt(self, tmp_path):
         captured_input = {}
         events = [

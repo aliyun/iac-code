@@ -86,3 +86,10 @@ def test_deploying_renders_stack_outputs_after_complete_step() -> None:
     assert deploying_step.complete_step_terminal is False
     assert "`complete_step` 成功返回后" in prompt
     assert "`complete_step.conclusion.outputs` 渲染 Stack Outputs" in prompt
+
+
+def test_deploying_declares_failure_condition_for_failed_status() -> None:
+    loaded = load_pipeline_dir(_selling_dir())
+    deploying_step = next(step for step in loaded.steps if step.step_id == "deploying")
+
+    assert deploying_step.failure_condition == {"field": "status", "values": ["failed"]}

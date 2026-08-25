@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from iac_code.pipeline.engine.loader import _parse_exit_condition, load_pipeline_dir
+from iac_code.pipeline.engine.loader import _parse_exit_condition, _parse_failure_condition, load_pipeline_dir
 
 
 def _write_pipeline(tmp_path: Path, yaml_content: str, prompts: dict[str, str] | None = None):
@@ -845,3 +845,32 @@ class TestParseExitCondition:
     def test_error_message_includes_step_id(self):
         with pytest.raises(ValueError, match="step_x"):
             _parse_exit_condition("wrong", "step_x")
+
+
+class TestParseFailureCondition:
+    def test_none_returns_none(self):
+        assert _parse_failure_condition(None, "step_x") is None
+
+    def test_valid_dict_returned_unchanged(self):
+        raw = {"field": "status", "values": ["failed"]}
+        assert _parse_failure_condition(raw, "step_x") is raw
+
+    def test_non_dict_raises(self):
+        with pytest.raises(ValueError, match="must be a dict"):
+            _parse_failure_condition("wrong", "step_x")
+
+    def test_missing_values_raises(self):
+        with pytest.raises(ValueError, match="must be a dict"):
+            _parse_failure_condition({"field": "status"}, "step_x")
+
+    def test_empty_values_raises(self):
+        with pytest.raises(ValueError, match="non-empty list of strings"):
+            _parse_failure_condition({"field": "status", "values": []}, "step_x")
+
+    def test_non_string_values_raises(self):
+        with pytest.raises(ValueError, match="non-empty list of strings"):
+            _parse_failure_condition({"field": "status", "values": [1]}, "step_x")
+
+    def test_error_message_includes_step_id(self):
+        with pytest.raises(ValueError, match="step_x"):
+            _parse_failure_condition("wrong", "step_x")
