@@ -1480,3 +1480,195 @@ def test_store_returns_none_for_invalid_utf8_snapshot(tmp_path) -> None:
 def test_snapshot_schema_version_is_exported() -> None:
     assert SNAPSHOT_SCHEMA_VERSION == "1.1"
     assert "SNAPSHOT_SCHEMA_VERSION" in pipeline_snapshot.__all__
+
+
+_CANDIDATE_STEP_ORDER = ("template_generating", "reviewing", "cost_estimating", "summarizing")
+_PARENT_STEP = {
+    "runId": "step-evaluate_candidates-1",
+    "id": "evaluate_candidates",
+    "index": 2,
+    "total": 4,
+    "attempt": 1,
+}
+_CANDIDATE = {
+    "runId": "candidate-26ee3b23-0-1",
+    "id": "evaluate_candidate_26ee3b23",
+    "index": 0,
+    "attempt": 1,
+}
+
+
+def _candidate_step_coordinate(step_id: str, attempt: int = 1) -> dict:
+    index = _CANDIDATE_STEP_ORDER.index(step_id) + 1
+    return {
+        "runId": f"{_CANDIDATE['runId']}-{step_id}-{attempt}",
+        "id": step_id,
+        "index": index,
+        "total": len(_CANDIDATE_STEP_ORDER),
+        "attempt": attempt,
+    }
+
+
+def _candidate_with_pending_skeletons() -> dict:
+    """A ``candidate_started`` coordinate carrying the pending sub-step skeleton."""
+    return dict(
+        _CANDIDATE,
+        steps=[
+            dict(_candidate_step_coordinate(step_id), name=step_id, status="pending")
+            for step_id in _CANDIDATE_STEP_ORDER
+        ],
+    )
+
+
+def test_reduce_candidate_step_skeletons_do_not_duplicate_real_sub_steps() -> None:
+    parent = _base("evt-1", 1, "step_started", scope="step")
+    parent["step"] = _PARENT_STEP
+    started = _base("evt-2", 2, "candidate_started", scope="candidate")
+    started["step"] = _PARENT_STEP
+    started["candidate"] = _candidate_with_pending_skeletons()
+    sub_started = _base("evt-3", 3, "candidate_step_started", scope="candidate_step")
+    sub_started["step"] = _PARENT_STEP
+    sub_started["candidate"] = _CANDIDATE
+    sub_started["candidateStep"] = _candidate_step_coordinate("template_generating")
+    sub_done = _base("evt-4", 4, "candidate_step_completed", scope="candidate_step")
+    sub_done["step"] = _PARENT_STEP
+    sub_done["candidate"] = _CANDIDATE
+    sub_done["candidateStep"] = _candidate_step_coordinate("template_generating")
+    sub_done["data"] = {"conclusion": {"body": "ros"}}
+
+    snapshot = reduce_pipeline_events([parent, started, sub_started, sub_done])
+
+    steps = snapshot["steps"][0]["candidates"][0]["steps"]
+    assert len(steps) == len(_CANDIDATE_STEP_ORDER)
+    template_steps = [step for step in steps if step["id"] == "template_generating"]
+    assert len(template_steps) == 1
+    assert template_steps[0]["status"] == "completed"
+    assert template_steps[0]["conclusion"] == {"body": "ros"}
+
+
+def test_reduce_candidate_step_retry_supersedes_earlier_attempt() -> None:
+    parent = _base("evt-1", 1, "step_started", scope="step")
+    parent["step"] = _PARENT_STEP
+    started = _base("evt-2", 2, "candidate_started", scope="candidate")
+    started["step"] = _PARENT_STEP
+    started["candidate"] = _candidate_with_pending_skeletons()
+    first_attempt = _base("evt-3", 3, "candidate_step_started", scope="candidate_step")
+    first_attempt["step"] = _PARENT_STEP
+    first_attempt["candidate"] = _CANDIDATE
+    first_attempt["candidateStep"] = _candidate_step_coordinate("cost_estimating", 1)
+    retry = _base("evt-4", 4, "candidate_step_started", scope="candidate_step")
+    retry["step"] = _PARENT_STEP
+    retry["candidate"] = _CANDIDATE
+    retry["candidateStep"] = _candidate_step_coordinate("cost_estimating", 2)
+
+    snapshot = reduce_pipeline_events([parent, started, first_attempt, retry])
+
+    cost_steps = [step for step in snapshot["steps"][0]["candidates"][0]["steps"] if step["id"] == "cost_estimating"]
+    assert [(step["attempt"], step["status"]) for step in cost_steps] == [(1, "superseded"), (2, "working")]
+    assert cost_steps[0]["supersededAt"] == "2026-06-08T10:00:00Z"
+
+
+def test_reduce_completed_candidate_leaves_no_pending_sub_steps() -> None:
+    """Regression for session 2787feb9: candidate ``completed`` while sub-steps 0 and 2
+    stayed ``pending`` with a ``null`` conclusion after being retried."""
+    parent = _base("evt-1", 1, "step_started", scope="step")
+    parent["step"] = _PARENT_STEP
+    started = _base("evt-2", 2, "candidate_started", scope="candidate")
+    started["step"] = _PARENT_STEP
+    started["candidate"] = _candidate_with_pending_skeletons()
+
+    events = [parent, started]
+    sequence = 3
+    retried = {"template_generating", "cost_estimating"}
+    for step_id in _CANDIDATE_STEP_ORDER:
+        attempt = 2 if step_id in retried else 1
+        for event_type in ("candidate_step_started", "candidate_step_completed"):
+            event = _base(f"evt-{sequence}", sequence, event_type, scope="candidate_step")
+            event["step"] = _PARENT_STEP
+            event["candidate"] = _CANDIDATE
+            event["candidateStep"] = _candidate_step_coordinate(step_id, attempt)
+            if event_type == "candidate_step_completed":
+                event["data"] = {"conclusion": {"ok": True}}
+            events.append(event)
+            sequence += 1
+    completed = _base(f"evt-{sequence}", sequence, "candidate_completed", scope="candidate")
+    completed["step"] = _PARENT_STEP
+    completed["candidate"] = _CANDIDATE
+    events.append(completed)
+
+    snapshot = reduce_pipeline_events(events)
+
+    candidate = snapshot["steps"][0]["candidates"][0]
+    assert candidate["status"] == "completed"
+    assert all(step["status"] in {"completed", "superseded"} for step in candidate["steps"])
+    assert not [step for step in candidate["steps"] if step["status"] == "pending"]
+    assert not [step for step in candidate["steps"] if step["status"] != "completed" and step.get("conclusion")]
+    completed_ids = [step["id"] for step in candidate["steps"] if step["status"] == "completed"]
+    assert completed_ids == list(_CANDIDATE_STEP_ORDER)
+
+
+def test_reduce_failed_candidate_splits_running_and_unstarted_sub_steps() -> None:
+    parent = _base("evt-1", 1, "step_started", scope="step")
+    parent["step"] = _PARENT_STEP
+    started = _base("evt-2", 2, "candidate_started", scope="candidate")
+    started["step"] = _PARENT_STEP
+    started["candidate"] = _candidate_with_pending_skeletons()
+    running = _base("evt-3", 3, "candidate_step_started", scope="candidate_step")
+    running["step"] = _PARENT_STEP
+    running["candidate"] = _CANDIDATE
+    running["candidateStep"] = _candidate_step_coordinate("template_generating")
+    failed = _base("evt-4", 4, "candidate_failed", scope="candidate", status="working")
+    failed["step"] = _PARENT_STEP
+    failed["candidate"] = _CANDIDATE
+
+    snapshot = reduce_pipeline_events([parent, started, running, failed])
+
+    candidate = snapshot["steps"][0]["candidates"][0]
+    assert candidate["status"] == "failed"
+    statuses = {step["id"]: step["status"] for step in candidate["steps"]}
+    assert statuses["template_generating"] == "failed"
+    assert statuses["reviewing"] == "superseded"
+    assert statuses["cost_estimating"] == "superseded"
+    assert statuses["summarizing"] == "superseded"
+
+
+def test_reduce_repairs_existing_snapshot_with_pending_sub_steps() -> None:
+    existing = {
+        "schemaVersion": SNAPSHOT_SCHEMA_VERSION,
+        "status": "working",
+        "lastSequence": 9,
+        "seenEventIds": ["evt-1"],
+        "steps": [
+            {
+                **_PARENT_STEP,
+                "status": "completed",
+                "candidates": [
+                    {
+                        **_CANDIDATE,
+                        "status": "completed",
+                        "completedAt": "2026-08-24T18:30:00Z",
+                        "steps": [
+                            dict(_candidate_step_coordinate("template_generating"), status="pending"),
+                            dict(
+                                _candidate_step_coordinate("reviewing"),
+                                status="completed",
+                                conclusion={"ok": True},
+                            ),
+                            dict(_candidate_step_coordinate("cost_estimating"), status="pending"),
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+    snapshot = reduce_pipeline_events([], existing)
+
+    candidate = snapshot["steps"][0]["candidates"][0]
+    statuses = {step["id"]: step["status"] for step in candidate["steps"]}
+    assert statuses == {
+        "template_generating": "superseded",
+        "reviewing": "completed",
+        "cost_estimating": "superseded",
+    }
+    assert candidate["steps"][0]["supersededAt"] == "2026-08-24T18:30:00Z"

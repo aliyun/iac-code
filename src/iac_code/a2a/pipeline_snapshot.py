@@ -36,6 +36,12 @@ _CLEANUP_STATUS_BY_EVENT_TYPE = {
     PIPELINE_EVENT_CLEANUP_FAILED: "failed",
 }
 _KNOWN_CLEANUP_STATUSES = {"pending", "started", "in_progress", "completed", "failed", "skipped"}
+# Candidate sub-steps that reached a terminal state are never re-converged when the
+# candidate itself finishes.  ``superseded`` marks abandoned/retried attempts so a
+# completed candidate never keeps ``pending`` sub-steps with a ``null`` conclusion.
+_CANDIDATE_STEP_SUPERSEDED_STATUS = "superseded"
+_TERMINAL_CANDIDATE_STEP_STATUSES = {"completed", "failed", _CANDIDATE_STEP_SUPERSEDED_STATUS}
+_TERMINAL_CANDIDATE_STATUSES = {"completed", "failed"}
 _PENDING_BACKUP_VISIBILITY = "pending_backup"
 _COMMITTED_BACKUP_VISIBILITY = "committed"
 _BACKUP_COMMITTED_EVENT_TYPE = "backup_committed"
@@ -266,6 +272,15 @@ class _PipelineSnapshotReducer:
                     valid_candidate_steps.append(candidate_step)
                     self._candidate_steps_by_run_id[candidate_step_run_id] = candidate_step
                 candidate["steps"] = valid_candidate_steps
+                candidate_status = _string_or_none(candidate.get("status"))
+                if candidate_status in _TERMINAL_CANDIDATE_STATUSES:
+                    # Repair snapshots persisted before candidate terminal states
+                    # converged their sub-steps.
+                    _converge_candidate_steps(
+                        candidate,
+                        candidate_status,
+                        _string_or_none(candidate.get("completedAt")) or _string_or_none(candidate.get("failedAt")),
+                    )
             step["candidates"] = valid_candidates
         self._snapshot["steps"] = valid_steps
         self._sanitize_active_candidate_run_ids()
@@ -661,8 +676,37 @@ class _PipelineSnapshotReducer:
         self._candidate_parent_step_run_ids[run_id] = step["runId"]
 
         _merge_coordinate(candidate, coordinate)
+        self._claim_candidate_step_skeletons(candidate)
         self._apply_candidate_lifecycle(candidate, event)
         return candidate
+
+    def _claim_candidate_step_skeletons(self, candidate: dict[str, Any]) -> None:
+        """Index sub-step entries that arrived as part of a candidate coordinate.
+
+        ``candidate_started`` carries a skeleton of every planned sub-step with
+        ``status="pending"``.  Without indexing them here, later
+        ``candidate_step_*`` events would miss the lookup and append a second
+        entry for the same ``runId``, leaving the pending skeleton behind.
+        """
+        claimed: list[dict[str, Any]] = []
+        seen_run_ids: set[str] = set()
+        for candidate_step in _dict_list(candidate.get("steps")):
+            run_id = _string_or_none(candidate_step.get("runId"))
+            if run_id is None or run_id in seen_run_ids:
+                continue
+            seen_run_ids.add(run_id)
+            known = self._candidate_steps_by_run_id.get(run_id)
+            if known is None:
+                self._candidate_steps_by_run_id[run_id] = candidate_step
+                claimed.append(candidate_step)
+                continue
+            # A tracked entry is authoritative: keep it and fold in any coordinate
+            # fields the skeleton carries without downgrading its status.
+            for key, value in candidate_step.items():
+                if key != "status" and key not in known:
+                    known[key] = copy.deepcopy(value)
+            claimed.append(known)
+        candidate["steps"] = claimed
 
     def _apply_candidate_lifecycle(self, candidate: dict[str, Any], event: dict[str, Any]) -> None:
         event_type = event.get("eventType")
@@ -677,11 +721,13 @@ class _PipelineSnapshotReducer:
             candidate["status"] = "completed"
             _set_time(candidate, "completedAt", created_at)
             _merge_completion_data(candidate, event)
+            _converge_candidate_steps(candidate, "completed", created_at)
             _remove_value(self._snapshot["control"]["activeCandidateRunIds"], run_id)
         elif event_type == "candidate_failed":
             candidate["status"] = "failed"
             _set_time(candidate, "failedAt", created_at)
             _merge_completion_data(candidate, event)
+            _converge_candidate_steps(candidate, "failed", created_at)
             _remove_value(self._snapshot["control"]["activeCandidateRunIds"], run_id)
         elif event_type == "candidate_restart_requested":
             candidate["status"] = "restarting"
@@ -733,6 +779,7 @@ class _PipelineSnapshotReducer:
 
         _merge_coordinate(candidate_step, coordinate)
         self._apply_candidate_step_lifecycle(candidate_step, event)
+        _supersede_earlier_candidate_step_attempts(candidate, candidate_step, _string_or_none(event.get("createdAt")))
         return candidate_step
 
     def _apply_candidate_step_lifecycle(self, candidate_step: dict[str, Any], event: dict[str, Any]) -> None:
@@ -1761,6 +1808,53 @@ def _merge_completion_data(target: dict[str, Any], event: dict[str, Any]) -> Non
 def _append_unique(values: list[Any], value: Any) -> None:
     if value not in values:
         values.append(value)
+
+
+def _mark_candidate_step_superseded(candidate_step: dict[str, Any], created_at: str | None) -> None:
+    candidate_step["status"] = _CANDIDATE_STEP_SUPERSEDED_STATUS
+    _set_time(candidate_step, "supersededAt", created_at)
+
+
+def _supersede_earlier_candidate_step_attempts(
+    candidate: dict[str, Any],
+    candidate_step: dict[str, Any],
+    created_at: str | None,
+) -> None:
+    """Converge sibling attempts abandoned by a retry of the same sub-step.
+
+    A retried sub-step gets a new ``runId`` (``...-<step_id>-<attempt>``), so the
+    previous attempt would otherwise stay ``pending``/``working`` forever.
+    """
+    step_id = _string_or_none(candidate_step.get("id"))
+    attempt = _int_or_none(candidate_step.get("attempt")) or 1
+    if step_id is None:
+        return
+
+    for sibling in _dict_list(candidate.get("steps")):
+        if sibling is candidate_step or _string_or_none(sibling.get("id")) != step_id:
+            continue
+        if (_int_or_none(sibling.get("attempt")) or 1) >= attempt:
+            continue
+        if _string_or_none(sibling.get("status")) in _TERMINAL_CANDIDATE_STEP_STATUSES:
+            continue
+        _mark_candidate_step_superseded(sibling, created_at)
+
+
+def _converge_candidate_steps(candidate: dict[str, Any], candidate_status: str, created_at: str | None) -> None:
+    """Force every sub-step of a finished candidate into a terminal state.
+
+    A ``completed``/``failed`` candidate must never keep ``pending`` sub-steps with
+    a ``null`` conclusion — that combination makes replay and audit self-contradictory.
+    """
+    for candidate_step in _dict_list(candidate.get("steps")):
+        status = _string_or_none(candidate_step.get("status"))
+        if status in _TERMINAL_CANDIDATE_STEP_STATUSES:
+            continue
+        if candidate_status == "failed" and status == "working":
+            candidate_step["status"] = "failed"
+            _set_time(candidate_step, "failedAt", created_at)
+            continue
+        _mark_candidate_step_superseded(candidate_step, created_at)
 
 
 def _remove_value(values: list[Any], value: Any) -> None:
