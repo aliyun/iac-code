@@ -158,6 +158,11 @@ def public_aliyun_error(
             return _("Alibaba Cloud API {operation} requires body_file for its binary request body.").format(
                 operation=operation
             )
+        if parameter == "StackId" and safe_product.casefold() in {"ros", "resourceorchestrationservice"}:
+            return _(
+                "Alibaba Cloud API {operation} requires parameter StackId. "
+                "When only the stack name is known, call ListStacks filtered by StackName to read StackId first."
+            ).format(operation=operation)
         if parameter is not None and "," not in parameter:
             return _("Alibaba Cloud API {operation} requires parameter {parameter}.").format(
                 operation=operation,

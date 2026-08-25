@@ -6093,6 +6093,17 @@ msgstr ""
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} requires parameter StackId. When only the "
+"stack name is known, call ListStacks filtered by StackName to read "
+"StackId first."
+msgstr ""
+"L’API Alibaba Cloud {operation} exige le paramètre StackId. Si seul le "
+"nom de la pile est connu, appelez d’abord ListStacks en filtrant sur "
+"StackName pour lire le StackId."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
 msgid "Alibaba Cloud API {operation} requires parameter {parameter}."
 msgstr "L'API Alibaba Cloud {operation} nécessite le paramètre {parameter}."
 
@@ -6718,6 +6729,33 @@ msgstr ""
 "params.TemplateURL. Enregistrez le modèle dans un fichier et transmettez "
 "params.TemplateURL, par exemple un chemin de fichier local ou une URL "
 "OSS/HTTP."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_stack_identifier.py
+#, python-brace-format
+msgid "{} requires StackId, but the request provides only StackName."
+msgstr "{} exige StackId, mais la requête ne fournit que StackName."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_stack_identifier.py
+#, python-brace-format
+msgid "{} requires StackId, but the request provides no stack identifier."
+msgstr "{} exige StackId, mais la requête ne fournit aucun identifiant de pile."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_stack_identifier.py
+msgid ""
+"This operation targets a stack by StackId only; StackName is not an "
+"accepted target."
+msgstr ""
+"Cette opération cible une pile uniquement par StackId ; StackName n’est "
+"pas une cible acceptée."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_stack_identifier.py
+#, python-brace-format
+msgid ""
+"Call ListStacks filtered by StackName first, read StackId from the "
+"result, then call {} with it."
+msgstr ""
+"Appelez d’abord ListStacks en filtrant sur StackName, lisez le StackId "
+"dans le résultat, puis appelez {} avec celui-ci."
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid "The local ROS template file cannot be read."

@@ -5779,6 +5779,16 @@ msgstr "Alibaba Cloud API {operation} のバイナリリクエストボディに
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} requires parameter StackId. When only the "
+"stack name is known, call ListStacks filtered by StackName to read "
+"StackId first."
+msgstr ""
+"Alibaba Cloud API {operation} にはパラメーター StackId が必要です。スタック名しか分からない場合は、まず "
+"StackName でフィルターした ListStacks を呼び出して StackId を取得してください。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
 msgid "Alibaba Cloud API {operation} requires parameter {parameter}."
 msgstr "Alibaba Cloud API {operation} にはパラメーター {parameter} が必要です。"
 
@@ -6351,6 +6361,31 @@ msgstr ""
 "ROS パイプラインで {action} を呼び出す場合は、params.TemplateURL "
 "を渡す必要があります。テンプレートをファイルに保存し、ローカルファイルパスまたは OSS/HTTP URL などを "
 "params.TemplateURL として渡してください。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_stack_identifier.py
+#, python-brace-format
+msgid "{} requires StackId, but the request provides only StackName."
+msgstr "{} には StackId が必要ですが、リクエストには StackName しか指定されていません。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_stack_identifier.py
+#, python-brace-format
+msgid "{} requires StackId, but the request provides no stack identifier."
+msgstr "{} には StackId が必要ですが、リクエストにスタック識別子が指定されていません。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_stack_identifier.py
+msgid ""
+"This operation targets a stack by StackId only; StackName is not an "
+"accepted target."
+msgstr "この操作はスタックを StackId でのみ指定します。StackName は対象として受け付けられません。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_stack_identifier.py
+#, python-brace-format
+msgid ""
+"Call ListStacks filtered by StackName first, read StackId from the "
+"result, then call {} with it."
+msgstr ""
+"まず StackName でフィルターした ListStacks を呼び出し、結果から StackId を取得してから、それを使って {} "
+"を呼び出してください。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid "The local ROS template file cannot be read."

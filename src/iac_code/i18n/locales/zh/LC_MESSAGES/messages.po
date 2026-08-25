@@ -5700,6 +5700,16 @@ msgstr "阿里云 API {operation} 的二进制请求体需要 body_file。"
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} requires parameter StackId. When only the "
+"stack name is known, call ListStacks filtered by StackName to read "
+"StackId first."
+msgstr ""
+"阿里云 API {operation} 需要参数 StackId。若仅知道资源栈名称，请先调用 ListStacks 并按 StackName "
+"过滤以获取 StackId。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
 msgid "Alibaba Cloud API {operation} requires parameter {parameter}."
 msgstr "阿里云 API {operation} 需要参数 {parameter}。"
 
@@ -6190,6 +6200,29 @@ msgid ""
 msgstr ""
 "ROS pipeline 调用 {action} 必须传入 params.TemplateURL。请将模板保存到文件，并传入 "
 "params.TemplateURL，例如本地文件路径或 OSS/HTTP URL。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_stack_identifier.py
+#, python-brace-format
+msgid "{} requires StackId, but the request provides only StackName."
+msgstr "{} 需要 StackId，但请求只提供了 StackName。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_stack_identifier.py
+#, python-brace-format
+msgid "{} requires StackId, but the request provides no stack identifier."
+msgstr "{} 需要 StackId，但请求没有提供任何资源栈标识。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_stack_identifier.py
+msgid ""
+"This operation targets a stack by StackId only; StackName is not an "
+"accepted target."
+msgstr "该操作只能通过 StackId 定位资源栈，不接受 StackName 作为目标。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_stack_identifier.py
+#, python-brace-format
+msgid ""
+"Call ListStacks filtered by StackName first, read StackId from the "
+"result, then call {} with it."
+msgstr "请先调用按 StackName 过滤的 ListStacks，从结果中取出 StackId，再用它调用 {}。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid "The local ROS template file cannot be read."

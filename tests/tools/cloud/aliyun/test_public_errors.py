@@ -136,6 +136,8 @@ def test_aliyun_public_error_templates_are_directly_extractable(tmp_path: Path) 
         "Alibaba Cloud API {operation} received multiple template sources. Provide only one.",
         "Alibaba Cloud API {operation} requires a body source compatible with its API contract.",
         "Alibaba Cloud API {operation} requires parameter {parameter}.",
+        "Alibaba Cloud API {operation} requires parameter StackId. "
+        "When only the stack name is known, call ListStacks filtered by StackName to read StackId first.",
         "Alibaba Cloud API {operation} template file is invalid. Use a readable regular template file.",
         "Alibaba Cloud API {operation} template validation failed. Check the template syntax and resource definitions.",
         "Alibaba Cloud API {operation} was not found. Check the product, version, and action.",
@@ -236,6 +238,17 @@ def test_missing_required_parameter_error_reports_every_safe_name_without_values
 
     assert message == "Alibaba Cloud API Ecs/DescribeInstances requires parameters InstanceId,RegionId."
     assert "business-value" not in message
+
+
+def test_missing_ros_stack_id_error_points_at_list_stacks_by_name() -> None:
+    error = ApiContractError("missing_required_parameters:StackId")
+
+    message = public_aliyun_error(error, product="ros", action="GetStack")
+
+    assert message == (
+        "Alibaba Cloud API ros/GetStack requires parameter StackId. "
+        "When only the stack name is known, call ListStacks filtered by StackName to read StackId first."
+    )
 
 
 @pytest.mark.parametrize(

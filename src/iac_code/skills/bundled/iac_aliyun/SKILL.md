@@ -166,6 +166,17 @@ auto_trigger:
 - 使用 ros_stack 工具执行 CreateStack/UpdateStack/ContinueCreateStack/DeleteStack，禁止用 Bash
 - CreateStack 必须传 `DisableRollback: true`
 
+## 按 StackName 查询资源栈
+
+`GetStack`、`ListStackResources`、`ListStackEvents`、`DeleteStack`、`UpdateStack` 等资源栈操作只接受 `StackId`，不接受 `StackName`。
+
+用户只给出资源栈名称（无 StackId）时：
+1. 先调用 `aliyun_api(product="ros", action="ListStacks", params={"StackName": "<名称>"})`，不要先调用 `GetStack`
+2. 从返回的 `Stacks` 中取 `StackId`
+3. 再用该 `StackId` 调用目标操作
+
+`ListStacks` 返回 `TotalCount=0` 时说明该地域下不存在同名资源栈，直接告知用户并确认地域，不要改用其他接口重试。
+
 ## 参考文件
 
 | 文件 | 内容 |
