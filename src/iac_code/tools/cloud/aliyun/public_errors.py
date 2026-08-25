@@ -423,6 +423,18 @@ def public_aliyun_error(
     target_http = _target_http_context(code)
     if target_http is not None:
         status, target_code = target_http
+        if _is_request_rejected_status(status):
+            if target_code is not None:
+                return _(
+                    "Alibaba Cloud API {operation} rejected the request with HTTP {status} and error code {code}. "
+                    "An equivalent request will be rejected again; fix the request or switch to an API path that "
+                    "does not depend on the rejected input."
+                ).format(operation=operation, status=status, code=target_code)
+            return _(
+                "Alibaba Cloud API {operation} rejected the request with HTTP {status}. "
+                "An equivalent request will be rejected again; fix the request or switch to an API path that "
+                "does not depend on the rejected input."
+            ).format(operation=operation, status=status)
         if target_code is not None:
             return _(
                 "Alibaba Cloud API {operation} returned HTTP {status} with error code {code}. "
@@ -532,6 +544,16 @@ def _target_http_context(code: str) -> tuple[str, str | None] | None:
     if not 100 <= int(status) <= 599:
         return None
     return status, match.group(2)
+
+
+def _is_request_rejected_status(status: str) -> bool:
+    """Client errors that reject the request shape, so resending is pointless.
+
+    408 and 429 are excluded: they depend on timing rather than the request, so
+    an identical request can legitimately succeed later.
+    """
+    value = int(status)
+    return 400 <= value < 500 and value not in {408, 429}
 
 
 def _safe_identifier(value: Any, fallback: str) -> str:

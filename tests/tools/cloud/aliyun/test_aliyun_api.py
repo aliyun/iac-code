@@ -40,6 +40,7 @@ from iac_code.tools.cloud.aliyun.product_resolver import ProductResolver
 from iac_code.tools.cloud.aliyun.public_errors import public_aliyun_error
 from iac_code.tools.cloud.aliyun.result_contract import ALIYUN_BODY_CONTRACT_VERSION, ALIYUN_HTTP_METADATA_KEY
 from iac_code.tools.cloud.aliyun.retry_policy import RetryBudget, RetryExhausted, RetryReason, TransportFailure
+from iac_code.tools.failure_recovery import TERMINAL_FAILURE_METADATA_KEY
 from iac_code.tools.tool_executor import ToolCallRequest, ToolExecutor
 from iac_code.types.permissions import InvocationBinding, ToolPermissionContext
 from iac_code.types.stream_events import ResourceObservedEvent
@@ -2645,10 +2646,19 @@ async def test_shared_target_boundary_converts_transport_http_errors_to_sanitize
     assert transport.calls[-1]["contract"].transport == expected_transport
     assert result.is_error is True
     product = "Oss" if action == "HeadObject" else "Ecs"
-    assert result.content.startswith(
-        f"Alibaba Cloud API {product}/{action} returned HTTP {status} with error code InvalidRequest. "
-        "Check the request and cloud permissions before retrying."
-    )
+    if status == 400:
+        assert result.content.startswith(
+            f"Alibaba Cloud API {product}/{action} rejected the request with HTTP {status} and error code "
+            "InvalidRequest. An equivalent request will be rejected again; fix the request or switch to an API path "
+            "that does not depend on the rejected input."
+        )
+        assert result.metadata == {TERMINAL_FAILURE_METADATA_KEY: "http_400:InvalidRequest"}
+    else:
+        assert result.content.startswith(
+            f"Alibaba Cloud API {product}/{action} returned HTTP {status} with error code InvalidRequest. "
+            "Check the request and cloud permissions before retrying."
+        )
+        assert result.metadata is None
     assert "Message: 该用户没有授权" in result.content
     assert "Description: Use a valid business authorization before retrying." in result.content
     assert len(result.content) < 768
@@ -2726,7 +2736,7 @@ async def test_target_boundary_preserves_oauth_style_business_error_semantics(mo
     result = await _production_execute(AliyunApi(services=services), _target_test_input("DescribeInstances"))
 
     assert result.is_error is True
-    assert "HTTP 404 with error code instance_not_found" in result.content
+    assert "HTTP 404 and error code instance_not_found" in result.content
     assert "Description: Instance not found by request." in result.content
     assert "request-private" not in result.content
 

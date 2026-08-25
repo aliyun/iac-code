@@ -14,6 +14,7 @@ from iac_code.services.telemetry.content_serializer import serialize_tool_argume
 from iac_code.services.telemetry.names import Events, GenAiAttr, GenAiOperationName, GenAiSpanKind, Metrics, Spans
 from iac_code.services.telemetry.sanitize import sanitize_error_message, sanitize_tool_name
 from iac_code.tools.base import ToolContext, ToolResult
+from iac_code.tools.failure_recovery import TerminalFailureLedger, take_terminal_failure
 from iac_code.types.permissions import ExecutionClass, InvocationBinding
 
 if TYPE_CHECKING:
@@ -42,6 +43,7 @@ class ToolExecutor:
         self._registry = registry
         self._max_concurrency = max_concurrency
         self._tool_timeout = tool_timeout
+        self._terminal_failures = TerminalFailureLedger()
 
     def partition(self, calls: list[ToolCallRequest]) -> tuple[list[ToolCallRequest], list[ToolCallRequest]]:
         """Partition calls into concurrent (read-only) and serial (write) batches."""
@@ -109,6 +111,16 @@ class ToolExecutor:
         if timeout is None:
             timeout = self._tool_timeout
 
+        already_failed = self._recorded_terminal_failure(call)
+        if already_failed is not None:
+            return ToolResult.error(
+                _(
+                    "Tool '{tool_name}' already failed terminally ({signature}) for this exact request. "
+                    "Resending an equivalent request will fail the same way. Diagnose the root cause, then switch "
+                    "to a different request or path, or report an explicit conclusion instead."
+                ).format(tool_name=call.name, signature=already_failed)
+            )
+
         # Telemetry instrumentation
         tool_name = sanitize_tool_name(call.name)
         started = time.monotonic()
@@ -137,6 +149,7 @@ class ToolExecutor:
                     span.set_attribute(GenAiAttr.TOOL_CALL_RESULT, serialize_tool_result(result, tool_name=call.name))
                 log_event(Events.TOOL_USE_SUCCEEDED, {"tool_name": tool_name, "duration_ms": duration_ms})
                 add_metric(Metrics.TOOL_USE_COUNT, 1, {"tool_name": tool_name, "outcome": "success"})
+                self._consume_terminal_failure(call, result)
                 return result
         except asyncio.TimeoutError:
             log_event(
@@ -171,6 +184,27 @@ class ToolExecutor:
                 ToolResult.error(_("Tool '{tool_name}' failed: {error}").format(tool_name=call.name, error=e)),
                 context,
             )
+
+    def _recorded_terminal_failure(self, call: ToolCallRequest) -> str | None:
+        binding = call.invocation_binding
+        if binding is None:
+            return None
+        return self._terminal_failures.lookup(
+            tool_name=call.name,
+            canonical_input_sha256=binding.canonical_input_sha256,
+        )
+
+    def _consume_terminal_failure(self, call: ToolCallRequest, result: ToolResult) -> None:
+        """Record a terminal failure and strip its internal marker from the result."""
+        signature = take_terminal_failure(result)
+        binding = call.invocation_binding
+        if signature is None or binding is None:
+            return
+        self._terminal_failures.record(
+            tool_name=call.name,
+            canonical_input_sha256=binding.canonical_input_sha256,
+            signature=signature,
+        )
 
     @staticmethod
     def _attach_ros_preflight(result: ToolResult, context: ToolContext) -> ToolResult:

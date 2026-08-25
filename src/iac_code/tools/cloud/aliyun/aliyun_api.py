@@ -81,6 +81,7 @@ from iac_code.tools.cloud.aliyun.template_source import (
 )
 from iac_code.tools.cloud.aliyun.user_agent import build_user_agent
 from iac_code.tools.cloud.base_api import BaseCloudApi
+from iac_code.tools.failure_recovery import mark_terminal_failure, terminal_failure_signature
 from iac_code.tools.path_safety import check_read_path_with_resolution
 from iac_code.types.permissions import (
     MAX_PERMISSION_AUDIT_ITEMS,
@@ -501,6 +502,23 @@ def _target_http_error_message(response: Any) -> str:
             code = candidate
     suffix = f":{code}" if code is not None else ""
     return f"aliyun_target_http_error:{int(response.status)}{suffix}"
+
+
+def _target_terminal_failure_signature(response: Any) -> str | None:
+    """Signature for statuses that reject the request shape itself, else None.
+
+    408 and 429 depend on timing rather than the request shape, so an identical
+    request can legitimately succeed later and must stay repeatable.
+    """
+    status = int(response.status)
+    if not 400 <= status < 500 or status in {408, 429}:
+        return None
+    code = None
+    if isinstance(response.body, Mapping):
+        candidate = response.body.get("Code", response.body.get("code", response.body.get("error")))
+        if isinstance(candidate, str) and _TARGET_ERROR_CODE.fullmatch(candidate):
+            code = candidate
+    return terminal_failure_signature(status=status, code=code)
 
 
 def _redact_target_error_detail(value: str) -> str:
@@ -2553,6 +2571,7 @@ class AliyunApi(BaseCloudApi):
             target_outcome = "target_transport_failure"
             target_error_message: str | None = None
             target_error_detail: str | None = None
+            target_terminal_signature: str | None = None
             target_error: BaseException | None = None
             with start_span(
                 Spans.ALIYUN_API_CALL,
@@ -2564,6 +2583,7 @@ class AliyunApi(BaseCloudApi):
                         target_outcome = "http_error"
                         target_error_message = _target_http_error_message(response)
                         target_error_detail = _target_http_error_detail(response)
+                        target_terminal_signature = _target_terminal_failure_signature(response)
                     else:
                         target_outcome = "success"
                 except asyncio.CancelledError as error:
@@ -2622,7 +2642,10 @@ class AliyunApi(BaseCloudApi):
                 )
                 if target_error_detail is not None:
                     public_error = f"{public_error} Response: {target_error_detail}"
-                return ToolResult.error(public_error)
+                error_result = ToolResult.error(public_error)
+                if target_terminal_signature is not None:
+                    mark_terminal_failure(error_result, target_terminal_signature)
+                return error_result
             assert response is not None
             business_content, body_format = serialize_business_result(response, request, contract)
             aliyun_http = build_aliyun_http_metadata(

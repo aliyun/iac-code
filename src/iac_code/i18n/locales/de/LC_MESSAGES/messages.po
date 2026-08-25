@@ -5482,6 +5482,15 @@ msgstr ""
 
 #: src/iac_code/tools/tool_executor.py
 #, python-brace-format
+msgid ""
+"Tool '{tool_name}' already failed terminally ({signature}) for this exact"
+" request. Resending an equivalent request will fail the same way. "
+"Diagnose the root cause, then switch to a different request or path, or "
+"report an explicit conclusion instead."
+msgstr "Das Tool „{tool_name}“ ist für genau diese Anfrage bereits endgültig fehlgeschlagen ({signature}). Eine gleichwertige Anfrage schlägt genauso fehl. Ermitteln Sie die Ursache und wechseln Sie dann die Anfrage oder den Pfad, oder nennen Sie eine ausdrückliche Schlussfolgerung."
+
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
 msgid "Tool '{tool_name}' timed out after {timeout}s"
 msgstr "Zeitüberschreitung bei Tool „{tool_name}“ nach {timeout} s"
 
@@ -6527,6 +6536,23 @@ msgid ""
 msgstr ""
 "max_response_bytes der Alibaba-Cloud-API {operation} muss zwischen 1 und "
 "16777216 liegen."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} rejected the request with HTTP {status} and"
+" error code {code}. An equivalent request will be rejected again; fix the"
+" request or switch to an API path that does not depend on the rejected "
+"input."
+msgstr "Die Alibaba Cloud API {operation} hat die Anfrage mit HTTP {status} und Fehlercode {code} abgelehnt. Eine gleichwertige Anfrage wird erneut abgelehnt; korrigieren Sie die Anfrage oder wechseln Sie zu einem API-Pfad, der nicht von der abgelehnten Eingabe abhängt."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} rejected the request with HTTP {status}. An"
+" equivalent request will be rejected again; fix the request or switch to "
+"an API path that does not depend on the rejected input."
+msgstr "Die Alibaba Cloud API {operation} hat die Anfrage mit HTTP {status} abgelehnt. Eine gleichwertige Anfrage wird erneut abgelehnt; korrigieren Sie die Anfrage oder wechseln Sie zu einem API-Pfad, der nicht von der abgelehnten Eingabe abhängt."
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format

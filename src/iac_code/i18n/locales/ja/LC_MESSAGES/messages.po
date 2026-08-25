@@ -5174,6 +5174,15 @@ msgstr "ツール「{tool_name}」への入力が無効です: {error}。ツー�
 
 #: src/iac_code/tools/tool_executor.py
 #, python-brace-format
+msgid ""
+"Tool '{tool_name}' already failed terminally ({signature}) for this exact"
+" request. Resending an equivalent request will fail the same way. "
+"Diagnose the root cause, then switch to a different request or path, or "
+"report an explicit conclusion instead."
+msgstr "ツール「{tool_name}」はこのリクエストで既に最終的な失敗（{signature}）となりました。同等のリクエストを再送しても同じように失敗します。根本原因を特定し、別のリクエストや経路に切り替えるか、明確な結論を示してください。"
+
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
 msgid "Tool '{tool_name}' timed out after {timeout}s"
 msgstr "ツール「{tool_name}」は {timeout} 秒後にタイムアウトしました"
 
@@ -6160,6 +6169,23 @@ msgid ""
 msgstr ""
 "Alibaba Cloud API {operation} の max_response_bytes は 1 から 16777216 "
 "の範囲で指定してください。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} rejected the request with HTTP {status} and"
+" error code {code}. An equivalent request will be rejected again; fix the"
+" request or switch to an API path that does not depend on the rejected "
+"input."
+msgstr "Alibaba Cloud API {operation} は HTTP {status}、エラーコード {code} でリクエストを拒否しました。同等のリクエストは再び拒否されます。リクエストを修正するか、拒否された入力に依存しない API 経路に切り替えてください。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} rejected the request with HTTP {status}. An"
+" equivalent request will be rejected again; fix the request or switch to "
+"an API path that does not depend on the rejected input."
+msgstr "Alibaba Cloud API {operation} は HTTP {status} でリクエストを拒否しました。同等のリクエストは再び拒否されます。リクエストを修正するか、拒否された入力に依存しない API 経路に切り替えてください。"
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format

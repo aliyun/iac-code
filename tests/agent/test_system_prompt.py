@@ -406,6 +406,13 @@ class TestBuildBaseSections:
         tools_pos = result.find("Using Tools")
         assert identity_pos < tools_pos
 
+    def test_tools_section_forbids_resending_equivalent_requests_after_a_failure(self):
+        result = build_base_sections(["tools"], cwd="/tmp")
+        assert "Never resend an equivalent request after a failure" in result
+        assert "an error text is a symptom, not a diagnosis" in result
+        assert "switch to a path that does not depend on the failing precondition" in result
+        assert "state an explicit conclusion" in result
+
     def test_empty_list_returns_empty_string(self):
         result = build_base_sections([], cwd="/tmp")
         assert result == ""

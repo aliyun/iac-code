@@ -5109,6 +5109,15 @@ msgstr "工具“{tool_name}”的输入无效：{error}。请按照工具架构
 
 #: src/iac_code/tools/tool_executor.py
 #, python-brace-format
+msgid ""
+"Tool '{tool_name}' already failed terminally ({signature}) for this exact"
+" request. Resending an equivalent request will fail the same way. "
+"Diagnose the root cause, then switch to a different request or path, or "
+"report an explicit conclusion instead."
+msgstr "工具“{tool_name}”对该请求已终态失败（{signature}）。重发等价请求只会以同样方式失败。请先定位根因，然后换用其它请求或路径，或直接给出明确结论。"
+
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
 msgid "Tool '{tool_name}' timed out after {timeout}s"
 msgstr "工具“{tool_name}”在 {timeout} 秒后超时"
 
@@ -6021,6 +6030,23 @@ msgid ""
 "Alibaba Cloud API {operation} max_response_bytes must be between 1 and "
 "16777216."
 msgstr "阿里云 API {operation} 的 max_response_bytes 必须介于 1 和 16777216 之间。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} rejected the request with HTTP {status} and"
+" error code {code}. An equivalent request will be rejected again; fix the"
+" request or switch to an API path that does not depend on the rejected "
+"input."
+msgstr "阿里云 API {operation} 以 HTTP {status} 和错误码 {code} 拒绝了该请求。等价请求会再次被拒绝；请修正请求，或改用不依赖被拒输入的 API 路径。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} rejected the request with HTTP {status}. An"
+" equivalent request will be rejected again; fix the request or switch to "
+"an API path that does not depend on the rejected input."
+msgstr "阿里云 API {operation} 以 HTTP {status} 拒绝了该请求。等价请求会再次被拒绝；请修正请求，或改用不依赖被拒输入的 API 路径。"
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format

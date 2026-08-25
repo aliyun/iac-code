@@ -90,6 +90,12 @@ def test_aliyun_public_error_templates_are_directly_extractable(tmp_path: Path) 
         "Check the request and cloud permissions before retrying.",
         "Alibaba Cloud API {operation} returned HTTP {status} with error code {code}. "
         "Check the request and cloud permissions before retrying.",
+        "Alibaba Cloud API {operation} rejected the request with HTTP {status}. "
+        "An equivalent request will be rejected again; fix the request or switch to an API path that "
+        "does not depend on the rejected input.",
+        "Alibaba Cloud API {operation} rejected the request with HTTP {status} and error code {code}. "
+        "An equivalent request will be rejected again; fix the request or switch to an API path that "
+        "does not depend on the rejected input.",
         "Alibaba Cloud API {operation} received a retryable service response, but the retry deadline expired. "
         "Retry the read-only request later.",
         "Alibaba Cloud API {operation} read-only request did not complete before the retry deadline. "
@@ -163,6 +169,35 @@ def test_aliyun_public_error_templates_are_directly_extractable(tmp_path: Path) 
         "so {operation} cannot be signed. Check ECS metadata availability.",
     }
     assert msgids == required
+
+
+@pytest.mark.parametrize("status", [400, 403, 404])
+def test_rejected_request_statuses_require_switching_paths_instead_of_resending(status: int) -> None:
+    message = public_aliyun_error(
+        f"aliyun_target_http_error:{status}:InvalidParameter",
+        product="Ros",
+        action="ListStackEvents",
+    )
+
+    assert message == (
+        f"Alibaba Cloud API Ros/ListStackEvents rejected the request with HTTP {status} and error code "
+        "InvalidParameter. An equivalent request will be rejected again; fix the request or switch to an API path "
+        "that does not depend on the rejected input."
+    )
+
+
+@pytest.mark.parametrize("status", [408, 429, 500, 503])
+def test_timing_and_server_statuses_keep_the_retryable_guidance(status: int) -> None:
+    message = public_aliyun_error(
+        f"aliyun_target_http_error:{status}",
+        product="Ros",
+        action="ListStackEvents",
+    )
+
+    assert message == (
+        f"Alibaba Cloud API Ros/ListStackEvents returned HTTP {status}. "
+        "Check the request and cloud permissions before retrying."
+    )
 
 
 @pytest.mark.parametrize(

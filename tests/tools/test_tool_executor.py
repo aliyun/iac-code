@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from iac_code.tools.base import Tool, ToolContext, ToolResult
+from iac_code.tools.failure_recovery import mark_terminal_failure
 from iac_code.tools.tool_executor import ToolCallRequest, ToolExecutor
 from iac_code.types.permissions import InvocationBinding
 
@@ -628,3 +629,102 @@ class TestRosPreflightOutcomePropagation:
 
         summaries = [item.metadata["ros_validation"]["diagnostics"][0]["summary"] for item in results]
         assert summaries == ["warning-a", "warning-b"]
+
+
+class FakeTerminalFailureTool(FakeReadTool):
+    """Fails like an Alibaba Cloud 4xx: same request shape, same rejection."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def execute(self, *, tool_input, context):
+        self.calls.append(dict(tool_input))
+        result = ToolResult.error("rejected")
+        if tool_input.get("terminal", True):
+            mark_terminal_failure(result, "http_400:ResourceTypeNotFound")
+        return result
+
+
+def _binding(canonical_input_sha256: str) -> InvocationBinding:
+    return InvocationBinding("nonce", "session", "call", "read", canonical_input_sha256)
+
+
+@pytest.mark.asyncio
+class TestTerminalFailureRecovery:
+    async def test_equivalent_request_is_refused_without_calling_the_tool_again(self, monkeypatch):
+        monkeypatch.setattr("iac_code.tools.tool_executor._", lambda message: message)
+        tool = FakeTerminalFailureTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        executor = ToolExecutor(registry=registry)
+        call = ToolCallRequest(id="first", name="read", input={}, invocation_binding=_binding("a" * 64))
+
+        first = (await executor.execute_batch([call], ToolContext()))[0]
+        second = (await executor.execute_batch([call], ToolContext()))[0]
+
+        assert len(tool.calls) == 1
+        assert first.content == "rejected"
+        assert second.is_error is True
+        assert "already failed terminally (http_400:ResourceTypeNotFound)" in second.content
+        assert "switch" in second.content
+
+    async def test_internal_terminal_marker_never_reaches_the_returned_result(self):
+        tool = FakeTerminalFailureTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        executor = ToolExecutor(registry=registry)
+
+        result = (
+            await executor.execute_batch(
+                [ToolCallRequest(id="first", name="read", input={}, invocation_binding=_binding("b" * 64))],
+                ToolContext(),
+            )
+        )[0]
+
+        assert result.metadata is None
+
+    async def test_a_different_request_shape_is_still_executed(self):
+        tool = FakeTerminalFailureTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        executor = ToolExecutor(registry=registry)
+
+        await executor.execute_batch(
+            [ToolCallRequest(id="first", name="read", input={"stack": "a"}, invocation_binding=_binding("c" * 64))],
+            ToolContext(),
+        )
+        await executor.execute_batch(
+            [ToolCallRequest(id="second", name="read", input={"stack": "b"}, invocation_binding=_binding("d" * 64))],
+            ToolContext(),
+        )
+
+        assert [call["stack"] for call in tool.calls] == ["a", "b"]
+
+    async def test_non_terminal_failures_stay_repeatable(self):
+        tool = FakeTerminalFailureTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        executor = ToolExecutor(registry=registry)
+        call = ToolCallRequest(
+            id="first",
+            name="read",
+            input={"terminal": False},
+            invocation_binding=_binding("e" * 64),
+        )
+
+        await executor.execute_batch([call], ToolContext())
+        await executor.execute_batch([call], ToolContext())
+
+        assert len(tool.calls) == 2
+
+    async def test_calls_without_an_invocation_binding_are_not_tracked(self):
+        tool = FakeTerminalFailureTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        executor = ToolExecutor(registry=registry)
+        call = ToolCallRequest(id="first", name="read", input={})
+
+        await executor.execute_batch([call], ToolContext())
+        await executor.execute_batch([call], ToolContext())
+
+        assert len(tool.calls) == 2

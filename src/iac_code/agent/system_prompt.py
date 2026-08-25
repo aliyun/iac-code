@@ -191,7 +191,10 @@ def _build_tools_section() -> str:
         "- Read files before modifying them.\n"
         "- Use EditFile for surgical edits to existing files.\n"
         "- Use WriteFile only for creating new files or complete rewrites.\n"
-        "- If a tool call fails, do not retry the same call. Adjust your approach."
+        "- If a tool call fails, do not retry the same call. Adjust your approach.\n"
+        "- Never resend an equivalent request after a failure: an error text is a symptom, not a diagnosis. "
+        "Identify the root cause first, then either switch to a path that does not depend on the failing "
+        "precondition, or state an explicit conclusion about why the goal cannot be reached."
     )
 
 
