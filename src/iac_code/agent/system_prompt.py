@@ -310,6 +310,22 @@ def _build_cloud_config_section() -> str:
         return ""
 
 
+def _build_final_response_section() -> str:
+    return (
+        "# Final Response\n"
+        "- Announcing an action is not doing it. If you say you will query, fetch or check something, "
+        "complete it in the same turn and report what you found.\n"
+        "- After tool calls succeed, end the turn with a user-facing summary of the actual results, "
+        "never with an intent statement or a transitional phrase.\n"
+        "- When results are paginated, keep fetching until the pages are exhausted, then summarize the "
+        "complete set, including the concrete items and their total count.\n"
+        "- Tool completion is not task completion. The user only sees your final message, so the data "
+        "they asked for must appear there.\n"
+        "- Brevity applies to your prose, not to the data the user asked for. Never drop or truncate the "
+        "result listing to keep the answer short."
+    )
+
+
 def _build_output_style_section() -> str:
     return (
         "# Output Style\n"
@@ -330,6 +346,7 @@ SECTION_BUILDERS: dict[str, Callable[..., str]] = {
     "tools": _build_tools_section,
     "doing_tasks": _build_doing_tasks_section,
     "actions": _build_actions_section,
+    "final_response": _build_final_response_section,
     "output_style": _build_output_style_section,
 }
 
@@ -342,6 +359,7 @@ SECTION_PRIORITIES: dict[str, int] = {
     "doing_tasks": 80,
     "actions": 75,
     "runtime_context": 72,
+    "final_response": 55,
     "output_style": 50,
 }
 
@@ -471,6 +489,7 @@ def build_system_prompt(
             priority=60,
             is_static=False,
         )
+    builder.add_cached_section("final_response", _build_final_response_section, priority=55, is_static=False)
     builder.add_cached_section("output_style", _build_output_style_section, priority=50, is_static=False)
 
     return builder.build()

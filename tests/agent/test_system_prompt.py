@@ -109,6 +109,17 @@ class TestBuildSystemPrompt:
         prompt = build_system_prompt(cwd=_TMP)
         assert "concise" in prompt.lower() or "brief" in prompt.lower()
 
+    def test_contains_final_response_closing_contract(self):
+        prompt = build_system_prompt(cwd=_TMP)
+        assert "# Final Response" in prompt
+        assert "user-facing summary of the actual results" in prompt
+        assert "never with an intent statement or a transitional phrase" in prompt
+        assert "keep fetching until the pages are exhausted" in prompt
+
+    def test_final_response_precedes_output_style(self):
+        prompt = build_system_prompt(cwd=_TMP)
+        assert prompt.index("# Final Response") < prompt.index("# Output Style")
+
     def test_memory_section_included_when_content(self):
         prompt = build_system_prompt(cwd=_TMP, memory_content="Remember: user prefers Python")
         assert "user prefers Python" in prompt
@@ -427,6 +438,7 @@ class TestBuildBaseSections:
             "tools",
             "doing_tasks",
             "actions",
+            "final_response",
             "output_style",
         }
         assert set(SECTION_BUILDERS.keys()) == expected_keys

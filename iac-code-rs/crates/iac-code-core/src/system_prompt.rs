@@ -27,6 +27,7 @@ pub fn build_system_prompt(cwd: &str, memory_content: &str, skill_listing: &str)
     if !memory_content.trim().is_empty() {
         dynamic_sections.push(format!("# Memory\n{}", memory_content.trim()));
     }
+    dynamic_sections.push(build_final_response_section());
     dynamic_sections.push(build_output_style_section());
 
     let mut sections = static_sections;
@@ -139,6 +140,16 @@ fn build_actions_section() -> String {
 - Freely take local, reversible actions like editing files or running tests.\n\
 - For hard-to-reverse or shared-system actions, check with the user first.\n\
 - Never use destructive git operations (push --force, reset --hard) unless the user explicitly requests them."
+        .to_owned()
+}
+
+fn build_final_response_section() -> String {
+    "# Final Response\n\
+- Announcing an action is not doing it. If you say you will query, fetch or check something, complete it in the same turn and report what you found.\n\
+- After tool calls succeed, end the turn with a user-facing summary of the actual results, never with an intent statement or a transitional phrase.\n\
+- When results are paginated, keep fetching until the pages are exhausted, then summarize the complete set, including the concrete items and their total count.\n\
+- Tool completion is not task completion. The user only sees your final message, so the data they asked for must appear there.\n\
+- Brevity applies to your prose, not to the data the user asked for. Never drop or truncate the result listing to keep the answer short."
         .to_owned()
 }
 
