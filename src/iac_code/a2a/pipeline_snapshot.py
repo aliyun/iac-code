@@ -36,6 +36,11 @@ _CLEANUP_STATUS_BY_EVENT_TYPE = {
     PIPELINE_EVENT_CLEANUP_FAILED: "failed",
 }
 _KNOWN_CLEANUP_STATUSES = {"pending", "started", "in_progress", "completed", "failed", "skipped"}
+# Statuses a step/candidate/sub-step can hold while it is still in flight. A
+# pipeline-level cancel/failure never emits per-node ``*_completed`` events, so
+# these have to be sunk into an explicit terminal status by the reducer itself.
+_NON_TERMINAL_NODE_STATUSES = {None, "working", "waiting_input", "restarting"}
+_NODE_TERMINAL_TIME_KEYS = {"canceled": "canceledAt", "failed": "failedAt"}
 _PENDING_BACKUP_VISIBILITY = "pending_backup"
 _COMMITTED_BACKUP_VISIBILITY = "committed"
 _BACKUP_COMMITTED_EVENT_TYPE = "backup_committed"
@@ -529,6 +534,7 @@ class _PipelineSnapshotReducer:
             self._snapshot["pendingTerminal"] = None
             self._snapshot["pendingInput"] = None
             self._snapshot["control"]["activeCandidateRunIds"] = []
+            self._finalize_unfinished_nodes(terminal_status, event)
         elif (
             event_type not in {"input_required", "input_received", *_CLEANUP_STATUS_BY_EVENT_TYPE}
             and not _is_pending_backup_publication(event)
@@ -538,6 +544,45 @@ class _PipelineSnapshotReducer:
             )
         ):
             self._apply_event_status(event)
+
+    def _finalize_unfinished_nodes(self, terminal_status: str, event: dict[str, Any]) -> None:
+        """Sink every still-running step/candidate/sub-step into ``terminal_status``.
+
+        A cancel/failure at the pipeline level never emits per-node
+        ``*_completed`` / ``*_failed`` events, so nodes keep the ``working``
+        status written by their ``*_started`` event and their conclusion stays
+        ``null`` forever — the step result becomes undecidable on reload.
+        ``pipeline_completed`` is deliberately excluded: a normal completion
+        already closes each node, and forcing a status there would mask real
+        anomalies.
+        """
+        time_key = _NODE_TERMINAL_TIME_KEYS.get(terminal_status)
+        if time_key is None:
+            return
+
+        created_at = _string_or_none(event.get("createdAt"))
+        event_type = _string_or_none(event.get("eventType"))
+        for step in self._snapshot["steps"]:
+            self._finalize_node(step, terminal_status, time_key, created_at, event_type)
+            for candidate in _dict_list(step.get("candidates")):
+                self._finalize_node(candidate, terminal_status, time_key, created_at, event_type)
+                for candidate_step in _dict_list(candidate.get("steps")):
+                    self._finalize_node(candidate_step, terminal_status, time_key, created_at, event_type)
+
+    @staticmethod
+    def _finalize_node(
+        node: dict[str, Any],
+        terminal_status: str,
+        time_key: str,
+        created_at: str | None,
+        event_type: str | None,
+    ) -> None:
+        if _string_or_none(node.get("status")) not in _NON_TERMINAL_NODE_STATUSES:
+            return
+        node["status"] = terminal_status
+        _set_time(node, time_key, created_at)
+        if event_type is not None:
+            node["terminalReason"] = event_type
 
     def _merge_pipeline_identity(self, event: dict[str, Any]) -> None:
         for key in ("pipelineRunId", "taskId", "contextId", "pipelineName"):

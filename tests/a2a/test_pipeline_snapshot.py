@@ -816,6 +816,110 @@ def test_reduce_completion_events_keep_conclusions_on_pipeline_state_nodes() -> 
     assert step["candidates"][0]["steps"][0]["conclusion"] == {"body": "ros"}
 
 
+def _canceled_evidence_events() -> list[dict]:
+    """Rebuild the shape of the evidence session: ``evaluate_candidates`` and its
+    candidate ``cost_estimating`` sub-step only ever announced ``*_started``
+    before the pipeline was canceled."""
+    parent = _base("evt-1", 1, "step_started", scope="step")
+    parent["step"] = {
+        "runId": "step-evaluate_candidates-1",
+        "id": "evaluate_candidates",
+        "index": 3,
+        "total": 5,
+        "attempt": 1,
+    }
+    candidate = _base("evt-2", 2, "candidate_started", scope="candidate")
+    candidate["step"] = parent["step"]
+    candidate["candidate"] = {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1}
+    candidate_step = _base("evt-3", 3, "candidate_step_started", scope="candidate_step")
+    candidate_step["step"] = parent["step"]
+    candidate_step["candidate"] = candidate["candidate"]
+    candidate_step["candidateStep"] = {
+        "runId": "candidate-eval-0-1-cost_estimating-1",
+        "id": "cost_estimating",
+        "index": 2,
+        "total": 3,
+        "attempt": 1,
+    }
+    return [parent, candidate, candidate_step]
+
+
+def test_reduce_pipeline_canceled_finalizes_unfinished_steps_and_candidates() -> None:
+    canceled = _base("evt-4", 4, "pipeline_canceled", status="canceled")
+    canceled["createdAt"] = "2026-06-08T10:05:00Z"
+
+    snapshot = reduce_pipeline_events([*_canceled_evidence_events(), canceled])
+
+    assert snapshot["status"] == "canceled"
+    step = snapshot["steps"][0]
+    assert step["id"] == "evaluate_candidates"
+    assert step["status"] == "canceled"
+    assert step["canceledAt"] == "2026-06-08T10:05:00Z"
+    assert step["terminalReason"] == "pipeline_canceled"
+
+    candidate = step["candidates"][0]
+    assert candidate["status"] == "canceled"
+    assert candidate["canceledAt"] == "2026-06-08T10:05:00Z"
+
+    candidate_step = candidate["steps"][0]
+    assert candidate_step["id"] == "cost_estimating"
+    assert candidate_step["status"] == "canceled"
+    assert candidate_step["canceledAt"] == "2026-06-08T10:05:00Z"
+    assert candidate_step["terminalReason"] == "pipeline_canceled"
+    assert snapshot["control"]["activeCandidateRunIds"] == []
+
+
+def test_reduce_pipeline_canceled_keeps_completed_nodes_and_conclusions() -> None:
+    intent = _base("evt-0a", 1, "step_started", scope="step")
+    intent["step"] = {"runId": "step-intent_parsing-1", "id": "intent_parsing", "index": 1, "total": 5, "attempt": 1}
+    intent_done = _base("evt-0b", 2, "step_completed", scope="step")
+    intent_done["step"] = intent["step"]
+    intent_done["data"] = {"conclusionField": "intent", "conclusion": {"region": "cn-hangzhou"}}
+    canceled = _base("evt-9", 9, "pipeline_canceled", status="canceled")
+
+    events = [intent, intent_done, *_canceled_evidence_events(), canceled]
+    snapshot = reduce_pipeline_events(events)
+
+    by_id = {step["id"]: step for step in snapshot["steps"]}
+    assert by_id["intent_parsing"]["status"] == "completed"
+    assert by_id["intent_parsing"]["conclusion"] == {"region": "cn-hangzhou"}
+    assert "canceledAt" not in by_id["intent_parsing"]
+    assert by_id["evaluate_candidates"]["status"] == "canceled"
+
+
+def test_reduce_pipeline_failed_finalizes_unfinished_nodes_as_failed() -> None:
+    failed = _base("evt-4", 4, "pipeline_failed", status="failed")
+
+    snapshot = reduce_pipeline_events([*_canceled_evidence_events(), failed])
+
+    assert snapshot["status"] == "failed"
+    step = snapshot["steps"][0]
+    assert step["status"] == "failed"
+    assert step["failedAt"] == "2026-06-08T10:00:00Z"
+    assert step["terminalReason"] == "pipeline_failed"
+    assert step["candidates"][0]["steps"][0]["status"] == "failed"
+
+
+def test_reduce_pipeline_canceled_pending_backup_leaves_nodes_untouched() -> None:
+    pending = _base("evt-4", 4, "pipeline_canceled", status="canceled")
+    pending["visibility"] = "pending_backup"
+
+    snapshot = reduce_pipeline_events([*_canceled_evidence_events(), pending])
+
+    assert snapshot["pendingTerminal"]["eventType"] == "pipeline_canceled"
+    assert snapshot["steps"][0]["status"] == "working"
+    assert snapshot["steps"][0]["candidates"][0]["steps"][0]["status"] == "working"
+
+
+def test_reduce_pipeline_completed_does_not_force_unfinished_nodes() -> None:
+    completed = _base("evt-4", 4, "pipeline_completed", status="completed")
+
+    snapshot = reduce_pipeline_events([*_canceled_evidence_events(), completed])
+
+    assert snapshot["status"] == "completed"
+    assert snapshot["steps"][0]["status"] == "working"
+
+
 def test_reduce_candidate_without_parent_step_does_not_create_none_step() -> None:
     candidate = _base("evt-1", 1, "candidate_started", scope="candidate")
     candidate["candidate"] = {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1}
