@@ -223,6 +223,17 @@ class TestSkillContentRosOnly:
     def test_contains_error_handling(self, body):
         assert "部署失败" in body
 
+    def test_create_failed_recovery_loop_requires_redeploy(self, body):
+        assert "CREATE_FAILED 恢复闭环" in body
+        assert "status_reason" in body
+        assert "必须**重新发起部署" in body
+        assert "只做 `edit_file` 与 `ros_validate_template` 不构成本步骤的结论" in body
+        assert "最后一个部署相关动作必须是 `ros_deploy`" in body
+
+    def test_deploying_must_end_in_deployment_terminal_state(self, body):
+        assert "本步骤必须以部署终态收尾" in body
+        assert "不得用 `status: cancelled` 表示部署失败或恢复放弃" in body
+
     def test_no_template_generation(self, body):
         assert "模板生成流程" not in body
         assert "参数化规则" not in body
@@ -418,6 +429,17 @@ class TestEvalsJson:
         assert "确认" in confirmed_eval["prompt"]
         assert "uses_delete_stack" not in confirmed_assertions
         assert "no_delete_stack" in confirmed_assertions
+
+    def test_create_failed_eval_requires_redeploy_after_repair(self):
+        data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))
+        evals_by_name = {ev["name"]: ev for ev in data["evals"]}
+        recovery_eval = evals_by_name["create-failed-redeploy-closes-loop"]
+        assertion_names = {assertion["name"] for assertion in recovery_eval["assertions"]}
+
+        assert "CREATE_FAILED" in recovery_eval["selected_plan"]["stack_status"]
+        assert "redeploys_after_repair" in assertion_names
+        assert "no_stop_after_revalidate" in assertion_names
+        assert "terminal_status" in assertion_names
 
     def test_template_validation_eval_uses_dedicated_tool(self):
         data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))

@@ -142,6 +142,15 @@ conclusion_schema:
 - 模板/参数 → 修复后调用 `ros_deploy` 的 `continue_create`
 - `continue_create` 返回 `ContinueCreateStackValidationFailed` → 告知用户需要重建本步骤创建的失败 Stack，再调用 `ros_deploy` 的 `delete_and_create`
 
+### CREATE_FAILED 恢复闭环
+`ros_deploy` 返回 `CREATE_FAILED` 时按下面的闭环恢复，不得中途结束本步骤：
+1. 从结果的 `status_reason` 和失败资源列表定位具体失败资源与失败原因。
+2. 原因指向模板时，就地修复 `selected_plan.template_url` 指向的原模板文件，然后重新调用 `ros_validate_template`；原因指向参数时按「部署前参数补全」调整参数。
+3. 修复并校验通过后**必须**重新发起部署：调用 `ros_deploy` 的 `continue_create`（或按 `ContinueCreateStackValidationFailed` 走 `delete_and_create`），直到 Stack 达到 `CREATE_COMPLETE` 或恢复手段耗尽。
+4. 只做 `edit_file` 与 `ros_validate_template` 不构成本步骤的结论；最后一个部署相关动作必须是 `ros_deploy`，不得在模板修复或校验之后直接调用 `complete_step`。
+
+本步骤必须以部署终态收尾：成功时返回 `status: success` 与真实 `stack_id`；确认不可恢复时返回 `status: failed`，`error` 写明失败资源、失败原因与已尝试的恢复动作。不得用 `status: cancelled` 表示部署失败或恢复放弃。
+
 ### 删除并重建
 仅在 `continue_create` 返回 `ContinueCreateStackValidationFailed` 后使用 `delete_and_create`。调用时：
 - `stack_id` 指向本步骤创建的旧失败 Stack，不得使用通过查询发现的其他 Stack

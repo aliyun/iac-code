@@ -47,6 +47,8 @@
 ## 错误处理
 - 模板校验失败 → 就地修复模板后重试（最多 5 轮）
 - 部署失败或等待超时 → 按技能的参数补全与 `ros_deploy` 恢复策略处理
+- `CREATE_FAILED` → 按技能的恢复闭环定位失败资源、修复后重新调用 `ros_deploy`；只修模板并重新校验不算完成本步骤
+- 本步骤必须以部署终态收尾：成功返回真实 `stack_id`，确认不可恢复时返回 `status: failed` 并说明原因
 - 架构层面必须变更（如产品组合不可行）→ rollback_request 到 `architecture_planning`
 
 ## 注意事项

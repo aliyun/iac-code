@@ -56,6 +56,14 @@ _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
         "or confirm that it should not be handled for now."
     ),
     "deploy_wait_create_complete": ("A successful deployment must wait until ros_deploy returns CREATE_COMPLETE."),
+    "deploy_retry_after_template_fix": (
+        "deploying repaired or revalidated the template but never re-issued the deployment; "
+        "call ros_deploy again and report the deployment outcome instead of ending the step."
+    ),
+    "deploy_cancel_requires_user_request": (
+        "deploying may only report status cancelled when the user explicitly cancelled; "
+        "a failed deployment must be retried with ros_deploy or reported as status failed."
+    ),
     "hard_constraint_verification_required": (
         "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
         "and evidence."
@@ -96,6 +104,14 @@ def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
             "or confirm that it should not be handled for now."
         ),
         _("A successful deployment must wait until ros_deploy returns CREATE_COMPLETE."),
+        _(
+            "deploying repaired or revalidated the template but never re-issued the deployment; "
+            "call ros_deploy again and report the deployment outcome instead of ending the step."
+        ),
+        _(
+            "deploying may only report status cancelled when the user explicitly cancelled; "
+            "a failed deployment must be retried with ros_deploy or reported as status failed."
+        ),
         _(
             "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
             "and evidence."
@@ -534,7 +550,7 @@ class CompleteStepTool(Tool):
                 continue
             if actions and self._first_string(tool_input, ("action", "Action")) not in actions:
                 continue
-            if record.get("is_error"):
+            if record.get("is_error") and not self._error_records_allowed(requirement):
                 continue
             result = record.get("result")
             if not isinstance(result, dict):
@@ -644,7 +660,7 @@ class CompleteStepTool(Tool):
             return False
         if actions and self._first_string(tool_input, ("action", "Action")) not in actions:
             return False
-        if record.get("is_error"):
+        if record.get("is_error") and not self._error_records_allowed(requirement):
             return False
         result = record.get("result")
         if not isinstance(result, dict):
@@ -701,7 +717,9 @@ class CompleteStepTool(Tool):
             if field_mismatch is not None:
                 mismatch_message = self._format_match_field_mismatch(base_message, field_mismatch)
                 continue
-            if record.get("is_error") or not isinstance(raw_result, dict):
+            if record.get("is_error") and not self._error_records_allowed(requirement):
+                break
+            if not isinstance(raw_result, dict):
                 break
             if expected_success is not None and self._bool_from_result(result) is not bool(expected_success):
                 break
@@ -1101,6 +1119,15 @@ class CompleteStepTool(Tool):
         if left is None or right is None:
             return left == right
         return left.lower() == right.lower()
+
+    @staticmethod
+    def _error_records_allowed(requirement: dict[str, Any]) -> bool:
+        """Allow matching failed tool results only when the guard explicitly opts in.
+
+        Needed for guards that require evidence of an *attempt* (e.g. a ros_deploy call that
+        returned CREATE_FAILED), because failed tool results are recorded with is_error=True.
+        """
+        return requirement.get("allow_error_result") is True
 
     @classmethod
     def _expected_actions(cls, requirement: dict[str, Any]) -> set[str]:

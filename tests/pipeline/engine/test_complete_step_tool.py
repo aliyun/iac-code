@@ -808,6 +808,72 @@ class TestCompletionGuards:
 
         assert not result.is_error
 
+    @staticmethod
+    def _allow_error_result_tool(*, allow_error_result: bool) -> CompleteStepTool:
+        requirement = {
+            "tool": "ros_deploy",
+            "action_in": ["create", "continue_create"],
+            "latest_match": True,
+        }
+        if allow_error_result:
+            requirement["allow_error_result"] = True
+        return CompleteStepTool(
+            StepConfig(
+                step_id="deploying",
+                conclusion_field="deployment",
+                forward=None,
+                conclusion_schema={
+                    "type": "object",
+                    "required": ["status"],
+                    "properties": {
+                        "status": {"type": "string", "enum": ["success", "failed", "cancelled"]},
+                        "error": {"type": "string"},
+                    },
+                },
+            ),
+            completion_guards=[
+                {
+                    "when_conclusion_field_equals": {"status": "failed"},
+                    "require_tool_result": requirement,
+                }
+            ],
+            completion_guard_state={
+                "successful_tools": set(),
+                "tool_results": {},
+                "tool_result_records": [
+                    {
+                        "tool_name": "ros_deploy",
+                        "input": {"action": "create", "stack_id": "stack-123"},
+                        "result": {"stack_id": "stack-123", "status": "CREATE_FAILED", "is_success": False},
+                        "is_error": True,
+                    }
+                ],
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_allow_error_result_matches_failed_tool_result(self):
+        tool = self._allow_error_result_tool(allow_error_result=True)
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "failed", "error": "CREATE_FAILED"}},
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_failed_tool_result_is_ignored_without_allow_error_result(self):
+        tool = self._allow_error_result_tool(allow_error_result=False)
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "failed", "error": "CREATE_FAILED"}},
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "ros_deploy" in result.content
+
     @pytest.mark.asyncio
     async def test_required_conclusion_any_of_accepts_clarification_text(self):
         config = StepConfig(step_id="intent_parsing", conclusion_field="intent", forward=None)

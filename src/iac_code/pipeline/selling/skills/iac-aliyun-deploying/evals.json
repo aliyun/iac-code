@@ -223,6 +223,28 @@
         {"name": "skips_routine_availability_query", "check": "跳过例行可用性查询"},
         {"name": "uses_template_url", "check": "ros_deploy 参数中使用 template_url，不使用 TemplateBody"}
       ]
+    },
+    {
+      "id": 11,
+      "name": "create-failed-redeploy-closes-loop",
+      "prompt": "部署失败了，SAE 应用创建报错，请继续处理",
+      "selected_plan": {
+        "selection_valid": true,
+        "template_url": "{TMPDIR}/ros-sae-template.yml",
+        "region": "cn-hangzhou",
+        "stack_id": "stack-sae-1",
+        "stack_status": "CREATE_FAILED",
+        "status_reason": "The resource ALIYUN::SAE::Application is CREATE_FAILED: invalid PackageType"
+      },
+      "expected_behavior": "定位失败资源与原因，就地修复同一个模板文件并重新 ros_validate_template 后，必须重新调用 ros_deploy 完成部署；不得只做 edit_file+ros_validate_template 就结束步骤，也不得以 cancelled 收尾",
+      "assertions": [
+        {"name": "identifies_failed_resource", "check": "从 status_reason 定位失败资源 ALIYUN::SAE::Application 与失败原因"},
+        {"name": "repairs_same_template", "check": "使用 edit_file 就地修复 selected_plan.template_url 指向的模板文件"},
+        {"name": "revalidates_template", "check": "修复后重新调用 ros_validate_template"},
+        {"name": "redeploys_after_repair", "check": "重新调用 ros_deploy 的 continue_create 或 delete_and_create 发起部署"},
+        {"name": "no_stop_after_revalidate", "check": "未在 ros_validate_template 之后直接结束步骤"},
+        {"name": "terminal_status", "check": "以 status success 或 status failed 收尾，不使用 status cancelled"}
+      ]
     }
   ]
 }

@@ -4057,6 +4057,26 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"deploying repaired or revalidated the template but never re-issued the "
+"deployment; call ros_deploy again and report the deployment outcome "
+"instead of ending the step."
+msgstr ""
+"deploying reparó o revalidó la plantilla, pero nunca volvió a lanzar el "
+"despliegue; llama de nuevo a ros_deploy e informa del resultado del "
+"despliegue en lugar de finalizar el paso."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"deploying may only report status cancelled when the user explicitly "
+"cancelled; a failed deployment must be retried with ros_deploy or "
+"reported as status failed."
+msgstr ""
+"deploying solo puede informar status cancelled cuando el usuario canceló "
+"explícitamente; un despliegue fallido debe reintentarse con ros_deploy o "
+"informarse como status failed."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Every explicit user hard constraint must be covered by a satisfied check "
 "with matching parameters and evidence."
 msgstr ""

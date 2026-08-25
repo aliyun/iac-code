@@ -600,6 +600,38 @@ steps:
           status_in: [CREATE_COMPLETE]
           match_conclusion_field: stack_id
         message_key: deploy_wait_create_complete
+      - when_conclusion_field_equals:
+          status: failed
+        when_tool_result_exists:
+          tools: [edit_file, ros_validate_template]
+        require_tool_result:
+          tool: ros_deploy
+          action_in: [create, continue_create, delete_and_create, wait]
+          allow_error_result: true
+          latest_match: true
+          disallow_tool_results_after_match:
+            - tools: [edit_file, ros_validate_template]
+              message_key: deploy_retry_after_template_fix
+        message_key: deploy_retry_after_template_fix
+      - when_conclusion_field_equals:
+          status: cancelled
+        when_tool_result_exists:
+          tools: [edit_file, ros_validate_template]
+        unless_user_message_matches_any:
+          - 取消部署
+          - 不要部署
+          - 停止部署
+          - cancel the deployment
+          - stop the deployment
+        require_tool_result:
+          tool: ros_deploy
+          action_in: [create, continue_create, delete_and_create, wait]
+          allow_error_result: true
+          latest_match: true
+          disallow_tool_results_after_match:
+            - tools: [edit_file, ros_validate_template]
+              message_key: deploy_cancel_requires_user_request
+        message_key: deploy_cancel_requires_user_request
     tools:
       include: []
       exclude:

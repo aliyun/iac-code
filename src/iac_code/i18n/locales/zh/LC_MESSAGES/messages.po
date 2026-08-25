@@ -3834,6 +3834,22 @@ msgstr "部署成功必须等待 ros_deploy 返回 CREATE_COMPLETE。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"deploying repaired or revalidated the template but never re-issued the "
+"deployment; call ros_deploy again and report the deployment outcome "
+"instead of ending the step."
+msgstr "deploying 修复或重新校验了模板，却没有重新发起部署；请再次调用 ros_deploy 并报告部署结果，不要直接结束该步骤。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"deploying may only report status cancelled when the user explicitly "
+"cancelled; a failed deployment must be retried with ros_deploy or "
+"reported as status failed."
+msgstr ""
+"只有用户明确取消时，deploying 才能返回 status cancelled；部署失败必须用 ros_deploy 重试，或返回 "
+"status failed。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Every explicit user hard constraint must be covered by a satisfied check "
 "with matching parameters and evidence."
 msgstr "每个用户明确提出的硬约束都必须由一条状态为满足的检查覆盖，且参数和证据一致。"
