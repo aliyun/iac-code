@@ -353,6 +353,12 @@ class _PipelineSnapshotReducer:
             if event_id is not None:
                 self._seen_event_ids.add(event_id)
         self._snapshot["control"]["rollbackHistory"] = unique_rollbacks
+        # Rebuild from the deduplicated detail lists instead of trusting the
+        # persisted counters, so an incremental reduce never double-counts.
+        self._snapshot["control"]["qualitySignals"]["pipelineRollbacks"] = len(unique_rollbacks)
+        self._snapshot["control"]["qualitySignals"]["canceledStatuses"] = sum(
+            1 for step in self._snapshot["steps"] if step.get("status") == "canceled"
+        )
 
     def _hydrate_candidate_restarts(self) -> None:
         unique_restarts: list[dict[str, Any]] = []
@@ -1003,6 +1009,40 @@ class _PipelineSnapshotReducer:
         }
         _merge_event_coordinates(entry, event)
         self._snapshot["control"]["rollbackHistory"].append(entry)
+        self._snapshot["control"]["qualitySignals"]["pipelineRollbacks"] += 1
+        self._cancel_superseded_step_attempts(event)
+
+    def _cancel_superseded_step_attempts(self, event: dict[str, Any]) -> None:
+        """Mark step attempts abandoned by this rollback as ``canceled``.
+
+        A rollback restarts its target step with a bumped attempt, so earlier
+        attempts of the same step id never reach a terminal lifecycle event.
+        Without this they stay ``working`` forever and the canceled count
+        under-reports the steps the run actually gave up on.
+        """
+        step = _dict_or_none(event.get("step"))
+        target_step_id = _string_or_none(step.get("id")) if step is not None else None
+        if target_step_id is None:
+            target_step_id = _first_string_value(
+                _dict_or_empty(event.get("data")),
+                ("toStepId", "toStep", "to_step", "rollbackTarget"),
+            )
+        if target_step_id is None:
+            return
+
+        current_attempt = _int_or_none(step.get("attempt")) if step is not None else None
+        created_at = _string_or_none(event.get("createdAt"))
+        for candidate_step in self._snapshot["steps"]:
+            if _string_or_none(candidate_step.get("id")) != target_step_id:
+                continue
+            if candidate_step.get("status") not in {"working", "waiting_input"}:
+                continue
+            attempt = _int_or_none(candidate_step.get("attempt")) or 1
+            if current_attempt is not None and attempt >= current_attempt:
+                continue
+            candidate_step["status"] = "canceled"
+            _set_time(candidate_step, "canceledAt", created_at)
+            self._snapshot["control"]["qualitySignals"]["canceledStatuses"] += 1
 
     def _append_candidate_restart(self, event: dict[str, Any]) -> None:
         key = _string_or_none(event.get("eventId")) or str(_sequence_value(event))
@@ -1323,9 +1363,14 @@ def _empty_snapshot() -> dict[str, Any]:
             "candidateRestarts": [],
             "handoffHistory": [],
             "warningHistory": [],
+            "qualitySignals": _empty_quality_signals(),
         },
         "seenEventIds": [],
     }
+
+
+def _empty_quality_signals() -> dict[str, int]:
+    return {"pipelineRollbacks": 0, "canceledStatuses": 0}
 
 
 def _cleanup_resource_status(resource: dict[str, Any]) -> str | None:
@@ -1430,6 +1475,15 @@ def _snapshot_from_existing(existing_snapshot: dict[str, Any] | None) -> dict[st
     ):
         value = snapshot["control"].get(key)
         snapshot["control"][key] = copy.deepcopy(value) if isinstance(value, list) else []
+
+    quality_signals = snapshot["control"].get("qualitySignals")
+    normalized_signals = _empty_quality_signals()
+    if isinstance(quality_signals, dict):
+        for key in normalized_signals:
+            count = _int_or_none(quality_signals.get(key))
+            if count is not None and count > 0:
+                normalized_signals[key] = count
+    snapshot["control"]["qualitySignals"] = normalized_signals
 
     seen_event_ids = snapshot.get("seenEventIds")
     snapshot["seenEventIds"] = (

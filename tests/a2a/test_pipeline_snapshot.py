@@ -847,6 +847,58 @@ def test_reduce_display_items_and_rollback_are_deduplicated() -> None:
     assert len(snapshot["control"]["rollbackHistory"]) == 1
 
 
+def test_reduce_quality_signals_match_rollback_event_count() -> None:
+    first_attempt = {"id": "deploy", "runId": "step-deploy-1", "attempt": 1, "index": 1}
+    second_attempt = {"id": "deploy", "runId": "step-deploy-2", "attempt": 2, "index": 1}
+    started = _base("evt-1", 1, "step_started", scope="step")
+    started["step"] = first_attempt
+    rollback = _base("evt-2", 2, "rollback_completed", scope="interrupt")
+    rollback["step"] = second_attempt
+    rollback["data"] = {"rollbackScope": "parent", "toStepId": "deploy", "reason": "重新部署"}
+    restarted = _base("evt-3", 3, "step_started", scope="step")
+    restarted["step"] = second_attempt
+
+    events = [started, rollback, restarted]
+    snapshot = reduce_pipeline_events(events)
+
+    rollback_events = sum(1 for event in events if event["eventType"] == "rollback_completed")
+    signals = snapshot["control"]["qualitySignals"]
+    assert signals["pipelineRollbacks"] == rollback_events
+    assert signals["canceledStatuses"] == 1
+
+    statuses = {step["runId"]: step["status"] for step in snapshot["steps"]}
+    assert statuses["step-deploy-1"] == "canceled"
+    assert statuses["step-deploy-2"] == "working"
+
+
+def test_reduce_quality_signals_ignore_duplicate_rollback_events() -> None:
+    rollback = _base("evt-1", 1, "rollback_completed", scope="pipeline")
+    rollback["data"] = {"fromStep": "review", "toStep": "plan"}
+
+    snapshot = reduce_pipeline_events([rollback, rollback.copy()])
+
+    assert snapshot["control"]["qualitySignals"]["pipelineRollbacks"] == 1
+
+
+def test_reduce_quality_signals_are_stable_across_incremental_reduce() -> None:
+    rollback = _base("evt-1", 1, "rollback_completed", scope="interrupt")
+    rollback["step"] = {"id": "deploy", "runId": "step-deploy-2", "attempt": 2, "index": 1}
+    rollback["data"] = {"toStepId": "deploy"}
+
+    snapshot = reduce_pipeline_events([rollback])
+    resumed = reduce_pipeline_events([rollback], snapshot)
+
+    assert resumed["control"]["qualitySignals"] == snapshot["control"]["qualitySignals"]
+
+
+def test_reduce_quality_signals_default_for_legacy_snapshot() -> None:
+    legacy = {"schemaVersion": "1.0", "control": {"rollbackHistory": []}}
+
+    snapshot = reduce_pipeline_events([], legacy)
+
+    assert snapshot["control"]["qualitySignals"] == {"pipelineRollbacks": 0, "canceledStatuses": 0}
+
+
 def test_reduce_permission_and_tool_result_display_items() -> None:
     permission = _base("evt-permission", 1, "permission_requested", scope="pipeline")
     permission["permission"] = {
