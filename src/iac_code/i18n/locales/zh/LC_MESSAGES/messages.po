@@ -3840,6 +3840,12 @@ msgstr "每个用户明确提出的硬约束都必须由一条状态为满足的
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"The template preview did not succeed, so the cost estimate is not "
+"verified; report it as unverified instead of completing the step with a "
+"plain cost."
+msgstr "模板预览未通过，成本估算未经验证；请如实标注为未验证，不要直接给出成本并结束步骤。"
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr "调用此工具提交结论以完成当前步骤。如需回滚到较早步骤，请设置 rollback_request。"

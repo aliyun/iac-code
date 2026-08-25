@@ -145,5 +145,9 @@ def diagram_items(manager: Any, session: Any, optimizing_indices: frozenset[int]
         if cost is not None:
             entry["costItems"] = cost["costItems"]
             entry["totalMonthlyCost"] = cost["totalMonthlyCost"]
+            if "costEstimateVerified" in cost:
+                entry["costEstimateVerified"] = cost["costEstimateVerified"]
+            if "unverifiedReason" in cost:
+                entry["unverifiedReason"] = cost["unverifiedReason"]
         by_key[key] = entry
     return list(by_key.values())

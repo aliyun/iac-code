@@ -217,6 +217,36 @@ def test_ros_deploy_permission_metadata_contains_safe_deployment_summary() -> No
     assert "must-not-appear" not in str(metadata)
 
 
+def test_ros_deploy_deployment_summary_surfaces_unverified_cost() -> None:
+    from iac_code.pipeline.selling.tools.ros_deploy_tool import RosDeployTool
+
+    tool = RosDeployTool(
+        completion_guard_state={
+            "context_snapshot": {
+                "selected_plan": {
+                    "selected_candidate_name": "低成本方案",
+                    "selected_candidate": {"name": "低成本方案"},
+                    "selected_candidate_result": {
+                        "cost": {
+                            "monthly_estimate": "¥88/月",
+                            "resources": [],
+                            "cost_estimate_verified": False,
+                            "unverified_reason": "VPC 配额超限，模板预览未通过",
+                        }
+                    },
+                }
+            }
+        }
+    )
+
+    summary = tool._operation_metadata(
+        {"action": "create", "stack_name": "demo-stack", "template_url": "templates/demo.yml"}
+    )["deploymentSummary"]
+
+    assert summary["costEstimateVerified"] is False
+    assert summary["unverifiedReason"] == "VPC 配额超限，模板预览未通过"
+
+
 @pytest.mark.parametrize(
     ("tool_input", "expected_fields"),
     [

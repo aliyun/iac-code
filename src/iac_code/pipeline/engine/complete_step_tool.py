@@ -60,6 +60,10 @@ _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
         "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
         "and evidence."
     ),
+    "cost_estimate_unverified_disclosure_required": (
+        "The template preview did not succeed, so the cost estimate is not verified; report it as unverified "
+        "instead of completing the step with a plain cost."
+    ),
 }
 _COMPLETION_GUARD_MESSAGE_KEY_BY_TEXT = {text: key for key, text in _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY.items()}
 
@@ -99,6 +103,10 @@ def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
         _(
             "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
             "and evidence."
+        ),
+        _(
+            "The template preview did not succeed, so the cost estimate is not verified; report it as unverified "
+            "instead of completing the step with a plain cost."
         ),
     )
 

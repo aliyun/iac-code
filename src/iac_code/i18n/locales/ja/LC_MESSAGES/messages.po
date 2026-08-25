@@ -3876,6 +3876,12 @@ msgstr "ユーザーが明示した各ハード制約は、パラメーターと
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"The template preview did not succeed, so the cost estimate is not "
+"verified; report it as unverified instead of completing the step with a "
+"plain cost."
+msgstr "テンプレートのプレビューが成功していないため、コスト見積もりは未検証です。通常のコストとしてステップを完了せず、未検証として報告してください。"
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""

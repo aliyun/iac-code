@@ -44,5 +44,7 @@ API 调用完成后调用 `complete_step` 提交费用预估。
 
 若 `ros_preview_template` 成功，在 `complete_step.conclusion.preview_validation` 写入 PreviewStack 成功证明：`succeeded: true`、`template_url: "{template.file_path}"`、`parameters: <预览通过的同一参数字典>`；失败或未执行时写入 `succeeded: false`、`error: "<原因>"`。
 
+`complete_step.conclusion.cost_estimate_verified` 必须与 `preview_validation.succeeded` 一致。预览未通过时填 `false`，并在 `unverified_reason` 中如实说明预览失败原因以及模板是否已尝试修复；缺少该说明时 `complete_step` 会拒绝结束步骤。
+
 ## 注意事项
 - 不要读取项目文件或记忆，所需的上下文已在上方提供。

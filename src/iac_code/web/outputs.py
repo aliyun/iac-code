@@ -176,6 +176,30 @@ def pipeline_candidate_options(manager: Any, session: Any) -> list[dict[str, Any
     return candidates
 
 
+def _cost_verification_fields(cost: dict[str, Any]) -> dict[str, Any]:
+    """派生候选成本的「是否经过模板预览验证」标记。
+
+    cost_estimating 允许在预览未通过时软降级继续询价(如缺 VpcId 等外部输入),此时结论会带
+    ``cost_estimate_verified: false`` 与 ``unverified_reason``。展示层必须把该状态透传出去,
+    否则未经预览验证的成本与已验证成本在界面上完全相同,用户会把不可落地的估算当作可落地成本。
+    旧会话日志没有这两个字段时回退到 ``preview_validation.succeeded``。
+    """
+    verified = cost.get("cost_estimate_verified")
+    if not isinstance(verified, bool):
+        preview = cost.get("preview_validation")
+        if not isinstance(preview, dict) or "succeeded" not in preview:
+            return {}
+        verified = preview.get("succeeded") is True
+    fields: dict[str, Any] = {"costEstimateVerified": verified}
+    if not verified:
+        reason = cost.get("unverified_reason")
+        if not isinstance(reason, str) or not reason:
+            preview = cost.get("preview_validation")
+            reason = preview.get("error") if isinstance(preview, dict) else None
+        fields["unverifiedReason"] = reason if isinstance(reason, str) else ""
+    return fields
+
+
 def pipeline_candidate_costs(manager: Any, session: Any) -> dict[int, dict[str, Any]]:
     """从 pipeline A2A 日志取各候选的询价,按候选序号聚合。
 
@@ -221,6 +245,7 @@ def pipeline_candidate_costs(manager: Any, session: Any) -> dict[int, dict[str, 
             costs[index] = {
                 "costItems": items,
                 "totalMonthlyCost": total if isinstance(total, str) else "",
+                **_cost_verification_fields(cost),
             }
         elif event_type == "candidate_detail_shown":
             detail = data.get("detail")
@@ -235,6 +260,13 @@ def pipeline_candidate_costs(manager: Any, session: Any) -> dict[int, dict[str, 
             costs[index] = {
                 "costItems": items if isinstance(items, list) else [],
                 "totalMonthlyCost": total if isinstance(total, str) else "",
+                # detail 覆盖 completed 时保留已派生的未验证标记:show_candidate_detail 只带费用明细,
+                # 不带 cost_estimating 的验证状态,直接覆盖会让「未经预览验证」的提示凭空消失。
+                **{
+                    key: value
+                    for key, value in (costs.get(index) or {}).items()
+                    if key in {"costEstimateVerified", "unverifiedReason"}
+                },
             }
     return costs
 

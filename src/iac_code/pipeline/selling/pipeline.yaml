@@ -356,6 +356,10 @@ sub_pipelines:
               checks_field: hard_constraint_checks
               deployment_parameters_field: deployment_parameters
             message_key: hard_constraint_verification_required
+          - when_conclusion_field_equals:
+              preview_validation.succeeded: false
+            required_conclusion_field: unverified_reason
+            message_key: cost_estimate_unverified_disclosure_required
         tools:
           include: []
           exclude:

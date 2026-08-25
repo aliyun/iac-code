@@ -126,6 +126,8 @@ class TestSkillFrontmatter:
                     "evidence": [{"type": "context", "summary": "parameter value", "actual_value": 120}],
                 }
             ],
+            "cost_estimate_verified": False,
+            "unverified_reason": "缺少 ZoneId，预览未通过",
             "preview_validation": {"succeeded": False, "error": "missing ZoneId"},
         }
 
@@ -183,6 +185,7 @@ class TestSkillFrontmatter:
             "template_fixed": False,
             "deployment_parameters": {"ZoneId": "cn-hangzhou-k"},
             "hard_constraint_checks": [],
+            "cost_estimate_verified": True,
             "preview_validation": {
                 "succeeded": True,
                 "template_url": "templates/a.yml",
@@ -209,6 +212,8 @@ class TestSkillFrontmatter:
             "template_fixed": False,
             "deployment_parameters": {},
             "hard_constraint_checks": [],
+            "cost_estimate_verified": False,
+            "unverified_reason": "缺少 VpcId，预览未通过",
             "preview_validation": {"succeeded": False, "error": "missing VpcId"},
         }
 
@@ -216,6 +221,59 @@ class TestSkillFrontmatter:
         missing_error = dict(conclusion, preview_validation={"succeeded": False})
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(missing_error, schema)
+
+    def test_conclusion_schema_requires_unverified_disclosure_when_preview_failed(self):
+        schema = _parse_frontmatter(SKILL_MD.read_text(encoding="utf-8"))["conclusion_schema"]
+        conclusion = {
+            "monthly_estimate": "¥1280/月",
+            "currency": "CNY",
+            "resources": [{"type": "ALIYUN::ECS::InstanceGroup", "cost": "¥1280/月"}],
+            "template_fixed": False,
+            "deployment_parameters": {},
+            "hard_constraint_checks": [],
+            "cost_estimate_verified": False,
+            "unverified_reason": "VPC 配额超限导致预览失败，成本未经验证",
+            "preview_validation": {"succeeded": False, "error": "ResourceQuotaExceeded"},
+        }
+
+        jsonschema.validate(conclusion, schema)
+
+        missing_reason = dict(conclusion)
+        del missing_reason["unverified_reason"]
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(missing_reason, schema)
+
+        empty_reason = dict(conclusion, unverified_reason="")
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(empty_reason, schema)
+
+        claims_verified = dict(conclusion, cost_estimate_verified=True)
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(claims_verified, schema)
+
+    def test_conclusion_schema_requires_verified_true_when_preview_succeeded(self):
+        schema = _parse_frontmatter(SKILL_MD.read_text(encoding="utf-8"))["conclusion_schema"]
+        conclusion = {
+            "monthly_estimate": "¥1280/月",
+            "currency": "CNY",
+            "resources": [{"type": "ALIYUN::ECS::InstanceGroup", "cost": "¥1280/月"}],
+            "template_fixed": False,
+            "deployment_parameters": {"ZoneId": "cn-hangzhou-k"},
+            "hard_constraint_checks": [],
+            "cost_estimate_verified": True,
+            "preview_validation": {
+                "succeeded": True,
+                "template_url": "templates/a.yml",
+                "parameters": {"ZoneId": "cn-hangzhou-k"},
+            },
+        }
+
+        jsonschema.validate(conclusion, schema)
+
+        assert "cost_estimate_verified" in schema["required"]
+        claims_unverified = dict(conclusion, cost_estimate_verified=False)
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(claims_unverified, schema)
 
 
 class TestSkillContentRosOnly:
@@ -345,6 +403,13 @@ class TestSkillContentRosOnly:
 
     def test_contains_template_url(self, body):
         assert "template_url" in body
+
+    def test_failed_preview_must_be_disclosed_as_unverified(self, body):
+        assert "## 预览未通过时的处置" in body
+        assert "cost_estimate_verified" in body
+        assert "unverified_reason" in body
+        assert "ResourceQuotaExceeded" in body
+        assert "不得当作正常成本" in body
 
     def test_template_url_source_is_not_duplicated_from_prompt(self, body):
         assert "模板来源硬约束" not in body
@@ -521,6 +586,11 @@ class TestCostPrompt:
         body = COST_PROMPT_MD.read_text(encoding="utf-8")
         assert "preview_validation" in body
         assert "PreviewStack 成功证明" in body
+
+    def test_prompt_requires_unverified_disclosure_when_preview_failed(self):
+        body = COST_PROMPT_MD.read_text(encoding="utf-8")
+        assert "cost_estimate_verified" in body
+        assert "unverified_reason" in body
 
     def test_prompt_names_template_url_value_for_pricing_tools(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")

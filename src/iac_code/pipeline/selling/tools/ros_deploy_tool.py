@@ -383,6 +383,14 @@ class RosDeployTool(Tool):
         total_monthly_cost = _string_value(cost.get("monthly_estimate"))
         if total_monthly_cost:
             summary["totalMonthlyCost"] = total_monthly_cost
+        # cost_estimating 可能在模板预览未通过时软降级出成本;部署确认摘要必须带上该状态,
+        # 否则用户会把未经预览验证的估算当作已验证成本来批准部署。
+        if isinstance(cost.get("cost_estimate_verified"), bool):
+            summary["costEstimateVerified"] = cost["cost_estimate_verified"]
+            if not cost["cost_estimate_verified"]:
+                unverified_reason = _string_value(cost.get("unverified_reason"))
+                if unverified_reason:
+                    summary["unverifiedReason"] = unverified_reason
 
         resources: list[dict[str, str]] = []
         raw_resources = cost.get("resources")

@@ -13,7 +13,34 @@ conclusion_schema:
     - deployment_parameters
     - hard_constraint_checks
     - preview_validation
+    - cost_estimate_verified
   additionalProperties: false
+  allOf:
+    - if:
+        properties:
+          preview_validation:
+            properties:
+              succeeded:
+                const: false
+            required: [succeeded]
+        required: [preview_validation]
+      then:
+        properties:
+          cost_estimate_verified:
+            const: false
+        required: [cost_estimate_verified, unverified_reason]
+    - if:
+        properties:
+          preview_validation:
+            properties:
+              succeeded:
+                const: true
+            required: [succeeded]
+        required: [preview_validation]
+      then:
+        properties:
+          cost_estimate_verified:
+            const: true
   properties:
     monthly_estimate:
       type: string
@@ -173,6 +200,13 @@ conclusion_schema:
             type: string
           reason:
             type: string
+    cost_estimate_verified:
+      type: boolean
+      description: 本次成本估算是否基于通过 ros_preview_template 验证的模板与参数；preview_validation.succeeded 为 false 时必须填 false
+    unverified_reason:
+      type: string
+      minLength: 1
+      description: cost_estimate_verified 为 false 时必填，向用户如实说明预览未通过的原因（如 VPC 配额超限）以及模板是否已尝试修复
     parameter_set_summary:
       type: string
     fix_summary:
@@ -187,7 +221,7 @@ conclusion_schema:
 
 使用专用 ROS 模板询价工具预估部署费用。
 
-前一步已完成模板校验；本步骤避免在成本预估前重复校验模板。首次询价前必须先尝试按参数推荐流程形成 Preview-Validated Pricing Parameter Set，不得直接跳过 PreviewStack。PreviewStack 不是成本估算的硬门禁；完整部署参数暂时无法自动形成时，仍可用当前已选参数调用 `ros_estimate_template_cost`，并把缺口留给后续步骤补充。只有在修复或改写模板后，才调用 `ros_validate_template` 校验改动。
+前一步已完成模板校验；本步骤避免在成本预估前重复校验模板。首次询价前必须先尝试按参数推荐流程形成 Preview-Validated Pricing Parameter Set，不得直接跳过 PreviewStack。PreviewStack 不是成本估算的硬门禁；完整部署参数暂时无法自动形成时，仍可用当前已选参数调用 `ros_estimate_template_cost`，并把缺口留给后续步骤补充。预览未通过时不得当作正常成本产出，必须按「预览未通过时的处置」如实标注。只有在修复或改写模板后，才调用 `ros_validate_template` 校验改动。
 
 ## 执行流程
 
@@ -198,7 +232,18 @@ conclusion_schema:
 5. **按需修复问题** — 仅当询价失败且错误指向模板问题，或你必须修复/改写模板时，修改模板并写回原文件路径
 6. **修改后校验并重新询价** — 调用 `ros_validate_template` 校验改动；通过后调用 `ros_estimate_template_cost` 重新询价；失败则修复重试（最多 7 轮）
 7. **结构化传递参数** — 在 `complete_step.conclusion.deployment_parameters` 输出当前已选或已用于询价的参数字典；在 `preview_validation` 输出预览成功证明；在 `missing_deployment_parameters` 输出仍未补齐的完整部署参数缺口
-8. **输出结果** — 汇总费用并调用 `complete_step`
+8. **标注验证状态** — 按「预览未通过时的处置」填写 `cost_estimate_verified`，未通过时补齐 `unverified_reason`
+9. **输出结果** — 汇总费用并调用 `complete_step`
+
+## 预览未通过时的处置
+
+`ros_preview_template` 未通过时，先按失败原因分类，再决定是否继续询价：
+
+- **外部输入缺口**（缺 VpcId、VSwitchId、SecurityGroupId、KeyPairName、证书、域名等无法自动补齐的已有资源或外部值）：属于既有软降级场景。记录缺口后可用当前参数继续询价。
+- **模板自身问题**（资源属性、内置函数、Parameters 定义错误）：必须先按「按需校验模板」修复模板并写回原文件路径，再重新预览与询价；不得跳过修复直接出成本。
+- **配额或库存类失败**（如 `ResourceQuotaExceeded`、`QuotaExceeded`、指定规格无库存）：模板本身可能合法但当前无法落地。优先按 reference 的回溯规则更换可用候选（如换可用区、规格），或改写模板降低资源用量后重新预览；确实无法在本步骤内解决时，如实标注未验证，不得当作正常成本。
+
+无论属于哪一类，只要最终 `preview_validation.succeeded` 为 `false`，就必须把 `cost_estimate_verified` 填为 `false`，并在 `unverified_reason` 中写明预览失败的真实原因以及模板是否已尝试修复。`complete_step` 会校验该标注，缺失时拒绝结束步骤。预览通过时 `cost_estimate_verified` 填 `true`。
 
 ## 按需校验模板
 
@@ -304,6 +349,7 @@ aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<�
 - `deployment_parameters` 填当前已选、已验证或已用于 `ros_estimate_template_cost` 的参数字典；PreviewStack 成功但询价失败时仍填该参数集；没有任何可用参数时填 `{}`
 - 没有硬约束时，`hard_constraint_checks` 填 `[]`；不要输出 `hard_constraints_verified`
 - `preview_validation` 填 `ros_preview_template` 的结构化状态：成功时填 `{"succeeded": true, "template_url": "<当前模板文件路径>", "parameters": <预览通过的同一参数字典>}`；失败或未执行时填 `{"succeeded": false, "error": "<原因>"}`
+- `cost_estimate_verified` 与 `preview_validation.succeeded` 必须一致：预览通过填 `true`，未通过填 `false` 并补齐 `unverified_reason`
 - `missing_deployment_parameters` 填完整部署或 PreviewStack 仍缺少的参数及原因；没有缺口时可省略或填 `[]`
 - `parameter_set_summary` 可简要说明参数来源、可用性筛选、PreviewStack 验证结果以及是否使用软门禁继续询价
 - 询价失败时 `monthly_estimate` 填 "询价失败"，`resources` 为空数组，`error` 说明原因

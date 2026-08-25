@@ -1460,6 +1460,72 @@ class TestCompletionGuards:
         assert result.is_error
         assert "rerun validation" in result.content
 
+    @staticmethod
+    def _cost_estimating_tool() -> CompleteStepTool:
+        return CompleteStepTool(
+            StepConfig(step_id="cost_estimating", conclusion_field="cost", forward=None),
+            completion_guards=[
+                {
+                    "when_conclusion_field_equals": {"preview_validation.succeeded": False},
+                    "required_conclusion_field": "unverified_reason",
+                    "message_key": "cost_estimate_unverified_disclosure_required",
+                }
+            ],
+            completion_guard_state={"successful_tools": set(), "tool_results": {}},
+        )
+
+    @pytest.mark.asyncio
+    async def test_rejects_cost_conclusion_when_failed_preview_is_not_disclosed(self):
+        tool = self._cost_estimating_tool()
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "total_monthly_cost": 1280.0,
+                    "preview_validation": {"succeeded": False, "error": "ResourceQuotaExceeded"},
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "unverified_reason" in result.content
+
+    @pytest.mark.asyncio
+    async def test_accepts_cost_conclusion_when_failed_preview_is_disclosed(self):
+        tool = self._cost_estimating_tool()
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "total_monthly_cost": 1280.0,
+                    "cost_estimate_verified": False,
+                    "unverified_reason": "VPC 配额超限导致 PreviewStack 失败，成本未经模板预览验证",
+                    "preview_validation": {"succeeded": False, "error": "ResourceQuotaExceeded"},
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_does_not_require_disclosure_when_preview_succeeded(self):
+        tool = self._cost_estimating_tool()
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "total_monthly_cost": 1280.0,
+                    "cost_estimate_verified": True,
+                    "preview_validation": {"succeeded": True},
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
 
 class TestSchemaValidation:
     def test_missing_conclusion_validation_error_includes_current_step_schema(self):

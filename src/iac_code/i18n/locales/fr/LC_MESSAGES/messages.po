@@ -4074,6 +4074,15 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"The template preview did not succeed, so the cost estimate is not "
+"verified; report it as unverified instead of completing the step with a "
+"plain cost."
+msgstr ""
+"L’aperçu du modèle n’a pas abouti, l’estimation des coûts n’est donc pas "
+"vérifiée ; signalez-la comme non vérifiée au lieu de terminer l’étape "
+"avec un coût normal."
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""

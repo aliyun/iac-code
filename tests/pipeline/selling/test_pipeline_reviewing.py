@@ -44,7 +44,12 @@ def test_review_enabled_loads_infraguard_repair_step_before_cost() -> None:
                 "deployment_parameters_field": "deployment_parameters",
             },
             "message_key": "hard_constraint_verification_required",
-        }
+        },
+        {
+            "when_conclusion_field_equals": {"preview_validation.succeeded": False},
+            "required_conclusion_field": "unverified_reason",
+            "message_key": "cost_estimate_unverified_disclosure_required",
+        },
     ]
 
     assert review_step.tools is not None

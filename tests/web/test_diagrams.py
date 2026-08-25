@@ -265,6 +265,124 @@ def test_candidate_costs_detail_shown_wins_over_completed(tmp_path):
     assert costs[0]["costItems"][0]["name"] == "RDS"
 
 
+def _completed_cost_envelope(index, cost):
+    return {
+        "eventType": "candidate_completed",
+        "data": {"candidateIndex": index, "candidateName": "x", "conclusions": {"cost": cost}},
+    }
+
+
+def test_candidate_costs_marks_unverified_when_preview_failed(tmp_path):
+    manager = _Manager(
+        [
+            _completed_cost_envelope(
+                0,
+                {
+                    "monthly_estimate": "¥1280/月",
+                    "resources": [{"type": "ECS", "cost": "¥1280/月"}],
+                    "cost_estimate_verified": False,
+                    "unverified_reason": "VPC 配额超限，模板预览未通过",
+                    "preview_validation": {"succeeded": False, "error": "ResourceQuotaExceeded"},
+                },
+            ),
+        ]
+    )
+    costs = pipeline_candidate_costs(manager, _session(tmp_path))
+    assert costs[0]["costEstimateVerified"] is False
+    assert costs[0]["unverifiedReason"] == "VPC 配额超限，模板预览未通过"
+
+
+def test_candidate_costs_marks_verified_when_preview_succeeded(tmp_path):
+    manager = _Manager(
+        [
+            _completed_cost_envelope(
+                0,
+                {
+                    "monthly_estimate": "¥1280/月",
+                    "resources": [],
+                    "cost_estimate_verified": True,
+                    "preview_validation": {"succeeded": True, "template_url": "a.yml", "parameters": {}},
+                },
+            ),
+        ]
+    )
+    costs = pipeline_candidate_costs(manager, _session(tmp_path))
+    assert costs[0]["costEstimateVerified"] is True
+    assert "unverifiedReason" not in costs[0]
+
+
+def test_candidate_costs_falls_back_to_preview_validation_for_legacy_journals(tmp_path):
+    # 旧会话日志没有 cost_estimate_verified/unverified_reason,回退到 preview_validation。
+    manager = _Manager(
+        [
+            _completed_cost_envelope(
+                0,
+                {
+                    "monthly_estimate": "¥1280/月",
+                    "resources": [],
+                    "preview_validation": {"succeeded": False, "error": "ResourceQuotaExceeded"},
+                },
+            ),
+        ]
+    )
+    costs = pipeline_candidate_costs(manager, _session(tmp_path))
+    assert costs[0]["costEstimateVerified"] is False
+    assert costs[0]["unverifiedReason"] == "ResourceQuotaExceeded"
+
+
+def test_candidate_costs_without_preview_validation_omit_verification_keys(tmp_path):
+    manager = _Manager([_completed_envelope(0, "x", "¥46/月", [{"type": "ECS", "cost": "¥32"}])])
+    costs = pipeline_candidate_costs(manager, _session(tmp_path))
+    assert "costEstimateVerified" not in costs[0]
+    assert "unverifiedReason" not in costs[0]
+
+
+def test_detail_shown_does_not_erase_unverified_marker(tmp_path):
+    # show_candidate_detail 只覆盖金额,不能抹掉「未经预览验证」的告警。
+    manager = _Manager(
+        [
+            _completed_cost_envelope(
+                0,
+                {
+                    "monthly_estimate": "¥1280/月",
+                    "resources": [],
+                    "cost_estimate_verified": False,
+                    "unverified_reason": "VPC 配额超限",
+                    "preview_validation": {"succeeded": False, "error": "ResourceQuotaExceeded"},
+                },
+            ),
+            _detail_envelope(0, [{"name": "ECS", "monthly_cost": "¥1280"}], "¥1280/月"),
+        ]
+    )
+    costs = pipeline_candidate_costs(manager, _session(tmp_path))
+    assert costs[0]["totalMonthlyCost"] == "¥1280/月"
+    assert costs[0]["costEstimateVerified"] is False
+    assert costs[0]["unverifiedReason"] == "VPC 配额超限"
+
+
+def test_diagram_items_propagate_unverified_cost_marker(tmp_path):
+    manager = _Manager(
+        [
+            _wf_envelope("cand0.yaml", _ROS_A, index=0, name="高可用"),
+            _wf_envelope("cand1.yaml", _ROS_B, index=1, name="经济型"),
+            _completed_cost_envelope(
+                0,
+                {
+                    "monthly_estimate": "¥1280/月",
+                    "resources": [{"type": "ECS", "cost": "¥1280/月"}],
+                    "cost_estimate_verified": False,
+                    "unverified_reason": "VPC 配额超限",
+                    "preview_validation": {"succeeded": False, "error": "ResourceQuotaExceeded"},
+                },
+            ),
+        ]
+    )
+    by_index = {i["candidateIndex"]: i for i in diagram_items(manager, _session(tmp_path))}
+    assert by_index[0]["costEstimateVerified"] is False
+    assert by_index[0]["unverifiedReason"] == "VPC 配额超限"
+    assert "costEstimateVerified" not in by_index[1]
+
+
 def test_diagram_items_attaches_cost_by_index(tmp_path):
     manager = _Manager(
         [
