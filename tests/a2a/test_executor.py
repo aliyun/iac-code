@@ -3788,12 +3788,10 @@ class TestResolveCandidatePresentation:
         executor = self._make_executor()
 
         assert (
-            executor._resolve_candidate_presentation({"iac_code": {"candidatePresentation": " rich-v1 "}})
-            == "rich-v1"
+            executor._resolve_candidate_presentation({"iac_code": {"candidatePresentation": " rich-v1 "}}) == "rich-v1"
         )
         assert (
-            executor._resolve_candidate_presentation({"iac_code": {"candidate_presentation": "RICH-V1"}})
-            == "rich-v1"
+            executor._resolve_candidate_presentation({"iac_code": {"candidate_presentation": "RICH-V1"}}) == "rich-v1"
         )
 
     def test_rejects_unknown_or_missing_presentation(self) -> None:
