@@ -58,6 +58,26 @@ def test_architecture_prompt_guides_optional_memory_lookup_for_planning_context(
     assert "当前用户意图为准" in body
 
 
+def test_architecture_requires_intent_resource_coverage_or_explicit_exclusion():
+    body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+    end = body.index("---", 3)
+    schema = yaml.safe_load(body[3:end])["conclusion_schema"]
+    candidate_properties = schema["properties"]["candidates"]["items"]["properties"]
+    exclusion = candidate_properties["excluded_resource_intents"]["items"]
+
+    assert set(exclusion["required"]) == {"product", "reason"}
+    assert exclusion["properties"]["reason"]["minLength"] == 1
+    assert "不允许静默丢弃已解析的意图资源" in body
+    assert "excluded_resource_intents" in body
+
+
+def test_architecture_prompt_states_intent_resource_coverage_constraint():
+    body = PROMPT_FILE.read_text(encoding="utf-8")
+
+    assert "excluded_resource_intents" in body
+    assert "不要静默丢弃已解析出的资源意图" in body
+
+
 def test_architecture_keeps_iac_code_web_candidate_on_fixed_entry_topology():
     body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
 

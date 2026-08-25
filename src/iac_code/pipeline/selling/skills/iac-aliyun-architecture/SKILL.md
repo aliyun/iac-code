@@ -42,6 +42,21 @@ conclusion_schema:
                 notes:
                   type: string
             description: 本方案中每个资源的新建、复用、引用或禁止语义；从 intent.resource_intents 继承或收窄
+          excluded_resource_intents:
+            type: array
+            items:
+              type: object
+              required: [product, reason]
+              additionalProperties: false
+              properties:
+                product:
+                  type: string
+                  description: intent.resource_intents 中被本方案排除的资源或产品名称
+                reason:
+                  type: string
+                  minLength: 1
+                  description: 本方案不包含该意图资源的具体原因；不得为空
+            description: 本方案未覆盖的意图资源及排除原因；意图资源既未覆盖也未在此说明时方案不合法
           hard_constraints:
             type: array
             description: 当前候选采用的用户硬约束完整快照；以进入本步骤后的最新用户要求为准，不得加入推断规格或方案推荐值
@@ -130,6 +145,7 @@ conclusion_schema:
 - 方案名称（体现核心差异，如"Serverless 轻量方案"而非泛泛的"方案一"）
 - 核心阿里云产品组合（只列必要的产品）
 - 资源生命周期：`resource_intents`
+- 未覆盖的意图资源及原因：`excluded_resource_intents`（全部覆盖时省略）
 - 拓扑描述（简述部署架构）
 - 月度费用估算范围
 - 优势和局限
@@ -144,6 +160,17 @@ conclusion_schema:
 - 将 `resource_intents` 原样或按方案收窄后写入每个 candidate，供模板生成步骤继续执行同一约束。
 
 示例：intent 表示“已有 VPC 中创建安全组”时，candidate 应包含 `resource_intents: [{"product": "VPC", "action": "use_existing"}, {"product": "SecurityGroup", "action": "create"}]`。不得生成 VSwitch，也不得设计成“创建 VPC + VSwitch + SecurityGroup”。
+
+## 意图资源覆盖约束
+
+`intent.resource_intents` 同时是候选集的**覆盖约束**，不只是禁止约束。每个 `action` 为 `create`、`use_existing` 或 `reference` 的意图资源，在每个候选中都必须满足其中之一：
+
+- 被该候选覆盖：出现在 `candidate.resource_intents` 或 `candidate.products` 中；
+- 或在 `candidate.excluded_resource_intents` 中显式列出，并给出非空 `reason` 说明本方案为什么不包含它。
+
+不允许静默丢弃已解析的意图资源。例如 intent 解析出 OSS 静态托管意图时，候选要么包含 OSS 方案，要么在 `excluded_resource_intents` 写明排除原因（如“本方案改用 ECS 承载动态渲染，静态资源不单独使用 OSS”）；只给 ECS、SAE 候选而完全不提 OSS 是错误输出。
+
+`excluded_resource_intents` 只能出现 `intent.resource_intents` 里已有的资源，不要把用户没提过的产品写进排除列表。
 
 ## 用户硬约束
 

@@ -4088,6 +4088,14 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"Every resource parsed into the intent must be covered by a candidate, or "
+"explicitly excluded with a reason in that candidate."
+msgstr ""
+"Jede in der Absicht erkannte Ressource muss von einem Kandidaten abgedeckt "
+"oder in diesem Kandidaten mit einer Begründung explizit ausgeschlossen werden."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""

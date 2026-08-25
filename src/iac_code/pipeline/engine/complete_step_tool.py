@@ -14,6 +14,7 @@ import jsonschema
 from iac_code.i18n import _
 from iac_code.pipeline.display_names import display_step_name
 from iac_code.pipeline.engine.hard_constraints import collect_hard_constraints, validate_hard_constraint_checks
+from iac_code.pipeline.engine.intent_coverage import collect_resource_intents, validate_intent_coverage
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.utils.public_errors import sanitize_strict_text
@@ -60,6 +61,10 @@ _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
         "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
         "and evidence."
     ),
+    "intent_resource_coverage_required": (
+        "Every resource parsed into the intent must be covered by a candidate, or explicitly excluded with a "
+        "reason in that candidate."
+    ),
 }
 _COMPLETION_GUARD_MESSAGE_KEY_BY_TEXT = {text: key for key, text in _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY.items()}
 
@@ -99,6 +104,10 @@ def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
         _(
             "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
             "and evidence."
+        ),
+        _(
+            "Every resource parsed into the intent must be covered by a candidate, or explicitly excluded with a "
+            "reason in that candidate."
         ),
     )
 
@@ -324,6 +333,7 @@ class CompleteStepTool(Tool):
             required_tool_result = guard.get("require_tool_result")
             required_conclusion_sha256 = guard.get("require_conclusion_sha256")
             required_constraint_coverage = guard.get("require_context_constraint_coverage")
+            required_intent_coverage = guard.get("require_context_intent_coverage")
             required_field = guard.get("required_conclusion_field")
             required_any_of = guard.get("required_conclusion_any_of") or []
             successful_tools = self._completion_guard_state.get("successful_tools", set())
@@ -383,7 +393,48 @@ class CompleteStepTool(Tool):
                 )
                 if validation_error is not None:
                     return validation_error
+            if isinstance(required_intent_coverage, dict):
+                validation_error = self._validate_context_intent_coverage(
+                    required_intent_coverage,
+                    conclusion,
+                    self._completion_guard_message(guard, None),
+                )
+                if validation_error is not None:
+                    return validation_error
         return None
+
+    def _validate_context_intent_coverage(
+        self,
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        message: str | None,
+    ) -> str | None:
+        source_fields = requirement.get("source_fields") or []
+        if not isinstance(source_fields, list) or not all(isinstance(field, str) for field in source_fields):
+            return message or _("A completion guard is misconfigured.")
+        context_snapshot = self._completion_guard_state.get("context_snapshot")
+        if not isinstance(context_snapshot, dict):
+            context_snapshot = {}
+        intents, source_issues = collect_resource_intents(context_snapshot, source_fields)
+        candidates = self._resolve_dotted(conclusion, str(requirement.get("candidates_field") or "candidates"))
+        issues = source_issues + validate_intent_coverage(intents, candidates)
+        if not issues:
+            return None
+        base_message = message or _(
+            "Every resource parsed into the intent must be covered by a candidate, or explicitly excluded with a "
+            "reason in that candidate."
+        )
+        issue_summaries = []
+        for issue in issues:
+            specifics = ", ".join(value for value in (issue.product, issue.detail) if value)
+            issue_summaries.append(f"{issue.code}[{specifics}]" if specifics else issue.code)
+        code = issues[0].code if len(issues) == 1 else "multiple_intent_coverage_issues"
+        detail = "; ".join(issue_summaries)
+        return _("{message} Validation issue: {code} ({detail}).").format(
+            message=base_message,
+            code=code,
+            detail=detail,
+        )
 
     def _validate_context_constraint_coverage(
         self,

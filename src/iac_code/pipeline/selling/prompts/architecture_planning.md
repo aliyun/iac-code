@@ -26,4 +26,5 @@
 - 你可以按需自主使用 `read_memory` 补充规划上下文：在生成方案前，如用户意图涉及已有资源、默认地域、已有 VPC/Zone、网段约束、成本偏好、高可用偏好、架构偏好、命名规范或历史项目约束，先调用 `read_memory({})` 查看索引，再读取相关 name。
 - 记忆只用于补充方案设计背景；若记忆与当前用户意图冲突，以当前用户意图为准。
 - 直接根据已知意图设计架构方案。
+- `intent.resource_intents` 中 `action` 为 `create`/`use_existing`/`reference` 的资源是候选集的覆盖约束：每个候选要么包含该资源，要么在 `excluded_resource_intents` 中给出非空 `reason` 说明排除原因。不要静默丢弃已解析出的资源意图（如 OSS）。
 - 如果意图信息不足以设计架构，可在 rollback_request 中请求回退到 intent_parsing。

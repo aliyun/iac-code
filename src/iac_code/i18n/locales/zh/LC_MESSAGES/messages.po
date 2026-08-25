@@ -3840,6 +3840,12 @@ msgstr "每个用户明确提出的硬约束都必须由一条状态为满足的
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"Every resource parsed into the intent must be covered by a candidate, or "
+"explicitly excluded with a reason in that candidate."
+msgstr "意图中解析出的每个资源都必须被某个候选方案覆盖，或在该候选方案中给出原因并显式排除。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr "调用此工具提交结论以完成当前步骤。如需回滚到较早步骤，请设置 rollback_request。"

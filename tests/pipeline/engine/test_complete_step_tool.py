@@ -381,6 +381,88 @@ class TestCompletionGuards:
         assert "constraint_parameter_mismatch[db-storage-min, DBInstanceStorage]" in error
         assert "missing_constraint_check[db-engine-version]" in error
 
+    def test_requires_candidates_to_cover_parsed_intent_resources(self):
+        guard = {
+            "always": True,
+            "require_context_intent_coverage": {
+                "source_fields": ["intent.resource_intents"],
+                "candidates_field": "candidates",
+            },
+            "message_key": "intent_resource_coverage_required",
+        }
+        tool = CompleteStepTool(
+            StepConfig(step_id="architecture_planning", conclusion_field="architecture", forward=None),
+            completion_guards=[guard],
+            completion_guard_state={
+                "context_snapshot": {
+                    "intent": {
+                        "resource_intents": [
+                            {"product": "OSS", "action": "create", "source": "user"},
+                            {"product": "CDN", "action": "create", "source": "user"},
+                        ]
+                    }
+                }
+            },
+        )
+
+        dropped_oss = {
+            "candidates": [
+                {"name": "ecs-web", "products": ["ECS", "VPC"]},
+                {"name": "sae-web", "products": ["SAE"]},
+            ]
+        }
+        error = tool.validate_completion_input({"conclusion": dropped_oss})
+        assert error is not None
+        assert "multiple_intent_coverage_issues" in error
+        assert "intent_resource_not_covered[OSS, candidates.0]" in error
+        assert "intent_resource_not_covered[CDN, candidates.1]" in error
+
+        covered = {"candidates": [{"name": "oss-cdn-static", "products": ["OSS", "CDN"]}]}
+        assert tool.validate_completion_input({"conclusion": covered}) is None
+
+        explicitly_excluded = {
+            "candidates": [
+                {
+                    "name": "ecs-web",
+                    "products": ["ECS", "CDN"],
+                    "excluded_resource_intents": [
+                        {"product": "OSS", "reason": "本方案由 ECS 承载动态渲染，静态资源不单独使用 OSS"}
+                    ],
+                }
+            ]
+        }
+        assert tool.validate_completion_input({"conclusion": explicitly_excluded}) is None
+
+        excluded_without_reason = {
+            "candidates": [
+                {
+                    "name": "ecs-web",
+                    "products": ["ECS", "CDN"],
+                    "excluded_resource_intents": [{"product": "OSS", "reason": ""}],
+                }
+            ]
+        }
+        error = tool.validate_completion_input({"conclusion": excluded_without_reason})
+        assert error is not None
+        assert "intent_resource_exclusion_reason_missing[OSS, candidates.0]" in error
+
+    def test_intent_coverage_guard_passes_when_intent_has_no_resource_intents(self):
+        tool = CompleteStepTool(
+            StepConfig(step_id="architecture_planning", conclusion_field="architecture", forward=None),
+            completion_guards=[
+                {
+                    "always": True,
+                    "require_context_intent_coverage": {"source_fields": ["intent.resource_intents"]},
+                    "message_key": "intent_resource_coverage_required",
+                }
+            ],
+            completion_guard_state={"context_snapshot": {"intent": {"core_requirements": ["ECS"]}}},
+        )
+
+        conclusion = {"candidates": [{"name": "ecs-web", "products": ["ECS"]}]}
+
+        assert tool.validate_completion_input({"conclusion": conclusion}) is None
+
     @pytest.mark.asyncio
     async def test_constraint_guard_returns_repairable_error_before_failing_step(self):
         constraint = {

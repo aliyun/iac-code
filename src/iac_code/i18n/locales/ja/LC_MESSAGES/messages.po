@@ -3876,6 +3876,13 @@ msgstr "ユーザーが明示した各ハード制約は、パラメーターと
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"Every resource parsed into the intent must be covered by a candidate, or "
+"explicitly excluded with a reason in that candidate."
+msgstr ""
+"インテントで解析された各リソースは、いずれかの候補で網羅するか、その候補で理由を示して明示的に除外する必要があります。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""

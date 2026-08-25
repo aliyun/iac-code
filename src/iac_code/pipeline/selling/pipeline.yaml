@@ -453,6 +453,13 @@ steps:
     skill: iac-aliyun-architecture
     prompt: prompts/architecture_planning.md
     context_fields: [intent]
+    max_conclusion_retries: 3
+    completion_guards:
+      - always: true
+        require_context_intent_coverage:
+          source_fields: [intent.resource_intents]
+          candidates_field: candidates
+        message_key: intent_resource_coverage_required
     tools:
       include: [read_memory, read_file, list_files, glob, grep, web_fetch, aliyun_doc_search]
       exclude: []
