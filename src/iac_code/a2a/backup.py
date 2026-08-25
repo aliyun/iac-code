@@ -12,6 +12,8 @@ from iac_code.services.session_backup_state import BackupPublicationProof
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_SHARED_COMMIT_TIMEOUT_SECONDS = 30.0
+
 
 async def run_sync_fenced(function: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
     """Delay coroutine cancellation until the synchronous mutation has actually stopped."""
@@ -41,6 +43,7 @@ async def backup_session_async(
     critical: bool,
     metrics: Any | None = None,
     publication_proofs: dict[str, BackupPublicationProof] | None = None,
+    shared_commit_timeout: float = _DEFAULT_SHARED_COMMIT_TIMEOUT_SECONDS,
 ) -> Any | None:
     failed_recorded = False
     try:
@@ -64,7 +67,19 @@ async def backup_session_async(
                 retry_count,
                 message,
             )
-        elif getattr(result, "enabled", False):
+        elif (
+            getattr(result, "enabled", False)
+            and critical
+            and reason in {BackupReason.TERMINAL, BackupReason.HANDOFF_READY}
+        ):
+            wait_for_shared_commit = getattr(backup_service, "wait_for_shared_commit", None)
+            if callable(wait_for_shared_commit):
+                result = await run_sync_fenced(
+                    wait_for_shared_commit,
+                    result,
+                    timeout=shared_commit_timeout,
+                )
+        if getattr(result, "enabled", False) and getattr(result, "succeeded", True):
             _record_backup_succeeded(metrics, reason=reason, critical=critical, retry_count=retry_count)
         return result
     except Exception as exc:

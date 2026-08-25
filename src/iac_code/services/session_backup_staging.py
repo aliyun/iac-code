@@ -69,6 +69,83 @@ class StagedSessionBackupService(SessionBackupService):
     def staging_root(self) -> Path:
         return self._staging_root
 
+    def wait_for_shared_commit(
+        self,
+        result: BackupResult,
+        *,
+        timeout: float | None = None,
+        poll_interval: float = 0.05,
+    ) -> BackupResult:
+        """Wait until the staged snapshot is published to the existing shared layout."""
+        if result.shared_committed:
+            return result
+        if (
+            not result.succeeded
+            or not result.staged_committed
+            or result.destination is None
+            or result.generation is None
+            or result.commit_id is None
+        ):
+            raise SessionBackupBlocked(
+                "Staged session backup is missing publication identity.",
+                retry_count=result.retry_count,
+                result=result,
+            )
+
+        snapshot = Path(result.destination)
+        try:
+            project, snapshot_name = snapshot.relative_to(
+                self._staging_root / "projects"
+            ).parts
+        except (ValueError, TypeError):
+            raise SessionBackupBlocked(
+                "Staged session backup has an invalid publication path.",
+                retry_count=result.retry_count,
+                result=result,
+            ) from None
+        parsed = parse_staged_snapshot_name(snapshot_name)
+        if parsed is None or parsed[1] != result.generation:
+            raise SessionBackupBlocked(
+                "Staged session backup has an invalid publication identity.",
+                retry_count=result.retry_count,
+                result=result,
+            )
+        session_id = parsed[0]
+        shared = self._backup_root_required() / "projects" / project / session_id
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while snapshot.exists():
+            if deadline is not None and time.monotonic() >= deadline:
+                raise SessionBackupBlocked(
+                    "Timed out waiting for staged session backup publication.",
+                    retry_count=result.retry_count,
+                    result=result,
+                )
+            time.sleep(poll_interval)
+
+        try:
+            shared_state = self._read_state(
+                shared,
+                session_id=session_id,
+                shared=True,
+            )
+        except SessionBackupError:
+            raise SessionBackupBlocked(
+                "Shared session backup could not be verified.",
+                retry_count=result.retry_count,
+                result=result,
+            ) from None
+        if (
+            shared_state is None
+            or shared_state.generation != result.generation
+            or shared_state.commit_id != result.commit_id
+        ):
+            raise SessionBackupBlocked(
+                "Shared session backup does not match the staged publication.",
+                retry_count=result.retry_count,
+                result=result,
+            )
+        return replace(result, destination=shared, shared_committed=True)
+
     @_log_backup_session_elapsed
     def backup_session(
         self,

@@ -682,6 +682,33 @@ async def test_cancel_active_task_does_not_need_context_lock() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cancel_task_and_wait_reports_unfinished_task_after_timeout() -> None:
+    store = A2ATaskStore(
+        metrics=NoOpA2AMetrics(),
+        idle_timeout_seconds=60,
+        cleanup_interval_seconds=300,
+    )
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    release = asyncio.Event()
+
+    async def ignore_cancel_until_released() -> None:
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            await release.wait()
+
+    active = asyncio.create_task(ignore_cancel_until_released())
+    task.active_task = active
+    await asyncio.sleep(0)
+
+    assert await store.cancel_task_and_wait("task-1", timeout=0.01) is False
+    assert active.done() is False
+
+    release.set()
+    await active
+
+
+@pytest.mark.asyncio
 async def test_task_status_access_waits_for_mutation_lock() -> None:
     store = A2ATaskStore(metrics=NoOpA2AMetrics(), idle_timeout_seconds=60, cleanup_interval_seconds=300)
     task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")

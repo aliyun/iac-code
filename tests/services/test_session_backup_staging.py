@@ -311,6 +311,80 @@ def test_staging_worker_publishes_versions_in_order_and_empties_staging_root(
     assert list(staging_root.iterdir()) == []
 
 
+def test_terminal_publication_waits_for_oss_and_restores_in_another_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service, session_dir, staging_root, backup_root = _create_staged_service(
+        monkeypatch,
+        tmp_path,
+    )
+    expected_files = {
+        "session.jsonl": '{"role":"user","content":"restore-me"}\n',
+        "a2a/pipeline/a2a-snapshot.json": '{"status":"canceled"}\n',
+    }
+    for relative, content in expected_files.items():
+        path = session_dir / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    staged = service.backup_session(
+        "/repo",
+        "s1",
+        reason=BackupReason.TERMINAL,
+        critical=True,
+    )
+    committed: list[object] = []
+    wait_started = threading.Event()
+
+    def wait_for_publication() -> None:
+        wait_started.set()
+        committed.append(
+            service.wait_for_shared_commit(
+                staged,
+                timeout=1.0,
+                poll_interval=0.005,
+            )
+        )
+
+    waiter = threading.Thread(target=wait_for_publication)
+    waiter.start()
+    assert wait_started.wait(timeout=1.0)
+    assert waiter.is_alive()
+
+    assert SessionBackupStagingWorker(staging_root, backup_root).run_once() == 1
+    waiter.join(timeout=1.0)
+
+    assert waiter.is_alive() is False
+    published = committed[0]
+    assert published.shared_committed is True
+    assert published.generation == staged.generation
+    assert published.commit_id == staged.commit_id
+
+    sandbox_b_storage = SessionStorage(projects_dir=tmp_path / "sandbox-b-config" / "projects")
+    sandbox_b_service = StagedSessionBackupService(
+        tmp_path / "sandbox-b-staging",
+        sandbox_b_storage,
+        retry_delays=(),
+    )
+    restored = sandbox_b_service.restore_session("/repo", "s1")
+    restored_dir = sandbox_b_storage.session_dir("/repo", "s1")
+
+    assert restored.restored is True
+    for relative, content in expected_files.items():
+        assert (restored_dir / relative).read_text(encoding="utf-8") == content
+
+    shared_dir = backup_root / "projects" / session_dir.parent.name / "s1"
+    assert Path(published.destination) == shared_dir
+    assert not (shared_dir / "generations").exists()
+    assert sorted(path.name for path in shared_dir.iterdir()) == [
+        ".backup-state.json",
+        "a2a",
+        "metadata.json",
+        "session.jsonl",
+    ]
+
+
 def test_staging_worker_does_not_skip_failed_version_for_same_session(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

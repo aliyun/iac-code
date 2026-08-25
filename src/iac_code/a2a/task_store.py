@@ -851,6 +851,7 @@ class A2ATaskStore(TaskStore):
                 raise
         except TimeoutError:
             logger.warning("Timed out waiting for canceled A2A task %s to finish", task_id)
+            return False
         return True
 
     async def is_task_active(self, task_id: str) -> bool:
