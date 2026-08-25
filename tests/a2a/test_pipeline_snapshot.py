@@ -1338,7 +1338,9 @@ def test_reduce_candidate_restart_removes_old_run_from_active_when_next_attempt_
 
     candidates = snapshot["steps"][0]["candidates"]
     assert [candidate["runId"] for candidate in candidates] == ["candidate-eval-0-1", "candidate-eval-0-2"]
-    assert candidates[0]["status"] == "restarting"
+    # Once attempt 2 starts, attempt 1 is superseded instead of dangling on ``restarting``.
+    assert candidates[0]["status"] == "superseded"
+    assert candidates[0].get("conclusion") is not None
     assert candidates[1]["status"] == "working"
     assert snapshot["control"]["activeCandidateRunIds"] == ["candidate-eval-0-2"]
 
@@ -1480,3 +1482,132 @@ def test_store_returns_none_for_invalid_utf8_snapshot(tmp_path) -> None:
 def test_snapshot_schema_version_is_exported() -> None:
     assert SNAPSHOT_SCHEMA_VERSION == "1.1"
     assert "SNAPSHOT_SCHEMA_VERSION" in pipeline_snapshot.__all__
+
+
+def test_reduce_pipeline_canceled_finalizes_dangling_nodes() -> None:
+    """Cancel evidence (session afb47b236ee54db5a22d295609b69de6): an in-flight step
+    used to keep ``working``/``conclusion: null`` forever after the run was canceled."""
+    step = _base("evt-step", 1, "step_started", scope="step")
+    step["step"] = {"runId": "step-architecture_planning-1", "id": "architecture_planning", "attempt": 1}
+    candidate_started = _base("evt-cand", 2, "candidate_started", scope="candidate")
+    candidate_started["step"] = step["step"]
+    candidate_started["candidate"] = {"runId": "candidate-plan-0-1", "id": "plan", "index": 0, "attempt": 1}
+    candidate_step = _base("evt-cand-step", 3, "candidate_step_started", scope="candidate_step")
+    candidate_step["step"] = step["step"]
+    candidate_step["candidate"] = candidate_started["candidate"]
+    candidate_step["candidateStep"] = {"runId": "candidate-plan-0-1-template-1", "id": "template", "attempt": 1}
+    canceled = _base("evt-cancel", 4, "pipeline_canceled", status="canceled")
+
+    snapshot = reduce_pipeline_events([step, candidate_started, candidate_step, canceled])
+
+    assert snapshot["status"] == "canceled"
+    tree_step = snapshot["steps"][0]
+    assert tree_step["status"] == "canceled"
+    assert tree_step.get("conclusion") is not None
+    assert tree_step["conclusion"]["terminationReason"] == "pipeline_canceled"
+    tree_candidate = tree_step["candidates"][0]
+    assert tree_candidate["status"] == "canceled"
+    assert tree_candidate.get("conclusion") is not None
+    assert tree_candidate["steps"][0]["status"] == "canceled"
+    assert tree_candidate["steps"][0].get("conclusion") is not None
+    assert snapshot["control"]["activeCandidateRunIds"] == []
+
+
+def test_reduce_pipeline_failed_finalizes_dangling_nodes() -> None:
+    step = _base("evt-step", 1, "step_started", scope="step")
+    step["step"] = {"runId": "step-a-1", "id": "a", "attempt": 1}
+    failed = _base("evt-failed", 2, "pipeline_failed", status="failed")
+
+    snapshot = reduce_pipeline_events([step, failed])
+
+    assert snapshot["status"] == "failed"
+    assert snapshot["steps"][0]["status"] == "failed"
+    assert snapshot["steps"][0]["conclusion"]["status"] == "failed"
+
+
+def test_reduce_pipeline_completed_does_not_fabricate_step_success() -> None:
+    step = _base("evt-step", 1, "step_started", scope="step")
+    step["step"] = {"runId": "step-a-1", "id": "a", "attempt": 1}
+    completed = _base("evt-done", 2, "pipeline_completed", status="completed")
+
+    snapshot = reduce_pipeline_events([step, completed])
+
+    assert snapshot["status"] == "completed"
+    assert snapshot["steps"][0]["status"] == "working"
+    assert snapshot["steps"][0].get("conclusion") is None
+
+
+def test_reduce_rollback_completed_supersedes_previous_step_attempt() -> None:
+    """Rollback evidence (session e0c70d3197184b49826469b509a6fd21): the interrupted
+    attempt stayed ``working`` next to the replayed attempt of the same step."""
+    first = _base("evt-step-1", 1, "step_started", scope="step")
+    first["step"] = {"runId": "step-a-1", "id": "a", "attempt": 1}
+    candidate_started = _base("evt-cand", 2, "candidate_started", scope="candidate")
+    candidate_started["step"] = first["step"]
+    candidate_started["candidate"] = {"runId": "candidate-a-0-1", "id": "a-cand", "index": 0, "attempt": 1}
+    rollback = _base("evt-rollback", 3, "rollback_completed")
+    rollback["step"] = {"runId": "step-a-2", "id": "a", "attempt": 2}
+    second = _base("evt-step-2", 4, "step_started", scope="step")
+    second["step"] = rollback["step"]
+
+    snapshot = reduce_pipeline_events([first, candidate_started, rollback, second])
+
+    steps = snapshot["steps"]
+    assert [step["runId"] for step in steps] == ["step-a-1", "step-a-2"]
+    assert steps[0]["status"] == "superseded"
+    assert steps[0]["conclusion"]["terminationReason"] == "rollback_completed"
+    assert steps[0]["candidates"][0]["status"] == "superseded"
+    assert steps[1]["status"] == "working"
+    assert steps[1].get("conclusion") is None
+
+
+def test_reduce_candidate_restart_finalizes_candidate_sub_steps() -> None:
+    """Candidate restart evidence (session 7eaff0d9bcff4de7a1ba510ed030f017): the
+    superseded candidate kept ``working``/``pending`` sub-steps."""
+    step = _base("evt-step", 1, "step_started", scope="step")
+    step["step"] = {"runId": "step-evaluate_candidates-1", "id": "evaluate_candidates", "attempt": 1}
+    candidate_started = _base("evt-cand", 2, "candidate_started", scope="candidate")
+    candidate_started["step"] = step["step"]
+    candidate_started["candidate"] = {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1}
+    candidate_step = _base("evt-cand-step", 3, "candidate_step_started", scope="candidate_step")
+    candidate_step["step"] = step["step"]
+    candidate_step["candidate"] = candidate_started["candidate"]
+    candidate_step["candidateStep"] = {"runId": "candidate-eval-0-1-template-1", "id": "template", "attempt": 1}
+    restart = _base("evt-restart", 4, "candidate_restart_requested", scope="candidate")
+    restart["step"] = step["step"]
+    restart["candidate"] = candidate_started["candidate"]
+
+    snapshot = reduce_pipeline_events([step, candidate_started, candidate_step, restart])
+
+    candidate = snapshot["steps"][0]["candidates"][0]
+    assert candidate["status"] == "restarting"
+    sub_step = candidate["steps"][0]
+    assert sub_step["status"] == "superseded"
+    assert sub_step["conclusion"]["terminationReason"] == "candidate_restart_requested"
+    assert snapshot["control"]["activeCandidateRunIds"] == []
+
+
+def test_finalize_keeps_existing_terminal_status_and_conclusion() -> None:
+    step = _base("evt-step", 1, "step_started", scope="step")
+    step["step"] = {"runId": "step-a-1", "id": "a", "attempt": 1}
+    step_failed = _base("evt-step-failed", 2, "step_failed", scope="step", status="failed")
+    step_failed["step"] = step["step"]
+    step_failed["data"] = {"error": "boom"}
+    canceled = _base("evt-cancel", 3, "pipeline_canceled", status="canceled")
+
+    snapshot = reduce_pipeline_events([step, step_failed, canceled])
+
+    assert snapshot["status"] == "canceled"
+    assert snapshot["steps"][0]["status"] == "failed"
+
+
+def test_finalize_non_terminal_nodes_is_idempotent_on_replay() -> None:
+    step = _base("evt-step", 1, "step_started", scope="step")
+    step["step"] = {"runId": "step-a-1", "id": "a", "attempt": 1}
+    canceled = _base("evt-cancel", 2, "pipeline_canceled", status="canceled")
+
+    once = reduce_pipeline_events([step, canceled])
+    twice = reduce_pipeline_events([step, canceled], existing_snapshot=once)
+
+    assert twice["steps"] == once["steps"]
+    assert twice["status"] == "canceled"

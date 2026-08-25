@@ -36,6 +36,18 @@ _CLEANUP_STATUS_BY_EVENT_TYPE = {
     PIPELINE_EVENT_CLEANUP_FAILED: "failed",
 }
 _KNOWN_CLEANUP_STATUSES = {"pending", "started", "in_progress", "completed", "failed", "skipped"}
+# Terminal statuses for steps/candidates/candidate steps inside the snapshot tree.
+# Anything else (``working``, ``pending``, ``waiting_input``, ``restarting``, missing)
+# is a dangling non-terminal node that must be finalized when the run terminates or
+# when the node gets superseded by a rollback / candidate restart.
+_TERMINAL_NODE_STATUSES = {"completed", "failed", "canceled", "superseded"}
+_SUPERSEDED_NODE_STATUS = "superseded"
+_FINALIZED_TIME_KEY_BY_STATUS = {
+    "canceled": "canceledAt",
+    "completed": "completedAt",
+    "failed": "failedAt",
+    "superseded": "supersededAt",
+}
 _PENDING_BACKUP_VISIBILITY = "pending_backup"
 _COMMITTED_BACKUP_VISIBILITY = "committed"
 _BACKUP_COMMITTED_EVENT_TYPE = "backup_committed"
@@ -501,6 +513,7 @@ class _PipelineSnapshotReducer:
             self._apply_cleanup_event(event)
         elif event_type == "rollback_completed":
             self._append_rollback(event)
+            self._supersede_rolled_back_steps(event)
         elif event_type == "candidate_restart_requested":
             self._append_candidate_restart(event)
         elif event_type == "input_required":
@@ -529,6 +542,7 @@ class _PipelineSnapshotReducer:
             self._snapshot["pendingTerminal"] = None
             self._snapshot["pendingInput"] = None
             self._snapshot["control"]["activeCandidateRunIds"] = []
+            self._finalize_non_terminal_nodes(terminal_status, event)
         elif (
             event_type not in {"input_required", "input_received", *_CLEANUP_STATUS_BY_EVENT_TYPE}
             and not _is_pending_backup_publication(event)
@@ -538,6 +552,109 @@ class _PipelineSnapshotReducer:
             )
         ):
             self._apply_event_status(event)
+
+    def _finalize_non_terminal_nodes(self, status: str, event: dict[str, Any]) -> None:
+        """Converge every dangling step/candidate/candidate step when the run terminates.
+
+        Only ``canceled``/``failed`` propagate. A successful run emits ``step_completed``
+        per step, so pushing ``completed`` onto a node that never reported completion
+        would fabricate a success that did not happen.
+        """
+        if status not in {"canceled", "failed"}:
+            return
+        reason = _string_or_none(event.get("eventType")) or status
+        for step in self._snapshot["steps"]:
+            _finalize_node(step, status, event, reason=reason, finalized_by="run_termination")
+            for candidate in _dict_list(step.get("candidates")):
+                _finalize_node(candidate, status, event, reason=reason, finalized_by="run_termination")
+                for candidate_step in _dict_list(candidate.get("steps")):
+                    _finalize_node(candidate_step, status, event, reason=reason, finalized_by="run_termination")
+
+    def _supersede_rolled_back_steps(self, event: dict[str, Any]) -> None:
+        """Collapse the pre-rollback attempts of the rollback target step.
+
+        ``pipeline_events`` bumps the step ``attempt`` on rollback, so the replayed step
+        lands as a new record while the interrupted attempt would otherwise stay
+        ``working`` with a ``null`` conclusion next to it.
+        """
+        coordinate = _dict_or_none(event.get("step"))
+        if coordinate is None:
+            return
+        step_id = _string_or_none(coordinate.get("id"))
+        attempt = _int_or_none(coordinate.get("attempt"))
+        if step_id is None or attempt is None:
+            return
+        for step in self._snapshot["steps"]:
+            if _string_or_none(step.get("id")) != step_id:
+                continue
+            if (_int_or_none(step.get("attempt")) or 1) >= attempt:
+                continue
+            _finalize_node(
+                step,
+                _SUPERSEDED_NODE_STATUS,
+                event,
+                reason="rollback_completed",
+                finalized_by="rollback_collapse",
+            )
+            for candidate in _dict_list(step.get("candidates")):
+                _finalize_node(
+                    candidate,
+                    _SUPERSEDED_NODE_STATUS,
+                    event,
+                    reason="rollback_completed",
+                    finalized_by="rollback_collapse",
+                )
+                for candidate_step in _dict_list(candidate.get("steps")):
+                    _finalize_node(
+                        candidate_step,
+                        _SUPERSEDED_NODE_STATUS,
+                        event,
+                        reason="rollback_completed",
+                        finalized_by="rollback_collapse",
+                    )
+
+    def _supersede_earlier_candidate_attempts(self, candidate: dict[str, Any], event: dict[str, Any]) -> None:
+        """Terminate the previous attempts of the candidate that just (re)started."""
+        candidate_id = _string_or_none(candidate.get("id"))
+        candidate_index = _int_or_none(candidate.get("index"))
+        attempt = _int_or_none(candidate.get("attempt"))
+        if candidate_id is None or candidate_index is None or attempt is None:
+            return
+        for other in self._candidates_by_run_id.values():
+            if other is candidate:
+                continue
+            if _string_or_none(other.get("id")) != candidate_id:
+                continue
+            if _int_or_none(other.get("index")) != candidate_index:
+                continue
+            if (_int_or_none(other.get("attempt")) or 1) >= attempt:
+                continue
+            _finalize_node(
+                other,
+                _SUPERSEDED_NODE_STATUS,
+                event,
+                reason="candidate_restarted",
+                finalized_by="candidate_restart",
+            )
+            for candidate_step in _dict_list(other.get("steps")):
+                _finalize_node(
+                    candidate_step,
+                    _SUPERSEDED_NODE_STATUS,
+                    event,
+                    reason="candidate_restarted",
+                    finalized_by="candidate_restart",
+                )
+
+    def _supersede_restarted_candidate(self, candidate: dict[str, Any], event: dict[str, Any]) -> None:
+        """Terminate the sub-steps of a candidate that is being restarted."""
+        for candidate_step in _dict_list(candidate.get("steps")):
+            _finalize_node(
+                candidate_step,
+                _SUPERSEDED_NODE_STATUS,
+                event,
+                reason="candidate_restart_requested",
+                finalized_by="candidate_restart",
+            )
 
     def _merge_pipeline_identity(self, event: dict[str, Any]) -> None:
         for key in ("pipelineRunId", "taskId", "contextId", "pipelineName"):
@@ -672,6 +789,7 @@ class _PipelineSnapshotReducer:
             candidate["status"] = "working"
             _set_time(candidate, "startedAt", created_at)
             self._remove_active_candidate_attempts(candidate)
+            self._supersede_earlier_candidate_attempts(candidate, event)
             _append_unique(self._snapshot["control"]["activeCandidateRunIds"], run_id)
         elif event_type == "candidate_completed":
             candidate["status"] = "completed"
@@ -687,6 +805,7 @@ class _PipelineSnapshotReducer:
             candidate["status"] = "restarting"
             _set_time(candidate, "restartingAt", created_at)
             _remove_value(self._snapshot["control"]["activeCandidateRunIds"], run_id)
+            self._supersede_restarted_candidate(candidate, event)
 
     def _remove_active_candidate_attempts(self, candidate: dict[str, Any]) -> None:
         candidate_id = _string_or_none(candidate.get("id"))
@@ -1053,6 +1172,37 @@ class _PipelineSnapshotReducer:
         if data:
             pending["backupBlocked"] = data
         return pending
+
+
+def _is_terminal_node(node: dict[str, Any]) -> bool:
+    return _string_or_none(node.get("status")) in _TERMINAL_NODE_STATUSES
+
+
+def _finalize_node(
+    node: dict[str, Any],
+    status: str,
+    event: dict[str, Any],
+    *,
+    reason: str,
+    finalized_by: str,
+) -> None:
+    """Move a dangling snapshot node to ``status`` and give it an explicit conclusion.
+
+    Already-terminal nodes keep their own status and conclusion, and a node that carries
+    a real conclusion never has it overwritten, so the projection stays idempotent and
+    never rewrites a result the pipeline actually reported.
+    """
+    if _is_terminal_node(node):
+        return
+    node["status"] = status
+    created_at = _string_or_none(event.get("createdAt"))
+    _set_time(node, _FINALIZED_TIME_KEY_BY_STATUS.get(status, "finalizedAt"), created_at)
+    if node.get("conclusion") is None:
+        node["conclusion"] = {
+            "status": status,
+            "terminationReason": reason,
+            "finalizedBy": finalized_by,
+        }
 
 
 def _normal_handoff(event: dict[str, Any]) -> dict[str, Any]:
