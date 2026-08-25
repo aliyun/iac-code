@@ -542,12 +542,10 @@ def test_bridge_automatically_runs_cleanup_only_task_and_restores_pipeline_resul
 
     assert len(captured_payloads) == 2
     assert all(
-        payload["params"]["message"]["metadata"]["iac_code"]["cleanupOnly"] is True
-        for payload in captured_payloads
+        payload["params"]["message"]["metadata"]["iac_code"]["cleanupOnly"] is True for payload in captured_payloads
     )
     assert all(
-        payload["params"]["message"]["metadata"]["iac_code"]["channel"] == "skill/host"
-        for payload in captured_payloads
+        payload["params"]["message"]["metadata"]["iac_code"]["channel"] == "skill/host" for payload in captured_payloads
     )
     assert captured_payloads[0]["params"]["message"]["contextId"] == "ctx-pipeline-1"
     assert result["state"] == "completed"
@@ -1138,9 +1136,7 @@ def test_candidate_presentation_survives_bounded_bridge_projection() -> None:
                                     "summary": "单 ECS 低成本方案。",
                                     "architectureDiagram": "flowchart LR\nU[用户] --> E[ECS]",
                                     "totalMonthlyCost": "¥88/月",
-                                    "costItems": [
-                                        {"name": "ECS", "spec": "2核4G", "monthlyCost": "¥88/月"}
-                                    ],
+                                    "costItems": [{"name": "ECS", "spec": "2核4G", "monthlyCost": "¥88/月"}],
                                 }
                             ],
                             "required": True,
