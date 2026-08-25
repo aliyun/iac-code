@@ -4317,15 +4317,6 @@ msgstr "<faltante>"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
-msgid ""
-"Rollback count cannot exceed {max_rollbacks}. Complete the current step "
-"or ask the user for help."
-msgstr ""
-"La cantidad de reversiones no puede superar {max_rollbacks}. Completa el "
-"paso actual o pide ayuda al usuario."
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
 msgid "Candidate count cannot exceed {limit}; {count} were submitted."
 msgstr "La cantidad de candidatos no puede superar {limit}; se enviaron {count}."
 
@@ -4339,6 +4330,28 @@ msgstr ""
 "La cantidad de destinos de reversión no puede superar {limit}; hay "
 "{count}. Pide ayuda al usuario o reduce los destinos antes de llamar a "
 "complete_step."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "no reason was provided"
+msgstr "no se proporcionó ningún motivo"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"Rollback count cannot exceed {max_rollbacks}. The deployment kept rolling"
+" back to {target_step} because: {reason}. Do not roll back again. Finish "
+"this step with status: failed and, in the error field, explain to the "
+"user that the deployment did not complete, give this root-cause "
+"diagnosis, and offer follow-up options: retry the deployment, change the "
+"specification (return to candidate selection), or ask for human help."
+msgstr ""
+"El número de reversiones no puede superar {max_rollbacks}. El despliegue "
+"siguió revirtiendo a {target_step} porque: {reason}. No vuelvas a revertir. "
+"Finaliza este paso con status: failed y, en el campo error, explica al "
+"usuario que el despliegue no se completó, ofrece este diagnóstico de causa "
+"raíz y las opciones de seguimiento: reintentar el despliegue, cambiar la "
+"especificación (volver a la selección de candidatos) o solicitar ayuda "
+"humana."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -13001,4 +13014,13 @@ msgstr "¿Permitir Bash?"
 #~ msgstr ""
 #~ "Aprobar llamada de herramienta: {tool}\n"
 #~ "Resumen de entrada: {summary}"
+
+#~ msgid ""
+#~ "Rollback count cannot exceed {max_rollbacks}."
+#~ " Complete the current step or ask "
+#~ "the user for help."
+#~ msgstr ""
+#~ "La cantidad de reversiones no puede "
+#~ "superar {max_rollbacks}. Completa el paso "
+#~ "actual o pide ayuda al usuario."
 

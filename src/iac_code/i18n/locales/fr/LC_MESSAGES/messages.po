@@ -4324,15 +4324,6 @@ msgstr "<manquant>"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
-msgid ""
-"Rollback count cannot exceed {max_rollbacks}. Complete the current step "
-"or ask the user for help."
-msgstr ""
-"Le nombre de retours arrière ne peut pas dépasser {max_rollbacks}. "
-"Terminez l’étape actuelle ou demandez l’aide de l’utilisateur."
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
 msgid "Candidate count cannot exceed {limit}; {count} were submitted."
 msgstr ""
 "Le nombre de candidats ne peut pas dépasser {limit} ; {count} ont été "
@@ -4348,6 +4339,29 @@ msgstr ""
 "Le nombre de cibles de retour arrière ne peut pas dépasser {limit} ; il y"
 " en a {count}. Demandez l’aide de l’utilisateur ou réduisez les cibles "
 "avant d’appeler complete_step."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "no reason was provided"
+msgstr "aucune raison n'a été fournie"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"Rollback count cannot exceed {max_rollbacks}. The deployment kept rolling"
+" back to {target_step} because: {reason}. Do not roll back again. Finish "
+"this step with status: failed and, in the error field, explain to the "
+"user that the deployment did not complete, give this root-cause "
+"diagnosis, and offer follow-up options: retry the deployment, change the "
+"specification (return to candidate selection), or ask for human help."
+msgstr ""
+"Le nombre de retours en arrière ne peut pas dépasser {max_rollbacks}. Le "
+"déploiement a continué de revenir à {target_step} pour la raison suivante : "
+"{reason}. Ne revenez plus en arrière. Terminez cette étape avec status: "
+"failed et, dans le champ error, expliquez à l'utilisateur que le "
+"déploiement ne s'est pas terminé, fournissez ce diagnostic de cause racine "
+"et proposez des options : réessayer le déploiement, changer de "
+"spécification (revenir à la sélection des candidats) ou demander une aide "
+"humaine."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -13059,4 +13073,14 @@ msgstr "Autoriser Bash ?"
 #~ msgstr ""
 #~ "Approuver l'appel d'outil : {tool}\n"
 #~ "Résumé de l'entrée : {summary}"
+
+#~ msgid ""
+#~ "Rollback count cannot exceed {max_rollbacks}."
+#~ " Complete the current step or ask "
+#~ "the user for help."
+#~ msgstr ""
+#~ "Le nombre de retours arrière ne "
+#~ "peut pas dépasser {max_rollbacks}. Terminez"
+#~ " l’étape actuelle ou demandez l’aide "
+#~ "de l’utilisateur."
 

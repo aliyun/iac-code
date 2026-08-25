@@ -4349,16 +4349,6 @@ msgstr "<fehlt>"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
-msgid ""
-"Rollback count cannot exceed {max_rollbacks}. Complete the current step "
-"or ask the user for help."
-msgstr ""
-"Die Anzahl der Zurücksetzungen darf {max_rollbacks} nicht überschreiten. "
-"Schließen Sie den aktuellen Schritt ab oder bitten Sie den Benutzer um "
-"Hilfe."
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
 msgid "Candidate count cannot exceed {limit}; {count} were submitted."
 msgstr ""
 "Die Anzahl der Kandidaten darf {limit} nicht überschreiten; {count} "
@@ -4374,6 +4364,29 @@ msgstr ""
 "Die Anzahl der Rücksetzungsziele darf {limit} nicht überschreiten; es "
 "gibt {count}. Bitten Sie den Benutzer um Hilfe oder grenzen Sie die Ziele"
 " ein, bevor Sie complete_step aufrufen."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "no reason was provided"
+msgstr "es wurde kein Grund angegeben"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"Rollback count cannot exceed {max_rollbacks}. The deployment kept rolling"
+" back to {target_step} because: {reason}. Do not roll back again. Finish "
+"this step with status: failed and, in the error field, explain to the "
+"user that the deployment did not complete, give this root-cause "
+"diagnosis, and offer follow-up options: retry the deployment, change the "
+"specification (return to candidate selection), or ask for human help."
+msgstr ""
+"Die Anzahl der Rollbacks darf {max_rollbacks} nicht überschreiten. Die "
+"Bereitstellung wurde wiederholt zu {target_step} zurückgesetzt, weil: "
+"{reason}. Führen Sie keinen weiteren Rollback durch. Schließen Sie diesen "
+"Schritt mit status: failed ab und erklären Sie dem Benutzer im Feld error, "
+"dass die Bereitstellung nicht abgeschlossen wurde, geben Sie diese "
+"Ursachendiagnose an und bieten Sie Folgeoptionen an: Bereitstellung "
+"erneut versuchen, Spezifikation ändern (zur Kandidatenauswahl "
+"zurückkehren) oder menschliche Hilfe anfordern."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -13087,4 +13100,14 @@ msgstr "Bash zulassen?"
 #~ msgstr ""
 #~ "Tool-Aufruf genehmigen: {tool}\n"
 #~ "Eingabezusammenfassung: {summary}"
+
+#~ msgid ""
+#~ "Rollback count cannot exceed {max_rollbacks}."
+#~ " Complete the current step or ask "
+#~ "the user for help."
+#~ msgstr ""
+#~ "Die Anzahl der Zurücksetzungen darf "
+#~ "{max_rollbacks} nicht überschreiten. Schließen "
+#~ "Sie den aktuellen Schritt ab oder "
+#~ "bitten Sie den Benutzer um Hilfe."
 

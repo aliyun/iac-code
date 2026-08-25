@@ -947,10 +947,7 @@ class CompleteStepTool(Tool):
         rollback = tool_input.get("rollback_request")
         rollback_tuple = (rollback["target_step"], rollback["reason"]) if rollback else None
         if rollback_tuple and self._step_config.rollback_count >= self._step_config.max_rollbacks:
-            max_rollbacks = self._step_config.max_rollbacks
-            return _(
-                "Rollback count cannot exceed {max_rollbacks}. Complete the current step or ask the user for help."
-            ).format(max_rollbacks=max_rollbacks)
+            return self._rollback_budget_exhausted_message(rollback_tuple)
 
         validation_error = self._validate_conclusion(conclusion)
         if validation_error is None:
@@ -1028,6 +1025,31 @@ class CompleteStepTool(Tool):
             "Rollback target count cannot exceed {limit}; there are {count}. "
             "Ask the user for help or narrow the rollback targets before calling complete_step."
         ).format(limit=MAX_ROLLBACK_TARGETS, count=target_count)
+
+    def _rollback_budget_exhausted_message(self, rollback_tuple: tuple[str, str]) -> str:
+        """Explain a rollback-limit failure with root cause and follow-up options.
+
+        The first sentence keeps the historical "Rollback count cannot exceed
+        {max_rollbacks}" wording, then a root-cause diagnosis (the last rollback
+        target and reason) and the user-facing follow-up options (retry, change
+        spec / return to candidate selection, or ask for human help) are appended
+        so the deployment failure is explained instead of only surfacing the
+        terse limit error.
+        """
+        target_step, reason = rollback_tuple
+        target_label = display_step_name(target_step)
+        clean_reason = sanitize_strict_text(str(reason)).strip() or _("no reason was provided")
+        return _(
+            "Rollback count cannot exceed {max_rollbacks}. The deployment kept rolling back to {target_step} "
+            "because: {reason}. Do not roll back again. Finish this step with status: failed and, in the error "
+            "field, explain to the user that the deployment did not complete, give this root-cause diagnosis, and "
+            "offer follow-up options: retry the deployment, change the specification (return to candidate "
+            "selection), or ask for human help."
+        ).format(
+            max_rollbacks=self._step_config.max_rollbacks,
+            target_step=target_label,
+            reason=clean_reason,
+        )
 
     @staticmethod
     def _matches(pattern: str, value: str) -> bool:
@@ -1134,11 +1156,8 @@ class CompleteStepTool(Tool):
         )
 
         if rollback_tuple and self._step_config.rollback_count >= self._step_config.max_rollbacks:
-            max_rollbacks = self._step_config.max_rollbacks
             return ToolResult(
-                content=_(
-                    "Rollback count cannot exceed {max_rollbacks}. Complete the current step or ask the user for help."
-                ).format(max_rollbacks=max_rollbacks),
+                content=self._rollback_budget_exhausted_message(rollback_tuple),
                 is_error=True,
             )
 

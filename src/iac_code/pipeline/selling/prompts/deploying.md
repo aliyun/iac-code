@@ -48,6 +48,7 @@
 - 模板校验失败 → 就地修复模板后重试（最多 5 轮）
 - 部署失败或等待超时 → 按技能的参数补全与 `ros_deploy` 恢复策略处理
 - 架构层面必须变更（如产品组合不可行）→ rollback_request 到 `architecture_planning`
+- 回滚已触及上限（`complete_step` 返回 "Rollback count cannot exceed ..."）→ 不要再次 rollback_request。以 `status: failed` 收尾，并在 `error` 中向用户清晰说明：部署未完成、失败根因（反复回滚的目标步骤与原因），以及后续选项——重试部署、换规格（回到候选选择）或请求人工协助。
 
 ## 注意事项
 - 不要读取项目文件或记忆，所需的上下文已在上方提供。

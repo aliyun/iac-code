@@ -250,6 +250,38 @@ class TestCompleteStepToolExecute:
         assert result.is_error
         assert result.metadata is None
         assert "5" in result.content
+        # Root-cause diagnosis: the repeated rollback target and reason are surfaced.
+        assert "redo" in result.content
+        # Follow-up options are explained instead of only the terse limit error.
+        assert "failed" in result.content
+        assert "retry" in result.content
+        assert "candidate selection" in result.content
+
+    def test_validate_completion_input_reports_root_cause_when_budget_exhausted(self):
+        config = StepConfig(
+            step_id="cost_estimating",
+            conclusion_field="cost",
+            forward=None,
+            rollback_targets=["template_generating"],
+        )
+        config.rollback_count = 3
+        config.max_rollbacks = 3
+        tool = CompleteStepTool(config)
+
+        error = tool.validate_completion_input(
+            {
+                "conclusion": {"total": 200},
+                "rollback_request": {"target_step": "template_generating", "reason": "redo"},
+            }
+        )
+
+        assert error is not None
+        assert "3" in error
+        assert "redo" in error
+        assert "failed" in error
+        assert "retry" in error
+        assert "candidate selection" in error
+
 
     @pytest.mark.asyncio
     async def test_rejects_when_rollback_target_count_exceeds_limit(self):

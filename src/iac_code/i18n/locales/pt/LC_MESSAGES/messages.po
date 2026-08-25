@@ -4293,15 +4293,6 @@ msgstr "<ausente>"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
-msgid ""
-"Rollback count cannot exceed {max_rollbacks}. Complete the current step "
-"or ask the user for help."
-msgstr ""
-"A quantidade de reversões não pode exceder {max_rollbacks}. Conclua a "
-"etapa atual ou peça ajuda ao usuário."
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
 msgid "Candidate count cannot exceed {limit}; {count} were submitted."
 msgstr ""
 "A quantidade de candidatos não pode exceder {limit}; {count} foram "
@@ -4317,6 +4308,28 @@ msgstr ""
 "A quantidade de destinos de reversão não pode exceder {limit}; há "
 "{count}. Peça ajuda ao usuário ou reduza os destinos antes de chamar "
 "complete_step."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "no reason was provided"
+msgstr "nenhum motivo foi fornecido"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"Rollback count cannot exceed {max_rollbacks}. The deployment kept rolling"
+" back to {target_step} because: {reason}. Do not roll back again. Finish "
+"this step with status: failed and, in the error field, explain to the "
+"user that the deployment did not complete, give this root-cause "
+"diagnosis, and offer follow-up options: retry the deployment, change the "
+"specification (return to candidate selection), or ask for human help."
+msgstr ""
+"O número de reversões não pode exceder {max_rollbacks}. A implantação "
+"continuou revertendo para {target_step} porque: {reason}. Não reverta "
+"novamente. Encerre esta etapa com status: failed e, no campo error, "
+"explique ao usuário que a implantação não foi concluída, forneça este "
+"diagnóstico de causa raiz e ofereça opções de continuidade: repetir a "
+"implantação, alterar a especificação (voltar à seleção de candidatos) ou "
+"solicitar ajuda humana."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -12893,4 +12906,13 @@ msgstr "Permitir Bash?"
 #~ msgstr ""
 #~ "Aprovar chamada de ferramenta: {tool}\n"
 #~ "Resumo da entrada: {summary}"
+
+#~ msgid ""
+#~ "Rollback count cannot exceed {max_rollbacks}."
+#~ " Complete the current step or ask "
+#~ "the user for help."
+#~ msgstr ""
+#~ "A quantidade de reversões não pode "
+#~ "exceder {max_rollbacks}. Conclua a etapa "
+#~ "atual ou peça ajuda ao usuário."
 

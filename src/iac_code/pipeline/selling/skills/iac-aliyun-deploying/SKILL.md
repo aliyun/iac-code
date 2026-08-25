@@ -149,6 +149,14 @@ conclusion_schema:
 - 工具会先确认替代创建参数和模板可用，再删除旧失败 Stack 后创建新的 Stack
 - 成功后最终结果使用新 Stack 的 `stack_id`，不要把旧 `stack_id` 当成部署成功结果
 
+### 回滚触及上限
+当反复回滚导致 `complete_step` 返回 "Rollback count cannot exceed ..." 时，回滚预算已耗尽，不要再次发起 `rollback_request`。此时以 `status: failed` 收尾，并在 `error` 中向用户清晰说明：
+- 部署未完成；
+- 失败根因诊断：反复回滚的目标步骤与原因；
+- 后续选项：重试部署、换规格（回到候选选择）或请求人工协助。
+
+不得仅把 `complete_step` 的报错原文抛给用户，必须给出可读的根因说明与后续选项。
+
 ## 资源和文档搜索
 
 - 不确定的 ROS 资源属性或 Schema → aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<类型>"})

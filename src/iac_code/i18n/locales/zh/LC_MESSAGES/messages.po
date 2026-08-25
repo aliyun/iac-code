@@ -4058,13 +4058,6 @@ msgstr "<缺失>"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
-msgid ""
-"Rollback count cannot exceed {max_rollbacks}. Complete the current step "
-"or ask the user for help."
-msgstr "回滚次数不能超过 {max_rollbacks} 次。请完成当前步骤或请求用户介入。"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
 msgid "Candidate count cannot exceed {limit}; {count} were submitted."
 msgstr "候选方案数量不能超过 {limit} 个，当前提交了 {count} 个。"
 
@@ -4075,6 +4068,25 @@ msgid ""
 "user for help or narrow the rollback targets before calling "
 "complete_step."
 msgstr "可回滚目标数量不能超过 {limit} 个，当前有 {count} 个。请请求用户介入或收窄回滚目标后再调用 complete_step。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "no reason was provided"
+msgstr "未提供原因"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"Rollback count cannot exceed {max_rollbacks}. The deployment kept rolling"
+" back to {target_step} because: {reason}. Do not roll back again. Finish "
+"this step with status: failed and, in the error field, explain to the "
+"user that the deployment did not complete, give this root-cause "
+"diagnosis, and offer follow-up options: retry the deployment, change the "
+"specification (return to candidate selection), or ask for human help."
+msgstr ""
+"回滚次数不能超过 {max_rollbacks} 次。部署反复回滚到 {target_step}，原因："
+"{reason}。请不要再回滚。请以 status: failed 结束本步骤，并在 error 字段中向用户"
+"说明部署未完成、给出该根因诊断，并提供后续选项：重试部署、换规格（回到候选选择）"
+"或请求人工协助。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -11842,4 +11854,10 @@ msgstr "允许 Bash?"
 #~ msgstr ""
 #~ "批准工具调用：{tool}\n"
 #~ "输入摘要：{summary}"
+
+#~ msgid ""
+#~ "Rollback count cannot exceed {max_rollbacks}."
+#~ " Complete the current step or ask "
+#~ "the user for help."
+#~ msgstr "回滚次数不能超过 {max_rollbacks} 次。请完成当前步骤或请求用户介入。"
 

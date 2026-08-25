@@ -4105,13 +4105,6 @@ msgstr "<欠落>"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
-msgid ""
-"Rollback count cannot exceed {max_rollbacks}. Complete the current step "
-"or ask the user for help."
-msgstr "ロールバック回数は {max_rollbacks} を超えられません。現在のステップを完了するか、ユーザーに支援を求めてください。"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
 msgid "Candidate count cannot exceed {limit}; {count} were submitted."
 msgstr "候補数は {limit} を超えられません。{count} 件が送信されました。"
 
@@ -4124,6 +4117,26 @@ msgid ""
 msgstr ""
 "ロールバック対象数は {limit} を超えられません。現在 {count} 件あります。complete_step "
 "を呼ぶ前にユーザーに支援を求めるか、対象を絞ってください。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "no reason was provided"
+msgstr "理由は提供されていません"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"Rollback count cannot exceed {max_rollbacks}. The deployment kept rolling"
+" back to {target_step} because: {reason}. Do not roll back again. Finish "
+"this step with status: failed and, in the error field, explain to the "
+"user that the deployment did not complete, give this root-cause "
+"diagnosis, and offer follow-up options: retry the deployment, change the "
+"specification (return to candidate selection), or ask for human help."
+msgstr ""
+"ロールバック回数は {max_rollbacks} 回を超えられません。デプロイは {target_step} "
+"へ繰り返しロールバックされました。理由: {reason}。これ以上ロールバックしないでください。"
+"このステップを status: failed で終了し、error フィールドでデプロイが完了しなかったこと"
+"をユーザーに説明し、この根本原因の診断と、次の選択肢を提示してください: デプロイの再試行、"
+"仕様の変更（候補選択に戻る）、または人によるサポートの依頼。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -12073,4 +12086,10 @@ msgstr "Bash を許可しますか？"
 #~ msgstr ""
 #~ "ツール呼び出しを承認: {tool}\n"
 #~ "入力サマリー: {summary}"
+
+#~ msgid ""
+#~ "Rollback count cannot exceed {max_rollbacks}."
+#~ " Complete the current step or ask "
+#~ "the user for help."
+#~ msgstr "ロールバック回数は {max_rollbacks} を超えられません。現在のステップを完了するか、ユーザーに支援を求めてください。"
 
