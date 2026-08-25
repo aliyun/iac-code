@@ -31,7 +31,11 @@ from iac_code.a2a.pipeline_paths import (
     a2a_pipeline_dir_for_sidecar_dir,
     existing_a2a_pipeline_dir_for_session,
 )
-from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
+from iac_code.a2a.pipeline_snapshot import (
+    A2APipelineSnapshotStore,
+    is_terminated_node_conclusion,
+    reduce_pipeline_events,
+)
 from iac_code.a2a.pipeline_stream import (
     BACKUP_COMMITTED_EVENT_TYPE,
     PipelineA2AEventPublisher,
@@ -3968,7 +3972,7 @@ def _flat_pipeline_context_from_a2a_snapshot(snapshot: dict[str, Any] | None, lo
         if not field_name:
             continue
         conclusion = step.get("conclusion")
-        if conclusion is not None:
+        if conclusion is not None and not is_terminated_node_conclusion(conclusion):
             context[field_name] = conclusion
     return context
 

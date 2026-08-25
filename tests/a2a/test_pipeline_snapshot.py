@@ -1480,3 +1480,157 @@ def test_store_returns_none_for_invalid_utf8_snapshot(tmp_path) -> None:
 def test_snapshot_schema_version_is_exported() -> None:
     assert SNAPSHOT_SCHEMA_VERSION == "1.1"
     assert "SNAPSHOT_SCHEMA_VERSION" in pipeline_snapshot.__all__
+
+
+def _intent_parsing_step() -> dict:
+    return {"runId": "step-intent_parsing-1", "id": "intent_parsing", "index": 1, "total": 3, "attempt": 1}
+
+
+def test_reduce_pipeline_canceled_finalizes_working_step() -> None:
+    started = _base("evt-1", 1, "step_started", scope="step")
+    started["step"] = _intent_parsing_step()
+    canceled = _base("evt-2", 2, "pipeline_canceled", status="canceled")
+    canceled["data"] = {"source": "executor", "reason": "Task canceled."}
+
+    snapshot = reduce_pipeline_events([started, canceled])
+
+    assert snapshot["status"] == "canceled"
+    step = snapshot["steps"][0]
+    assert step["status"] == "canceled"
+    assert step["canceledAt"] == "2026-06-08T10:00:00Z"
+    assert step["conclusion"] == {
+        "pipelineTerminated": True,
+        "terminalStatus": "canceled",
+        "reason": "Task canceled.",
+    }
+
+
+def test_reduce_pipeline_canceled_finalizes_candidates_and_candidate_steps() -> None:
+    started = _base("evt-1", 1, "step_started", scope="step")
+    started["step"] = _intent_parsing_step()
+    candidate = _base("evt-2", 2, "candidate_started", scope="candidate")
+    candidate["step"] = started["step"]
+    candidate["candidate"] = {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1}
+    candidate_step = _base("evt-3", 3, "candidate_step_started", scope="candidate_step")
+    candidate_step["step"] = started["step"]
+    candidate_step["candidate"] = candidate["candidate"]
+    candidate_step["candidateStep"] = {
+        "runId": "candidate-eval-0-1-template-1",
+        "id": "template",
+        "index": 1,
+        "total": 1,
+        "attempt": 1,
+    }
+    canceled = _base("evt-4", 4, "pipeline_canceled", status="canceled")
+
+    snapshot = reduce_pipeline_events([started, candidate, candidate_step, canceled])
+
+    step = snapshot["steps"][0]
+    assert step["status"] == "canceled"
+    assert step["candidates"][0]["status"] == "canceled"
+    assert step["candidates"][0]["steps"][0]["status"] == "canceled"
+    assert step["candidates"][0]["conclusion"]["pipelineTerminated"] is True
+    assert step["candidates"][0]["steps"][0]["conclusion"]["pipelineTerminated"] is True
+    assert snapshot["control"]["activeCandidateRunIds"] == []
+
+
+def test_reduce_pipeline_canceled_omits_reason_when_event_has_none() -> None:
+    started = _base("evt-1", 1, "step_started", scope="step")
+    started["step"] = _intent_parsing_step()
+    canceled = _base("evt-2", 2, "pipeline_canceled", status="canceled")
+
+    snapshot = reduce_pipeline_events([started, canceled])
+
+    assert snapshot["steps"][0]["conclusion"] == {"pipelineTerminated": True, "terminalStatus": "canceled"}
+
+
+def test_reduce_pipeline_failed_finalizes_working_step() -> None:
+    started = _base("evt-1", 1, "step_started", scope="step")
+    started["step"] = _intent_parsing_step()
+    failed = _base("evt-2", 2, "pipeline_failed", status="failed")
+    failed["data"] = {"errorSummary": "provider unavailable"}
+
+    snapshot = reduce_pipeline_events([started, failed])
+
+    step = snapshot["steps"][0]
+    assert step["status"] == "failed"
+    assert step["failedAt"] == "2026-06-08T10:00:00Z"
+    assert step["errorSummary"] == "provider unavailable"
+    assert step["conclusion"]["terminalStatus"] == "failed"
+
+
+def test_reduce_pipeline_canceled_finalizes_waiting_input_step() -> None:
+    started = _base("evt-1", 1, "step_started", scope="step")
+    started["step"] = _intent_parsing_step()
+    waiting = _base("evt-2", 2, "input_required", scope="input", status="input_required")
+    waiting["step"] = started["step"]
+    canceled = _base("evt-3", 3, "pipeline_canceled", status="canceled")
+
+    snapshot = reduce_pipeline_events([started, waiting, canceled])
+
+    assert snapshot["steps"][0]["status"] == "canceled"
+    assert snapshot["pendingInput"] is None
+
+
+def test_reduce_pipeline_canceled_keeps_already_terminal_step_conclusion() -> None:
+    completed = _base("evt-1", 1, "step_completed", scope="step")
+    completed["step"] = _intent_parsing_step()
+    completed["data"] = {"conclusionField": "intent", "conclusion": {"intent": "deploy"}}
+    running = _base("evt-2", 2, "step_started", scope="step")
+    running["step"] = {"runId": "step-planning-2", "id": "planning", "index": 2, "total": 3, "attempt": 1}
+    canceled = _base("evt-3", 3, "pipeline_canceled", status="canceled")
+
+    snapshot = reduce_pipeline_events([completed, running, canceled])
+
+    finished, interrupted = snapshot["steps"]
+    assert finished["status"] == "completed"
+    assert finished["conclusion"] == {"intent": "deploy"}
+    assert "canceledAt" not in finished
+    assert interrupted["status"] == "canceled"
+    assert interrupted["conclusion"]["pipelineTerminated"] is True
+
+
+def test_reduce_pipeline_completed_does_not_fabricate_step_conclusions() -> None:
+    started = _base("evt-1", 1, "step_started", scope="step")
+    started["step"] = _intent_parsing_step()
+    completed = _base("evt-2", 2, "pipeline_completed", status="completed")
+
+    snapshot = reduce_pipeline_events([started, completed])
+
+    assert snapshot["status"] == "completed"
+    assert snapshot["steps"][0]["status"] == "working"
+    assert "conclusion" not in snapshot["steps"][0]
+
+
+def test_reduce_pending_backup_cancel_does_not_finalize_steps() -> None:
+    started = _base("evt-1", 1, "step_started", scope="step")
+    started["step"] = _intent_parsing_step()
+    canceled = _base("evt-2", 2, "pipeline_canceled", status="canceled")
+    canceled["visibility"] = "pending_backup"
+
+    snapshot = reduce_pipeline_events([started, canceled])
+
+    assert snapshot["status"] == "working"
+    assert snapshot["pendingTerminal"]["eventType"] == "pipeline_canceled"
+    assert snapshot["steps"][0]["status"] == "working"
+
+
+def test_reduce_pipeline_canceled_finalization_is_idempotent_across_reductions() -> None:
+    started = _base("evt-1", 1, "step_started", scope="step")
+    started["step"] = _intent_parsing_step()
+    canceled = _base("evt-2", 2, "pipeline_canceled", status="canceled")
+    canceled["data"] = {"reason": "Task canceled."}
+    late = _base("evt-3", 3, "pipeline_warning")
+
+    once = reduce_pipeline_events([started, canceled])
+    twice = reduce_pipeline_events([late], existing_snapshot=once)
+
+    assert twice["steps"][0]["status"] == "canceled"
+    assert twice["steps"][0]["conclusion"] == once["steps"][0]["conclusion"]
+
+
+def test_is_terminated_node_conclusion_only_matches_synthesized_conclusions() -> None:
+    assert pipeline_snapshot.is_terminated_node_conclusion({"pipelineTerminated": True, "terminalStatus": "canceled"})
+    assert not pipeline_snapshot.is_terminated_node_conclusion({"intent": "deploy"})
+    assert not pipeline_snapshot.is_terminated_node_conclusion(None)
+    assert "is_terminated_node_conclusion" in pipeline_snapshot.__all__

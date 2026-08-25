@@ -10759,3 +10759,28 @@ async def test_pending_ask_user_question_resume_preserves_image_input(tmp_path: 
 
     assert events
     assert received["supplemental_input"] == pipeline_input
+
+
+def test_flat_pipeline_context_from_snapshot_skips_terminated_step_conclusions() -> None:
+    from iac_code.a2a.pipeline_executor import _flat_pipeline_context_from_a2a_snapshot
+
+    loaded_pipeline = SimpleNamespace(
+        steps=[
+            SimpleNamespace(step_id="intent_parsing", conclusion_field="intent"),
+            SimpleNamespace(step_id="planning", conclusion_field="plan"),
+        ]
+    )
+    snapshot = {
+        "steps": [
+            {"id": "intent_parsing", "status": "completed", "conclusion": {"intent": "deploy"}},
+            {
+                "id": "planning",
+                "status": "canceled",
+                "conclusion": {"pipelineTerminated": True, "terminalStatus": "canceled"},
+            },
+        ]
+    }
+
+    context = _flat_pipeline_context_from_a2a_snapshot(snapshot, loaded_pipeline)
+
+    assert context == {"intent": {"intent": "deploy"}}

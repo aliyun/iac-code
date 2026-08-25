@@ -29,6 +29,13 @@ _TERMINAL_STATUS_BY_EVENT_TYPE = {
     "pipeline_failed": "failed",
     "pipeline_canceled": "canceled",
 }
+_TERMINAL_NODE_STATUSES = {"completed", "failed", "canceled"}
+# ``completed`` is intentionally excluded: marking an unfinished step as completed would
+# fabricate a successful business conclusion for work that never ran.
+_INTERRUPTED_TERMINAL_STATUSES = {"failed", "canceled"}
+# Marks a conclusion synthesized by the reducer rather than reported by a step, so
+# consumers such as the pipeline handoff context can tell it apart from real results.
+_TERMINATED_CONCLUSION_MARKER = "pipelineTerminated"
 _CLEANUP_STATUS_BY_EVENT_TYPE = {
     PIPELINE_EVENT_CLEANUP_STARTED: "started",
     PIPELINE_EVENT_CLEANUP_PROGRESS: "in_progress",
@@ -529,6 +536,7 @@ class _PipelineSnapshotReducer:
             self._snapshot["pendingTerminal"] = None
             self._snapshot["pendingInput"] = None
             self._snapshot["control"]["activeCandidateRunIds"] = []
+            self._finalize_open_nodes(terminal_status, event)
         elif (
             event_type not in {"input_required", "input_received", *_CLEANUP_STATUS_BY_EVENT_TYPE}
             and not _is_pending_backup_publication(event)
@@ -749,6 +757,35 @@ class _PipelineSnapshotReducer:
             candidate_step["status"] = "failed"
             _set_time(candidate_step, "failedAt", created_at)
             _merge_completion_data(candidate_step, event)
+
+    def _finalize_open_nodes(self, terminal_status: str, event: dict[str, Any]) -> None:
+        """Converge every still-open step/candidate/sub-step onto the run's terminal status.
+
+        A run interrupted mid-step never emits ``step_completed``/``step_failed`` for the
+        step it was executing, so without this the snapshot keeps that step at ``working``
+        with ``conclusion`` null forever while the run itself is already terminal.  Mirrors
+        ``web.pipeline_transcript._on_pipeline_canceled``, which finalizes the same nodes in
+        the transcript, so both projections agree on the outcome of one run.
+        """
+        if terminal_status not in _INTERRUPTED_TERMINAL_STATUSES:
+            return
+
+        created_at = _string_or_none(event.get("createdAt"))
+        time_key = "canceledAt" if terminal_status == "canceled" else "failedAt"
+        reason = _string_or_none(_dict_or_empty(event.get("data")).get("reason"))
+        for nodes in (
+            self._steps_by_run_id,
+            self._candidates_by_run_id,
+            self._candidate_steps_by_run_id,
+        ):
+            for node in nodes.values():
+                if _string_or_none(node.get("status")) in _TERMINAL_NODE_STATUSES:
+                    continue
+                node["status"] = terminal_status
+                _set_time(node, time_key, created_at)
+                _merge_completion_data(node, event)
+                if node.get("conclusion") is None:
+                    node["conclusion"] = _terminated_node_conclusion(terminal_status, reason)
 
     def _apply_text_delta(self, event: dict[str, Any]) -> None:
         text = _dict_or_empty(event.get("data")).get("text")
@@ -1741,6 +1778,18 @@ def _set_time(target: dict[str, Any], key: str, value: str | None) -> None:
         target[key] = value
 
 
+def _terminated_node_conclusion(terminal_status: str, reason: str | None) -> dict[str, Any]:
+    conclusion: dict[str, Any] = {_TERMINATED_CONCLUSION_MARKER: True, "terminalStatus": terminal_status}
+    if reason is not None:
+        conclusion["reason"] = reason
+    return conclusion
+
+
+def is_terminated_node_conclusion(conclusion: Any) -> bool:
+    """Report whether a snapshot node conclusion was synthesized on pipeline termination."""
+    return isinstance(conclusion, dict) and conclusion.get(_TERMINATED_CONCLUSION_MARKER) is True
+
+
 def _merge_completion_data(target: dict[str, Any], event: dict[str, Any]) -> None:
     data = _dict_or_empty(event.get("data"))
     for key in (
@@ -1775,6 +1824,7 @@ def _utc_now() -> str:
 __all__ = [
     "A2APipelineSnapshotStore",
     "SNAPSHOT_SCHEMA_VERSION",
+    "is_terminated_node_conclusion",
     "reduce_pipeline_events",
     "sanitize_pipeline_cleanup_private_fields",
     "snapshot_needs_backup_commit_repair",
