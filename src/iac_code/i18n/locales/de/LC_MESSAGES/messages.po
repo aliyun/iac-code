@@ -4158,6 +4158,20 @@ msgid "complete_step validation failed."
 msgstr "Die Validierung von complete_step ist fehlgeschlagen."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"conclusion must be a non-empty object; an empty conclusion means the step"
+" produced no result. Fill in the fields required by the current step, or "
+"state the failure reason in the conclusion."
+msgstr "conclusion muss ein nicht leeres Objekt sein; eine leere conclusion bedeutet, dass der Schritt kein Ergebnis erzeugt hat. Füllen Sie die vom aktuellen Schritt geforderten Felder aus oder nennen Sie den Fehlergrund in der conclusion."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"Step {step_id} submitted an empty conclusion {attempts} times; the step "
+"produced no usable result."
+msgstr "Schritt {step_id} hat {attempts} Mal eine leere conclusion übermittelt; der Schritt hat kein verwertbares Ergebnis erzeugt."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "Clarification is required before completing the current step."
 msgstr "Vor Abschluss des aktuellen Schritts ist eine Klärung erforderlich."
 

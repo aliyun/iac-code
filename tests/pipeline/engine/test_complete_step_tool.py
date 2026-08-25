@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from iac_code.pipeline.engine.complete_step_tool import CompleteStepTool
+from iac_code.pipeline.engine.complete_step_tool import EMPTY_CONCLUSION_FAILURE_KIND, CompleteStepTool
 from iac_code.pipeline.engine.types import StepConfig, StepStatus
 from iac_code.tools.base import ToolContext
 
@@ -1672,6 +1672,67 @@ class TestSchemaValidation:
             context=ToolContext(),
         )
         assert not result.is_error
+
+
+class TestEmptyConclusionFailure:
+    """An empty conclusion must fail the step instead of silently reporting COMPLETED."""
+
+    @staticmethod
+    def _schemaless_config(**overrides):
+        return StepConfig(
+            step_id="intent_parsing",
+            conclusion_field="intent",
+            forward="architecture_planning",
+            **overrides,
+        )
+
+    @pytest.mark.asyncio
+    async def test_empty_conclusion_retries_before_failing(self):
+        tool = CompleteStepTool(self._schemaless_config(max_conclusion_retries=1))
+
+        first = await tool.execute(tool_input={"conclusion": {}}, context=ToolContext())
+        assert first.is_error
+        assert first.metadata is None
+
+        second = await tool.execute(tool_input={"conclusion": {}}, context=ToolContext())
+        assert second.is_error
+        step_result = second.metadata["step_result"]
+        assert step_result.status == StepStatus.FAILED
+        assert step_result.failure_kind == EMPTY_CONCLUSION_FAILURE_KIND
+
+    @pytest.mark.asyncio
+    async def test_terminal_failure_carries_non_empty_conclusion(self):
+        tool = CompleteStepTool(self._schemaless_config(max_conclusion_retries=0))
+
+        result = await tool.execute(tool_input={"conclusion": {}}, context=ToolContext())
+
+        step_result = result.metadata["step_result"]
+        assert step_result.status == StepStatus.FAILED
+        assert step_result.conclusion
+        assert step_result.conclusion["failed"] is True
+        assert step_result.conclusion["failure_kind"] == EMPTY_CONCLUSION_FAILURE_KIND
+        assert step_result.conclusion["step_id"] == "intent_parsing"
+        assert step_result.conclusion["reason"]
+        assert step_result.error
+
+    @pytest.mark.asyncio
+    async def test_null_only_conclusion_is_rejected(self):
+        """A NoneType parse result degrades to {} after normalization and must not pass."""
+        tool = CompleteStepTool(self._schemaless_config(max_conclusion_retries=0))
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"is_infra_intent": None, "confidence": None}},
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert result.metadata["step_result"].failure_kind == EMPTY_CONCLUSION_FAILURE_KIND
+
+    def test_validate_completion_input_rejects_empty_conclusion(self):
+        tool = CompleteStepTool(self._schemaless_config())
+
+        assert tool.validate_completion_input({"conclusion": {}}) is not None
+        assert tool.validate_completion_input({"conclusion": {"is_infra_intent": True}}) is None
 
 
 class TestNullNormalization:

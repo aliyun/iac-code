@@ -93,6 +93,8 @@ _REAL_RESTORE_FAILURE_REASONS = {
 
 def _is_a2a_surface(surface: str) -> bool:
     return surface == "a2a" or surface.startswith("a2a_")
+
+
 _SIDECAR_ROOT_DIRS = {"a2a", "image-cache", "pipeline", "tool-results"}
 _SIDECAR_ROOT_FILES = {
     ".backup-state.json",
@@ -989,6 +991,8 @@ class PipelineRunner:
     def should_switch_to_normal(self, completed_event_data: dict) -> bool:
         policy = self.on_complete_policy
         if policy is None or policy.action != "switch_to_normal":
+            return False
+        if completed_event_data.get("handoff_blocked"):
             return False
         outcome = terminal_outcome_from_completed_event(completed_event_data)
         return outcome in policy.apply_on
@@ -4443,8 +4447,21 @@ class PipelineRunner:
                 type=PipelineEventType.PIPELINE_COMPLETED,
                 step_id=step.step_id,
                 timestamp=time.time(),
-                data={"total_steps": self.state_machine.total_steps, "failed": True},
+                data=self._terminal_failed_event_data(step_result),
             )
+
+    def _terminal_failed_event_data(self, step_result: StepResult | None) -> dict:
+        """Build PIPELINE_COMPLETED data for a failed step, blocking handoff on typed failures.
+
+        A typed failure (e.g. an empty conclusion) carries no usable result downstream, so the
+        normal-mode handoff must not be published as if the pipeline had succeeded.
+        """
+        data: dict = {"total_steps": self.state_machine.total_steps, "failed": True}
+        failure_kind = getattr(step_result, "failure_kind", None)
+        if failure_kind:
+            data["failure_kind"] = failure_kind
+            data["handoff_blocked"] = True
+        return data
 
     def clear_sidecar(self) -> None:
         """Mark the sidecar non-resumable while preserving files for debugging."""

@@ -6,6 +6,7 @@ import yaml
 
 from iac_code.pipeline.engine.handoff import build_handoff_summary, terminal_outcome_from_completed_event
 from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
+from iac_code.pipeline.engine.types import StepResult, StepStatus
 
 
 def _make_runner(tmp_path: Path, on_complete: dict | None = None) -> PipelineRunner:
@@ -169,6 +170,44 @@ def test_runner_should_switch_to_normal_for_configured_canceled_event(tmp_path):
     runner = _make_runner(tmp_path, _switch_policy("completed", "canceled"))
 
     assert runner.should_switch_to_normal({"canceled": True}) is True
+
+
+def test_runner_blocks_handoff_for_blocked_failure(tmp_path):
+    """A typed step failure must not hand off to normal mode even when 'failed' is in apply_on."""
+    runner = _make_runner(tmp_path, _switch_policy("completed", "failed"))
+
+    assert (
+        runner.should_switch_to_normal({"failed": True, "failure_kind": "empty_conclusion", "handoff_blocked": True})
+        is False
+    )
+
+
+def test_runner_terminal_failed_event_data_marks_handoff_blocked_for_typed_failure(tmp_path):
+    runner = _make_runner(tmp_path, _switch_policy("completed", "failed"))
+    step_result = StepResult(
+        step_id="step",
+        status=StepStatus.FAILED,
+        conclusion={"failed": True, "failure_kind": "empty_conclusion", "reason": "empty intent"},
+        error="empty conclusion",
+        failure_kind="empty_conclusion",
+    )
+
+    data = runner._terminal_failed_event_data(step_result)
+
+    assert data["failed"] is True
+    assert data["failure_kind"] == "empty_conclusion"
+    assert data["handoff_blocked"] is True
+    assert runner.should_switch_to_normal(data) is False
+
+
+def test_runner_terminal_failed_event_data_keeps_handoff_for_untyped_failure(tmp_path):
+    runner = _make_runner(tmp_path, _switch_policy("completed", "failed"))
+    step_result = StepResult(step_id="step", status=StepStatus.FAILED, error="No conclusion extracted")
+
+    data = runner._terminal_failed_event_data(step_result)
+
+    assert "handoff_blocked" not in data
+    assert runner.should_switch_to_normal(data) is True
 
 
 def test_runner_build_normal_handoff_summary_uses_configured_context_values(tmp_path):

@@ -425,6 +425,8 @@ class StepExecutor:
 
         if terminal_failed_step_result is not None:
             step_result = terminal_failed_step_result
+            if step_result.conclusion:
+                context.set_conclusion(step.conclusion_field, step_result.conclusion)
         elif complete_step_input is not None:
             conclusion = complete_step_input.get("conclusion", {})
             conclusion = self._merge_preserved_candidate_selection(preserved_selection, conclusion)

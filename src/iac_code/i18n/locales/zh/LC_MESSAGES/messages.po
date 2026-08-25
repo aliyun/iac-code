@@ -3899,6 +3899,20 @@ msgid "complete_step validation failed."
 msgstr "complete_step 校验失败。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"conclusion must be a non-empty object; an empty conclusion means the step"
+" produced no result. Fill in the fields required by the current step, or "
+"state the failure reason in the conclusion."
+msgstr "conclusion 必须是非空对象；空 conclusion 表示该步骤没有产出结果。请填写当前步骤要求的字段，或在 conclusion 中说明失败原因。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"Step {step_id} submitted an empty conclusion {attempts} times; the step "
+"produced no usable result."
+msgstr "步骤 {step_id} 连续 {attempts} 次提交了空 conclusion，该步骤没有产出可用结果。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "Clarification is required before completing the current step."
 msgstr "完成当前步骤前需要先澄清。"
 

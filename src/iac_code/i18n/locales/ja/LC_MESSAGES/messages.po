@@ -3937,6 +3937,20 @@ msgid "complete_step validation failed."
 msgstr "complete_step の検証に失敗しました。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"conclusion must be a non-empty object; an empty conclusion means the step"
+" produced no result. Fill in the fields required by the current step, or "
+"state the failure reason in the conclusion."
+msgstr "conclusion は空でないオブジェクトである必要があります。空の conclusion はステップが結果を生成しなかったことを意味します。現在のステップで必要なフィールドを入力するか、conclusion に失敗理由を記載してください。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"Step {step_id} submitted an empty conclusion {attempts} times; the step "
+"produced no usable result."
+msgstr "ステップ {step_id} が空の conclusion を {attempts} 回送信しました。このステップは利用可能な結果を生成しませんでした。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "Clarification is required before completing the current step."
 msgstr "現在のステップを完了する前に確認が必要です。"
 

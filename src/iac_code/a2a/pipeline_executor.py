@@ -1235,11 +1235,7 @@ class IacCodeA2APipelineExecutor:
             def permission_context_getter() -> Any:
                 return getattr(agent_loop, "_permission_context", None)
 
-        surface = (
-            A2A_RICH_CANDIDATE_SURFACE
-            if self._candidate_presentation == RICH_CANDIDATE_PRESENTATION
-            else "a2a"
-        )
+        surface = A2A_RICH_CANDIDATE_SURFACE if self._candidate_presentation == RICH_CANDIDATE_PRESENTATION else "a2a"
         return create_pipeline(
             pipeline_name,
             provider_manager=runtime.provider_manager,

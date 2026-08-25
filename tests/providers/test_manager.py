@@ -1676,9 +1676,7 @@ class TestProviderManagerCompleteRetry:
 
     async def test_complete_attributes_bailian_openai_endpoint_to_dashscope_on_all_signals(self):
         mock_provider = AsyncMock()
-        mock_provider._base_url = (
-            "https://llm-testworkspace000000.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
-        )
+        mock_provider._base_url = "https://llm-testworkspace000000.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
         mock_provider.complete = AsyncMock(
             return_value=NonStreamingResponse(
                 message_id="complete-response",

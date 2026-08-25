@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 MAX_PARALLEL_CANDIDATES = 5
 MAX_ROLLBACK_TARGETS = 5
+EMPTY_CONCLUSION_FAILURE_KIND = "empty_conclusion"
 _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
     "reviewing_rerun_after_validate_template_write": (
         "reviewing ran write_file/edit_file after ros_validate_template; "
@@ -297,6 +298,35 @@ class CompleteStepTool(Tool):
         if verbose:
             return output.strip()
         return _("complete_step validation failed.")
+
+    def _validate_non_empty_conclusion(self, conclusion: Any) -> str | None:
+        """Reject empty conclusions even when the step declares no ``conclusion_schema``.
+
+        A null/NoneType parse result degrades to ``{}`` after ``normalize_input``. Without this
+        check a schema-less step would accept it and report COMPLETED, silently skipping the
+        downstream stages that depend on the conclusion.
+        """
+        if isinstance(conclusion, dict) and conclusion:
+            return None
+        logger.warning(
+            "Empty conclusion rejected for step %s",
+            sanitize_strict_text(self._step_config.step_id),
+        )
+        return _(
+            "conclusion must be a non-empty object; an empty conclusion means the step produced no result. "
+            "Fill in the fields required by the current step, or state the failure reason in the conclusion."
+        )
+
+    def _empty_conclusion_failure(self, attempts: int) -> tuple[str, dict[str, Any]]:
+        reason = _(
+            "Step {step_id} submitted an empty conclusion {attempts} times; the step produced no usable result."
+        ).format(step_id=display_step_name(self._step_config.step_id), attempts=attempts)
+        return reason, {
+            "failed": True,
+            "failure_kind": EMPTY_CONCLUSION_FAILURE_KIND,
+            "step_id": self._step_config.step_id,
+            "reason": reason,
+        }
 
     def _validate_conclusion(self, conclusion: dict) -> str | None:
         """Validate conclusion against schema. Returns error message or None."""
@@ -952,7 +982,9 @@ class CompleteStepTool(Tool):
                 "Rollback count cannot exceed {max_rollbacks}. Complete the current step or ask the user for help."
             ).format(max_rollbacks=max_rollbacks)
 
-        validation_error = self._validate_conclusion(conclusion)
+        validation_error = self._validate_non_empty_conclusion(conclusion)
+        if validation_error is None:
+            validation_error = self._validate_conclusion(conclusion)
         if validation_error is None:
             validation_error = self._validate_completion_guards(conclusion)
         if validation_error is None:
@@ -1142,7 +1174,10 @@ class CompleteStepTool(Tool):
                 is_error=True,
             )
 
-        validation_error = self._validate_conclusion(conclusion)
+        empty_conclusion_error = self._validate_non_empty_conclusion(conclusion)
+        validation_error = empty_conclusion_error
+        if validation_error is None:
+            validation_error = self._validate_conclusion(conclusion)
         if validation_error is None:
             validation_error = self._validate_completion_guards(conclusion)
         if validation_error is None:
@@ -1150,14 +1185,24 @@ class CompleteStepTool(Tool):
         if validation_error:
             self._validation_attempts += 1
             if self._validation_attempts > self._step_config.max_conclusion_retries:
-                step_result = StepResult(
-                    step_id=self._step_config.step_id,
-                    status=StepStatus.FAILED,
-                    error=_("Schema validation failed after {attempts} attempts: {error}").format(
-                        attempts=self._validation_attempts,
-                        error=validation_error,
-                    ),
-                )
+                if empty_conclusion_error is not None:
+                    error, failure_conclusion = self._empty_conclusion_failure(self._validation_attempts)
+                    step_result = StepResult(
+                        step_id=self._step_config.step_id,
+                        status=StepStatus.FAILED,
+                        conclusion=failure_conclusion,
+                        error=error,
+                        failure_kind=EMPTY_CONCLUSION_FAILURE_KIND,
+                    )
+                else:
+                    step_result = StepResult(
+                        step_id=self._step_config.step_id,
+                        status=StepStatus.FAILED,
+                        error=_("Schema validation failed after {attempts} attempts: {error}").format(
+                            attempts=self._validation_attempts,
+                            error=validation_error,
+                        ),
+                    )
                 max_retries = self._step_config.max_conclusion_retries
                 return ToolResult(
                     content=_(

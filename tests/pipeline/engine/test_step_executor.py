@@ -2610,6 +2610,51 @@ class TestStepExecutorValidationRespect:
         assert results == [terminal_result]
 
     @pytest.mark.asyncio
+    async def test_terminal_failure_conclusion_is_written_to_context(self, tmp_path):
+        """An empty-conclusion failure must leave a non-empty reason in the pipeline context."""
+        failure_conclusion = {
+            "failed": True,
+            "failure_kind": "empty_conclusion",
+            "step_id": "intent_parsing",
+            "reason": "intent_parsing submitted an empty conclusion",
+        }
+        terminal_result = StepResult(
+            step_id="intent_parsing",
+            status=StepStatus.FAILED,
+            conclusion=failure_conclusion,
+            error="intent_parsing submitted an empty conclusion",
+            failure_kind="empty_conclusion",
+        )
+
+        class FakeAgentLoop:
+            def __init__(self, **kwargs):
+                pass
+
+            async def run_streaming(self, user_input):
+                yield ToolUseStartEvent(tool_use_id="tu_1", name="complete_step")
+                yield ToolUseEndEvent(tool_use_id="tu_1", name="complete_step", input={"conclusion": {}})
+                yield ToolResultEvent(
+                    tool_use_id="tu_1",
+                    tool_name="complete_step",
+                    result="conclusion validation failed",
+                    is_error=True,
+                    metadata={"step_result": terminal_result},
+                )
+
+        executor = _make_executor(tmp_path)
+        step = _make_step()
+        ctx = PipelineContext(SIMPLE_DEPS)
+
+        collected = []
+        with patch("iac_code.agent.agent_loop.AgentLoop", FakeAgentLoop):
+            async for event in executor.execute(step, ctx, "test_session"):
+                collected.append(event)
+
+        results = [e for e in collected if isinstance(e, StepResult)]
+        assert results == [terminal_result]
+        assert ctx.get_conclusion(step.conclusion_field) == failure_conclusion
+
+    @pytest.mark.asyncio
     async def test_accepts_conclusion_only_after_successful_validation(self, tmp_path):
         """When first call fails validation and second succeeds, only second conclusion is accepted."""
         call_count = [0]  # noqa: F841
@@ -2776,11 +2821,15 @@ class TestStepExecutorSchemaWiring:
             surface="a2a_rich",
         )
 
-        tool_schema = executor._build_step_tools(
-            step,
-            context,
-            compact_candidate_selection=True,
-        ).get("complete_step").input_schema
+        tool_schema = (
+            executor._build_step_tools(
+                step,
+                context,
+                compact_candidate_selection=True,
+            )
+            .get("complete_step")
+            .input_schema
+        )
         conclusion_schema = tool_schema["properties"]["conclusion"]
         assert conclusion_schema["required"] == [
             "selected_candidate_name",
@@ -2863,11 +2912,15 @@ class TestStepExecutorSchemaWiring:
             context,
             resume_candidate_selection=True,
         )
-        tool_schema = executor._build_step_tools(
-            step,
-            context,
-            compact_candidate_selection=preserved is not None,
-        ).get("complete_step").input_schema
+        tool_schema = (
+            executor._build_step_tools(
+                step,
+                context,
+                compact_candidate_selection=preserved is not None,
+            )
+            .get("complete_step")
+            .input_schema
+        )
 
         assert preserved is None
         conclusion_schema = tool_schema["properties"]["conclusion"]
@@ -3143,12 +3196,26 @@ async def test_resumed_step_returns_reconstructed_complete_step(monkeypatch, tmp
 
 
 @pytest.mark.asyncio
-async def test_resumed_completed_step_sets_empty_conclusion_and_calls_on_exit(monkeypatch, tmp_path):
-    class FailIfAgentLoopIsCreated:
-        def __init__(self, *args, **kwargs):
-            raise AssertionError("AgentLoop should not be created for already-completed transcript")
+async def test_resumed_completed_step_rejects_empty_conclusion_and_reruns(monkeypatch, tmp_path):
+    """An empty conclusion in the transcript is not a completed step — the step must be re-driven."""
 
-    monkeypatch.setattr("iac_code.agent.agent_loop.AgentLoop", FailIfAgentLoopIsCreated)
+    class FakeAgentLoop:
+        def __init__(self, *args, **kwargs):
+            self.resume_messages = kwargs.get("resume_messages")
+
+        async def continue_streaming(self):
+            yield ToolUseStartEvent(tool_use_id="tu_retry", name="complete_step")
+            yield ToolUseEndEvent(
+                tool_use_id="tu_retry",
+                name="complete_step",
+                input={"conclusion": {"is_infra_intent": True}},
+            )
+            yield ToolResultEvent(tool_use_id="tu_retry", tool_name="complete_step", result="ok")
+
+        async def run_streaming(self, user_input):
+            raise AssertionError("resumed step should continue, not start a fresh prompt")
+
+    monkeypatch.setattr("iac_code.agent.agent_loop.AgentLoop", FakeAgentLoop)
 
     executor = _make_executor(tmp_path)
     step = _make_step()
@@ -3176,9 +3243,9 @@ async def test_resumed_completed_step_sets_empty_conclusion_and_calls_on_exit(mo
 
     assert len(results) == 1
     assert results[0].status == StepStatus.COMPLETED
-    assert results[0].conclusion == {}
-    assert ctx.get_conclusion(step.conclusion_field) == {}
-    step.on_exit.assert_called_once_with(ctx, {})
+    assert results[0].conclusion == {"is_infra_intent": True}
+    assert ctx.get_conclusion(step.conclusion_field) == {"is_infra_intent": True}
+    step.on_exit.assert_called_once_with(ctx, {"is_infra_intent": True})
 
 
 @pytest.mark.asyncio

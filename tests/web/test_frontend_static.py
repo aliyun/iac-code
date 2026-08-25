@@ -2547,7 +2547,7 @@ def test_completed_turn_collapses_process_into_summary() -> None:
     # 「已处理」组的展开态必须跨重建保留:openKey 让 toggle 记录器登记用户操作、
     # applyDetailsOpenOverrides 在重建后恢复;键取 turnId,缺 turnId 时回退首条消息 id。
     assert 'const turnKey = turnId || text(agentMessages[0]?.messageId || agentMessages[0]?.id || "");' in app_source
-    assert 'details.dataset.openKey = `turnproc:${turnKey}`;' in app_source
+    assert "details.dataset.openKey = `turnproc:${turnKey}`;" in app_source
 
     # 只有最后一次工具调用之后的文本才是「最终回答」;此前每个步骤的文本旁白
     # (夹在工具调用之间的 text delta)连同思考、工具一起折进「已处理」,不平铺成答案。
