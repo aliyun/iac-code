@@ -356,6 +356,12 @@ sub_pipelines:
               checks_field: hard_constraint_checks
               deployment_parameters_field: deployment_parameters
             message_key: hard_constraint_verification_required
+          - always: true
+            require_pricing_caliber_alignment:
+              planning_estimate_field: candidate.monthly_estimate
+              calibers_field: pricing_calibers
+              monthly_estimate_field: monthly_estimate
+            message_key: pricing_caliber_alignment_required
         tools:
           include: []
           exclude:
@@ -509,6 +515,12 @@ steps:
                   total_monthly_cost:
                     type: string
                     description: 成本预估步骤返回的月度总费用；不得使用架构规划阶段的粗略估算
+                  planning_monthly_estimate:
+                    type: string
+                    description: 架构规划阶段的月费粗估（列表价口径），取自成本步骤的 pricing_calibers.planning_estimate；仅用于与最终估算并列展示
+                  cost_caliber_note:
+                    type: string
+                    description: 粗估与最终估算的差异说明，取自成本步骤的 pricing_calibers.deviation_reason
                   cost_items:
                     type: array
                     description: 成本预估步骤返回的逐资源月费用；不得重新估价

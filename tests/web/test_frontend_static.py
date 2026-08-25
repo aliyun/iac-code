@@ -2547,7 +2547,7 @@ def test_completed_turn_collapses_process_into_summary() -> None:
     # 「已处理」组的展开态必须跨重建保留:openKey 让 toggle 记录器登记用户操作、
     # applyDetailsOpenOverrides 在重建后恢复;键取 turnId,缺 turnId 时回退首条消息 id。
     assert 'const turnKey = turnId || text(agentMessages[0]?.messageId || agentMessages[0]?.id || "");' in app_source
-    assert 'details.dataset.openKey = `turnproc:${turnKey}`;' in app_source
+    assert "details.dataset.openKey = `turnproc:${turnKey}`;" in app_source
 
     # 只有最后一次工具调用之后的文本才是「最终回答」;此前每个步骤的文本旁白
     # (夹在工具调用之间的 text delta)连同思考、工具一起折进「已处理」,不平铺成答案。
@@ -11228,7 +11228,7 @@ def test_output_panel_uses_codex_dark_theme() -> None:
 
 def test_output_panel_renders_architecture_diagram_section() -> None:
     js = _source(OUTPUT_PANEL_JS)
-    assert 'from "../mermaid_render.js?v=arch-diagram-v5"' in js
+    assert 'from "../mermaid_render.js?v=arch-diagram-v6"' in js
     assert "renderDiagramRow" in js
     assert '"Architecture diagram"' in js
     # 计数把 diagrams 计入(驱动徽标/自动显隐/自动弹出)
@@ -11296,7 +11296,7 @@ def test_mermaid_vendor_bundle_present() -> None:
 
 def test_pipeline_candidate_inline_diagram_uses_web_diagrams() -> None:
     js = _source(PIPELINE_JS)
-    assert 'from "../mermaid_render.js?v=arch-diagram-v5"' in js
+    assert 'from "../mermaid_render.js?v=arch-diagram-v6"' in js
     assert "webDiagrams" in js  # combinedDiagrams 合并 state.webDiagrams
     assert "pipeline-candidate-diagram" in js  # 每卡可折叠架构图
     assert "renderMermaid" in js

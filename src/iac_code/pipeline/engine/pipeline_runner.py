@@ -93,6 +93,8 @@ _REAL_RESTORE_FAILURE_REASONS = {
 
 def _is_a2a_surface(surface: str) -> bool:
     return surface == "a2a" or surface.startswith("a2a_")
+
+
 _SIDECAR_ROOT_DIRS = {"a2a", "image-cache", "pipeline", "tool-results"}
 _SIDECAR_ROOT_FILES = {
     ".backup-state.json",

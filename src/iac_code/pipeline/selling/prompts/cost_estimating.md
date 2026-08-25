@@ -6,6 +6,11 @@
 
 ## 当前候选方案
 - 名称：`{candidate.name}`
+- 架构规划阶段的月费粗估（列表价口径）：`{candidate.monthly_estimate}`
+- 粗估计价假设：
+```json
+{candidate.estimate_basis}
+```
 - 资源生命周期：
 ```json
 {candidate.resource_intents}
@@ -41,6 +46,14 @@ API 调用完成后调用 `complete_step` 提交费用预估。
 - `TradeAmount` 是合同优惠后的最终价，按与原价相同的月度周期换算并汇总。
 - 两个字段都存在时，使用 `¥<原价>/月（列表价，合同优惠后约¥<最终价>/月）` 格式；即使数值相同也保留两个价格口径。
 - 任一字段缺失时只展示可用价格，并在 `api_raw_summary` 中说明缺失字段；询价失败时仍填写 `"询价失败"`。
+- `TradeAmount` 显著低于 `OriginalAmount`（尤其接近或等于 0）时，必须在询价结果中找到对应的合同优惠来源字段并写入 `pricing_calibers.discount_source`。找不到来源时，不得输出合同优惠后价格，`monthly_estimate` 只保留列表价，并在 `api_raw_summary` 说明无法核对优惠来源。禁止输出无来源的 `¥0.00/月` 有效价。
+
+`complete_step.conclusion.pricing_calibers` 必须对照架构规划的粗估：
+- `planning_estimate` 原样复制上方的 `{candidate.monthly_estimate}`；上方为空或未提供时填 `"未提供"`。
+- `list_price` 填本次询价的月度列表价（`OriginalAmount` 汇总），与粗估同为列表价口径。
+- `effective_price` 填合同优惠后价格（`TradeAmount` 汇总），并按上一条规则提供 `discount_source`。
+- `deviation_ratio` 填 `list_price ÷ 粗估中值`，`calibers_aligned` 说明两者是否同口径。
+- 偏差超过 30% 或口径不一致时，必须在 `deviation_reason` 依据上方粗估假设说明差异来源（实例规格、磁盘、公网带宽、计费方式、粗估遗漏的资源等）。
 
 若 `ros_preview_template` 成功，在 `complete_step.conclusion.preview_validation` 写入 PreviewStack 成功证明：`succeeded: true`、`template_url: "{template.file_path}"`、`parameters: <预览通过的同一参数字典>`；失败或未执行时写入 `succeeded: false`、`error: "<原因>"`。
 

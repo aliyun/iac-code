@@ -548,6 +548,14 @@ msgid "{n}y"
 msgstr "{n}a"
 
 #: src/iac_code/web/static/js/app.js
+msgid "Operation failed"
+msgstr "La operación falló"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Archive failed"
+msgstr "Error al archivar"
+
+#: src/iac_code/web/static/js/app.js
 msgid "Read-only"
 msgstr "Solo lectura"
 
@@ -562,14 +570,6 @@ msgstr "Introduce contenido"
 #: src/iac_code/web/static/js/app.js
 msgid "Please enter a name"
 msgstr "Introduce un nombre"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Operation failed"
-msgstr "La operación falló"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Archive failed"
-msgstr "Error al archivar"
 
 #: src/iac_code/web/static/js/app.js
 #, python-brace-format
@@ -951,6 +951,14 @@ msgstr "Sin información de precios"
 #: src/iac_code/web/static/js/mermaid_render.js
 msgid "Estimated monthly cost"
 msgstr "Costo mensual estimado"
+
+#: src/iac_code/web/static/js/mermaid_render.js
+msgid "Planning estimate"
+msgstr "Estimación de planificación"
+
+#: src/iac_code/web/static/js/mermaid_render.js
+msgid "Cost caliber"
+msgstr "Criterio de costo"
 
 #: src/iac_code/web/static/js/token_transport.js
 msgid "Enter Web access token"

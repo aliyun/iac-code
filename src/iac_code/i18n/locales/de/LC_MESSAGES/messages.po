@@ -4088,6 +4088,16 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"The pricing conclusion must reconcile the planning estimate with the ROS "
+"list price and give a contract discount source for any discounted "
+"effective price."
+msgstr ""
+"Das Kostenergebnis muss die Planungsschätzung mit dem ROS-Listenpreis "
+"abgleichen und für jeden rabattierten Effektivpreis die Quelle des "
+"Vertragsrabatts angeben."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -4865,6 +4875,18 @@ msgstr "Liste der Kostenaufschlüsselung"
 #: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
 msgid "Total monthly cost, such as CNY 1,234/month"
 msgstr "Gesamte monatliche Kosten, z. B. CNY 1.234/Monat"
+
+#: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
+msgid "Rough monthly estimate from architecture planning, at list-price caliber"
+msgstr ""
+"Grobe monatliche Schätzung aus der Architekturplanung, nach Listenpreis-"
+"Maßstab"
+
+#: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
+msgid ""
+"Explanation of the deviation between the planning estimate and the final "
+"cost"
+msgstr "Erläuterung der Abweichung zwischen Planungsschätzung und Endkosten"
 
 #: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
 #, python-brace-format
@@ -9958,6 +9980,18 @@ msgstr "  ✓ Ausgewählt: {name}"
 #: src/iac_code/ui/pipeline_display_replay.py
 msgid "  Candidate selection completed"
 msgstr "  Kandidatenauswahl abgeschlossen"
+
+#: src/iac_code/ui/components/candidate_selection.py
+#: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "Planning estimate: {estimate}"
+msgstr "Planungsschätzung: {estimate}"
+
+#: src/iac_code/ui/components/candidate_selection.py
+#: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "Cost caliber: {note}"
+msgstr "Kostenmaßstab: {note}"
 
 #: src/iac_code/ui/components/candidate_selection.py
 #: src/iac_code/ui/pipeline_display_replay.py

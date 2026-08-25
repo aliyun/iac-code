@@ -1,5 +1,5 @@
 import { t } from "../i18n.js?v=web-repl-ui-277";
-import { renderMermaid, renderMermaidViews, renderDiagramPrice } from "../mermaid_render.js?v=arch-diagram-v5";
+import { renderMermaid, renderMermaidViews, renderDiagramPrice } from "../mermaid_render.js?v=arch-diagram-v6";
 
 function text(value) {
   return value === undefined || value === null ? "" : String(value);

@@ -50,6 +50,8 @@ class DisplayCandidate:
     summary: str = ""
     cost_items: list[dict[str, Any]] = field(default_factory=list)
     total_monthly_cost: str = ""
+    planning_monthly_estimate: str = ""
+    cost_caliber_note: str = ""
 
 
 @dataclass
@@ -272,6 +274,8 @@ class PipelineDisplayRecorder:
                 "summary": getattr(event, "summary", ""),
                 "cost_items": getattr(event, "cost_items", []),
                 "total_monthly_cost": getattr(event, "total_monthly_cost", ""),
+                "planning_monthly_estimate": getattr(event, "planning_monthly_estimate", ""),
+                "cost_caliber_note": getattr(event, "cost_caliber_note", ""),
             },
         )
 
@@ -463,6 +467,8 @@ class PipelineDisplayReducer:
                 cost_items = payload.get("cost_items")
                 candidate.cost_items = cost_items if isinstance(cost_items, list) else []
                 candidate.total_monthly_cost = str(payload.get("total_monthly_cost") or "")
+                candidate.planning_monthly_estimate = str(payload.get("planning_monthly_estimate") or "")
+                candidate.cost_caliber_note = str(payload.get("cost_caliber_note") or "")
                 if attempt.candidate_selection.state == "none":
                     attempt.candidate_selection.state = "preparing"
                 continue

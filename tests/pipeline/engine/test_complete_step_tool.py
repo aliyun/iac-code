@@ -1744,3 +1744,187 @@ class TestNullNormalization:
         valid, error = tool.validate_input(tool_input)
         assert not valid
         assert "name" in error
+
+
+class TestPricingCaliberAlignmentGuard:
+    """require_pricing_caliber_alignment must be enforced in code, not only in the prompt."""
+
+    @staticmethod
+    def _tool(*, conclusion_calibers, planning_estimate, tool_result_records=None) -> CompleteStepTool:
+        return CompleteStepTool(
+            StepConfig(step_id="cost_estimating", conclusion_field="cost", forward=None),
+            completion_guards=[
+                {
+                    "always": True,
+                    "require_pricing_caliber_alignment": {
+                        "planning_estimate_field": "candidate.monthly_estimate",
+                        "calibers_field": "pricing_calibers",
+                        "monthly_estimate_field": "monthly_estimate",
+                    },
+                    "message_key": "pricing_caliber_alignment_required",
+                }
+            ],
+            completion_guard_state={
+                "context_snapshot": {"candidate": {"monthly_estimate": planning_estimate}},
+                "tool_result_records": list(tool_result_records or []),
+            },
+        )
+
+    @staticmethod
+    def _conclusion(calibers) -> dict:
+        return {"monthly_estimate": "¥289.81/月", "pricing_calibers": calibers}
+
+    @pytest.mark.asyncio
+    async def test_accepts_reconciled_pricing_calibers(self):
+        tool = self._tool(
+            conclusion_calibers=None,
+            planning_estimate="¥300/月",
+        )
+        conclusion = self._conclusion(
+            {
+                "planning_estimate": "¥300/月",
+                "list_price": "¥289.81/月",
+                "calibers_aligned": True,
+                "deviation_ratio": 0.97,
+            }
+        )
+
+        result = await tool.execute(tool_input={"conclusion": conclusion}, context=ToolContext())
+
+        assert result.is_error is False
+        assert result.metadata["step_result"].conclusion == conclusion
+
+    @pytest.mark.asyncio
+    async def test_rejects_conclusion_without_pricing_calibers(self):
+        tool = self._tool(conclusion_calibers=None, planning_estimate="¥300/月")
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"monthly_estimate": "¥289.81/月"}}, context=ToolContext()
+        )
+
+        assert result.is_error is True
+        assert "pricing_calibers_missing" in result.content
+
+    @pytest.mark.asyncio
+    async def test_rejects_planning_estimate_not_copied_from_context(self):
+        tool = self._tool(conclusion_calibers=None, planning_estimate="¥300/月")
+        conclusion = self._conclusion(
+            {
+                "planning_estimate": "¥120/月",
+                "list_price": "¥289.81/月",
+                "calibers_aligned": True,
+                "deviation_ratio": 0.97,
+            }
+        )
+
+        result = await tool.execute(tool_input={"conclusion": conclusion}, context=ToolContext())
+
+        assert result.is_error is True
+        assert "planning_estimate_mismatch" in result.content
+
+    @pytest.mark.asyncio
+    async def test_rejects_unexplained_two_and_a_half_times_deviation(self):
+        tool = self._tool(conclusion_calibers=None, planning_estimate="¥120/月")
+        conclusion = self._conclusion(
+            {
+                "planning_estimate": "¥120/月",
+                "list_price": "¥300/月",
+                "calibers_aligned": False,
+                "deviation_ratio": 2.5,
+            }
+        )
+
+        result = await tool.execute(tool_input={"conclusion": conclusion}, context=ToolContext())
+
+        assert result.is_error is True
+        assert "deviation_reason_missing" in result.content
+
+    @pytest.mark.asyncio
+    async def test_accepts_explained_deviation(self):
+        tool = self._tool(conclusion_calibers=None, planning_estimate="¥120/月")
+        conclusion = self._conclusion(
+            {
+                "planning_estimate": "¥120/月",
+                "list_price": "¥300/月",
+                "calibers_aligned": False,
+                "deviation_ratio": 2.5,
+                "deviation_reason": "粗估按按量付费 1Mbps，询价按包年包月 5Mbps",
+            }
+        )
+
+        result = await tool.execute(tool_input={"conclusion": conclusion}, context=ToolContext())
+
+        assert result.is_error is False
+
+    @pytest.mark.asyncio
+    async def test_rejects_zero_effective_price_without_trade_amount_evidence(self):
+        tool = self._tool(conclusion_calibers=None, planning_estimate="¥300/月", tool_result_records=[])
+        conclusion = self._conclusion(
+            {
+                "planning_estimate": "¥300/月",
+                "list_price": "¥289.81/月",
+                "effective_price": "¥0.00/月",
+                "discount_source": "合同优惠",
+                "calibers_aligned": True,
+                "deviation_ratio": 0.97,
+            }
+        )
+
+        result = await tool.execute(tool_input={"conclusion": conclusion}, context=ToolContext())
+
+        assert result.is_error is True
+        assert "zero_effective_price_without_source" in result.content
+
+    @pytest.mark.asyncio
+    async def test_accepts_zero_effective_price_backed_by_trade_amount(self):
+        tool = self._tool(
+            conclusion_calibers=None,
+            planning_estimate="¥300/月",
+            tool_result_records=[
+                {
+                    "tool_name": "ros_estimate_template_cost",
+                    "is_error": False,
+                    "result": {"Result": {"OriginalAmount": "289.81", "TradeAmount": "0.00"}},
+                }
+            ],
+        )
+        conclusion = self._conclusion(
+            {
+                "planning_estimate": "¥300/月",
+                "list_price": "¥289.81/月",
+                "effective_price": "¥0.00/月",
+                "discount_source": "GetTemplateEstimateCost.TradeAmount",
+                "calibers_aligned": True,
+                "deviation_ratio": 0.97,
+            }
+        )
+
+        result = await tool.execute(tool_input={"conclusion": conclusion}, context=ToolContext())
+
+        assert result.is_error is False
+
+    @pytest.mark.asyncio
+    async def test_rejects_discounted_effective_price_without_source(self):
+        tool = self._tool(conclusion_calibers=None, planning_estimate="¥300/月")
+        conclusion = self._conclusion(
+            {
+                "planning_estimate": "¥300/月",
+                "list_price": "¥289.81/月",
+                "effective_price": "¥6.08/月",
+                "calibers_aligned": True,
+                "deviation_ratio": 0.97,
+            }
+        )
+
+        result = await tool.execute(tool_input={"conclusion": conclusion}, context=ToolContext())
+
+        assert result.is_error is True
+        assert "discount_source_missing" in result.content
+
+    @pytest.mark.asyncio
+    async def test_skips_guard_when_pricing_failed(self):
+        tool = self._tool(conclusion_calibers=None, planning_estimate="¥300/月")
+
+        result = await tool.execute(tool_input={"conclusion": {"monthly_estimate": "询价失败"}}, context=ToolContext())
+
+        assert result.is_error is False

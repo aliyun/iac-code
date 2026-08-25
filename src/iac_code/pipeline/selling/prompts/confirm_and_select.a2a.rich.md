@@ -25,8 +25,10 @@
 - `options[].architecture_diagram`：紧凑 Mermaid `flowchart` 源码，只使用当前 `candidate`、`template` 和拓扑中已有的事实；最多 12 个节点，不要添加 Markdown 代码围栏
 - `options[].total_monthly_cost`：原样取 `evaluated_candidates[i].cost.monthly_estimate`
 - `options[].cost_items`：逐项取 `evaluated_candidates[i].cost.resources`，每项包含 `name`、可选 `spec` 和 `monthly_cost`；`monthly_cost` 原样取资源的 `cost`
+- `options[].planning_monthly_estimate`：原样取 `evaluated_candidates[i].cost.pricing_calibers.planning_estimate`（架构规划阶段的列表价粗估）；该字段缺失时省略
+- `options[].cost_caliber_note`：原样取 `evaluated_candidates[i].cost.pricing_calibers.deviation_reason`；该字段缺失时省略
 
-不要使用 `evaluated_candidates[i].candidate.monthly_estimate`，它只是架构规划阶段的粗略估算。不要重新询价或自行补算价格。若费用明细没有规格字段，省略 `spec`，不要猜测。
+`total_monthly_cost` 只能是最终 ROS 估算，不得使用 `evaluated_candidates[i].candidate.monthly_estimate`，它只是架构规划阶段的粗略估算；粗估只能通过 `planning_monthly_estimate` 与 `cost_caliber_note` 并列展示。不要重新询价或自行补算价格。若费用明细没有规格字段，省略 `spec`，不要猜测。
 
 `user_prompt`、`summary` 和 Mermaid 节点标签应使用用户当前语言；字段名、枚举值和其他协议字段保持上面的固定形式。
 

@@ -48,6 +48,52 @@ def test_architecture_hard_constraint_schema_describes_every_field():
     assert all(value.get("description") for value in properties.values())
 
 
+def _candidate_schema() -> dict:
+    body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+    end = body.index("---", 3)
+    schema = yaml.safe_load(body[3:end])["conclusion_schema"]
+    return schema["properties"]["candidates"]["items"]
+
+
+def test_architecture_requires_estimate_basis_for_monthly_estimate():
+    candidate = _candidate_schema()
+    estimate_basis = candidate["properties"]["estimate_basis"]
+
+    assert "monthly_estimate" in candidate["required"]
+    assert "estimate_basis" in candidate["required"]
+    assert estimate_basis["type"] == "object"
+    assert estimate_basis["required"] == ["pricing_mode", "assumptions"]
+    assert estimate_basis["additionalProperties"] is False
+    assert estimate_basis["properties"]["pricing_mode"]["enum"] == [
+        "subscription",
+        "pay_as_you_go",
+        "mixed",
+    ]
+    assert estimate_basis["properties"]["assumptions"]["minItems"] == 1
+    assert all(value.get("description") for value in estimate_basis["properties"].values())
+
+
+def test_architecture_declares_list_price_caliber_for_rough_estimate():
+    body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "## 费用估算口径" in body
+    assert "粗略估算" in body
+    assert "列表价" in body
+    assert "OriginalAmount" in body
+    assert "不得把合同优惠、代金券、活动折扣折算进粗估" in body
+    assert "estimate_basis.assumptions" in body
+
+
+def test_architecture_prompt_requires_list_price_caliber_and_assumptions():
+    body = PROMPT_FILE.read_text(encoding="utf-8")
+
+    assert "## 费用估算口径" in body
+    assert "月度列表价口径" in body
+    assert "粗略估算" in body
+    assert "不要把合同优惠、代金券或活动折扣折算进粗估" in body
+    assert "`estimate_basis` 必须写明 `pricing_mode`" in body
+
+
 def test_architecture_prompt_guides_optional_memory_lookup_for_planning_context():
     body = PROMPT_FILE.read_text(encoding="utf-8")
 

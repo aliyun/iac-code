@@ -13,11 +13,39 @@ conclusion_schema:
     - deployment_parameters
     - hard_constraint_checks
     - preview_validation
+    - pricing_calibers
   additionalProperties: false
   properties:
     monthly_estimate:
       type: string
       description: 月度费用估算；询价同时返回 OriginalAmount 与 TradeAmount 时，必须同时包含列表价和合同优惠后价格（如 ¥96.80/月（列表价，合同优惠后约¥13.76/月））；询价失败时填 "询价失败"
+    pricing_calibers:
+      type: object
+      required: [planning_estimate, list_price, calibers_aligned]
+      additionalProperties: false
+      description: 规划粗估与最终 ROS 询价的口径对照；complete_step 由代码校验对照完整性、偏差解释和优惠来源
+      properties:
+        planning_estimate:
+          type: string
+          description: 原样复制 candidate.monthly_estimate；架构规划未给出粗估时填 "未提供"
+        list_price:
+          type: string
+          description: 本次询价的月度列表价（OriginalAmount 汇总，含金额与周期，如 "¥289.81/月"），与规划粗估同口径
+        effective_price:
+          type: string
+          description: 合同优惠后的月度有效价（TradeAmount 汇总）；询价未返回 TradeAmount 时省略
+        discount_source:
+          type: string
+          description: effective_price 显著低于 list_price 时必填，说明优惠来源（如询价结果中的合同优惠/折扣字段）；没有可核对来源时不得输出低于列表价的有效价
+        deviation_ratio:
+          type: number
+          description: list_price 与规划粗估的比值（list_price ÷ 粗估中值），无法计算时省略并在 deviation_reason 说明
+        calibers_aligned:
+          type: boolean
+          description: 两个估算是否属于同一计价口径（均为月度列表价且假设一致）
+        deviation_reason:
+          type: string
+          description: calibers_aligned 为 false 或 deviation_ratio 偏离 1 超过 30% 时必填，依据 candidate.estimate_basis 说明差异来源（规格、带宽、计费方式、遗漏资源等）
     currency:
       type: string
       enum: [CNY]
@@ -307,3 +335,14 @@ aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<�
 - `missing_deployment_parameters` 填完整部署或 PreviewStack 仍缺少的参数及原因；没有缺口时可省略或填 `[]`
 - `parameter_set_summary` 可简要说明参数来源、可用性筛选、PreviewStack 验证结果以及是否使用软门禁继续询价
 - 询价失败时 `monthly_estimate` 填 "询价失败"，`resources` 为空数组，`error` 说明原因
+
+## 价格口径对照
+
+`pricing_calibers` 是规划粗估与最终询价的对照结论，由代码在 `complete_step` 时校验：
+
+- `planning_estimate` 原样复制 `candidate.monthly_estimate`（架构规划的粗略估算，列表价口径）；架构规划未给出粗估时填 `"未提供"`。
+- `list_price` 填本次询价的月度列表价（`OriginalAmount` 汇总），必须与粗估同口径才可比。
+- `deviation_ratio` 填 `list_price ÷ 粗估中值`；`calibers_aligned` 说明两者是否同口径。
+- `deviation_ratio` 偏离 1 超过 30%，或 `calibers_aligned` 为 false 时，必须在 `deviation_reason` 依据 `candidate.estimate_basis` 说明差异来源（实例规格、磁盘、公网带宽、计费方式、粗估遗漏的资源等），不得留空。
+- `effective_price` 填合同优惠后的月度有效价（`TradeAmount` 汇总）。有效价显著低于列表价时，`discount_source` 必须说明询价结果中的优惠来源；**没有可核对来源时不得输出低于列表价的有效价**，尤其不得输出无来源的 `¥0.00/月`，此时只保留列表价并在 `api_raw_summary` 说明缺失字段。
+- 与硬约束校验一致：不要自行输出"口径是否一致"以外的布尔结论；代码校验失败时会返回具体校验码（如 `deviation_reason_missing`、`zero_effective_price_without_source`），按原因补全对照后重试，不得删除字段绕过校验。

@@ -145,5 +145,9 @@ def diagram_items(manager: Any, session: Any, optimizing_indices: frozenset[int]
         if cost is not None:
             entry["costItems"] = cost["costItems"]
             entry["totalMonthlyCost"] = cost["totalMonthlyCost"]
+            if cost.get("planningMonthlyEstimate"):
+                entry["planningMonthlyEstimate"] = cost["planningMonthlyEstimate"]
+            if cost.get("costCaliberNote"):
+                entry["costCaliberNote"] = cost["costCaliberNote"]
         by_key[key] = entry
     return list(by_key.values())

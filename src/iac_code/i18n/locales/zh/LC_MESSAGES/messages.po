@@ -3840,6 +3840,13 @@ msgstr "每个用户明确提出的硬约束都必须由一条状态为满足的
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"The pricing conclusion must reconcile the planning estimate with the ROS "
+"list price and give a contract discount source for any discounted "
+"effective price."
+msgstr "费用结论必须将规划粗估与 ROS 列表价对照，并为任何优惠后的有效价说明合同优惠来源。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr "调用此工具提交结论以完成当前步骤。如需回滚到较早步骤，请设置 rollback_request。"
@@ -4531,6 +4538,16 @@ msgstr "费用明细列表"
 #: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
 msgid "Total monthly cost, such as CNY 1,234/month"
 msgstr "月度总费用，例如 1,234 元/月"
+
+#: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
+msgid "Rough monthly estimate from architecture planning, at list-price caliber"
+msgstr "架构规划阶段的月费粗估，采用列表价口径"
+
+#: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
+msgid ""
+"Explanation of the deviation between the planning estimate and the final "
+"cost"
+msgstr "规划粗估与最终费用之间偏差的说明"
 
 #: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
 #, python-brace-format
@@ -8977,6 +8994,18 @@ msgstr "  ✓ 已选择: {name}"
 #: src/iac_code/ui/pipeline_display_replay.py
 msgid "  Candidate selection completed"
 msgstr "  方案选择已完成"
+
+#: src/iac_code/ui/components/candidate_selection.py
+#: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "Planning estimate: {estimate}"
+msgstr "规划粗估：{estimate}"
+
+#: src/iac_code/ui/components/candidate_selection.py
+#: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "Cost caliber: {note}"
+msgstr "成本口径：{note}"
 
 #: src/iac_code/ui/components/candidate_selection.py
 #: src/iac_code/ui/pipeline_display_replay.py

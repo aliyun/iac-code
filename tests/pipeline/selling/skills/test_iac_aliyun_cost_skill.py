@@ -112,6 +112,11 @@ class TestSkillFrontmatter:
         }
         conclusion = {
             "monthly_estimate": "¥100/月",
+            "pricing_calibers": {
+                "planning_estimate": "¥90-110/月",
+                "list_price": "¥100/月",
+                "calibers_aligned": True,
+            },
             "currency": "CNY",
             "resources": [{"type": "ALIYUN::RDS::DBInstance", "cost": "¥100/月"}],
             "template_fixed": False,
@@ -172,12 +177,64 @@ class TestSkillFrontmatter:
         assert "OriginalAmount" in description
         assert "TradeAmount" in description
 
+    def test_conclusion_schema_requires_pricing_caliber_reconciliation(self):
+        schema = _parse_frontmatter(SKILL_MD.read_text(encoding="utf-8"))["conclusion_schema"]
+        calibers_schema = schema["properties"]["pricing_calibers"]
+
+        assert "pricing_calibers" in schema["required"]
+        assert calibers_schema["required"] == ["planning_estimate", "list_price", "calibers_aligned"]
+        assert calibers_schema["additionalProperties"] is False
+        assert calibers_schema["properties"]["calibers_aligned"]["type"] == "boolean"
+        assert calibers_schema["properties"]["deviation_ratio"]["type"] == "number"
+        for field in ("effective_price", "discount_source", "deviation_ratio", "deviation_reason", "list_price"):
+            assert calibers_schema["properties"][field].get("description")
+
+        conclusion = {
+            "monthly_estimate": "¥289.81/月",
+            "pricing_calibers": {
+                "planning_estimate": "¥300/月",
+                "list_price": "¥289.81/月",
+                "effective_price": "¥6.08/月",
+                "discount_source": "GetTemplateEstimateCost.TradeAmount",
+                "deviation_ratio": 0.97,
+                "calibers_aligned": True,
+                "deviation_reason": "带宽假设一致",
+            },
+            "currency": "CNY",
+            "resources": [{"type": "ALIYUN::ECS::InstanceGroup", "cost": "¥289.81/月"}],
+            "template_fixed": False,
+            "deployment_parameters": {},
+            "hard_constraint_checks": [],
+            "preview_validation": {"succeeded": False, "error": "x"},
+        }
+        jsonschema.validate(conclusion, schema)
+
+        missing_block = {key: value for key, value in conclusion.items() if key != "pricing_calibers"}
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(missing_block, schema)
+
+        for field in ("planning_estimate", "list_price", "calibers_aligned"):
+            partial = json.loads(json.dumps(conclusion, ensure_ascii=False))
+            del partial["pricing_calibers"][field]
+            with pytest.raises(jsonschema.ValidationError):
+                jsonschema.validate(partial, schema)
+
+        unknown_field = json.loads(json.dumps(conclusion, ensure_ascii=False))
+        unknown_field["pricing_calibers"]["made_up"] = "x"
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(unknown_field, schema)
+
     def test_conclusion_schema_requires_full_preview_validation_when_succeeded(self):
         content = SKILL_MD.read_text(encoding="utf-8")
         fm = _parse_frontmatter(content)
         schema = fm["conclusion_schema"]
         conclusion = {
             "monthly_estimate": "¥100/月",
+            "pricing_calibers": {
+                "planning_estimate": "¥90-110/月",
+                "list_price": "¥100/月",
+                "calibers_aligned": True,
+            },
             "currency": "CNY",
             "resources": [{"type": "ALIYUN::ECS::InstanceGroup", "cost": "¥100/月"}],
             "template_fixed": False,
@@ -204,6 +261,12 @@ class TestSkillFrontmatter:
         schema = fm["conclusion_schema"]
         conclusion = {
             "monthly_estimate": "询价失败",
+            "pricing_calibers": {
+                "planning_estimate": "未提供",
+                "list_price": "询价失败",
+                "calibers_aligned": False,
+                "deviation_reason": "询价失败，无法比较口径",
+            },
             "currency": "CNY",
             "resources": [],
             "template_fixed": False,
@@ -342,6 +405,21 @@ class TestSkillContentRosOnly:
         assert "ros_estimate_template_cost" in body
         assert "missing_deployment_parameters" in body
         assert "选择阶段" in body and "parameter_overrides" in body
+
+    def test_reconciles_planning_estimate_against_ros_list_price(self, body):
+        assert "## 价格口径对照" in body
+        assert "pricing_calibers" in body
+        assert "原样复制 `candidate.monthly_estimate`" in body
+        assert "OriginalAmount" in body
+        assert "candidate.estimate_basis" in body
+        assert "30%" in body
+        assert "deviation_reason_missing" in body
+
+    def test_forbids_effective_price_below_list_price_without_source(self, body):
+        assert "没有可核对来源时不得输出低于列表价的有效价" in body
+        assert "¥0.00/月" in body
+        assert "zero_effective_price_without_source" in body
+        assert "TradeAmount" in body
 
     def test_contains_template_url(self, body):
         assert "template_url" in body
@@ -538,6 +616,15 @@ class TestCostPrompt:
         assert "列表价" in body
         assert "合同优惠后" in body
         assert "monthly_estimate" in body
+
+    def test_prompt_carries_planning_estimate_and_requires_caliber_reconciliation(self):
+        body = COST_PROMPT_MD.read_text(encoding="utf-8")
+
+        assert "{candidate.monthly_estimate}" in body
+        assert "{candidate.estimate_basis}" in body
+        assert "complete_step.conclusion.pricing_calibers" in body
+        assert "`deviation_ratio` 填 `list_price ÷ 粗估中值`" in body
+        assert "禁止输出无来源的 `¥0.00/月` 有效价。" in body
 
     def test_prompt_receives_only_required_candidate_fields_without_repeating_skill_rules(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")

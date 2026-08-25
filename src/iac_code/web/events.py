@@ -564,6 +564,8 @@ class WebEventTranslator:
                     "summary": event.summary,
                     "costItems": event.cost_items,
                     "totalMonthlyCost": event.total_monthly_cost,
+                    "planningMonthlyEstimate": event.planning_monthly_estimate,
+                    "costCaliberNote": event.cost_caliber_note,
                     "candidateIndex": event.candidate_index,
                 },
             )

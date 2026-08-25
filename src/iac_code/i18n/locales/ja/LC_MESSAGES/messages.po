@@ -3876,6 +3876,13 @@ msgstr "ユーザーが明示した各ハード制約は、パラメーターと
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"The pricing conclusion must reconcile the planning estimate with the ROS "
+"list price and give a contract discount source for any discounted "
+"effective price."
+msgstr "コスト結論では、計画時の概算を ROS 定価と照合し、割引後の実効価格には契約割引の出所を示す必要があります。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -4586,6 +4593,16 @@ msgstr "費用内訳リスト"
 #: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
 msgid "Total monthly cost, such as CNY 1,234/month"
 msgstr "月額合計費用。例: CNY 1,234/月"
+
+#: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
+msgid "Rough monthly estimate from architecture planning, at list-price caliber"
+msgstr "アーキテクチャ計画段階の月額概算（定価基準）"
+
+#: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
+msgid ""
+"Explanation of the deviation between the planning estimate and the final "
+"cost"
+msgstr "計画時の概算と最終コストの差異の説明"
 
 #: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
 #, python-brace-format
@@ -9162,6 +9179,18 @@ msgstr "  ✓ 選択済み: {name}"
 #: src/iac_code/ui/pipeline_display_replay.py
 msgid "  Candidate selection completed"
 msgstr "  候補の選択が完了しました"
+
+#: src/iac_code/ui/components/candidate_selection.py
+#: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "Planning estimate: {estimate}"
+msgstr "計画時の概算：{estimate}"
+
+#: src/iac_code/ui/components/candidate_selection.py
+#: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "Cost caliber: {note}"
+msgstr "コスト基準：{note}"
 
 #: src/iac_code/ui/components/candidate_selection.py
 #: src/iac_code/ui/pipeline_display_replay.py

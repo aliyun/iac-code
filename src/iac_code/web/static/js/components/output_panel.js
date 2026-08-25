@@ -1,6 +1,6 @@
 import { t } from "../i18n.js?v=web-repl-ui-277";
 // 输出面板:悬浮抽屉汇总资源栈与模板文件;自持 DOM,不进 render 扇出。
-import { renderMermaid, renderMermaidViews, renderDiagramPrice } from "../mermaid_render.js?v=arch-diagram-v5";
+import { renderMermaid, renderMermaidViews, renderDiagramPrice } from "../mermaid_render.js?v=arch-diagram-v6";
 
 const STATUS_LABELS = { true: t("Success"), false: t("In progress / failed") };
 

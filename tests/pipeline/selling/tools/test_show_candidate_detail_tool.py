@@ -36,6 +36,17 @@ class TestShowCandidateDetailToolMeta:
             "total_monthly_cost",
         }
 
+    def test_input_schema_offers_optional_dual_caliber_fields(self):
+        tool = ShowCandidateDetailTool()
+        properties = tool.input_schema["properties"]
+
+        assert properties["planning_monthly_estimate"]["type"] == "string"
+        assert properties["cost_caliber_note"]["type"] == "string"
+        assert properties["planning_monthly_estimate"]["description"]
+        assert properties["cost_caliber_note"]["description"]
+        assert "planning_monthly_estimate" not in tool.input_schema["required"]
+        assert "cost_caliber_note" not in tool.input_schema["required"]
+
 
 class TestShowCandidateDetailToolExecute:
     @pytest.mark.asyncio
@@ -84,6 +95,51 @@ class TestShowCandidateDetailToolExecute:
         assert isinstance(event, CandidateDetailEvent)
         assert event.candidate_name == "Same"
         assert event.candidate_index == 1
+
+    @pytest.mark.asyncio
+    async def test_forwards_planning_estimate_and_caliber_note(self):
+        queue: asyncio.Queue = asyncio.Queue()
+        tool = ShowCandidateDetailTool()
+
+        result = await tool.execute(
+            tool_input={
+                "candidate_name": "单 ECS",
+                "candidate_index": 0,
+                "summary": "s",
+                "cost_items": [],
+                "total_monthly_cost": "¥289.81/月",
+                "planning_monthly_estimate": "¥300/月（粗略估算，列表价口径）",
+                "cost_caliber_note": "带宽假设由 5Mbps 调整为 1Mbps",
+            },
+            context=ToolContext(cwd="/tmp", event_queue=queue),
+        )
+
+        assert not result.is_error
+        event = queue.get_nowait()
+        assert event.planning_monthly_estimate == "¥300/月（粗略估算，列表价口径）"
+        assert event.cost_caliber_note == "带宽假设由 5Mbps 调整为 1Mbps"
+        assert event.total_monthly_cost == "¥289.81/月"
+
+    @pytest.mark.asyncio
+    async def test_dual_caliber_fields_default_to_empty_when_omitted(self):
+        queue: asyncio.Queue = asyncio.Queue()
+        tool = ShowCandidateDetailTool()
+
+        result = await tool.execute(
+            tool_input={
+                "candidate_name": "方案B",
+                "candidate_index": 0,
+                "summary": "s",
+                "cost_items": [],
+                "total_monthly_cost": "¥0/月",
+            },
+            context=ToolContext(cwd="/tmp", event_queue=queue),
+        )
+
+        assert not result.is_error
+        event = queue.get_nowait()
+        assert event.planning_monthly_estimate == ""
+        assert event.cost_caliber_note == ""
 
     @pytest.mark.asyncio
     async def test_no_event_queue(self):

@@ -104,9 +104,7 @@ def test_runtime_archive_and_version_marker_are_rooted_consistently(tmp_path: Pa
     assert "artifactRevision" not in marker
 
 
-def test_runtime_a2a_smoke_checks_health_and_agent_card(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_runtime_a2a_smoke_checks_health_and_agent_card(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_module("skill_runtime_smoke", BUILD_SCRIPT)
     server = tmp_path / "server.py"
     server.write_text(

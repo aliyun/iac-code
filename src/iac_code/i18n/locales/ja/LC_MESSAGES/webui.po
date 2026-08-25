@@ -540,6 +540,14 @@ msgid "{n}y"
 msgstr "{n}年"
 
 #: src/iac_code/web/static/js/app.js
+msgid "Operation failed"
+msgstr "操作に失敗しました"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Archive failed"
+msgstr "アーカイブに失敗しました"
+
+#: src/iac_code/web/static/js/app.js
 msgid "Read-only"
 msgstr "読み取り専用"
 
@@ -554,14 +562,6 @@ msgstr "内容を入力してください"
 #: src/iac_code/web/static/js/app.js
 msgid "Please enter a name"
 msgstr "名前を入力してください"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Operation failed"
-msgstr "操作に失敗しました"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Archive failed"
-msgstr "アーカイブに失敗しました"
 
 #: src/iac_code/web/static/js/app.js
 #, python-brace-format
@@ -937,6 +937,14 @@ msgstr "価格情報はありません"
 #: src/iac_code/web/static/js/mermaid_render.js
 msgid "Estimated monthly cost"
 msgstr "月間コストの見積もり"
+
+#: src/iac_code/web/static/js/mermaid_render.js
+msgid "Planning estimate"
+msgstr "計画時の概算"
+
+#: src/iac_code/web/static/js/mermaid_render.js
+msgid "Cost caliber"
+msgstr "コスト基準"
 
 #: src/iac_code/web/static/js/token_transport.js
 msgid "Enter Web access token"

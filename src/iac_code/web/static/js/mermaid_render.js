@@ -126,5 +126,18 @@ export function renderDiagramPrice(item) {
     }
     wrap.append(ul);
   }
+  // 成本口径对照:规划阶段粗估与最终 ROS 估算并列,偏差原因随后说明,避免只见单一口径。
+  const planning = item && typeof item.planningMonthlyEstimate === "string" ? item.planningMonthlyEstimate : "";
+  const note = item && typeof item.costCaliberNote === "string" ? item.costCaliberNote : "";
+  for (const [labelText, valueText] of [
+    [t("Planning estimate"), planning],
+    [t("Cost caliber"), note],
+  ]) {
+    if (!valueText) continue;
+    const row = document.createElement("div");
+    row.className = "diagram-price-caliber";
+    row.textContent = `${labelText}: ${valueText}`;
+    wrap.append(row);
+  }
   return wrap;
 }

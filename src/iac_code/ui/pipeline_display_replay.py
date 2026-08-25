@@ -276,6 +276,8 @@ class PipelineDisplayReplayRenderer:
                     candidate.cost_items,
                     candidate.total_monthly_cost,
                     candidate_index=candidate.candidate_index,
+                    planning_monthly_estimate=candidate.planning_monthly_estimate,
+                    cost_caliber_note=candidate.cost_caliber_note,
                 )
 
         if selection.state == "waiting":
@@ -314,6 +316,10 @@ class PipelineDisplayReplayRenderer:
         if candidate.cost_items:
             self.console.print()
             self.console.print(self._render_cost_table(candidate.cost_items, candidate.total_monthly_cost))
+        if candidate.planning_monthly_estimate:
+            self.console.print(_("Planning estimate: {estimate}").format(estimate=candidate.planning_monthly_estimate))
+        if candidate.cost_caliber_note:
+            self.console.print(_("Cost caliber: {note}").format(note=candidate.cost_caliber_note))
 
     @staticmethod
     def _selected_candidate(selection: DisplayCandidateSelection) -> DisplayCandidate | None:

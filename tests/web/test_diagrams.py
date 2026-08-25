@@ -252,6 +252,41 @@ def test_candidate_costs_from_completed_conclusion(tmp_path):
     assert costs[0]["costItems"][1] == {"name": "云盘 40GiB", "monthly_cost": "¥8.00/月"}
 
 
+def test_candidate_costs_carries_pricing_calibers_from_conclusion(tmp_path):
+    # cost.pricing_calibers.{planning_estimate,deviation_reason} → planningMonthlyEstimate / costCaliberNote,
+    # 让前端把架构规划粗估与最终 ROS 估算并列展示。
+    envelope = _completed_envelope(0, "x", "¥289.81/月", [{"type": "ECS", "cost": "¥32"}])
+    envelope["data"]["conclusions"]["cost"]["pricing_calibers"] = {
+        "planning_estimate": "¥300/月（粗略估算，列表价口径）",
+        "list_price": "¥289.81/月",
+        "calibers_aligned": True,
+        "deviation_reason": "带宽假设由 5Mbps 调整为 1Mbps",
+    }
+    costs = pipeline_candidate_costs(_Manager([envelope]), _session(tmp_path))
+
+    assert costs[0]["totalMonthlyCost"] == "¥289.81/月"
+    assert costs[0]["planningMonthlyEstimate"] == "¥300/月（粗略估算，列表价口径）"
+    assert costs[0]["costCaliberNote"] == "带宽假设由 5Mbps 调整为 1Mbps"
+
+
+def test_candidate_costs_calibers_default_empty_without_reconciliation(tmp_path):
+    manager = _Manager([_completed_envelope(0, "x", "¥46/月", [{"type": "ECS", "cost": "¥32"}])])
+    costs = pipeline_candidate_costs(manager, _session(tmp_path))
+
+    assert costs[0]["planningMonthlyEstimate"] == ""
+    assert costs[0]["costCaliberNote"] == ""
+
+
+def test_candidate_costs_carries_pricing_calibers_from_detail(tmp_path):
+    envelope = _detail_envelope(0, [], "¥289.81/月")
+    envelope["data"]["detail"]["planningMonthlyEstimate"] = "¥300/月"
+    envelope["data"]["detail"]["costCaliberNote"] = "口径已对齐"
+    costs = pipeline_candidate_costs(_Manager([envelope]), _session(tmp_path))
+
+    assert costs[0]["planningMonthlyEstimate"] == "¥300/月"
+    assert costs[0]["costCaliberNote"] == "口径已对齐"
+
+
 def test_candidate_costs_detail_shown_wins_over_completed(tmp_path):
     # 同序号两种来源都在时,显式 show_candidate_detail(CLI)优先于 step3 结论。
     manager = _Manager(

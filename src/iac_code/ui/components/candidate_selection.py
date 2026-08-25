@@ -31,6 +31,8 @@ class CandidateDetailEntry:
     summary: str
     cost_items: list[dict]
     total_monthly_cost: str
+    planning_monthly_estimate: str = ""
+    cost_caliber_note: str = ""
 
 
 @dataclass
@@ -67,6 +69,8 @@ class CandidateTab:
     summary: str | None = None
     cost_items: list[dict] = field(default_factory=list)
     total_monthly_cost: str = ""
+    planning_monthly_estimate: str = ""
+    cost_caliber_note: str = ""
     # U-I14: preserve every detail entry keyed by the originating tool_use_id so
     # duplicate ``show_candidate_detail`` calls for the same candidate don't lose
     # state. The convenience fields above hold the most recent entry for display.
@@ -150,6 +154,10 @@ class CandidateSelectionRenderer:
             target.cost_items = source.cost_items
         if not target.total_monthly_cost and source.total_monthly_cost:
             target.total_monthly_cost = source.total_monthly_cost
+        if not target.planning_monthly_estimate and source.planning_monthly_estimate:
+            target.planning_monthly_estimate = source.planning_monthly_estimate
+        if not target.cost_caliber_note and source.cost_caliber_note:
+            target.cost_caliber_note = source.cost_caliber_note
         target.details_by_tool_use_id.update(source.details_by_tool_use_id)
 
     def _remove_tab(self, tab: CandidateTab) -> None:
@@ -225,6 +233,8 @@ class CandidateSelectionRenderer:
         cost_items: list[dict],
         total_monthly_cost: str,
         candidate_index: int | None = None,
+        planning_monthly_estimate: str = "",
+        cost_caliber_note: str = "",
     ) -> None:
         """Store a candidate detail keyed by ``tool_use_id``.
 
@@ -237,10 +247,14 @@ class CandidateSelectionRenderer:
         tab.summary = summary
         tab.cost_items = cost_items
         tab.total_monthly_cost = total_monthly_cost
+        tab.planning_monthly_estimate = planning_monthly_estimate
+        tab.cost_caliber_note = cost_caliber_note
         tab.details_by_tool_use_id[tool_use_id] = CandidateDetailEntry(
             summary=summary,
             cost_items=cost_items,
             total_monthly_cost=total_monthly_cost,
+            planning_monthly_estimate=planning_monthly_estimate,
+            cost_caliber_note=cost_caliber_note,
         )
 
     def handle_key(self, key_event: KeyEvent) -> bool:
@@ -418,8 +432,23 @@ class CandidateSelectionRenderer:
         if tab.cost_items:
             parts.append(Text())
             parts.append(self._render_cost_table(tab.cost_items, tab.total_monthly_cost))
+        parts.extend(self._render_cost_caliber_lines(tab.planning_monthly_estimate, tab.cost_caliber_note))
 
         return Group(*parts)
+
+    @staticmethod
+    def _render_cost_caliber_lines(planning_monthly_estimate: str, cost_caliber_note: str) -> list[RenderableType]:
+        lines: list[RenderableType] = []
+        if planning_monthly_estimate:
+            lines.append(
+                Text(
+                    _("Planning estimate: {estimate}").format(estimate=planning_monthly_estimate),
+                    style="dim",
+                )
+            )
+        if cost_caliber_note:
+            lines.append(Text(_("Cost caliber: {note}").format(note=cost_caliber_note), style="dim"))
+        return lines
 
     @staticmethod
     def _normalize_diagram_views(

@@ -4042,6 +4042,8 @@ class InlineREPL:
                         summary=candidate.summary,
                         cost_items=candidate.cost_items,
                         total_monthly_cost=candidate.total_monthly_cost,
+                        planning_monthly_estimate=candidate.planning_monthly_estimate,
+                        cost_caliber_note=candidate.cost_caliber_note,
                     )
             yield PipelineEvent(
                 type=PipelineEventType.USER_INPUT_REQUIRED,
@@ -4993,6 +4995,8 @@ class InlineREPL:
                         event.cost_items,
                         event.total_monthly_cost,
                         candidate_index=event.candidate_index,
+                        planning_monthly_estimate=event.planning_monthly_estimate,
+                        cost_caliber_note=event.cost_caliber_note,
                     )
                     expired = [tid for tid in detail_tool_ids if tid in detail_accumulated]
                     for tid in expired:

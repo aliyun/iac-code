@@ -226,6 +226,32 @@ class TestCandidateSelectionRendererRendering:
         assert "ECS" in output
         assert "¥50" in output
 
+    def test_render_shows_both_calibers_and_deviation_note(self):
+        r, console = _make_renderer()
+        r.add_detail(
+            "tu_1",
+            "方案1",
+            "desc",
+            [{"name": "ECS", "spec": "1C2G", "monthly_cost": "¥50"}],
+            "¥289.81/月",
+            planning_monthly_estimate="¥300/月（粗略估算）",
+            cost_caliber_note="带宽假设由 5Mbps 调整为 1Mbps",
+        )
+        console.print(r.render())
+        output = console.file.getvalue()
+        assert "¥289.81/月" in output
+        assert "¥300/月" in output
+        assert "5Mbps" in output
+
+    def test_render_omits_caliber_lines_when_absent(self):
+        r, console = _make_renderer()
+        r.add_detail("tu_1", "方案1", "desc", [], "¥50/月")
+        lines = r._render_cost_caliber_lines("", "")
+        console.print(r.render())
+
+        assert lines == []
+        assert "Planning estimate" not in console.file.getvalue()
+
     def test_render_placeholder_when_diagram_missing(self):
         r, console = _make_renderer()
         r.add_detail("tu_1", "方案1", "desc", [], "¥0")

@@ -784,6 +784,41 @@ class TestSkillSchemaExtraction:
         with pytest.raises(ValueError, match="require_context_contraint_coverage"):
             load_pipeline_dir(tmp_path)
 
+    def test_accepts_pricing_caliber_alignment_completion_guard(self, tmp_path):
+        yaml_content = dedent("""\
+            name: test
+            context_dependencies:
+              cost: []
+            max_rollbacks: 1
+            steps:
+              - id: cost_estimating
+                conclusion_field: cost
+                forward: null
+                prompt: prompts/cost.md
+                completion_guards:
+                  - always: true
+                    require_pricing_caliber_alignment:
+                      planning_estimate_field: candidate.monthly_estimate
+                      calibers_field: pricing_calibers
+                      monthly_estimate_field: monthly_estimate
+                    message_key: pricing_caliber_alignment_required
+        """)
+        _write_pipeline(tmp_path, yaml_content, {"cost.md": "C"})
+
+        loaded = load_pipeline_dir(tmp_path)
+
+        assert loaded.steps[0].completion_guards == [
+            {
+                "always": True,
+                "require_pricing_caliber_alignment": {
+                    "planning_estimate_field": "candidate.monthly_estimate",
+                    "calibers_field": "pricing_calibers",
+                    "monthly_estimate_field": "monthly_estimate",
+                },
+                "message_key": "pricing_caliber_alignment_required",
+            }
+        ]
+
     def test_interrupt_judge_failure_policy_from_yaml(self, tmp_path):
         yaml_content = dedent("""\
             name: test

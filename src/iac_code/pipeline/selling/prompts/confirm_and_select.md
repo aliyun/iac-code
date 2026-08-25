@@ -43,12 +43,14 @@
   - `spec`：规格描述（如 "2核4G"）
   - `monthly_cost`：月费用（如 "¥200/月"）
 - `total_monthly_cost`：月度总费用（如 "¥1,234/月"）
+- `planning_monthly_estimate`：架构规划阶段的月费粗估（列表价口径），取 `evaluated_candidates[i].cost.pricing_calibers.planning_estimate`；缺失时省略
+- `cost_caliber_note`：粗估与最终估算的差异说明，取 `evaluated_candidates[i].cost.pricing_calibers.deviation_reason`；缺失时省略
 
 价格口径必须沿用成本预估步骤的归一化结果。`evaluated_candidates` 中每一项的 `candidate`、`cost`、`template` 是同级字段：
 - `total_monthly_cost` 必须取 `evaluated_candidates[i].cost.monthly_estimate`
 - `cost_items[].monthly_cost` 必须取 `evaluated_candidates[i].cost.resources[].cost`
 
-不要使用 `evaluated_candidates[i].candidate.monthly_estimate`，该字段是架构规划阶段的粗略估算。不要重新询价，也不要重新估算价格。
+不要使用 `evaluated_candidates[i].candidate.monthly_estimate`，该字段是架构规划阶段的粗略估算。不要重新询价，也不要重新估算价格。规划粗估只能通过 `planning_monthly_estimate` 与 `cost_caliber_note` 与最终估算并列展示，不得覆盖 `total_monthly_cost`。
 
 如果多个方案都需要展示，必须对每个方案都调用一次“架构图 + 方案详情”的并行展示；不要为了架构图优化额外阻塞方案详情展示。
 

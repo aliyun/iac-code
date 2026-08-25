@@ -55,6 +55,14 @@ class ShowCandidateDetailTool(Tool):
                     "type": "string",
                     "description": _("Total monthly cost, such as CNY 1,234/month"),
                 },
+                "planning_monthly_estimate": {
+                    "type": "string",
+                    "description": _("Rough monthly estimate from architecture planning, at list-price caliber"),
+                },
+                "cost_caliber_note": {
+                    "type": "string",
+                    "description": _("Explanation of the deviation between the planning estimate and the final cost"),
+                },
             },
             "required": ["candidate_name", "candidate_index", "summary", "cost_items", "total_monthly_cost"],
         }
@@ -79,6 +87,8 @@ class ShowCandidateDetailTool(Tool):
                 summary=tool_input["summary"],
                 cost_items=tool_input["cost_items"],
                 total_monthly_cost=tool_input["total_monthly_cost"],
+                planning_monthly_estimate=tool_input.get("planning_monthly_estimate") or "",
+                cost_caliber_note=tool_input.get("cost_caliber_note") or "",
                 candidate_index=candidate_index,
             )
             await context.event_queue.put(event)

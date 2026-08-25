@@ -4074,6 +4074,16 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"The pricing conclusion must reconcile the planning estimate with the ROS "
+"list price and give a contract discount source for any discounted "
+"effective price."
+msgstr ""
+"La conclusion tarifaire doit rapprocher l'estimation de planification du "
+"prix catalogue ROS et indiquer la source de remise contractuelle pour "
+"tout prix effectif remisé."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -4843,6 +4853,20 @@ msgstr "Liste de ventilation des coûts"
 #: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
 msgid "Total monthly cost, such as CNY 1,234/month"
 msgstr "Coût mensuel total, par exemple 1 234 CNY/mois"
+
+#: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
+msgid "Rough monthly estimate from architecture planning, at list-price caliber"
+msgstr ""
+"Estimation mensuelle approximative issue de la planification "
+"d'architecture, au référentiel prix catalogue"
+
+#: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
+msgid ""
+"Explanation of the deviation between the planning estimate and the final "
+"cost"
+msgstr ""
+"Explication de l'écart entre l'estimation de planification et le coût "
+"final"
 
 #: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
 #, python-brace-format
@@ -9936,6 +9960,18 @@ msgstr "  ✓ Sélectionné : {name}"
 #: src/iac_code/ui/pipeline_display_replay.py
 msgid "  Candidate selection completed"
 msgstr "  Sélection du candidat terminée"
+
+#: src/iac_code/ui/components/candidate_selection.py
+#: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "Planning estimate: {estimate}"
+msgstr "Estimation de planification : {estimate}"
+
+#: src/iac_code/ui/components/candidate_selection.py
+#: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "Cost caliber: {note}"
+msgstr "Référentiel de coût : {note}"
 
 #: src/iac_code/ui/components/candidate_selection.py
 #: src/iac_code/ui/pipeline_display_replay.py

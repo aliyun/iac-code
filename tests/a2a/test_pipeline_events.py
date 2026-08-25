@@ -1404,6 +1404,100 @@ def test_show_candidate_detail_tool_result_recovers_detail_from_tool_input() -> 
     assert detail_event["data"]["detail"]["costItems"] == [{"name": "ecs", "monthly_cost": "CNY 60"}]
 
 
+def test_candidate_detail_projects_dual_pricing_calibers() -> None:
+    translator = PipelineEventTranslator(_ctx())
+    translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.STEP_STARTED,
+            step_id="confirm_and_select",
+            timestamp=time.time(),
+            data={"index": 4, "total": 4},
+        )
+    )
+
+    envelope = translator.translate(
+        CandidateDetailEvent(
+            tool_use_id="toolu-detail",
+            candidate_name="low cost",
+            summary="single ecs",
+            cost_items=[],
+            total_monthly_cost="CNY 289.81",
+            planning_monthly_estimate="CNY 300 (rough, list price)",
+            cost_caliber_note="bandwidth assumption lowered",
+        )
+    )[0]
+
+    detail = envelope["data"]["detail"]
+    assert detail["totalMonthlyCost"] == "CNY 289.81"
+    assert detail["planningMonthlyEstimate"] == "CNY 300 (rough, list price)"
+    assert detail["costCaliberNote"] == "bandwidth assumption lowered"
+
+
+def test_candidate_detail_omits_caliber_keys_when_unset() -> None:
+    translator = PipelineEventTranslator(_ctx())
+    translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.STEP_STARTED,
+            step_id="confirm_and_select",
+            timestamp=time.time(),
+            data={"index": 4, "total": 4},
+        )
+    )
+
+    envelope = translator.translate(
+        CandidateDetailEvent(
+            tool_use_id="toolu-detail",
+            candidate_name="low cost",
+            summary="single ecs",
+            cost_items=[],
+            total_monthly_cost="CNY 60",
+        )
+    )[0]
+
+    detail = envelope["data"]["detail"]
+    assert "planningMonthlyEstimate" not in detail
+    assert "costCaliberNote" not in detail
+
+
+def test_show_candidate_detail_tool_result_recovers_calibers_from_tool_input() -> None:
+    translator = PipelineEventTranslator(_ctx())
+    translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.STEP_STARTED,
+            step_id="confirm_and_select",
+            timestamp=time.time(),
+            data={"index": 4, "total": 4},
+        )
+    )
+    translator.translate(
+        ToolUseEndEvent(
+            tool_use_id="toolu-detail",
+            name="show_candidate_detail",
+            input={
+                "candidate_name": "low cost",
+                "summary": "single ecs",
+                "cost_items": [],
+                "total_monthly_cost": "CNY 289.81",
+                "planning_monthly_estimate": "CNY 300",
+                "cost_caliber_note": "calibers aligned",
+            },
+        )
+    )
+
+    envelopes = translator.translate(
+        ToolResultEvent(
+            tool_use_id="toolu-detail",
+            tool_name="show_candidate_detail",
+            result="已展示「low cost」的方案详情。",
+            is_error=False,
+        )
+    )
+
+    detail = envelopes[0]["data"]["detail"]
+    assert detail["planningMonthlyEstimate"] == "CNY 300"
+    assert detail["costCaliberNote"] == "calibers aligned"
+
+
 def test_tool_trace_input_passthrough_keeps_raw() -> None:
     translator = PipelineEventTranslator(_ctx())
     raw_path = "/Users/alice/.iac-code/settings.yml"

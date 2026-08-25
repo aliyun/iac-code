@@ -11,7 +11,7 @@ conclusion_schema:
       minItems: 1
       items:
         type: object
-        required: [name, output_path, products, hard_constraints, topology, monthly_estimate, pros, cons]
+        required: [name, output_path, products, hard_constraints, topology, monthly_estimate, estimate_basis, pros, cons]
         properties:
           name:
             type: string
@@ -83,6 +83,23 @@ conclusion_schema:
             type: string
           monthly_estimate:
             type: string
+            description: 月度费用粗略估算；必须标注为粗略估算并采用与 ROS 询价一致的月度列表价口径（如 "粗略估算 ¥80-120/月（列表价口径）"），不得把合同优惠折算进该值
+          estimate_basis:
+            type: object
+            required: [pricing_mode, assumptions]
+            additionalProperties: false
+            description: monthly_estimate 的计价口径与假设；cost_estimating 用它对照最终 ROS 估算并解释偏差
+            properties:
+              pricing_mode:
+                type: string
+                enum: [subscription, pay_as_you_go, mixed]
+                description: 粗估采用的计费方式；subscription 为包年包月，pay_as_you_go 为按量付费，mixed 为不同资源混用
+              assumptions:
+                type: array
+                minItems: 1
+                items:
+                  type: string
+                description: 影响金额的关键假设，如实例规格、磁盘容量与类型、公网带宽大小与计费方式、是否含数据传输费用；粗估不含任何合同优惠
           pros:
             type: array
             items:
@@ -131,7 +148,7 @@ conclusion_schema:
 - 核心阿里云产品组合（只列必要的产品）
 - 资源生命周期：`resource_intents`
 - 拓扑描述（简述部署架构）
-- 月度费用估算范围
+- 月度费用估算范围（`monthly_estimate`）与其计价口径和假设（`estimate_basis`）
 - 优势和局限
 
 ## 资源生命周期约束
@@ -164,3 +181,13 @@ conclusion_schema:
 
 - 产品组合只包含实现需求所必需的资源，不要为了"看起来完整"添加用户没需要的东西
 - 费用估算基于阿里云公开定价的合理范围，不需要精确到个位
+
+## 费用估算口径
+
+本步骤的 `monthly_estimate` 只是粗略估算，与后续 `cost_estimating` 的 ROS 询价结果必须使用同一口径，才能被对照和解释差异：
+
+- 统一使用**月度列表价**口径（对应询价返回的 `OriginalAmount`），与最终 ROS 估算的列表价可比。
+- 不得把合同优惠、代金券、活动折扣折算进粗估，也不得输出合同优惠后价格。
+- 金额文本必须自带"粗略估算"与"列表价口径"标注，避免下游或用户把它当成最终报价。
+- `estimate_basis.pricing_mode` 与 `estimate_basis.assumptions` 必须写明影响金额的关键假设（实例规格、磁盘容量与类型、公网带宽大小与计费方式、是否包含数据传输费用等）。假设缺失会导致 `cost_estimating` 无法解释偏差。
+- 粗估与最终询价出现倍数级偏差时，由 `cost_estimating` 依据这些假设注明原因；本步骤不需要精确到个位，但假设必须真实、可核对。

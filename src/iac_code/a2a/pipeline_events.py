@@ -585,6 +585,8 @@ class PipelineEventTranslator:
                 cost_items=inner.cost_items,
                 total_monthly_cost=inner.total_monthly_cost,
                 candidate_index=inner.candidate_index,
+                planning_monthly_estimate=inner.planning_monthly_estimate,
+                cost_caliber_note=inner.cost_caliber_note,
             )
             self._mark_candidate_detail_emitted(inner.tool_use_id)
             input_data = None
@@ -701,6 +703,8 @@ class PipelineEventTranslator:
             cost_items=event.cost_items,
             total_monthly_cost=event.total_monthly_cost,
             candidate_index=event.candidate_index,
+            planning_monthly_estimate=event.planning_monthly_estimate,
+            cost_caliber_note=event.cost_caliber_note,
         )
         self._mark_candidate_detail_emitted(event.tool_use_id)
         return self._translate_parent_scoped_display_event("candidate_detail_shown", data)
@@ -1613,6 +1617,8 @@ def _candidate_detail_data(
     cost_items: list[dict],
     total_monthly_cost: str,
     candidate_index: int | None = None,
+    planning_monthly_estimate: str = "",
+    cost_caliber_note: str = "",
 ) -> dict[str, Any]:
     detail: dict[str, Any] = {
         "candidateName": candidate_name,
@@ -1620,6 +1626,10 @@ def _candidate_detail_data(
         "costItems": cost_items,
         "totalMonthlyCost": total_monthly_cost,
     }
+    if planning_monthly_estimate:
+        detail["planningMonthlyEstimate"] = planning_monthly_estimate
+    if cost_caliber_note:
+        detail["costCaliberNote"] = cost_caliber_note
     data: dict[str, Any] = {
         "detailId": f"detail-{tool_use_id}",
         "toolUseId": tool_use_id,
@@ -1635,6 +1645,10 @@ def _candidate_detail_data_from_tool_input(tool_use_id: str, tool_input: dict[st
     candidate_name = _first_string_value(tool_input, ("candidate_name", "candidateName"))
     summary = _first_string_value(tool_input, ("summary",))
     total_monthly_cost = _first_string_value(tool_input, ("total_monthly_cost", "totalMonthlyCost"))
+    planning_monthly_estimate = _first_string_value(
+        tool_input, ("planning_monthly_estimate", "planningMonthlyEstimate")
+    )
+    cost_caliber_note = _first_string_value(tool_input, ("cost_caliber_note", "costCaliberNote"))
     candidate_index = _int_or_none(tool_input.get("candidate_index"))
     if candidate_index is None:
         candidate_index = _int_or_none(tool_input.get("candidateIndex"))
@@ -1650,6 +1664,8 @@ def _candidate_detail_data_from_tool_input(tool_use_id: str, tool_input: dict[st
         cost_items=[item for item in cost_items if isinstance(item, dict)],
         total_monthly_cost=total_monthly_cost,
         candidate_index=candidate_index,
+        planning_monthly_estimate=planning_monthly_estimate or "",
+        cost_caliber_note=cost_caliber_note or "",
     )
 
 

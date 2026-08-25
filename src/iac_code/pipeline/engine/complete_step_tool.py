@@ -14,6 +14,7 @@ import jsonschema
 from iac_code.i18n import _
 from iac_code.pipeline.display_names import display_step_name
 from iac_code.pipeline.engine.hard_constraints import collect_hard_constraints, validate_hard_constraint_checks
+from iac_code.pipeline.engine.pricing_calibers import validate_pricing_calibers
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.utils.public_errors import sanitize_strict_text
@@ -60,6 +61,10 @@ _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
         "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
         "and evidence."
     ),
+    "pricing_caliber_alignment_required": (
+        "The pricing conclusion must reconcile the planning estimate with the ROS list price and give a "
+        "contract discount source for any discounted effective price."
+    ),
 }
 _COMPLETION_GUARD_MESSAGE_KEY_BY_TEXT = {text: key for key, text in _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY.items()}
 
@@ -99,6 +104,10 @@ def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
         _(
             "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
             "and evidence."
+        ),
+        _(
+            "The pricing conclusion must reconcile the planning estimate with the ROS list price and give a "
+            "contract discount source for any discounted effective price."
         ),
     )
 
@@ -324,6 +333,7 @@ class CompleteStepTool(Tool):
             required_tool_result = guard.get("require_tool_result")
             required_conclusion_sha256 = guard.get("require_conclusion_sha256")
             required_constraint_coverage = guard.get("require_context_constraint_coverage")
+            required_pricing_calibers = guard.get("require_pricing_caliber_alignment")
             required_field = guard.get("required_conclusion_field")
             required_any_of = guard.get("required_conclusion_any_of") or []
             successful_tools = self._completion_guard_state.get("successful_tools", set())
@@ -383,7 +393,49 @@ class CompleteStepTool(Tool):
                 )
                 if validation_error is not None:
                     return validation_error
+            if isinstance(required_pricing_calibers, dict):
+                validation_error = self._validate_pricing_caliber_alignment(
+                    required_pricing_calibers,
+                    conclusion,
+                    self._completion_guard_message(guard, None),
+                )
+                if validation_error is not None:
+                    return validation_error
         return None
+
+    def _validate_pricing_caliber_alignment(
+        self,
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        message: str | None,
+    ) -> str | None:
+        planning_estimate_field = requirement.get("planning_estimate_field")
+        if planning_estimate_field is not None and not isinstance(planning_estimate_field, str):
+            return message or _("A completion guard is misconfigured.")
+        context_snapshot = self._completion_guard_state.get("context_snapshot")
+        if not isinstance(context_snapshot, dict):
+            context_snapshot = {}
+        planning_estimate = (
+            self._resolve_dotted(context_snapshot, planning_estimate_field) if planning_estimate_field else None
+        )
+        issues = validate_pricing_calibers(
+            conclusion,
+            planning_estimate=planning_estimate,
+            tool_result_records=self._completion_guard_state.get("tool_result_records") or [],
+            calibers_field=str(requirement.get("calibers_field") or "pricing_calibers"),
+            monthly_estimate_field=str(requirement.get("monthly_estimate_field") or "monthly_estimate"),
+        )
+        if not issues:
+            return None
+        base_message = message or _(
+            "The pricing conclusion must reconcile the planning estimate with the ROS list price and give a "
+            "contract discount source for any discounted effective price."
+        )
+        return _("{message} Validation issue: {code} ({detail}).").format(
+            message=base_message,
+            code=issues[0].code if len(issues) == 1 else "multiple_pricing_caliber_issues",
+            detail="; ".join(f"{issue.code}[{issue.detail}]" if issue.detail else issue.code for issue in issues),
+        )
 
     def _validate_context_constraint_coverage(
         self,

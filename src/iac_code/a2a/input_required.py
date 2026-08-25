@@ -178,35 +178,29 @@ def permission_display_fields(request: PermissionRequestEvent, *, language: str 
             command = safe_input.get("command") or safe_input.get("cmd")
         if isinstance(command, str) and command.strip():
             command_fallback = translate_message("shell command", language=language)
-            target = translate_message(
-                "the current local workspace; command: {command}", language=language
-            ).format(command=_display_text(command, fallback=command_fallback, maximum=240))
+            target = translate_message("the current local workspace; command: {command}", language=language).format(
+                command=_display_text(command, fallback=command_fallback, maximum=240)
+            )
         else:
             target = translate_message("the current local workspace", language=language)
         effect = "read" if is_read_only else ("local_execution" if read_only_known else "unknown")
     elif tool_name in {"write_file", "edit_file"}:
         title = translate_message("Change a workspace file", language=language)
-        purpose = translate_message(
-            "Write a file needed for the requested infrastructure task.", language=language
-        )
+        purpose = translate_message("Write a file needed for the requested infrastructure task.", language=language)
         target = _safe_input_target(safe_input, language=language) or translate_message(
             "a file in the current workspace", language=language
         )
         effect = "file_change"
     elif tool_name in {"read_file", "glob", "grep"} or is_read_only:
         title = translate_message("Read workspace data with {tool}", language=language).format(tool=public_tool)
-        purpose = translate_message(
-            "Read local data needed for the requested infrastructure task.", language=language
-        )
+        purpose = translate_message("Read local data needed for the requested infrastructure task.", language=language)
         target = _safe_input_target(safe_input, language=language) or translate_message(
             "the current local workspace", language=language
         )
         effect = "read"
     else:
         title = translate_message("Run {tool}", language=language).format(tool=public_tool)
-        purpose = translate_message(
-            "Run this operation for the requested infrastructure task.", language=language
-        )
+        purpose = translate_message("Run this operation for the requested infrastructure task.", language=language)
         target = _safe_input_target(safe_input, language=language) or translate_message(
             "the current task workspace or cloud account", language=language
         )
@@ -319,9 +313,7 @@ def _cloud_operation_title(product: str, action: str, *, is_read_only: bool, lan
     if action == "CreateStack":
         return translate_message("Create {product} stack", language=language).format(product=product_label)
     if action == "ContinueCreateStack":
-        return translate_message("Continue creating {product} stack", language=language).format(
-            product=product_label
-        )
+        return translate_message("Continue creating {product} stack", language=language).format(product=product_label)
     if action == "UpdateStack":
         return translate_message("Update {product} stack", language=language).format(product=product_label)
     if action == "DeleteStack":
@@ -344,9 +336,7 @@ def _safe_input_target(value: Any, *, language: str) -> str:
     for key in ("file_path", "filePath", "path", "region_id", "regionId", "resource_id", "resourceId"):
         candidate = value.get(key)
         if isinstance(candidate, str) and candidate.strip():
-            return _display_text(
-                candidate, fallback=translate_message("the current task scope", language=language)
-            )
+            return _display_text(candidate, fallback=translate_message("the current task scope", language=language))
     return ""
 
 

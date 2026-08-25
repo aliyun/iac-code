@@ -538,6 +538,14 @@ msgid "{n}y"
 msgstr "{n}年"
 
 #: src/iac_code/web/static/js/app.js
+msgid "Operation failed"
+msgstr "操作失败"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Archive failed"
+msgstr "归档失败"
+
+#: src/iac_code/web/static/js/app.js
 msgid "Read-only"
 msgstr "只读"
 
@@ -552,14 +560,6 @@ msgstr "请输入内容"
 #: src/iac_code/web/static/js/app.js
 msgid "Please enter a name"
 msgstr "请输入名称"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Operation failed"
-msgstr "操作失败"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Archive failed"
-msgstr "归档失败"
 
 #: src/iac_code/web/static/js/app.js
 #, python-brace-format
@@ -935,6 +935,14 @@ msgstr "暂无询价信息"
 #: src/iac_code/web/static/js/mermaid_render.js
 msgid "Estimated monthly cost"
 msgstr "预估月度费用"
+
+#: src/iac_code/web/static/js/mermaid_render.js
+msgid "Planning estimate"
+msgstr "规划粗估"
+
+#: src/iac_code/web/static/js/mermaid_render.js
+msgid "Cost caliber"
+msgstr "成本口径"
 
 #: src/iac_code/web/static/js/token_transport.js
 msgid "Enter Web access token"

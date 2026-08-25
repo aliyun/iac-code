@@ -1731,6 +1731,12 @@ def _unified_input_projection(
                     projected_option["architectureDiagram"] = architecture_diagram[:1600]
                 if isinstance(total_monthly_cost, str) and total_monthly_cost:
                     projected_option["totalMonthlyCost"] = total_monthly_cost[:300]
+                planning_estimate = option.get("planning_monthly_estimate") or option.get("planningMonthlyEstimate")
+                if isinstance(planning_estimate, str) and planning_estimate:
+                    projected_option["planningMonthlyEstimate"] = planning_estimate[:300]
+                caliber_note = option.get("cost_caliber_note") or option.get("costCaliberNote")
+                if isinstance(caliber_note, str) and caliber_note:
+                    projected_option["costCaliberNote"] = caliber_note[:600]
                 raw_cost_items = option.get("cost_items") or option.get("costItems")
                 cost_items: list[dict[str, str]] = []
                 if isinstance(raw_cost_items, list):

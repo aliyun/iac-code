@@ -189,9 +189,13 @@ def pipeline_candidate_costs(manager: Any, session: Any) -> dict[int, dict[str, 
     - ``candidate_detail_shown``(CLI 显式 show_candidate_detail):保留兼容,携带
       ``detail.costItems`` / ``detail.totalMonthlyCost``。
 
+    另外映射成本口径对照:``cost.pricing_calibers`` 的 ``planning_estimate`` / ``deviation_reason``
+    (detail 路径为 ``planningMonthlyEstimate`` / ``costCaliberNote``),让前端把架构规划粗估与
+    最终 ROS 估算并列展示,避免只见单一口径。
+
     候选序号取 ``data.candidateIndex``(detail 回退 ``data.detail.candidateIndex``);缺序号
     无法与架构图对齐,跳过。按信封顺序 latest-wins;journal 中 completed 早于 detail,故同序号
-    两者都在时 detail 优先。返回 ``{index: {costItems, totalMonthlyCost}}``。
+    两者都在时 detail 优先。返回 ``{index: {costItems, totalMonthlyCost, planningMonthlyEstimate, costCaliberNote}}``。
     """
     costs: dict[int, dict[str, Any]] = {}
     for envelope in manager._load_a2a_pipeline_envelopes(getattr(session, "context_id", None)):
@@ -218,9 +222,15 @@ def pipeline_candidate_costs(manager: Any, session: Any) -> dict[int, dict[str, 
                 else []
             )
             total = cost.get("monthly_estimate")
+            calibers = cost.get("pricing_calibers")
+            calibers = calibers if isinstance(calibers, dict) else {}
+            planning = calibers.get("planning_estimate")
+            note = calibers.get("deviation_reason")
             costs[index] = {
                 "costItems": items,
                 "totalMonthlyCost": total if isinstance(total, str) else "",
+                "planningMonthlyEstimate": planning if isinstance(planning, str) else "",
+                "costCaliberNote": note if isinstance(note, str) else "",
             }
         elif event_type == "candidate_detail_shown":
             detail = data.get("detail")
@@ -232,9 +242,13 @@ def pipeline_candidate_costs(manager: Any, session: Any) -> dict[int, dict[str, 
                 continue
             items = detail.get("costItems")
             total = detail.get("totalMonthlyCost")
+            planning = detail.get("planningMonthlyEstimate")
+            note = detail.get("costCaliberNote")
             costs[index] = {
                 "costItems": items if isinstance(items, list) else [],
                 "totalMonthlyCost": total if isinstance(total, str) else "",
+                "planningMonthlyEstimate": planning if isinstance(planning, str) else "",
+                "costCaliberNote": note if isinstance(note, str) else "",
             }
     return costs
 

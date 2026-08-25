@@ -403,6 +403,8 @@ class CandidateDetailEvent(ToolEmittedEvent):
     summary: str
     cost_items: list[dict]
     total_monthly_cost: str
+    planning_monthly_estimate: str = ""
+    cost_caliber_note: str = ""
     candidate_index: int | None = None
     type: Literal["candidate_detail"] = "candidate_detail"
 
