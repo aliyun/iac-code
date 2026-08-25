@@ -4074,6 +4074,14 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"The cost estimate must use the same billing caliber as architecture "
+"planning, record where the contract-discounted price comes from or mark "
+"it as an estimate, and explain any significant deviation from the planned"
+" range."
+msgstr "L'estimation des coûts doit utiliser le même référentiel de facturation que la planification d'architecture, indiquer l'origine du prix remisé contractuel ou le marquer comme une estimation, et expliquer tout écart significatif par rapport à la fourchette planifiée."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -4176,13 +4184,13 @@ msgstr ""
 "{fields}."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
-msgid "A completion guard is misconfigured."
-msgstr "Une garde de finalisation est mal configurée."
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
 msgid "{message} Validation issue: {code} ({detail})."
 msgstr "{message} Problème de validation : {code} ({detail})."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A completion guard is misconfigured."
+msgstr "Une garde de finalisation est mal configurée."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A conclusion content hash is required before completing the current step."

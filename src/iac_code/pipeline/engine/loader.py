@@ -43,6 +43,7 @@ _SUPPORTED_COMPLETION_GUARD_KEYS = {
     "message_key",
     "require_conclusion_sha256",
     "require_context_constraint_coverage",
+    "require_cost_caliber_consistency",
     "require_tool",
     "require_tool_result",
     "required_conclusion_any_of",
@@ -343,9 +344,7 @@ def _parse_surface_overrides(raw: object, step_id: str) -> dict[str, StepSurface
 
         conclusion_schema = override.get("conclusion_schema")
         if conclusion_schema is not None and not isinstance(conclusion_schema, dict):
-            raise ValueError(
-                f"Step '{step_id}': surface_overrides.{surface}.conclusion_schema must be a mapping"
-            )
+            raise ValueError(f"Step '{step_id}': surface_overrides.{surface}.conclusion_schema must be a mapping")
 
         overrides[surface] = StepSurfaceOverride(
             prompt_file=prompt,

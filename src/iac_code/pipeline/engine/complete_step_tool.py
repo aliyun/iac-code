@@ -13,6 +13,7 @@ import jsonschema
 
 from iac_code.i18n import _
 from iac_code.pipeline.display_names import display_step_name
+from iac_code.pipeline.engine.cost_caliber import validate_cost_caliber
 from iac_code.pipeline.engine.hard_constraints import collect_hard_constraints, validate_hard_constraint_checks
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.tools.base import Tool, ToolContext, ToolResult
@@ -60,6 +61,11 @@ _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
         "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
         "and evidence."
     ),
+    "cost_caliber_consistency_required": (
+        "The cost estimate must use the same billing caliber as architecture planning, record where the "
+        "contract-discounted price comes from or mark it as an estimate, and explain any significant "
+        "deviation from the planned range."
+    ),
 }
 _COMPLETION_GUARD_MESSAGE_KEY_BY_TEXT = {text: key for key, text in _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY.items()}
 
@@ -99,6 +105,11 @@ def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
         _(
             "Every explicit user hard constraint must be covered by a satisfied check with matching parameters "
             "and evidence."
+        ),
+        _(
+            "The cost estimate must use the same billing caliber as architecture planning, record where the "
+            "contract-discounted price comes from or mark it as an estimate, and explain any significant "
+            "deviation from the planned range."
         ),
     )
 
@@ -324,6 +335,7 @@ class CompleteStepTool(Tool):
             required_tool_result = guard.get("require_tool_result")
             required_conclusion_sha256 = guard.get("require_conclusion_sha256")
             required_constraint_coverage = guard.get("require_context_constraint_coverage")
+            required_cost_caliber = guard.get("require_cost_caliber_consistency")
             required_field = guard.get("required_conclusion_field")
             required_any_of = guard.get("required_conclusion_any_of") or []
             successful_tools = self._completion_guard_state.get("successful_tools", set())
@@ -383,7 +395,55 @@ class CompleteStepTool(Tool):
                 )
                 if validation_error is not None:
                     return validation_error
+            if isinstance(required_cost_caliber, dict):
+                validation_error = self._validate_cost_caliber_consistency(
+                    required_cost_caliber,
+                    conclusion,
+                    self._completion_guard_message(guard, None),
+                )
+                if validation_error is not None:
+                    return validation_error
         return None
+
+    def _validate_cost_caliber_consistency(
+        self,
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        message: str | None,
+    ) -> str | None:
+        context_snapshot = self._completion_guard_state.get("context_snapshot")
+        if not isinstance(context_snapshot, dict):
+            context_snapshot = {}
+        kwargs: dict[str, Any] = {}
+        for key in (
+            "planning_estimate_field",
+            "monthly_estimate_field",
+            "provenance_field",
+            "deviation_field",
+            "expected_caliber",
+        ):
+            value = requirement.get(key)
+            if isinstance(value, str) and value:
+                kwargs[key] = value
+        tolerance = requirement.get("deviation_tolerance_ratio")
+        if isinstance(tolerance, int | float) and not isinstance(tolerance, bool):
+            kwargs["deviation_tolerance_ratio"] = float(tolerance)
+
+        issues = validate_cost_caliber(context_snapshot, conclusion, **kwargs)
+        if not issues:
+            return None
+        base_message = message or _(
+            "The cost estimate must use the same billing caliber as architecture planning, record where the "
+            "contract-discounted price comes from or mark it as an estimate, and explain any significant "
+            "deviation from the planned range."
+        )
+        issue_summaries = [f"{issue.code}[{issue.detail}]" if issue.detail else issue.code for issue in issues]
+        code = issues[0].code if len(issues) == 1 else "multiple_cost_caliber_issues"
+        return _("{message} Validation issue: {code} ({detail}).").format(
+            message=base_message,
+            code=code,
+            detail="; ".join(issue_summaries),
+        )
 
     def _validate_context_constraint_coverage(
         self,

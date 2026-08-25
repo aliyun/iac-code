@@ -28,6 +28,8 @@
 
 不要使用 `evaluated_candidates[i].candidate.monthly_estimate`，它只是架构规划阶段的粗略估算。不要重新询价或自行补算价格。若费用明细没有规格字段，省略 `spec`，不要猜测。
 
+`spec` 只能来自 `cost` 数据或最终模板中的实际规格，不要沿用规划阶段的规格。`evaluated_candidates[i].cost.planning_deviation.status` 为 `deviated` 时，在 `options[].summary` 中说明相对规划的变更原因（取 `planning_deviation.reason`）。`evaluated_candidates[i].cost.pricing_provenance.contract_price_is_estimate` 为 `true` 时，合同优惠价只能作为标注了「估算」的参考值出现，`total_monthly_cost` 仍以列表价为主口径。
+
 `user_prompt`、`summary` 和 Mermaid 节点标签应使用用户当前语言；字段名、枚举值和其他协议字段保持上面的固定形式。
 
 `complete_step.conclusion.user_prompt` 必须是展示给用户的选择提示，例如“请选择要部署的方案：”。

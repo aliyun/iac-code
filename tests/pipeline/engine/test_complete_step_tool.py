@@ -381,6 +381,74 @@ class TestCompletionGuards:
         assert "constraint_parameter_mismatch[db-storage-min, DBInstanceStorage]" in error
         assert "missing_constraint_check[db-engine-version]" in error
 
+    def test_requires_cost_caliber_consistency_with_planning_estimate(self):
+        guard = {
+            "always": True,
+            "require_cost_caliber_consistency": {
+                "planning_estimate_field": "candidate.monthly_estimate",
+                "monthly_estimate_field": "monthly_estimate",
+                "provenance_field": "pricing_provenance",
+                "deviation_field": "planning_deviation",
+                "expected_caliber": "pay_as_you_go_monthly",
+                "deviation_tolerance_ratio": 0.2,
+            },
+            "message_key": "cost_caliber_consistency_required",
+        }
+        tool = CompleteStepTool(
+            StepConfig(step_id="cost_estimating", conclusion_field="cost", forward=None),
+            completion_guards=[guard],
+            completion_guard_state={
+                "context_snapshot": {
+                    "candidate": {"monthly_estimate": "¥80-120/月（按量付费列表价，架构规划粗估）"},
+                },
+            },
+        )
+
+        aligned = {
+            "monthly_estimate": "¥110.00/月（列表价，合同优惠后约¥15.30/月）",
+            "pricing_provenance": {
+                "caliber": "pay_as_you_go_monthly",
+                "list_price_source": "GetTemplateEstimateCost.OriginalAmount",
+                "contract_price_source": "GetTemplateEstimateCost.TradeAmount",
+            },
+            "planning_deviation": {"status": "aligned"},
+        }
+        assert tool.validate_completion_input({"conclusion": aligned}) is None
+
+        undocumented_discount = dict(aligned, pricing_provenance=dict(aligned["pricing_provenance"]))
+        del undocumented_discount["pricing_provenance"]["contract_price_source"]
+        error = tool.validate_completion_input({"conclusion": undocumented_discount})
+        assert error is not None
+        assert "contract_price_provenance_missing" in error
+        assert "contract-discounted price" in error
+
+        silent_deviation = dict(aligned, monthly_estimate="¥281.77/月（列表价）")
+        error = tool.validate_completion_input({"conclusion": silent_deviation})
+        assert error is not None
+        assert "planning_deviation_unreported" in error
+
+        explained_deviation = dict(
+            silent_deviation,
+            planning_deviation={
+                "status": "deviated",
+                "reason": "模板生成阶段按硬约束升档至 2vCPU/4GiB",
+                "spec_changes": [{"item": "ECS InstanceType", "planned": "1vCPU/1GiB", "actual": "2vCPU/4GiB"}],
+            },
+        )
+        assert tool.validate_completion_input({"conclusion": explained_deviation}) is None
+
+        wrong_caliber = dict(
+            aligned,
+            pricing_provenance={
+                "caliber": "subscription_monthly",
+                "list_price_source": "GetTemplateEstimateCost.OriginalAmount",
+                "contract_price_source": "GetTemplateEstimateCost.TradeAmount",
+            },
+        )
+        error = tool.validate_completion_input({"conclusion": wrong_caliber})
+        assert error is not None
+        assert "pricing_caliber_mismatch" in error
+
     @pytest.mark.asyncio
     async def test_constraint_guard_returns_repairable_error_before_failing_step(self):
         constraint = {

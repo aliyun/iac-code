@@ -3840,6 +3840,14 @@ msgstr "每个用户明确提出的硬约束都必须由一条状态为满足的
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"The cost estimate must use the same billing caliber as architecture "
+"planning, record where the contract-discounted price comes from or mark "
+"it as an estimate, and explain any significant deviation from the planned"
+" range."
+msgstr "成本估算必须与架构规划使用相同的计费口径，记录合同优惠价的来源或将其标注为估算，并说明相对规划区间的显著偏离。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr "调用此工具提交结论以完成当前步骤。如需回滚到较早步骤，请设置 rollback_request。"
@@ -3930,13 +3938,13 @@ msgid ""
 msgstr "{message} complete_step.conclusion 必须包含以下字段之一: {fields}。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
-msgid "A completion guard is misconfigured."
-msgstr "完成守卫配置错误。"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
 msgid "{message} Validation issue: {code} ({detail})."
 msgstr "{message} 校验问题：{code}（{detail}）。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A completion guard is misconfigured."
+msgstr "完成守卫配置错误。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A conclusion content hash is required before completing the current step."

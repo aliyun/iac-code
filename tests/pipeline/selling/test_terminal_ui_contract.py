@@ -133,9 +133,7 @@ def test_confirm_prompt_tells_model_to_preserve_parameter_overrides():
 def test_confirm_prompts_share_selection_contract_structure():
     repl_prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.md").read_text(encoding="utf-8")
     a2a_prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.a2a.md").read_text(encoding="utf-8")
-    rich_prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.a2a.rich.md").read_text(
-        encoding="utf-8"
-    )
+    rich_prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.a2a.rich.md").read_text(encoding="utf-8")
 
     shared_fragments = [
         "## 首次执行",
@@ -195,7 +193,37 @@ def test_confirm_skill_rich_surface_uses_rich_prompt_and_schema():
     assert "`options[].cost_items`" in prompt
     assert "evaluated_candidates[i].cost.monthly_estimate" in prompt
     assert "evaluated_candidates[i].candidate.monthly_estimate" in prompt
+    assert "evaluated_candidates[i].cost.planning_deviation.status" in prompt
+    assert "evaluated_candidates[i].cost.pricing_provenance.contract_price_is_estimate" in prompt
     assert "用户当前语言" in prompt
+
+
+def test_confirm_and_select_reports_planning_deviation_and_discount_labeling():
+    prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.md").read_text(encoding="utf-8")
+
+    assert "evaluated_candidates[i].cost.planning_deviation.status" in prompt
+    assert "planning_deviation.reason" in prompt
+    assert "evaluated_candidates[i].cost.pricing_provenance.contract_price_is_estimate" in prompt
+    assert "不得把无来源的优惠价单独作为最终价格呈现" in prompt
+    assert "不要沿用 `candidate` 中的规划规格" in prompt
+
+
+def test_cost_estimating_guards_cost_caliber_consistency():
+    loaded = load_pipeline_dir(_selling_pipeline_dir())
+    cost_step = next(
+        step
+        for sub_pipeline in loaded.sub_pipelines.values()
+        for step in sub_pipeline.steps
+        if step.step_id == "cost_estimating"
+    )
+    guard = next(guard for guard in cost_step.completion_guards if "require_cost_caliber_consistency" in guard)
+
+    requirement = guard["require_cost_caliber_consistency"]
+    assert guard["message_key"] == "cost_caliber_consistency_required"
+    assert requirement["planning_estimate_field"] == "candidate.monthly_estimate"
+    assert requirement["provenance_field"] == "pricing_provenance"
+    assert requirement["deviation_field"] == "planning_deviation"
+    assert requirement["expected_caliber"] == "pay_as_you_go_monthly"
 
 
 def test_selling_steps_do_not_expose_static_rollback_rules():

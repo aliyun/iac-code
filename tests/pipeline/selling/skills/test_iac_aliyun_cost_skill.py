@@ -127,6 +127,11 @@ class TestSkillFrontmatter:
                 }
             ],
             "preview_validation": {"succeeded": False, "error": "missing ZoneId"},
+            "pricing_provenance": {
+                "caliber": "pay_as_you_go_monthly",
+                "list_price_source": "GetTemplateEstimateCost.OriginalAmount",
+            },
+            "planning_deviation": {"status": "aligned"},
         }
 
         jsonschema.validate(conclusion, schema)
@@ -172,6 +177,91 @@ class TestSkillFrontmatter:
         assert "OriginalAmount" in description
         assert "TradeAmount" in description
 
+    def test_monthly_estimate_schema_pins_the_billing_caliber(self):
+        fm = _parse_frontmatter(SKILL_MD.read_text(encoding="utf-8"))
+        description = fm["conclusion_schema"]["properties"]["monthly_estimate"]["description"]
+
+        assert "pay_as_you_go_monthly" in description
+        assert "architecture_planning" in description
+        assert "估算" in description
+
+    def test_conclusion_schema_requires_pricing_provenance(self):
+        schema = _parse_frontmatter(SKILL_MD.read_text(encoding="utf-8"))["conclusion_schema"]
+        provenance = schema["properties"]["pricing_provenance"]
+
+        assert provenance["required"] == ["caliber", "list_price_source"]
+        assert provenance["properties"]["caliber"]["const"] == "pay_as_you_go_monthly"
+        assert provenance["properties"]["contract_price_source"]["type"] == "string"
+        assert provenance["properties"]["contract_price_is_estimate"]["type"] == "boolean"
+        assert all(value.get("description") for value in provenance["properties"].values())
+
+    def test_conclusion_schema_requires_planning_deviation(self):
+        schema = _parse_frontmatter(SKILL_MD.read_text(encoding="utf-8"))["conclusion_schema"]
+        deviation = schema["properties"]["planning_deviation"]
+
+        assert deviation["required"] == ["status"]
+        assert deviation["properties"]["status"]["enum"] == [
+            "aligned",
+            "deviated",
+            "planning_estimate_unavailable",
+        ]
+        assert deviation["properties"]["spec_changes"]["items"]["required"] == ["item", "planned", "actual"]
+        assert "reason" in deviation["properties"]
+
+    def test_successful_quote_must_carry_provenance_and_deviation(self):
+        schema = _parse_frontmatter(SKILL_MD.read_text(encoding="utf-8"))["conclusion_schema"]
+        conclusion = {
+            "monthly_estimate": "¥110.00/月（列表价，合同优惠后约¥15.30/月）",
+            "currency": "CNY",
+            "resources": [{"type": "ALIYUN::ECS::InstanceGroup", "cost": "¥110.00/月"}],
+            "template_fixed": False,
+            "deployment_parameters": {"ZoneId": "cn-hangzhou-k"},
+            "hard_constraint_checks": [],
+            "preview_validation": {
+                "succeeded": True,
+                "template_url": "templates/1-a.yml",
+                "parameters": {"ZoneId": "cn-hangzhou-k"},
+            },
+            "pricing_provenance": {
+                "caliber": "pay_as_you_go_monthly",
+                "list_price_source": "GetTemplateEstimateCost.OriginalAmount",
+                "contract_price_source": "GetTemplateEstimateCost.TradeAmount",
+            },
+            "planning_deviation": {"status": "aligned"},
+        }
+
+        jsonschema.validate(conclusion, schema)
+
+        for dropped in ("pricing_provenance", "planning_deviation"):
+            incomplete = {key: value for key, value in conclusion.items() if key != dropped}
+            with pytest.raises(jsonschema.ValidationError):
+                jsonschema.validate(incomplete, schema)
+
+        wrong_caliber = json.loads(json.dumps(conclusion, ensure_ascii=False))
+        wrong_caliber["pricing_provenance"]["caliber"] = "subscription_monthly"
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(wrong_caliber, schema)
+
+        unknown_status = json.loads(json.dumps(conclusion, ensure_ascii=False))
+        unknown_status["planning_deviation"]["status"] = "unknown"
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(unknown_status, schema)
+
+    def test_failed_quote_does_not_require_provenance_or_deviation(self):
+        schema = _parse_frontmatter(SKILL_MD.read_text(encoding="utf-8"))["conclusion_schema"]
+        conclusion = {
+            "monthly_estimate": "询价失败",
+            "currency": "CNY",
+            "resources": [],
+            "template_fixed": False,
+            "deployment_parameters": {},
+            "hard_constraint_checks": [],
+            "preview_validation": {"succeeded": False, "error": "missing VpcId"},
+            "error": "GetTemplateEstimateCost 返回 InvalidParameter",
+        }
+
+        jsonschema.validate(conclusion, schema)
+
     def test_conclusion_schema_requires_full_preview_validation_when_succeeded(self):
         content = SKILL_MD.read_text(encoding="utf-8")
         fm = _parse_frontmatter(content)
@@ -188,6 +278,11 @@ class TestSkillFrontmatter:
                 "template_url": "templates/a.yml",
                 "parameters": {"ZoneId": "cn-hangzhou-k"},
             },
+            "pricing_provenance": {
+                "caliber": "pay_as_you_go_monthly",
+                "list_price_source": "GetTemplateEstimateCost.OriginalAmount",
+            },
+            "planning_deviation": {"status": "aligned"},
         }
 
         jsonschema.validate(conclusion, schema)
@@ -359,6 +454,17 @@ class TestSkillContentRosOnly:
     def test_contains_output_format(self, body):
         assert "monthly_estimate" in body
         assert "complete_step" in body
+
+    def test_documents_cost_caliber_and_planning_reconciliation(self, body):
+        assert "## 成本口径与规划对账" in body
+        assert "按量付费列表价折算月度" in body
+        assert "pay_as_you_go_monthly" in body
+        assert "contract_price_source" in body
+        assert "contract_price_is_estimate" in body
+        assert "planning_deviation" in body
+        assert "spec_changes" in body
+        assert "不得静默替换数值" in body
+        assert "不要把包年包月价格与按量价格混在同一个字段里比较" in body
 
     def test_no_doc_search_recommendation(self, body):
         assert "aliyun_doc_search" in body
@@ -538,6 +644,19 @@ class TestCostPrompt:
         assert "列表价" in body
         assert "合同优惠后" in body
         assert "monthly_estimate" in body
+
+    def test_prompt_pins_billing_caliber_and_planning_reconciliation(self):
+        body = COST_PROMPT_MD.read_text(encoding="utf-8")
+
+        assert "{candidate.monthly_estimate}" in body
+        assert "按量付费列表价折算月度" in body
+        assert "pay_as_you_go_monthly" in body
+        assert "pricing_provenance" in body
+        assert "contract_price_source" in body
+        assert "contract_price_is_estimate" in body
+        assert "planning_deviation" in body
+        assert "spec_changes" in body
+        assert "不得静默替换数值" in body
 
     def test_prompt_receives_only_required_candidate_fields_without_repeating_skill_rules(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")

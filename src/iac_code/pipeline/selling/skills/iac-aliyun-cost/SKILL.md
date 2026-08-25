@@ -13,11 +13,76 @@ conclusion_schema:
     - deployment_parameters
     - hard_constraint_checks
     - preview_validation
+  allOf:
+    - if:
+        required: [monthly_estimate]
+        properties:
+          monthly_estimate:
+            not:
+              const: "询价失败"
+      then:
+        required: [pricing_provenance, planning_deviation]
   additionalProperties: false
   properties:
     monthly_estimate:
       type: string
-      description: 月度费用估算；询价同时返回 OriginalAmount 与 TradeAmount 时，必须同时包含列表价和合同优惠后价格（如 ¥96.80/月（列表价，合同优惠后约¥13.76/月））；询价失败时填 "询价失败"
+      description: 月度费用估算，口径固定为按量付费列表价折算月度（pay_as_you_go_monthly），与 architecture_planning 粗估口径一致；OriginalAmount 是主口径列表价，TradeAmount 是合同优惠后价格，两者都存在时用 ¥<原价>/月（列表价，合同优惠后约¥<最终价>/月）；合同优惠价没有 pricing_provenance.contract_price_source 时必须标注为估算（如 合同优惠后约¥13.76/月，估算），不得单独作为最终价格呈现；询价失败时填 "询价失败"
+    pricing_provenance:
+      type: object
+      description: 价格口径与来源证明；complete_step 由代码校验，缺少列表价来源或合同优惠价来源/估算标注时不允许结束步骤
+      required: [caliber, list_price_source]
+      additionalProperties: false
+      properties:
+        caliber:
+          const: pay_as_you_go_monthly
+          description: 计费口径，固定为按量付费折算月度；不得使用包年包月口径
+        list_price_source:
+          type: string
+          minLength: 1
+          description: 列表价来源，如 GetTemplateEstimateCost.OriginalAmount
+        contract_price_source:
+          type: string
+          description: 合同优惠价来源，如 GetTemplateEstimateCost.TradeAmount；询价结果未返回 TradeAmount 或无法说明折扣依据时省略，并把 contract_price_is_estimate 置为 true
+        contract_price_is_estimate:
+          type: boolean
+          description: 合同优惠价缺少可核对来源时置 true，同时必须在 monthly_estimate 文本中标注"估算"
+        request_id:
+          type: string
+          description: 询价工具返回的 RequestId，便于回溯
+    planning_deviation:
+      type: object
+      description: 与 architecture_planning 粗估的对账结果；complete_step 由代码校验，显著偏离规划区间但未记录原因时不允许结束步骤
+      required: [status]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [aligned, deviated, planning_estimate_unavailable]
+          description: aligned 表示最终列表价落在规划区间容差内；deviated 表示显著偏离，必须填写 reason；planning_estimate_unavailable 仅在 candidate.monthly_estimate 无法解析出金额时使用
+        planning_monthly_estimate:
+          type: string
+          description: candidate.monthly_estimate 原文，用于对账留痕
+        final_monthly_estimate:
+          type: string
+          description: 本步骤最终 monthly_estimate 原文
+        spec_changes:
+          type: array
+          description: 模板生成阶段相对规划阶段的规格变更（升档/降档）
+          items:
+            type: object
+            required: [item, planned, actual]
+            additionalProperties: false
+            properties:
+              item:
+                type: string
+                description: 变更对象，如 ECS InstanceType、系统盘类型
+              planned:
+                type: string
+              actual:
+                type: string
+        reason:
+          type: string
+          description: status=deviated 时必填；说明成本或规格偏离规划区间的原因，不得静默替换数值
     currency:
       type: string
       enum: [CNY]
@@ -307,3 +372,15 @@ aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<�
 - `missing_deployment_parameters` 填完整部署或 PreviewStack 仍缺少的参数及原因；没有缺口时可省略或填 `[]`
 - `parameter_set_summary` 可简要说明参数来源、可用性筛选、PreviewStack 验证结果以及是否使用软门禁继续询价
 - 询价失败时 `monthly_estimate` 填 "询价失败"，`resources` 为空数组，`error` 说明原因
+
+## 成本口径与规划对账
+
+本步骤是候选成本的权威口径，`architecture_planning` 的 `candidate.monthly_estimate` 只是粗估区间。两阶段必须使用同一计费口径，最终以本步骤结果为准。
+
+- **统一口径**：只使用**按量付费列表价折算月度**（`pricing_provenance.caliber: pay_as_you_go_monthly`）。不要把包年包月价格与按量价格混在同一个字段里比较。`OriginalAmount` 是主口径列表价；`TradeAmount` 是合同优惠后价格。
+- **优惠价必须有据**：`TradeAmount` 存在时在 `pricing_provenance.contract_price_source` 写明来源（如 `GetTemplateEstimateCost.TradeAmount`）。无法说明折扣依据时，把 `contract_price_is_estimate` 置为 `true` 并在 `monthly_estimate` 文本中标注「估算」；两者都没有时代码会拒绝结束步骤。折扣幅度较大（如列表价的一折）时尤其不能省略来源。
+- **偏离必须记录原因**：把 `candidate.monthly_estimate` 与本步骤最终列表价对账后填写 `planning_deviation`。
+  - 落在规划区间（含 20% 容差）内 → `status: aligned`
+  - 显著超出区间，或模板生成阶段改变了规格（如规划 1c1g、实际 2vCPU/4GB） → `status: deviated`，在 `spec_changes` 列出规格变更，并在 `reason` 说明原因（如"模板生成阶段按硬约束升档至 2vCPU/4GB，列表价随之上升"）。不得静默替换数值。
+  - `candidate.monthly_estimate` 无法解析出金额时才用 `status: planning_estimate_unavailable`
+- 不要为了让数值"看起来对齐"而改写询价结果；对账记录的是真实差异及其原因。

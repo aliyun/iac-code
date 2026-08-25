@@ -44,7 +44,19 @@ def test_review_enabled_loads_infraguard_repair_step_before_cost() -> None:
                 "deployment_parameters_field": "deployment_parameters",
             },
             "message_key": "hard_constraint_verification_required",
-        }
+        },
+        {
+            "always": True,
+            "require_cost_caliber_consistency": {
+                "planning_estimate_field": "candidate.monthly_estimate",
+                "monthly_estimate_field": "monthly_estimate",
+                "provenance_field": "pricing_provenance",
+                "deviation_field": "planning_deviation",
+                "expected_caliber": "pay_as_you_go_monthly",
+                "deviation_tolerance_ratio": 0.2,
+            },
+            "message_key": "cost_caliber_consistency_required",
+        },
     ]
 
     assert review_step.tools is not None

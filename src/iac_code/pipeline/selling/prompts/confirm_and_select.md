@@ -50,6 +50,11 @@
 
 不要使用 `evaluated_candidates[i].candidate.monthly_estimate`，该字段是架构规划阶段的粗略估算。不要重新询价，也不要重新估算价格。
 
+方案对比与规格描述也必须使用成本预估阶段的最终值，不要引用规划阶段的规格或区间：
+- `cost_items[].spec` 取 `cost` 数据或最终模板中的实际规格，不要沿用 `candidate` 中的规划规格。
+- `evaluated_candidates[i].cost.planning_deviation.status` 为 `deviated` 时，在 `summary` 中说明规格或成本相对规划的变更原因（取 `planning_deviation.reason`），不要静默展示新数值。
+- `evaluated_candidates[i].cost.pricing_provenance.contract_price_is_estimate` 为 `true` 时，合同优惠价只能作为标注了「估算」的参考值出现，`total_monthly_cost` 仍以列表价为主口径；不得把无来源的优惠价单独作为最终价格呈现。
+
 如果多个方案都需要展示，必须对每个方案都调用一次“架构图 + 方案详情”的并行展示；不要为了架构图优化额外阻塞方案详情展示。
 
 - 不要用文字输出对比表格或方案信息 — 所有展示数据通过上述工具传递

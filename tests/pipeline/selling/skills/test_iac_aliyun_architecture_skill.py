@@ -48,6 +48,37 @@ def test_architecture_hard_constraint_schema_describes_every_field():
     assert all(value.get("description") for value in properties.values())
 
 
+def test_architecture_monthly_estimate_pins_caliber_and_rough_label():
+    body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+    end = body.index("---", 3)
+    schema = yaml.safe_load(body[3:end])["conclusion_schema"]
+    description = schema["properties"]["candidates"]["items"]["properties"]["monthly_estimate"]["description"]
+
+    assert "按量付费列表价" in description
+    assert "cost_estimating" in description
+    assert "架构规划粗估" in description
+    assert "不得使用包年包月" in description
+
+
+def test_architecture_skill_documents_shared_cost_caliber():
+    body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "## 成本口径" in body
+    assert "按量付费列表价折算月度" in body
+    assert "OriginalAmount" in body
+    assert "不要预估合同优惠价" in body or "不要预估合同优惠价——折扣只能由询价 API 返回" in body
+    assert "区间必须与本方案 `topology` 中写明的实际规格自洽" in body
+
+
+def test_architecture_prompt_documents_shared_cost_caliber():
+    body = PROMPT_FILE.read_text(encoding="utf-8")
+
+    assert "## 成本口径" in body
+    assert "按量付费列表价折算月度" in body
+    assert "架构规划粗估" in body
+    assert "不要使用包年包月" in body
+
+
 def test_architecture_prompt_guides_optional_memory_lookup_for_planning_context():
     body = PROMPT_FILE.read_text(encoding="utf-8")
 
