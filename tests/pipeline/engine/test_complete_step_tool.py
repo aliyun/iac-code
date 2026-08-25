@@ -1744,3 +1744,76 @@ class TestNullNormalization:
         valid, error = tool.validate_input(tool_input)
         assert not valid
         assert "name" in error
+
+
+class TestFlattenedConclusionNormalization:
+    """LLMs sometimes flatten conclusion fields to the top level — they are lifted back."""
+
+    @staticmethod
+    def _intent_tool() -> CompleteStepTool:
+        config = StepConfig(
+            step_id="intent_parsing",
+            conclusion_field="intent",
+            forward="arch",
+            conclusion_schema={
+                "type": "object",
+                "required": ["is_infra_intent", "confidence"],
+                "additionalProperties": False,
+                "properties": {
+                    "is_infra_intent": {"type": "boolean"},
+                    "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                    "scale_hint": {"type": "string"},
+                    "budget_constraint": {"type": "string"},
+                    "additional_notes": {"type": "string"},
+                },
+            },
+        )
+        return CompleteStepTool(config)
+
+    def test_flattened_conclusion_fields_are_lifted_into_conclusion(self):
+        tool = self._intent_tool()
+        tool_input = {
+            "conclusion": {"is_infra_intent": True, "confidence": "high"},
+            "additional_notes": "用户仅需要一个 VPC",
+            "budget_constraint": "月预算500元以内",
+            "scale_hint": "创业团队",
+        }
+
+        valid, error = tool.validate_input(tool_input)
+
+        assert valid, f"Expected valid but got: {error}"
+        assert set(tool_input) == {"conclusion"}
+        assert tool_input["conclusion"]["additional_notes"] == "用户仅需要一个 VPC"
+        assert tool_input["conclusion"]["budget_constraint"] == "月预算500元以内"
+        assert tool_input["conclusion"]["scale_hint"] == "创业团队"
+
+    def test_existing_conclusion_value_wins_over_flattened_duplicate(self):
+        tool = self._intent_tool()
+        tool_input = {
+            "conclusion": {"is_infra_intent": True, "confidence": "high", "scale_hint": "中小企业"},
+            "scale_hint": "创业团队",
+        }
+
+        valid, error = tool.validate_input(tool_input)
+
+        assert valid, f"Expected valid but got: {error}"
+        assert tool_input["conclusion"]["scale_hint"] == "中小企业"
+
+    def test_conclusion_is_created_when_all_fields_are_flattened(self):
+        tool = self._intent_tool()
+        tool_input = {"is_infra_intent": True, "confidence": "high", "additional_notes": "全部平铺"}
+
+        valid, error = tool.validate_input(tool_input)
+
+        assert valid, f"Expected valid but got: {error}"
+        assert tool_input["conclusion"]["is_infra_intent"] is True
+        assert tool_input["conclusion"]["additional_notes"] == "全部平铺"
+
+    def test_unknown_top_level_field_is_still_rejected(self):
+        tool = self._intent_tool()
+        tool_input = {"conclusion": {"is_infra_intent": True, "confidence": "high"}, "admin_token": "x"}
+
+        valid, error = tool.validate_input(tool_input)
+
+        assert not valid
+        assert "admin_token" in error

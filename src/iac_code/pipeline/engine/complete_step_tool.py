@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 MAX_PARALLEL_CANDIDATES = 5
 MAX_ROLLBACK_TARGETS = 5
+# Top-level complete_step arguments; never treated as flattened conclusion fields.
+_COMPLETE_STEP_TOOL_LEVEL_FIELDS = frozenset({"conclusion", "rollback_request"})
 _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
     "reviewing_rerun_after_validate_template_write": (
         "reviewing ran write_file/edit_file after ros_validate_template; "
@@ -174,11 +176,38 @@ class CompleteStepTool(Tool):
 
     def normalize_input(self, tool_input: dict[str, Any]) -> None:
         """Normalize conclusion before input/schema validation."""
+        self._lift_flattened_conclusion_fields(tool_input)
         conclusion = tool_input.get("conclusion")
         if isinstance(conclusion, dict):
             for key in [k for k, v in conclusion.items() if v is None]:
                 del conclusion[key]
             self._copy_guard_tool_results_to_conclusion(conclusion)
+
+    def _lift_flattened_conclusion_fields(self, tool_input: dict[str, Any]) -> None:
+        """Move conclusion fields that the model flattened to the top level back into conclusion.
+
+        The outer schema sets ``additionalProperties: false``, so a flattened field such as
+        ``additional_notes`` would otherwise fail input validation and force a rollback retry
+        even though the field is a legitimate part of the step's conclusion schema.
+        """
+        conclusion_schema = self._step_config.conclusion_schema
+        if not isinstance(conclusion_schema, dict):
+            return
+        conclusion_properties = conclusion_schema.get("properties")
+        if not isinstance(conclusion_properties, dict):
+            return
+        liftable = [
+            key for key in tool_input if key not in _COMPLETE_STEP_TOOL_LEVEL_FIELDS and key in conclusion_properties
+        ]
+        if not liftable:
+            return
+        conclusion = tool_input.get("conclusion")
+        if not isinstance(conclusion, dict):
+            conclusion = {}
+            tool_input["conclusion"] = conclusion
+        for key in liftable:
+            value = tool_input.pop(key)
+            conclusion.setdefault(key, value)
 
     def _copy_guard_tool_results_to_conclusion(self, conclusion: dict[str, Any]) -> None:
         tool_results = self._completion_guard_state.get("tool_results", {})
