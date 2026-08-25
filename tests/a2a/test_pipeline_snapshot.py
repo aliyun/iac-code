@@ -733,6 +733,228 @@ def test_reduce_candidate_lifecycle_and_candidate_steps() -> None:
     assert snapshot["control"]["activeCandidateRunIds"] == []
 
 
+def _candidate_step_events(
+    parent_step: dict,
+    candidate: dict,
+    step_id: str,
+    index: int,
+    attempt: int,
+    sequence: int,
+    *,
+    outcome: str,
+    conclusion: dict | None = None,
+) -> list[dict]:
+    coordinate = {
+        "runId": f"{candidate['runId']}-{step_id}-{attempt}",
+        "id": step_id,
+        "index": index,
+        "total": 3,
+        "attempt": attempt,
+    }
+    started = _base(f"evt-{step_id}-{attempt}-start", sequence, "candidate_step_started", scope="candidate_step")
+    finished = _base(f"evt-{step_id}-{attempt}-end", sequence + 1, f"candidate_step_{outcome}", scope="candidate_step")
+    for event in (started, finished):
+        event["step"] = parent_step
+        event["candidate"] = candidate
+        event["candidateStep"] = coordinate
+    if conclusion is not None:
+        finished["data"] = {"conclusion": conclusion}
+    return [started, finished]
+
+
+def _candidate_started_with_skeletons(parent_step: dict, candidate: dict, step_ids: list[str]) -> dict:
+    started = _base("evt-candidate-start", 2, "candidate_started", scope="candidate")
+    started["step"] = parent_step
+    started["candidate"] = {
+        **candidate,
+        "steps": [
+            {
+                "id": step_id,
+                "name": step_id,
+                "runId": f"{candidate['runId']}-{step_id}-1",
+                "attempt": 1,
+                "index": index,
+                "total": len(step_ids),
+                "status": "pending",
+            }
+            for index, step_id in enumerate(step_ids, start=1)
+        ],
+    }
+    return started
+
+
+def test_reduce_candidate_step_skeleton_is_updated_in_place_not_duplicated() -> None:
+    parent = _base("evt-1", 1, "step_started", scope="step")
+    parent["step"] = {"runId": "step-evaluate-1", "id": "evaluate", "index": 1, "total": 1, "attempt": 1}
+    candidate = {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1}
+    started = _candidate_started_with_skeletons(
+        parent["step"], candidate, ["template_generating", "reviewing", "cost_estimating"]
+    )
+    events = [
+        parent,
+        started,
+        *_candidate_step_events(
+            parent["step"], candidate, "template_generating", 1, 1, 3, outcome="completed", conclusion={"template": "t"}
+        ),
+    ]
+
+    snapshot = reduce_pipeline_events(events)
+
+    steps = snapshot["steps"][0]["candidates"][0]["steps"]
+    template_steps = [step for step in steps if step["id"] == "template_generating"]
+    assert len(template_steps) == 1
+    assert template_steps[0]["status"] == "completed"
+    assert template_steps[0]["conclusion"] == {"template": "t"}
+    # The skeleton supplies the presentation fields the real event omits.
+    assert template_steps[0]["name"] == "template_generating"
+
+
+def test_reduce_candidate_completed_leaves_no_pending_substeps_after_retry() -> None:
+    parent = _base("evt-1", 1, "step_started", scope="step")
+    parent["step"] = {"runId": "step-evaluate-1", "id": "evaluate", "index": 1, "total": 1, "attempt": 1}
+    candidate = {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1}
+    started = _candidate_started_with_skeletons(
+        parent["step"], candidate, ["template_generating", "reviewing", "cost_estimating"]
+    )
+    completed = _base("evt-candidate-end", 20, "candidate_completed", scope="candidate")
+    completed["step"] = parent["step"]
+    completed["candidate"] = candidate
+    events = [
+        parent,
+        started,
+        # template_generating fails once and succeeds on the second attempt.
+        *_candidate_step_events(
+            parent["step"], candidate, "template_generating", 1, 1, 3, outcome="failed", conclusion={"error": "boom"}
+        ),
+        *_candidate_step_events(
+            parent["step"], candidate, "template_generating", 1, 2, 5, outcome="completed", conclusion={"template": "t"}
+        ),
+        *_candidate_step_events(
+            parent["step"], candidate, "reviewing", 2, 1, 7, outcome="completed", conclusion={"review": "ok"}
+        ),
+        *_candidate_step_events(
+            parent["step"], candidate, "cost_estimating", 3, 1, 9, outcome="completed", conclusion={"cost": 12}
+        ),
+        completed,
+    ]
+
+    snapshot = reduce_pipeline_events(events)
+
+    result = snapshot["steps"][0]["candidates"][0]
+    assert result["status"] == "completed"
+    assert all(step["status"] != "pending" for step in result["steps"])
+    assert all(step.get("conclusion") is not None for step in result["steps"])
+    # The genuinely failed first attempt stays visible for troubleshooting.
+    assert [(step["id"], step["attempt"], step["status"]) for step in result["steps"]] == [
+        ("template_generating", 1, "failed"),
+        ("template_generating", 2, "completed"),
+        ("reviewing", 1, "completed"),
+        ("cost_estimating", 1, "completed"),
+    ]
+
+
+def test_reduce_candidate_early_exit_settles_unrun_substeps_as_skipped() -> None:
+    parent = _base("evt-1", 1, "step_started", scope="step")
+    parent["step"] = {"runId": "step-evaluate-1", "id": "evaluate", "index": 1, "total": 1, "attempt": 1}
+    candidate = {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1}
+    started = _candidate_started_with_skeletons(
+        parent["step"], candidate, ["template_generating", "reviewing", "cost_estimating"]
+    )
+    completed = _base("evt-candidate-end", 20, "candidate_completed", scope="candidate")
+    completed["step"] = parent["step"]
+    completed["candidate"] = candidate
+    completed["data"] = {"earlyExit": True}
+    events = [
+        parent,
+        started,
+        *_candidate_step_events(
+            parent["step"], candidate, "template_generating", 1, 1, 3, outcome="completed", conclusion={"template": "t"}
+        ),
+        completed,
+    ]
+
+    snapshot = reduce_pipeline_events(events)
+
+    result = snapshot["steps"][0]["candidates"][0]
+    assert [(step["id"], step["status"]) for step in result["steps"]] == [
+        ("template_generating", "completed"),
+        ("reviewing", "skipped"),
+        ("cost_estimating", "skipped"),
+    ]
+    assert result["steps"][1]["skippedAt"] == completed["createdAt"]
+
+
+def test_reduce_candidate_restart_keeps_pending_substeps() -> None:
+    parent = _base("evt-1", 1, "step_started", scope="step")
+    parent["step"] = {"runId": "step-evaluate-1", "id": "evaluate", "index": 1, "total": 1, "attempt": 1}
+    candidate = {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1}
+    started = _candidate_started_with_skeletons(
+        parent["step"], candidate, ["template_generating", "reviewing", "cost_estimating"]
+    )
+    restart = _base("evt-restart", 20, "candidate_restart_requested", scope="candidate")
+    restart["step"] = parent["step"]
+    restart["candidate"] = candidate
+
+    snapshot = reduce_pipeline_events([parent, started, restart])
+
+    result = snapshot["steps"][0]["candidates"][0]
+    assert result["status"] == "restarting"
+    assert [step["status"] for step in result["steps"]] == ["pending", "pending", "pending"]
+
+
+def test_hydrate_merges_duplicate_candidate_step_and_keeps_terminal_record() -> None:
+    existing = {
+        "schemaVersion": "1.1",
+        "status": "completed",
+        "lastSequence": 9,
+        "seenEventIds": ["evt-seed"],
+        "steps": [
+            {
+                "runId": "step-evaluate-1",
+                "id": "evaluate",
+                "index": 1,
+                "attempt": 1,
+                "status": "completed",
+                "candidates": [
+                    {
+                        "runId": "candidate-eval-0-1",
+                        "id": "evaluate_candidate_b7ed18ac",
+                        "index": 0,
+                        "attempt": 1,
+                        "status": "completed",
+                        "steps": [
+                            # Snapshots written before skeletons shared the runId index
+                            # contain the pending stub ahead of the real record.
+                            {
+                                "runId": "candidate-eval-0-1-template_generating-1",
+                                "id": "template_generating",
+                                "index": 1,
+                                "attempt": 1,
+                                "status": "pending",
+                            },
+                            {
+                                "runId": "candidate-eval-0-1-template_generating-1",
+                                "id": "template_generating",
+                                "index": 1,
+                                "attempt": 1,
+                                "status": "completed",
+                                "conclusion": {"template": "t"},
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+    snapshot = reduce_pipeline_events([], existing_snapshot=existing)
+
+    steps = snapshot["steps"][0]["candidates"][0]["steps"]
+    assert len(steps) == 1
+    assert steps[0]["status"] == "completed"
+    assert steps[0]["conclusion"] == {"template": "t"}
+
+
 def test_reduce_candidate_failure_keeps_snapshot_working() -> None:
     parent = _base("evt-1", 1, "step_started", scope="step")
     parent["step"] = {"runId": "step-evaluate-1", "id": "evaluate", "index": 1, "total": 1, "attempt": 1}

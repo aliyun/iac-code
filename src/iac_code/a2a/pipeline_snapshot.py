@@ -36,6 +36,7 @@ _CLEANUP_STATUS_BY_EVENT_TYPE = {
     PIPELINE_EVENT_CLEANUP_FAILED: "failed",
 }
 _KNOWN_CLEANUP_STATUSES = {"pending", "started", "in_progress", "completed", "failed", "skipped"}
+_TERMINAL_CANDIDATE_STEP_STATUSES = {"completed", "failed", "skipped"}
 _PENDING_BACKUP_VISIBILITY = "pending_backup"
 _COMMITTED_BACKUP_VISIBILITY = "committed"
 _BACKUP_COMMITTED_EVENT_TYPE = "backup_committed"
@@ -257,14 +258,21 @@ class _PipelineSnapshotReducer:
                 self._candidate_parent_step_run_ids[candidate_run_id] = step_run_id
 
                 valid_candidate_steps: list[dict[str, Any]] = []
-                seen_candidate_step_run_ids: set[str] = set()
+                candidate_steps_by_run_id: dict[str, dict[str, Any]] = {}
                 for candidate_step in candidate["steps"]:
                     candidate_step_run_id = _string_or_none(candidate_step.get("runId"))
-                    if candidate_step_run_id is None or candidate_step_run_id in seen_candidate_step_run_ids:
+                    if candidate_step_run_id is None:
                         continue
-                    seen_candidate_step_run_ids.add(candidate_step_run_id)
-                    valid_candidate_steps.append(candidate_step)
-                    self._candidate_steps_by_run_id[candidate_step_run_id] = candidate_step
+                    kept = candidate_steps_by_run_id.get(candidate_step_run_id)
+                    if kept is None:
+                        candidate_steps_by_run_id[candidate_step_run_id] = candidate_step
+                        valid_candidate_steps.append(candidate_step)
+                        self._candidate_steps_by_run_id[candidate_step_run_id] = candidate_step
+                        continue
+                    # Snapshots written before skeleton steps shared the reducer's runId
+                    # index can hold both a pending skeleton and the real record for one
+                    # runId.  Merge them so the observed status and conclusion survive.
+                    _merge_duplicate_candidate_step(kept, candidate_step)
                 candidate["steps"] = valid_candidate_steps
             step["candidates"] = valid_candidates
         self._snapshot["steps"] = valid_steps
@@ -660,9 +668,38 @@ class _PipelineSnapshotReducer:
             step["candidates"].append(candidate)
         self._candidate_parent_step_run_ids[run_id] = step["runId"]
 
-        _merge_coordinate(candidate, coordinate)
+        skeletons = _dict_list(coordinate.get("steps"))
+        _merge_coordinate(candidate, {key: value for key, value in coordinate.items() if key != "steps"})
+        self._seed_candidate_step_skeletons(candidate, skeletons)
         self._apply_candidate_lifecycle(candidate, event)
         return candidate
+
+    def _seed_candidate_step_skeletons(self, candidate: dict[str, Any], skeletons: list[dict[str, Any]]) -> None:
+        """Register the ``candidate_started`` step skeletons under their ``runId``.
+
+        The skeletons must share the reducer's ``runId`` index with the records built
+        from real ``candidate_step_*`` events; otherwise every real event misses the
+        index and appends a duplicate, leaving the ``pending`` skeleton behind under a
+        candidate that already reached a terminal state.
+        """
+        for skeleton in skeletons:
+            skeleton_run_id = _string_or_none(skeleton.get("runId"))
+            if skeleton_run_id is None:
+                continue
+            candidate_step = self._candidate_steps_by_run_id.get(skeleton_run_id)
+            if candidate_step is None:
+                candidate_step = {"status": "pending"}
+                _merge_coordinate(candidate_step, skeleton)
+                candidate_step["runId"] = skeleton_run_id
+                self._candidate_steps_by_run_id[skeleton_run_id] = candidate_step
+            else:
+                # A real event already described this step; only fill in gaps so the
+                # skeleton never resets an observed status or drops a conclusion.
+                for key, value in skeleton.items():
+                    if key != "status" and value is not None:
+                        candidate_step.setdefault(key, copy.deepcopy(value))
+            if candidate_step not in candidate["steps"]:
+                candidate["steps"].append(candidate_step)
 
     def _apply_candidate_lifecycle(self, candidate: dict[str, Any], event: dict[str, Any]) -> None:
         event_type = event.get("eventType")
@@ -677,16 +714,31 @@ class _PipelineSnapshotReducer:
             candidate["status"] = "completed"
             _set_time(candidate, "completedAt", created_at)
             _merge_completion_data(candidate, event)
+            self._settle_candidate_steps(candidate, created_at)
             _remove_value(self._snapshot["control"]["activeCandidateRunIds"], run_id)
         elif event_type == "candidate_failed":
             candidate["status"] = "failed"
             _set_time(candidate, "failedAt", created_at)
             _merge_completion_data(candidate, event)
+            self._settle_candidate_steps(candidate, created_at)
             _remove_value(self._snapshot["control"]["activeCandidateRunIds"], run_id)
         elif event_type == "candidate_restart_requested":
             candidate["status"] = "restarting"
             _set_time(candidate, "restartingAt", created_at)
             _remove_value(self._snapshot["control"]["activeCandidateRunIds"], run_id)
+
+    def _settle_candidate_steps(self, candidate: dict[str, Any], created_at: str | None) -> None:
+        """Give every sub-step a terminal status once the candidate itself is terminal.
+
+        Steps the candidate never actually ran (for example after an early exit) keep no
+        conclusion, so they settle as ``skipped`` rather than being reported as ``pending``
+        work under a finished candidate.
+        """
+        for candidate_step in _dict_list(candidate.get("steps")):
+            if candidate_step.get("status") in _TERMINAL_CANDIDATE_STEP_STATUSES:
+                continue
+            candidate_step["status"] = "skipped"
+            _set_time(candidate_step, "skippedAt", created_at)
 
     def _remove_active_candidate_attempts(self, candidate: dict[str, Any]) -> None:
         candidate_id = _string_or_none(candidate.get("id"))
@@ -1483,6 +1535,26 @@ def _sanitize_cleanup_private_fields(value: dict[str, Any], *, root_is_cleanup: 
     # retained for compatibility, but cleanup fields and errors stay intact.
     del root_is_cleanup
     return copy.deepcopy(value)
+
+
+def _merge_duplicate_candidate_step(kept: dict[str, Any], duplicate: dict[str, Any]) -> None:
+    """Fold a duplicate candidate step record into the one being kept.
+
+    The record that reached a terminal state carries the real outcome, so its status
+    wins even when the duplicate was stored first.
+    """
+    kept_is_terminal = kept.get("status") in _TERMINAL_CANDIDATE_STEP_STATUSES
+    duplicate_is_terminal = duplicate.get("status") in _TERMINAL_CANDIDATE_STEP_STATUSES
+    for key, value in duplicate.items():
+        if value is None:
+            continue
+        if key == "status":
+            if duplicate_is_terminal and not kept_is_terminal:
+                kept["status"] = value
+            continue
+        if key in kept and (kept_is_terminal or not duplicate_is_terminal):
+            continue
+        kept[key] = copy.deepcopy(value)
 
 
 def _merge_coordinate(target: dict[str, Any], coordinate: dict[str, Any]) -> None:
