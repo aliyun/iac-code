@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -18,6 +21,24 @@ from iac_code.types.permissions import ExecutionClass, InvocationBinding
 
 if TYPE_CHECKING:
     from iac_code.tools.base import ToolRegistry
+
+_MAX_REJECTED_INPUT_DIGESTS = 64
+
+
+def _input_digest(tool_input: dict) -> str | None:
+    """Stable digest of a tool input, or None when it cannot be serialized."""
+    try:
+        encoded = json.dumps(
+            tool_input,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+            default=repr,
+        ).encode("utf-8")
+    except (TypeError, ValueError):
+        return None
+    return hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass
@@ -42,6 +63,35 @@ class ToolExecutor:
         self._registry = registry
         self._max_concurrency = max_concurrency
         self._tool_timeout = tool_timeout
+        # Fingerprints of tool inputs already rejected by input validation, so a
+        # model that resubmits byte-identical invalid arguments gets an escalated
+        # error instead of the same text again. Bounded per executor.
+        self._rejected_input_digests: OrderedDict[tuple[str, str], None] = OrderedDict()
+
+    def _record_rejected_input(self, tool_name: str, tool_input: dict) -> bool:
+        """Remember a rejected input. Returns True if this exact input was rejected before."""
+        digest = _input_digest(tool_input)
+        if digest is None:
+            return False
+        key = (tool_name, digest)
+        if key in self._rejected_input_digests:
+            self._rejected_input_digests.move_to_end(key)
+            return True
+        self._rejected_input_digests[key] = None
+        while len(self._rejected_input_digests) > _MAX_REJECTED_INPUT_DIGESTS:
+            self._rejected_input_digests.popitem(last=False)
+        return False
+
+    @staticmethod
+    def _repeated_rejection_prefix(tool_name: str) -> str:
+        return (
+            _(
+                "These exact '{tool_name}' arguments were already rejected by input validation. "
+                "Resubmitting them will keep failing. Read the error below, then call '{tool_name}' "
+                "again with corrected arguments that differ from the rejected ones."
+            ).format(tool_name=tool_name)
+            + "\n"
+        )
 
     def partition(self, calls: list[ToolCallRequest]) -> tuple[list[ToolCallRequest], list[ToolCallRequest]]:
         """Partition calls into concurrent (read-only) and serial (write) batches."""
@@ -70,15 +120,19 @@ class ToolExecutor:
         # Input validation
         valid, error = tool.validate_input(call.input)
         if not valid:
+            repeated = self._record_rejected_input(call.name, call.input)
             tool_error = tool.validation_error_result(call.input)
             if tool_error is not None:
+                if repeated:
+                    return ToolResult.error(self._repeated_rejection_prefix(call.name) + tool_error.content)
                 return tool_error
-            return ToolResult.error(
-                _(
-                    "Invalid input for tool '{tool_name}': {error}. "
-                    "Please provide all required parameters as defined in the tool schema."
-                ).format(tool_name=call.name, error=error)
-            )
+            message = _(
+                "Invalid input for tool '{tool_name}': {error}. "
+                "Please provide all required parameters as defined in the tool schema."
+            ).format(tool_name=call.name, error=error)
+            if repeated:
+                message = self._repeated_rejection_prefix(call.name) + message
+            return ToolResult.error(message)
 
         # Pass event_queue from call to context for tools that emit progress events.
         # Always derive a per-call ToolContext so that ``tool_use_id`` (U-I14) is

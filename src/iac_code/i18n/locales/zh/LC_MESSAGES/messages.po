@@ -5097,6 +5097,15 @@ msgstr "正在读取文件..."
 
 #: src/iac_code/tools/tool_executor.py
 #, python-brace-format
+msgid ""
+"These exact '{tool_name}' arguments were already rejected by input "
+"validation. Resubmitting them will keep failing. Read the error below, "
+"then call '{tool_name}' again with corrected arguments that differ from "
+"the rejected ones."
+msgstr "这些 '{tool_name}' 参数已经被输入校验拒绝过。重复提交同样的参数仍会失败。请阅读下面的错误信息，然后用与被拒绝参数不同的、已修正的参数重新调用 '{tool_name}'。"
+
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
 msgid "Unknown tool: {tool_name}"
 msgstr "未知工具：{tool_name}"
 
@@ -5618,6 +5627,20 @@ msgid ""
 "Alibaba Cloud API protocol overrides are invalid for {operation}. Remove "
 "style, method, or pathname overrides and retry."
 msgstr "{operation} 的阿里云 API 协议覆盖无效。请移除 style、method 或 pathname 覆盖后重试。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API input is invalid for {operation}. Fix field {field} and"
+" retry."
+msgstr "{operation} 的阿里云 API 输入无效。请修正字段 {field} 后重试。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API input is invalid for {operation}. Fix fields {fields} "
+"and retry."
+msgstr "{operation} 的阿里云 API 输入无效。请修正字段 {fields} 后重试。"
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format

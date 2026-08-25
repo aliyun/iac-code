@@ -5448,6 +5448,15 @@ msgstr "Lecture du fichier…"
 
 #: src/iac_code/tools/tool_executor.py
 #, python-brace-format
+msgid ""
+"These exact '{tool_name}' arguments were already rejected by input "
+"validation. Resubmitting them will keep failing. Read the error below, "
+"then call '{tool_name}' again with corrected arguments that differ from "
+"the rejected ones."
+msgstr "Ces arguments exacts de '{tool_name}' ont déjà été rejetés par la validation des entrées. Les renvoyer échouera encore. Lisez l'erreur ci-dessous, puis rappelez '{tool_name}' avec des arguments corrigés, différents de ceux qui ont été rejetés."
+
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
 msgid "Unknown tool: {tool_name}"
 msgstr "Outil inconnu : {tool_name}"
 
@@ -5989,6 +5998,20 @@ msgstr ""
 "Les substitutions de protocole de l'API Alibaba Cloud ne sont pas valides"
 " pour {operation}. Supprimez les substitutions de style, method ou "
 "pathname, puis réessayez."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API input is invalid for {operation}. Fix field {field} and"
+" retry."
+msgstr "L'entrée de l'API Alibaba Cloud n'est pas valide pour {operation}. Corrigez le champ {field}, puis réessayez."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API input is invalid for {operation}. Fix fields {fields} "
+"and retry."
+msgstr "L'entrée de l'API Alibaba Cloud n'est pas valide pour {operation}. Corrigez les champs {fields}, puis réessayez."
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format

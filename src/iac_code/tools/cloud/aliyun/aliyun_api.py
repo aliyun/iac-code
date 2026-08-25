@@ -58,7 +58,11 @@ from iac_code.tools.cloud.aliyun.contract_store import (
     canonical_input_sha256,
 )
 from iac_code.tools.cloud.aliyun.ecs_credential_errors import ecs_credential_error_code
-from iac_code.tools.cloud.aliyun.public_errors import normalize_api_identity, public_aliyun_error
+from iac_code.tools.cloud.aliyun.public_errors import (
+    invalid_tool_input_code,
+    normalize_api_identity,
+    public_aliyun_error,
+)
 from iac_code.tools.cloud.aliyun.result_contract import (
     ALIYUN_HTTP_METADATA_KEY,
     build_aliyun_http_metadata,
@@ -622,6 +626,33 @@ def _is_roa_read_only_request(input: dict) -> bool:
     return "body" not in input or input.get("body") is None
 
 
+def _schema_invalid_field_names(schema: Mapping[str, Any], tool_input: Mapping[str, Any]) -> list[str]:
+    """Collect the top-level input field names rejected by the tool JSON Schema."""
+    import jsonschema
+
+    names: list[str] = []
+    try:
+        errors = list(jsonschema.Draft7Validator(dict(schema)).iter_errors(dict(tool_input)))
+    except Exception:
+        return names
+    for error in errors:
+        if error.path:
+            candidate = error.path[0]
+            if isinstance(candidate, str):
+                names.append(candidate)
+            continue
+        if error.validator == "required":
+            missing = getattr(error, "message", "")
+            match = re.match(r"^'([^']+)' is a required property$", missing)
+            if match:
+                names.append(match.group(1))
+        elif error.validator == "additionalProperties":
+            declared = schema.get("properties")
+            if isinstance(declared, Mapping):
+                names.extend(name for name in tool_input if name not in declared)
+    return names
+
+
 def _normalize_runtime_input(
     input: Mapping[str, Any],
     *,
@@ -629,8 +660,9 @@ def _normalize_runtime_input(
     allow_arbitrary_json_body: bool = False,
 ) -> dict[str, Any]:
     allowed_fields = _RUNTIME_INPUT_FIELDS | ({LOCAL_TEMPLATE_PATH_FIELD} if allow_internal_shape else set())
-    if any(not isinstance(name, str) or name not in allowed_fields for name in input):
-        raise ApiContractError("invalid_tool_input")
+    unexpected_fields = [name for name in input if not isinstance(name, str) or name not in allowed_fields]
+    if unexpected_fields:
+        raise ApiContractError(invalid_tool_input_code(unexpected_fields))
     try:
         normalized = copy.deepcopy(dict(input))
     except (TypeError, ValueError) as error:
@@ -1030,7 +1062,7 @@ class AliyunApi(BaseCloudApi):
             )
         return ToolResult.error(
             public_aliyun_error(
-                "invalid_tool_input",
+                invalid_tool_input_code(_schema_invalid_field_names(self.input_schema, tool_input)),
                 product=tool_input.get("product"),
                 version=tool_input.get("version"),
                 action=tool_input.get("action"),
@@ -1447,7 +1479,7 @@ class AliyunApi(BaseCloudApi):
                 allow_arbitrary_json_body=True,
             )
             if not model_schema_valid:
-                raise ApiContractError("invalid_tool_input")
+                raise ApiContractError(invalid_tool_input_code(_schema_invalid_field_names(self.input_schema, input)))
             initial_shape = _runtime_call_shape(normalized)
         except ApiContractError as error:
             return PermissionResult(
@@ -2350,7 +2382,9 @@ class AliyunApi(BaseCloudApi):
                 allow_arbitrary_json_body=True,
             )
             if not model_schema_valid:
-                raise ApiContractError("invalid_tool_input")
+                raise ApiContractError(
+                    invalid_tool_input_code(_schema_invalid_field_names(self.input_schema, api_input))
+                )
             initial_shape = _runtime_call_shape(normalized)
 
             observe("local_authorization")

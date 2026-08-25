@@ -53,6 +53,8 @@ def test_aliyun_public_error_templates_are_directly_extractable(tmp_path: Path) 
         "Alibaba Cloud API {operation} cannot modify cloud resources from a pipeline step. "
         "Use a pipeline-specific tool for this operation.",
         "Alibaba Cloud API input is invalid for {operation}. Check product, action, version, region, and parameters.",
+        "Alibaba Cloud API input is invalid for {operation}. Fix field {field} and retry.",
+        "Alibaba Cloud API input is invalid for {operation}. Fix fields {fields} and retry.",
         "Alibaba Cloud returned the target response, but its headers are too large to display safely. "
         "Verify the cloud resource state before retrying.",
         "Alibaba Cloud returned an unsupported response body for {operation}. "
@@ -252,6 +254,58 @@ def test_missing_required_parameter_error_bounds_public_parameter_list(parameter
 
     assert message == "Alibaba Cloud API Ecs/DescribeInstances is missing required parameters."
     assert parameter_names not in message
+
+
+def test_invalid_tool_input_error_names_the_single_offending_field() -> None:
+    error = ApiContractError("invalid_tool_input:parameters")
+
+    message = public_aliyun_error(error, product="ros", action="PreviewStack")
+
+    assert message == ("Alibaba Cloud API input is invalid for ros/PreviewStack. Fix field parameters and retry.")
+
+
+def test_invalid_tool_input_error_names_every_offending_field() -> None:
+    error = ApiContractError("invalid_tool_input:parameters,stack_name")
+
+    message = public_aliyun_error(error, product="ros", action="PreviewStack")
+
+    assert message == (
+        "Alibaba Cloud API input is invalid for ros/PreviewStack. Fix fields parameters,stack_name and retry."
+    )
+
+
+def test_invalid_tool_input_error_never_echoes_field_values() -> None:
+    error = ApiContractError("invalid_tool_input:parameters")
+
+    message = public_aliyun_error(
+        error,
+        product="ros",
+        action="PreviewStack",
+        region_id="cn-hangzhou",
+    )
+
+    assert "parameters" in message
+    assert "CUSTOMER_SECRET" not in message
+
+
+@pytest.mark.parametrize(
+    "field_names",
+    [
+        ",".join(f"field{index}" for index in range(17)),
+        ",".join(f"field{index}{'x' * 110}" for index in range(5)),
+        "not a safe field name",
+    ],
+)
+def test_invalid_tool_input_error_falls_back_when_fields_are_unsafe(field_names: str) -> None:
+    error = ApiContractError(f"invalid_tool_input:{field_names}")
+
+    message = public_aliyun_error(error, product="ros", action="PreviewStack")
+
+    assert message == (
+        "Alibaba Cloud API input is invalid for ros/PreviewStack. "
+        "Check product, action, version, region, and parameters."
+    )
+    assert field_names not in message
 
 
 def test_wildcard_parameter_name_is_preserved_as_safe_public_context() -> None:

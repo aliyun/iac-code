@@ -1433,9 +1433,9 @@ async def test_runtime_permission_local_stages_precede_openmeta_and_deny_short_c
         ("pathname", "https://host.invalid/path", "invalid_pathname"),
         ("content_type", "not-a-media-type", "invalid_content_type"),
         ("body_file", "", "invalid_body_file"),
-        ("params", None, "invalid_tool_input"),
-        ("params_body", {"Payload": "value"}, "invalid_tool_input"),
-        ("formdata", {"TemplateBody": "{}"}, "invalid_tool_input"),
+        ("params", None, "invalid_tool_input:params"),
+        ("params_body", {"Payload": "value"}, "invalid_tool_input:params_body"),
+        ("formdata", {"TemplateBody": "{}"}, "invalid_tool_input:formdata"),
     ],
 )
 @pytest.mark.asyncio
@@ -3238,7 +3238,7 @@ async def test_public_schema_rejection_invalidates_snapshot() -> None:
 
     result = await tool.execute(tool_input=tool_input, context=context)
 
-    assert result == ToolResult.error(_expected_public_error("invalid_tool_input", tool_input))
+    assert result == ToolResult.error(_expected_public_error("invalid_tool_input:params", tool_input))
     assert runtime.contract_store.size == 0
 
 

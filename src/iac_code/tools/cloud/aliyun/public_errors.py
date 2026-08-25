@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -73,6 +73,15 @@ def normalize_api_identity(tool_input: Mapping[str, Any]) -> AliyunApiIdentity:
     )
 
 
+def invalid_tool_input_code(fields: Iterable[Any]) -> str:
+    """Build an invalid_tool_input code carrying the responsible field names only."""
+
+    names = sorted({name for name in fields if isinstance(name, str) and name})
+    if not names:
+        return "invalid_tool_input"
+    return "invalid_tool_input:" + ",".join(names)
+
+
 def public_aliyun_error(
     error: BaseException | str,
     *,
@@ -101,6 +110,20 @@ def public_aliyun_error(
         return _(
             "Alibaba Cloud API protocol overrides are invalid for {operation}. "
             "Remove style, method, or pathname overrides and retry."
+        ).format(operation=operation)
+    if code.startswith("invalid_tool_input:"):
+        fields = _safe_parameter_list(code.partition(":")[2])
+        if fields is not None and "," not in fields:
+            return _("Alibaba Cloud API input is invalid for {operation}. Fix field {field} and retry.").format(
+                operation=operation, field=fields
+            )
+        if fields is not None:
+            return _("Alibaba Cloud API input is invalid for {operation}. Fix fields {fields} and retry.").format(
+                operation=operation, fields=fields
+            )
+        return _(
+            "Alibaba Cloud API input is invalid for {operation}. "
+            "Check product, action, version, region, and parameters."
         ).format(operation=operation)
     if code == "invalid_tool_input":
         return _(

@@ -5162,6 +5162,15 @@ msgstr "ファイルを読み取り中…"
 
 #: src/iac_code/tools/tool_executor.py
 #, python-brace-format
+msgid ""
+"These exact '{tool_name}' arguments were already rejected by input "
+"validation. Resubmitting them will keep failing. Read the error below, "
+"then call '{tool_name}' again with corrected arguments that differ from "
+"the rejected ones."
+msgstr "この '{tool_name}' の引数はすでに入力検証で拒否されています。同じ引数を再送信しても失敗し続けます。以下のエラーを確認し、拒否された引数とは異なる修正済みの引数で '{tool_name}' を再度呼び出してください。"
+
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
 msgid "Unknown tool: {tool_name}"
 msgstr "不明なツール: {tool_name}"
 
@@ -5687,6 +5696,20 @@ msgid ""
 msgstr ""
 "{operation} の Alibaba Cloud API プロトコル上書きが無効です。style、method、pathname "
 "の上書きを削除して再試行してください。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API input is invalid for {operation}. Fix field {field} and"
+" retry."
+msgstr "{operation} の Alibaba Cloud API 入力が無効です。フィールド {field} を修正して再試行してください。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API input is invalid for {operation}. Fix fields {fields} "
+"and retry."
+msgstr "{operation} の Alibaba Cloud API 入力が無効です。フィールド {fields} を修正して再試行してください。"
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format

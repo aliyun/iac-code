@@ -12,6 +12,7 @@ from iac_code.tools.cloud.aliyun.api_contract import ApiCallShape, ApiContractEr
 from iac_code.tools.cloud.aliyun.openmeta import ApiMetadata, ParameterMetadata
 from iac_code.tools.cloud.aliyun.public_errors import (
     AliyunApiIdentity,
+    invalid_tool_input_code,
     normalize_api_identity,
     public_aliyun_error,
     public_aliyun_unsupported_reasons,
@@ -235,8 +236,9 @@ def _normalize_doc_input(tool_input: Mapping[str, Any]) -> AliyunApiIdentity:
     detail = tool_input.get("detail", "summary")
     if not isinstance(detail, str) or detail not in _DETAILS:
         raise ApiContractError("invalid_detail")
-    if set(tool_input) - {"product", "action", "version", "detail"}:
-        raise ApiContractError("invalid_tool_input")
+    unexpected_fields = set(tool_input) - {"product", "action", "version", "detail"}
+    if unexpected_fields:
+        raise ApiContractError(invalid_tool_input_code(unexpected_fields))
     return normalize_api_identity(tool_input)
 
 

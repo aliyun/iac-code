@@ -446,6 +446,83 @@ class TestToolExecutorValidation:
         await executor.execute_batch(calls, ToolContext())
         assert len(executed) == 0
 
+    async def test_repeated_identical_invalid_input_escalates_error(self):
+        tool = FakeStrictTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        executor = ToolExecutor(registry=registry)
+
+        first = await executor.execute_batch([ToolCallRequest(id="r1", name="strict", input={})], ToolContext())
+        second = await executor.execute_batch([ToolCallRequest(id="r2", name="strict", input={})], ToolContext())
+
+        assert first[0].is_error is True
+        assert "already rejected" not in first[0].content
+        assert second[0].is_error is True
+        assert "already rejected" in second[0].content
+        # The original actionable detail must survive the escalation.
+        assert "path" in second[0].content
+
+    async def test_different_invalid_input_does_not_escalate(self):
+        tool = FakeStrictTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        executor = ToolExecutor(registry=registry)
+
+        first = await executor.execute_batch([ToolCallRequest(id="d1", name="strict", input={})], ToolContext())
+        second = await executor.execute_batch(
+            [ToolCallRequest(id="d2", name="strict", input={"path": 123})], ToolContext()
+        )
+
+        assert "already rejected" not in first[0].content
+        assert second[0].is_error is True
+        assert "already rejected" not in second[0].content
+
+    async def test_repeated_invalid_input_escalates_tool_specific_error(self):
+        class ToolErrorTool(FakeStrictTool):
+            def validation_error_result(self, tool_input):
+                return ToolResult.error("tool specific detail")
+
+        tool = ToolErrorTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        executor = ToolExecutor(registry=registry)
+
+        first = await executor.execute_batch([ToolCallRequest(id="t1", name="strict", input={})], ToolContext())
+        second = await executor.execute_batch([ToolCallRequest(id="t2", name="strict", input={})], ToolContext())
+
+        assert first[0].content == "tool specific detail"
+        assert "already rejected" in second[0].content
+        assert "tool specific detail" in second[0].content
+
+    async def test_unserializable_invalid_input_does_not_break_validation(self):
+        tool = FakeStrictTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        executor = ToolExecutor(registry=registry)
+
+        unserializable = {"path": {object()}}
+        results = await executor.execute_batch(
+            [ToolCallRequest(id="u1", name="strict", input=unserializable)], ToolContext()
+        )
+
+        assert results[0].is_error is True
+
+    async def test_repeated_rejection_tracking_is_bounded(self):
+        from iac_code.tools.tool_executor import _MAX_REJECTED_INPUT_DIGESTS
+
+        tool = FakeStrictTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        executor = ToolExecutor(registry=registry)
+
+        for index in range(_MAX_REJECTED_INPUT_DIGESTS + 10):
+            await executor.execute_batch(
+                [ToolCallRequest(id=f"b{index}", name="strict", input={"path": index})],
+                ToolContext(),
+            )
+
+        assert len(executor._rejected_input_digests) <= _MAX_REJECTED_INPUT_DIGESTS
+
 
 def _warning_outcome(label: str):
     from iac_code.tools.cloud.aliyun.ros_validation.model import (
