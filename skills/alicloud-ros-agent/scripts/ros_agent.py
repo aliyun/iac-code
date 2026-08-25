@@ -280,9 +280,13 @@ def _free_port() -> int:
 
 
 def _job_paths(job_id: str) -> Tuple[pathlib.Path, pathlib.Path, pathlib.Path]:
-    if not re.fullmatch(r"[0-9a-f]{32}", job_id or ""):
+    try:
+        canonical_job_id = uuid.UUID(job_id).hex
+    except (AttributeError, ValueError) as exc:
+        raise BridgeError("job_not_found", "The requested ROS Agent job does not exist.") from exc
+    if canonical_job_id != job_id:
         raise BridgeError("job_not_found", "The requested ROS Agent job does not exist.")
-    root = _state_root() / "jobs" / job_id
+    root = _state_root() / "jobs" / canonical_job_id
     return root, root / "job.json", root / "events.jsonl"
 
 
