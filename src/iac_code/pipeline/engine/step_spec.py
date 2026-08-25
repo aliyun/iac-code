@@ -117,6 +117,13 @@ class SubPipelineSpec:
     max_rollbacks: int
     iterate_over: str
     context_fields_from_parent: list[str] = field(default_factory=list)
+    # Seconds a sub-step may go without emitting any event before it is treated
+    # as stalled. ``None`` disables stall detection.
+    sub_step_stall_timeout_s: float | None = None
+    # How many times a stalled sub-step is retried in place before the candidate
+    # is failed. Retrying the same sub-step is preferred over replacing the
+    # candidate so the original failure stays visible.
+    sub_step_stall_retries: int = 1
 
 
 @dataclass

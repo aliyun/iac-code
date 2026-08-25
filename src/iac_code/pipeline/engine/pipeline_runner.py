@@ -3197,6 +3197,11 @@ class PipelineRunner:
 
         parent_step_id = parent_step_id or self.state_machine.current_step.step_id
         candidate_name = state.get("name", "")
+        # A candidate that is about to restart in place keeps running; every other
+        # cancellation reason must leave a terminal, diagnosable state behind so a
+        # replacement candidate cannot mask why this one stopped.
+        if reason != "candidate_restart":
+            state["cancel_reason"] = reason
         if not state.get("_candidate_cancelled_observed", False):
             state["_candidate_cancelled_observed"] = True
             self._observability.candidate_cancelled(
@@ -4605,6 +4610,50 @@ class PipelineRunner:
             failed_by_index[i] = dict(entry)
             await self._save_running(step.step_id, reason="parallel candidate failed")
 
+        def save_candidate_cancelled_sync(i: int, state: dict[str, Any], reason: str) -> None:
+            """Persist a terminal entry for a cancelled candidate, preserving the reason.
+
+            Runs synchronously because the owning task is already cancelled. The
+            status stays ``failed`` so restore/replay keep routing on the three
+            known states; ``terminal_reason`` carries why it stopped.
+            """
+            active_attempt_id = state.get("active_attempt_id")
+            if active_attempt_id:
+                self._mark_attempt_status(active_attempt_id, "failed")
+            terminal_reason = "superseded" if reason == "hard_interrupt_parent_rollback" else "canceled"
+            failure = public_error(
+                message=_("Candidate {index} was {reason} before completing sub-step {sub_step}.").format(
+                    index=i + 1,
+                    reason=terminal_reason,
+                    sub_step=state.get("current_sub_step") or "?",
+                ),
+                error_type="CandidateCancelled",
+                extra_details={
+                    "cancel_reason": reason,
+                    "terminal_reason": terminal_reason,
+                    "sub_step_id": state.get("current_sub_step") or None,
+                },
+            )
+            entry = {
+                "status": "failed",
+                "terminal_reason": terminal_reason,
+                "candidate": candidates[i],
+                "sub_pipeline_id": state.get("sub_pipeline_id") or f"{sub_spec.name}_candidate_{i}",
+                "state_machine": state.get("state_machine"),
+                "context": state.get("context"),
+                "current_sub_step": state.get("current_sub_step", ""),
+                "current_index": state.get("current_index"),
+                "active_attempt_id": active_attempt_id,
+                "transcript_id": state.get("transcript_id"),
+                "conclusions": state.get("conclusions", {}),
+                "step_conclusions": state.get("step_conclusions", {}),
+                "error": state.get("error") or failure.summary,
+                "error_details": state.get("error_details") or failure.details,
+            }
+            self._execution.setdefault("candidates", {})[str(i)] = entry
+            failed_by_index[i] = dict(entry)
+            self._save_running_sync(step.step_id, reason="parallel candidate cancelled")
+
         async def put_candidate_event(candidate_index: int, event: Any) -> None:
             nonlocal event_sequence
             event_sequence += 1
@@ -4781,6 +4830,12 @@ class PipelineRunner:
                     await put_candidate_event(i, event)
             except asyncio.CancelledError:
                 logger.debug("Candidate %d cancelled", i)
+                cancel_reason = state.get("cancel_reason")
+                if isinstance(cancel_reason, str) and i not in conclusions_by_index and i not in failed_by_index:
+                    try:
+                        save_candidate_cancelled_sync(i, state, cancel_reason)
+                    except PipelineStatePersistenceError:
+                        logger.warning("Failed to persist cancelled candidate %d terminal state", i)
             except PipelineStatePersistenceError as exc:
                 await put_candidate_event(i, exc)
             except SessionBackupBlocked as exc:
@@ -4964,9 +5019,27 @@ class PipelineRunner:
                     result["error"] = restored["error"]
                 if restored.get("error_details") is not None:
                     result["error_details"] = restored["error_details"]
+                if restored.get("terminal_reason") is not None:
+                    result["terminal_reason"] = restored["terminal_reason"]
                 aggregated.append(result)
             else:
-                aggregated.append({"candidate": candidate, "failed": True})
+                # Never aggregate a reason-less failure: a replacement candidate must
+                # not be able to silently take over from an undiagnosed one.
+                failure = public_error(
+                    message=_("Candidate {index} ended without a result or a recorded failure reason.").format(
+                        index=i + 1
+                    ),
+                    error_type="CandidateOutcomeMissing",
+                    extra_details={"parent_step_id": step.step_id, "candidate_index": i},
+                )
+                aggregated.append(
+                    {
+                        "candidate": candidate,
+                        "failed": True,
+                        "error": failure.summary,
+                        "error_details": failure.details,
+                    }
+                )
 
         self.context.set_conclusion(step.conclusion_field, aggregated)
         candidate_success_count = sum(1 for item in aggregated if isinstance(item, dict) and not item.get("failed"))

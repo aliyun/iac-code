@@ -245,8 +245,26 @@ def _parse_sub_pipelines(
             max_rollbacks=sub_raw.get("max_rollbacks", 5),
             iterate_over=sub_raw.get("iterate_over", ""),
             context_fields_from_parent=sub_raw.get("context_fields_from_parent", []),
+            sub_step_stall_timeout_s=_parse_sub_step_stall_timeout(sub_name, sub_raw.get("sub_step_stall_timeout_s")),
+            sub_step_stall_retries=_parse_sub_step_stall_retries(sub_name, sub_raw.get("sub_step_stall_retries", 1)),
         )
     return result
+
+
+def _parse_sub_step_stall_timeout(sub_name: str, raw: object) -> float | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, (int, float)) or isinstance(raw, bool) or raw <= 0:
+        raise ValueError(
+            f"sub_pipelines.{sub_name}.sub_step_stall_timeout_s must be a positive number or omitted, got {raw!r}"
+        )
+    return float(raw)
+
+
+def _parse_sub_step_stall_retries(sub_name: str, raw: object) -> int:
+    if not isinstance(raw, int) or isinstance(raw, bool) or raw < 0:
+        raise ValueError(f"sub_pipelines.{sub_name}.sub_step_stall_retries must be a non-negative integer, got {raw!r}")
+    return raw
 
 
 def _parse_steps(raw_steps: list[dict]) -> list[StepSpec]:

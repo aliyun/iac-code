@@ -134,6 +134,11 @@ max_rollbacks: 3
 sub_pipelines:
   evaluate_candidate:
     max_rollbacks: 5
+    # 子步骤在这么久没有产出任何事件即判定卡死（等待用户输入/暂停期间不计时）。
+    # 卡死会记录显式失败原因并优先原地重试同一子步骤，重试用尽后候选进入终态，
+    # 不允许静默换成缩减模板的新候选。
+    sub_step_stall_timeout_s: 600
+    sub_step_stall_retries: 1
     context_fields_from_parent: [intent]
     iterate_over: architecture.candidates
     steps:

@@ -374,6 +374,66 @@ class TestSubPipelineParsing:
         assert len(sub.steps) == 1
         assert sub.steps[0].skill == "iac_aliyun"
 
+    @staticmethod
+    def _stall_yaml(extra_keys: str) -> str:
+        return dedent("""\
+            name: test
+            context_dependencies:
+              result: []
+            max_rollbacks: 1
+            sub_pipelines:
+              sub1:
+                max_rollbacks: 1
+                iterate_over: result.items
+            {extra_keys}    steps:
+                  - id: inner
+                    conclusion_field: out
+                    forward: null
+                    prompt: prompts/inner.md
+            steps:
+              - id: outer
+                type: parallel_sub_pipeline
+                sub_pipeline: sub1
+                conclusion_field: result
+                forward: null
+                prompt: prompts/outer.md
+        """).format(extra_keys=extra_keys)
+
+    def test_stall_detection_keys_parsed(self, tmp_path):
+        yaml_content = self._stall_yaml("    sub_step_stall_timeout_s: 600\n    sub_step_stall_retries: 2\n")
+        _write_pipeline(tmp_path, yaml_content, {"outer.md": "O", "inner.md": "I"})
+
+        loaded = load_pipeline_dir(tmp_path)
+
+        sub = loaded.sub_pipelines["sub1"]
+        assert sub.sub_step_stall_timeout_s == 600.0
+        assert sub.sub_step_stall_retries == 2
+
+    def test_stall_detection_disabled_by_default(self, tmp_path):
+        _write_pipeline(tmp_path, self._stall_yaml(""), {"outer.md": "O", "inner.md": "I"})
+
+        loaded = load_pipeline_dir(tmp_path)
+
+        sub = loaded.sub_pipelines["sub1"]
+        assert sub.sub_step_stall_timeout_s is None
+        assert sub.sub_step_stall_retries == 1
+
+    @pytest.mark.parametrize("raw_timeout", ["0", "-5", "abc", "true"])
+    def test_rejects_invalid_stall_timeout(self, tmp_path, raw_timeout):
+        yaml_content = self._stall_yaml(f"    sub_step_stall_timeout_s: {raw_timeout}\n")
+        _write_pipeline(tmp_path, yaml_content, {"outer.md": "O", "inner.md": "I"})
+
+        with pytest.raises(ValueError, match="sub_step_stall_timeout_s"):
+            load_pipeline_dir(tmp_path)
+
+    @pytest.mark.parametrize("raw_retries", ["-1", "1.5", "abc", "true"])
+    def test_rejects_invalid_stall_retries(self, tmp_path, raw_retries):
+        yaml_content = self._stall_yaml(f"    sub_step_stall_retries: {raw_retries}\n")
+        _write_pipeline(tmp_path, yaml_content, {"outer.md": "O", "inner.md": "I"})
+
+        with pytest.raises(ValueError, match="sub_step_stall_retries"):
+            load_pipeline_dir(tmp_path)
+
     def test_step_type_parallel(self, tmp_path):
         yaml_content = dedent("""\
             name: test

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import logging
 import time
@@ -24,10 +25,25 @@ from iac_code.pipeline.engine.step_executor import StepExecutor
 from iac_code.pipeline.engine.step_spec import LoadedPipeline, SubPipelineSpec
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.services.session_backup import SessionBackupBlocked
-from iac_code.types.stream_events import SubPipelineStreamEvent
+from iac_code.types.stream_events import AskUserQuestionEvent, PermissionRequestEvent, SubPipelineStreamEvent
 from iac_code.utils.public_errors import sanitize_strict_text
 
 logger = logging.getLogger(__name__)
+
+SUB_STEP_STALLED_ERROR_TYPE = "SubStepStalled"
+
+
+class SubStepStalledError(Exception):
+    """A sub-step produced no event within its configured stall window.
+
+    Raised by the stall watchdog so a hanging sub-step becomes an explicit,
+    diagnosable failure instead of an indefinitely ``working`` candidate.
+    """
+
+    def __init__(self, *, step_id: str, stalled_seconds: float) -> None:
+        super().__init__("Sub-step {0} stalled for {1:.1f}s".format(step_id, stalled_seconds))
+        self.step_id = step_id
+        self.stalled_seconds = stalled_seconds
 
 
 @dataclass
@@ -367,6 +383,55 @@ class SubPipelineExecutor:
         self._apply_telemetry_correlation(executor)
         return executor
 
+    async def _iter_events_with_stall_watchdog(
+        self,
+        stream: Any,
+        *,
+        step_id: str,
+        timeout_s: float,
+    ) -> AsyncGenerator[Any, None]:
+        """Yield step-executor events, raising SubStepStalledError on prolonged silence.
+
+        The watchdog measures the gap between consecutive events rather than the
+        total step duration, so legitimately slow sub-steps keep running as long
+        as they make observable progress. Waiting for a user answer or a paused
+        pipeline is not progress-free work, so any window that overlaps such a
+        wait is discarded instead of being judged.
+        """
+        iterator = stream.__aiter__()
+        awaiting_user_response = False
+        while True:
+            next_event = asyncio.ensure_future(iterator.__anext__())
+            while True:
+                suspended_at_start = self._stall_watchdog_suspended(awaiting_user_response)
+                window_started = time.monotonic()
+                done, _pending = await asyncio.wait({next_event}, timeout=timeout_s)
+                if done:
+                    break
+                if suspended_at_start or self._stall_watchdog_suspended(awaiting_user_response):
+                    continue
+                stalled_seconds = time.monotonic() - window_started
+                next_event.cancel()
+                with contextlib.suppress(BaseException):
+                    await next_event
+                aclose = getattr(stream, "aclose", None)
+                if callable(aclose):
+                    with contextlib.suppress(Exception):
+                        await aclose()
+                raise SubStepStalledError(step_id=step_id, stalled_seconds=stalled_seconds)
+            try:
+                event = next_event.result()
+            except StopAsyncIteration:
+                return
+            awaiting_user_response = isinstance(event, (AskUserQuestionEvent, PermissionRequestEvent))
+            yield event
+
+    def _stall_watchdog_suspended(self, awaiting_user_response: bool) -> bool:
+        """Whether the sub-step is legitimately idle and must not be judged stalled."""
+        if awaiting_user_response:
+            return True
+        return self._pause_event is not None and not self._pause_event.is_set()
+
     async def execute_streaming(
         self,
         sub_spec: SubPipelineSpec,
@@ -487,6 +552,7 @@ class SubPipelineExecutor:
         sub_step_started_at: float | None = None
         current_sub_step_id: str | None = None
         attempt_info: dict[str, Any] | None = None
+        stall_attempts: dict[str, int] = {}
 
         async def publish_sub_step_state(
             *,
@@ -654,6 +720,7 @@ class SubPipelineExecutor:
                             step_msg = None
                         is_first_step = False
                         step_result: StepResult | None = None
+                        stalled: SubStepStalledError | None = None
                         with self._observability.sub_step_span(**current_step_attrs):
                             execute_kwargs: dict[str, Any] = {
                                 "user_message": step_msg,
@@ -675,23 +742,116 @@ class SubPipelineExecutor:
                                 execute_kwargs = {
                                     key: value for key, value in execute_kwargs.items() if key in parameters
                                 }
-                            async for event in step_executor.execute(
+                            event_stream: Any = step_executor.execute(
                                 step,
                                 sub_context,
                                 session_id,
                                 **execute_kwargs,
-                            ):
-                                if isinstance(event, StepResult):
-                                    step_result = event
-                                elif isinstance(event, PipelineEvent):
-                                    # Forward pipeline-level events from the step executor directly
-                                    yield event
-                                else:
-                                    yield SubPipelineStreamEvent(
-                                        sub_pipeline_id=sub_pipeline_id,
-                                        candidate_index=candidate_index,
-                                        inner=event,
-                                    )
+                            )
+                            if sub_spec.sub_step_stall_timeout_s is not None:
+                                event_stream = self._iter_events_with_stall_watchdog(
+                                    event_stream,
+                                    step_id=step.step_id,
+                                    timeout_s=sub_spec.sub_step_stall_timeout_s,
+                                )
+                            try:
+                                async for event in event_stream:
+                                    if isinstance(event, StepResult):
+                                        step_result = event
+                                    elif isinstance(event, PipelineEvent):
+                                        # Forward pipeline-level events from the step executor directly
+                                        yield event
+                                    else:
+                                        yield SubPipelineStreamEvent(
+                                            sub_pipeline_id=sub_pipeline_id,
+                                            candidate_index=candidate_index,
+                                            inner=event,
+                                        )
+                            except SubStepStalledError as stall:
+                                stalled = stall
+
+                        if stalled is not None:
+                            # A stalled sub-step must be diagnosed explicitly and retried in
+                            # place; replacing the candidate would hide the original failure
+                            # and silently change the delivered plan.
+                            stall_attempts[step.step_id] = stall_attempts.get(step.step_id, 0) + 1
+                            stall_attempt = stall_attempts[step.step_id]
+                            will_retry = stall_attempt <= sub_spec.sub_step_stall_retries
+                            failure = public_error(
+                                message=str(stalled),
+                                error_type=SUB_STEP_STALLED_ERROR_TYPE,
+                                extra_details={
+                                    "step_id": step.step_id,
+                                    "stalled_seconds": round(stalled.stalled_seconds, 3),
+                                    "stall_timeout_s": sub_spec.sub_step_stall_timeout_s,
+                                    "stall_attempt": stall_attempt,
+                                    "stall_retries_allowed": sub_spec.sub_step_stall_retries,
+                                    "will_retry": will_retry,
+                                },
+                            )
+                            error_summary = failure.summary
+                            self._observability.sub_step_completed(
+                                duration_ms=self._observability.duration_ms(sub_step_started_at),
+                                failed=True,
+                                error_summary=error_summary,
+                                error_type=SUB_STEP_STALLED_ERROR_TYPE,
+                                error_id=failure.error_id,
+                                **current_step_attrs,
+                            )
+                            await publish_sub_step_state(
+                                status="running" if will_retry else "failed",
+                                attempt_status="failed",
+                                current_sub_step=step.step_id,
+                                attempt_info=attempt_info,
+                            )
+                            yield PipelineEvent(
+                                type=PipelineEventType.SUB_STEP_FAILED,
+                                step_id=step.step_id,
+                                timestamp=time.time(),
+                                data=sub_step_event_data(
+                                    step.step_id,
+                                    {
+                                        "error": error_summary,
+                                        "error_summary": error_summary,
+                                        "error_details": failure.details,
+                                    },
+                                ),
+                            )
+                            if will_retry:
+                                logger.warning(
+                                    (
+                                        "Retrying stalled sub-step in place: pipeline=%s session_id=%s "
+                                        "sub_pipeline_id=%s candidate_index=%d sub_step_id=%s "
+                                        "stalled_seconds=%.1f stall_attempt=%d"
+                                    ),
+                                    sanitize_strict_text(self._pipeline.name),
+                                    sanitize_strict_text(session_id),
+                                    sanitize_strict_text(sub_pipeline_id),
+                                    candidate_index,
+                                    sanitize_strict_text(step.step_id),
+                                    stalled.stalled_seconds,
+                                    stall_attempt,
+                                )
+                                continue
+                            terminal_event = PipelineEvent(
+                                type=PipelineEventType.SUB_PIPELINE_COMPLETED,
+                                step_id=None,
+                                timestamp=time.time(),
+                                data=sub_pipeline_event_data(
+                                    {
+                                        "failed": True,
+                                        "error": error_summary,
+                                        "error_summary": error_summary,
+                                        "error_details": failure.details,
+                                    },
+                                ),
+                            )
+                            emit_sub_pipeline_failed(
+                                error_summary,
+                                SUB_STEP_STALLED_ERROR_TYPE,
+                                failure.error_id,
+                            )
+                            break
 
                         if step_result is None or step_result.status == StepStatus.FAILED:
                             # P-I22: surface structured error info (error_summary + error_details)

@@ -1,5 +1,6 @@
 """Tests for SubPipelineExecutor."""
 
+import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -1761,3 +1762,283 @@ class TestFailedCandidateErrorPropagated:
             conclusions={},
         )
         assert result.error_details is None
+
+
+def _stall_sub_spec(*, timeout_s: float, retries: int) -> SubPipelineSpec:
+    spec = _make_sub_spec()
+    spec.sub_step_stall_timeout_s = timeout_s
+    spec.sub_step_stall_retries = retries
+    return spec
+
+
+def _stall_pipeline() -> LoadedPipeline:
+    return LoadedPipeline(
+        name="test",
+        steps=[],
+        context_dependencies={"intent": []},
+        max_rollbacks=3,
+        skills={"iac_aliyun": "# Skill", "iac-aliyun-cost": "# Cost"},
+    )
+
+
+def _stall_parent_context() -> PipelineContext:
+    parent_ctx = PipelineContext({"intent": []})
+    parent_ctx.set_conclusion("intent", {"type": "test"})
+    return parent_ctx
+
+
+class TestSubStepStallWatchdog:
+    """A stalled sub-step must be diagnosed in place, never silently replaced."""
+
+    @pytest.mark.asyncio
+    async def test_stall_without_retries_fails_with_reason(self, tmp_path, monkeypatch):
+        class HangingStepExecutor:
+            current_agent_loop = None
+
+            async def execute(self, step, context, session_id, **kwargs):
+                if step.step_id == "cost_estimating":
+                    await asyncio.Event().wait()
+                    return
+                yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"body": "ok"})
+
+        executor = SubPipelineExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=_stall_pipeline(),
+            pipeline_dir=tmp_path,
+        )
+        monkeypatch.setattr(executor, "_make_step_executor", lambda: HangingStepExecutor())
+
+        events = [
+            event
+            async for event in executor.execute_streaming(
+                sub_spec=_stall_sub_spec(timeout_s=0.05, retries=0),
+                candidate={"name": "Plan A"},
+                candidate_index=0,
+                parent_context=_stall_parent_context(),
+                session_id="test_session",
+            )
+        ]
+
+        failed = [e for e in events if isinstance(e, PipelineEvent) and e.type == PipelineEventType.SUB_STEP_FAILED]
+        assert len(failed) == 1
+        details = failed[0].data["error_details"]
+        assert details["type"] == "SubStepStalled"
+        assert details["step_id"] == "cost_estimating"
+        assert details["stalled_seconds"] > 0
+        assert details["will_retry"] is False
+
+        terminal = [
+            e for e in events if isinstance(e, PipelineEvent) and e.type == PipelineEventType.SUB_PIPELINE_COMPLETED
+        ]
+        assert len(terminal) == 1
+        assert terminal[0].data["failed"] is True
+        assert terminal[0].data["error_details"]["type"] == "SubStepStalled"
+
+    @pytest.mark.asyncio
+    async def test_stall_retries_same_sub_step_in_place(self, tmp_path, monkeypatch):
+        attempts: list[str] = []
+
+        class StallOnceStepExecutor:
+            current_agent_loop = None
+
+            async def execute(self, step, context, session_id, **kwargs):
+                attempts.append(step.step_id)
+                if step.step_id == "cost_estimating" and attempts.count("cost_estimating") == 1:
+                    await asyncio.Event().wait()
+                    return
+                yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"body": step.step_id})
+
+        executor = SubPipelineExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=_stall_pipeline(),
+            pipeline_dir=tmp_path,
+        )
+        monkeypatch.setattr(executor, "_make_step_executor", lambda: StallOnceStepExecutor())
+
+        events = [
+            event
+            async for event in executor.execute_streaming(
+                sub_spec=_stall_sub_spec(timeout_s=0.05, retries=1),
+                candidate={"name": "Plan A"},
+                candidate_index=0,
+                parent_context=_stall_parent_context(),
+                session_id="test_session",
+            )
+        ]
+
+        # The same sub-step ran twice; the earlier sub-step was not re-run.
+        assert attempts == ["template_generating", "cost_estimating", "cost_estimating"]
+
+        failed = [e for e in events if isinstance(e, PipelineEvent) and e.type == PipelineEventType.SUB_STEP_FAILED]
+        assert len(failed) == 1
+        assert failed[0].data["error_details"]["will_retry"] is True
+
+        terminal = [
+            e for e in events if isinstance(e, PipelineEvent) and e.type == PipelineEventType.SUB_PIPELINE_COMPLETED
+        ]
+        assert len(terminal) == 1
+        assert terminal[0].data["failed"] is False
+        # Conclusions from the sub-step completed before the stall are preserved.
+        assert terminal[0].data["step_conclusions"]["template_generating"] == {"body": "template_generating"}
+        assert terminal[0].data["step_conclusions"]["cost_estimating"] == {"body": "cost_estimating"}
+
+    @pytest.mark.asyncio
+    async def test_stall_publishes_running_state_while_retrying(self, tmp_path, monkeypatch):
+        published: list[tuple[str, str]] = []
+
+        class StallOnceStepExecutor:
+            current_agent_loop = None
+            seen = 0
+
+            async def execute(self, step, context, session_id, **kwargs):
+                if step.step_id == "cost_estimating":
+                    StallOnceStepExecutor.seen += 1
+                    if StallOnceStepExecutor.seen == 1:
+                        await asyncio.Event().wait()
+                        return
+                yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"body": "ok"})
+
+        def record(payload):
+            published.append((payload["current_sub_step"], payload["status"]))
+
+        executor = SubPipelineExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=_stall_pipeline(),
+            pipeline_dir=tmp_path,
+        )
+        monkeypatch.setattr(executor, "_make_step_executor", lambda: StallOnceStepExecutor())
+
+        async for _event in executor.execute_streaming(
+            sub_spec=_stall_sub_spec(timeout_s=0.05, retries=1),
+            candidate={"name": "Plan A"},
+            candidate_index=0,
+            parent_context=_stall_parent_context(),
+            session_id="test_session",
+            sub_step_state_callback=record,
+        ):
+            pass
+
+        # The stalled attempt keeps the candidate running so it can retry in place.
+        assert ("cost_estimating", "running") in published
+        assert ("cost_estimating", "failed") not in published
+
+    @pytest.mark.asyncio
+    async def test_waiting_for_user_answer_is_not_a_stall(self, tmp_path, monkeypatch):
+        from iac_code.types.stream_events import AskUserQuestionEvent
+
+        class AskThenIdleStepExecutor:
+            current_agent_loop = None
+
+            async def execute(self, step, context, session_id, **kwargs):
+                if step.step_id == "cost_estimating":
+                    yield AskUserQuestionEvent(
+                        tool_use_id="tu_1",
+                        question="which region?",
+                        options=[{"id": "a", "label": "A"}],
+                    )
+                    await asyncio.sleep(0.3)  # 6 stall windows pass awaiting an answer; none may count
+                yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"body": "ok"})
+
+        executor = SubPipelineExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=_stall_pipeline(),
+            pipeline_dir=tmp_path,
+        )
+        monkeypatch.setattr(executor, "_make_step_executor", lambda: AskThenIdleStepExecutor())
+
+        events = [
+            event
+            async for event in executor.execute_streaming(
+                sub_spec=_stall_sub_spec(timeout_s=0.05, retries=0),
+                candidate={"name": "Plan A"},
+                candidate_index=0,
+                parent_context=_stall_parent_context(),
+                session_id="test_session",
+            )
+        ]
+
+        assert not [e for e in events if isinstance(e, PipelineEvent) and e.type == PipelineEventType.SUB_STEP_FAILED]
+        terminal = [
+            e for e in events if isinstance(e, PipelineEvent) and e.type == PipelineEventType.SUB_PIPELINE_COMPLETED
+        ]
+        assert terminal[0].data["failed"] is False
+
+    @pytest.mark.asyncio
+    async def test_paused_pipeline_is_not_a_stall(self, tmp_path, monkeypatch):
+        pause_event = asyncio.Event()
+        reached_paused_step = asyncio.Event()
+
+        class PausedThenResumingStepExecutor:
+            current_agent_loop = None
+
+            async def execute(self, step, context, session_id, **kwargs):
+                if step.step_id == "cost_estimating":
+                    reached_paused_step.set()
+                    await pause_event.wait()
+                yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"body": "ok"})
+
+        executor = SubPipelineExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=_stall_pipeline(),
+            pipeline_dir=tmp_path,
+            pause_event=pause_event,
+        )
+        monkeypatch.setattr(executor, "_make_step_executor", lambda: PausedThenResumingStepExecutor())
+
+        async def resume_once_several_windows_elapsed():
+            await reached_paused_step.wait()
+            await asyncio.sleep(0.3)  # 6 stall windows pass while paused; none may count
+            pause_event.set()
+
+        resume_task = asyncio.ensure_future(resume_once_several_windows_elapsed())
+        events = [
+            event
+            async for event in executor.execute_streaming(
+                sub_spec=_stall_sub_spec(timeout_s=0.05, retries=0),
+                candidate={"name": "Plan A"},
+                candidate_index=0,
+                parent_context=_stall_parent_context(),
+                session_id="test_session",
+            )
+        ]
+        await resume_task
+
+        assert not [e for e in events if isinstance(e, PipelineEvent) and e.type == PipelineEventType.SUB_STEP_FAILED]
+
+    @pytest.mark.asyncio
+    async def test_stall_detection_disabled_by_default(self, tmp_path, monkeypatch):
+        class SlowStepExecutor:
+            current_agent_loop = None
+
+            async def execute(self, step, context, session_id, **kwargs):
+                await asyncio.sleep(0.02)
+                yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"body": "ok"})
+
+        sub_spec = _make_sub_spec()
+        assert sub_spec.sub_step_stall_timeout_s is None
+
+        executor = SubPipelineExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=_stall_pipeline(),
+            pipeline_dir=tmp_path,
+        )
+        monkeypatch.setattr(executor, "_make_step_executor", lambda: SlowStepExecutor())
+
+        events = [
+            event
+            async for event in executor.execute_streaming(
+                sub_spec=sub_spec,
+                candidate={"name": "Plan A"},
+                candidate_index=0,
+                parent_context=_stall_parent_context(),
+                session_id="test_session",
+            )
+        ]
+
+        assert not [e for e in events if isinstance(e, PipelineEvent) and e.type == PipelineEventType.SUB_STEP_FAILED]

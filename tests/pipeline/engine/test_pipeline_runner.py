@@ -4704,3 +4704,175 @@ class TestResolveIterateField:
         runner.context.snapshot = MagicMock(return_value={"plan": {"options": [{"x": 1}]}})
         result = runner._resolve_iterate_field("plan.options")
         assert result == [{"x": 1}]
+
+
+class TestCandidateTerminalStateOnCancel:
+    """A candidate that stops without finishing must leave a terminal, diagnosable
+    entry behind. Otherwise a replacement candidate silently takes over and the
+    original failure (e.g. a hanging cost_estimating sub-step) is never surfaced."""
+
+    @staticmethod
+    def _build_runner(tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "arch.md").write_text("Arch", encoding="utf-8")
+        (tmp_path / "prompts" / "eval.md").write_text("Eval", encoding="utf-8")
+        (tmp_path / "prompts" / "template.md").write_text("T", encoding="utf-8")
+        (tmp_path / "pipeline.yaml").write_text(
+            dedent("""\
+            name: test
+            context_dependencies:
+              architecture: []
+              evaluated: [architecture]
+            max_rollbacks: 3
+            sub_pipelines:
+              evaluate_candidate:
+                max_rollbacks: 2
+                iterate_over: architecture.candidates
+                context_fields_from_parent: []
+                steps:
+                  - id: cost_estimating
+                    conclusion_field: template
+                    forward: null
+                    prompt: prompts/template.md
+                    context_fields: [candidate]
+            steps:
+              - id: arch
+                conclusion_field: architecture
+                forward: eval
+                prompt: prompts/arch.md
+              - id: eval
+                type: parallel_sub_pipeline
+                sub_pipeline: evaluate_candidate
+                conclusion_field: evaluated
+                forward: null
+                prompt: prompts/eval.md
+        """),
+            encoding="utf-8",
+        )
+        runner = PipelineRunner(
+            pipeline_dir=tmp_path,
+            provider_manager=MagicMock(),
+            base_tool_registry=MagicMock(),
+            session_storage=FakeSessionStorage(),
+            session_id="test123",
+        )
+        runner.context.set_conclusion("architecture", {"candidates": [{"name": "Plan A"}, {"name": "Plan B"}]})
+        runner.state_machine.advance()  # position at "eval"
+        return runner
+
+    @staticmethod
+    def _hanging_execute_streaming(released):
+        async def execute_streaming(sub_spec, candidate, candidate_index, parent_context, session_id, **kwargs):
+            yield PipelineEvent(
+                type=PipelineEventType.SUB_PIPELINE_STARTED,
+                step_id=None,
+                timestamp=0,
+                data={
+                    "sub_pipeline_id": f"eval_{candidate_index}",
+                    "candidate_index": candidate_index,
+                    "candidate_name": candidate["name"],
+                    "total_steps": 1,
+                    "sub_pipeline_name": "evaluate_candidate",
+                },
+            )
+            yield PipelineEvent(
+                type=PipelineEventType.SUB_STEP_STARTED,
+                step_id=None,
+                timestamp=0,
+                data={"step_id": "cost_estimating", "candidate_index": candidate_index},
+            )
+            await released.wait()  # never completes: mimics the stalled sub-step
+            yield  # pragma: no cover
+
+        return execute_streaming
+
+    async def _run_until_cancelled(self, runner, *, cancel_reason):
+        released = asyncio.Event()
+        with patch("iac_code.pipeline.engine.pipeline_runner.SubPipelineExecutor") as mock_sub_exec:
+            instance = MagicMock()
+            instance.execute_streaming = self._hanging_execute_streaming(released)
+            instance.current_step_executor_agent_loop = None
+            mock_sub_exec.return_value = instance
+
+            step = next(s for s in runner._loaded.steps if s.step_id == "eval")
+            gen = runner._execute_parallel_sub_pipeline(step)
+            for _ in range(4):  # both candidates: started + sub-step started
+                await gen.__anext__()
+            assert len(runner._active_candidates) == 2
+
+            runner._cancel_active_candidates(reason=cancel_reason)
+            await gen.aclose()
+
+    @pytest.mark.asyncio
+    async def test_parent_rollback_cancel_records_superseded_terminal_state(self, tmp_path):
+        runner = self._build_runner(tmp_path)
+
+        await self._run_until_cancelled(runner, cancel_reason="hard_interrupt_parent_rollback")
+
+        entries = runner._execution["candidates"]
+        assert set(entries) == {"0", "1"}
+        for index in ("0", "1"):
+            entry = entries[index]
+            assert entry["status"] == "failed", "terminal status must stay one of completed/failed/running"
+            assert entry["terminal_reason"] == "superseded"
+            assert entry["current_sub_step"] == "cost_estimating"
+            assert entry["error"]
+            assert entry["error_details"]["type"] == "CandidateCancelled"
+            assert entry["error_details"]["cancel_reason"] == "hard_interrupt_parent_rollback"
+            assert entry["error_details"]["sub_step_id"] == "cost_estimating"
+
+    @pytest.mark.asyncio
+    async def test_plain_cancel_records_canceled_terminal_state(self, tmp_path):
+        runner = self._build_runner(tmp_path)
+
+        await self._run_until_cancelled(runner, cancel_reason="parallel_cleanup")
+
+        for entry in runner._execution["candidates"].values():
+            assert entry["status"] == "failed"
+            assert entry["terminal_reason"] == "canceled"
+            assert entry["error_details"]["cancel_reason"] == "parallel_cleanup"
+
+    @pytest.mark.asyncio
+    async def test_candidate_restart_does_not_write_terminal_state(self, tmp_path):
+        """An in-place restart is not a terminal outcome, so nothing must be recorded."""
+        runner = self._build_runner(tmp_path)
+
+        await self._run_until_cancelled(runner, cancel_reason="candidate_restart")
+
+        assert runner._execution.get("candidates", {}) == {}
+
+    @pytest.mark.asyncio
+    async def test_candidate_without_outcome_aggregates_a_reason(self, tmp_path):
+        """A candidate stream that ends silently must not aggregate as a blank result."""
+        runner = self._build_runner(tmp_path)
+
+        async def silent_execute_streaming(sub_spec, candidate, candidate_index, parent_context, session_id, **kwargs):
+            yield PipelineEvent(
+                type=PipelineEventType.SUB_PIPELINE_STARTED,
+                step_id=None,
+                timestamp=0,
+                data={
+                    "sub_pipeline_id": f"eval_{candidate_index}",
+                    "candidate_index": candidate_index,
+                    "candidate_name": candidate["name"],
+                    "total_steps": 1,
+                    "sub_pipeline_name": "evaluate_candidate",
+                },
+            )
+
+        with patch("iac_code.pipeline.engine.pipeline_runner.SubPipelineExecutor") as mock_sub_exec:
+            instance = MagicMock()
+            instance.execute_streaming = silent_execute_streaming
+            instance.current_step_executor_agent_loop = None
+            mock_sub_exec.return_value = instance
+
+            step = next(s for s in runner._loaded.steps if s.step_id == "eval")
+            async for _event in runner._execute_parallel_sub_pipeline(step):
+                pass
+
+        aggregated = runner.context.get_conclusion("evaluated")
+        assert len(aggregated) == 2
+        for item in aggregated:
+            assert item["failed"] is True
+            assert item["error"]
+            assert item["error_details"]["type"] == "CandidateOutcomeMissing"
