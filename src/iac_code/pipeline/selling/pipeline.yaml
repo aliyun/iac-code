@@ -16,6 +16,10 @@ on_complete:
     - early_exit
     - failed
     - canceled
+  # 必需产物门禁：intent_parsing 未产出非空 intent 时不发 pipeline_handoff_ready，
+  # 避免在步骤仍在执行/被取消时发出无产物的虚假就绪信号。
+  require_conclusions:
+    - intent
   handoff_context:
     include:
       - intent

@@ -54,6 +54,34 @@ RETRY_TEXT = "A temporary error occurred. Please retry."
 _A2A_ASYNC_TEST_TIMEOUT = 5
 
 
+def _completed_intent_parsing_event(context_id: str = "ctx-1", task_id: str = "task-1") -> dict:
+    """A completed ``intent_parsing`` step so the cancel handoff gate is satisfied.
+
+    ``selling`` declares ``on_complete.require_conclusions: [intent]``; without a
+    non-empty ``intent`` conclusion in the sidecar the cancel path suppresses
+    ``pipeline_handoff_ready`` on purpose.
+    """
+    return {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-intent",
+        "sequence": 1,
+        "createdAt": "2026-06-08T09:59:00Z",
+        "eventType": "step_completed",
+        "scope": "step",
+        "pipelineRunId": context_id,
+        "taskId": task_id,
+        "contextId": context_id,
+        "pipelineName": "selling",
+        "status": "working",
+        "step": {"runId": "step-intent_parsing-1", "id": "intent_parsing", "attempt": 1},
+        "data": {
+            "conclusionField": "intent",
+            "conclusion": {"summary": "部署 nginx", "is_infra_intent": True},
+        },
+    }
+
+
 @pytest.mark.asyncio
 async def test_stream_event_driver_preserves_generator_context_across_yields() -> None:
     from iac_code.a2a.pipeline_executor import _drive_stream_events
@@ -8202,7 +8230,7 @@ def test_cancel_waiting_input_sidecar_appends_cancel_handoff_as_durable_group(
         "schemaVersion": "1.0",
         "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
         "eventId": "evt-selection",
-        "sequence": 1,
+        "sequence": 2,
         "createdAt": "2026-06-08T10:00:00Z",
         "eventType": "input_required",
         "scope": "step",
@@ -8219,8 +8247,10 @@ def test_cancel_waiting_input_sidecar_appends_cancel_handoff_as_durable_group(
             "options": [{"name": "方案A", "candidate_index": 0}],
         },
     }
+    intent_completed = _completed_intent_parsing_event(context_id=context_id)
+    A2APipelineJournal(pipeline_dir).append(intent_completed)
     A2APipelineJournal(pipeline_dir).append(pending)
-    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([intent_completed, pending]))
     append_many_calls = []
     original_append_many = A2APipelineJournal.append_many
 
@@ -8259,6 +8289,64 @@ def test_cancel_waiting_input_sidecar_appends_cancel_handoff_as_durable_group(
         )
         == "canceled"
     )
+
+
+def test_cancel_waiting_input_suppresses_handoff_without_required_conclusion(
+    tmp_path: Path,
+) -> None:
+    """A run canceled before intent_parsing produced an intent must not signal readiness.
+
+    Regression for sessions where ``pipeline_handoff_ready`` fired while
+    ``intent_parsing`` was still working with a null intent, immediately followed by
+    ``pipeline_canceled`` and no candidates.
+    """
+    from iac_code.a2a.pipeline_executor import WaitingInputCancelResult, cancel_waiting_input_task_from_sidecar
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+
+    cwd = tmp_path / "workspace"
+    session_id = "session-ctx-1"
+    context_id = "ctx-1"
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    pending = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-ask",
+        "sequence": 1,
+        "createdAt": "2026-06-08T10:00:00Z",
+        "eventType": "input_required",
+        "scope": "step",
+        "pipelineRunId": context_id,
+        "taskId": "task-1",
+        "contextId": context_id,
+        "pipelineName": "selling",
+        "status": "input_required",
+        "step": {"runId": "step-intent_parsing-1", "id": "intent_parsing", "attempt": 1},
+        "input": {
+            "inputId": "ask-intent_parsing-1",
+            "kind": "ask_user_question",
+            "prompt": "要部署什么？",
+            "options": [],
+        },
+    }
+    A2APipelineJournal(pipeline_dir).append(pending)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+
+    canceled = cancel_waiting_input_task_from_sidecar(
+        cwd=str(cwd),
+        session_id=session_id,
+        context_id=context_id,
+        task_id="task-1",
+        reason="user canceled",
+    )
+
+    assert canceled == WaitingInputCancelResult.CANCELED
+    event_types = [event["eventType"] for event in A2APipelineJournal(pipeline_dir).read_all()]
+    assert "pipeline_handoff_ready" not in event_types
+    assert event_types.count("pipeline_canceled") == 2
+    snapshot = A2APipelineSnapshotStore(pipeline_dir).load()
+    assert snapshot is not None
+    assert snapshot["status"] == "canceled"
+    assert snapshot["normalHandoff"] is None
 
 
 @pytest.mark.asyncio
@@ -8461,7 +8549,7 @@ async def test_cancel_waiting_input_backup_sees_committed_cancel_and_mirrored_ta
         "schemaVersion": "1.0",
         "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
         "eventId": "evt-selection",
-        "sequence": 1,
+        "sequence": 2,
         "createdAt": "2026-06-08T10:00:00Z",
         "eventType": "input_required",
         "scope": "step",
@@ -8478,8 +8566,10 @@ async def test_cancel_waiting_input_backup_sees_committed_cancel_and_mirrored_ta
             "options": [{"name": "方案A", "candidate_index": 0}],
         },
     }
+    intent_completed = _completed_intent_parsing_event(context_id=context_id)
+    A2APipelineJournal(pipeline_dir).append(intent_completed)
     A2APipelineJournal(pipeline_dir).append(pending)
-    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([intent_completed, pending]))
     metrics = SpyMetrics()
 
     canceled = cancel_waiting_input_task_from_sidecar(
@@ -8515,7 +8605,7 @@ def test_cancel_waiting_input_sidecar_returns_false_when_durable_group_fails(
         "schemaVersion": "1.0",
         "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
         "eventId": "evt-selection",
-        "sequence": 1,
+        "sequence": 2,
         "createdAt": "2026-06-08T10:00:00Z",
         "eventType": "input_required",
         "scope": "step",
@@ -8532,8 +8622,10 @@ def test_cancel_waiting_input_sidecar_returns_false_when_durable_group_fails(
             "options": [{"name": "方案A", "candidate_index": 0}],
         },
     }
+    intent_completed = _completed_intent_parsing_event(context_id=context_id)
+    A2APipelineJournal(pipeline_dir).append(intent_completed)
     A2APipelineJournal(pipeline_dir).append(pending)
-    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([intent_completed, pending]))
 
     def fail_append_many(self, events, durable: bool = False):
         assert durable is True
@@ -8551,7 +8643,10 @@ def test_cancel_waiting_input_sidecar_returns_false_when_durable_group_fails(
     )
 
     assert canceled == WaitingInputCancelResult.PERSIST_FAILED
-    assert [event["eventType"] for event in A2APipelineJournal(pipeline_dir).read_all()] == ["input_required"]
+    assert [event["eventType"] for event in A2APipelineJournal(pipeline_dir).read_all()] == [
+        "step_completed",
+        "input_required",
+    ]
     snapshot = A2APipelineSnapshotStore(pipeline_dir).load()
     assert snapshot is not None
     assert snapshot["status"] == "waiting_input"
@@ -8580,7 +8675,7 @@ def test_cancel_waiting_input_backup_blocked_persist_failure_records_unavailable
         "schemaVersion": "1.0",
         "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
         "eventId": "evt-selection",
-        "sequence": 1,
+        "sequence": 2,
         "createdAt": "2026-06-08T10:00:00Z",
         "eventType": "input_required",
         "scope": "step",
@@ -8597,8 +8692,10 @@ def test_cancel_waiting_input_backup_blocked_persist_failure_records_unavailable
             "options": [{"name": "方案A", "candidate_index": 0}],
         },
     }
+    intent_completed = _completed_intent_parsing_event(context_id=context_id)
+    A2APipelineJournal(pipeline_dir).append(intent_completed)
     A2APipelineJournal(pipeline_dir).append(pending)
-    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([intent_completed, pending]))
     original_append = A2APipelineJournal.append
 
     def fail_backup_blocked_append(self, event, durable: bool = False):
@@ -8623,6 +8720,7 @@ def test_cancel_waiting_input_backup_blocked_persist_failure_records_unavailable
     assert metrics.backup_blocked == [(BackupReason.TERMINAL.value, False)]
     events = A2APipelineJournal(pipeline_dir).read_all()
     assert [event["eventType"] for event in events] == [
+        "step_completed",
         "input_required",
         "pipeline_canceled",
         "pipeline_handoff_ready",
@@ -8630,7 +8728,7 @@ def test_cancel_waiting_input_backup_blocked_persist_failure_records_unavailable
         "pipeline_handoff_ready",
         "input_required",
     ]
-    assert [event.get("visibility") for event in events[1:5]] == [
+    assert [event.get("visibility") for event in events[2:6]] == [
         "pending_backup",
         "pending_backup",
         "committed",
@@ -8680,7 +8778,7 @@ def test_cancel_waiting_input_failed_backup_result_persist_failure_records_unrec
         "schemaVersion": "1.0",
         "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
         "eventId": "evt-selection",
-        "sequence": 1,
+        "sequence": 2,
         "createdAt": "2026-06-08T10:00:00Z",
         "eventType": "input_required",
         "scope": "step",
@@ -8697,8 +8795,10 @@ def test_cancel_waiting_input_failed_backup_result_persist_failure_records_unrec
             "options": [{"name": "方案A", "candidate_index": 0}],
         },
     }
+    intent_completed = _completed_intent_parsing_event(context_id=context_id)
+    A2APipelineJournal(pipeline_dir).append(intent_completed)
     A2APipelineJournal(pipeline_dir).append(pending)
-    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([intent_completed, pending]))
     original_append = A2APipelineJournal.append
 
     def fail_backup_blocked_append(self, event, durable: bool = False):
@@ -8743,7 +8843,7 @@ def test_cancel_waiting_input_backup_blocked_records_metric(tmp_path: Path) -> N
         "schemaVersion": "1.0",
         "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
         "eventId": "evt-selection",
-        "sequence": 1,
+        "sequence": 2,
         "createdAt": "2026-06-08T10:00:00Z",
         "eventType": "input_required",
         "scope": "step",
@@ -8760,8 +8860,10 @@ def test_cancel_waiting_input_backup_blocked_records_metric(tmp_path: Path) -> N
             "options": [{"name": "方案A", "candidate_index": 0}],
         },
     }
+    intent_completed = _completed_intent_parsing_event(context_id=context_id)
+    A2APipelineJournal(pipeline_dir).append(intent_completed)
     A2APipelineJournal(pipeline_dir).append(pending)
-    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([intent_completed, pending]))
     metrics = SpyMetrics()
 
     canceled = cancel_waiting_input_task_from_sidecar(
@@ -8805,7 +8907,7 @@ def test_cancel_waiting_input_failed_backup_result_records_blocked_metric(tmp_pa
         "schemaVersion": "1.0",
         "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
         "eventId": "evt-selection",
-        "sequence": 1,
+        "sequence": 2,
         "createdAt": "2026-06-08T10:00:00Z",
         "eventType": "input_required",
         "scope": "step",
@@ -8822,8 +8924,10 @@ def test_cancel_waiting_input_failed_backup_result_records_blocked_metric(tmp_pa
             "options": [{"name": "方案A", "candidate_index": 0}],
         },
     }
+    intent_completed = _completed_intent_parsing_event(context_id=context_id)
+    A2APipelineJournal(pipeline_dir).append(intent_completed)
     A2APipelineJournal(pipeline_dir).append(pending)
-    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([intent_completed, pending]))
     metrics = SpyMetrics()
 
     canceled = cancel_waiting_input_task_from_sidecar(
@@ -8884,7 +8988,7 @@ async def test_cancel_waiting_input_committed_persist_failure_keeps_task_input_r
         "schemaVersion": "1.0",
         "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
         "eventId": "evt-selection",
-        "sequence": 1,
+        "sequence": 2,
         "createdAt": "2026-06-08T10:00:00Z",
         "eventType": "input_required",
         "scope": "step",
@@ -8901,8 +9005,10 @@ async def test_cancel_waiting_input_committed_persist_failure_keeps_task_input_r
             "options": [{"name": "方案A", "candidate_index": 0}],
         },
     }
+    intent_completed = _completed_intent_parsing_event(context_id=context_id)
+    A2APipelineJournal(pipeline_dir).append(intent_completed)
     A2APipelineJournal(pipeline_dir).append(pending)
-    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([intent_completed, pending]))
     original_append_many = A2APipelineJournal.append_many
     append_many_calls = 0
     fail_during_committed_append = False
@@ -8969,12 +9075,13 @@ async def test_cancel_waiting_input_committed_persist_failure_keeps_task_input_r
     persisted_task = await store.get_task_record("task-1")
     assert persisted_task.state == "input-required"
     events = A2APipelineJournal(pipeline_dir).read_all()
-    assert [event["eventType"] for event in events[:3]] == [
+    assert [event["eventType"] for event in events[:4]] == [
+        "step_completed",
         "input_required",
         "pipeline_canceled",
         "pipeline_handoff_ready",
     ]
-    assert all(event.get("visibility") == "pending_backup" for event in events[1:3])
+    assert all(event.get("visibility") == "pending_backup" for event in events[2:4])
     assert events[-1]["eventType"] == "input_required"
     assert events[-1]["data"]["kind"] == "terminal_publication_unavailable"
     snapshot = A2APipelineSnapshotStore(pipeline_dir).load()
@@ -9033,7 +9140,7 @@ def test_concurrent_cancel_waiting_input_sidecar_is_serialized(tmp_path: Path) -
         "schemaVersion": "1.0",
         "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
         "eventId": "evt-selection",
-        "sequence": 1,
+        "sequence": 2,
         "createdAt": "2026-06-08T10:00:00Z",
         "eventType": "input_required",
         "scope": "step",
@@ -9050,8 +9157,10 @@ def test_concurrent_cancel_waiting_input_sidecar_is_serialized(tmp_path: Path) -
             "options": [{"name": "方案A", "candidate_index": 0}],
         },
     }
+    intent_completed = _completed_intent_parsing_event(context_id=context_id)
+    A2APipelineJournal(pipeline_dir).append(intent_completed)
     A2APipelineJournal(pipeline_dir).append(pending)
-    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([intent_completed, pending]))
     backup_service = BlockingBackupService()
     results: list[WaitingInputCancelResult] = []
     errors: list[BaseException] = []

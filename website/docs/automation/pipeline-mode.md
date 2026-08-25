@@ -93,6 +93,8 @@ If the process exits or the session is interrupted, IaC Code saves the pipeline 
 
 After the pipeline completes, fails, exits early, or is canceled, IaC Code switches back to normal chat. You can then ask follow-up questions, adjust the plan, or handle post-deployment issues.
 
+Switching back to normal chat also requires the pipeline's required results. If a required step has not produced a usable result yet — for example the run is canceled while the requirement-understanding stage is still working — IaC Code publishes only the terminal state and does not signal handoff readiness, so no downstream consumer receives an empty result as if the pipeline had finished its work.
+
 ## Automation Integrations
 
 Pipeline mode can be integrated through A2A server mode or SDK process mode. A2A server mode exposes pipeline progress, artifacts, permission results, and recovery information for external consoles or task systems. SDK process mode keeps `iac-code` as a local subprocess and exchanges line-delimited JSON over stdin/stdout.

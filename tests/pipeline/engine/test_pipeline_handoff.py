@@ -41,12 +41,15 @@ def _make_runner(tmp_path: Path, on_complete: dict | None = None) -> PipelineRun
     )
 
 
-def _switch_policy(*apply_on: str, include: list[str] | None = None) -> dict:
-    return {
+def _switch_policy(*apply_on: str, include: list[str] | None = None, require: list[str] | None = None) -> dict:
+    policy = {
         "action": "switch_to_normal",
         "apply_on": list(apply_on),
         "handoff_context": {"include": include or ["intent"]},
     }
+    if require is not None:
+        policy["require_conclusions"] = list(require)
+    return policy
 
 
 def test_terminal_outcome_from_completed_event_completed():
@@ -181,3 +184,45 @@ def test_runner_build_normal_handoff_summary_uses_configured_context_values(tmp_
     assert "Outcome: completed" in summary
     assert '"summary": "deploy nginx"' in summary
     assert "Missing context fields:\n- architecture" in summary
+
+
+def test_runner_should_not_switch_while_required_conclusion_missing(tmp_path):
+    runner = _make_runner(tmp_path, _switch_policy("completed", "canceled", "failed", "early_exit", require=["intent"]))
+
+    assert runner.missing_handoff_conclusions() == ["intent"]
+    assert runner.should_switch_to_normal({"total_steps": 1}) is False
+    assert runner.should_switch_to_normal({"canceled": True}) is False
+    assert runner.should_switch_to_normal({"failed": True}) is False
+    assert runner.should_switch_to_normal({"early_exit": True}) is False
+
+
+def test_runner_should_switch_once_required_conclusion_is_produced(tmp_path):
+    runner = _make_runner(tmp_path, _switch_policy("completed", "canceled", require=["intent"]))
+    runner.context.set_conclusion("intent", {"summary": "deploy nginx"})
+
+    assert runner.missing_handoff_conclusions() == []
+    assert runner.should_switch_to_normal({"total_steps": 1}) is True
+    assert runner.should_switch_to_normal({"canceled": True}) is True
+
+
+def test_runner_should_not_switch_for_empty_required_conclusion(tmp_path):
+    runner = _make_runner(tmp_path, _switch_policy("completed", require=["intent"]))
+    runner.context.set_conclusion("intent", {})
+
+    assert runner.should_switch_to_normal({"total_steps": 1}) is False
+
+
+def test_runner_should_not_switch_for_stale_required_conclusion(tmp_path):
+    runner = _make_runner(tmp_path, _switch_policy("completed", require=["intent"]))
+    runner.context.set_conclusion("intent", {"summary": "deploy nginx"})
+    runner.context.mark_stale("intent")
+
+    assert runner.missing_handoff_conclusions() == ["intent"]
+    assert runner.should_switch_to_normal({"total_steps": 1}) is False
+
+
+def test_runner_without_require_conclusions_keeps_outcome_only_gate(tmp_path):
+    runner = _make_runner(tmp_path, _switch_policy("completed"))
+
+    assert runner.missing_handoff_conclusions() == []
+    assert runner.should_switch_to_normal({"total_steps": 1}) is True

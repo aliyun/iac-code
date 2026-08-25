@@ -81,7 +81,7 @@ def load_pipeline_dir(
     feature_flags = _resolve_feature_flags(raw.get("feature_flags"))
     if feature_flag_overrides:
         feature_flags.update(feature_flag_overrides)
-    on_complete = _parse_on_complete(raw.get("on_complete"))
+    on_complete = _parse_on_complete(raw.get("on_complete"), context_dependencies)
 
     sub_pipelines = _parse_sub_pipelines(raw.get("sub_pipelines", {}), feature_flags, pipeline_dir)
 
@@ -194,7 +194,7 @@ def _validate_context_dependencies_acyclic(dependencies: dict[str, list[str]]) -
         visit(field_name)
 
 
-def _parse_on_complete(raw: dict | None) -> OnCompletePolicy | None:
+def _parse_on_complete(raw: dict | None, context_dependencies: dict[str, list[str]]) -> OnCompletePolicy | None:
     if raw is None:
         return None
     if not isinstance(raw, dict):
@@ -223,10 +223,26 @@ def _parse_on_complete(raw: dict | None) -> OnCompletePolicy | None:
         raise ValueError(f"on_complete.handoff_context.include must be a list of strings, got {raw_include!r}")
     include = cast(list[str], raw_include)
 
+    raw_require_conclusions = raw.get("require_conclusions", [])
+    if not isinstance(raw_require_conclusions, list) or not all(
+        isinstance(field_name, str) for field_name in raw_require_conclusions
+    ):
+        raise ValueError(f"on_complete.require_conclusions must be a list of strings, got {raw_require_conclusions!r}")
+    require_conclusions = cast(list[str], raw_require_conclusions)
+    # A typo here would silently suppress handoff forever, so fail at load time.
+    unknown_fields = [field_name for field_name in require_conclusions if field_name not in context_dependencies]
+    if unknown_fields:
+        unknown = ", ".join(unknown_fields)
+        known = ", ".join(sorted(context_dependencies))
+        raise ValueError(
+            f"on_complete.require_conclusions contains unknown context field(s): {unknown}; known fields: {known}"
+        )
+
     return OnCompletePolicy(
         action=action,
         apply_on=list(apply_on),
         handoff_context=HandoffContextConfig(include=list(include)),
+        require_conclusions=list(require_conclusions),
     )
 
 

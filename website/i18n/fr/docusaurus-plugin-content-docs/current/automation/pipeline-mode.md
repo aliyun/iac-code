@@ -87,6 +87,8 @@ Si le processus se termine ou si la session est interrompue, IaC Code enregistre
 
 Une fois le pipeline terminé, échoué, sorti plus tôt ou annulé, IaC Code revient au chat normal. Vous pouvez alors poser des questions de suivi, ajuster le plan ou traiter les problèmes après déploiement.
 
+Le retour au chat normal exige aussi que le pipeline ait produit ses résultats obligatoires. Si une étape obligatoire n'a pas encore produit de résultat exploitable — par exemple lorsque l'exécution est annulée alors que l'étape de compréhension du besoin est encore en cours —, IaC Code publie uniquement l'état terminal et n'émet pas le signal de transfert, afin qu'aucun consommateur en aval ne reçoive un résultat vide comme si le pipeline avait achevé son travail.
+
 ## Intégrations d'automatisation
 
 Le mode pipeline est actuellement conçu principalement pour le REPL interactif. Le mode serveur A2A peut exposer la progression du pipeline, les artefacts, les résultats d'autorisation et les informations de reprise, ce qui est utile pour connecter un pipeline à une console externe ou à un système de tâches.

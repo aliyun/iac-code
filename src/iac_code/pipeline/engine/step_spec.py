@@ -52,6 +52,9 @@ class OnCompletePolicy:
     action: str
     apply_on: list[str] = field(default_factory=lambda: ["completed"])
     handoff_context: HandoffContextConfig = field(default_factory=HandoffContextConfig)
+    # Context fields that must hold a fresh, non-empty conclusion before the pipeline
+    # may signal handoff readiness. Empty list keeps the outcome-only behavior.
+    require_conclusions: list[str] = field(default_factory=list)
 
 
 @dataclass

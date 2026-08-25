@@ -87,6 +87,8 @@ Wenn der Prozess endet oder die Sitzung unterbrochen wird, speichert IaC Code de
 
 Nachdem die Pipeline abgeschlossen ist, fehlschlägt, frühzeitig beendet oder abgebrochen wird, wechselt IaC Code zurück in den normalen Chat. Danach können Sie Folgefragen stellen, den Plan anpassen oder Probleme nach dem Deployment bearbeiten.
 
+Der Wechsel zurück in den normalen Chat setzt zusätzlich voraus, dass die Pipeline ihre erforderlichen Ergebnisse geliefert hat. Wenn ein erforderlicher Schritt noch kein verwertbares Ergebnis erzeugt hat – etwa wenn der Lauf abgebrochen wird, während die Phase zur Anforderungsklärung noch läuft –, veröffentlicht IaC Code nur den Endzustand und sendet kein Handoff-Bereitschaftssignal. So erhält kein nachgelagerter Konsument ein leeres Ergebnis, als hätte die Pipeline ihre Arbeit abgeschlossen.
+
 ## Automatisierungsintegrationen
 
 Der Pipeline-Modus ist derzeit hauptsächlich für die interaktive REPL gedacht. Der A2A-Servermodus kann Pipeline-Fortschritt, Artefakte, Berechtigungsergebnisse und Wiederherstellungsinformationen nach außen bereitstellen. Das ist nützlich, wenn eine Pipeline an eine externe Konsole oder ein Aufgabensystem angebunden wird.

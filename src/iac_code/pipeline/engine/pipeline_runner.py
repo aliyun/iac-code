@@ -986,12 +986,40 @@ class PipelineRunner:
             return None
         return session_dir
 
+    def missing_handoff_conclusions(self) -> list[str]:
+        """Required conclusion fields that are still empty or stale.
+
+        A step only writes its conclusion into the context after ``complete_step``
+        succeeds, and rollback/interrupt marks previously written fields stale, so an
+        empty result here means every required step produced a usable, current result.
+        """
+        policy = self.on_complete_policy
+        if policy is None:
+            return []
+        missing: list[str] = []
+        for field_name in policy.require_conclusions:
+            field = self.context.get_field(field_name)
+            if not field.value or field.stale:
+                missing.append(field_name)
+        return missing
+
     def should_switch_to_normal(self, completed_event_data: dict) -> bool:
         policy = self.on_complete_policy
         if policy is None or policy.action != "switch_to_normal":
             return False
         outcome = terminal_outcome_from_completed_event(completed_event_data)
-        return outcome in policy.apply_on
+        if outcome not in policy.apply_on:
+            return False
+        missing = self.missing_handoff_conclusions()
+        if missing:
+            logger.info(
+                "Suppressing pipeline %s handoff readiness (outcome=%s): missing conclusions %s",
+                self.pipeline_name,
+                outcome,
+                ", ".join(missing),
+            )
+            return False
+        return True
 
     def build_normal_handoff_summary(self, completed_event_data: dict) -> str:
         policy = self.on_complete_policy

@@ -3907,6 +3907,20 @@ def _waiting_input_cancel_handoff_event(
     context_snapshot = _flat_pipeline_context_from_sidecar(cwd=cwd, session_id=session_id)
     if not context_snapshot:
         context_snapshot = _flat_pipeline_context_from_a2a_snapshot(snapshot, loaded_pipeline)
+    # 与 PipelineRunner.should_switch_to_normal 同一门禁:必需步骤尚未产出非空 conclusion 时
+    # 不发就绪信号,否则取消一个还停在早期步骤的 run 会产生「无产物即就绪」的假信号。
+    missing = [
+        field_name
+        for field_name in getattr(policy, "require_conclusions", [])
+        if not context_snapshot.get(field_name)
+    ]
+    if missing:
+        logger.info(
+            "Suppressing pipeline %s cancel handoff readiness: missing conclusions %s",
+            pipeline_name,
+            ", ".join(missing),
+        )
+        return None
     summary = build_handoff_summary(
         pipeline_name=pipeline_name,
         outcome="canceled",

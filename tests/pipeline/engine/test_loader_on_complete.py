@@ -109,3 +109,78 @@ def test_falsy_non_mapping_handoff_context_raises(tmp_path):
 
     with pytest.raises(ValueError, match="on_complete.handoff_context"):
         load_pipeline_dir(tmp_path)
+
+
+def test_omitted_require_conclusions_defaults_to_empty(tmp_path):
+    _write_pipeline(
+        tmp_path,
+        _minimal_yaml(
+            dedent(
+                """\
+                on_complete:
+                  action: switch_to_normal
+                """
+            )
+        ),
+    )
+
+    loaded = load_pipeline_dir(tmp_path)
+
+    assert loaded.on_complete is not None
+    assert loaded.on_complete.require_conclusions == []
+
+
+def test_require_conclusions_parses(tmp_path):
+    _write_pipeline(
+        tmp_path,
+        _minimal_yaml(
+            dedent(
+                """\
+                on_complete:
+                  action: switch_to_normal
+                  require_conclusions: [intent]
+                """
+            )
+        ),
+    )
+
+    loaded = load_pipeline_dir(tmp_path)
+
+    assert loaded.on_complete is not None
+    assert loaded.on_complete.require_conclusions == ["intent"]
+
+
+def test_non_list_require_conclusions_raises(tmp_path):
+    _write_pipeline(
+        tmp_path,
+        _minimal_yaml(
+            dedent(
+                """\
+                on_complete:
+                  action: switch_to_normal
+                  require_conclusions: intent
+                """
+            )
+        ),
+    )
+
+    with pytest.raises(ValueError, match="on_complete.require_conclusions"):
+        load_pipeline_dir(tmp_path)
+
+
+def test_unknown_require_conclusions_field_raises(tmp_path):
+    _write_pipeline(
+        tmp_path,
+        _minimal_yaml(
+            dedent(
+                """\
+                on_complete:
+                  action: switch_to_normal
+                  require_conclusions: [intetn]
+                """
+            )
+        ),
+    )
+
+    with pytest.raises(ValueError, match="unknown context field"):
+        load_pipeline_dir(tmp_path)

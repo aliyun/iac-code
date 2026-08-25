@@ -87,6 +87,8 @@ Si el proceso termina o la sesión se interrumpe, IaC Code guarda el estado del 
 
 Cuando el pipeline termina, falla, sale antes de tiempo o se cancela, IaC Code vuelve al chat normal. Luego puedes hacer preguntas de seguimiento, ajustar el plan o resolver problemas posteriores al despliegue.
 
+Volver al chat normal también exige que el pipeline haya producido sus resultados obligatorios. Si un paso obligatorio todavía no ha producido un resultado utilizable —por ejemplo, si la ejecución se cancela mientras la etapa de comprensión del requisito sigue en curso—, IaC Code publica únicamente el estado terminal y no emite la señal de traspaso, de modo que ningún consumidor posterior reciba un resultado vacío como si el pipeline hubiera terminado su trabajo.
+
 ## Integraciones de automatización
 
 El modo pipeline está diseñado actualmente sobre todo para el REPL interactivo. El modo servidor A2A puede exponer progreso del pipeline, artefactos, resultados de permisos e información de recuperación, lo que resulta útil para conectar un pipeline a una consola externa o a un sistema de tareas.
