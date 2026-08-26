@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded Alibaba Cloud ROS Agent bridge using Alibaba Cloud CLI."""
+"""Bounded Alibaba Cloud ROS Agent bridge using signed StartChat RPCs."""
 
 import argparse
 import contextlib
@@ -18,6 +18,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -653,7 +654,6 @@ def build_command(
         resolve_aliyun(args.aliyun_path),
         "ros",
         "StartChat",
-        "--force",
         "--method",
         "POST",
         "--endpoint",
@@ -686,7 +686,6 @@ def build_stop_command(job: Dict[str, Any], session_id: str) -> List[str]:
         resolve_aliyun(str(job.get("aliyunPath") or "aliyun")),
         "ros",
         "StopChat",
-        "--force",
         "--method",
         "POST",
         "--endpoint",
@@ -718,17 +717,9 @@ def _load_code_sdk() -> Dict[str, Any]:
                 importlib.import_module("alibabacloud_credentials.provider.cli_profile"),
                 "CLIProfileCredentialsProvider",
             ),
-            "AccessKeyCredential": getattr(
-                importlib.import_module("aliyunsdkcore.auth.credentials"), "AccessKeyCredential"
-            ),
-            "StsTokenCredential": getattr(
-                importlib.import_module("aliyunsdkcore.auth.credentials"), "StsTokenCredential"
-            ),
-            "AcsClient": getattr(importlib.import_module("aliyunsdkcore.client"), "AcsClient"),
-            "CommonRequest": getattr(importlib.import_module("aliyunsdkcore.request"), "CommonRequest"),
-            "protocolType": importlib.import_module("aliyunsdkcore.http.protocol_type"),
-            "methodType": importlib.import_module("aliyunsdkcore.http.method_type"),
-            "requests": importlib.import_module("aliyunsdkcore.vendored.requests"),
+            "DaraRequest": getattr(importlib.import_module("darabonba.request"), "DaraRequest"),
+            "OpenApiUtils": getattr(importlib.import_module("alibabacloud_tea_openapi.utils"), "Utils"),
+            "requests": importlib.import_module("requests"),
         }
     except (ImportError, AttributeError) as exc:
         raise BridgeError(
@@ -917,7 +908,7 @@ def _code_credentials(
     profile: Optional[str],
     region_id: Optional[str],
     credential_source: Optional[str] = None,
-) -> Any:
+) -> Tuple[str, str, Optional[str]]:
     if credential_source not in {None, "environment", "profile"}:
         raise BridgeError("credential_failed", "The managed Alibaba Cloud credential source is invalid.")
     environment = None if credential_source == "profile" else _environment_credentials()
@@ -944,9 +935,57 @@ def _code_credentials(
             security_token = credentials.get_security_token()
             if not access_key_id or not access_key_secret:
                 raise ValueError("empty credentials")
+    return access_key_id, access_key_secret, security_token or None
+
+
+def _canonical_query_string(parameters: Dict[str, str]) -> str:
+    return "&".join(
+        "{}={}".format(name, urllib.parse.quote(value, safe="~", encoding="utf-8"))
+        for name, value in sorted(parameters.items())
+    )
+
+
+def _build_v3_request(
+    sdk: Dict[str, Any],
+    operation: str,
+    parameters: Dict[str, str],
+    endpoint: str,
+    credentials: Tuple[str, str, Optional[str]],
+) -> Tuple[str, Dict[str, str]]:
+    access_key_id, access_key_secret, security_token = credentials
+    signature_algorithm = "ACS3-HMAC-SHA256"
+    utils = sdk["OpenApiUtils"]
+    payload_hash = utils.hash(b"", signature_algorithm).hex()
+    headers = {
+        "accept": "text/event-stream" if operation == "StartChat" else "application/json",
+        "accept-encoding": "identity",
+        "host": endpoint,
+        "user-agent": USER_AGENT,
+        "x-acs-action": operation,
+        "x-acs-content-sha256": payload_hash,
+        "x-acs-date": utils.get_timestamp(),
+        "x-acs-signature-nonce": utils.get_nonce(),
+        "x-acs-version": "2019-09-10",
+    }
     if security_token:
-        return sdk["StsTokenCredential"](access_key_id, access_key_secret, security_token)
-    return sdk["AccessKeyCredential"](access_key_id, access_key_secret)
+        headers["x-acs-accesskey-id"] = access_key_id
+        headers["x-acs-security-token"] = security_token
+
+    request = sdk["DaraRequest"]()
+    request.protocol = "https"
+    request.method = "POST"
+    request.pathname = "/"
+    request.query = dict(parameters)
+    request.headers = headers
+    headers["Authorization"] = utils.get_authorization(
+        request,
+        signature_algorithm,
+        payload_hash,
+        access_key_id,
+        access_key_secret,
+    )
+    query = _canonical_query_string(parameters)
+    return "https://{}/{}".format(endpoint, "?{}".format(query) if query else ""), headers
 
 
 class _CodeHttpResponse:
@@ -983,27 +1022,8 @@ def _open_code_request(
 ) -> Any:
     sdk = _load_code_sdk()
     try:
-        core_credentials = _code_credentials(sdk, aliyun_path, profile, region_id, credential_source)
-        client = sdk["AcsClient"](
-            region_id=region_id or "cn-hangzhou",
-            credential=core_credentials,
-            auto_retry=False,
-            verify=False if _endpoint_kind(endpoint) == "loopback" else None,
-        )
-        client.append_user_agent("AlibabaCloud-Agent-Skills", "alibabacloud-ros-agent")
-        request = sdk["CommonRequest"](
-            domain=endpoint,
-            version="2019-09-10",
-            action_name=operation,
-            product="ROS",
-        )
-        request.set_protocol_type(sdk["protocolType"].HTTPS)
-        request.set_method(sdk["methodType"].POST)
-        request.add_header("Accept-Encoding", "identity")
-        request.add_header("Accept", "text/event-stream" if operation == "StartChat" else "application/json")
-        for name, value in parameters.items():
-            request.add_query_param(name, value)
-        signed = client._make_http_response(endpoint, request, read_timeout, connect_timeout)
+        credentials = _code_credentials(sdk, aliyun_path, profile, region_id, credential_source)
+        url, headers = _build_v3_request(sdk, operation, parameters, endpoint, credentials)
     except BridgeError:
         raise
     except Exception as exc:
@@ -1016,10 +1036,10 @@ def _open_code_request(
     session = sdk["requests"].Session()
     try:
         response = session.request(
-            method=signed.get_method(),
-            url="https://{}{}".format(endpoint, signed.get_url()),
-            data=signed.get_body(),
-            headers=signed.get_headers(),
+            method="POST",
+            url=url,
+            data=None,
+            headers=headers,
             timeout=(connect_timeout, read_timeout),
             allow_redirects=False,
             verify=_endpoint_kind(endpoint) != "loopback",
