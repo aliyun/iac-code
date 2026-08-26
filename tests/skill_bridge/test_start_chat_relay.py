@@ -359,6 +359,23 @@ def _aliyun_start_chat_command(
     return command
 
 
+def _require_aliyun_apis(aliyun: str, *operations: str) -> None:
+    for operation in operations:
+        completed = subprocess.run(
+            [aliyun, "ros", operation, "--help"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
+        )
+        if completed.returncode == 2 and "is not a valid api" in completed.stderr:
+            pytest.skip("Installed Alibaba Cloud CLI metadata does not include {} yet".format(operation))
+
+
 def _aliyun_start_chat(
     aliyun: str,
     endpoint: str,
@@ -385,6 +402,8 @@ def _aliyun_start_chat(
         timeout=20,
         check=False,
     )
+    if completed.returncode == 2 and "is not a valid api" in completed.stderr:
+        pytest.skip("Installed Alibaba Cloud CLI metadata does not include StartChat yet")
     assert completed.returncode == 0, bridge.sanitize_text(completed.stderr, 1000)
     return completed.stdout, completed.stderr
 
@@ -422,6 +441,8 @@ def _aliyun_stop_chat(aliyun: str, endpoint: str, session_id: str) -> dict:
         timeout=20,
         check=False,
     )
+    if completed.returncode == 2 and "is not a valid api" in completed.stderr:
+        pytest.skip("Installed Alibaba Cloud CLI metadata does not include StopChat yet")
     assert completed.returncode == 0, bridge.sanitize_text(completed.stderr, 1000)
     value = json.loads(completed.stdout)
     assert isinstance(value, dict)
@@ -607,6 +628,7 @@ def test_stop_chat_round_trip_through_real_aliyun_cli(
     aliyun = shutil.which("aliyun")
     if aliyun is None:
         pytest.skip("Alibaba Cloud CLI is not installed")
+    _require_aliyun_apis(aliyun, "StopChat")
     metrics_path = tmp_path / "relay-metrics.json"
     relay_server = relay.StartChatRelay(
         ("127.0.0.1", 0),
@@ -673,6 +695,7 @@ def test_stop_chat_cancels_live_a2a_stream_through_real_aliyun_cli(
     aliyun = shutil.which("aliyun")
     if aliyun is None:
         pytest.skip("Alibaba Cloud CLI is not installed")
+    _require_aliyun_apis(aliyun, "StartChat", "StopChat")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
@@ -785,6 +808,7 @@ def test_normal_permission_round_trip_through_real_aliyun_cli_and_a2a(
     aliyun = shutil.which("aliyun")
     if aliyun is None:
         pytest.skip("Alibaba Cloud CLI is not installed")
+    _require_aliyun_apis(aliyun, "StartChat")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
@@ -894,6 +918,7 @@ def test_normal_consecutive_permissions_return_at_each_serial_boundary(
     aliyun = shutil.which("aliyun")
     if aliyun is None:
         pytest.skip("Alibaba Cloud CLI is not installed")
+    _require_aliyun_apis(aliyun, "StartChat")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
@@ -1009,6 +1034,7 @@ def test_top_pipeline_permission_ends_parent_start_chat_and_continues_on_reply_s
     aliyun = shutil.which("aliyun")
     if aliyun is None:
         pytest.skip("Alibaba Cloud CLI is not installed")
+    _require_aliyun_apis(aliyun, "StartChat")
     from iac_code.a2a import executor as executor_module
     from iac_code.a2a import pipeline_executor as pipeline_executor_module
     from scripts.a2a.e2e.permission_wait.permission_wait_fixture_server import (
@@ -1137,6 +1163,7 @@ def test_sub_pipeline_permissions_round_trip_through_real_aliyun_cli_and_a2a(
     aliyun = shutil.which("aliyun")
     if aliyun is None:
         pytest.skip("Alibaba Cloud CLI is not installed")
+    _require_aliyun_apis(aliyun, "StartChat")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
