@@ -28,6 +28,7 @@ from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStre
 ROOT = Path(__file__).resolve().parents[2]
 RELAY_PATH = Path(__file__).with_name("start_chat_relay.py")
 BRIDGE_PATH = ROOT / "skills/alicloud-ros-agent/scripts/ros_agent.py"
+REAL_ALIYUN_PLUGINS_DIR = Path.home() / ".aliyun" / "plugins"
 
 
 def _load_module(name: str, path: Path):
@@ -344,7 +345,7 @@ def _aliyun_start_chat_command(
         [],
     )
     command[command.index("--endpoint") + 1] = endpoint
-    query_index = command.index("--Query")
+    query_index = command.index("--query")
     command[query_index:query_index] = [
         "--skip-secure-verify",
         "--mode",
@@ -359,21 +360,12 @@ def _aliyun_start_chat_command(
     return command
 
 
-def _require_aliyun_apis(aliyun: str, *operations: str) -> None:
-    for operation in operations:
-        completed = subprocess.run(
-            [aliyun, "ros", operation, "--help"],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=10,
-            check=False,
-        )
-        if completed.returncode == 2 and "is not a valid api" in completed.stderr:
-            pytest.skip("Installed Alibaba Cloud CLI metadata does not include {} yet".format(operation))
+def _require_aliyun_apis(monkeypatch: pytest.MonkeyPatch, aliyun: str, *operations: str) -> None:
+    del aliyun, operations
+    monkeypatch.setenv("ALIBABA_CLOUD_CLI_PLUGINS_DIR", str(REAL_ALIYUN_PLUGINS_DIR))
+    status = bridge._local_ros_plugin_status()
+    if not status["ready"]:
+        pytest.skip("Installed ROS CLI plugin does not provide start-chat and stop-chat")
 
 
 def _aliyun_start_chat(
@@ -419,7 +411,7 @@ def _aliyun_stop_chat(aliyun: str, endpoint: str, session_id: str) -> dict:
         },
         session_id,
     )
-    input_index = command.index("--AgentVersion")
+    input_index = command.index("--agent-version")
     command[input_index:input_index] = [
         "--mode",
         "AK",
@@ -458,7 +450,7 @@ def _summarize_sse(
 ) -> dict:
     summary = bridge.StreamSummary(session_id, mode=mode)
     diagnostics = []
-    for payload, raw in bridge.iter_sse_payloads(stdout.splitlines(keepends=True)):
+    for payload, raw in bridge.iter_cli_plugin_payloads(stdout.splitlines(keepends=True)):
         if payload is None:
             summary.malformed_event_count += 1
             diagnostics.append(raw)
@@ -628,7 +620,7 @@ def test_stop_chat_round_trip_through_real_aliyun_cli(
     aliyun = shutil.which("aliyun")
     if aliyun is None:
         pytest.skip("Alibaba Cloud CLI is not installed")
-    _require_aliyun_apis(aliyun, "StopChat")
+    _require_aliyun_apis(monkeypatch, aliyun, "StopChat")
     metrics_path = tmp_path / "relay-metrics.json"
     relay_server = relay.StartChatRelay(
         ("127.0.0.1", 0),
@@ -695,7 +687,7 @@ def test_stop_chat_cancels_live_a2a_stream_through_real_aliyun_cli(
     aliyun = shutil.which("aliyun")
     if aliyun is None:
         pytest.skip("Alibaba Cloud CLI is not installed")
-    _require_aliyun_apis(aliyun, "StartChat", "StopChat")
+    _require_aliyun_apis(monkeypatch, aliyun, "StartChat", "StopChat")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
@@ -747,7 +739,7 @@ def test_stop_chat_cancels_live_a2a_stream_through_real_aliyun_cli(
         None,
         [],
     )
-    query_index = command.index("--Query")
+    query_index = command.index("--query")
     command[query_index:query_index] = [
         "--mode",
         "AK",
@@ -808,7 +800,7 @@ def test_normal_permission_round_trip_through_real_aliyun_cli_and_a2a(
     aliyun = shutil.which("aliyun")
     if aliyun is None:
         pytest.skip("Alibaba Cloud CLI is not installed")
-    _require_aliyun_apis(aliyun, "StartChat")
+    _require_aliyun_apis(monkeypatch, aliyun, "StartChat")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
@@ -918,7 +910,7 @@ def test_normal_consecutive_permissions_return_at_each_serial_boundary(
     aliyun = shutil.which("aliyun")
     if aliyun is None:
         pytest.skip("Alibaba Cloud CLI is not installed")
-    _require_aliyun_apis(aliyun, "StartChat")
+    _require_aliyun_apis(monkeypatch, aliyun, "StartChat")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
@@ -1034,7 +1026,7 @@ def test_top_pipeline_permission_ends_parent_start_chat_and_continues_on_reply_s
     aliyun = shutil.which("aliyun")
     if aliyun is None:
         pytest.skip("Alibaba Cloud CLI is not installed")
-    _require_aliyun_apis(aliyun, "StartChat")
+    _require_aliyun_apis(monkeypatch, aliyun, "StartChat")
     from iac_code.a2a import executor as executor_module
     from iac_code.a2a import pipeline_executor as pipeline_executor_module
     from scripts.a2a.e2e.permission_wait.permission_wait_fixture_server import (
@@ -1163,7 +1155,7 @@ def test_sub_pipeline_permissions_round_trip_through_real_aliyun_cli_and_a2a(
     aliyun = shutil.which("aliyun")
     if aliyun is None:
         pytest.skip("Alibaba Cloud CLI is not installed")
-    _require_aliyun_apis(aliyun, "StartChat")
+    _require_aliyun_apis(monkeypatch, aliyun, "StartChat")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))

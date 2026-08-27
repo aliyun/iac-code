@@ -28,6 +28,7 @@ MAX_PROMPT_BYTES = 1024 * 1024
 MAX_CONTEXT_BYTES = 64 * 1024
 MAX_CONFIG_BYTES = 16 * 1024
 MAX_CLI_CONFIG_BYTES = 2 * 1024 * 1024
+MAX_PLUGIN_MANIFEST_BYTES = 2 * 1024 * 1024
 MAX_SSE_LINE_BYTES = 16 * 1024 * 1024
 MAX_SSE_EVENT_BYTES = 16 * 1024 * 1024
 MAX_FINAL_TEXT_BYTES = 10 * 1024
@@ -56,6 +57,9 @@ DEFAULT_ENDPOINT = "ros.aliyuncs.com"
 SUPPORTED_AGENT_MODES = {"normal", "pipeline"}
 DEFAULT_TRANSPORT = "code"
 SUPPORTED_TRANSPORTS = {"code", "aliyun_cli"}
+DEFAULT_ALIYUN_CLI_EXECUTION_MODE = "local"
+SUPPORTED_ALIYUN_CLI_EXECUTION_MODES = {"local", "remote"}
+ROS_PLUGIN_COMMANDS = {"start-chat", "stop-chat"}
 USER_AGENT = "AlibabaCloud-Agent-Skills/alibabacloud-ros-agent"
 ACCESS_KEY_ID_ENV_NAMES = (
     "ALIBABA_CLOUD_ACCESS_KEY_ID",
@@ -352,6 +356,7 @@ def load_skill_config(path: Optional[pathlib.Path] = None) -> Dict[str, Any]:
         "allowedAgentModes",
         "managerIdleSeconds",
         "transport",
+        "aliyunCLIExecutionMode",
         "enableThinking",
         "aliyunCLIProfile",
     }
@@ -364,6 +369,12 @@ def load_skill_config(path: Optional[pathlib.Path] = None) -> Dict[str, Any]:
         if not isinstance(transport, str) or transport not in SUPPORTED_TRANSPORTS:
             raise BridgeError("invalid_config", "transport must be code or aliyun_cli.")
         result["transport"] = transport
+
+    if "aliyunCLIExecutionMode" in value:
+        execution_mode = value["aliyunCLIExecutionMode"]
+        if not isinstance(execution_mode, str) or execution_mode not in SUPPORTED_ALIYUN_CLI_EXECUTION_MODES:
+            raise BridgeError("invalid_config", "aliyunCLIExecutionMode must be local or remote.")
+        result["aliyunCLIExecutionMode"] = execution_mode
 
     if "endpoint" in value:
         endpoint = value["endpoint"]
@@ -414,6 +425,26 @@ def load_skill_config(path: Optional[pathlib.Path] = None) -> Dict[str, Any]:
                 "aliyunCLIProfile must be an empty or non-padded Profile name of at most 200 bytes.",
             )
         result["aliyunCLIProfile"] = profile
+
+    execution_mode = result.get("aliyunCLIExecutionMode", DEFAULT_ALIYUN_CLI_EXECUTION_MODE)
+    transport = result.get("transport", DEFAULT_TRANSPORT)
+    if "aliyunCLIExecutionMode" in result and transport != "aliyun_cli":
+        raise BridgeError(
+            "invalid_config",
+            "aliyunCLIExecutionMode may be configured only when transport is aliyun_cli.",
+        )
+    if execution_mode == "remote":
+        if result.get("aliyunCLIProfile"):
+            raise BridgeError(
+                "invalid_config",
+                "aliyunCLIProfile is not available when aliyunCLIExecutionMode is remote.",
+            )
+        endpoint = result.get("endpoint")
+        if isinstance(endpoint, str) and _endpoint_kind(endpoint, "invalid_config") != "aliyun":
+            raise BridgeError(
+                "invalid_config",
+                "Remote aliyun CLI execution requires a public aliyuncs.com endpoint.",
+            )
     return result
 
 
@@ -421,11 +452,13 @@ def apply_skill_config(args: argparse.Namespace, config: Dict[str, Any]) -> None
     configured_endpoint = config.get("endpoint")
     allowed_modes = config.get("allowedAgentModes", sorted(SUPPORTED_AGENT_MODES))
     transport = config.get("transport", DEFAULT_TRANSPORT)
+    cli_execution_mode = config.get("aliyunCLIExecutionMode", DEFAULT_ALIYUN_CLI_EXECUTION_MODE)
     enable_thinking = config.get("enableThinking", True)
     configured_profile = config.get("aliyunCLIProfile", "")
     args.manager_idle_seconds = config.get("managerIdleSeconds", MANAGER_IDLE_SECONDS)
     args.enable_thinking = enable_thinking
     args.aliyun_cli_profile = configured_profile
+    args.aliyun_cli_execution_mode = cli_execution_mode
     args.profile_pinned = bool(configured_profile)
     if args.command == "check":
         args.endpoint = configured_endpoint or DEFAULT_ENDPOINT
@@ -440,13 +473,19 @@ def apply_skill_config(args: argparse.Namespace, config: Dict[str, Any]) -> None
         raise BridgeError("config_conflict", "--endpoint conflicts with the endpoint fixed by Skill config.json.")
     args.endpoint = configured_endpoint or requested_endpoint or DEFAULT_ENDPOINT
     args.transport = transport
-    _endpoint_kind(args.endpoint, "invalid_config" if configured_endpoint else "invalid_input")
+    endpoint_kind = _endpoint_kind(args.endpoint, "invalid_config" if configured_endpoint else "invalid_input")
+    if transport == "aliyun_cli" and cli_execution_mode == "remote" and endpoint_kind != "aliyun":
+        raise BridgeError("invalid_input", "Remote aliyun CLI execution requires a public aliyuncs.com endpoint.")
     if args.mode not in allowed_modes:
         raise BridgeError("mode_not_allowed", "Agent mode {} is not allowed by Skill config.json.".format(args.mode))
     requested_profile = getattr(args, "profile", None)
+    if transport == "aliyun_cli" and cli_execution_mode == "remote" and requested_profile:
+        raise BridgeError("config_conflict", "--profile is not available with remote aliyun CLI execution.")
     if configured_profile and requested_profile and requested_profile != configured_profile:
         raise BridgeError("config_conflict", "--profile conflicts with aliyunCLIProfile fixed by Skill config.json.")
     args.profile = configured_profile or requested_profile
+    if transport == "aliyun_cli" and getattr(args, "client_context_file", None):
+        raise BridgeError("unsupported_input", "The ROS CLI plugin does not support ClientContext.")
     if getattr(args, "no_thinking", False) and enable_thinking:
         raise BridgeError("config_conflict", "--no-thinking conflicts with enableThinking fixed by Skill config.json.")
     args.no_thinking = not enable_thinking
@@ -649,17 +688,20 @@ def build_command(
     client_context: Optional[str],
     attachments: List[Dict[str, str]],
 ) -> List[str]:
+    if client_context is not None:
+        raise BridgeError("unsupported_input", "The ROS CLI plugin does not support ClientContext.")
     endpoint_kind = _endpoint_kind(args.endpoint or "")
+    execution_mode = getattr(args, "aliyun_cli_execution_mode", DEFAULT_ALIYUN_CLI_EXECUTION_MODE)
+    if execution_mode == "remote" and endpoint_kind != "aliyun":
+        raise BridgeError("invalid_input", "Remote aliyun CLI execution requires a public aliyuncs.com endpoint.")
+    if execution_mode == "remote" and args.profile:
+        raise BridgeError("invalid_input", "Remote aliyun CLI execution does not accept a local Profile.")
     command = [
         resolve_aliyun(args.aliyun_path),
         "ros",
-        "StartChat",
-        "--method",
-        "POST",
+        "start-chat",
         "--endpoint",
         args.endpoint,
-        "--header",
-        "Accept=text/event-stream",
         "--connect-timeout",
         str(args.connect_timeout),
         "--read-timeout",
@@ -674,20 +716,45 @@ def build_command(
         command.extend(["--profile", args.profile])
     if args.region_id:
         command.extend(["--region", args.region_id])
-    for name, value in build_start_chat_parameters(args, prompt, client_context, attachments).items():
-        command.extend(["--{}".format(name), value])
+    command.extend(
+        [
+            "--query",
+            prompt,
+            "--agent-version",
+            "V2",
+            "--enable-partial-message",
+            "true",
+            "--enable-thinking",
+            "false" if args.no_thinking else "true",
+            "--biz-mode",
+            "IaCCodePipeline" if args.mode == "pipeline" else "IaCCodeNormal",
+        ]
+    )
+    if args.session_id:
+        command.extend(["--session-id", args.session_id])
+    if args.region_id:
+        command.extend(["--biz-region-id", args.region_id])
+    for attachment in attachments:
+        values = []
+        for field in ("Type", "MimeType", "Name", "OssObjectKey"):
+            if field in attachment:
+                values.append("{}={}".format(field, attachment[field]))
+        command.extend(["--attachments", *values])
     return command
 
 
 def build_stop_command(job: Dict[str, Any], session_id: str) -> List[str]:
     endpoint = str(job.get("endpoint") or "")
     endpoint_kind = _endpoint_kind(endpoint)
+    execution_mode = job.get("aliyunCLIExecutionMode", DEFAULT_ALIYUN_CLI_EXECUTION_MODE)
+    if execution_mode == "remote" and endpoint_kind != "aliyun":
+        raise BridgeError("invalid_input", "Remote aliyun CLI execution requires a public aliyuncs.com endpoint.")
+    if execution_mode == "remote" and job.get("profile"):
+        raise BridgeError("invalid_input", "Remote aliyun CLI execution does not accept a local Profile.")
     command = [
         resolve_aliyun(str(job.get("aliyunPath") or "aliyun")),
         "ros",
-        "StopChat",
-        "--method",
-        "POST",
+        "stop-chat",
         "--endpoint",
         endpoint,
         "--connect-timeout",
@@ -706,7 +773,7 @@ def build_stop_command(job: Dict[str, Any], session_id: str) -> List[str]:
     region_id = job.get("regionId")
     if isinstance(region_id, str) and region_id:
         command.extend(["--region", region_id])
-    command.extend(["--AgentVersion", "V2", "--SessionId", session_id])
+    command.extend(["--agent-version", "V2", "--session-id", session_id])
     return command
 
 
@@ -780,6 +847,52 @@ def _read_cli_configuration() -> Dict[str, Any]:
     return value
 
 
+def _local_ros_plugin_status() -> Dict[str, Any]:
+    configured_root = os.environ.get("ALIBABA_CLOUD_CLI_PLUGINS_DIR")
+    root = (
+        pathlib.Path(os.path.expanduser(configured_root))
+        if configured_root
+        else pathlib.Path.home() / ".aliyun" / "plugins"
+    )
+    manifest_path = root / "manifest.json"
+    try:
+        with manifest_path.open("rb") as handle:
+            raw = handle.read(MAX_PLUGIN_MANIFEST_BYTES + 1)
+    except FileNotFoundError:
+        return {"installed": False, "ready": False}
+    except OSError as exc:
+        raise BridgeError("cli_check_failed", "The Alibaba Cloud CLI plugin manifest could not be read.") from exc
+    if len(raw) > MAX_PLUGIN_MANIFEST_BYTES:
+        raise BridgeError("cli_check_failed", "The Alibaba Cloud CLI plugin manifest is too large.")
+    try:
+        manifest = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, ValueError) as exc:
+        raise BridgeError("cli_check_failed", "The Alibaba Cloud CLI plugin manifest is invalid.") from exc
+    plugins = manifest.get("plugins") if isinstance(manifest, dict) else None
+    plugin = plugins.get("aliyun-cli-ros") if isinstance(plugins, dict) else None
+    if not isinstance(plugin, dict):
+        return {"installed": False, "ready": False}
+
+    commands = plugin.get("cmdNames")
+    command_names = {value for value in commands if isinstance(value, str)} if isinstance(commands, list) else set()
+    raw_path = plugin.get("path")
+    executable_exists = False
+    if isinstance(raw_path, str) and raw_path:
+        plugin_root = pathlib.Path(os.path.expanduser(raw_path))
+        candidates = (plugin_root / "aliyun-cli-ros", plugin_root / "aliyun-cli-ros.exe")
+        executable_exists = any(
+            candidate.is_file() and (os.name == "nt" or os.access(str(candidate), os.X_OK)) for candidate in candidates
+        )
+    result: Dict[str, Any] = {
+        "installed": True,
+        "ready": executable_exists and ROS_PLUGIN_COMMANDS.issubset(command_names),
+    }
+    version = plugin.get("version")
+    if isinstance(version, str) and version:
+        result["version"] = sanitize_text(version, 80)
+    return result
+
+
 def _selected_cli_profile_record(profile: Optional[str]) -> Dict[str, Any]:
     value = _read_cli_configuration()
     profile_name = profile or _first_nonempty_env(PROFILE_ENV_NAMES) or value.get("current")
@@ -792,13 +905,17 @@ def _selected_cli_profile_record(profile: Optional[str]) -> Dict[str, Any]:
     mode = selected.get("mode") if isinstance(selected, dict) else None
     if not isinstance(mode, str) or not mode:
         raise BridgeError("credential_failed", "The selected Alibaba Cloud CLI Profile is not configured.")
-    result = {"name": profile_name, "mode": mode}  # type: Dict[str, Any]
+    assert isinstance(selected, dict)
+    result: Dict[str, Any] = {"name": profile_name, "mode": mode}
     region_id = selected.get("region_id")
     if isinstance(region_id, str) and re.fullmatch(r"[A-Za-z0-9-]+", region_id):
         result["regionId"] = region_id
     language = selected.get("language")
     if isinstance(language, str) and language:
         result["language"] = sanitize_text(language, 50)
+    result["autoPluginInstall"] = bool(selected.get("auto_plugin_install")) or (
+        os.environ.get("ALIBABA_CLOUD_CLI_PLUGIN_AUTO_INSTALL") == "true"
+    )
     return result
 
 
@@ -808,6 +925,13 @@ def _selected_cli_profile(profile: Optional[str]) -> Tuple[str, str]:
 
 
 def _resolve_start_identity(args: argparse.Namespace) -> None:
+    if (
+        args.transport == "aliyun_cli"
+        and getattr(args, "aliyun_cli_execution_mode", DEFAULT_ALIYUN_CLI_EXECUTION_MODE) == "remote"
+    ):
+        args.profile = None
+        args.credential_source = "remote"
+        return
     environment = None  # type: Optional[Tuple[str, str, Optional[str]]]
     profile = None  # type: Optional[Dict[str, Any]]
     if args.transport == "code" and not getattr(args, "profile_pinned", False):
@@ -1108,6 +1232,29 @@ def iter_sse_payloads(lines: Iterable[str]) -> Iterator[Tuple[Optional[Dict[str,
             raw_lines.append(line)
     if data_lines or raw_lines:
         yield decode(data_lines, raw_lines)
+
+
+def _cli_plugin_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    data = payload.get("data")
+    return data if isinstance(data, dict) else payload
+
+
+def iter_cli_plugin_payloads(lines: Iterable[str]) -> Iterator[Tuple[Optional[Dict[str, Any]], str]]:
+    for raw_line in lines:
+        if len(raw_line.encode("utf-8")) > MAX_SSE_LINE_BYTES:
+            raise BridgeError("stream_failed", "A StartChat CLI output line exceeded the bridge limit.")
+        payload_text = raw_line.strip()
+        if not payload_text:
+            continue
+        try:
+            value = json.loads(payload_text)
+        except ValueError:
+            yield None, payload_text
+            continue
+        if not isinstance(value, dict):
+            yield None, payload_text
+            continue
+        yield _cli_plugin_payload(value), payload_text
 
 
 def _event_payload(result: Any) -> Any:
@@ -3080,7 +3227,7 @@ def _consume_start_chat(
             raise BridgeError("cli_start_failed", "Alibaba Cloud CLI could not be started.", True) from exc
         assert process.stdout is not None
         try:
-            for payload, raw in iter_sse_payloads(process.stdout):
+            for payload, raw in iter_cli_plugin_payloads(process.stdout):
                 if payload is None:
                     summary.malformed_event_count += 1
                     if raw:
@@ -3208,6 +3355,7 @@ def _request_from_job(job: Dict[str, Any], prompt: str) -> Dict[str, Any]:
         "endpoint": job["endpoint"],
         # Jobs created before transport selection existed used the native CLI.
         "transport": job.get("transport", "aliyun_cli"),
+        "aliyunCLIExecutionMode": job.get("aliyunCLIExecutionMode", DEFAULT_ALIYUN_CLI_EXECUTION_MODE),
         "sessionId": job.get("sessionId"),
         "regionId": job.get("regionId"),
         "profile": job.get("profile"),
@@ -3227,6 +3375,7 @@ def _start_job_local(payload: Dict[str, Any]) -> Dict[str, Any]:
     mode = payload.get("mode")
     endpoint = payload.get("endpoint")
     transport = payload.get("transport", DEFAULT_TRANSPORT)
+    cli_execution_mode = payload.get("aliyunCLIExecutionMode", DEFAULT_ALIYUN_CLI_EXECUTION_MODE)
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt.encode("utf-8")) > MAX_PROMPT_BYTES:
         raise BridgeError("invalid_input", "The StartChat prompt is empty or too large.")
     if mode not in SUPPORTED_AGENT_MODES:
@@ -3236,6 +3385,17 @@ def _start_job_local(payload: Dict[str, Any]) -> Dict[str, Any]:
     _endpoint_kind(endpoint)
     if transport not in SUPPORTED_TRANSPORTS:
         raise BridgeError("invalid_input", "The ROS transport is invalid.")
+    if cli_execution_mode not in SUPPORTED_ALIYUN_CLI_EXECUTION_MODES:
+        raise BridgeError("invalid_input", "The aliyun CLI execution mode is invalid.")
+    if transport != "aliyun_cli" and cli_execution_mode != DEFAULT_ALIYUN_CLI_EXECUTION_MODE:
+        raise BridgeError("invalid_input", "The aliyun CLI execution mode requires the aliyun_cli transport.")
+    if transport == "aliyun_cli" and cli_execution_mode == "remote":
+        if _endpoint_kind(endpoint) != "aliyun":
+            raise BridgeError("invalid_input", "Remote aliyun CLI execution requires a public aliyuncs.com endpoint.")
+        if payload.get("profile"):
+            raise BridgeError("invalid_input", "Remote aliyun CLI execution does not accept a local Profile.")
+        if payload.get("clientContext") is not None:
+            raise BridgeError("unsupported_input", "The ROS CLI plugin does not support ClientContext.")
     aliyun_path = str(payload.get("aliyunPath") or "aliyun")
     if transport == "aliyun_cli":
         resolve_aliyun(aliyun_path)
@@ -3254,6 +3414,7 @@ def _start_job_local(payload: Dict[str, Any]) -> Dict[str, Any]:
         "mode": mode,
         "endpoint": endpoint,
         "transport": transport,
+        "aliyunCLIExecutionMode": cli_execution_mode,
         "regionId": payload.get("regionId"),
         "profile": payload.get("profile"),
         "credentialSource": payload.get("credentialSource"),
@@ -3668,6 +3829,7 @@ def run_worker(job_id: str, request_token: str) -> int:
     args = argparse.Namespace(
         aliyun_path=request.get("aliyunPath", "aliyun"),
         transport=request.get("transport", "aliyun_cli"),
+        aliyun_cli_execution_mode=request.get("aliyunCLIExecutionMode", DEFAULT_ALIYUN_CLI_EXECUTION_MODE),
         endpoint=request.get("endpoint"),
         connect_timeout=int(request.get("connectTimeout") or 10),
         read_timeout=int(request.get("readTimeout") or DEFAULT_READ_TIMEOUT_SECONDS),
@@ -4085,12 +4247,20 @@ def _parse_profile_fields(output: bytes) -> Dict[str, str]:
 def run_check(args: argparse.Namespace) -> Dict[str, Any]:
     sdk = None  # type: Optional[Dict[str, Any]]
     environment_credentials = None  # type: Optional[Tuple[str, str, Optional[str]]]
+    cli_execution_mode = getattr(args, "aliyun_cli_execution_mode", DEFAULT_ALIYUN_CLI_EXECUTION_MODE)
     if args.transport == "code":
         sdk = _load_code_sdk()
         if not args.profile_pinned:
             environment_credentials = _environment_credentials()
 
-    if environment_credentials is not None:
+    plugin_status = None  # type: Optional[Dict[str, Any]]
+    plugin_auto_install = None  # type: Optional[bool]
+    if args.transport == "aliyun_cli" and cli_execution_mode == "remote":
+        resolve_aliyun(args.aliyun_path)
+        current_profile = {"configured": True, "mode": "RemoteSandbox"}
+        cli = "aliyun"
+        version = None
+    elif environment_credentials is not None:
         current_profile = {"configured": True, "mode": "Environment"}  # type: Dict[str, Any]
         current_profile["regionId"] = _environment_region() or "cn-hangzhou"
         cli = None
@@ -4122,19 +4292,31 @@ def run_check(args: argparse.Namespace) -> Dict[str, Any]:
             assert version_result is not None
             cli = "aliyun"
             version = sanitize_text((version_result.stdout or b"").decode("utf-8", "replace"), 200)
+            plugin_status = _local_ros_plugin_status()
+            plugin_auto_install = bool(selected.get("autoPluginInstall"))
 
-    return {
+    result = {
         "ok": True,
         "cli": cli,
         "version": version,
         "transport": args.transport,
+        "aliyunCLIExecutionMode": cli_execution_mode,
         "endpoint": args.endpoint,
         "allowedAgentModes": args.allowed_agent_modes,
         "managerIdleSeconds": args.manager_idle_seconds,
         "enableThinking": args.enable_thinking,
         "aliyunCLIProfile": args.aliyun_cli_profile,
         "currentProfile": current_profile,
-    }
+    }  # type: Dict[str, Any]
+    if plugin_status is not None:
+        result["rosPluginReady"] = plugin_status["ready"]
+        result["pluginAutoInstallEnabled"] = plugin_auto_install
+        result["pluginInstallRequired"] = bool(plugin_status["installed"] and not plugin_status["ready"]) or bool(
+            not plugin_status["installed"] and not plugin_auto_install
+        )
+        if plugin_status.get("version"):
+            result["rosPluginVersion"] = plugin_status["version"]
+    return result
 
 
 def _follow_after_command(args: argparse.Namespace, result: Dict[str, Any]) -> Dict[str, Any]:
@@ -4167,6 +4349,7 @@ def run_start_job(args: argparse.Namespace) -> Dict[str, Any]:
             "prompt": prompt,
             "mode": args.mode,
             "transport": args.transport,
+            "aliyunCLIExecutionMode": args.aliyun_cli_execution_mode,
             "endpoint": args.endpoint,
             "regionId": args.region_id,
             "profile": args.profile,
