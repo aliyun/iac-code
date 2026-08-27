@@ -74,6 +74,12 @@ a2a-grpc = [
 a2a-redis = [
     "redis>=5.0.0",
 ]
+agui = [
+    "ag-ui-protocol==0.1.20",
+    "a2a-sdk[http-server,signing]>=1.0.2,<2",
+    "starlette>=0.39.0",
+    "uvicorn[standard]>=0.30.0",
+]
 diagram = ["termaid>=0.1; python_version >= '3.11'"]
 
 [dependency-groups]

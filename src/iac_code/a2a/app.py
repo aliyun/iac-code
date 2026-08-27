@@ -39,9 +39,12 @@ from iac_code.a2a.projection import (
     resolve_a2a_public_path_roots,
     resolve_a2a_public_path_roots_for_data,
 )
+from iac_code.a2a.types import validate_protocol_id
 from iac_code.i18n import _
 from iac_code.pipeline.config import get_run_mode
 from iac_code.services.configuration_readiness import configuration_readiness
+from iac_code.services.session_backup import SessionBackupError
+from iac_code.services.session_storage import SessionStorage
 
 logger = logging.getLogger(__name__)
 _V03_JSONRPC_METHODS = frozenset(
@@ -477,6 +480,42 @@ def create_app(
     async def get_readiness(request: Request) -> JSONResponse:
         return JSONResponse(configuration_readiness(model=model))
 
+    async def ensure_session_restored(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse({"error": "Invalid session restore request."}, status_code=400)
+        if not isinstance(payload, dict):
+            return JSONResponse({"error": "Invalid session restore request."}, status_code=400)
+        raw_cwd = payload.get("cwd")
+        raw_session_id = payload.get("sessionId")
+        if not isinstance(raw_cwd, str) or not raw_cwd or not isinstance(raw_session_id, str):
+            return JSONResponse({"error": "Invalid session restore request."}, status_code=400)
+
+        executor = getattr(components.handler, "agent_executor", None)
+        resolve_cwd = getattr(executor, "_resolve_cwd", None)
+        backup_service = components.backup_service
+        if not callable(resolve_cwd) or backup_service is None:
+            return JSONResponse({"error": "Session restore is unavailable."}, status_code=503)
+        try:
+            session_id = validate_protocol_id(raw_session_id)
+            cwd = resolve_cwd({"iac_code": {"cwd": raw_cwd}})
+            result = await asyncio.to_thread(backup_service.reconcile_session, cwd, session_id)
+            exists = SessionStorage().exists(cwd, session_id)
+        except ValueError:
+            return JSONResponse({"error": "Invalid session restore request."}, status_code=400)
+        except SessionBackupError as exc:
+            logger.warning("A2A session restore failed error_type=%s", type(exc).__name__)
+            return JSONResponse({"error": "Unable to restore the A2A session."}, status_code=503)
+        except Exception as exc:
+            logger.warning("A2A session restore failed error_type=%s", type(exc).__name__)
+            return JSONResponse({"error": "Unable to restore the A2A session."}, status_code=503)
+
+        if not exists:
+            return JSONResponse({"status": "not_found"}, status_code=404)
+        status = "restored" if getattr(result, "action", None) == "restored" else "current"
+        return JSONResponse({"status": status})
+
     recovery_service = A2APipelineRecoveryService(task_store=components.task_store)
 
     async def recovery_path_roots(*, context_id: str | None, task_id: str | None) -> list[dict[str, str]]:
@@ -523,6 +562,7 @@ def create_app(
         Route("/health", health, methods=["GET"]),
         Route(AGENT_CARD_WELL_KNOWN_PATH, get_agent_card, methods=["GET"]),
         Route("/iac-code/readiness", get_readiness, methods=["GET"]),
+        Route("/iac-code/session/ensure-restored", ensure_session_restored, methods=["POST"]),
         Route("/iac-code/pipeline/state", get_pipeline_state, methods=["GET"]),
     ]
     install_jsonrpc_error_data_passthrough()

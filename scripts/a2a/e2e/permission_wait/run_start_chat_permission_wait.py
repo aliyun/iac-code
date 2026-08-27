@@ -439,6 +439,14 @@ def _run_qoder(
     resume: bool,
     run_dir: Path,
 ) -> dict[str, Any]:
+    state_dir = str(env.get("ALICLOUD_ROS_AGENT_STATE_DIR") or "")
+    driver_policy = (
+        "You are driving one bounded ROS Agent E2E job. Execute at most one ros_agent.py bridge command in each "
+        "Qoder turn, then stop and return its bounded result. Across this session execute readiness check at most "
+        "once and managed start exactly once. After a job exists, never start another job; use only follow, continue, "
+        "or respond for that job. Prefix every ros_agent.py command with ALICLOUD_ROS_AGENT_STATE_DIR={}. Do not "
+        "replace the remote ROS Agent with local cloud, template, or deployment work."
+    ).format(state_dir)
     command = [
         str(args.qoder_cli.expanduser().resolve()),
         "-p",
@@ -447,6 +455,8 @@ def _run_qoder(
         "--config-dir",
         str(args.qoder_config_dir.expanduser().resolve()),
         "--dangerously-skip-permissions",
+        "--append-system-prompt",
+        driver_policy,
         "--cwd",
         str(workspace),
     ]
@@ -473,6 +483,18 @@ def _run_qoder(
     content_block_index = 0
     first_mermaid_block_index: int | None = None
     first_cloud_permission_block_index: int | None = None
+    bridge_command_count = 0
+    bridge_managed_start = False
+    bridge_managed_start_count = 0
+    bridge_check_count = 0
+    bridge_state_dir_bound = False
+    bridge_state_dir_bound_count = 0
+    bridge_start_shape_ok = False
+    bridge_script_path_kinds: set[str] = set()
+    bridge_tool_use_ids: set[str] = set()
+    bridge_result_codes: set[str] = set()
+    bridge_result_states: set[str] = set()
+    bridge_result_ok_values: set[bool] = set()
 
     def contains_cloud_permission(value: Any) -> bool:
         if isinstance(value, dict):
@@ -511,6 +533,42 @@ def _run_qoder(
             if not isinstance(block, dict):
                 continue
             content_block_index += 1
+            if block.get("type") == "tool_use":
+                serialized_block = json.dumps(block, ensure_ascii=False)
+                if "ros_agent.py" in serialized_block:
+                    tool_use_id = block.get("id")
+                    if isinstance(tool_use_id, str) and tool_use_id:
+                        bridge_tool_use_ids.add(tool_use_id)
+                    bridge_command_count += 1
+                    if " start " in serialized_block:
+                        bridge_managed_start = True
+                        bridge_managed_start_count += 1
+                        bridge_start_shape_ok = bridge_start_shape_ok or all(
+                            token in serialized_block for token in ("--prompt-file", "--mode", "--follow")
+                        )
+                    if " check" in serialized_block:
+                        bridge_check_count += 1
+                    if "ALICLOUD_ROS_AGENT_STATE_DIR" in serialized_block:
+                        bridge_state_dir_bound = True
+                        bridge_state_dir_bound_count += 1
+                    if "<absolute-bridge-path>" in serialized_block:
+                        bridge_script_path_kinds.add("placeholder")
+                    elif "/.qoderwork/skills/alicloud-ros-agent/" in serialized_block:
+                        bridge_script_path_kinds.add("qoderwork")
+                    elif "/.qoder/skills/alicloud-ros-agent/" in serialized_block:
+                        bridge_script_path_kinds.add("qoder")
+                    elif "/skills/alicloud-ros-agent/" in serialized_block:
+                        bridge_script_path_kinds.add("repository")
+                    else:
+                        bridge_script_path_kinds.add("other")
+            if block.get("type") == "tool_result" and block.get("tool_use_id") in bridge_tool_use_ids:
+                serialized_result = json.dumps(block.get("content"), ensure_ascii=False)
+                for code in re.findall(r'"code"\s*:\s*"([A-Za-z0-9_.-]{1,80})"', serialized_result):
+                    bridge_result_codes.add(code)
+                for state in re.findall(r'"state"\s*:\s*"([A-Za-z0-9_.-]{1,80})"', serialized_result):
+                    bridge_result_states.add(state)
+                for raw_ok in re.findall(r'"ok"\s*:\s*(true|false)', serialized_result, re.IGNORECASE):
+                    bridge_result_ok_values.add(raw_ok.casefold() == "true")
             if item.get("type") == "assistant" and block.get("type") == "text":
                 text = block.get("text")
                 if isinstance(text, str) and text.strip():
@@ -537,6 +595,17 @@ def _run_qoder(
         "firstMermaidBlockIndex": first_mermaid_block_index,
         "firstCloudPermissionBlockIndex": first_cloud_permission_block_index,
         "mentionsFollow": " follow" in completed.stdout.casefold(),
+        "bridgeCommandCount": bridge_command_count,
+        "bridgeManagedStart": bridge_managed_start,
+        "bridgeManagedStartCount": bridge_managed_start_count,
+        "bridgeCheckCount": bridge_check_count,
+        "bridgeStateDirBound": bridge_state_dir_bound,
+        "bridgeStateDirBoundCount": bridge_state_dir_bound_count,
+        "bridgeStartShapeOk": bridge_start_shape_ok,
+        "bridgeScriptPathKinds": sorted(bridge_script_path_kinds),
+        "bridgeResultCodes": sorted(bridge_result_codes),
+        "bridgeResultStates": sorted(bridge_result_states),
+        "bridgeResultOkValues": sorted(bridge_result_ok_values),
     }
     _append_jsonl(run_dir / "qoder-turns.jsonl", evidence)
     if completed.returncode != 0:
@@ -949,6 +1018,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     deployment_confirmation_attempts = 0
     cleanup_confirmation_attempts = 0
     architecture_seen = False
+    readiness_only_turn_seen = False
     job_path: Path | None = None
     skill_installation_backups: list[_SkillInstallationBackup] = []
     read_only_cloud_evidence: list[dict[str, Any]] = []
@@ -959,6 +1029,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "stack_name": stack_name,
             "vswitch_name": vswitch_name,
             "mode": "Normal" if args.mode == "normal" else "Pipeline",
+            "mode_arg": args.mode,
+            "state_dir": str(state_root),
         },
     )
     try:
@@ -985,8 +1057,25 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 resume=turn > 0,
                 run_dir=run_dir,
             )
+            bridge_command_count = int(qoder_evidence.get("bridgeCommandCount") or 0)
+            bridge_start_count = int(qoder_evidence.get("bridgeManagedStartCount") or 0)
+            if bridge_start_count and qoder_evidence.get("bridgeStateDirBound") is not True:
+                raise AssertionError("Qoder Skill bridge command did not bind the E2E state directory")
             architecture_seen = architecture_seen or bool(qoder_evidence.get("assistantMermaid"))
             jobs = _jobs(state_root)
+            if not jobs:
+                if bridge_command_count < 1:
+                    raise AssertionError("Qoder did not execute a managed Skill bridge command")
+                bridge_check_count = int(qoder_evidence.get("bridgeCheckCount") or 0)
+                if readiness_only_turn_seen or bridge_check_count != bridge_command_count:
+                    raise AssertionError("Qoder did not start the managed ROS Agent job after readiness")
+                readiness_only_turn_seen = True
+                next_prompt = (
+                    "readiness check 已完成。现在必须且只执行一次 alicloud-ros-agent Skill 的 managed start，"
+                    "使用精确的小写参数 --mode {} 开始之前给出的部署任务；不得再次 check，也不得在本地替代执行。"
+                    "每条 bridge 命令必须显式设置 ALICLOUD_ROS_AGENT_STATE_DIR={}.".format(args.mode, state_root)
+                )
+                continue
             if len(jobs) != 1:
                 raise AssertionError("expected exactly one ROS Agent job, found {}".format(len(jobs)))
             job_path, job = jobs[0]
@@ -1000,6 +1089,14 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             state = str(job.get("state") or "")
             if state in FAILURE_STATES:
                 raise RuntimeError("ROS Agent job ended in {}".format(state))
+            text_only_cleanup_summary = (
+                cleanup_started
+                and state in TERMINAL_STATES
+                and int(job.get("turn") or 0) == cleanup_turn
+                and int(qoder_evidence.get("assistantTextBlocks") or 0) > 0
+            )
+            if bridge_command_count < 1 and not text_only_cleanup_summary:
+                raise AssertionError("Qoder did not execute a managed Skill bridge command")
             current = job.get("inputRequired")
             if state == "input-required" and isinstance(current, dict):
                 input_id = current.get("inputId")
@@ -1066,6 +1163,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                             "stack_name": stack_name,
                             "vswitch_name": vswitch_name,
                             "mode": args.mode,
+                            "state_dir": str(state_root),
                         },
                     )
                 else:
@@ -1086,6 +1184,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                                 "stack_name": stack_name,
                                 "vswitch_name": vswitch_name,
                                 "mode": args.mode,
+                                "state_dir": str(state_root),
                             },
                         )
                     else:
@@ -1096,6 +1195,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                                 "stack_name": stack_name,
                                 "vswitch_name": vswitch_name,
                                 "mode": args.mode,
+                                "state_dir": str(state_root),
                             },
                         )
                 continue
@@ -1112,6 +1212,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                         "stack_name": stack_name,
                         "vswitch_name": vswitch_name,
                         "mode": args.mode,
+                        "state_dir": str(state_root),
                     },
                 )
                 continue
@@ -1167,6 +1268,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     metrics_path = run_dir / "relay-metrics.json"
     if metrics_path.is_file():
         relay_metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    relay_session_ids = {
+        str(item.get("sessionId"))
+        for item in relay_metrics.get("requests", [])
+        if item.get("action") == "StartChat" and item.get("sessionId")
+    }
     qoder_turns = []
     qoder_path = run_dir / "qoder-turns.jsonl"
     if qoder_path.is_file():
@@ -1245,6 +1351,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "native StartChat relay was used": any(
             item.get("action") == "StartChat" for item in relay_metrics.get("requests", [])
         ),
+        "all StartChat requests stayed in one ROS session": len(relay_session_ids) == 1,
         "Qoder emitted explanatory assistant text": sum(
             int(item.get("assistantTextBlocks") or 0) for item in qoder_turns
         )

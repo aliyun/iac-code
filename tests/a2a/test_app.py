@@ -51,8 +51,9 @@ from iac_code.services.permission_wait import (
     PermissionWaitPolicy,
     build_permission_checkpoint,
 )
-from iac_code.services.session_backup import BackupReason, SessionBackupBlocked
+from iac_code.services.session_backup import BackupReason, SessionBackupBlocked, SessionBackupService
 from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
+from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import TextDeltaEvent, ToolResultEvent
 
@@ -149,6 +150,60 @@ def test_readiness_route_is_authenticated_and_returns_non_secret_status(monkeypa
     assert unauthorized.status_code == 401
     assert response.status_code == 200
     assert response.json() == expected
+
+
+def test_ensure_session_restored_is_authenticated_idempotent_and_restores_backup(monkeypatch, tmp_path) -> None:
+    config_dir = tmp_path / "config"
+    backup_root = tmp_path / "backup"
+    workspace_root = tmp_path / "workspace"
+    cwd = workspace_root / "session"
+    cwd.mkdir(parents=True)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    monkeypatch.setenv("IACCODE_A2A_ALLOWED_CWDS", str(workspace_root))
+
+    session_id = "session-restore"
+    backup_storage = SessionStorage(projects_dir=backup_root / "projects")
+    backup_session_dir = backup_storage.session_dir(str(cwd), session_id)
+    write_session_metadata(
+        backup_session_dir,
+        SessionMetadata(session_id=session_id, cwd=str(cwd), layout_version=SESSION_LAYOUT_VERSION_V2),
+    )
+    SessionBackupService(session_storage=backup_storage).initialize_session(str(cwd), session_id)
+    pipeline_dir = backup_session_dir / "a2a" / "pipeline"
+    pipeline_dir.mkdir(parents=True)
+    (pipeline_dir / "a2a-events.jsonl").write_text('{"sequence":1}\n', encoding="utf-8")
+    (pipeline_dir / "a2a-snapshot.json").write_text('{"lastSequence":1}\n', encoding="utf-8")
+
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token="runtime-token",
+        model="qwen3.6-plus",
+        persistence_dir=config_dir / "a2a",
+    )
+    payload = {"cwd": str(cwd), "sessionId": session_id}
+    headers = {"Authorization": "Bearer runtime-token"}
+    with TestClient(app) as client:
+        unauthorized = client.post("/iac-code/session/ensure-restored", json=payload)
+        restored = client.post("/iac-code/session/ensure-restored", json=payload, headers=headers)
+        current = client.post("/iac-code/session/ensure-restored", json=payload, headers=headers)
+        missing = client.post(
+            "/iac-code/session/ensure-restored",
+            json={"cwd": str(cwd), "sessionId": "missing-session"},
+            headers=headers,
+        )
+
+    restored_pipeline_dir = SessionStorage().session_dir(str(cwd), session_id) / "a2a" / "pipeline"
+    assert unauthorized.status_code == 401
+    assert restored.status_code == 200
+    assert restored.json() == {"status": "restored"}
+    assert current.status_code == 200
+    assert current.json() == {"status": "current"}
+    assert missing.status_code == 404
+    assert missing.json() == {"status": "not_found"}
+    assert (restored_pipeline_dir / "a2a-events.jsonl").read_text(encoding="utf-8") == '{"sequence":1}\n'
+    assert (restored_pipeline_dir / "a2a-snapshot.json").read_text(encoding="utf-8") == '{"lastSequence":1}\n'
 
 
 @pytest.mark.asyncio

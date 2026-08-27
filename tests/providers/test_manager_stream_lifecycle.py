@@ -259,7 +259,9 @@ async def test_stream_capture_belongs_to_calling_scope_and_fallback_restores_con
                 tool_uses=[],
                 stop_reason="end_turn",
                 usage=Usage(),
-            )
+            ),
+            provider_name="anthropic",
+            model="claude-sonnet-4-6",
         )
 
     monkeypatch.setattr(manager, "_complete_with_retry_result", completion)

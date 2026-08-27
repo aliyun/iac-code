@@ -953,6 +953,31 @@ def test_legacy_pending_permission_gets_conservative_display_fallback() -> None:
     assert projected["isReadOnly"] is False
 
 
+def test_candidate_permission_projection_preserves_sideband_coordinates() -> None:
+    envelope = {
+        "eventId": "evt-candidate-permission",
+        "eventType": "permission_requested",
+        "taskId": "task-1",
+        "contextId": "ctx-1",
+        "scope": "candidate",
+        "candidate": {"id": "candidate-a"},
+        "status": "working",
+        "permission": {
+            "pending": True,
+            "inputId": "permission-candidate-a",
+            "toolUseId": "tool-a",
+            "toolName": "bash",
+            "safeSummary": "bash: pwd",
+        },
+    }
+
+    projected = _unified_input_projection(envelope)
+
+    assert projected is not None
+    assert projected["scope"] == "candidate"
+    assert projected["subPipelineId"] == "candidate-a"
+
+
 def test_candidate_selection_projection_can_use_runtime_step_ui_mode_without_mutating_envelope() -> None:
     envelope = {
         "eventId": "evt-1",
@@ -983,6 +1008,7 @@ def test_ask_question_projection_preserves_free_text_contract() -> None:
         "input": {
             "kind": "ask_user_question",
             "inputId": "question-1",
+            "toolUseId": "call-question-1",
             "prompt": "Choose or describe",
             "allowFreeText": True,
             "freeTextPrompt": "Describe the custom region",
@@ -991,6 +1017,7 @@ def test_ask_question_projection_preserves_free_text_contract() -> None:
     }
     projected = _unified_input_projection(envelope)
     assert projected is not None
+    assert projected["toolUseId"] == "call-question-1"
     assert projected["allowFreeText"] is True
     assert projected["freeTextPrompt"] == "Describe the custom region"
 

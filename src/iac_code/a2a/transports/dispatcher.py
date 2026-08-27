@@ -87,10 +87,11 @@ from iac_code.a2a.push import (
 from iac_code.a2a.push_queue import LocalFileA2APushQueue, RedisStreamsA2APushQueue, require_redis_asyncio
 from iac_code.a2a.push_secrets import A2APushSecretKeyring
 from iac_code.a2a.push_worker import A2APushDeliveryWorker
+from iac_code.a2a.request_mode import resolve_request_run_mode
 from iac_code.a2a.runtime_registry import A2ARuntimeOwner, A2ARuntimeRegistration, register_runtime_owner
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.i18n import _
-from iac_code.pipeline.config import RunMode, get_run_mode
+from iac_code.pipeline.config import RunMode
 from iac_code.services.permission_wait import PermissionWaitCheckpointStore
 from iac_code.services.session_backup import SessionBackupService
 from iac_code.services.session_backup_staging import (
@@ -284,6 +285,7 @@ class A2ARuntimeComponents:
     card: Any
     app: Starlette
     _exit_stack: AsyncExitStack
+    backup_service: Any | None = None
     push_worker: Any | None = None
     push_queue: Any | None = None
     runtime_registration: A2ARuntimeRegistration | None = None
@@ -463,6 +465,7 @@ def create_runtime_components(
         card=card,
         app=app,
         _exit_stack=AsyncExitStack(),
+        backup_service=backup_service,
         push_worker=push_worker,
         push_queue=push_queue_instance,
         runtime_registration=runtime_registration,
@@ -570,7 +573,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         base_stream = super().on_message_send_stream(params, context)
         tracked_stream = (
             base_stream
-            if get_run_mode() is RunMode.PIPELINE
+            if resolve_request_run_mode(params.message) is RunMode.PIPELINE
             else _iterate_with_pipeline_transport_tracking(
                 base_stream,
                 task_id=getattr(params.message, "task_id", None) or None,
@@ -713,7 +716,9 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                 await self._cleanup_active_message_producer(producer_task, task.id)
 
     async def _hydrate_recoverable_pipeline_task_id(self, params: SendMessageRequest) -> None:
-        if get_run_mode() is not RunMode.PIPELINE or not isinstance(self.task_store, A2ATaskStore):
+        if resolve_request_run_mode(params.message) is not RunMode.PIPELINE or not isinstance(
+            self.task_store, A2ATaskStore
+        ):
             return
         message = getattr(params, "message", None)
         if message is None:
@@ -741,7 +746,9 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             message.task_id = task_id
 
     async def _reconcile_recoverable_pipeline_task(self, params: SendMessageRequest, context) -> None:
-        if get_run_mode() is not RunMode.PIPELINE or not isinstance(self.task_store, A2ATaskStore):
+        if resolve_request_run_mode(params.message) is not RunMode.PIPELINE or not isinstance(
+            self.task_store, A2ATaskStore
+        ):
             return
         message = getattr(params, "message", None)
         if message is None:
@@ -1056,7 +1063,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         await super().on_delete_task_push_notification_config(params, context)
 
     def _validate_pipeline_message_request(self, params: SendMessageRequest) -> None:
-        if get_run_mode() != RunMode.PIPELINE:
+        if resolve_request_run_mode(params.message) != RunMode.PIPELINE:
             return
         executor = getattr(self, "agent_executor", None)
         if isinstance(executor, IacCodeA2AExecutor):

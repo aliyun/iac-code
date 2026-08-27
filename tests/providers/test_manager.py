@@ -760,6 +760,9 @@ class TestProviderManagerStreaming:
         events = [e async for e in mgr.stream(messages=[Message.user("hi")], system="sys")]
         types = [e.type for e in events]
         assert "message_start" in types and "text_delta" in types and "message_end" in types
+        terminal = next(event for event in events if isinstance(event, MessageEndEvent))
+        assert terminal.usage.provider == "asyncmock"
+        assert terminal.usage.model == "claude-sonnet-4-6"
 
     async def test_stream_records_normalized_token_usage_on_all_signals(self):
         mock_provider = AsyncMock()

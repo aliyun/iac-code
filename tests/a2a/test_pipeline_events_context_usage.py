@@ -6,7 +6,7 @@ import pytest
 
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator, _usage_data
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
-from iac_code.types.stream_events import ContextUsageEvent
+from iac_code.types.stream_events import ContextUsageEvent, MessageEndEvent, Usage
 
 _SNAKE = {
     "system_prompt_tokens": 100,
@@ -89,3 +89,31 @@ def test_parent_scoped_context_usage_envelope(pipeline_translator_with_active_st
     assert env["status"] == "working"
     assert env["data"]["totalTokens"] == 1500
     assert env["step"]["id"] == step_id
+
+
+def test_provider_usage_envelope_preserves_model_and_token_counts(pipeline_translator_with_active_step):
+    translator, step_id = pipeline_translator_with_active_step
+    envelopes = translator.translate(
+        MessageEndEvent(
+            stop_reason="end_turn",
+            usage=Usage(
+                provider="dashscope",
+                model="qwen-test",
+                input_tokens=12,
+                output_tokens=3,
+                cache_read_input_tokens=2,
+            ),
+        )
+    )
+
+    assert len(envelopes) == 1
+    assert envelopes[0]["eventType"] == "usage"
+    assert envelopes[0]["step"]["id"] == step_id
+    assert envelopes[0]["data"] == {
+        "provider": "dashscope",
+        "model": "qwen-test",
+        "inputTokens": 12,
+        "outputTokens": 3,
+        "totalTokens": 17,
+        "cachedInputTokens": 2,
+    }

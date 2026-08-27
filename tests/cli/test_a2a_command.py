@@ -46,6 +46,68 @@ def test_a2a_command_rejects_removed_advanced_flags() -> None:
     assert "No such option: --token" in result.stderr
 
 
+def test_agui_command_loads_online_adapter_config(monkeypatch, tmp_path) -> None:
+    captured = {}
+    logging_setup = {}
+
+    config = tmp_path / "agui.yml"
+    config.write_text(
+        "\n".join(
+            [
+                "host: 0.0.0.0",
+                "port: 41243",
+                "a2a_url: http://127.0.0.1:41242",
+                "state_dir: /home/iac_code_config/agui",
+                "interrupt_ttl: 540",
+                "idle_shutdown: 0",
+                "log_stdout: true",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("IAC_CODE_AGUI_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("IAC_CODE_AGUI_A2A_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "iac_code.cli.main.setup_logging",
+        lambda **kwargs: logging_setup.update(kwargs),
+    )
+    monkeypatch.setattr(
+        "iac_code.agui.server.run_server",
+        lambda **kwargs: captured.update(kwargs),
+    )
+
+    result = CliRunner().invoke(app, ["agui", "--config", str(config)])
+
+    assert result.exit_code == 0
+    assert logging_setup == {
+        "session_id": "agui-adapter",
+        "debug": False,
+        "stdout": True,
+    }
+    assert captured == {
+        "host": "0.0.0.0",
+        "port": 41243,
+        "a2a_url": "http://127.0.0.1:41242",
+        "a2a_token": None,
+        "interrupt_ttl": 540,
+        "state_dir": "/home/iac_code_config/agui",
+        "debug": False,
+        "auth_token": None,
+        "idle_shutdown": 0.0,
+    }
+
+
+def test_agui_command_translates_runtime_validation_errors(monkeypatch, tmp_path) -> None:
+    config = tmp_path / "agui.yml"
+    config.write_text("port: 0\n", encoding="utf-8")
+    monkeypatch.setattr("iac_code.cli.main._", lambda message: f"i18n:{message}")
+
+    result = CliRunner().invoke(app, ["agui", "--config", str(config)])
+
+    assert result.exit_code == 1
+    assert "i18n:--port must be between 1 and 65535." in result.stderr
+
+
 def test_a2a_client_help_groups_client_commands() -> None:
     result = CliRunner().invoke(app, ["a2a-client", "--help"])
 

@@ -1071,6 +1071,8 @@ class ProviderManager:
             if terminal_status is not None:
                 return False
             terminal_status = status
+            event.usage.provider = provider_name
+            event.usage.model = sanitized_model
             with activate_span():
                 self._set_llm_response_span_attrs(span, event, model)
                 self._emit_success_telemetry(
@@ -1303,6 +1305,8 @@ class ProviderManager:
                 yield _error_event_from_exception(e)
                 return
             response = completion.response
+            response.usage.provider = completion.provider_name
+            response.usage.model = sanitize_model_name(completion.model)
             yield MessageStartEvent(message_id=response.message_id)
             if response.thinking_blocks:
                 for block_index, block in enumerate(response.thinking_blocks):

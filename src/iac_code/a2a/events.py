@@ -82,7 +82,13 @@ def _truncate(value: Any, *, _depth: int = 0) -> Any:
 
 
 def _public_tool_input_metadata(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
-    return {"inputSummary": build_input_summary(tool_name, tool_input)}
+    return {
+        "inputSummary": build_input_summary(tool_name, tool_input),
+        # This is protocol data consumed as AG-UI TOOL_CALL_ARGS, not an audit
+        # record. Keep the canonical arguments here; the A2A wire boundary
+        # applies the existing path-only safe-mode projection to a copy.
+        "toolInput": copy.deepcopy(tool_input),
+    }
 
 
 def _public_permission_input_metadata(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
@@ -490,6 +496,20 @@ async def publish_stream_event(
         return None
 
     if isinstance(event, MessageEndEvent):
+        usage = {
+            "inputTokens": event.usage.input_tokens,
+            "outputTokens": event.usage.output_tokens,
+            "totalTokens": event.usage.total_tokens,
+        }
+        provider = getattr(event.usage, "provider", None)
+        model = getattr(event.usage, "model", None)
+        cached_input_tokens = getattr(event.usage, "cache_read_input_tokens", None)
+        if isinstance(provider, str) and provider:
+            usage["provider"] = provider
+        if isinstance(model, str) and model:
+            usage["model"] = model
+        if isinstance(cached_input_tokens, int) and not isinstance(cached_input_tokens, bool):
+            usage["cachedInputTokens"] = cached_input_tokens
         await _enqueue_status(
             event_queue,
             task_id=task_id,
@@ -497,11 +517,7 @@ async def publish_stream_event(
             state=TaskState.TASK_STATE_WORKING,
             metadata={
                 "iac_code": {
-                    "usage": {
-                        "inputTokens": event.usage.input_tokens,
-                        "outputTokens": event.usage.output_tokens,
-                        "totalTokens": event.usage.total_tokens,
-                    }
+                    "usage": usage
                 }
             },
             iac_code_session_id=iac_code_session_id,

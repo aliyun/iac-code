@@ -9,6 +9,13 @@ The runner substitutes `{run_id}`, `{stack_name}`, `{vswitch_name}`, and
 请使用 alicloud-ros-agent Skill 的 {mode} 模式完成这个真实测试：在 cn-hangzhou 查询已有 VPC，选择其中一个，
 只在该 VPC 内通过 ROS Stack 部署一个新 VSwitch。Stack 名称必须是 {stack_name}，VSwitch 名称必须是
 {vswitch_name}，CIDR 不得与已有网段冲突。不要创建或删除 VPC，也不要修改其他资源。
+每次调用 Skill bridge 时，命令都必须显式设置 `ALICLOUD_ROS_AGENT_STATE_DIR={state_dir}`，不得使用其他状态目录。
+不要在 Qoder 本地自行执行云查询、生成模板或部署；第一条基础设施操作必须通过该 Skill 的 managed `start`
+命令交给 ROS Agent，start 命令必须使用精确的小写参数 `--mode {mode_arg}`；之后只按 Skill 的
+`follow`、`continue` 或 `respond` 工作流处理同一个 job。
+ROS Agent 只使用任务工作区中的文件和已有工具完成任务，不要读取 iac-code 仓库源码或任务工作区外的路径。
+在 managed `start` 前可以按 Skill 要求执行一次 readiness `check`；check 完成后必须进入同一次测试的 start。
+整个测试只能执行一次 managed `start`，后续不得新建 job。
 
 执行过程中请持续用简短文字解释当前阶段。只读云查询不应申请权限；任何非只读操作都必须等待我明确确认。
 部署确认前必须展示部署摘要和 Mermaid 架构图。Pipeline 模式必须生成恰好两个都满足约束且确有差异的候选
@@ -25,6 +32,7 @@ step 开始/结束和候选选择，并在完成后保留同一 job 的 Normal h
 不冲突网段的已有 VPC；只需保留该 VPC 的精简摘要，不要再次返回完整 VPC 列表。继续生成并校验只含一个
 VSwitch 的 ROS Stack {stack_name}，VSwitch 名称为 {vswitch_name}。在任何部署确认之前，先用简短说明和
 Mermaid 架构图展示已有 VPC 与待建 VSwitch 的关系；确认和非只读云操作都必须等待我的明确回答。
+每次调用 Skill bridge 时，命令都必须显式设置 `ALICLOUD_ROS_AGENT_STATE_DIR={state_dir}`，不得使用其他状态目录。
 ```
 
 ## Confirm deployment
@@ -32,6 +40,7 @@ Mermaid 架构图展示已有 VPC 与待建 VSwitch 的关系；确认和非只�
 ```text
 我已经审阅刚才展示的部署摘要和 Mermaid 架构图，确认仅在所选已有 VPC 中通过 Stack {stack_name} 创建
 VSwitch {vswitch_name}。请继续同一个 ROS Agent job；遇到非只读云权限时仍需把权限申请返回给我，不得替我批准。
+每次调用 Skill bridge 时，命令都必须显式设置 `ALICLOUD_ROS_AGENT_STATE_DIR={state_dir}`，不得使用其他状态目录。
 ```
 
 ## Cleanup
@@ -41,6 +50,7 @@ VSwitch {vswitch_name}。请继续同一个 ROS Agent job；遇到非只读云�
 删除前说明目标并等待我确认；只允许删除这两个本次创建的对象，绝不能删除或修改已有 VPC。Pipeline 场景必须
 复用 Pipeline handoff 的 Normal 会话，不得启动新的 Normal job。清理后用只读查询确认 Stack/VSwitch 已不存在，
 并确认原有 VPC 仍可用。先展示精简删除摘要并等待我下一条明确确认。
+每次调用 Skill bridge 时，命令都必须显式设置 `ALICLOUD_ROS_AGENT_STATE_DIR={state_dir}`，不得使用其他状态目录。
 ```
 
 ## Confirm cleanup
@@ -48,6 +58,7 @@ VSwitch {vswitch_name}。请继续同一个 ROS Agent job；遇到非只读云�
 ```text
 我确认删除本次测试创建的 Stack {stack_name}，并让其中的 VSwitch {vswitch_name} 随 Stack 删除。请继续同一个
 ROS Agent job；不得删除或修改已有 VPC，遇到非只读云权限时仍需把权限申请返回给我，不得替我批准。
+每次调用 Skill bridge 时，命令都必须显式设置 `ALICLOUD_ROS_AGENT_STATE_DIR={state_dir}`，不得使用其他状态目录。
 ```
 
 ## Scripted answers

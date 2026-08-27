@@ -315,6 +315,8 @@ def test_real_runner_uses_repository_prompt_with_run_scoped_names() -> None:
             "stack_name": "pwait-normal-1234-stack",
             "vswitch_name": "pwait-normal-1234-vsw",
             "mode": "Normal",
+            "mode_arg": "normal",
+            "state_dir": "/tmp/pwait-normal-state",
         },
     )
 
@@ -323,6 +325,10 @@ def test_real_runner_uses_repository_prompt_with_run_scoped_names() -> None:
     assert "pwait-normal-1234-vsw" in prompt
     assert "Mermaid" in prompt
     assert "不要创建或删除 VPC" in prompt
+    assert "ALICLOUD_ROS_AGENT_STATE_DIR=/tmp/pwait-normal-state" in prompt
+    assert "--mode normal" in prompt
+    assert "一次 readiness `check`" in prompt
+    assert "整个测试只能执行一次 managed `start`" in prompt
     pipeline_prompt = runner._prompt_section(
         "Deployment",
         {
@@ -330,10 +336,13 @@ def test_real_runner_uses_repository_prompt_with_run_scoped_names() -> None:
             "stack_name": "pwait-pipeline-1234-stack",
             "vswitch_name": "pwait-pipeline-1234-vsw",
             "mode": "Pipeline",
+            "mode_arg": "pipeline",
+            "state_dir": "/tmp/pwait-pipeline-state",
         },
     )
     assert "恰好两个" in pipeline_prompt
     assert "不同可用区" in pipeline_prompt
+    assert "--mode pipeline" in pipeline_prompt
 
 
 def test_real_runner_refuses_incomplete_read_only_unknown_and_out_of_scope_permissions(tmp_path) -> None:
@@ -613,9 +622,25 @@ def test_real_runner_records_assistant_diagram_and_cloud_permission_block_order(
     stdout = "\n".join(
         json.dumps(item)
         for item in (
-            {
-                "type": "assistant",
-                "message": {"content": [{"type": "text", "text": "```mermaid\ngraph TD\n```"}]},
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "text", "text": "```mermaid\ngraph TD\n```"},
+                    {
+                        "type": "tool_use",
+                        "id": "bridge-1",
+                        "name": "Bash",
+                        "input": {
+                            "command": (
+                                "ALICLOUD_ROS_AGENT_STATE_DIR=/tmp/state python3 "
+                                "/repo/skills/alicloud-ros-agent/scripts/ros_agent.py "
+                                "start --prompt-file request.txt --mode normal --follow"
+                            )
+                        },
+                    },
+                ]
+            },
             },
             {
                 "type": "user",
@@ -638,11 +663,13 @@ def test_real_runner_records_assistant_diagram_and_cloud_permission_block_order(
             },
         )
     )
-    monkeypatch.setattr(
-        runner.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout=stdout, stderr=""),
-    )
+    captured_command = []
+
+    def run_qoder(command, **_kwargs):
+        captured_command.extend(command)
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(runner.subprocess, "run", run_qoder)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
@@ -652,7 +679,7 @@ def test_real_runner_records_assistant_diagram_and_cloud_permission_block_order(
             qoder_config_dir=tmp_path / "qoder-config",
             qoder_turn_timeout=30,
         ),
-        env={},
+        env={"ALICLOUD_ROS_AGENT_STATE_DIR": "/tmp/state"},
         workspace=workspace,
         session_id="session-1",
         prompt="test",
@@ -662,4 +689,16 @@ def test_real_runner_records_assistant_diagram_and_cloud_permission_block_order(
     )
 
     assert evidence["firstMermaidBlockIndex"] == 1
-    assert evidence["firstCloudPermissionBlockIndex"] == 2
+    assert evidence["firstCloudPermissionBlockIndex"] == 3
+    assert evidence["bridgeCommandCount"] == 1
+    assert evidence["bridgeManagedStart"] is True
+    assert evidence["bridgeManagedStartCount"] == 1
+    assert evidence["bridgeCheckCount"] == 0
+    assert evidence["bridgeStateDirBound"] is True
+    assert evidence["bridgeStateDirBoundCount"] == 1
+    assert evidence["bridgeStartShapeOk"] is True
+    assert evidence["bridgeScriptPathKinds"] == ["repository"]
+    policy = captured_command[captured_command.index("--append-system-prompt") + 1]
+    assert "Execute at most one ros_agent.py bridge command" in policy
+    assert "managed start exactly once" in policy
+    assert "ALICLOUD_ROS_AGENT_STATE_DIR=/tmp/state" in policy
