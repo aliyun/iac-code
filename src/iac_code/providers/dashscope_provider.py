@@ -18,6 +18,9 @@ DASHSCOPE_TOKEN_PLAN_BASE_URL = "https://token-plan.cn-beijing.maas.aliyuncs.com
 # Ref: https://help.aliyun.com/zh/model-studio/context-cache
 _EXPLICIT_CACHE_MODEL_PREFIXES: tuple[str, ...] = (
     "qwen3.8-max",
+    "qwen3.8-flash",
+    "qwen3.8-2.4t-a95b",
+    "qwen3.8-27b",
     "qwen3.7-max",
     "qwen3.7-plus",
     "qwen3-coder-plus",
@@ -41,6 +44,7 @@ _PRESERVE_THINKING_MODEL_PREFIXES: tuple[str, ...] = (
     "qwen3.6-flash",
     "kimi-k2.7-code",
     "kimi-k2.6",
+    "kimi-k3",
     "kimi/kimi-k3",
     "kimi/kimi-k2.7-code",
     "kimi/kimi-k2.6",
@@ -160,9 +164,18 @@ class DashScopeProvider(OpenAIProvider):
             elif effort not in {None, "auto"} and spec.default_effort is not None:
                 kwargs["reasoning_effort"] = spec.default_effort.value
             return kwargs
+        if self._model == "kimi-k3":
+            # Bailian-hosted K3 is always-on and defaults to preserved
+            # reasoning. Keep both flags explicit when callers ask to disable.
+            return {"extra_body": {"enable_thinking": True, "preserve_thinking": True}}
         disabled_by_effort = effort in _DISABLE_THINKING_EFFORTS and effort not in allowed
         if self._thinking_disabled() or disabled_by_effort:
             if not spec.supports_disable:
+                if spec.uses_reasoning_effort_param and "low" in allowed:
+                    return {
+                        "extra_body": {"enable_thinking": True},
+                        "reasoning_effort": "low",
+                    }
                 return self._preserve_thinking_kwargs()
             return {"extra_body": {"enable_thinking": False}}
         extra_body: dict[str, Any] = {"enable_thinking": True}

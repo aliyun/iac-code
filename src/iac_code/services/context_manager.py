@@ -71,6 +71,9 @@ _MODEL_EXACT_CONFIGS: dict[str, ContextWindowConfig] = {
     "gemini-2.5-pro": _context_config(1_048_576, 65_536),
     "gemini-2.5-flash": _context_config(1_048_576, 65_536),
     "gemini-2.5-flash-lite": _context_config(1_048_576, 65_536),
+    # This ID is shared by Kimi's direct provider and Bailian's hosted model.
+    # Keep the common conservative capacity until context limits are keyed by
+    # provider as well as model.
     "kimi-k3": _context_config(1_000_000),
     # DashScope's Moonshot-hosted K3 advertises a 1M-token context window.
     # Keep the output cap conservative until the endpoint documents a limit.
@@ -80,12 +83,18 @@ _MODEL_EXACT_CONFIGS: dict[str, ContextWindowConfig] = {
     "kimi-k2.6": _context_config(262_144),
     "kimi-k2.5": _context_config(262_144),
     "qwen3.8-max": _context_config(1_000_000),
+    "qwen3.8-max-prime": _context_config(1_000_000),
+    "qwen3.8-flash": _context_config(1_000_000),
+    "qwen3.8-2.4t-a95b": _context_config(1_000_000, 131_072),
+    "qwen3.8-27b": _context_config(1_000_000, 131_072),
     "qwen3.8-max-preview": _context_config(1_000_000),
     "qwen3.7-max": _context_config(1_000_000),
     "qwen3.7-plus": _context_config(1_000_000),
     "qwen3.7-flash": _context_config(1_000_000),
     "qwen3.6-plus": _context_config(1_000_000),
     "qwen3.6-flash": _context_config(1_000_000),
+    "qwen3.6-35b-a3b": _context_config(262_144, 65_536),
+    "qwen3.6-27b": _context_config(262_144, 65_536),
     "qwen3.5-plus": _context_config(1_000_000),
     "qwen3.5-flash": _context_config(1_000_000),
     "qwen-plus": _context_config(1_000_000),
@@ -99,6 +108,8 @@ _MODEL_EXACT_CONFIGS: dict[str, ContextWindowConfig] = {
     "deepseek-v4-flash-0731": _context_config(1_000_000, 393_216),
     "deepseek-v4-flash": _context_config(1_000_000, 393_216),
     "glm-5.3": _context_config(1_000_000, 128_000),
+    "glm-5.3-flash": _context_config(1_000_000, 128_000),
+    "zhipu/glm-5.3": _context_config(1_048_576, 131_072),
     "glm-5.2-fast-preview": _context_config(1_048_576, 131_072),
     "glm-5.2": _context_config(1_000_000, 128_000),
     "glm-5.1": _context_config(202_752),
@@ -109,6 +120,8 @@ _MODEL_EXACT_CONFIGS: dict[str, ContextWindowConfig] = {
     "minimax-m2.7-highspeed": _context_config(196_608),
     "minimax-m2.5": _context_config(196_608),
     "minimax-m2.5-highspeed": _context_config(196_608),
+    "xiaomi/mimo-v2.5-pro": _context_config(1_048_576, 131_072),
+    "stepfun/step-3.7-flash": _context_config(262_144, 262_144),
 }
 
 _MODEL_CONFIGS: dict[str, ContextWindowConfig] = {

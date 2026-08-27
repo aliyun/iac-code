@@ -88,6 +88,25 @@ class TestDashScopeBuildThinkingKwargs:
         p = DashScopeProvider(model="kimi/kimi-k3", api_key="k")
         assert p._build_thinking_kwargs() == {"extra_body": {"preserve_thinking": True}}
 
+    def test_bailian_hosted_kimi_k3_keeps_always_on_thinking(self):
+        p = DashScopeProvider(model="kimi-k3", api_key="k", thinking_enabled=False)
+        assert p._build_thinking_kwargs() == {
+            "extra_body": {"enable_thinking": True, "preserve_thinking": True}
+        }
+
+    def test_qwen38_open_model_supports_thinking_budget(self):
+        p = DashScopeProvider(model="qwen3.8-2.4t-a95b", api_key="k", thinking_budget=2048)
+        assert p._build_thinking_kwargs() == {
+            "extra_body": {"enable_thinking": True, "thinking_budget": 2048}
+        }
+
+    def test_stepfun_uses_its_documented_effort_values(self):
+        p = DashScopeProvider(model="stepfun/step-3.7-flash", api_key="k", effort="medium")
+        assert p._build_thinking_kwargs() == {
+            "extra_body": {"enable_thinking": True},
+            "reasoning_effort": "medium",
+        }
+
     def test_qwen38_uses_always_on_thinking_without_enable_flag(self):
         p = DashScopeProvider(
             model="qwen3.8-max-preview",
@@ -119,6 +138,20 @@ class TestDashScopeBuildThinkingKwargs:
     def test_glm(self):
         p = DashScopeProvider(model="glm-5.1", api_key="k")
         assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True}}
+
+    def test_zhipu_glm53_uses_always_on_hosted_protocol(self):
+        p = DashScopeProvider(model="ZHIPU/GLM-5.3", api_key="k", effort="high")
+        assert p._build_thinking_kwargs() == {
+            "extra_body": {"enable_thinking": True},
+            "reasoning_effort": "high",
+        }
+
+    def test_zhipu_glm53_disable_request_degrades_to_low_effort(self):
+        p = DashScopeProvider(model="ZHIPU/GLM-5.3", api_key="k", thinking_enabled=False)
+        assert p._build_thinking_kwargs() == {
+            "extra_body": {"enable_thinking": True},
+            "reasoning_effort": "low",
+        }
 
     @pytest.mark.parametrize("model", ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-0731"])
     def test_bailian_deepseek_emits_enable_thinking_and_reasoning_effort(self, model):

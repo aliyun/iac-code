@@ -1676,9 +1676,7 @@ class TestProviderManagerCompleteRetry:
 
     async def test_complete_attributes_bailian_openai_endpoint_to_dashscope_on_all_signals(self):
         mock_provider = AsyncMock()
-        mock_provider._base_url = (
-            "https://llm-testworkspace000000.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
-        )
+        mock_provider._base_url = "https://llm-testworkspace000000.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
         mock_provider.complete = AsyncMock(
             return_value=NonStreamingResponse(
                 message_id="complete-response",
@@ -2500,7 +2498,11 @@ class TestModelPrefixAutoMapping:
             ("MiniMax/MiniMax-M3", "dashscope"),
             ("deepseek-v4-pro-0813", "dashscope"),
             ("deepseek-v4-flash-0731", "dashscope"),
-            ("glm-5.3", "zhipu_cn_codingplan"),
+            ("ZHIPU/GLM-5.3", "dashscope"),
+            ("xiaomi/mimo-v2.5-pro", "dashscope"),
+            ("stepfun/step-3.7-flash", "dashscope"),
+            ("glm-5.3", "zhipu_cn"),
+            ("glm-5.3-flash", "zhipu_cn"),
         ],
     )
     def test_exact_hosted_models_override_generic_prefixes(self, monkeypatch, model, expected_provider):
@@ -2568,3 +2570,9 @@ def test_qwen36_fallback_is_available_on_each_endpoint(provider_key, expected_fa
     assert _PROVIDER_MODEL_FALLBACK_MAP[provider_key]["qwen3.6-plus"] == expected_fallback
     assert expected_fallback in {model.id for model in PROVIDER_REGISTRY[provider_key].models}
     assert "qwen3.6-plus" not in MODEL_FALLBACK_MAP
+
+
+def test_qwen38_flash_fallback_is_available_on_each_endpoint():
+    assert _PROVIDER_MODEL_FALLBACK_MAP["dashscope"]["qwen3.8-flash"] == "qwen3.7-flash"
+    assert _PROVIDER_MODEL_FALLBACK_MAP["dashscope_token_plan"]["qwen3.8-flash"] == "qwen3.6-flash"
+    assert "qwen3.8-flash" not in MODEL_FALLBACK_MAP

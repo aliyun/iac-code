@@ -46,11 +46,17 @@ PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         models=[
             ModelEntry("qwen3.8-max", is_default=True, support_multimodal=True),
+            ModelEntry("qwen3.8-max-prime", support_multimodal=True),
+            ModelEntry("qwen3.8-flash", support_multimodal=True),
+            ModelEntry("qwen3.8-2.4t-a95b"),
+            ModelEntry("qwen3.8-27b", support_multimodal=True),
             ModelEntry("qwen3.7-max"),
             ModelEntry("qwen3.7-plus", support_multimodal=True),
             ModelEntry("qwen3.7-flash", support_multimodal=True),
             ModelEntry("qwen3.6-plus", support_multimodal=True),
             ModelEntry("qwen3.6-flash", support_multimodal=True),
+            ModelEntry("qwen3.6-35b-a3b", support_multimodal=True),
+            ModelEntry("qwen3.6-27b", support_multimodal=True),
             ModelEntry("qwen3.6-max-preview"),
             ModelEntry("qwen3-max"),
             ModelEntry("qwen3.5-plus", support_multimodal=True),
@@ -60,6 +66,7 @@ PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
             ModelEntry("qwq-plus"),
             ModelEntry("qwen3-coder-plus"),
             ModelEntry("qwen3-coder-next"),
+            ModelEntry("kimi-k3", support_multimodal=True),
             # This adapter sends local images as data URLs, while DashScope's
             # Moonshot-hosted K3 accepts public URLs only.
             ModelEntry("kimi/kimi-k3"),
@@ -73,8 +80,11 @@ PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
             ModelEntry("glm-5.2-fast-preview"),
             ModelEntry("glm-5.2"),
             ModelEntry("glm-5.1"),
+            ModelEntry("ZHIPU/GLM-5.3"),
             ModelEntry("MiniMax/MiniMax-M3", support_multimodal=True),
             ModelEntry("MiniMax-M2.5"),
+            ModelEntry("xiaomi/mimo-v2.5-pro"),
+            ModelEntry("stepfun/step-3.7-flash", support_multimodal=True),
         ],
         qwenpaw_provider_ids=["dashscope"],
     ),
@@ -86,6 +96,7 @@ PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
         base_url="https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
         models=[
             ModelEntry("qwen3.8-max", is_default=True, support_multimodal=True),
+            ModelEntry("qwen3.8-flash", support_multimodal=True),
             ModelEntry("qwen3.7-max"),
             ModelEntry("qwen3.7-plus", support_multimodal=True),
             ModelEntry("qwen3.6-plus", support_multimodal=True),
@@ -267,7 +278,9 @@ PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
         provider_class="iac_code.providers.zhipu_provider.ZhiPuProvider",
         base_url="https://open.bigmodel.cn/api/paas/v4",
         models=[
-            ModelEntry("glm-5.2", is_default=True),
+            ModelEntry("glm-5.3", is_default=True),
+            ModelEntry("glm-5.3-flash", support_multimodal=True),
+            ModelEntry("glm-5.2"),
             ModelEntry("glm-5.1"),
             ModelEntry("glm-5-turbo"),
             ModelEntry("glm-5"),
@@ -290,7 +303,9 @@ PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
         provider_class="iac_code.providers.zhipu_provider.ZhiPuProvider",
         base_url="https://api.z.ai/api/paas/v4",
         models=[
-            ModelEntry("glm-5.2", is_default=True),
+            ModelEntry("glm-5.3", is_default=True),
+            ModelEntry("glm-5.3-flash", support_multimodal=True),
+            ModelEntry("glm-5.2"),
             ModelEntry("glm-5.1"),
             ModelEntry("glm-5-turbo"),
             ModelEntry("glm-5"),
@@ -434,6 +449,7 @@ PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
         base_url="https://open.bigmodel.cn/api/coding/paas/v4",
         models=[
             ModelEntry("glm-5.3", is_default=True),
+            ModelEntry("glm-5.3-flash", support_multimodal=True),
             ModelEntry("glm-5.2"),
             ModelEntry("glm-5-turbo"),
             ModelEntry("glm-4.7"),
@@ -451,6 +467,7 @@ PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
         base_url="https://api.z.ai/api/coding/paas/v4",
         models=[
             ModelEntry("glm-5.3", is_default=True),
+            ModelEntry("glm-5.3-flash", support_multimodal=True),
             ModelEntry("glm-5.2"),
             ModelEntry("glm-5-turbo"),
             ModelEntry("glm-4.7"),

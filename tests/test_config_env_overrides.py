@@ -456,7 +456,11 @@ class TestLoadCredentials:
             ("kimi/kimi-k3", "dashscope"),
             ("MiniMax/MiniMax-M3", "dashscope"),
             ("deepseek-v4-pro-0813", "dashscope"),
-            ("glm-5.3", "zhipu_cn_codingplan"),
+            ("ZHIPU/GLM-5.3", "dashscope"),
+            ("xiaomi/mimo-v2.5-pro", "dashscope"),
+            ("stepfun/step-3.7-flash", "dashscope"),
+            ("glm-5.3", "zhipu_cn"),
+            ("glm-5.3-flash", "zhipu_cn"),
         ],
     )
     def test_api_key_env_routed_via_exact_hosted_model(self, monkeypatch, tmp_path, model, expected_slot):

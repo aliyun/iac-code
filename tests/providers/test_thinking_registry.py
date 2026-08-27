@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from iac_code.providers.thinking import (
     EffortLevel,
     ThinkingFamily,
@@ -128,6 +130,35 @@ class TestGetThinkingSpec:
         assert preview.default_effort is EffortLevel.XHIGH
         assert preview.supports_disable is False
         assert preview.thinking_enabled_by_default is True
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "qwen3.8-flash",
+            "qwen3.8-2.4t-a95b",
+            "qwen3.8-27b",
+            "qwen3.6-35b-a3b",
+            "qwen3.6-27b",
+        ],
+    )
+    def test_bailian_open_qwen_models_use_hybrid_thinking_budget(self, model):
+        spec = get_thinking_spec("dashscope", model)
+        assert spec.family is ThinkingFamily.DASHSCOPE
+        assert spec.supports_thinking_budget is True
+        assert spec.thinking_enabled_by_default is True
+
+    def test_bailian_hosted_kimi_mimo_and_stepfun_specs(self):
+        kimi = get_thinking_spec("dashscope", "kimi-k3")
+        assert kimi.supports_disable is False
+        assert kimi.thinking_enabled_by_default is True
+
+        mimo = get_thinking_spec("dashscope", "xiaomi/mimo-v2.5-pro")
+        assert mimo.supports_disable is True
+        assert mimo.thinking_enabled_by_default is True
+
+        stepfun = get_thinking_spec("dashscope", "stepfun/step-3.7-flash")
+        assert stepfun.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH)
+        assert stepfun.uses_reasoning_effort_param is True
 
     def test_anthropic_46_excludes_xhigh_but_keeps_max(self):
         spec = get_thinking_spec("anthropic", "claude-sonnet-4-6")
@@ -294,18 +325,25 @@ class TestGetThinkingSpec:
         spec = get_thinking_spec("zhipu_intl_codingplan", "glm-5.1")
         assert spec.family is ThinkingFamily.ZHIPU
 
-    def test_glm53_coding_plan_is_always_on_with_low_high_max(self):
-        for provider_key in ("zhipu_cn_codingplan", "zhipu_intl_codingplan"):
-            spec = get_thinking_spec(provider_key, "glm-5.3")
-            assert spec.family is ThinkingFamily.ZHIPU
-            assert spec.allowed_efforts == (EffortLevel.LOW, EffortLevel.HIGH, EffortLevel.MAX)
-            assert spec.default_effort is EffortLevel.MAX
-            assert spec.uses_reasoning_effort_param is True
-            assert spec.supports_disable is False
-            assert spec.thinking_enabled_by_default is True
-        # The standard ZhiPu model API is not live for glm-5.3 yet.
-        assert get_thinking_spec("zhipu_cn", "glm-5.3").family is ThinkingFamily.NONE
-        assert get_thinking_spec("zhipu_intl", "glm-5.3").family is ThinkingFamily.NONE
+    def test_glm53_family_is_always_on_with_low_high_max(self):
+        for provider_key in ("zhipu_cn", "zhipu_intl", "zhipu_cn_codingplan", "zhipu_intl_codingplan"):
+            for model in ("glm-5.3", "glm-5.3-flash"):
+                spec = get_thinking_spec(provider_key, model)
+                assert spec.family is ThinkingFamily.ZHIPU
+                assert spec.allowed_efforts == (EffortLevel.LOW, EffortLevel.HIGH, EffortLevel.MAX)
+                assert spec.default_effort is EffortLevel.MAX
+                assert spec.uses_reasoning_effort_param is True
+                assert spec.supports_disable is False
+                assert spec.thinking_enabled_by_default is True
+
+    def test_dashscope_zhipu_glm53_uses_hosted_wire_family(self):
+        spec = get_thinking_spec("dashscope", "ZHIPU/GLM-5.3")
+        assert spec.family is ThinkingFamily.DASHSCOPE
+        assert spec.allowed_efforts == (EffortLevel.LOW, EffortLevel.HIGH, EffortLevel.MAX)
+        assert spec.default_effort is EffortLevel.MAX
+        assert spec.uses_reasoning_effort_param is True
+        assert spec.supports_disable is False
+        assert spec.thinking_enabled_by_default is True
 
     def test_token_plan_minimax_m25(self):
         spec = get_thinking_spec("dashscope_token_plan", "MiniMax-M2.5")
@@ -328,9 +366,11 @@ class TestResolveThinkingActive:
         assert resolve_thinking_active("zhipu_cn", "glm-5.2", None) is True
 
     def test_glm53_cannot_be_turned_off(self):
-        assert resolve_thinking_active("zhipu_cn_codingplan", "glm-5.3", None) is True
+        assert resolve_thinking_active("zhipu_cn", "glm-5.3", None) is True
+        assert resolve_thinking_active("zhipu_intl", "glm-5.3-flash", False) is True
         assert resolve_thinking_active("zhipu_cn_codingplan", "glm-5.3", False) is True
         assert resolve_thinking_active("zhipu_intl_codingplan", "glm-5.3", False) is True
+        assert resolve_thinking_active("dashscope", "ZHIPU/GLM-5.3", False) is True
 
     def test_reasoning_families_unset_default_off(self):
         # reasoning-effort / budget 家族:未配置时不下发思考指令 → 视为关。

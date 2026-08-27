@@ -44,7 +44,7 @@ class ZhiPuProvider(OpenAIProvider):
         if self._thinking_disabled():
             if spec.supports_disable:
                 return {"extra_body": {"thinking": {"type": "disabled"}}}
-            # Always-on models (glm-5.3) reject thinking.type=disabled. The
+            # Always-on models (glm-5.3 and glm-5.3-flash) reject thinking.type=disabled. The
             # official migration guidance is to keep thinking enabled at the
             # lightest effort instead of failing the request.
             always_on_kwargs: dict[str, Any] = {"extra_body": {"thinking": {"type": "enabled"}}}

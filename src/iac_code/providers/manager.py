@@ -346,17 +346,25 @@ MODEL_FALLBACK_MAP = {
     "gpt-5.5": "gpt-5.4",
     "gpt-5.4": "gpt-5.4-mini",
     "qwen3.8-max": "qwen3.7-plus",
+    "qwen3.8-max-prime": "qwen3.8-max",
+    "qwen3.8-2.4t-a95b": "qwen3.8-max",
+    "qwen3.8-27b": "qwen3.8-flash",
     "qwen3.8-max-preview": "qwen3.8-max",
     "qwen3.7-max": "qwen3.7-plus",
     "qwen3.7-flash": "qwen3.6-flash",
+    "qwen3.6-35b-a3b": "qwen3.6-flash",
+    "qwen3.6-27b": "qwen3.6-flash",
     "kimi/kimi-k3": "kimi-k2.7-code",
     "kimi-k3": "kimi-k2.7-code",
-    "glm-5.3": "glm-5.2",
+    "glm-5.3": "glm-5.3-flash",
+    "ZHIPU/GLM-5.3": "glm-5.2",
     "glm-5.2-fast-preview": "glm-5.2",
     "glm-5.2": "glm-5.1",
     "deepseek-v4-pro": "deepseek-v4-flash",
     "deepseek-v4-pro-0813": "deepseek-v4-pro",
     "deepseek-v4-flash-0731": "deepseek-v4-flash",
+    "xiaomi/mimo-v2.5-pro": "qwen3.8-flash",
+    "stepfun/step-3.7-flash": "qwen3.8-flash",
 }
 
 _MODEL_REFUSAL_FALLBACK_MAP = {
@@ -365,8 +373,14 @@ _MODEL_REFUSAL_FALLBACK_MAP = {
 }
 
 _PROVIDER_MODEL_FALLBACK_MAP = {
-    "dashscope": {"qwen3.6-plus": "qwen3.6-flash"},
-    "dashscope_token_plan": {"qwen3.6-plus": "qwen3.6-flash"},
+    "dashscope": {
+        "qwen3.8-flash": "qwen3.7-flash",
+        "qwen3.6-plus": "qwen3.6-flash",
+    },
+    "dashscope_token_plan": {
+        "qwen3.8-flash": "qwen3.6-flash",
+        "qwen3.6-plus": "qwen3.6-flash",
+    },
     "aliyun_codingplan": {"qwen3.6-plus": "qwen3.5-plus"},
     "aliyun_codingplan_intl": {"qwen3.6-plus": "qwen3.5-plus"},
 }
