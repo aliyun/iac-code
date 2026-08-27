@@ -101,11 +101,17 @@ class TestContextWindowConfig:
         ("model", "context_window"),
         [
             ("qwen3.8-max", 1_000_000),
+            ("qwen3.8-max-prime", 1_000_000),
+            ("qwen3.8-flash", 1_000_000),
+            ("qwen3.8-2.4t-a95b", 1_000_000),
+            ("qwen3.8-27b", 1_000_000),
             ("qwen3.8-max-preview", 1_000_000),
             ("qwen3.7-max", 1_000_000),
             ("qwen3.7-plus", 1_000_000),
             ("qwen3.7-flash", 1_000_000),
             ("qwen3.6-flash", 1_000_000),
+            ("qwen3.6-35b-a3b", 262_144),
+            ("qwen3.6-27b", 262_144),
             ("deepseek-v4-pro", 1_000_000),
             ("deepseek-v4-pro-0813", 1_000_000),
             ("deepseek-v4-flash-0731", 1_000_000),
@@ -113,6 +119,8 @@ class TestContextWindowConfig:
             ("glm-5.1", 202_752),
             ("MiniMax-M3", 1_000_000),
             ("MiniMax/MiniMax-M3", 196_608),
+            ("xiaomi/mimo-v2.5-pro", 1_048_576),
+            ("stepfun/step-3.7-flash", 262_144),
         ],
     )
     def test_current_dashscope_models_use_documented_context_capacity(self, model, context_window):
@@ -134,15 +142,39 @@ class TestContextWindowConfig:
         assert config.context_window == 1_000_000
         assert config.max_output_tokens == 128_000
 
+    def test_glm53_flash_uses_documented_context_and_output_capacity(self):
+        config = get_context_window_config("glm-5.3-flash")
+        assert config.context_window == 1_000_000
+        assert config.max_output_tokens == 128_000
+
+    def test_dashscope_zhipu_glm53_uses_hosted_capacity(self):
+        config = get_context_window_config("ZHIPU/GLM-5.3")
+        assert config.context_window == 1_048_576
+        assert config.max_output_tokens == 131_072
+
     def test_dashscope_glm52_fast_preview_uses_documented_capacity(self):
         config = get_context_window_config("glm-5.2-fast-preview")
         assert config.context_window == 1_048_576
         assert config.max_output_tokens == 131_072
 
-    def test_direct_kimi_k3_uses_documented_context_window(self):
+    def test_shared_kimi_k3_id_keeps_conservative_capacity(self):
         config = get_context_window_config("kimi-k3")
         assert config.context_window == 1_000_000
         assert config.max_output_tokens == 8_192
+
+    @pytest.mark.parametrize(
+        ("model", "max_output_tokens"),
+        [
+            ("qwen3.8-2.4t-a95b", 131_072),
+            ("qwen3.8-27b", 131_072),
+            ("qwen3.6-35b-a3b", 65_536),
+            ("qwen3.6-27b", 65_536),
+            ("xiaomi/mimo-v2.5-pro", 131_072),
+            ("stepfun/step-3.7-flash", 262_144),
+        ],
+    )
+    def test_new_bailian_models_use_documented_output_capacity(self, model, max_output_tokens):
+        assert get_context_window_config(model).max_output_tokens == max_output_tokens
 
     def test_unknown_model_uses_default(self):
         config = get_context_window_config("unknown-model-xyz")

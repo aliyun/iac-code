@@ -25,11 +25,17 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
 
     for model_id in (
         "qwen3.8-max",
+        "qwen3.8-max-prime",
+        "qwen3.8-flash",
+        "qwen3.8-2.4t-a95b",
+        "qwen3.8-27b",
         "qwen3.7-max",
         "qwen3.7-plus",
         "qwen3.7-flash",
         "qwen3.6-plus",
         "qwen3.6-flash",
+        "qwen3.6-35b-a3b",
+        "qwen3.6-27b",
         "qwen3.5-plus",
         "qwen3.5-flash",
         "qwen-plus",
@@ -38,6 +44,7 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
         "deepseek-v4-pro-0813",
         "deepseek-v4-flash-0731",
         "deepseek-v4-flash",
+        "kimi-k3",
         "kimi/kimi-k3",
         "kimi-k2.7-code",
         "kimi-k2.6",
@@ -45,8 +52,11 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
         "glm-5.2-fast-preview",
         "glm-5.2",
         "glm-5.1",
+        "ZHIPU/GLM-5.3",
         "MiniMax/MiniMax-M3",
         "MiniMax-M2.5",
+        "xiaomi/mimo-v2.5-pro",
+        "stepfun/step-3.7-flash",
     ):
         assert model_id in models
 
@@ -61,17 +71,27 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
     assert _model_entry("dashscope", "qwen3.8-max").support_multimodal
     assert not _model_entry("dashscope", "qwen3.7-max").support_multimodal
     for model_id in (
+        "qwen3.8-max-prime",
+        "qwen3.8-flash",
+        "qwen3.8-27b",
         "qwen3.7-plus",
         "qwen3.7-flash",
         "qwen3.6-plus",
         "qwen3.6-flash",
+        "qwen3.6-35b-a3b",
+        "qwen3.6-27b",
         "qwen3.5-plus",
         "qwen3.5-flash",
         "kimi-k2.7-code",
+        "kimi-k3",
         "MiniMax/MiniMax-M3",
+        "stepfun/step-3.7-flash",
     ):
         assert _model_entry("dashscope", model_id).support_multimodal
+    assert not _model_entry("dashscope", "qwen3.8-2.4t-a95b").support_multimodal
+    assert not _model_entry("dashscope", "xiaomi/mimo-v2.5-pro").support_multimodal
     assert not _model_entry("dashscope", "deepseek-v4-pro-0813").support_multimodal
+    assert not _model_entry("dashscope", "ZHIPU/GLM-5.3").support_multimodal
     # The public adapter can only send local attachments as data URLs, but
     # Moonshot-hosted K3 on DashScope accepts public image URLs only.
     assert not _model_entry("dashscope", "kimi/kimi-k3").support_multimodal
@@ -82,6 +102,7 @@ def test_dashscope_token_plan_uses_exact_supported_chat_models() -> None:
 
     for model_id in (
         "qwen3.8-max",
+        "qwen3.8-flash",
         "qwen3.7-max",
         "qwen3.7-plus",
         "qwen3.6-plus",
@@ -108,6 +129,7 @@ def test_dashscope_token_plan_uses_exact_supported_chat_models() -> None:
     assert "qwen3.8-max-preview" not in models
     assert PROVIDER_REGISTRY["dashscope_token_plan"].default_model == "qwen3.8-max"
     assert _model_entry("dashscope_token_plan", "qwen3.8-max").support_multimodal
+    assert _model_entry("dashscope_token_plan", "qwen3.8-flash").support_multimodal
     assert not _model_entry("dashscope_token_plan", "qwen3.7-max").support_multimodal
     assert not _model_entry("dashscope_token_plan", "deepseek-v4-pro-0813").support_multimodal
     for model_id in ("qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash", "kimi-k2.7-code", "kimi-k2.5", "kimi-k2.6"):
@@ -175,22 +197,17 @@ def test_direct_kimi_minimax_and_zhipu_models_are_updated() -> None:
         assert "MiniMax-M2.1" not in _model_ids(provider_key)
         assert get_thinking_spec(provider_key, "MiniMax-M3").family is ThinkingFamily.MINIMAX
 
-    for provider_key in ("zhipu_cn", "zhipu_intl"):
-        assert "glm-5.2" in _model_ids(provider_key)
-        assert PROVIDER_REGISTRY[provider_key].default_model == "glm-5.2"
-        assert get_thinking_spec(provider_key, "glm-5.2").family is ThinkingFamily.ZHIPU
-        assert get_thinking_spec(provider_key, "glm-5.1").family is ThinkingFamily.ZHIPU
-        # GLM-5.3 is Coding-Plan-only for now; the standard model API is not
-        # live yet, so it must not appear on the direct endpoints.
-        assert "glm-5.3" not in _model_ids(provider_key)
-        assert get_thinking_spec(provider_key, "glm-5.3").family is ThinkingFamily.NONE
-
-    for provider_key in ("zhipu_cn_codingplan", "zhipu_intl_codingplan"):
+    for provider_key in ("zhipu_cn", "zhipu_intl", "zhipu_cn_codingplan", "zhipu_intl_codingplan"):
         assert "glm-5.3" in _model_ids(provider_key)
+        assert "glm-5.3-flash" in _model_ids(provider_key)
         assert "glm-5.2" in _model_ids(provider_key)
         assert PROVIDER_REGISTRY[provider_key].default_model == "glm-5.3"
+        assert not _model_entry(provider_key, "glm-5.3").support_multimodal
+        assert _model_entry(provider_key, "glm-5.3-flash").support_multimodal
         assert get_thinking_spec(provider_key, "glm-5.3").family is ThinkingFamily.ZHIPU
+        assert get_thinking_spec(provider_key, "glm-5.3-flash").family is ThinkingFamily.ZHIPU
         assert get_thinking_spec(provider_key, "glm-5.2").family is ThinkingFamily.ZHIPU
+        assert get_thinking_spec(provider_key, "glm-5.1").family is ThinkingFamily.ZHIPU
 
 
 def test_provider_specific_thinking_wire_formats_do_not_use_openai_or_anthropic_effort_fields() -> None:
@@ -217,8 +234,9 @@ def test_provider_specific_thinking_wire_formats_do_not_use_openai_or_anthropic_
         "extra_body": {"thinking": {"type": "enabled"}},
         "reasoning_effort": "max",
     }
-    # GLM-5.3 (Coding Plan) is always-on: it accepts low/high/max and rejects
-    # thinking.type=disabled, so a disabled toggle degrades to enabled + low.
+    # The GLM-5.3 family is always-on across Model API and Coding Plan: it
+    # accepts low/high/max and rejects thinking.type=disabled, so a disabled
+    # toggle degrades to enabled + low.
     assert ZhiPuProvider(
         model="glm-5.3", api_key="k", provider_key="zhipu_cn_codingplan", effort="max"
     )._build_thinking_kwargs() == {
@@ -234,6 +252,18 @@ def test_provider_specific_thinking_wire_formats_do_not_use_openai_or_anthropic_
     assert ZhiPuProvider(
         model="glm-5.3", api_key="k", provider_key="zhipu_intl_codingplan"
     )._build_thinking_kwargs() == {"extra_body": {"thinking": {"type": "enabled"}}}
+    assert ZhiPuProvider(
+        model="glm-5.3-flash", api_key="k", provider_key="zhipu_cn", effort="high"
+    )._build_thinking_kwargs() == {
+        "extra_body": {"thinking": {"type": "enabled"}},
+        "reasoning_effort": "high",
+    }
+    assert ZhiPuProvider(
+        model="glm-5.3-flash", api_key="k", provider_key="zhipu_intl", thinking_enabled=False
+    )._build_thinking_kwargs() == {
+        "extra_body": {"thinking": {"type": "enabled"}},
+        "reasoning_effort": "low",
+    }
     assert ZhiPuProvider(model="glm-5.2", api_key="k")._build_thinking_kwargs() == {
         "extra_body": {"thinking": {"type": "enabled"}}
     }
@@ -382,6 +412,52 @@ def test_dashscope_new_model_protocols_are_not_flattened() -> None:
         "extra_body": {"enable_thinking": True, "preserve_thinking": True},
         "reasoning_effort": "xhigh",
     }
+
+    for model in (
+        "qwen3.8-flash",
+        "qwen3.8-2.4t-a95b",
+        "qwen3.8-27b",
+        "qwen3.6-35b-a3b",
+        "qwen3.6-27b",
+    ):
+        spec = get_thinking_spec("dashscope", model)
+        assert spec.family is ThinkingFamily.DASHSCOPE
+        assert spec.supports_thinking_budget is True
+        assert spec.uses_reasoning_effort_param is False
+        assert spec.thinking_enabled_by_default is True
+
+    assert DashScopeProvider(
+        model="qwen3.8-27b",
+        api_key="k",
+        thinking_budget=4096,
+    )._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True, "thinking_budget": 4096}}
+
+    hosted_kimi = get_thinking_spec("dashscope", "kimi-k3")
+    assert hosted_kimi.supports_disable is False
+    assert DashScopeProvider(
+        model="kimi-k3",
+        api_key="k",
+        thinking_enabled=False,
+    )._build_thinking_kwargs() == {
+        "extra_body": {"enable_thinking": True, "preserve_thinking": True}
+    }
+
+    stepfun = get_thinking_spec("dashscope", "stepfun/step-3.7-flash")
+    assert stepfun.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH)
+    assert DashScopeProvider(
+        model="stepfun/step-3.7-flash",
+        api_key="k",
+        effort="high",
+    )._build_thinking_kwargs() == {
+        "extra_body": {"enable_thinking": True},
+        "reasoning_effort": "high",
+    }
+
+    assert DashScopeProvider(
+        model="xiaomi/mimo-v2.5-pro",
+        api_key="k",
+        thinking_enabled=False,
+    )._build_thinking_kwargs() == {"extra_body": {"enable_thinking": False}}
 
     preview = get_thinking_spec("dashscope_token_plan", "qwen3.8-max-preview")
     assert preview.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.XHIGH)

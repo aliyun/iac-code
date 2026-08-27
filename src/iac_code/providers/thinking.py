@@ -250,6 +250,12 @@ _DASHSCOPE_QWEN38_SPEC = ThinkingSpec(
     thinking_enabled_by_default=True,
 )
 
+_DASHSCOPE_QWEN_HYBRID_SPEC = ThinkingSpec(
+    ThinkingFamily.DASHSCOPE,
+    supports_thinking_budget=True,
+    thinking_enabled_by_default=True,
+)
+
 _DASHSCOPE_QWEN38_PREVIEW_SPEC = ThinkingSpec(
     ThinkingFamily.DASHSCOPE,
     (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.XHIGH),
@@ -265,6 +271,27 @@ _DASHSCOPE_KIMI_K3_SPEC = ThinkingSpec(
     EffortLevel.MAX,
     uses_reasoning_effort_param=True,
     supports_disable=False,
+)
+
+_DASHSCOPE_HOSTED_KIMI_K3_SPEC = ThinkingSpec(
+    ThinkingFamily.DASHSCOPE,
+    supports_disable=False,
+    thinking_enabled_by_default=True,
+)
+
+_DASHSCOPE_STEP37_SPEC = ThinkingSpec(
+    ThinkingFamily.DASHSCOPE,
+    (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH),
+    uses_reasoning_effort_param=True,
+)
+
+_DASHSCOPE_ZHIPU_GLM53_SPEC = ThinkingSpec(
+    ThinkingFamily.DASHSCOPE,
+    _ZHIPU_GLM53_EFFORTS,
+    EffortLevel.MAX,
+    uses_reasoning_effort_param=True,
+    supports_disable=False,
+    thinking_enabled_by_default=True,
 )
 
 _ANTHROPIC_ADAPTIVE_SPEC = ThinkingSpec(
@@ -362,12 +389,18 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
     },
     "dashscope": {
         "qwen3.8-max": _DASHSCOPE_QWEN38_SPEC,
+        "qwen3.8-max-prime": _DASHSCOPE_QWEN38_SPEC,
+        "qwen3.8-flash": _DASHSCOPE_QWEN_HYBRID_SPEC,
+        "qwen3.8-2.4t-a95b": _DASHSCOPE_QWEN_HYBRID_SPEC,
+        "qwen3.8-27b": _DASHSCOPE_QWEN_HYBRID_SPEC,
         "qwen3.7-max": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.7-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.7-flash": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.6-max-preview": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.6-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.6-flash": ThinkingSpec(ThinkingFamily.DASHSCOPE),
+        "qwen3.6-35b-a3b": _DASHSCOPE_QWEN_HYBRID_SPEC,
+        "qwen3.6-27b": _DASHSCOPE_QWEN_HYBRID_SPEC,
         "qwen3.5-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.5-flash": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
@@ -376,12 +409,19 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "kimi-k2.6": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "kimi-k2.5": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "kimi-k2.7-code": _DASHSCOPE_KIMI_K27_CODE_SPEC,
+        "kimi-k3": _DASHSCOPE_HOSTED_KIMI_K3_SPEC,
         "kimi/kimi-k3": _DASHSCOPE_KIMI_K3_SPEC,
         "glm-5.2-fast-preview": _DASHSCOPE_GLM52_SPEC,
         "glm-5.2": _DASHSCOPE_GLM52_SPEC,
         "glm-5.1": _DASHSCOPE_GLM51_SPEC,
+        "ZHIPU/GLM-5.3": _DASHSCOPE_ZHIPU_GLM53_SPEC,
         "MiniMax-M2.5": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "MiniMax/MiniMax-M3": ThinkingSpec(ThinkingFamily.MINIMAX),
+        "xiaomi/mimo-v2.5-pro": ThinkingSpec(
+            ThinkingFamily.DASHSCOPE,
+            thinking_enabled_by_default=True,
+        ),
+        "stepfun/step-3.7-flash": _DASHSCOPE_STEP37_SPEC,
         "deepseek-v4-pro": ThinkingSpec(
             ThinkingFamily.DASHSCOPE,
             _DASHSCOPE_DEEPSEEK_EFFORTS,
@@ -409,6 +449,7 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
     },
     "dashscope_token_plan": {
         "qwen3.8-max": _DASHSCOPE_QWEN38_SPEC,
+        "qwen3.8-flash": _DASHSCOPE_QWEN_HYBRID_SPEC,
         "qwen3.8-max-preview": _DASHSCOPE_QWEN38_PREVIEW_SPEC,
         "qwen3.7-max": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.7-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
@@ -508,6 +549,8 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "MiniMax-M2.5-highspeed": ThinkingSpec(ThinkingFamily.MINIMAX),
     },
     "zhipu_cn": {
+        "glm-5.3": _ZHIPU_GLM53_SPEC,
+        "glm-5.3-flash": _ZHIPU_GLM53_SPEC,
         "glm-5.2": _ZHIPU_GLM52_SPEC,
         "glm-5.1": ThinkingSpec(ThinkingFamily.ZHIPU),
         "glm-5": ThinkingSpec(ThinkingFamily.ZHIPU),
@@ -524,6 +567,7 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
     },
     "zhipu_cn_codingplan": {
         "glm-5.3": _ZHIPU_GLM53_SPEC,
+        "glm-5.3-flash": _ZHIPU_GLM53_SPEC,
         "glm-5.2": _ZHIPU_GLM52_SPEC,
         "glm-5-turbo": ThinkingSpec(ThinkingFamily.ZHIPU),
         "glm-4.7": ThinkingSpec(ThinkingFamily.ZHIPU),

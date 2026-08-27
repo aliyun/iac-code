@@ -124,13 +124,13 @@ _MODEL_EXACT_TO_PROVIDER: dict[str, str] = {
     "glm-5.2-fast-preview": "dashscope",
     "kimi/kimi-k3": "dashscope",
     "minimax/minimax-m3": "dashscope",
+    "zhipu/glm-5.3": "dashscope",
+    "xiaomi/mimo-v2.5-pro": "dashscope",
+    "stepfun/step-3.7-flash": "dashscope",
     # Dated DeepSeek snapshots only exist on Bailian; the official DeepSeek
     # endpoint keeps the undated model IDs.
     "deepseek-v4-pro-0813": "dashscope",
     "deepseek-v4-flash-0731": "dashscope",
-    # GLM-5.3 is currently only served through the GLM Coding Plan endpoints;
-    # the standard ZhiPu model API is not live for it yet.
-    "glm-5.3": "zhipu_cn_codingplan",
 }
 
 _MODEL_PREFIX_TO_PROVIDER: tuple[tuple[str, str], ...] = (
