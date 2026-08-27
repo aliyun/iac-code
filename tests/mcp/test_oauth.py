@@ -1363,17 +1363,16 @@ def test_sync_expired_oauth_refresh_without_expires_in_deduplicates_across_proce
                     time.sleep(0.01)
 
             class BarrierStorage(MCPSecretStorage):
-                _blob_barrier_fired = False
+                _blob_reads = 0
 
                 def get_secret(self, key: str) -> str | None:
                     value = super().get_secret(key)
                     # 所有 OAuth 字段现在合并进单个 blob 条目;两个进程都读到过期旧状态后,
                     # 用一次性栅栏让它们同时进入刷新竞争,验证粗粒度 CAS 锁只放行一次网络刷新。
-                    if not self._blob_barrier_fired and key == oauth_module.oauth_storage_key(
-                        config, scope=MCPConfigScope.USER
-                    ):
-                        self._blob_barrier_fired = True
-                        wait_for_barrier("oauth-blob-read")
+                    if key == oauth_module.oauth_storage_key(config, scope=MCPConfigScope.USER):
+                        self._blob_reads += 1
+                        if self._blob_reads == 4:
+                            wait_for_barrier("oauth-blob-read")
                     return value
 
             oauth_module.discover_oauth_metadata = lambda _config: oauth_module.OAuthMetadata(

@@ -2298,8 +2298,11 @@ def test_manager_idle_countdown_starts_after_sse_worker_exits(monkeypatch, tmp_p
     monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    fake_cli = _write_fake_aliyun(
-        tmp_path,
+    # Invoke the current interpreter as the fake CLI and let it execute the
+    # positional ``ros`` script from the worker cwd. This avoids depending on
+    # Windows batch-file launch behavior in a manager lifecycle test.
+    fake_cli = Path(sys.executable)
+    (workspace / "ros").write_text(
         "import json, time\n"
         + "time.sleep(0.6)\n"
         + "event = {'result': {'statusUpdate': {'taskId': 'task-1', 'contextId': 'session-1', "
@@ -2307,6 +2310,7 @@ def test_manager_idle_countdown_starts_after_sse_worker_exits(monkeypatch, tmp_p
         + "'parts': [{'text': 'done'}]}}, 'metadata': {'iac_code': {'assistantFinal': "
         + "{'complete': True}}, 'iacCodeSessionId': 'iac-1'}}}}\n"
         + "print(json.dumps({'data': event}), flush=True)\n",
+        encoding="utf-8",
     )
 
     # Leave enough scheduling headroom for a loaded Windows xdist runner; this
