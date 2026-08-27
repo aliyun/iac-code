@@ -10,6 +10,7 @@ import pytest
 from iac_code.agent.message import Message, ToolUseBlock
 from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorage
 from iac_code.services.permission_wait import (
+    PermissionExecutionIdentityScope,
     PermissionWaitCheckpointStore,
     PermissionWaitCoordinator,
     PermissionWaitPolicy,
@@ -470,6 +471,42 @@ def test_cloud_execution_identity_is_non_secret_and_region_bound(monkeypatch) ->
     assert "sts-access-key-id" not in principal_ref
     assert "must-not-be-persisted" not in principal_ref
     assert region == "cn-shanghai"
+
+
+def test_cloud_execution_identity_uses_stable_a2a_user_across_sts_rotation(monkeypatch) -> None:
+    credentials = [
+        AliyunCredential(
+            mode="StsToken",
+            access_key_id="old-sts-access-key-id",
+            access_key_secret="old-secret",
+            sts_token="old-token",
+            region_id="cn-hangzhou",
+        ),
+        AliyunCredential(
+            mode="StsToken",
+            access_key_id="new-sts-access-key-id",
+            access_key_secret="new-secret",
+            sts_token="new-token",
+            region_id="cn-hangzhou",
+        ),
+    ]
+    monkeypatch.setattr(AliyunCredentials, "load", staticmethod(lambda: credentials.pop(0)))
+
+    with PermissionExecutionIdentityScope("stable-a2a-user").install():
+        before = permission_execution_identity(
+            tool_name="aliyun_api",
+            tool_input={"product": "ros", "action": "CreateStack", "region_id": "cn-hangzhou"},
+        )
+        after = permission_execution_identity(
+            tool_name="aliyun_api",
+            tool_input={"product": "ros", "action": "CreateStack", "region_id": "cn-hangzhou"},
+        )
+
+    assert before == after
+    assert before[0] is not None
+    assert "stable-a2a-user" not in before[0]
+    assert "old-sts-access-key-id" not in before[0]
+    assert "new-sts-access-key-id" not in before[0]
 
 
 def test_local_execution_identity_does_not_depend_on_cloud_credentials(monkeypatch) -> None:

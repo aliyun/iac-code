@@ -18,6 +18,7 @@ from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.input_required import PermissionInputRegistry, PermissionResponse
 from iac_code.a2a.projection import project_a2a_data
 from iac_code.services.permission_wait import (
+    PermissionExecutionIdentityScope,
     PermissionWaitCheckpointStore,
     PermissionWaitCoordinator,
     PermissionWaitPolicy,
@@ -543,7 +544,19 @@ async def test_failed_decision_backup_keeps_claim_retriable_without_delivering_f
 
 
 @pytest.mark.asyncio
-async def test_live_cloud_permission_rejects_changed_principal_before_claim(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("reply_user_id", "allowed"),
+    [
+        ("stable-a2a-user", True),
+        ("different-a2a-user", False),
+    ],
+)
+async def test_live_cloud_permission_binds_stable_a2a_user_across_sts_rotation(
+    tmp_path,
+    monkeypatch,
+    reply_user_id,
+    allowed,
+) -> None:
     workspace, session_id, store, registry = _durable_permission_fixture(tmp_path, monkeypatch)
     queue = FakeEventQueue()
     backup = _ObservedBoundaryBackup(queue, store)
@@ -556,7 +569,8 @@ async def test_live_cloud_permission_rejects_changed_principal_before_claim(tmp_
     )
     monkeypatch.setattr(AliyunCredentials, "load", staticmethod(lambda: original))
     tool_input = {"product": "ros", "action": "CreateStack", "region_id": "cn-hangzhou"}
-    principal_ref, region = permission_execution_identity(tool_name="aliyun_api", tool_input=tool_input)
+    with PermissionExecutionIdentityScope("stable-a2a-user").install():
+        principal_ref, region = permission_execution_identity(tool_name="aliyun_api", tool_input=tool_input)
     future = pending_future()
     event = PermissionRequestEvent(
         tool_name="aliyun_api",
@@ -564,7 +578,11 @@ async def test_live_cloud_permission_rejects_changed_principal_before_claim(tmp_
         tool_use_id="tool-write",
         response_future=future,
         continuation_frame=_permission_frame("tool-write"),
-        audit_context={"principal_ref": principal_ref, "region": region},
+        audit_context={
+            "principal_ref": principal_ref,
+            "principal_kind": "a2a_user",
+            "region": region,
+        },
     )
     pending = await publish_interactive_permission_boundary(
         queue,
@@ -585,23 +603,35 @@ async def test_live_cloud_permission_rejects_changed_principal_before_claim(tmp_
         region_id="cn-hangzhou",
     )
     monkeypatch.setattr(AliyunCredentials, "load", staticmethod(lambda: changed))
+    persisted = store.load(str(pending.boundary_id))
+    assert persisted["principalKind"] == "a2a_user"
+    assert "original-access-key-id" not in json.dumps(persisted)
+    assert "secret" not in json.dumps(persisted)
+    assert "token" not in json.dumps(persisted)
 
-    with pytest.raises(InvalidParamsError, match="cloud execution identity changed"):
-        await registry.answer(
-            PermissionResponse(
-                task_id="task-1",
-                context_id="ctx-1",
-                request_task_id="task-1",
-                input_id=pending.input_id,
-                tool_use_id="tool-write",
-                decision="allow_once",
-            )
-        )
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id=pending.input_id,
+        tool_use_id="tool-write",
+        decision="allow_once",
+    )
+    with PermissionExecutionIdentityScope(reply_user_id).install():
+        if allowed:
+            assert await registry.answer(response) is True
+        else:
+            with pytest.raises(InvalidParamsError, match="cloud execution identity changed"):
+                await registry.answer(response)
 
-    assert future.done() is False
-    assert store.load(str(pending.boundary_id))["decision"]["status"] == "none"
+    if allowed:
+        assert future.result() is True
+        assert store.load(str(pending.boundary_id))["decision"]["status"] == "applied"
+    else:
+        assert future.done() is False
+        assert store.load(str(pending.boundary_id))["decision"]["status"] == "none"
+        future.cancel()
     await registry.complete(pending)
-    future.cancel()
 
 
 @pytest.mark.asyncio

@@ -2951,6 +2951,7 @@ class WebSessionManager:
         audit_context = permission_event.audit_context if isinstance(permission_event.audit_context, Mapping) else {}
         frame = canonicalize_permission_continuation_frame(source_frame, audit_context=audit_context)
         principal_ref = audit_context.get("principal_ref")
+        principal_kind = audit_context.get("principal_kind")
         region = audit_context.get("region")
         record = build_permission_checkpoint(
             session_id=session.session_id,
@@ -2964,6 +2965,7 @@ class WebSessionManager:
             continuation_frame=frame,
             policy=self.permission_wait_policy,
             principal_ref=principal_ref if isinstance(principal_ref, str) else None,
+            principal_kind=principal_kind if principal_kind in {"a2a_user", "credential"} else None,
             region=region if isinstance(region, str) else None,
             pipeline_coordinates=pipeline_coordinates,
         )

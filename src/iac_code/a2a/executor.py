@@ -62,6 +62,7 @@ from iac_code.a2a.pipeline_stream import BACKUP_COMMITTED_EVENT_TYPE, PipelineA2
 from iac_code.a2a.projection import a2a_safe_mode_enabled
 from iac_code.a2a.request_mode import resolve_request_run_mode
 from iac_code.a2a.runtime_overrides import (
+    PermissionReplyExecutionContext,
     a2a_request_context,
     configure_runtime_model,
     credentials_with_metadata_api_key,
@@ -103,10 +104,10 @@ from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.capabilities.multimodal import is_model_multimodal
 from iac_code.services.permission_wait import (
+    PermissionExecutionIdentity,
     PermissionWaitCheckpointStore,
     RecoveredPermissionAuditBoundary,
     canonical_digest,
-    permission_execution_identity,
     recover_permission_audit_boundary,
 )
 from iac_code.services.permissions.audit import emit_permission_boundary_audit
@@ -1047,11 +1048,28 @@ class IacCodeA2AExecutor(AgentExecutor):
         self._metadata_echo_redactor = A2AMetadataEchoRedactor()
         self._backup_service = backup_service or SessionBackupService()
 
-    async def resolve_sideband_permission(self, response: PermissionResponse) -> Message | None:
-        if not await self._permission_input_registry.is_sideband_response(response):
-            return None
-        approved = await self._permission_input_registry.answer(response)
-        return permission_ack_message(response, approved=approved)
+    async def resolve_sideband_permission(
+        self,
+        response: PermissionResponse,
+        *,
+        metadata: Any | None = None,
+    ) -> Message | None:
+        telemetry_channel = await self._task_store.resolve_context_telemetry_channel(
+            response.context_id,
+            self._resolve_telemetry_channel(metadata),
+        )
+        request_context = self._permission_reply_request_context(
+            metadata,
+            telemetry_channel=telemetry_channel,
+        )
+        with request_context.install():
+            if not await self._permission_input_registry.is_sideband_response(response):
+                return None
+            approved = await self._permission_input_registry.answer(
+                response,
+                execution_context=request_context,
+            )
+            return permission_ack_message(response, approved=approved)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         metadata = getattr(context, "metadata", None) or getattr(getattr(context, "message", None), "metadata", None)
@@ -1065,17 +1083,44 @@ class IacCodeA2AExecutor(AgentExecutor):
             context_id,
             self._resolve_telemetry_channel(metadata),
         )
-        with a2a_request_context(telemetry_channel=telemetry_channel):
-            await self._execute(context, event_queue, context_id=context_id)
+        request_context = (
+            self._permission_reply_request_context(metadata, telemetry_channel=telemetry_channel)
+            if permission_response is not None
+            else None
+        )
+        with (
+            request_context.install()
+            if request_context is not None
+            else a2a_request_context(telemetry_channel=telemetry_channel)
+        ):
+            await self._execute(
+                context,
+                event_queue,
+                context_id=context_id,
+                permission_reply_context=request_context,
+            )
 
-    async def _execute(self, context: RequestContext, event_queue: EventQueue, *, context_id: str) -> None:
+    async def _execute(
+        self,
+        context: RequestContext,
+        event_queue: EventQueue,
+        *,
+        context_id: str,
+        permission_reply_context: PermissionReplyExecutionContext | None = None,
+    ) -> None:
         requested_task_id = context.task_id or None
         task_id = requested_task_id or "task-" + uuid.uuid4().hex[:12]
         permission_response = parse_permission_response(getattr(context, "message", None))
         if permission_response is not None:
             try:
                 pending = await self._permission_input_registry.pending_for_response(permission_response)
-                approved = await self._permission_input_registry.answer(permission_response)
+                if permission_reply_context is None:
+                    approved = await self._permission_input_registry.answer(permission_response)
+                else:
+                    approved = await self._permission_input_registry.answer(
+                        permission_response,
+                        execution_context=permission_reply_context,
+                    )
             except InvalidParamsError:
                 if await self._resume_persisted_permission(
                     context,
@@ -2006,14 +2051,34 @@ class IacCodeA2AExecutor(AgentExecutor):
             audit_already_final = persisted_decision.get("auditStatus") in {"recorded", "failed"}
         pipeline_executor: IacCodeA2APipelineExecutor | None = None
         audit_event: PermissionRequestEvent | None = None
-        if not audit_already_final:
-            recovered = recover_permission_audit_boundary(
-                record,
-                cwd=context_record.cwd,
-                session_id=context_record.session_id,
+        recovered = recover_permission_audit_boundary(
+            record,
+            cwd=context_record.cwd,
+            session_id=context_record.session_id,
+        )
+        if recovered is None:
+            raise InvalidParamsError("permission_resume_invalid: canonical permission request changed.")
+        principal_kind = record.get("principalKind")
+        if principal_kind is None and record.get("principalRef") is not None:
+            # Checkpoints written before principalKind used credential anchors.
+            principal_kind = "credential"
+        if principal_kind not in {None, "a2a_user", "credential"}:
+            raise InvalidParamsError("permission_resume_invalid: cloud execution identity changed.")
+        with self._permission_reply_request_context(
+            metadata,
+            session_id=context_record.session_id,
+        ).install():
+            current_identity = PermissionExecutionIdentity.resolve(
+                tool_name=recovered.tool_name,
+                tool_input=recovered.tool_input,
+                principal_kind=principal_kind,
             )
-            if recovered is None:
-                raise InvalidParamsError("permission_resume_invalid: canonical permission request changed.")
+        if current_identity.principal_ref != record.get("principalRef") or current_identity.region != record.get(
+            "region"
+        ):
+            raise InvalidParamsError("permission_resume_invalid: cloud execution identity changed.")
+
+        if not audit_already_final:
             try:
                 if record.get("permissionClass") == "pipeline":
                     pipeline_executor = make_pipeline_executor()
@@ -2042,13 +2107,19 @@ class IacCodeA2AExecutor(AgentExecutor):
                 raise InvalidParamsError(f"permission_resume_invalid: {exc}") from exc
 
             permission_audit = getattr(audit_event.permission_result, "audit", None)
-            with a2a_request_context(aliyun_credential=aliyun_credential):
-                principal_ref, region = permission_execution_identity(
+            with self._permission_reply_request_context(
+                metadata,
+                session_id=context_record.session_id,
+            ).install():
+                rebuilt_identity = PermissionExecutionIdentity.resolve(
                     tool_name=audit_event.tool_name,
                     tool_input=audit_event.tool_input,
                     permission_audit=permission_audit,
+                    principal_kind=principal_kind,
                 )
-            if principal_ref != record.get("principalRef") or region != record.get("region"):
+            if rebuilt_identity.principal_ref != record.get("principalRef") or rebuilt_identity.region != record.get(
+                "region"
+            ):
                 raise InvalidParamsError("permission_resume_invalid: cloud execution identity changed.")
 
         record = store.reconcile_deadline(
@@ -2442,6 +2513,21 @@ class IacCodeA2AExecutor(AgentExecutor):
         if isinstance(raw_user_id, str) and raw_user_id.strip():
             return raw_user_id.strip()
         return None
+
+    def _permission_reply_request_context(
+        self,
+        metadata: Any | None,
+        *,
+        telemetry_channel: str | None = None,
+        session_id: str | None = None,
+    ) -> PermissionReplyExecutionContext:
+        return PermissionReplyExecutionContext(
+            session_id=session_id,
+            user_id=self._resolve_user_id(metadata),
+            aliyun_credential=self._resolve_aliyun_credential(metadata),
+            preferred_language=self._resolve_preferred_language(metadata),
+            telemetry_channel=telemetry_channel,
+        )
 
     def _resolve_telemetry_channel(self, metadata: Any | None) -> str | None:
         if metadata is not None and hasattr(metadata, "DESCRIPTOR"):

@@ -226,6 +226,7 @@ class PermissionRequestEvent:
     )
     permission_wait_coordinates: dict[str, Any] | None = field(default=None, repr=False, compare=False)
     permission_decision_audited: bool = field(default=False, repr=False, compare=False)
+    permission_execution_context: Any | None = field(default=None, repr=False, compare=False)
     type: Literal["permission_request"] = "permission_request"
 
 

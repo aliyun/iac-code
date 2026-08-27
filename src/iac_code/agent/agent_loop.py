@@ -26,7 +26,11 @@ from iac_code.agent.message import (
 )
 from iac_code.i18n import _
 from iac_code.services.context_manager import ContextManager
-from iac_code.services.permission_wait import canonical_digest, permission_execution_identity
+from iac_code.services.permission_wait import (
+    PermissionExecutionIdentity,
+    canonical_digest,
+    permission_execution_identity,
+)
 from iac_code.services.permissions.audit import (
     PermissionAuditRecord,
     build_input_summary,
@@ -1189,6 +1193,7 @@ class AgentLoop:
 
         allowed_requests: list[ToolCallRequest] = []
         denied_by_id: dict[str, ToolResult] = {}
+        permission_execution_context: Any | None = None
         continuation_decisions = [dict(item) for item in recorded_decisions if isinstance(item, dict)]
         if len(continuation_decisions) != len(requests):
             raise ValueError("permission_resume_invalid: tool decisions changed")
@@ -1201,10 +1206,14 @@ class AgentLoop:
             if request_index == current_index:
                 if permission is None:
                     raise ValueError("permission_resume_invalid: current tool is unavailable")
+                principal_kind = checkpoint.get("principalKind")
+                if principal_kind is None and checkpoint.get("principalRef") is not None:
+                    principal_kind = "credential"
                 principal_ref, region = permission_execution_identity(
                     tool_name=request.name,
                     tool_input=request.input,
                     permission_audit=getattr(permission, "audit", None),
+                    principal_kind=principal_kind,
                 )
                 if principal_ref != checkpoint.get("principalRef") or region != checkpoint.get("region"):
                     raise ValueError("permission_resume_invalid: cloud execution identity changed")
@@ -1339,6 +1348,8 @@ class AgentLoop:
                         source = "audit_failure"
                         recorded["deniedResult"] = _("Permission denied.")
                     if state == "allow":
+                        if permission_event.permission_execution_context is not None:
+                            permission_execution_context = permission_event.permission_execution_context
                         principal_ref, region = permission_execution_identity(
                             tool_name=request.name,
                             tool_input=request.input,
@@ -1395,7 +1406,11 @@ class AgentLoop:
 
         executed_by_id: dict[str, ToolResult] = {}
         if allowed_requests:
-            results = await self._tool_executor.execute_batch(allowed_requests, context)
+            if permission_execution_context is None:
+                results = await self._tool_executor.execute_batch(allowed_requests, context)
+            else:
+                with permission_execution_context.install():
+                    results = await self._tool_executor.execute_batch(allowed_requests, context)
             for request, result in zip(allowed_requests, results):
                 executed_by_id[request.id] = result
                 processed = self._result_storage.process(request.id, result.content)
@@ -1528,12 +1543,16 @@ class AgentLoop:
             "settings": perm_ctx.audit_settings if perm_ctx is not None else None,
             "metadata": permission.audit,
         }
-        principal_ref, region = permission_execution_identity(
+        identity = PermissionExecutionIdentity.resolve(
             tool_name=request.name,
             tool_input=request.input,
             permission_audit=permission.audit,
         )
-        audit_context.update(principal_ref=principal_ref, region=region)
+        audit_context.update(
+            principal_ref=identity.principal_ref,
+            principal_kind=identity.principal_kind,
+            region=identity.region,
+        )
         if self._has_session_hierarchy:
             audit_context["root_session_id"] = self._root_session_id
             audit_context["transcript_id"] = self._transcript_id
@@ -1870,6 +1889,7 @@ class AgentLoop:
 
                 allowed_requests: list[ToolCallRequest] = []
                 denied_results: list[tuple[ToolCallRequest, ToolResult]] = []
+                permission_execution_context: Any | None = None
                 assistant_message_digest = canonical_digest(
                     [block.model_dump(mode="json") for block in assistant_blocks]
                 )
@@ -1953,12 +1973,17 @@ class AgentLoop:
                         "settings": perm_ctx.audit_settings if perm_ctx is not None else None,
                         "metadata": permission.audit,
                     }
-                    principal_ref, region = permission_execution_identity(
+                    identity = PermissionExecutionIdentity.resolve(
                         tool_name=request.name,
                         tool_input=request.input,
                         permission_audit=permission.audit,
                     )
-                    audit_context.update(principal_ref=principal_ref, region=region)
+                    principal_ref, region = identity.as_tuple()
+                    audit_context.update(
+                        principal_ref=principal_ref,
+                        principal_kind=identity.principal_kind,
+                        region=region,
+                    )
                     if self._has_session_hierarchy:
                         audit_context["root_session_id"] = self._root_session_id
                         audit_context["transcript_id"] = self._transcript_id
@@ -2062,6 +2087,8 @@ class AgentLoop:
                     if approved and not additional_audit_ok:
                         approved = False
                     if approved:
+                        if permission_event.permission_execution_context is not None:
+                            permission_execution_context = permission_event.permission_execution_context
                         allowed_requests.append(request)
                         continuation_decisions[request_index].update(
                             state="allow",
@@ -2122,7 +2149,11 @@ class AgentLoop:
                 requests = allowed_requests
 
                 # Start tool execution
-                exec_task = asyncio.create_task(self._tool_executor.execute_batch(requests, context))
+                if permission_execution_context is None:
+                    exec_task = asyncio.create_task(self._tool_executor.execute_batch(requests, context))
+                else:
+                    with permission_execution_context.install():
+                        exec_task = asyncio.create_task(self._tool_executor.execute_batch(requests, context))
 
                 # Poll event queues while tools execute
                 async def poll_event_queues():

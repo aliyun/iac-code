@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import hashlib
 import json
 import logging
 import math
 import re
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -22,6 +24,7 @@ from iac_code.utils.file_security import ensure_private_file
 from iac_code.utils.state_io import atomic_write_json, cross_process_file_lock
 
 PermissionClass = Literal["normal", "pipeline"]
+PermissionPrincipalKind = Literal["a2a_user", "credential"]
 PermissionPhase = Literal[
     "WAITING",
     "TIMEOUT_GRACE",
@@ -137,6 +140,107 @@ class RecoveredPermissionAuditBoundary:
     tool_input: dict[str, Any]
     tool_use_id: str
     audit_context: dict[str, Any]
+
+
+_permission_execution_principal: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "iac_code_permission_execution_principal",
+    default=None,
+)
+
+
+@dataclass(frozen=True)
+class PermissionExecutionIdentityScope:
+    """Install one stable request principal for cloud permission correlation."""
+
+    principal_id: str
+
+    def __post_init__(self) -> None:
+        if not self.principal_id:
+            raise ValueError("permission execution principal must be non-empty")
+
+    @contextmanager
+    def install(self) -> Iterator[None]:
+        token = _permission_execution_principal.set(self.principal_id)
+        try:
+            yield
+        finally:
+            _permission_execution_principal.reset(token)
+
+    @staticmethod
+    def current_principal_id() -> str | None:
+        return _permission_execution_principal.get()
+
+
+@dataclass(frozen=True)
+class PermissionExecutionIdentity:
+    """Stable principal and effective Region bound to one cloud permission."""
+
+    principal_ref: str | None
+    region: str | None
+    principal_kind: PermissionPrincipalKind | None = None
+
+    @classmethod
+    def resolve(
+        cls,
+        *,
+        tool_name: str,
+        tool_input: Mapping[str, Any],
+        permission_audit: object | None = None,
+        principal_kind: PermissionPrincipalKind | None = None,
+    ) -> PermissionExecutionIdentity:
+        operation = getattr(permission_audit, "operation", None)
+        operation = operation if isinstance(operation, Mapping) else {}
+        cloud_operation = (
+            principal_kind is not None
+            or bool(operation.get("product"))
+            or tool_name == "aliyun_api"
+            or tool_name.startswith("ros_")
+        )
+        if not cloud_operation:
+            return cls(None, None)
+
+        from iac_code.services.providers.aliyun import AliyunCredentials
+
+        credential = AliyunCredentials.load()
+        region = tool_input.get("region_id")
+        params = tool_input.get("params")
+        if not isinstance(region, str) or not region:
+            if isinstance(params, Mapping):
+                region = params.get("RegionId")
+        if not isinstance(region, str) or not region:
+            region = operation.get("region")
+        if (not isinstance(region, str) or not region) and credential is not None:
+            region = credential.region_id
+        effective_region = region if isinstance(region, str) and region else None
+
+        a2a_user_id = PermissionExecutionIdentityScope.current_principal_id()
+        effective_principal_kind = principal_kind or ("a2a_user" if a2a_user_id is not None else "credential")
+        if effective_principal_kind == "a2a_user":
+            if a2a_user_id is None:
+                return cls(None, effective_region, effective_principal_kind)
+            principal_ref = "aliyun:" + canonical_digest(
+                {
+                    "principalType": "a2a_user",
+                    "principal": a2a_user_id,
+                }
+            )
+            return cls(principal_ref, effective_region, effective_principal_kind)
+
+        if credential is None:
+            return cls(None, effective_region, effective_principal_kind)
+        anchor = credential.ram_role_arn or credential.ram_role_name or credential.access_key_id
+        if not anchor:
+            return cls(None, effective_region, effective_principal_kind)
+        principal_ref = "aliyun:" + canonical_digest(
+            {
+                "mode": credential.mode,
+                "anchor": anchor,
+            }
+        )
+        return cls(principal_ref, effective_region, effective_principal_kind)
+
+    def as_tuple(self) -> tuple[str | None, str | None]:
+        return self.principal_ref, self.region
 
 
 def _parse_permission_message_ref(value: object) -> tuple[str | None, int]:
@@ -262,42 +366,22 @@ def permission_execution_identity(
     tool_name: str,
     tool_input: Mapping[str, Any],
     permission_audit: object | None = None,
+    principal_kind: PermissionPrincipalKind | None = None,
 ) -> tuple[str | None, str | None]:
     """Return a non-secret Alibaba Cloud principal fingerprint and effective Region.
 
     Local permissions are deliberately not coupled to Alibaba Cloud credentials.
-    For a cloud operation, an unavailable stable credential anchor remains
-    ``None`` so durable recovery can fail closed instead of treating an
-    unknown principal as an approval for the current process identity.
+    A request-scoped A2A user id is the stable cloud principal when available,
+    so rotating STS credentials do not invalidate the same caller's pending
+    permission. Other surfaces retain the credential-anchor fallback.
     """
 
-    operation = getattr(permission_audit, "operation", None)
-    operation = operation if isinstance(operation, Mapping) else {}
-    cloud_operation = bool(operation.get("product")) or tool_name == "aliyun_api" or tool_name.startswith("ros_")
-    if not cloud_operation:
-        return None, None
-
-    from iac_code.services.providers.aliyun import AliyunCredentials
-
-    credential = AliyunCredentials.load()
-    region = tool_input.get("region_id")
-    params = tool_input.get("params")
-    if not isinstance(region, str) or not region:
-        if isinstance(params, Mapping):
-            region = params.get("RegionId")
-    if not isinstance(region, str) or not region:
-        region = operation.get("region")
-    if (not isinstance(region, str) or not region) and credential is not None:
-        region = credential.region_id
-    effective_region = region if isinstance(region, str) and region else None
-
-    if credential is None:
-        return None, effective_region
-    anchor = credential.ram_role_arn or credential.ram_role_name or credential.access_key_id
-    if not anchor:
-        return None, effective_region
-    principal_ref = "aliyun:" + canonical_digest({"mode": credential.mode, "anchor": anchor})
-    return principal_ref, effective_region
+    return PermissionExecutionIdentity.resolve(
+        tool_name=tool_name,
+        tool_input=tool_input,
+        permission_audit=permission_audit,
+        principal_kind=principal_kind,
+    ).as_tuple()
 
 
 def new_boundary_id() -> str:
@@ -741,6 +825,8 @@ class PermissionWaitCheckpointStore:
         if not isinstance(record.get("payloadDigest"), str) or not _SHA256.fullmatch(record["payloadDigest"]):
             raise ValueError("invalid permission payload digest")
         if record.get("phase") in _ACTIVE_PHASES:
+            if record.get("principalKind") not in {None, "a2a_user", "credential"}:
+                raise ValueError("invalid permission checkpoint principal kind")
             permission_class = record.get("permissionClass")
             mode = record.get("mode")
             if permission_class not in {"normal", "pipeline"} or mode != permission_class:
@@ -1224,6 +1310,7 @@ def build_permission_checkpoint(
     continuation_frame: Mapping[str, Any],
     policy: PermissionWaitPolicy,
     principal_ref: str | None = None,
+    principal_kind: PermissionPrincipalKind | None = None,
     region: str | None = None,
     pipeline_coordinates: Mapping[str, Any] | None = None,
     now: datetime | None = None,
@@ -1247,6 +1334,16 @@ def build_permission_checkpoint(
         "contextId": context_id,
         "sessionId": session_id,
         "principalRef": principal_ref,
+        "principalKind": (
+            principal_kind
+            or (
+                "a2a_user"
+                if principal_ref is not None and PermissionExecutionIdentityScope.current_principal_id() is not None
+                else "credential"
+                if principal_ref is not None
+                else None
+            )
+        ),
         "region": region,
         "mode": "normal" if permission_class == "normal" else "pipeline",
         "permissionClass": permission_class,
@@ -1269,6 +1366,8 @@ __all__ = [
     "PermissionWaitCheckpointStore",
     "PermissionWaitCoordinator",
     "PermissionWaitPolicy",
+    "PermissionExecutionIdentity",
+    "PermissionExecutionIdentityScope",
     "RecoveredPermissionAuditBoundary",
     "build_permission_checkpoint",
     "canonical_digest",

@@ -34,7 +34,7 @@ from iac_code.mcp.types import (
     ScopedMCPServerConfig,
 )
 from iac_code.pipeline.engine.user_input import PipelineUserInput
-from iac_code.services.permission_wait import RecoveredPermissionAuditBoundary
+from iac_code.services.permission_wait import PermissionExecutionIdentity, RecoveredPermissionAuditBoundary
 from iac_code.services.session_backup import (
     BACKUP_STATE_FILENAME,
     BackupReason,
@@ -46,6 +46,7 @@ from iac_code.services.session_backup import (
 from iac_code.services.session_backup_staging import StagedSessionBackupService
 from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
 from iac_code.services.session_storage import SessionStorage
+from iac_code.services.telemetry import get_user_id
 from iac_code.skills.frontmatter import SkillFrontmatter
 from iac_code.skills.skill_definition import SkillDefinition
 from iac_code.types.skill_source import SkillSource
@@ -4318,6 +4319,65 @@ async def test_executor_refreshes_cloud_tools_with_aliyun_metadata_for_reused_co
 
 
 @pytest.mark.asyncio
+async def test_executor_installs_permission_reply_identity_before_live_answer(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.services.providers.aliyun import AliyunCredentials
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id="pwi-test",
+        tool_use_id="tool-1",
+        decision="allow_once",
+    )
+    pending = SimpleNamespace(state="pending", boundary_id=None)
+    observed: list[tuple[str, str | None]] = []
+
+    async def pending_for_response(_response):
+        return pending
+
+    async def answer(_response, *, execution_context=None):
+        assert execution_context is not None
+        with execution_context.install():
+            credential = AliyunCredentials.load()
+            observed.append((get_user_id(), credential.access_key_id if credential is not None else None))
+        return True
+
+    async def claim_continuation(_pending):
+        return None
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr("iac_code.a2a.executor.parse_permission_response", lambda _message: response)
+    monkeypatch.setattr(executor._permission_input_registry, "pending_for_response", pending_for_response)
+    monkeypatch.setattr(executor._permission_input_registry, "answer", answer)
+    monkeypatch.setattr(executor._permission_input_registry, "claim_continuation", claim_continuation)
+
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-1",
+            context_id="ctx-1",
+            metadata={
+                "iac_code": {
+                    "user_id": "stable-a2a-user",
+                    "alibaba_cloud_access_key_id": "rotated-sts-ak",
+                    "alibaba_cloud_access_key_secret": "rotated-sts-secret",
+                    "alibaba_cloud_security_token": "rotated-sts-token",
+                    "alibaba_cloud_region_id": "cn-beijing",
+                }
+            },
+        ),
+        FakeEventQueue(),
+    )
+
+    assert observed == [("stable-a2a-user", "rotated-sts-ak")]
+
+
+@pytest.mark.asyncio
 async def test_suspending_permission_answer_waits_for_owner_then_resumes_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -4386,8 +4446,31 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    from iac_code.a2a.runtime_overrides import a2a_request_context
+    from iac_code.services.permission_wait import permission_execution_identity
+    from iac_code.services.providers.aliyun import AliyunCredential, AliyunCredentials
+
+    recovered_access_key_ids: list[str | None] = []
+    reply_credential = AliyunCredential(
+        mode="StsToken",
+        access_key_id="rotated-sts-ak",
+        access_key_secret="rotated-sts-secret",
+        sts_token="rotated-sts-token",
+        region_id="cn-beijing",
+    )
+    with a2a_request_context(
+        user_id="stable-a2a-user",
+        aliyun_credential=reply_credential,
+    ):
+        principal_ref, region = permission_execution_identity(
+            tool_name="aliyun_api",
+            tool_input={"product": "ros", "action": "CreateStack", "region_id": "cn-beijing"},
+        )
+
     class RecoveryLoop:
         async def resume_permission_boundary(self, _checkpoint):
+            credential = AliyunCredentials.load()
+            recovered_access_key_ids.append(credential.access_key_id if credential is not None else None)
             yield MessageStartEvent(message_id="final")
             yield TextDeltaEvent(text="Cleanup completed.")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
@@ -4396,6 +4479,9 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
         "boundaryId": "pwb-boundary1",
         "phase": "SUSPENDED",
         "permissionClass": "normal",
+        "principalRef": principal_ref,
+        "principalKind": "a2a_user",
+        "region": region,
         "decision": {
             "status": "claimed",
             "value": "allow_once",
@@ -4445,7 +4531,20 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
     task_store.mirror_task(task_record)
     runtime = FakeRuntime(agent_loop=RecoveryLoop(), session_id=context_record.session_id)
     monkeypatch.setattr("iac_code.a2a.executor.PermissionWaitCheckpointStore", lambda *_args: CheckpointStore())
+    monkeypatch.setattr(
+        "iac_code.a2a.executor.recover_permission_audit_boundary",
+        lambda *_args, **_kwargs: RecoveredPermissionAuditBoundary(
+            tool_name="aliyun_api",
+            tool_input={"product": "ros", "action": "CreateStack", "region_id": "cn-beijing"},
+            tool_use_id="tool-1",
+            audit_context={"session_id": context_record.session_id, "cwd": str(tmp_path)},
+        ),
+    )
     monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda _options: runtime)
+    monkeypatch.setattr(
+        "iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config",
+        lambda: None,
+    )
 
     executor = IacCodeA2AExecutor(
         task_store=task_store,
@@ -4463,7 +4562,19 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
     queue = FakeEventQueue()
 
     assert await executor._resume_persisted_permission(
-        FakeRequestContext(task_id="task-1", context_id="ctx-1"),
+        FakeRequestContext(
+            task_id="task-1",
+            context_id="ctx-1",
+            metadata={
+                "iac_code": {
+                    "user_id": "stable-a2a-user",
+                    "alibaba_cloud_access_key_id": "rotated-sts-ak",
+                    "alibaba_cloud_access_key_secret": "rotated-sts-secret",
+                    "alibaba_cloud_security_token": "rotated-sts-token",
+                    "alibaba_cloud_region_id": "cn-beijing",
+                }
+            },
+        ),
         queue,
         response=response,
     )
@@ -4482,6 +4593,7 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
     assert checkpoint["phase"] == "RESOLVED"
     assert len(resolved) == 1
     assert backup_service.calls == [(str(tmp_path), context_record.session_id, BackupReason.NORMAL_TURN_END, False)]
+    assert recovered_access_key_ids == ["rotated-sts-ak"]
 
 
 @pytest.mark.asyncio
@@ -4559,7 +4671,7 @@ async def test_restart_audit_rebuild_failure_precedes_permission_claim_and_backu
 
 
 @pytest.mark.asyncio
-async def test_restart_identity_validation_uses_resume_request_cloud_credential(monkeypatch, tmp_path) -> None:
+async def test_restart_identity_validation_uses_resume_request_identity(monkeypatch, tmp_path) -> None:
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
     executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
     task_record = SimpleNamespace(context_id="ctx-1")
@@ -4610,17 +4722,26 @@ async def test_restart_identity_validation_uses_resume_request_cloud_credential(
             permission_result=SimpleNamespace(audit=None),
         )
 
-    seen_access_key_ids: list[str | None] = []
+    seen_request_identities: list[tuple[str, str | None]] = []
 
-    def identity(**_kwargs):
+    def identity(**kwargs):
         from iac_code.services.providers.aliyun import AliyunCredentials
 
         credential = AliyunCredentials.load()
-        seen_access_key_ids.append(credential.access_key_id if credential is not None else None)
-        return "client-principal", "cn-beijing"
+        seen_request_identities.append(
+            (
+                get_user_id(),
+                credential.access_key_id if credential is not None else None,
+            )
+        )
+        return PermissionExecutionIdentity(
+            "client-principal",
+            "cn-beijing",
+            kwargs.get("principal_kind"),
+        )
 
     monkeypatch.setattr(executor, "_rebuild_normal_permission_audit_event", rebuild)
-    monkeypatch.setattr("iac_code.a2a.executor.permission_execution_identity", identity)
+    monkeypatch.setattr(PermissionExecutionIdentity, "resolve", staticmethod(identity))
     monkeypatch.setattr(
         "iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config",
         lambda: None,
@@ -4638,6 +4759,7 @@ async def test_restart_identity_validation_uses_resume_request_cloud_credential(
         context_id="ctx-1",
         metadata={
             "iac_code": {
+                "user_id": "stable-a2a-user",
                 "alibaba_cloud_access_key_id": "client-id",
                 "alibaba_cloud_access_key_secret": "client-secret",
                 "alibaba_cloud_region_id": "cn-beijing",
@@ -4648,4 +4770,118 @@ async def test_restart_identity_validation_uses_resume_request_cloud_credential(
     with pytest.raises(RuntimeError, match="identity validation completed"):
         await executor._resume_persisted_permission(context, FakeEventQueue(), response=response)
 
-    assert seen_access_key_ids == ["client-id"]
+    assert seen_request_identities == [
+        ("stable-a2a-user", "client-id"),
+        ("stable-a2a-user", "client-id"),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reply_user_id", "reply_region"),
+    [
+        ("different-a2a-user", "cn-hangzhou"),
+        ("stable-a2a-user", "cn-shanghai"),
+    ],
+)
+async def test_claimed_restart_revalidates_principal_and_region_before_runtime(
+    monkeypatch,
+    tmp_path,
+    reply_user_id,
+    reply_region,
+) -> None:
+    from iac_code.a2a.runtime_overrides import a2a_request_context
+    from iac_code.services.permission_wait import permission_execution_identity
+    from iac_code.services.providers.aliyun import AliyunCredential
+
+    original_credential = AliyunCredential(
+        mode="StsToken",
+        access_key_id="original-sts-ak",
+        access_key_secret="original-sts-secret",
+        sts_token="original-sts-token",
+        region_id="cn-hangzhou",
+    )
+    with a2a_request_context(
+        user_id="stable-a2a-user",
+        aliyun_credential=original_credential,
+    ):
+        principal_ref, region = permission_execution_identity(
+            tool_name="aliyun_api",
+            tool_input={"product": "ros", "action": "CreateStack"},
+        )
+
+    checkpoint = {
+        "boundaryId": "pwb-boundary1",
+        "phase": "SUSPENDED",
+        "permissionClass": "normal",
+        "decision": {
+            "status": "claimed",
+            "value": "allow_once",
+            "claimId": "claim-1",
+            "auditStatus": "recorded",
+            "backupStatus": "committed",
+        },
+        "principalRef": principal_ref,
+        "principalKind": "a2a_user",
+        "region": region,
+    }
+
+    class CheckpointStore:
+        def find(self, **_kwargs):
+            return checkpoint
+
+        def reconcile_deadline(self, *_args, **_kwargs):
+            pytest.fail("mismatched identity must be rejected before recovery")
+
+    task_store = A2ATaskStore(metrics=NoOpA2AMetrics())
+
+    async def get_task_record(_task_id):
+        return SimpleNamespace(context_id="ctx-1")
+
+    async def get_context_record(_context_id):
+        return SimpleNamespace(cwd=str(tmp_path), session_id="session-1")
+
+    monkeypatch.setattr(task_store, "get_task_record", get_task_record)
+    monkeypatch.setattr(task_store, "get_context_record", get_context_record)
+    monkeypatch.setattr(
+        "iac_code.a2a.executor.PermissionWaitCheckpointStore",
+        lambda *_args, **_kwargs: CheckpointStore(),
+    )
+    monkeypatch.setattr(
+        "iac_code.a2a.executor.recover_permission_audit_boundary",
+        lambda *_args, **_kwargs: RecoveredPermissionAuditBoundary(
+            tool_name="aliyun_api",
+            tool_input={"product": "ros", "action": "CreateStack"},
+            tool_use_id="tool-1",
+            audit_context={"session_id": "session-1", "cwd": str(tmp_path)},
+        ),
+    )
+    monkeypatch.setattr(
+        "iac_code.a2a.executor.create_agent_runtime",
+        lambda *_args, **_kwargs: pytest.fail("mismatched identity must not create a runtime"),
+    )
+    executor = IacCodeA2AExecutor(task_store=task_store, model="qwen3.6-plus")
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id="input-1",
+        tool_use_id="tool-1",
+        decision="allow_once",
+    )
+    context = FakeRequestContext(
+        task_id="task-1",
+        context_id="ctx-1",
+        metadata={
+            "iac_code": {
+                "user_id": reply_user_id,
+                "alibaba_cloud_access_key_id": "reply-sts-ak",
+                "alibaba_cloud_access_key_secret": "reply-sts-secret",
+                "alibaba_cloud_security_token": "reply-sts-token",
+                "alibaba_cloud_region_id": reply_region,
+            }
+        },
+    )
+
+    with pytest.raises(InvalidParamsError, match="cloud execution identity changed"):
+        await executor._resume_persisted_permission(context, FakeEventQueue(), response=response)

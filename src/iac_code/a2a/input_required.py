@@ -12,15 +12,15 @@ from a2a.types import Message, Part, Role
 from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict
 
-from iac_code.a2a.runtime_overrides import get_a2a_preferred_language
+from iac_code.a2a.runtime_overrides import PermissionReplyExecutionContext, get_a2a_preferred_language
 from iac_code.i18n import translate_message
 from iac_code.services.permission_wait import (
+    PermissionExecutionIdentity,
     PermissionWaitCheckpointStore,
     PermissionWaitCoordinator,
     PermissionWaitPolicy,
     build_permission_checkpoint,
     canonicalize_permission_continuation_frame,
-    permission_execution_identity,
 )
 from iac_code.services.permissions.audit import (
     build_prompt_tool_input,
@@ -545,6 +545,7 @@ class PermissionInputRegistry:
         except ValueError as exc:
             raise RuntimeError(f"permission_resume_invalid: {exc}") from exc
         principal_ref = audit_context.get("principal_ref")
+        principal_kind = audit_context.get("principal_kind")
         region = audit_context.get("region")
         record = build_permission_checkpoint(
             session_id=session_id,
@@ -558,6 +559,7 @@ class PermissionInputRegistry:
             continuation_frame=frame,
             policy=coordinator.policy,
             principal_ref=principal_ref if isinstance(principal_ref, str) else None,
+            principal_kind=principal_kind if principal_kind in {"a2a_user", "credential"} else None,
             region=region if isinstance(region, str) else None,
             pipeline_coordinates=pipeline_coordinates,
         )
@@ -714,14 +716,21 @@ class PermissionInputRegistry:
                 request.resolution_owner_managed = True
             return pending
 
-    async def answer(self, response: PermissionResponse) -> bool:
+    async def answer(
+        self,
+        response: PermissionResponse,
+        *,
+        execution_context: PermissionReplyExecutionContext | None = None,
+    ) -> bool:
         pending = await self._lookup(response)
         if pending.resolution_owner is not None:
+            pending.request.permission_execution_context = execution_context
             return await pending.resolution_owner.resolve_permission(pending, response)
 
         coordinator = self._permission_wait_coordinator
         if coordinator is not None and pending.boundary_id is not None:
             self._validate_live_execution_identity(pending)
+            pending.request.permission_execution_context = execution_context
 
             def audit_new_claim(value: str) -> bool:
                 return emit_permission_boundary_audit(
@@ -751,6 +760,7 @@ class PermissionInputRegistry:
 
         async with self._condition:
             self._validate_response(pending, response)
+            pending.request.permission_execution_context = execution_context
             future = pending.request.response_future
             if future is None or future.done():
                 raise InvalidParamsError("permission_resume_invalid: permission wait point is unavailable.")
@@ -778,12 +788,16 @@ class PermissionInputRegistry:
         if record is None:
             raise InvalidParamsError("permission_resume_invalid: permission checkpoint is unavailable.")
         permission_audit = getattr(pending.request.permission_result, "audit", None)
-        principal_ref, region = permission_execution_identity(
+        principal_kind = record.get("principalKind")
+        if principal_kind is None and record.get("principalRef") is not None:
+            principal_kind = "credential"
+        identity = PermissionExecutionIdentity.resolve(
             tool_name=pending.request.tool_name,
             tool_input=pending.request.tool_input,
             permission_audit=permission_audit,
+            principal_kind=principal_kind,
         )
-        if principal_ref != record.get("principalRef") or region != record.get("region"):
+        if identity.principal_ref != record.get("principalRef") or identity.region != record.get("region"):
             raise InvalidParamsError("permission_resume_invalid: cloud execution identity changed.")
 
     async def _backup_claim_before_delivery(self, pending: PendingPermission) -> None:

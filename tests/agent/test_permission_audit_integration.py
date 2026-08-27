@@ -253,6 +253,7 @@ async def test_agent_loop_prompt_event_carries_internal_audit_context(tmp_path):
         "settings": settings,
         "metadata": metadata,
         "principal_ref": None,
+        "principal_kind": "credential",
         "region": None,
     }
 
@@ -433,6 +434,7 @@ async def test_agent_loop_prompt_event_carries_transcript_audit_context(tmp_path
         "settings": settings,
         "metadata": metadata,
         "principal_ref": None,
+        "principal_kind": "credential",
         "region": None,
         "audit_log_path": str(audit_log_path),
     }

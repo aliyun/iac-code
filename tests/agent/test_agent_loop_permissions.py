@@ -5,7 +5,12 @@ import pytest
 from iac_code.agent.agent_loop import AgentLoop
 from iac_code.agent.message import Message, ToolUseBlock
 from iac_code.providers.base import ToolDefinition
-from iac_code.services.permission_wait import PermissionWaitPolicy, build_permission_checkpoint, canonical_digest
+from iac_code.services.permission_wait import (
+    PermissionExecutionIdentity,
+    PermissionWaitPolicy,
+    build_permission_checkpoint,
+    canonical_digest,
+)
 from iac_code.services.session_storage import SessionStorage
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
 from iac_code.types.permissions import PermissionAuditMetadata, PermissionResult
@@ -94,6 +99,64 @@ async def test_agent_loop_emits_permission_request_before_write_tool() -> None:
         for event in events
     )
     assert tool.executed is False
+
+
+@pytest.mark.asyncio
+async def test_live_permission_executes_tool_with_reply_credentials() -> None:
+    from iac_code.a2a.runtime_overrides import a2a_request_context
+    from iac_code.services.providers.aliyun import AliyunCredential, AliyunCredentials
+
+    old_credential = AliyunCredential(
+        mode="StsToken",
+        access_key_id="old-sts-ak",
+        access_key_secret="old-sts-secret",
+        sts_token="old-sts-token",
+    )
+    new_credential = AliyunCredential(
+        mode="StsToken",
+        access_key_id="new-sts-ak",
+        access_key_secret="new-sts-secret",
+        sts_token="new-sts-token",
+    )
+
+    class CredentialRecordingTool(WriteTool):
+        def __init__(self) -> None:
+            super().__init__()
+            self.access_key_ids: list[str | None] = []
+
+        async def execute(self, *, tool_input: dict, context: ToolContext) -> ToolResult:
+            credential = AliyunCredentials.load()
+            self.access_key_ids.append(credential.access_key_id if credential is not None else None)
+            return await super().execute(tool_input=tool_input, context=context)
+
+    class ReplyExecutionContext:
+        def install(self):
+            return a2a_request_context(
+                user_id="stable-a2a-user",
+                aliyun_credential=new_credential,
+            )
+
+    tool = CredentialRecordingTool()
+    registry = ToolRegistry()
+    registry.register(tool)
+    loop = AgentLoop(
+        provider_manager=FakeProviderManager(),
+        system_prompt="system",
+        tool_registry=registry,
+        max_turns=1,
+    )
+
+    with a2a_request_context(
+        user_id="stable-a2a-user",
+        aliyun_credential=old_credential,
+    ):
+        async for event in loop.run_streaming("write"):
+            if isinstance(event, PermissionRequestEvent):
+                event.permission_execution_context = ReplyExecutionContext()
+                assert event.response_future is not None
+                event.response_future.set_result(True)
+
+    assert tool.access_key_ids == ["new-sts-ak"]
 
 
 @pytest.mark.asyncio
@@ -678,10 +741,14 @@ async def test_live_successor_frame_records_each_user_approval_identity(monkeypa
         max_turns=1,
     )
     monkeypatch.setattr(
-        "iac_code.agent.agent_loop.permission_execution_identity",
-        lambda **kwargs: (
-            "principal-{}".format(kwargs["tool_input"]["value"]),
-            "region-{}".format(kwargs["tool_input"]["value"]),
+        PermissionExecutionIdentity,
+        "resolve",
+        classmethod(
+            lambda cls, **kwargs: cls(
+                "principal-{}".format(kwargs["tool_input"]["value"]),
+                "region-{}".format(kwargs["tool_input"]["value"]),
+                "credential",
+            )
         ),
     )
     permission_events: list[PermissionRequestEvent] = []

@@ -33,6 +33,7 @@ from iac_code.services.permission_wait import (
     build_permission_checkpoint,
 )
 from iac_code.services.session_storage import SessionStorage
+from iac_code.services.telemetry import get_user_id
 from iac_code.types.permissions import PermissionAuditMetadata, PermissionResult
 from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent
 
@@ -212,9 +213,11 @@ async def test_normal_permission_publishes_input_required_and_resumes_live_futur
     dumped = MessageToDict(queue.events[0], preserving_proto_field_name=False)
     parsed = parse_permission_response(_permission_message(input_id=dumped["metadata"]["iac_code"]["input"]["inputId"]))
     assert parsed is not None
-    assert await registry.answer(parsed) is True
+    execution_context = object()
+    assert await registry.answer(parsed, execution_context=execution_context) is True
     await publishing
     assert future.result() is True
+    assert request.permission_execution_context is execution_context
     assert queue.events[-1].status.state == TaskState.TASK_STATE_WORKING
 
 
@@ -774,6 +777,75 @@ async def test_sub_pipeline_permissions_stay_working_and_resolve_independently(m
     assert task is not None
     task_metadata = MessageToDict(task.metadata, preserving_proto_field_name=False)
     assert "pendingPermissions" not in task_metadata.get("iac_code", {})
+
+
+@pytest.mark.asyncio
+async def test_sideband_permission_installs_reply_identity_before_answer(monkeypatch, tmp_path) -> None:
+    from iac_code.services.providers.aliyun import AliyunCredentials
+    from iac_code.services.telemetry.attributes import AttributeBuilder
+    from iac_code.services.telemetry.names import IacCodeAttr
+
+    registry = PermissionInputRegistry()
+    task_store = A2ATaskStore()
+    executor = IacCodeA2AExecutor(
+        task_store=task_store,
+        model="qwen3.6-plus",
+        permission_input_registry=registry,
+    )
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id="permission-opaque",
+        tool_use_id="tool-1",
+        decision="allow_once",
+    )
+    observed: list[tuple[str, str | None, str]] = []
+    resolved_channels: list[tuple[str, str | None]] = []
+
+    async def is_sideband_response(_response):
+        return True
+
+    async def answer(_response, *, execution_context=None):
+        assert execution_context is not None
+        with execution_context.install():
+            credential = AliyunCredentials.load()
+            channel = AttributeBuilder(object(), service_name="test").build_signal_attributes()[IacCodeAttr.CHANNEL]
+            observed.append(
+                (
+                    get_user_id(),
+                    credential.access_key_id if credential is not None else None,
+                    channel,
+                )
+            )
+        return True
+
+    async def resolve_context_telemetry_channel(context_id, requested_channel):
+        resolved_channels.append((context_id, requested_channel))
+        return requested_channel
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr(registry, "is_sideband_response", is_sideband_response)
+    monkeypatch.setattr(registry, "answer", answer)
+    monkeypatch.setattr(task_store, "resolve_context_telemetry_channel", resolve_context_telemetry_channel)
+
+    ack = await executor.resolve_sideband_permission(
+        response,
+        metadata={
+            "iac_code": {
+                "user_id": "stable-a2a-user",
+                "channel": "play_account",
+                "alibaba_cloud_access_key_id": "rotated-sts-ak",
+                "alibaba_cloud_access_key_secret": "rotated-sts-secret",
+                "alibaba_cloud_security_token": "rotated-sts-token",
+                "alibaba_cloud_region_id": "cn-beijing",
+            }
+        },
+    )
+
+    assert ack is not None
+    assert resolved_channels == [("ctx-1", "play_account")]
+    assert observed == [("stable-a2a-user", "rotated-sts-ak", "play_account")]
 
 
 @pytest.mark.asyncio

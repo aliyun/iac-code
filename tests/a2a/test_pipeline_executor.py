@@ -10953,6 +10953,9 @@ async def test_pipeline_permission_checkpoint_uses_dedicated_resume_stream(
     """A persisted tool permission must not be routed as ordinary Pipeline input."""
 
     from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+    from iac_code.services.providers.aliyun import AliyunCredential, AliyunCredentials
+
+    recovered_access_key_ids: list[str | None] = []
 
     class PermissionResumePipeline(FakePipeline):
         def __init__(self, *, session_dir: Path) -> None:
@@ -10961,6 +10964,8 @@ async def test_pipeline_permission_checkpoint_uses_dedicated_resume_stream(
             self.permission_checkpoints: list[dict] = []
 
         async def resume_permission_boundary(self, checkpoint):
+            credential = AliyunCredentials.load()
+            recovered_access_key_ids.append(credential.access_key_id if credential is not None else None)
             self.permission_checkpoints.append(checkpoint)
             yield TextDeltaEvent(text="permission resumed")
 
@@ -10980,6 +10985,14 @@ async def test_pipeline_permission_checkpoint_uses_dedicated_resume_stream(
         permission_resolver=None,
         auto_approve_permissions=False,
         thinking_exposure_types=None,
+        user_id="stable-a2a-user",
+        aliyun_credential=AliyunCredential(
+            mode="StsToken",
+            access_key_id="rotated-sts-ak",
+            access_key_secret="rotated-sts-secret",
+            sts_token="rotated-sts-token",
+            region_id="cn-beijing",
+        ),
     )
     checkpoint = {
         "boundaryId": "pwb_boundary1",
@@ -11002,6 +11015,7 @@ async def test_pipeline_permission_checkpoint_uses_dedicated_resume_stream(
     assert pipeline.run_prompts == []
     assert pipeline.resume_prompts == []
     assert "permission resumed" in task.output_text
+    assert recovered_access_key_ids == ["rotated-sts-ak"]
 
 
 @pytest.mark.asyncio

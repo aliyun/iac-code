@@ -601,6 +601,7 @@ async def test_text_gateway_sideband_permission_response_hydrates_task_and_retur
         context_id="ctx-1",
         role=Role.ROLE_USER,
         parts=[Part(text="{} {}".format(PERMISSION_QUERY_PREFIX, json.dumps(response)))],
+        metadata={"iac_code": {"user_id": "stable-a2a-user"}},
     )
     ack_data = Value()
     ack_data.struct_value.update(
@@ -621,8 +622,11 @@ async def test_text_gateway_sideband_permission_response_hydrates_task_and_retur
         parts=[Part(data=ack_data, media_type="application/json")],
     )
 
+    received_metadata = []
+
     class Executor:
-        async def resolve_sideband_permission(self, _response):
+        async def resolve_sideband_permission(self, _response, *, metadata=None):
+            received_metadata.append(metadata)
             return ack
 
     async def fail_sdk_stream(*_args, **_kwargs):
@@ -643,6 +647,7 @@ async def test_text_gateway_sideband_permission_response_hydrates_task_and_retur
     assert await handler.on_message_send(params, call_context) is ack
     assert message.task_id == "task-1"
     assert await _collect_async(handler.on_message_send_stream(params, call_context)) == [ack]
+    assert received_metadata == [message.metadata, message.metadata]
 
 
 @pytest.mark.asyncio

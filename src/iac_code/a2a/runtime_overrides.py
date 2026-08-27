@@ -3,9 +3,11 @@ from __future__ import annotations
 import contextlib
 import contextvars
 from collections.abc import Iterator
+from dataclasses import dataclass, replace
 from typing import Any
 
 from iac_code.providers.request_policy import ProviderRequestPolicy
+from iac_code.services.permission_wait import PermissionExecutionIdentityScope
 from iac_code.services.providers.aliyun import AliyunCredential, use_aliyun_credential
 from iac_code.services.telemetry import use_session_id, use_telemetry_channel, use_user_id
 
@@ -19,6 +21,29 @@ _preferred_language: contextvars.ContextVar[str | None] = contextvars.ContextVar
 def get_a2a_preferred_language() -> str | None:
     """Return the request-local language requested by the A2A caller."""
     return _preferred_language.get()
+
+
+@dataclass(frozen=True)
+class PermissionReplyExecutionContext:
+    """In-memory execution overrides carried from a permission reply."""
+
+    user_id: str | None
+    aliyun_credential: AliyunCredential | None
+    preferred_language: str | None
+    telemetry_channel: str | None = None
+    session_id: str | None = None
+
+    def with_session_id(self, session_id: str | None) -> PermissionReplyExecutionContext:
+        return replace(self, session_id=session_id)
+
+    def install(self) -> contextlib.AbstractContextManager[None]:
+        return a2a_request_context(
+            session_id=self.session_id,
+            user_id=self.user_id,
+            aliyun_credential=self.aliyun_credential,
+            preferred_language=self.preferred_language,
+            telemetry_channel=self.telemetry_channel,
+        )
 
 
 @contextlib.contextmanager
@@ -39,6 +64,7 @@ def a2a_request_context(
         if session_id:
             stack.enter_context(use_session_id(session_id))
         if user_id:
+            stack.enter_context(PermissionExecutionIdentityScope(user_id).install())
             stack.enter_context(use_user_id(user_id))
         if aliyun_credential is not None:
             stack.enter_context(use_aliyun_credential(aliyun_credential))
