@@ -27,6 +27,10 @@
     "message": "Protocolo A2A",
     "description": "The label for category 'A2A Protocol' in sidebar 'docsSidebar'"
   },
+  "sidebar.docsSidebar.category.AG-UI Protocol": {
+    "message": "Protocolo AG-UI",
+    "description": "The label for category 'AG-UI Protocol' in sidebar 'docsSidebar'"
+  },
   "sidebar.docsSidebar.category.Automation": {
     "message": "Automacao",
     "description": "The label for category 'Automation' in sidebar 'docsSidebar'"

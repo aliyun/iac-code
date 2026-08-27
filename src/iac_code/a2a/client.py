@@ -154,22 +154,29 @@ class A2AClient:
         *,
         cwd: str,
         context_id: str | None = None,
+        task_id: str | None = None,
+        message_id: str | None = None,
         model: str | None = None,
         iac_code_api_key: str | None = None,
         thinking_enabled: bool | None = None,
         thinking_effort: str | None = None,
         thinking_budget: int | None = None,
+        iac_code_metadata: Mapping[str, Any] | None = None,
     ) -> A2AClientResponse:
         payload = self._message_payload(
             method="SendMessage",
             prompt=prompt,
+            parts=None,
             cwd=cwd,
             context_id=context_id,
+            task_id=task_id,
+            message_id=message_id,
             model=model,
             iac_code_api_key=iac_code_api_key,
             thinking_enabled=thinking_enabled,
             thinking_effort=thinking_effort,
             thinking_budget=thinking_budget,
+            additional_iac_code_metadata=iac_code_metadata,
         )
         transport = self._make_transport_client(url)
         response = await transport.send(payload)
@@ -182,22 +189,101 @@ class A2AClient:
         *,
         cwd: str,
         context_id: str | None = None,
+        task_id: str | None = None,
+        message_id: str | None = None,
         model: str | None = None,
         iac_code_api_key: str | None = None,
         thinking_enabled: bool | None = None,
         thinking_effort: str | None = None,
         thinking_budget: int | None = None,
+        iac_code_metadata: Mapping[str, Any] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         payload = self._message_payload(
             method="SendStreamingMessage",
             prompt=prompt,
+            parts=None,
             cwd=cwd,
             context_id=context_id,
+            task_id=task_id,
+            message_id=message_id,
             model=model,
             iac_code_api_key=iac_code_api_key,
             thinking_enabled=thinking_enabled,
             thinking_effort=thinking_effort,
             thinking_budget=thinking_budget,
+            additional_iac_code_metadata=iac_code_metadata,
+        )
+        transport = self._make_transport_client(url)
+        async for event in transport.stream(payload):
+            yield event
+
+    async def send_message_parts(
+        self,
+        url: str,
+        parts: Sequence[Mapping[str, Any]],
+        *,
+        cwd: str,
+        context_id: str,
+        task_id: str | None = None,
+        message_id: str | None = None,
+        model: str | None = None,
+        iac_code_api_key: str | None = None,
+        thinking_enabled: bool | None = None,
+        thinking_effort: str | None = None,
+        thinking_budget: int | None = None,
+        iac_code_metadata: Mapping[str, Any] | None = None,
+    ) -> A2AClientResponse:
+        """Send pre-validated A2A parts while preserving iac-code request metadata."""
+        payload = self._message_payload(
+            method="SendMessage",
+            prompt=None,
+            parts=parts,
+            cwd=cwd,
+            context_id=context_id,
+            task_id=task_id,
+            message_id=message_id,
+            model=model,
+            iac_code_api_key=iac_code_api_key,
+            thinking_enabled=thinking_enabled,
+            thinking_effort=thinking_effort,
+            thinking_budget=thinking_budget,
+            additional_iac_code_metadata=iac_code_metadata,
+        )
+        transport = self._make_transport_client(url)
+        response = await transport.send(payload)
+        return A2AClientResponse(payload=response)
+
+    async def stream_message_parts(
+        self,
+        url: str,
+        parts: Sequence[Mapping[str, Any]],
+        *,
+        cwd: str,
+        context_id: str,
+        task_id: str | None = None,
+        message_id: str | None = None,
+        model: str | None = None,
+        iac_code_api_key: str | None = None,
+        thinking_enabled: bool | None = None,
+        thinking_effort: str | None = None,
+        thinking_budget: int | None = None,
+        iac_code_metadata: Mapping[str, Any] | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Stream a message whose parts were validated by an embedding protocol adapter."""
+        payload = self._message_payload(
+            method="SendStreamingMessage",
+            prompt=None,
+            parts=parts,
+            cwd=cwd,
+            context_id=context_id,
+            task_id=task_id,
+            message_id=message_id,
+            model=model,
+            iac_code_api_key=iac_code_api_key,
+            thinking_enabled=thinking_enabled,
+            thinking_effort=thinking_effort,
+            thinking_budget=thinking_budget,
+            additional_iac_code_metadata=iac_code_metadata,
         )
         transport = self._make_transport_client(url)
         async for event in transport.stream(payload):
@@ -208,6 +294,43 @@ class A2AClient:
         if history_length is not None:
             params["historyLength"] = history_length
         return await self._send_jsonrpc(url, method="GetTask", params=params)
+
+    async def get_pipeline_state(
+        self,
+        url: str,
+        *,
+        task_id: str,
+        after_sequence: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Read iac-code's existing A2A pipeline recovery extension over HTTP."""
+
+        endpoint = url.rstrip("/") + "/iac-code/pipeline/state"
+        params = _without_none({"taskId": task_id, "afterSequence": after_sequence})
+        response = await self._http_client.get(endpoint, params=params, headers=self._jsonrpc_headers())
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict):
+            raise ValueError("A2A pipeline state response must be a JSON object")
+        return data
+
+    async def ensure_session_restored(self, url: str, *, cwd: str, session_id: str) -> bool:
+        """Ensure the A2A session payload is locally available before a cold resume."""
+
+        endpoint = url.rstrip("/") + "/iac-code/session/ensure-restored"
+        response = await self._http_client.post(
+            endpoint,
+            json={"cwd": cwd, "sessionId": session_id},
+            headers=self._jsonrpc_headers(),
+        )
+        if response.status_code == 404:
+            return False
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict) or data.get("status") not in {"current", "restored"}:
+            raise ValueError("A2A session restore response must report a ready session")
+        return True
 
     async def list_tasks(
         self,
@@ -397,16 +520,23 @@ class A2AClient:
         self,
         *,
         method: str,
-        prompt: str,
+        prompt: str | None,
+        parts: Sequence[Mapping[str, Any]] | None,
         cwd: str,
         context_id: str | None,
+        task_id: str | None,
+        message_id: str | None,
         model: str | None,
         iac_code_api_key: str | None,
         thinking_enabled: bool | None,
         thinking_effort: str | None,
         thinking_budget: int | None,
+        additional_iac_code_metadata: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
-        iac_code_metadata: dict[str, Any] = {"cwd": cwd}
+        if (prompt is None) == (parts is None):
+            raise ValueError("Exactly one of prompt or parts is required")
+        iac_code_metadata: dict[str, Any] = dict(additional_iac_code_metadata or {})
+        iac_code_metadata["cwd"] = cwd
         if model:
             stripped_model = model.strip()
             if stripped_model:
@@ -427,13 +557,15 @@ class A2AClient:
         if thinking:
             iac_code_metadata["thinking"] = thinking
         message: dict[str, Any] = {
-            "messageId": str(uuid.uuid4()),
+            "messageId": message_id or str(uuid.uuid4()),
             "role": "ROLE_USER",
-            "parts": [{"text": prompt}],
+            "parts": [{"text": prompt}] if prompt is not None else [dict(part) for part in parts or ()],
             "metadata": {"iac_code": iac_code_metadata},
         }
         if context_id:
             message["contextId"] = context_id
+        if task_id:
+            message["taskId"] = task_id
         return self._jsonrpc_payload(
             method=method,
             params={

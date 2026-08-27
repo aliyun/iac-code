@@ -16,6 +16,7 @@ from iac_code.a2a.events import (
 )
 from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.input_required import PermissionInputRegistry, PermissionResponse
+from iac_code.a2a.projection import project_a2a_data
 from iac_code.services.permission_wait import (
     PermissionWaitCheckpointStore,
     PermissionWaitCoordinator,
@@ -936,6 +937,7 @@ async def test_tool_events_publish_metadata_updates() -> None:
         "tool_name": "bash",
         "fields": {"cmd": {"type": "str"}},
     }
+    assert dumped[2]["metadata"]["iac_code"]["tool"]["toolInput"] == {"cmd": "pwd"}
     assert "input" not in dumped[2]["metadata"]["iac_code"]["tool"]
     assert dumped[3]["metadata"]["iac_code"]["tool"]["status"] == "completed"
 
@@ -1004,7 +1006,7 @@ async def test_tool_input_delta_metadata_omits_raw_partial_json() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tool_use_input_metadata_redacts_secret_values() -> None:
+async def test_tool_use_input_metadata_preserves_values_before_wire_projection() -> None:
     queue = FakeEventQueue()
 
     await publish_stream_event(
@@ -1020,12 +1022,11 @@ async def test_tool_use_input_metadata_redacts_secret_values() -> None:
 
     dumped = dump(queue.events[0])
     tool = dumped["metadata"]["iac_code"]["tool"]
-    rendered = str(tool)
     assert "input" not in tool
     assert tool["inputSummary"] == {"tool_name": "bash", "fields": {"cmd": {"type": "str"}}}
-    assert "sk-live-secret" not in rendered
-    assert "Authorization: Bearer" not in rendered
-    assert "/Users/alice" not in rendered
+    assert tool["toolInput"] == {
+        "cmd": 'cat /Users/alice/.iac-code/settings.yml && curl -H "Authorization: Bearer sk-live-secret"'
+    }
 
 
 @pytest.mark.asyncio
@@ -1080,7 +1081,7 @@ async def test_tool_use_input_metadata_redacts_structured_secret_fields() -> Non
 
 
 @pytest.mark.asyncio
-async def test_aliyun_tool_use_input_metadata_uses_summary_for_sensitive_safe_fields() -> None:
+async def test_aliyun_tool_use_input_metadata_keeps_summary_and_renderable_arguments() -> None:
     queue = FakeEventQueue()
     pem = "-----BEGIN PRIVATE KEY-----\nprivate-body\n-----END PRIVATE KEY-----"
 
@@ -1101,21 +1102,21 @@ async def test_aliyun_tool_use_input_metadata_uses_summary_for_sensitive_safe_fi
 
     dumped = dump(queue.events[0])
     tool = dumped["metadata"]["iac_code"]["tool"]
-    rendered = str(tool)
     assert "input" not in tool
     assert tool["inputSummary"]["tool_name"] == "aliyun_api"
     assert tool["inputSummary"]["params_fields"] == sorted(
         [fingerprint_text("StackName"), fingerprint_text("TemplateBody")]
     )
     assert tool["inputSummary"]["params_field_count"] == 2
-    assert "StackName" not in rendered
-    assert "TemplateBody" not in rendered
-    assert "private-body" not in rendered
-    assert "BEGIN PRIVATE KEY" not in rendered
+    assert tool["toolInput"] == {
+        "product": "ros",
+        "action": "CreateStack",
+        "params": {"TemplateBody": pem, "StackName": "demo"},
+    }
 
 
 @pytest.mark.asyncio
-async def test_tool_use_input_metadata_redacts_sensitive_keys() -> None:
+async def test_tool_use_input_metadata_preserves_renderable_business_arguments() -> None:
     queue = FakeEventQueue()
 
     await publish_stream_event(
@@ -1124,12 +1125,15 @@ async def test_tool_use_input_metadata_redacts_sensitive_keys() -> None:
         context_id="ctx-1",
         event=ToolUseEndEvent(
             tool_use_id="tool-1",
-            name="bash",
+            name="ros_stack",
             input={
-                "cmd": "pwd",
-                "apiKey": "plain-api-key",
-                "env": {"ALIBABA_CLOUD_ACCESS_KEY_SECRET": "ak-secret"},
-                "headers": [{"x-acs-security-token": "sts-token"}],
+                "action": "CreateStack",
+                "params": {
+                    "DisableRollback": True,
+                    "StackName": "demo-stack",
+                    "TemplateBody": {"ROSTemplateFormatVersion": "2015-09-01"},
+                },
+                "region_id": "cn-hangzhou",
             },
         ),
     )
@@ -1137,23 +1141,50 @@ async def test_tool_use_input_metadata_redacts_sensitive_keys() -> None:
     dumped = dump(queue.events[0])
     tool = dumped["metadata"]["iac_code"]["tool"]
     assert "input" not in tool
-    summary = tool["inputSummary"]
-    fields = summary["fields"]
-    assert summary["tool_name"] == "bash"
-    assert fields["cmd"] == {"type": "str"}
-    assert fields[fingerprint_text("apiKey")] == {"type": "str"}
-    assert fields[fingerprint_text("env")]["type"] == "object"
-    assert fields["headers"] == {"type": "array", "length": 1}
-    rendered = str(tool)
-    assert "apiKey" not in rendered
-    assert "env" not in rendered
-    assert "plain-api-key" not in rendered
-    assert "ak-secret" not in rendered
-    assert "sts-token" not in rendered
+    assert tool["toolInput"] == {
+        "action": "CreateStack",
+        "params": {
+            "DisableRollback": True,
+            "StackName": "demo-stack",
+            "TemplateBody": {"ROSTemplateFormatVersion": "2015-09-01"},
+        },
+        "region_id": "cn-hangzhou",
+    }
 
 
 @pytest.mark.asyncio
-async def test_tool_use_input_metadata_redacts_malformed_opaque_artifact_uri() -> None:
+async def test_tool_use_input_safe_mode_only_projects_paths() -> None:
+    queue = FakeEventQueue()
+    tool_input = {
+        "action": "CreateStack",
+        "path": "/workspace/template.yaml",
+        "params": {"DisableRollback": True, "Password": "fake-secret", "StackName": "demo-stack"},
+    }
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolUseEndEvent(tool_use_id="tool-1", name="ros_stack", input=tool_input),
+    )
+
+    canonical = dump(queue.events[0])
+    projected = project_a2a_data(
+        canonical,
+        public_path_roots=[{"path": "/workspace", "label": "."}],
+        safe_mode=True,
+    )
+    projected_input = projected["metadata"]["iac_code"]["tool"]["toolInput"]
+    assert projected_input == {
+        "action": "CreateStack",
+        "path": "[PATH]",
+        "params": {"DisableRollback": True, "Password": "fake-secret", "StackName": "demo-stack"},
+    }
+    assert canonical["metadata"]["iac_code"]["tool"]["toolInput"] == tool_input
+
+
+@pytest.mark.asyncio
+async def test_tool_use_input_metadata_keeps_malformed_opaque_artifact_uri_before_wire_projection() -> None:
     queue = FakeEventQueue()
     malformed_uri = r"iac-code-artifact://artifact-1/C:\Users\alice\.iac-code\projects\demo\template.yaml"
 
@@ -1170,17 +1201,14 @@ async def test_tool_use_input_metadata_redacts_malformed_opaque_artifact_uri() -
 
     dumped = dump(queue.events[0])
     tool = dumped["metadata"]["iac_code"]["tool"]
-    rendered = str(tool)
     assert "input" not in tool
     assert tool["inputSummary"]["fields"]["cmd"] == {"type": "str"}
     assert tool["inputSummary"]["fields"][fingerprint_text("note")] == {"type": "str"}
-    assert "iac-code-artifac[PATH]" not in rendered
-    assert "Users" not in rendered
-    assert ".iac-code" not in rendered
+    assert tool["toolInput"] == {"cmd": f"cat {malformed_uri}", "note": malformed_uri}
 
 
 @pytest.mark.asyncio
-async def test_tool_use_input_metadata_redacts_percent_encoded_local_path() -> None:
+async def test_tool_use_input_metadata_keeps_percent_encoded_path_before_wire_projection() -> None:
     queue = FakeEventQueue()
     encoded_path = "file%3A%2F%2F%2FUsers%2Falice%2F.iac-code%2Fprojects%2Fdemo%2Ftemplate.yaml"
 
@@ -1197,15 +1225,13 @@ async def test_tool_use_input_metadata_redacts_percent_encoded_local_path() -> N
 
     dumped = dump(queue.events[0])
     tool = dumped["metadata"]["iac_code"]["tool"]
-    rendered = str(tool)
     assert "input" not in tool
     assert tool["inputSummary"]["fields"]["cmd"] == {"type": "str"}
-    assert "%2FUsers" not in rendered
-    assert ".iac-code" not in rendered
+    assert tool["toolInput"] == {"cmd": f"cat {encoded_path}"}
 
 
 @pytest.mark.asyncio
-async def test_tool_use_input_summary_fingerprints_business_field_names() -> None:
+async def test_tool_use_input_summary_fingerprints_names_without_corrupting_tool_input() -> None:
     queue = FakeEventQueue()
 
     await publish_stream_event(
@@ -1224,17 +1250,17 @@ async def test_tool_use_input_summary_fingerprints_business_field_names() -> Non
     )
 
     tool = dump(queue.events[0])["metadata"]["iac_code"]["tool"]
-    rendered = str(tool)
     assert "input" not in tool
     assert tool["inputSummary"]["tool_name"] == "bash"
     fields = tool["inputSummary"]["fields"]
     assert fields["cmd"] == {"type": "str"}
     assert fields[fingerprint_text("customerEmail")] == {"type": "str"}
     assert fields[fingerprint_text("customer-prod-123")] == {"type": "str"}
-    assert "customerEmail" not in rendered
-    assert "customer-prod-123" not in rendered
-    assert "alice@example.com" not in rendered
-    assert "tenant-id" not in rendered
+    assert tool["toolInput"] == {
+        "cmd": "git status",
+        "customerEmail": "alice@example.com",
+        "customer-prod-123": "tenant-id",
+    }
 
 
 @pytest.mark.asyncio
@@ -1833,11 +1859,16 @@ async def test_message_end_publishes_usage_metadata() -> None:
         queue,
         task_id="task-1",
         context_id="ctx-1",
-        event=MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=2, output_tokens=3)),
+        event=MessageEndEvent(
+            stop_reason="end_turn",
+            usage=Usage(provider="dashscope", model="qwen", input_tokens=2, output_tokens=3),
+        ),
     )
 
     dumped = dump(queue.events[0])
     assert dumped["metadata"]["iac_code"]["usage"]["totalTokens"] == 5
+    assert dumped["metadata"]["iac_code"]["usage"]["provider"] == "dashscope"
+    assert dumped["metadata"]["iac_code"]["usage"]["model"] == "qwen"
 
 
 @pytest.mark.asyncio

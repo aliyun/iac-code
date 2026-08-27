@@ -82,6 +82,15 @@ const sidebars: SidebarsConfig = {
             'a2a/examples',
           ],
         },
+        {
+          type: 'category',
+          label: 'AG-UI Protocol',
+          items: [
+            'agui/overview',
+            'agui/getting-started',
+            'agui/protocol-reference',
+          ],
+        },
       ],
     },
     'contact',

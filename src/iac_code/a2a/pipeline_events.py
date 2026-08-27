@@ -29,6 +29,7 @@ from iac_code.types.stream_events import (
     ContextUsageEvent,
     DiagramEvent,
     MCPProgressEvent,
+    MessageEndEvent,
     MessageStartEvent,
     PermissionRequestEvent,
     ResourceObservedEvent,
@@ -263,6 +264,8 @@ class PipelineEventTranslator:
             return self._translate_pipeline_event(event)
         if isinstance(event, MessageStartEvent):
             return [self._translate_parent_scoped_display_event("message_started", {"messageId": event.message_id})]
+        if isinstance(event, MessageEndEvent):
+            return [self._translate_parent_scoped_display_event("usage", _provider_usage_data(event.usage))]
         if isinstance(event, TextDeltaEvent):
             return [self._translate_text_delta_event(event)]
         if isinstance(event, ThinkingDeltaEvent):
@@ -557,6 +560,11 @@ class PipelineEventTranslator:
         if isinstance(inner, MessageStartEvent):
             event_type = "message_started"
             data = {"messageId": inner.message_id}
+            input_data = None
+            permission = None
+        elif isinstance(inner, MessageEndEvent):
+            event_type = "usage"
+            data = _provider_usage_data(inner.usage)
             input_data = None
             permission = None
         elif isinstance(inner, TextDeltaEvent):
@@ -1453,6 +1461,17 @@ def _usage_data(usage: dict[str, Any]) -> dict[str, Any]:
         "userMessageTokens": usage.get("user_message_tokens"),
         "assistantMessageTokens": usage.get("assistant_message_tokens"),
         "toolResultTokens": usage.get("tool_result_tokens"),
+    }
+
+
+def _provider_usage_data(usage: Any) -> dict[str, Any]:
+    return {
+        "provider": getattr(usage, "provider", None),
+        "model": getattr(usage, "model", None),
+        "inputTokens": getattr(usage, "input_tokens", 0),
+        "outputTokens": getattr(usage, "output_tokens", 0),
+        "totalTokens": getattr(usage, "total_tokens", 0),
+        "cachedInputTokens": getattr(usage, "cache_read_input_tokens", 0),
     }
 
 

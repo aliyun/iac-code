@@ -60,6 +60,7 @@ from iac_code.a2a.pipeline_snapshot import (
 )
 from iac_code.a2a.pipeline_stream import BACKUP_COMMITTED_EVENT_TYPE, PipelineA2AEventPublisher
 from iac_code.a2a.projection import a2a_safe_mode_enabled
+from iac_code.a2a.request_mode import resolve_request_run_mode
 from iac_code.a2a.runtime_overrides import (
     a2a_request_context,
     configure_runtime_model,
@@ -81,7 +82,7 @@ from iac_code.config import get_active_provider_key, get_provider_config, load_c
 from iac_code.i18n import SUPPORTED_LANGUAGES, _
 from iac_code.mcp.errors import MCPConnectionError
 from iac_code.mcp.prompt_dispatch import is_mcp_prompt_file_path
-from iac_code.pipeline.config import RunMode, get_run_mode
+from iac_code.pipeline.config import RunMode
 from iac_code.pipeline.constants import (
     PIPELINE_EVENT_CLEANUP_COMPLETED,
     PIPELINE_EVENT_CLEANUP_FAILED,
@@ -1196,7 +1197,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             )
             cwd = self._resolve_cwd(metadata)
             public_path_roots = build_public_path_roots(cwd=cwd)
-            pipeline_mode = get_run_mode() == RunMode.PIPELINE
+            pipeline_mode = resolve_request_run_mode(metadata) == RunMode.PIPELINE
             if pipeline_mode and requested_task_id:
                 reservation = await self._task_store.begin_context_execution_if_task_active(
                     context_id,
@@ -2041,11 +2042,12 @@ class IacCodeA2AExecutor(AgentExecutor):
                 raise InvalidParamsError(f"permission_resume_invalid: {exc}") from exc
 
             permission_audit = getattr(audit_event.permission_result, "audit", None)
-            principal_ref, region = permission_execution_identity(
-                tool_name=audit_event.tool_name,
-                tool_input=audit_event.tool_input,
-                permission_audit=permission_audit,
-            )
+            with a2a_request_context(aliyun_credential=aliyun_credential):
+                principal_ref, region = permission_execution_identity(
+                    tool_name=audit_event.tool_name,
+                    tool_input=audit_event.tool_input,
+                    permission_audit=permission_audit,
+                )
             if principal_ref != record.get("principalRef") or region != record.get("region"):
                 raise InvalidParamsError("permission_resume_invalid: cloud execution identity changed.")
 

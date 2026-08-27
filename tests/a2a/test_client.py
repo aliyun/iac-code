@@ -73,6 +73,28 @@ class FakeHTTPClient:
         self.closed = True
 
 
+class PipelineStateHTTPClient(FakeHTTPClient):
+    def __init__(self, *, status_code: int = 200) -> None:
+        super().__init__()
+        self.status_code = status_code
+        self.pipeline_request = None
+
+    async def get(self, url: str, headers=None, params=None) -> FakeHTTPResponse:
+        self.pipeline_request = (url, headers, params)
+        return FakeHTTPResponse({"snapshot": {"lastSequence": 4}, "events": []}, self.status_code)
+
+
+class SessionRestoreHTTPClient(FakeHTTPClient):
+    def __init__(self, *, status_code: int = 200, status: str = "restored") -> None:
+        super().__init__()
+        self.status_code = status_code
+        self.status = status
+
+    async def post(self, url: str, json: dict[str, object], headers=None) -> FakeHTTPResponse:
+        self.requests.append(("POST", url, json, headers))
+        return FakeHTTPResponse({"status": self.status}, self.status_code)
+
+
 class HangingInputRequiredHTTPClient(FakeHTTPClient):
     def __init__(self) -> None:
         super().__init__()
@@ -105,6 +127,56 @@ class HangingInputRequiredHTTPClient(FakeHTTPClient):
 
 async def _collect_async(iterator):
     return [item async for item in iterator]
+
+
+@pytest.mark.asyncio
+async def test_get_pipeline_state_uses_read_only_http_extension_and_auth() -> None:
+    http = PipelineStateHTTPClient()
+    client = A2AClient(http_client=http, auth=A2AAuthConfig(bearer_token="secret"))
+
+    state = await client.get_pipeline_state("http://remote/", task_id="task-1", after_sequence=3)
+
+    assert state == {"snapshot": {"lastSequence": 4}, "events": []}
+    assert http.pipeline_request == (
+        "http://remote/iac-code/pipeline/state",
+        {"A2A-Version": "1.0", "Authorization": "Bearer secret"},
+        {"taskId": "task-1", "afterSequence": 3},
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_pipeline_state_returns_none_when_task_has_no_pipeline_snapshot() -> None:
+    client = A2AClient(http_client=PipelineStateHTTPClient(status_code=404))
+
+    assert await client.get_pipeline_state("http://remote/", task_id="task-1") is None
+
+
+@pytest.mark.asyncio
+async def test_ensure_session_restored_uses_internal_http_extension_and_auth() -> None:
+    http = SessionRestoreHTTPClient()
+    client = A2AClient(http_client=http, auth=A2AAuthConfig(bearer_token="secret"))
+
+    ready = await client.ensure_session_restored("http://remote/", cwd="/workspace/session", session_id="session-1")
+
+    assert ready is True
+    assert http.requests == [
+        (
+            "POST",
+            "http://remote/iac-code/session/ensure-restored",
+            {"cwd": "/workspace/session", "sessionId": "session-1"},
+            {"A2A-Version": "1.0", "Authorization": "Bearer secret"},
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_ensure_session_restored_returns_false_when_backup_is_missing() -> None:
+    client = A2AClient(http_client=SessionRestoreHTTPClient(status_code=404, status="not_found"))
+
+    assert (
+        await client.ensure_session_restored("http://remote/", cwd="/workspace/session", session_id="session-1")
+        is False
+    )
 
 
 def _base64url_uint(value: int) -> str:

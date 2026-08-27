@@ -2204,7 +2204,7 @@ async def test_executor_delegates_pipeline_mode_after_validation(
     from iac_code.services.telemetry.attributes import AttributeBuilder
     from iac_code.services.telemetry.identity import Identity
 
-    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setenv("IAC_CODE_MODE", "normal")
     monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", "1")
     monkeypatch.setenv("IAC_CODE_CHANNEL", "environment")
     calls = []
@@ -2250,6 +2250,7 @@ async def test_executor_delegates_pipeline_mode_after_validation(
             metadata={
                 "iac_code": {
                     "cwd": str(tmp_path),
+                    "run_mode": "pipeline",
                     "channel": "a2a-pipeline",
                     "user_id": "client-user",
                     "iac_code_model": "metadata-model",
@@ -4493,3 +4494,96 @@ async def test_restart_audit_rebuild_failure_precedes_permission_claim_and_backu
         )
 
     assert store_calls == []
+
+
+@pytest.mark.asyncio
+async def test_restart_identity_validation_uses_resume_request_cloud_credential(monkeypatch, tmp_path) -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    task_record = SimpleNamespace(context_id="ctx-1")
+    context_record = SimpleNamespace(cwd=str(tmp_path), session_id="session-1")
+
+    async def get_task_record(_task_id):
+        return task_record
+
+    async def get_context_record(_context_id):
+        return context_record
+
+    monkeypatch.setattr(store, "get_task_record", get_task_record)
+    monkeypatch.setattr(store, "get_context_record", get_context_record)
+    checkpoint = {
+        "boundaryId": "pwb-boundary1",
+        "phase": "SUSPENDED",
+        "permissionClass": "normal",
+        "decision": {"status": "none", "value": None},
+        "principalRef": "client-principal",
+        "region": "cn-beijing",
+    }
+
+    class CheckpointStore:
+        def find(self, **_kwargs):
+            return checkpoint
+
+        def reconcile_deadline(self, *_args, **_kwargs):
+            raise RuntimeError("identity validation completed")
+
+    monkeypatch.setattr(
+        "iac_code.a2a.executor.PermissionWaitCheckpointStore",
+        lambda *_args, **_kwargs: CheckpointStore(),
+    )
+    monkeypatch.setattr(
+        "iac_code.a2a.executor.recover_permission_audit_boundary",
+        lambda *_args, **_kwargs: RecoveredPermissionAuditBoundary(
+            tool_name="aliyun_api",
+            tool_input={"region_id": "cn-beijing"},
+            tool_use_id="tool-1",
+            audit_context={"session_id": "session-1", "cwd": str(tmp_path)},
+        ),
+    )
+
+    async def rebuild(**_kwargs):
+        return SimpleNamespace(
+            tool_name="aliyun_api",
+            tool_input={"region_id": "cn-beijing"},
+            permission_result=SimpleNamespace(audit=None),
+        )
+
+    seen_access_key_ids: list[str | None] = []
+
+    def identity(**_kwargs):
+        from iac_code.services.providers.aliyun import AliyunCredentials
+
+        credential = AliyunCredentials.load()
+        seen_access_key_ids.append(credential.access_key_id if credential is not None else None)
+        return "client-principal", "cn-beijing"
+
+    monkeypatch.setattr(executor, "_rebuild_normal_permission_audit_event", rebuild)
+    monkeypatch.setattr("iac_code.a2a.executor.permission_execution_identity", identity)
+    monkeypatch.setattr(
+        "iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config",
+        lambda: None,
+    )
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id="input-1",
+        tool_use_id="tool-1",
+        decision="deny",
+    )
+    context = FakeRequestContext(
+        task_id="task-1",
+        context_id="ctx-1",
+        metadata={
+            "iac_code": {
+                "alibaba_cloud_access_key_id": "client-id",
+                "alibaba_cloud_access_key_secret": "client-secret",
+                "alibaba_cloud_region_id": "cn-beijing",
+            }
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="identity validation completed"):
+        await executor._resume_persisted_permission(context, FakeEventQueue(), response=response)
+
+    assert seen_access_key_ids == ["client-id"]

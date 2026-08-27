@@ -228,7 +228,7 @@ msgstr "Diese Operation für die angeforderte Infrastrukturaufgabe ausführen."
 msgid "the current task workspace or cloud account"
 msgstr "der aktuelle Aufgaben-Arbeitsbereich oder das Cloud-Konto"
 
-#: src/iac_code/a2a/input_required.py
+#: src/iac_code/a2a/input_required.py src/iac_code/agui/events.py
 msgid "Permission required"
 msgstr "Berechtigung erforderlich"
 
@@ -340,7 +340,7 @@ msgstr "A2A-Pipeline-Zustand nicht gefunden"
 msgid "A2A task/context mismatch"
 msgstr "A2A-Aufgabe und Kontext passen nicht zusammen"
 
-#: src/iac_code/a2a/pipeline_stream.py
+#: src/iac_code/a2a/pipeline_stream.py src/iac_code/agui/events.py
 msgid "Input required"
 msgstr "Eingabe erforderlich"
 
@@ -731,6 +731,268 @@ msgstr ""
 "Zur Planung der Implementierungsstrategie, Architekturprüfung oder "
 "Lösungsentwicklung. Nur Lesen, keine Ausführung."
 
+#: src/iac_code/agui/app.py
+msgid "Content-Type must be application/json."
+msgstr "Der Content-Type muss application/json sein."
+
+#: src/iac_code/agui/app.py
+msgid "The AG-UI request body is too large."
+msgstr "Der AG-UI-Anfrageinhalt ist zu groß."
+
+#: src/iac_code/agui/app.py
+msgid "The request body is not valid JSON."
+msgstr "Der Anfrageinhalt ist kein gültiges JSON."
+
+#: src/iac_code/agui/app.py
+msgid "RunAgentInput must be a JSON object."
+msgstr "RunAgentInput muss ein JSON-Objekt sein."
+
+#: src/iac_code/agui/app.py
+msgid "Invalid AG-UI RunAgentInput envelope."
+msgstr "Die AG-UI-RunAgentInput-Struktur ist ungültig."
+
+#: src/iac_code/agui/app.py src/iac_code/agui/errors.py
+msgid "Invalid iac-code forwarded properties."
+msgstr "Die weitergeleiteten iac-code-Eigenschaften sind ungültig."
+
+#: src/iac_code/agui/app.py
+msgid "The cancel request body is too large."
+msgstr "Der Inhalt der Abbruchanfrage ist zu groß."
+
+#: src/iac_code/agui/app.py
+msgid "The cancel request body is not valid JSON."
+msgstr "Der Inhalt der Abbruchanfrage ist kein gültiges JSON."
+
+#: src/iac_code/agui/app.py
+msgid "The cancel request must be a JSON object."
+msgstr "Die Abbruchanfrage muss ein JSON-Objekt sein."
+
+#: src/iac_code/agui/app.py
+msgid "threadId and rosInvocationId are required."
+msgstr "threadId und rosInvocationId sind erforderlich."
+
+#: src/iac_code/agui/app.py
+msgid "The execution was not found."
+msgstr "Die Ausführung wurde nicht gefunden."
+
+#: src/iac_code/agui/app.py
+msgid "A valid bearer token is required."
+msgstr "Ein gültiges Bearer-Token ist erforderlich."
+
+#: src/iac_code/agui/errors.py
+msgid "A new run requires a user message."
+msgstr "Für eine neue Ausführung ist eine Benutzernachricht erforderlich."
+
+#: src/iac_code/agui/errors.py
+msgid "A resolved interrupt requires a payload."
+msgstr "Eine aufgelöste Unterbrechung erfordert Antwortdaten."
+
+#: src/iac_code/agui/errors.py
+msgid "An image exceeds the maximum size."
+msgstr "Ein Bild überschreitet die maximale Größe."
+
+#: src/iac_code/agui/errors.py
+msgid "An interrupt belongs to another A2A context."
+msgstr "Eine Unterbrechung gehört zu einem anderen A2A-Kontext."
+
+#: src/iac_code/agui/errors.py
+msgid "An interrupt belongs to another A2A task."
+msgstr "Eine Unterbrechung gehört zu einer anderen A2A-Aufgabe."
+
+#: src/iac_code/agui/errors.py
+msgid "Client-provided tools are not supported."
+msgstr "Vom Client bereitgestellte Tools werden nicht unterstützt."
+
+#: src/iac_code/agui/errors.py
+msgid "Only text and inline data images are supported."
+msgstr "Es werden nur Text und eingebettete Datenbilder unterstützt."
+
+#: src/iac_code/agui/errors.py
+msgid "Remote media URLs are not supported."
+msgstr "URLs zu entfernten Medien werden nicht unterstützt."
+
+#: src/iac_code/agui/errors.py
+msgid "The A2A context identity changed unexpectedly."
+msgstr "Die A2A-Kontextidentität hat sich unerwartet geändert."
+
+#: src/iac_code/agui/errors.py
+#, python-brace-format
+msgid "The A2A execution failed."
+msgstr "Die A2A-Ausführung ist fehlgeschlagen."
+
+#: src/iac_code/agui/errors.py
+msgid "The A2A interrupt response was not accepted."
+msgstr "Die A2A-Unterbrechungsantwort wurde nicht akzeptiert."
+
+#: src/iac_code/agui/errors.py
+msgid "The A2A permission response was not accepted."
+msgstr "Die A2A-Berechtigungsantwort wurde nicht akzeptiert."
+
+#: src/iac_code/agui/errors.py
+msgid "The A2A task identity changed unexpectedly."
+msgstr "Die A2A-Aufgabenidentität hat sich unerwartet geändert."
+
+#: src/iac_code/agui/errors.py
+msgid "The A2A task identity does not match the interrupted run."
+msgstr "Die A2A-Aufgabenidentität stimmt nicht mit der unterbrochenen Ausführung überein."
+
+#: src/iac_code/agui/errors.py
+msgid "The A2A task to resume is unavailable."
+msgstr "Die fortzusetzende A2A-Aufgabe ist nicht verfügbar."
+
+#: src/iac_code/agui/errors.py
+msgid "The AG-UI adapter state is unavailable."
+msgstr "Der Zustand des AG-UI-Adapters ist nicht verfügbar."
+
+#: src/iac_code/agui/errors.py
+msgid "The AG-UI run id has already been used."
+msgstr "Die AG-UI-Ausführungs-ID wurde bereits verwendet."
+
+#: src/iac_code/agui/errors.py
+msgid "The AG-UI thread already has an active run."
+msgstr "Der AG-UI-Thread hat bereits eine aktive Ausführung."
+
+#: src/iac_code/agui/errors.py
+msgid "The AG-UI thread is already bound to another workspace or caller."
+msgstr "Der AG-UI-Thread ist bereits an einen anderen Arbeitsbereich oder Aufrufer gebunden."
+
+#: src/iac_code/agui/errors.py
+msgid "The AG-UI thread is waiting for interrupt responses."
+msgstr "Der AG-UI-Thread wartet auf Unterbrechungsantworten."
+
+#: src/iac_code/agui/errors.py
+msgid "The accepted interrupt response could not be committed."
+msgstr "Die akzeptierte Unterbrechungsantwort konnte nicht gespeichert werden."
+
+#: src/iac_code/agui/errors.py
+msgid "The execution mapping could not be committed."
+msgstr "Die Ausführungszuordnung konnte nicht gespeichert werden."
+
+#: src/iac_code/agui/errors.py
+msgid "The execution session mapping could not be committed."
+msgstr "Die Zuordnung von Ausführung und Sitzung konnte nicht gespeichert werden."
+
+#: src/iac_code/agui/errors.py
+msgid "The execution to resume is no longer available."
+msgstr "Die fortzusetzende Ausführung ist nicht mehr verfügbar."
+
+#: src/iac_code/agui/errors.py
+msgid "The execution was cancelled by the interrupt response."
+msgstr "Die Ausführung wurde durch die Unterbrechungsantwort abgebrochen."
+
+#: src/iac_code/agui/errors.py
+msgid "The execution was cancelled."
+msgstr "Die Ausführung wurde abgebrochen."
+
+#: src/iac_code/agui/errors.py
+msgid "The iac-code session identity changed unexpectedly."
+msgstr "Die Identität der iac-code-Sitzung hat sich unerwartet geändert."
+
+#: src/iac_code/agui/errors.py
+msgid "The iac-code session to resume is unavailable."
+msgstr "Die fortzusetzende iac-code-Sitzung ist nicht verfügbar."
+
+#: src/iac_code/agui/errors.py
+msgid "The iac-code workspace cannot be created."
+msgstr "Der iac-code-Arbeitsbereich kann nicht erstellt werden."
+
+#: src/iac_code/agui/errors.py
+msgid "The iac-code workspace is invalid."
+msgstr "Der iac-code-Arbeitsbereich ist ungültig."
+
+#: src/iac_code/agui/errors.py
+msgid "The iac-code workspace is not a directory."
+msgstr "Der iac-code-Arbeitsbereich ist kein Verzeichnis."
+
+#: src/iac_code/agui/errors.py
+msgid "The iac-code workspace is outside the allowed roots."
+msgstr "Der iac-code-Arbeitsbereich liegt außerhalb der zulässigen Stammverzeichnisse."
+
+#: src/iac_code/agui/errors.py
+msgid "The iac-code workspace must be an absolute path."
+msgstr "Der iac-code-Arbeitsbereich muss ein absoluter Pfad sein."
+
+#: src/iac_code/agui/errors.py
+msgid "The image data is invalid."
+msgstr "Die Bilddaten sind ungültig."
+
+#: src/iac_code/agui/errors.py
+msgid "The image data is not valid base64."
+msgstr "Die Bilddaten sind kein gültiges base64."
+
+#: src/iac_code/agui/errors.py
+msgid "The image media type is not supported."
+msgstr "Der Medientyp des Bildes wird nicht unterstützt."
+
+#: src/iac_code/agui/errors.py
+msgid "The interrupt response does not contain an answer."
+msgstr "Die Unterbrechungsantwort enthält keine Antwort."
+
+#: src/iac_code/agui/errors.py
+msgid "The interrupt response has already been applied."
+msgstr "Die Unterbrechungsantwort wurde bereits angewendet."
+
+#: src/iac_code/agui/errors.py
+msgid "The interrupt response payload is invalid."
+msgstr "Die Antwortdaten der Unterbrechung sind ungültig."
+
+#: src/iac_code/agui/errors.py
+msgid "The interrupted execution has expired."
+msgstr "Die unterbrochene Ausführung ist abgelaufen."
+
+#: src/iac_code/agui/errors.py
+msgid "The interrupted execution state could not be committed."
+msgstr "Der Zustand der unterbrochenen Ausführung konnte nicht gespeichert werden."
+
+#: src/iac_code/agui/errors.py
+msgid "The local A2A execution service is unavailable."
+msgstr "Der lokale A2A-Ausführungsdienst ist nicht verfügbar."
+
+#: src/iac_code/agui/errors.py
+msgid "The local A2A execution service rejected the interrupt response."
+msgstr "Der lokale A2A-Ausführungsdienst hat die Unterbrechungsantwort abgelehnt."
+
+#: src/iac_code/agui/errors.py
+msgid "The resume contains duplicate interrupt ids."
+msgstr "Die Fortsetzung enthält doppelte Unterbrechungs-IDs."
+
+#: src/iac_code/agui/errors.py
+msgid "The resume must resolve every pending interrupt exactly once."
+msgstr "Beim Fortsetzen muss jede ausstehende Unterbrechung genau einmal aufgelöst werden."
+
+#: src/iac_code/agui/errors.py
+msgid "The resume references an unknown interrupt."
+msgstr "Die Fortsetzung verweist auf eine unbekannte Unterbrechung."
+
+#: src/iac_code/agui/errors.py
+msgid "The resume request does not match the interrupted run."
+msgstr "Die Fortsetzungsanfrage stimmt nicht mit der unterbrochenen Ausführung überein."
+
+#: src/iac_code/agui/errors.py
+msgid "The total image content exceeds the maximum size."
+msgstr "Der gesamte Bildinhalt überschreitet die maximale Größe."
+
+#: src/iac_code/agui/errors.py
+msgid "The user message content is invalid."
+msgstr "Der Inhalt der Benutzernachricht ist ungültig."
+
+#: src/iac_code/agui/process.py
+msgid "The local A2A process is already started."
+msgstr "Der lokale A2A-Prozess wurde bereits gestartet."
+
+#: src/iac_code/agui/process.py
+#, python-brace-format
+msgid "The local A2A process exited during startup (exit code {})."
+msgstr "Der lokale A2A-Prozess wurde während des Starts beendet (Exit-Code {})."
+
+#: src/iac_code/agui/process.py
+msgid "The local A2A process did not become ready in time."
+msgstr "Der lokale A2A-Prozess wurde nicht rechtzeitig bereit."
+
+#: src/iac_code/agui/server.py
+msgid "The AG-UI adapter may connect only to a loopback A2A HTTP(S) URL."
+msgstr "Der AG-UI-Adapter darf nur eine A2A-HTTP(S)-URL auf einer Loopback-Adresse verwenden."
+
 #: src/iac_code/cli/headless.py
 #, python-brace-format
 msgid "Tool started: {}"
@@ -866,6 +1128,14 @@ msgid ""
 msgstr ""
 "A2A-Server-Abhängigkeiten fehlen. Installieren mit: pip install 'iac-"
 "code[a2a]'"
+
+#: src/iac_code/cli/main.py
+msgid ""
+"AG-UI adapter dependencies are missing. Install with: pip install 'iac-"
+"code[agui]'"
+msgstr ""
+"Abhängigkeiten des AG-UI-Adapters fehlen. Installation mit: pip install "
+"'iac-code[agui]'"
 
 #: src/iac_code/cli/main.py
 msgid ""
@@ -1037,6 +1307,75 @@ msgstr "iac-code als ACP-Server ausführen."
 #: src/iac_code/cli/main.py
 msgid "Transport type: stdio or http"
 msgstr "Transporttyp: stdio oder http"
+
+#: src/iac_code/cli/main.py
+msgid "Unable to load the AG-UI config file."
+msgstr "Die AG-UI-Konfigurationsdatei kann nicht geladen werden."
+
+#: src/iac_code/cli/main.py
+msgid "AG-UI config file must contain a YAML mapping."
+msgstr "Die AG-UI-Konfigurationsdatei muss ein YAML-Mapping enthalten."
+
+#: src/iac_code/cli/main.py
+msgid "Run the AG-UI adapter backed by a local iac-code A2A process."
+msgstr "Den AG-UI-Adapter mit einem lokalen iac-code-A2A-Prozess ausführen."
+
+#: src/iac_code/cli/main.py
+msgid "YAML config file for AG-UI adapter options"
+msgstr "YAML-Konfigurationsdatei für Optionen des AG-UI-Adapters"
+
+#: src/iac_code/cli/main.py
+msgid "Existing local A2A URL; omitted starts a managed A2A child process"
+msgstr ""
+"Vorhandene lokale A2A-URL; ohne Angabe wird ein verwalteter A2A-"
+"Kindprozess gestartet"
+
+#: src/iac_code/cli/main.py
+msgid "Mirror adapter logs to stdout"
+msgstr "Adapterprotokolle nach stdout spiegeln"
+
+#: src/iac_code/cli/main.py
+msgid "Seconds an AG-UI interrupt remains resumable"
+msgstr "Sekunden, in denen eine AG-UI-Unterbrechung fortgesetzt werden kann"
+
+#: src/iac_code/cli/main.py
+msgid "Durable AG-UI adapter state directory"
+msgstr "Verzeichnis für den persistenten Zustand des AG-UI-Adapters"
+
+#: src/iac_code/cli/main.py
+msgid "Exit after this many idle seconds; zero disables idle shutdown"
+msgstr ""
+"Nach so vielen Leerlaufsekunden beenden; null deaktiviert das Beenden bei"
+" Leerlauf"
+
+#: src/iac_code/cli/main.py
+#, python-brace-format
+msgid "--port must be between 1 and 65535."
+msgstr "--port muss zwischen 1 und 65535 liegen."
+
+#: src/iac_code/cli/main.py
+msgid "--interrupt-ttl must be a positive integer."
+msgstr "--interrupt-ttl muss eine positive Ganzzahl sein."
+
+#: src/iac_code/cli/main.py
+msgid "--state-dir must be a string."
+msgstr "--state-dir muss eine Zeichenfolge sein."
+
+#: src/iac_code/cli/main.py
+msgid "--idle-shutdown must be a non-negative number."
+msgstr "--idle-shutdown muss eine nicht negative Zahl sein."
+
+#: src/iac_code/cli/main.py
+msgid "--a2a-url must be a string."
+msgstr "--a2a-url muss eine Zeichenfolge sein."
+
+#: src/iac_code/cli/main.py
+msgid "auth_token must be a string."
+msgstr "auth_token muss eine Zeichenfolge sein."
+
+#: src/iac_code/cli/main.py
+msgid "a2a_token must be a string."
+msgstr "a2a_token muss eine Zeichenfolge sein."
 
 #: src/iac_code/cli/main.py
 msgid "Run iac-code as an A2A 1.0 server."

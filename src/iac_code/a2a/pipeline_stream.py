@@ -1844,6 +1844,14 @@ def _unified_input_projection(
             projection["language"] = language
         if isinstance(deployment_summary, dict):
             projection["deploymentSummary"] = deployment_summary
+        scope = envelope.get("scope")
+        if isinstance(scope, str) and scope:
+            projection["scope"] = scope
+        candidate = envelope.get("candidate")
+        if isinstance(candidate, dict):
+            sub_pipeline_id = candidate.get("id") or candidate.get("subPipelineId")
+            if isinstance(sub_pipeline_id, str) and sub_pipeline_id:
+                projection["subPipelineId"] = sub_pipeline_id
         return projection
     raw_input = envelope.get("input")
     if not isinstance(raw_input, dict):
@@ -1866,6 +1874,9 @@ def _unified_input_projection(
         )[:1000],
         "required": True,
     }
+    tool_use_id = raw_input.get("toolUseId")
+    if isinstance(tool_use_id, str) and tool_use_id:
+        projected["toolUseId"] = tool_use_id
     if kind == "ask_user_question":
         projected["allowFreeText"] = bool(raw_input.get("allowFreeText"))
         free_text_prompt = raw_input.get("freeTextPrompt")

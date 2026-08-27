@@ -22,6 +22,8 @@ TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY = "render_verbose_result_in_transcr
 class Usage:
     """Provider token usage with enough metadata for normalized reporting."""
 
+    provider: str | None = None
+    model: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_input_tokens: int = 0

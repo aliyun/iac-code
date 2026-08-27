@@ -845,7 +845,7 @@ async def test_dispatcher_stream_preserves_message_metadata_echo_without_safe_mo
 
 @pytest.mark.asyncio
 async def test_dispatcher_rejects_pipeline_image_before_executor_runs(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setenv("IAC_CODE_MODE", "normal")
     monkeypatch.setattr(
         "iac_code.a2a.parts.maybe_resize_and_downsample",
         lambda raw: SimpleNamespace(data=raw, media_type="image/png"),
@@ -878,7 +878,7 @@ async def test_dispatcher_rejects_pipeline_image_before_executor_runs(monkeypatc
                             "mediaType": "image/png",
                         }
                     ],
-                    "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                    "metadata": {"iac_code": {"cwd": str(tmp_path), "run_mode": "pipeline"}},
                 },
                 "configuration": {"acceptedOutputModes": ["text/plain"]},
             },

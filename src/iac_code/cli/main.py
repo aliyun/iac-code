@@ -58,6 +58,10 @@ def _a2a_server_missing_dependencies_message() -> str:
     return _("A2A server dependencies are missing. Install with: pip install 'iac-code[a2a]'")
 
 
+def _agui_server_missing_dependencies_message() -> str:
+    return _("AG-UI adapter dependencies are missing. Install with: pip install 'iac-code[agui]'")
+
+
 def _piped_repl_requires_tty_message(piped_input: str) -> str:
     if piped_input.strip().startswith("/mcp"):
         return _(
@@ -609,6 +613,20 @@ def _load_a2a_config(path: str) -> dict[str, Any]:
     return _normalize_a2a_config_mapping(data)
 
 
+def _load_agui_config(path: str) -> dict[str, Any]:
+    import yaml
+
+    try:
+        data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise typer.BadParameter(_("Unable to load the AG-UI config file.")) from exc
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise typer.BadParameter(_("AG-UI config file must contain a YAML mapping."))
+    return _normalize_a2a_config_mapping(data)
+
+
 def _normalize_a2a_config_mapping(data: dict[Any, Any]) -> dict[str, Any]:
     return {str(key).replace("-", "_"): _normalize_a2a_config_value(value) for key, value in data.items()}
 
@@ -732,6 +750,105 @@ def _current_logical_cwd() -> str:
             except OSError:
                 pass
     return str(physical_cwd)
+
+
+@app.command(help=_("Run the AG-UI adapter backed by a local iac-code A2A process."))
+def agui(
+    ctx: typer.Context,
+    config_path: str = typer.Option("", "--config", help=_("YAML config file for AG-UI adapter options")),
+    host: str = typer.Option("127.0.0.1", envvar="IAC_CODE_AGUI_HOST", help=_("HTTP server host")),
+    port: int = typer.Option(8000, envvar="IAC_CODE_AGUI_PORT", help=_("HTTP server port")),
+    a2a_url: str = typer.Option(
+        "",
+        "--a2a-url",
+        envvar="IAC_CODE_AGUI_A2A_URL",
+        help=_("Existing local A2A URL; omitted starts a managed A2A child process"),
+    ),
+    debug: bool = typer.Option(False, "--debug", "-d", help=_("Enable debug logging")),
+    log_stdout: bool = typer.Option(
+        False,
+        "--log-stdout/--no-log-stdout",
+        help=_("Mirror adapter logs to stdout"),
+    ),
+    interrupt_ttl: int = typer.Option(
+        540,
+        "--interrupt-ttl",
+        envvar="IAC_CODE_AGUI_INTERRUPT_TTL",
+        help=_("Seconds an AG-UI interrupt remains resumable"),
+    ),
+    state_dir: str = typer.Option(
+        "",
+        "--state-dir",
+        envvar="IAC_CODE_AGUI_STATE_DIR",
+        help=_("Durable AG-UI adapter state directory"),
+    ),
+    idle_shutdown: float = typer.Option(
+        0,
+        "--idle-shutdown",
+        help=_("Exit after this many idle seconds; zero disables idle shutdown"),
+    ),
+) -> None:
+    """Run AG-UI as a protocol adapter; all execution remains in A2A."""
+    try:
+        config = _load_agui_config(config_path) if config_path else {}
+    except Exception as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    host = _a2a_config_value(ctx, config, "host", host)
+    port = _a2a_config_value(ctx, config, "port", port)
+    a2a_url = _a2a_config_value(ctx, config, "a2a_url", a2a_url)
+    debug = _a2a_config_value(ctx, config, "debug", debug)
+    log_stdout = _a2a_config_value(ctx, config, "log_stdout", log_stdout)
+    interrupt_ttl = _a2a_config_value(ctx, config, "interrupt_ttl", interrupt_ttl)
+    state_dir = _a2a_config_value(ctx, config, "state_dir", state_dir)
+    idle_shutdown = _a2a_config_value(ctx, config, "idle_shutdown", idle_shutdown)
+    if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+        typer.echo(_("--port must be between 1 and 65535."), err=True)
+        raise typer.Exit(1)
+    if not isinstance(interrupt_ttl, int) or isinstance(interrupt_ttl, bool) or interrupt_ttl <= 0:
+        typer.echo(_("--interrupt-ttl must be a positive integer."), err=True)
+        raise typer.Exit(1)
+    if state_dir and not isinstance(state_dir, str):
+        typer.echo(_("--state-dir must be a string."), err=True)
+        raise typer.Exit(1)
+    if not isinstance(idle_shutdown, (int, float)) or isinstance(idle_shutdown, bool) or idle_shutdown < 0:
+        typer.echo(_("--idle-shutdown must be a non-negative number."), err=True)
+        raise typer.Exit(1)
+    if a2a_url and not isinstance(a2a_url, str):
+        typer.echo(_("--a2a-url must be a string."), err=True)
+        raise typer.Exit(1)
+    auth_token = os.environ.get("IAC_CODE_AGUI_AUTH_TOKEN") or config.get("auth_token")
+    a2a_token = os.environ.get("IAC_CODE_AGUI_A2A_TOKEN") or config.get("a2a_token")
+    if auth_token is not None and not isinstance(auth_token, str):
+        typer.echo(_("auth_token must be a string."), err=True)
+        raise typer.Exit(1)
+    if a2a_token is not None and not isinstance(a2a_token, str):
+        typer.echo(_("a2a_token must be a string."), err=True)
+        raise typer.Exit(1)
+    setup_logging(session_id="agui-adapter", debug=bool(debug), stdout=bool(log_stdout))
+    try:
+        from iac_code.agui.server import run_server
+    except ImportError as exc:
+        typer.echo(_agui_server_missing_dependencies_message(), err=True)
+        raise typer.Exit(1) from exc
+    try:
+        run_server(
+            host=str(host),
+            port=port,
+            a2a_url=a2a_url or None,
+            a2a_token=a2a_token,
+            interrupt_ttl=interrupt_ttl,
+            state_dir=state_dir or None,
+            debug=bool(debug),
+            auth_token=auth_token,
+            idle_shutdown=float(idle_shutdown),
+        )
+    except ImportError as exc:
+        typer.echo(_agui_server_missing_dependencies_message(), err=True)
+        raise typer.Exit(1) from exc
+    except (RuntimeError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
 
 
 @app.command(help=_("Run iac-code as an A2A 1.0 server."))
