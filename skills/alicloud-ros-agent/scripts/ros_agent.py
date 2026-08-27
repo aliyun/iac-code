@@ -4077,6 +4077,8 @@ class _ManagerServer(ThreadingHTTPServer):
         self.record = record
         self.last_activity = time.monotonic()
         self.activity_mtime_ns = 0
+        self.startup_deadline = self.last_activity + MANAGER_START_TIMEOUT_SECONDS
+        self.startup_health_checked = False
 
 
 class _ManagerHandler(BaseHTTPRequestHandler):
@@ -4120,6 +4122,7 @@ class _ManagerHandler(BaseHTTPRequestHandler):
                 "pid": os.getpid(),
             },
         )
+        self.server.startup_health_checked = True
 
     def do_POST(self) -> None:
         if not self._authorized():
@@ -4196,6 +4199,10 @@ def run_manager_server(record_file: str) -> int:
                 if activity_mtime_ns > server.activity_mtime_ns:
                     server.activity_mtime_ns = activity_mtime_ns
                     server.last_activity = time.monotonic()
+            if not server.startup_health_checked:
+                if time.monotonic() >= server.startup_deadline:
+                    break
+                continue
             if _active_worker_exists():
                 server.last_activity = time.monotonic()
                 continue

@@ -36,12 +36,14 @@ from iac_code.mcp.types import (
 from iac_code.pipeline.engine.user_input import PipelineUserInput
 from iac_code.services.permission_wait import RecoveredPermissionAuditBoundary
 from iac_code.services.session_backup import (
+    BACKUP_STATE_FILENAME,
     BackupReason,
     BackupResult,
     SessionBackupBlocked,
     SessionBackupService,
     SessionReconcileResult,
 )
+from iac_code.services.session_backup_staging import StagedSessionBackupService
 from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
 from iac_code.services.session_storage import SessionStorage
 from iac_code.skills.frontmatter import SkillFrontmatter
@@ -1482,6 +1484,66 @@ async def test_executor_mirrors_canceled_terminal_before_terminal_backup(
     assert [(reason, critical) for *_ids, reason, critical in backup_service.calls] == [(BackupReason.TERMINAL, True)]
     record = await executor._task_store.get_or_create_task(task_id="task-1", context_id="ctx-1")
     assert record.state == "canceled"
+
+
+@pytest.mark.asyncio
+async def test_cancel_wait_returns_after_terminal_snapshot_staged_before_shared_publication(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_root = tmp_path / "config"
+    staging_root = tmp_path / "staging"
+    backup_root = tmp_path / "backup"
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    cwd = cwd.resolve()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_root))
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    started = asyncio.Event()
+
+    class BlockingLoop:
+        async def run_streaming(self, prompt: str):
+            started.set()
+            await asyncio.Future()
+            yield TextDeltaEvent(text="never")
+
+    runtime = FakeRuntime(agent_loop=BlockingLoop(), session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+    storage = SessionStorage(projects_dir=config_root / "projects")
+    backup_service = StagedSessionBackupService(staging_root, storage, retry_delays=())
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        backup_service=backup_service,
+    )
+    execute_task = asyncio.create_task(
+        executor.execute(
+            FakeRequestContext(metadata={"iac_code": {"cwd": str(cwd)}}),
+            FakeEventQueue(),
+        )
+    )
+    await started.wait()
+    context_record = await store.get_context_record("ctx-1")
+    session_dir = storage.session_dir(str(cwd), context_record.session_id)
+    (session_dir / "session.jsonl").write_text("terminal-v1\n", encoding="utf-8")
+    cancel_queue = FakeEventQueue()
+
+    await executor.cancel(FakeRequestContext(), cancel_queue)
+    await execute_task
+
+    snapshot = staging_root / "projects" / session_dir.parent.name / "{}_v1".format(context_record.session_id)
+    staged_state = json.loads((snapshot / BACKUP_STATE_FILENAME).read_text(encoding="utf-8"))
+    staged_task = json.loads((snapshot / "a2a" / "task.json").read_text(encoding="utf-8"))
+    staged_context = json.loads((snapshot / "a2a" / "context.json").read_text(encoding="utf-8"))
+    assert dump(cancel_queue.events[-1])["status"]["state"] == "TASK_STATE_CANCELED"
+    assert staged_state["generation"] == 1
+    assert staged_state["reason"] == BackupReason.TERMINAL.value
+    assert (snapshot / "session.jsonl").read_text(encoding="utf-8") == "terminal-v1\n"
+    assert staged_task["state"] == "canceled"
+    assert staged_context["active_task_id"] is None
+    assert not list(staging_root.rglob("*.copying"))
+    assert not backup_root.exists()
 
 
 @pytest.mark.asyncio

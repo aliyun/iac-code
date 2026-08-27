@@ -836,8 +836,9 @@ class A2ATaskStore(TaskStore):
             return True
 
     async def cancel_task_and_wait(self, task_id: str, *, timeout: float | None = None) -> bool:
+        task_id = validate_protocol_id(task_id)
         async with self._mutation_lock:
-            record = self._tasks.get(validate_protocol_id(task_id))
+            record = self._tasks.get(task_id)
             if record is None or record.active_task is None or record.active_task.done():
                 return False
             active_task = record.active_task
@@ -853,9 +854,36 @@ class A2ATaskStore(TaskStore):
         except asyncio.CancelledError:
             if not active_task.done():
                 raise
-        except TimeoutError:
+        except asyncio.TimeoutError:
             logger.warning("Timed out waiting for canceled A2A task %s to finish", task_id)
-        return True
+            return False
+        return await self._complete_cancel_task_wait(
+            task_id=task_id,
+            canceled_owner=active_task,
+        )
+
+    async def _complete_cancel_task_wait(
+        self,
+        *,
+        task_id: str,
+        canceled_owner: asyncio.Task[Any],
+    ) -> bool:
+        async with self._mutation_lock:
+            record = self._tasks.get(task_id)
+            if record is None:
+                return True
+            current_owner = record.active_task
+            if current_owner is not None and current_owner is not canceled_owner and not current_owner.done():
+                return False
+            if current_owner is not None:
+                record.active_task = None
+
+            context = self._contexts.get(record.context_id)
+            if context is not None and context.active_task_id == task_id:
+                context.active_task_id = None
+                context.touch()
+                self._mirror_context(context)
+            return True
 
     async def is_task_active(self, task_id: str) -> bool:
         async with self._mutation_lock:

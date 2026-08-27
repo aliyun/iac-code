@@ -283,15 +283,22 @@ def test_staged_reconcile_treats_concurrently_published_snapshot_as_absent(
     assert result.action == "current"
 
 
-def test_staging_worker_publishes_versions_in_order_and_empties_staging_root(
+def test_terminal_staging_allows_same_sandbox_reentry_before_ordered_publication(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     service, session_dir, staging_root, backup_root = _create_staged_service(monkeypatch, tmp_path)
     (session_dir / "session.jsonl").write_text("v1\n", encoding="utf-8")
-    service.backup_session("/repo", "s1", reason=BackupReason.NORMAL_TURN_END, critical=True)
-    (session_dir / "session.jsonl").write_text("v2\n", encoding="utf-8")
     service.backup_session("/repo", "s1", reason=BackupReason.TERMINAL, critical=True)
+
+    reconciled = service.reconcile_session("/repo", "s1")
+
+    assert reconciled.action == "staged_current"
+    assert reconciled.state is not None and reconciled.state.generation == 1
+    assert not backup_root.exists()
+
+    (session_dir / "session.jsonl").write_text("v2\n", encoding="utf-8")
+    service.backup_session("/repo", "s1", reason=BackupReason.NORMAL_TURN_END, critical=True)
     worker = SessionBackupStagingWorker(staging_root, backup_root)
     published: list[int] = []
     original_publish = worker.publish_snapshot
@@ -309,6 +316,58 @@ def test_staging_worker_publishes_versions_in_order_and_empties_staging_root(
     assert (final_dir / "session.jsonl").read_text(encoding="utf-8") == "v2\n"
     assert _read_state(final_dir, shared=True).generation == 2
     assert list(staging_root.iterdir()) == []
+
+
+def test_terminal_publication_restores_in_another_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service, session_dir, staging_root, backup_root = _create_staged_service(
+        monkeypatch,
+        tmp_path,
+    )
+    expected_files = {
+        "session.jsonl": '{"role":"user","content":"restore-me"}\n',
+        "a2a/pipeline/a2a-snapshot.json": '{"status":"canceled"}\n',
+    }
+    for relative, content in expected_files.items():
+        path = session_dir / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    staged = service.backup_session(
+        "/repo",
+        "s1",
+        reason=BackupReason.TERMINAL,
+        critical=True,
+    )
+
+    assert SessionBackupStagingWorker(staging_root, backup_root).run_once() == 1
+
+    sandbox_b_storage = SessionStorage(projects_dir=tmp_path / "sandbox-b-config" / "projects")
+    sandbox_b_service = StagedSessionBackupService(
+        tmp_path / "sandbox-b-staging",
+        sandbox_b_storage,
+        retry_delays=(),
+    )
+    restored = sandbox_b_service.restore_session("/repo", "s1")
+    restored_dir = sandbox_b_storage.session_dir("/repo", "s1")
+
+    assert restored.restored is True
+    for relative, content in expected_files.items():
+        assert (restored_dir / relative).read_text(encoding="utf-8") == content
+
+    shared_dir = backup_root / "projects" / session_dir.parent.name / "s1"
+    published_state = _read_state(shared_dir, shared=True)
+    assert published_state.generation == staged.generation
+    assert published_state.commit_id == staged.commit_id
+    assert not (shared_dir / "generations").exists()
+    assert sorted(path.name for path in shared_dir.iterdir()) == [
+        ".backup-state.json",
+        "a2a",
+        "metadata.json",
+        "session.jsonl",
+    ]
 
 
 def test_staging_worker_does_not_skip_failed_version_for_same_session(

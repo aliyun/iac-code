@@ -682,6 +682,105 @@ async def test_cancel_active_task_does_not_need_context_lock() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cancel_task_and_wait_reports_unfinished_task_after_timeout() -> None:
+    store = A2ATaskStore(
+        metrics=NoOpA2AMetrics(),
+        idle_timeout_seconds=60,
+        cleanup_interval_seconds=300,
+    )
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    release = asyncio.Event()
+
+    async def ignore_cancel_until_released() -> None:
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            await release.wait()
+
+    active = asyncio.create_task(ignore_cancel_until_released())
+    task.active_task = active
+    await asyncio.sleep(0)
+
+    assert await store.cancel_task_and_wait("task-1", timeout=0.01) is False
+    assert active.done() is False
+
+    release.set()
+    await active
+
+
+@pytest.mark.asyncio
+async def test_cancel_task_and_wait_clears_inactive_context_fence(
+    tmp_path,
+) -> None:
+    store = A2ATaskStore(
+        metrics=NoOpA2AMetrics(),
+        idle_timeout_seconds=60,
+        cleanup_interval_seconds=300,
+    )
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda sid: object(),
+    )
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    context.active_task_id = task.task_id
+    store.mirror_context(context)
+
+    async def run_until_cancelled() -> None:
+        await asyncio.sleep(60)
+
+    active = asyncio.create_task(run_until_cancelled())
+    task.active_task = active
+    await asyncio.sleep(0)
+
+    assert await store.cancel_task_and_wait(task.task_id, timeout=1) is True
+    assert task.active_task is None
+    assert (await store.get_context_record(context.context_id)).active_task_id is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_task_and_wait_preserves_live_replacement_owner(
+    tmp_path,
+) -> None:
+    store = A2ATaskStore(
+        metrics=NoOpA2AMetrics(),
+        idle_timeout_seconds=60,
+        cleanup_interval_seconds=300,
+    )
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda sid: object(),
+    )
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    context.active_task_id = task.task_id
+    store.mirror_context(context)
+    replacement_release = asyncio.Event()
+
+    async def replacement_owner() -> None:
+        await replacement_release.wait()
+
+    replacement = asyncio.create_task(replacement_owner())
+
+    async def replace_owner_when_cancelled() -> None:
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            task.active_task = replacement
+
+    active = asyncio.create_task(replace_owner_when_cancelled())
+    task.active_task = active
+    await asyncio.sleep(0)
+
+    assert await store.cancel_task_and_wait(task.task_id, timeout=1) is False
+    assert task.active_task is replacement
+    assert (await store.get_context_record(context.context_id)).active_task_id == task.task_id
+
+    replacement_release.set()
+    await replacement
+
+
+@pytest.mark.asyncio
 async def test_task_status_access_waits_for_mutation_lock() -> None:
     store = A2ATaskStore(metrics=NoOpA2AMetrics(), idle_timeout_seconds=60, cleanup_interval_seconds=300)
     task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")

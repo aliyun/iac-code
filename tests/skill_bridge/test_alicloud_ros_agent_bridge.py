@@ -2294,6 +2294,36 @@ def test_manager_is_loopback_authenticated_reused_and_recovers_after_idle_shutdo
     _wait_for_pid_exit(third["pid"])
 
 
+def test_manager_waits_for_first_authorized_health_before_idle_shutdown(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    original_manager_matches = bridge._manager_matches
+    delayed_health_check = False
+
+    def delay_first_authorized_health_check(record):
+        nonlocal delayed_health_check
+        if delayed_health_check:
+            return original_manager_matches(record)
+        invalid_record = dict(record, token="invalid")
+        deadline = time.monotonic() + bridge.MANAGER_START_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            try:
+                bridge._manager_request(invalid_record, "/health", timeout=0.2)
+            except bridge.BridgeError as exc:
+                if exc.code == "unauthorized":
+                    delayed_health_check = True
+                    time.sleep(0.7)
+                    break
+            time.sleep(0.05)
+        return original_manager_matches(record)
+
+    monkeypatch.setattr(bridge, "_manager_matches", delay_first_authorized_health_check)
+
+    manager = bridge.ensure_manager(0.1)
+
+    assert delayed_health_check
+    _wait_for_pid_exit(manager["pid"])
+
+
 def test_manager_idle_countdown_starts_after_sse_worker_exits(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
     workspace = tmp_path / "workspace"
@@ -2368,9 +2398,11 @@ def test_managed_worker_outlives_start_and_follow_returns_step_start_before_fina
     monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    release_final = tmp_path / "release-final"
     fake_cli = _write_fake_aliyun(
         tmp_path,
         "import json, time\n"
+        + "from pathlib import Path\n"
         + "def emit(value):\n"
         + "    print(json.dumps({'data': value}), flush=True)\n"
         + "def status(state, text='', metadata=None):\n"
@@ -2382,7 +2414,10 @@ def test_managed_worker_outlives_start_and_follow_returns_step_start_before_fina
         + "time.sleep(0.35)\n"
         + "emit(status('TASK_STATE_WORKING', metadata={'pipeline': {'eventType': 'step_started', "
         + "'step': {'id': 'intent_parsing', 'name': 'Understand'}}}))\n"
-        + "time.sleep(0.35)\n"
+        + "release = Path({!r})\n".format(str(release_final))
+        + "deadline = time.monotonic() + 10\n"
+        + "while not release.exists() and time.monotonic() < deadline:\n"
+        + "    time.sleep(0.05)\n"
         + "emit(status('TASK_STATE_WORKING', 'done', {'assistantFinal': {'complete': True}}))\n"
         + "emit(status('TASK_STATE_INPUT_REQUIRED'))\n",
     )
@@ -2413,6 +2448,7 @@ def test_managed_worker_outlives_start_and_follow_returns_step_start_before_fina
     assert "finalText" not in first
     assert bridge._pid_alive(started["workerPid"])
 
+    release_final.touch()
     second = bridge._follow_job_local(started["jobId"], first["cursor"], 3)
     assert second["state"] == "turn-completed"
     assert second["finalText"] == "done"
