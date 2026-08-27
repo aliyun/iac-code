@@ -127,7 +127,7 @@ def test_bridge_parses_as_python_38_and_uses_only_standard_library_imports() -> 
     assert "access-key-secret" not in source.lower()
 
 
-def test_build_command_uses_published_post_rpc_without_explicit_version_or_credentials(monkeypatch) -> None:
+def test_build_command_uses_ros_plugin_without_explicit_credentials(monkeypatch) -> None:
     monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/usr/local/bin/aliyun")
     command = bridge.build_command(
         _chat_args(
@@ -137,7 +137,7 @@ def test_build_command_uses_published_post_rpc_without_explicit_version_or_crede
             no_thinking=True,
         ),
         "创建 VPC",
-        '{"preferredLanguage":"zh"}',
+        None,
         [
             {
                 "Type": "image",
@@ -148,16 +148,21 @@ def test_build_command_uses_published_post_rpc_without_explicit_version_or_crede
         ],
     )
 
-    assert command[:3] == ["/usr/local/bin/aliyun", "ros", "StartChat"]
+    assert command[:3] == ["/usr/local/bin/aliyun", "ros", "start-chat"]
     assert "--force" not in command
-    assert command[command.index("--method") + 1] == "POST"
-    assert command[command.index("--Mode") + 1] == "IaCCodePipeline"
-    assert "--PipelineName" not in command
-    assert command[command.index("--SessionId") + 1] == "session-1"
-    assert command[command.index("--EnablePartialMessage") + 1] == "true"
-    assert command[command.index("--EnableThinking") + 1] == "false"
-    assert command[command.index("--Attachments.1.OssObjectKey") + 1] == "user/workspace/diagram.png"
-    assert command[command.index("--Query") + 1] == "创建 VPC"
+    assert "--method" not in command
+    assert command[command.index("--biz-mode") + 1] == "IaCCodePipeline"
+    assert command[command.index("--session-id") + 1] == "session-1"
+    assert command[command.index("--enable-partial-message") + 1] == "true"
+    assert command[command.index("--enable-thinking") + 1] == "false"
+    attachment_index = command.index("--attachments")
+    assert command[attachment_index + 1 : attachment_index + 5] == [
+        "Type=image",
+        "MimeType=image/png",
+        "Name=diagram.png",
+        "OssObjectKey=user/workspace/diagram.png",
+    ]
+    assert command[command.index("--query") + 1] == "创建 VPC"
     assert command[command.index("--user-agent") + 1] == bridge.USER_AGENT
     assert "--version" not in command
     assert not any("access-key" in value.lower() for value in command)
@@ -188,6 +193,24 @@ def test_build_command_supports_loopback_endpoint_through_native_cli(monkeypatch
     assert "--skip-secure-verify" in command
 
 
+def test_build_command_rejects_remote_profile_and_loopback(monkeypatch) -> None:
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/remote/bin/aliyun")
+    with pytest.raises(bridge.BridgeError, match="local Profile"):
+        bridge.build_command(
+            _chat_args(aliyun_cli_execution_mode="remote", profile="local-profile"),
+            "hello",
+            None,
+            [],
+        )
+    with pytest.raises(bridge.BridgeError, match="public aliyuncs.com"):
+        bridge.build_command(
+            _chat_args(aliyun_cli_execution_mode="remote", endpoint="127.0.0.1:56124"),
+            "hello",
+            None,
+            [],
+        )
+
+
 def test_build_stop_command_uses_only_published_stop_chat_inputs(monkeypatch) -> None:
     monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/usr/local/bin/aliyun")
     command = bridge.build_stop_command(
@@ -201,18 +224,18 @@ def test_build_stop_command_uses_only_published_stop_chat_inputs(monkeypatch) ->
         "session-1",
     )
 
-    assert command[:3] == ["/usr/local/bin/aliyun", "ros", "StopChat"]
-    assert command[command.index("--method") + 1] == "POST"
-    assert command[command.index("--AgentVersion") + 1] == "V2"
-    assert command[command.index("--SessionId") + 1] == "session-1"
+    assert command[:3] == ["/usr/local/bin/aliyun", "ros", "stop-chat"]
+    assert "--method" not in command
+    assert command[command.index("--agent-version") + 1] == "V2"
+    assert command[command.index("--session-id") + 1] == "session-1"
     assert command[command.index("--profile") + 1] == "skill-profile"
     assert command[command.index("--region") + 1] == "cn-hangzhou"
     assert command[command.index("--user-agent") + 1] == bridge.USER_AGENT
     assert "--force" not in command
     assert "--secure" in command
     assert "--skip-secure-verify" in command
-    assert "--Query" not in command
-    assert "--Mode" not in command
+    assert "--query" not in command
+    assert "--biz-mode" not in command
     assert not any("access-key" in value.lower() for value in command)
 
 
@@ -225,6 +248,7 @@ def test_optional_skill_config_defaults_and_applies_endpoint_and_mode_policy(tmp
         json.dumps(
             {
                 "transport": "aliyun_cli",
+                "aliyunCLIExecutionMode": "local",
                 "endpoint": "127.0.0.1:56124",
                 "allowedAgentModes": ["normal"],
                 "managerIdleSeconds": 45,
@@ -240,6 +264,7 @@ def test_optional_skill_config_defaults_and_applies_endpoint_and_mode_policy(tmp
 
     assert args.endpoint == "127.0.0.1:56124"
     assert args.transport == "aliyun_cli"
+    assert args.aliyun_cli_execution_mode == "local"
     assert config["allowedAgentModes"] == ["normal"]
     assert args.manager_idle_seconds == 45
     assert args.no_thinking is True
@@ -300,6 +325,10 @@ def test_profile_and_thinking_fixed_by_config_reject_conflicting_start_flags() -
         {"unknown": True},
         {"transport": "unsupported"},
         {"transport": True},
+        {"aliyunCLIExecutionMode": "unsupported"},
+        {"aliyunCLIExecutionMode": "remote"},
+        {"transport": "aliyun_cli", "aliyunCLIExecutionMode": "remote", "aliyunCLIProfile": "profile"},
+        {"transport": "aliyun_cli", "aliyunCLIExecutionMode": "remote", "endpoint": "127.0.0.1:56124"},
         {"endpoint": "https://127.0.0.1:56124"},
         {"endpoint": "attacker.example"},
         {"allowedAgentModes": []},
@@ -445,6 +474,7 @@ def test_check_returns_safe_current_profile_and_effective_skill_policy(monkeypat
         "cli": None,
         "version": None,
         "transport": "code",
+        "aliyunCLIExecutionMode": "local",
         "endpoint": "127.0.0.1:56124",
         "allowedAgentModes": ["normal"],
         "managerIdleSeconds": bridge.MANAGER_IDLE_SECONDS,
@@ -606,7 +636,17 @@ def test_aliyun_cli_check_does_not_load_optional_sdk_packages(monkeypatch) -> No
     monkeypatch.setattr(
         bridge,
         "_selected_cli_profile_record",
-        lambda profile: {"name": profile or "default", "mode": "AK", "regionId": "cn-hangzhou"},
+        lambda profile: {
+            "name": profile or "default",
+            "mode": "AK",
+            "regionId": "cn-hangzhou",
+            "autoPluginInstall": False,
+        },
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_local_ros_plugin_status",
+        lambda: {"installed": True, "ready": True, "version": "0.7.2"},
     )
     monkeypatch.setattr(bridge.subprocess, "run", fake_run)
     monkeypatch.setattr(bridge, "_load_code_sdk", lambda: pytest.fail("CLI transport must not load SDK packages"))
@@ -617,6 +657,185 @@ def test_aliyun_cli_check_does_not_load_optional_sdk_packages(monkeypatch) -> No
 
     assert result["ok"] is True
     assert result["transport"] == "aliyun_cli"
+    assert result["aliyunCLIExecutionMode"] == "local"
+    assert result["rosPluginReady"] is True
+    assert result["pluginInstallRequired"] is False
+    assert result["pluginAutoInstallEnabled"] is False
+    assert result["rosPluginVersion"] == "0.7.2"
+
+
+@pytest.mark.parametrize(
+    ("plugin_status", "auto_install", "install_required"),
+    [
+        ({"installed": False, "ready": False}, False, True),
+        ({"installed": False, "ready": False}, True, False),
+        ({"installed": True, "ready": False, "version": "0.7.1"}, True, True),
+    ],
+)
+def test_local_cli_check_reports_when_skill_must_install_ros_plugin(
+    monkeypatch, plugin_status, auto_install: bool, install_required: bool
+) -> None:
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/usr/local/bin/aliyun")
+    monkeypatch.setattr(
+        bridge,
+        "_selected_cli_profile_record",
+        lambda _profile: {
+            "name": "default",
+            "mode": "AK",
+            "regionId": "cn-hangzhou",
+            "autoPluginInstall": auto_install,
+        },
+    )
+    monkeypatch.setattr(bridge, "_local_ros_plugin_status", lambda: plugin_status)
+    monkeypatch.setattr(
+        bridge,
+        "_run_check_command",
+        lambda _command, required: SimpleNamespace(returncode=0, stdout=b"3.4.11\n", stderr=b""),
+    )
+    args = argparse.Namespace(command="check", aliyun_path="aliyun")
+    bridge.apply_skill_config(args, {"transport": "aliyun_cli"})
+
+    result = bridge.run_check(args)
+
+    assert result["rosPluginReady"] is False
+    assert result["pluginAutoInstallEnabled"] is auto_install
+    assert result["pluginInstallRequired"] is install_required
+
+
+def test_remote_aliyun_cli_check_does_not_run_cli_or_read_local_configuration(monkeypatch) -> None:
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/remote/bin/aliyun")
+    monkeypatch.setattr(
+        bridge,
+        "_selected_cli_profile_record",
+        lambda _profile: pytest.fail("remote CLI mode must not read a local Profile"),
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_local_ros_plugin_status",
+        lambda: pytest.fail("remote CLI mode must not inspect local plugins"),
+    )
+    monkeypatch.setattr(
+        bridge.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("remote CLI check must not invoke a CLI command"),
+    )
+    args = argparse.Namespace(command="check", aliyun_path="aliyun")
+    bridge.apply_skill_config(
+        args,
+        {
+            "transport": "aliyun_cli",
+            "aliyunCLIExecutionMode": "remote",
+            "endpoint": "ros-pre.aliyuncs.com",
+        },
+    )
+
+    result = bridge.run_check(args)
+
+    assert result["ok"] is True
+    assert result["cli"] == "aliyun"
+    assert result["version"] is None
+    assert result["aliyunCLIExecutionMode"] == "remote"
+    assert result["currentProfile"] == {"configured": True, "mode": "RemoteSandbox"}
+    assert "rosPluginReady" not in result
+    assert "pluginInstallRequired" not in result
+
+
+def test_remote_aliyun_cli_identity_does_not_read_local_credentials_or_region(monkeypatch) -> None:
+    monkeypatch.setattr(
+        bridge,
+        "_selected_cli_profile_record",
+        lambda _profile: pytest.fail("remote CLI mode must not read a local Profile"),
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_environment_region",
+        lambda: pytest.fail("remote CLI mode must not read a local region"),
+    )
+    args = SimpleNamespace(
+        transport="aliyun_cli",
+        aliyun_cli_execution_mode="remote",
+        profile=None,
+        profile_pinned=False,
+        region_id=None,
+    )
+
+    bridge._resolve_start_identity(args)
+
+    assert args.profile is None
+    assert args.credential_source == "remote"
+    assert args.region_id is None
+
+
+def test_local_ros_plugin_status_requires_binary_and_start_stop_commands(monkeypatch, tmp_path: Path) -> None:
+    plugin_root = tmp_path / "aliyun-cli-ros"
+    plugin_root.mkdir()
+    executable = plugin_root / ("aliyun-cli-ros.exe" if os.name == "nt" else "aliyun-cli-ros")
+    executable.write_bytes(b"plugin")
+    if os.name != "nt":
+        executable.chmod(0o700)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "plugins": {
+                    "aliyun-cli-ros": {
+                        "version": "0.7.2",
+                        "path": str(plugin_root),
+                        "cmdNames": ["start-chat", "stop-chat"],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ALIBABA_CLOUD_CLI_PLUGINS_DIR", str(tmp_path))
+
+    assert bridge._local_ros_plugin_status() == {"installed": True, "ready": True, "version": "0.7.2"}
+
+    manifest.write_text(
+        json.dumps(
+            {
+                "plugins": {
+                    "aliyun-cli-ros": {
+                        "version": "0.7.1",
+                        "path": str(plugin_root),
+                        "cmdNames": ["describe-regions"],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert bridge._local_ros_plugin_status() == {"installed": True, "ready": False, "version": "0.7.1"}
+
+
+def test_cli_transport_rejects_client_context_and_remote_profile() -> None:
+    local = argparse.Namespace(
+        command="start",
+        endpoint=None,
+        mode="normal",
+        profile=None,
+        no_thinking=False,
+        client_context_file="context.json",
+    )
+    with pytest.raises(bridge.BridgeError) as context_error:
+        bridge.apply_skill_config(local, {"transport": "aliyun_cli"})
+    assert context_error.value.code == "unsupported_input"
+
+    remote = argparse.Namespace(
+        command="start",
+        endpoint=None,
+        mode="normal",
+        profile="local-profile",
+        no_thinking=False,
+        client_context_file=None,
+    )
+    with pytest.raises(bridge.BridgeError) as profile_error:
+        bridge.apply_skill_config(
+            remote,
+            {"transport": "aliyun_cli", "aliyunCLIExecutionMode": "remote"},
+        )
+    assert profile_error.value.code == "config_conflict"
 
 
 def test_workspace_json_inputs_validate_context_and_flatten_attachments(tmp_path: Path) -> None:
@@ -747,6 +966,22 @@ def test_sse_parser_handles_heartbeats_multiline_data_and_raw_json() -> None:
         {"value": 1},
         {"result": {"ok": True}},
     ]
+
+
+def test_cli_plugin_parser_streams_and_unwraps_each_json_line() -> None:
+    first = {"result": {"statusUpdate": {"status": {"state": "TASK_STATE_WORKING"}}}}
+    second = {"result": {"statusUpdate": {"status": {"state": "TASK_STATE_COMPLETED"}}}}
+
+    events = list(
+        bridge.iter_cli_plugin_payloads(
+            [
+                json.dumps({"data": first}) + "\n",
+                json.dumps({"data": second}) + "\n",
+            ]
+        )
+    )
+
+    assert events == [(first, json.dumps({"data": first})), (second, json.dumps({"data": second}))]
 
 
 def test_sse_parser_rejects_an_unterminated_event_as_soon_as_its_cumulative_limit_is_exceeded(
@@ -1496,18 +1731,17 @@ def test_cli_failure_redacts_secrets_from_error() -> None:
 def test_run_chat_consumes_fake_cli_stream_without_network(monkeypatch, tmp_path: Path) -> None:
     prompt = tmp_path / "prompt.txt"
     prompt.write_text("hello", encoding="utf-8")
-    output = (
-        "data: "
-        + json.dumps(
-            _status_event(
+    output = json.dumps(
+        {
+            "data": _status_event(
                 state="TASK_STATE_INPUT_REQUIRED",
                 text="done",
                 metadata={"assistantFinal": {"complete": True}},
-            ),
-            separators=(",", ":"),
-        )
-        + "\n\n"
+            )
+        },
+        separators=(",", ":"),
     )
+    output += "\n"
     captured = {}
 
     class FakeProcess:
@@ -1556,7 +1790,7 @@ def test_run_chat_consumes_fake_cli_stream_without_network(monkeypatch, tmp_path
     assert result["state"] == "turn-completed"
     assert result["finalText"] == "done"
     assert os.path.normcase(captured["cwd"]) == os.path.normcase(str(tmp_path))
-    assert captured["command"][captured["command"].index("--Query") + 1] == "hello"
+    assert captured["command"][captured["command"].index("--query") + 1] == "hello"
 
 
 def test_code_transport_streams_sdk_signed_request_without_cli_response_buffering(monkeypatch, tmp_path: Path) -> None:
@@ -1943,10 +2177,9 @@ def test_run_respond_sends_json_as_the_only_start_chat_control_payload(monkeypat
         ),
         encoding="utf-8",
     )
-    output = (
-        "data: "
-        + json.dumps(
-            {
+    output = json.dumps(
+        {
+            "data": {
                 "result": {
                     "messageId": "permission-ack-1",
                     "taskId": "task-1",
@@ -1965,12 +2198,12 @@ def test_run_respond_sends_json_as_the_only_start_chat_control_payload(monkeypat
                             },
                         }
                     ],
-                }
-            },
-            separators=(",", ":"),
-        )
-        + "\n\n"
+                },
+            }
+        },
+        separators=(",", ":"),
     )
+    output += "\n"
     captured = {}
 
     class FakeProcess:
@@ -2013,16 +2246,16 @@ def test_run_respond_sends_json_as_the_only_start_chat_control_payload(monkeypat
 
     result = bridge.run_respond(args)
     command = captured["command"]
-    query_text = command[command.index("--Query") + 1]
+    query_text = command[command.index("--query") + 1]
     assert query_text.startswith(bridge.PERMISSION_QUERY_PREFIX + " ")
     query = json.loads(query_text[len(bridge.PERMISSION_QUERY_PREFIX) :])
 
     assert result["state"] == "permission-responded"
     assert result["permissionResponse"]["decision"] == "deny"
     assert query["decision"] == "deny"
-    assert command[command.index("--EnableThinking") + 1] == "false"
-    assert "--ClientContext" not in command
-    assert not any(value.startswith("--Attachments.") for value in command)
+    assert command[command.index("--enable-thinking") + 1] == "false"
+    assert "--client-context" not in command
+    assert "--attachments" not in command
 
 
 def _wait_for_pid_exit(pid: int, timeout: float = 4.0) -> None:
@@ -2065,16 +2298,19 @@ def test_manager_idle_countdown_starts_after_sse_worker_exits(monkeypatch, tmp_p
     monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    fake_cli = _write_fake_aliyun(
-        tmp_path,
+    # Invoke the current interpreter as the fake CLI and let it execute the
+    # positional ``ros`` script from the worker cwd. This avoids depending on
+    # Windows batch-file launch behavior in a manager lifecycle test.
+    fake_cli = Path(sys.executable)
+    (workspace / "ros").write_text(
         "import json, time\n"
         + "time.sleep(0.6)\n"
         + "event = {'result': {'statusUpdate': {'taskId': 'task-1', 'contextId': 'session-1', "
         + "'status': {'state': 'TASK_STATE_INPUT_REQUIRED', 'message': {'role': 'ROLE_AGENT', "
         + "'parts': [{'text': 'done'}]}}, 'metadata': {'iac_code': {'assistantFinal': "
         + "{'complete': True}}, 'iacCodeSessionId': 'iac-1'}}}}\n"
-        + "print('data: ' + json.dumps(event), flush=True)\n"
-        + "print('', flush=True)\n",
+        + "print(json.dumps({'data': event}), flush=True)\n",
+        encoding="utf-8",
     )
 
     # Leave enough scheduling headroom for a loaded Windows xdist runner; this
@@ -2136,8 +2372,7 @@ def test_managed_worker_outlives_start_and_follow_returns_step_start_before_fina
         tmp_path,
         "import json, time\n"
         + "def emit(value):\n"
-        + "    print('data: ' + json.dumps(value), flush=True)\n"
-        + "    print('', flush=True)\n"
+        + "    print(json.dumps({'data': value}), flush=True)\n"
         + "def status(state, text='', metadata=None):\n"
         + "    body = {'state': state}\n"
         + "    if text:\n"
@@ -3227,6 +3462,45 @@ def test_request_from_legacy_job_uses_current_stream_read_timeout_default() -> N
 
     assert request["readTimeout"] == bridge.DEFAULT_READ_TIMEOUT_SECONDS == 1800
     assert request["transport"] == "aliyun_cli"
+    assert request["aliyunCLIExecutionMode"] == "local"
+
+
+def test_remote_cli_job_persists_execution_mode_without_local_identity(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    captured = {}
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/remote/bin/aliyun")
+
+    def fake_spawn(job_id, request):
+        captured["jobId"] = job_id
+        captured["request"] = request
+        return 123
+
+    monkeypatch.setattr(bridge, "_spawn_worker", fake_spawn)
+
+    started = bridge._start_job_local(
+        {
+            "workspace": str(workspace),
+            "prompt": "create a VPC",
+            "mode": "normal",
+            "transport": "aliyun_cli",
+            "aliyunCLIExecutionMode": "remote",
+            "endpoint": "ros-pre.aliyuncs.com",
+            "regionId": None,
+            "profile": None,
+            "credentialSource": "remote",
+            "aliyunPath": "aliyun",
+        }
+    )
+
+    _root, job_path, _spool = bridge._job_paths(started["jobId"])
+    job = bridge._load_state_json(job_path)
+    assert job["aliyunCLIExecutionMode"] == "remote"
+    assert job["profile"] is None
+    assert job["regionId"] is None
+    assert captured["request"]["aliyunCLIExecutionMode"] == "remote"
+    assert captured["request"]["credentialSource"] == "remote"
 
 
 @pytest.mark.parametrize(
