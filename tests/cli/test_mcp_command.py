@@ -3167,7 +3167,6 @@ def test_mcp_auth_exchanges_loopback_code_and_stores_token(monkeypatch, tmp_path
         "discover_oauth_metadata",
         lambda config, resource_metadata_url=None: _fake_oauth_metadata(oauth_server),
     )
-    callback_port = _free_port()
     runner = CliRunner()
     runner.invoke(
         app,
@@ -3182,7 +3181,7 @@ def test_mcp_auth_exchanges_loopback_code_and_stores_token(monkeypatch, tmp_path
             "--client-id",
             "client-id",
             "--callback-port",
-            str(callback_port),
+            "0",
             "--auth-server-metadata-url",
             oauth_server.metadata_url,
             "--scope",

@@ -38,6 +38,7 @@ from iac_code.pipeline.engine.prerequisites import PrerequisiteDecision, Prerequ
 from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pipeline_user_input
 from iac_code.services.permission_wait import (
     PermissionWaitCheckpointStore,
+    PermissionWaitCoordinator,
     PermissionWaitPolicy,
     RecoveredPermissionAuditBoundary,
 )
@@ -3198,6 +3199,24 @@ async def test_pipeline_permission_resident_timer_survives_full_executor_publica
 ) -> None:
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     future = asyncio.get_running_loop().create_future()
+    timer_started = asyncio.Event()
+    timer_completed = asyncio.Event()
+    release_timer = asyncio.Event()
+
+    class GatedPermissionWaitCoordinator(PermissionWaitCoordinator):
+        async def _run_resident_timer(self, owner) -> None:
+            timer_started.set()
+            await release_timer.wait()
+            try:
+                await super()._run_resident_timer(owner)
+            finally:
+                if future.done():
+                    timer_completed.set()
+
+    monkeypatch.setattr(
+        "iac_code.services.permission_wait.PermissionWaitCoordinator",
+        GatedPermissionWaitCoordinator,
+    )
 
     class PermissionPipeline(FakePipeline):
         def __init__(self) -> None:
@@ -3244,10 +3263,8 @@ async def test_pipeline_permission_resident_timer_survives_full_executor_publica
         model="qwen3.6-plus",
         backup_service=backup_service,
         permission_wait_policy=PermissionWaitPolicy(
-            # Leave enough time for critical backup and publication to finish
-            # so the test measures timer ownership rather than runner speed.
-            resident_timeout_seconds=2,
-            timeout_grace_seconds=0.1,
+            resident_timeout_seconds=0.01,
+            timeout_grace_seconds=0,
         ),
     )
     queue = FakeEventQueue()
@@ -3257,7 +3274,11 @@ async def test_pipeline_permission_resident_timer_survives_full_executor_publica
         timeout=3,
     )
 
+    await asyncio.wait_for(timer_started.wait(), timeout=3)
+    assert future.done() is False
+    release_timer.set()
     assert await asyncio.wait_for(future, timeout=3) is PermissionWaitOutcome.SUSPEND
+    await asyncio.wait_for(timer_completed.wait(), timeout=3)
     context_record = await store.get_context_record("ctx-1")
     checkpoint = PermissionWaitCheckpointStore(str(tmp_path), context_record.session_id).list_active()[0]
     assert checkpoint["phase"] == "SUSPENDED"

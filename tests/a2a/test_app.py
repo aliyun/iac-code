@@ -2819,6 +2819,7 @@ async def test_subscribe_to_active_task_yields_initial_task_then_updates(monkeyp
 async def test_active_task_push_enqueue_failure_does_not_fail_task(monkeypatch, tmp_path, caplog) -> None:
     release = asyncio.Event()
     loop_completed = asyncio.Event()
+    enqueue_attempted = asyncio.Event()
 
     class ControlledLoop:
         async def run_streaming(self, _prompt: str):
@@ -2839,6 +2840,7 @@ async def test_active_task_push_enqueue_failure_does_not_fail_task(monkeypatch, 
     call_context = ServerCallContext()
 
     async def fail_enqueue(_job) -> None:
+        enqueue_attempted.set()
         raise OSError("queue unavailable")
 
     try:
@@ -2876,6 +2878,7 @@ async def test_active_task_push_enqueue_failure_does_not_fail_task(monkeypatch, 
 
             await asyncio.wait_for(collect_remaining_events(), timeout=1)
             await asyncio.wait_for(loop_completed.wait(), timeout=1)
+            await asyncio.wait_for(enqueue_attempted.wait(), timeout=1)
 
         final_task = await components.handler.on_get_task(GetTaskRequest(id=result.id), call_context)
         assert final_task.status.state != TaskState.TASK_STATE_FAILED
