@@ -983,7 +983,7 @@ def test_prompt_file_must_be_utf8_nonempty_and_inside_workspace(tmp_path: Path) 
         bridge.read_prompt(workspace, str(empty))
 
 
-def test_authenticated_manager_accepts_existing_workspace_outside_home_policy(tmp_path: Path) -> None:
+def test_authenticated_manager_accepts_existing_workspace_inside_user_owned_roots(tmp_path: Path) -> None:
     workspace = tmp_path / "agenthub-workspace"
     workspace.mkdir()
 
@@ -991,6 +991,11 @@ def test_authenticated_manager_accepts_existing_workspace_outside_home_policy(tm
 
     with pytest.raises(bridge.BridgeError, match="existing directory"):
         bridge._trusted_manager_workspace(str(workspace / "missing"))
+
+
+def test_authenticated_manager_rejects_workspace_outside_user_owned_roots() -> None:
+    with pytest.raises(bridge.BridgeError, match="home or temporary directory"):
+        bridge._trusted_manager_workspace(os.path.abspath(os.sep))
 
 
 def test_sse_parser_handles_heartbeats_multiline_data_and_raw_json() -> None:

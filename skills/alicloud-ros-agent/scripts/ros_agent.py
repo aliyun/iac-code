@@ -529,9 +529,9 @@ def _workspace(raw_path: Optional[str] = None) -> pathlib.Path:
 
 
 def _trusted_manager_workspace(raw_path: str) -> pathlib.Path:
-    """Resolve a workspace received over the authenticated local manager channel."""
+    """Resolve a manager workspace under the same user-owned roots as the CLI."""
 
-    path = pathlib.Path(os.path.realpath(raw_path)).resolve()
+    path = _resolve_user_owned_path(raw_path, "invalid_input", "The workspace")
     if not path.is_dir():
         raise BridgeError("invalid_input", "The workspace must be an existing directory.")
     return path
