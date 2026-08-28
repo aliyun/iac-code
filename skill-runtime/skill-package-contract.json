@@ -9,6 +9,40 @@
   "hostPythonMinimum": "3.8",
   "kind": "iac-code-skill-package-contract",
   "packageScript": "skill-runtime/package_skill.py",
+  "profileScript": "skill-runtime/skill_profiles.py",
+  "profiles": {
+    "alibabacloud-iac-code": {
+      "archiveRoot": "alibabacloud-iac-code",
+      "files": [
+        "SKILL.md",
+        "references/ram-policies.md",
+        "scripts/iac_code.py"
+      ],
+      "requiresRuntime": true,
+      "sourceDirectory": "skills/iac-code"
+    },
+    "alibabacloud-ros-agent": {
+      "archiveRoot": "alibabacloud-ros-agent",
+      "files": [
+        "SKILL.md",
+        "references/ram-policies.md",
+        "scripts/requirements.txt",
+        "scripts/ros_agent.py"
+      ],
+      "requiresRuntime": false,
+      "sourceDirectory": "skills/alicloud-ros-agent"
+    },
+    "iac-code": {
+      "archiveRoot": "iac-code",
+      "files": [
+        "SKILL.md",
+        "agents/openai.yaml",
+        "scripts/iac_code.py"
+      ],
+      "requiresRuntime": true,
+      "sourceDirectory": "skills/iac-code"
+    }
+  },
   "runtimePython": "cp312",
   "schemaVersion": 1,
   "sourceDirectory": "skills/iac-code"

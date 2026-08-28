@@ -1,9 +1,9 @@
 ---
-name: alicloud-ros-agent
+name: {{SKILL_NAME}}
 description: Use Alibaba Cloud ROS Agent through its StartChat API for remote infrastructure conversations. Trigger when the user explicitly asks for the ROS Agent, its StartChat API, or a remote iac-code conversation through Alibaba Cloud. Supports normal and selling Pipeline conversations, questions, candidate selection, correlated permission approval or denial, and explicit StopChat cancellation. Do not trigger for ordinary Alibaba Cloud infrastructure work that can use the local iac-code Skill, or for unrelated ROS API operations.
 ---
 
-# Alibaba Cloud ROS Agent
+# {{SKILL_TITLE}}
 
 Use the bridge at `scripts/ros_agent.py`. Its default code transport uses the Alibaba Cloud Credentials SDK default credential chain and Tea OpenAPI V3 signing to send ROS RPCs directly and consume StartChat SSE incrementally. The bridge never reads credential environment variables or credential values from Profile files itself. A Profile explicitly pinned by local policy is delegated to the Credentials SDK Profile provider and is exclusive: it never falls back to the default chain or another Profile. Credentials exist only inside the SDK-backed request path and are never accepted as bridge arguments, persisted in job state, or returned. An optional dependency-free transport invokes the ROS CLI plugin's `start-chat` and `stop-chat` commands. Run the bridge with `python3` on macOS/Linux or `py -3` on Windows.
 
@@ -27,7 +27,7 @@ While a Pipeline has `wireState: TASK_STATE_WORKING`, `follow` is the only obser
 
 ## Prerequisites
 
-The selected credential must be allowed to call `ros:StartChat`. Explicit cancellation additionally requires `ros:StopChat`; it is not required for an ordinary completed conversation. The default code transport requires the packages pinned in `requirements-code.txt` to be installed for the Python interpreter that runs the bridge. The Credentials SDK default chain or explicitly pinned Profile provider resolves the effective identity without bridge-level credential parsing. The `aliyun_cli` transport has no Python package dependency. Its local execution mode requires the installed CLI and a ROS plugin that provides `start-chat` and `stop-chat`; its remote execution mode expects the host's same-name `aliyun` command to forward those API invocations to a cloud CLI sandbox. Run the bridge check once before the first StartChat call:
+The selected credential must be allowed to call `ros:StartChat`. Explicit cancellation additionally requires `ros:StopChat`; it is not required for an ordinary completed conversation. The default code transport requires the packages pinned in `{{REQUIREMENTS_FILE}}` to be installed for the Python interpreter that runs the bridge. The Credentials SDK default chain or explicitly pinned Profile provider resolves the effective identity without bridge-level credential parsing. The `aliyun_cli` transport has no Python package dependency. Its local execution mode requires the installed CLI and a ROS plugin that provides `start-chat` and `stop-chat`; its remote execution mode expects the host's same-name `aliyun` command to forward those API invocations to a cloud CLI sandbox. Run the bridge check once before the first StartChat call:
 
 ```text
 python3 <absolute-bridge-path>/ros_agent.py check
@@ -37,7 +37,7 @@ The bounded JSON result includes the effective `transport`, `aliyunCLIExecutionM
 
 Use the check result as the sole readiness source. Except for the one local-mode plugin install command directed by `pluginInstallRequired`, never run `aliyun configure`, `aliyun plugin`, or other discovery/management commands, enumerate profiles, or read Alibaba Cloud CLI configuration files yourself. The check deliberately excludes credential values and does not prove that a token is still accepted by ROS; the StartChat response is authoritative for authentication and authorization failures.
 
-The returned `transport` is installation policy, not an Agent choice. If `check` fails—especially with `sdk_not_installed` in code mode—report that exact readiness problem and stop. Never edit `config.json`, propose or attempt another transport, pass a transport override, or fall back to `aliyun_cli` to bypass the failure. Only the user or installation administrator may change this policy outside the infrastructure task, after which a new `check` is required.
+{{#AGENTHUB}}The returned `transport` is installation policy, not an Agent choice. In an AgentHub-managed ephemeral runtime, if `check` returns `sdk_not_installed`, use the same Python interpreter to install only the exact bundled dependencies from `{{REQUIREMENTS_FILE}}` into that ephemeral runtime, without `sudo` or system changes, and then rerun `check` once. This readiness repair does not authorize a transport change, alternative tooling, or credential access. If installation, the repeated `check`, or any other readiness check fails, report the exact error and stop. Never edit `config.json`, propose or attempt another transport, pass a transport override, or fall back to `aliyun_cli` to bypass the failure. Only the user or installation administrator may change this policy outside the infrastructure task, after which a new `check` is required.{{/AGENTHUB}}{{#PUBLIC}}The returned `transport` is installation policy, not an Agent choice. If `check` fails—especially with `sdk_not_installed` in code mode—report that exact readiness problem and stop. Never edit `config.json`, propose or attempt another transport, pass a transport override, or fall back to `aliyun_cli` to bypass the failure. Only the user or installation administrator may change this policy outside the infrastructure task, after which a new `check` is required.{{/PUBLIC}}
 
 Add `--aliyun-path <path>` to `check` or `start` only when the effective credential path requires native aliyun CLI and it is not on `PATH`; the managed job preserves it for later requests. Use the returned credential source and region without asking the user to choose a Profile. Omit `--profile` unless the user explicitly supplied a Profile and local policy did not pin one; never try to override `aliyunCLIProfile`. Never pass credentials on the command line, put them in prompt files, or expose CLI configuration.
 
@@ -217,3 +217,34 @@ Never use `continue` to poll a working Pipeline after `respond`. StartChat has n
 - Keep `sessionId`, `taskId`, and `iacCodeSessionId` as opaque identifiers.
 - Interrupting a `follow` command does not cancel the background StartChat worker. Report the interruption and resume `follow` with the last confirmed cursor. Use `cancel` only after an explicit user cancellation request. If the worker itself fails, report its sanitized error; do not claim the remote task was canceled.
 - Treat the bridge JSON as the only job-state interface. Do not inspect `~/.cache/alicloud-ros-agent`, manager records, worker logs, the bridge source, or Alibaba Cloud CLI configuration to diagnose a failed job; present the returned sanitized `error` and let the operator inspect the server side.
+
+{{#AGENTHUB}}
+## Input/output examples
+
+Input: "Review this ROS template, explain validation errors, and propose a corrected version."
+
+Expected output: the bridge returns the authoritative ROS Agent response and preserves the same session for follow-up questions, permissions, and final artifacts.
+
+## Edge cases
+
+If credentials, endpoint metadata, or permissions are unavailable, stop with the returned actionable error. Reuse the returned session ID for follow-ups and StopChat. If a stream is interrupted, resume the frozen job instead of silently creating a second cloud session.
+
+## RAM permissions
+
+Before the first ROS API request, read [references/ram-policies.md](references/ram-policies.md) and verify that
+the selected credential has only the exact ROS actions required for the requested conversation and cancellation path.
+
+## Observability
+
+All outbound HTTP requests made by this AgentHub Skill carry this `User-Agent` template:
+
+```text
+AlibabaCloud-Agent-Skills/{{SKILL_NAME}}/{session-id}
+```
+
+- `{{SKILL_NAME}}` is the fixed AgentHub Skill identifier and matches the frontmatter `name`.
+- The session ID must be a 32-character lowercase hexadecimal string generated exactly once per session.
+  It must be reused unchanged for every outbound HTTP request in that session. The bridge reads `SKILL_SESSION_ID`
+  after validation; if it is absent or invalid, the bridge generates the session ID with `uuid.uuid4().hex` and stores
+  it for that session.
+{{/AGENTHUB}}

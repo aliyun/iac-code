@@ -1,9 +1,9 @@
 ---
-name: iac-code
+name: {{SKILL_NAME}}
 description: Use the packaged iac-code agent for Alibaba Cloud infrastructure tasks, including designing, provisioning, changing, or deploying resources; generating, reviewing, converting, validating, or troubleshooting ROS and Terraform templates; selecting existing cloud resources; estimating costs; operating ROS stacks; and inspecting or explicitly cleaning downloaded iac-code Skill Runtime caches. Trigger for Alibaba Cloud infrastructure work even when the user does not mention iac-code, ROS, Terraform, or this Skill, and for requests to inspect or clean the iac-code Runtime cache. Do not trigger for general Alibaba Cloud questions or unrelated application code. For matched requests, invoke the packaged bridge before any alternative tool and fail closed on bridge errors. Run through the local authenticated A2A runtime without pip or headless mode.
 ---
 
-# iac-code
+# {{SKILL_TITLE}}
 
 Use the single standard-library entry point at `scripts/iac_code.py`. Never install `iac-code` with pip and never invoke a headless command. Run every command below with `python3` on macOS/Linux. On Windows, replace `python3` with `py -3`; use `python` only after confirming it is CPython 3.8–3.14. Resolve the launcher once and reuse it for the whole job.
 
@@ -126,3 +126,35 @@ The current pinned Runtime and packages used by a live A2A process are protected
 - Use `latestText` only as running progress. Use `pipelineResult` from a terminal Pipeline as its success or failure result. Only `finalText` from a `turn_completed` result or a returned result artifact is a normal-turn answer.
 - Do not expose runtime tokens, local state files, credentials, environment values, or raw tool inputs/results.
 - If an error code is returned, report the concise message and suggested retry. Do not fall back to pip installation or another ABI artifact.
+
+{{#AGENTHUB}}
+## Input/output examples
+
+Input: "Create and validate a ROS template for a VPC and two subnets in cn-hangzhou."
+
+Expected output: the bridge returns the authoritative iac-code result, including the generated or validated template, progress boundaries, any permission request, and actionable errors without inventing cloud state.
+
+## Edge cases
+
+If the packaged Runtime cannot be downloaded or verified, stop and report the verification error; never install an unverified fallback. If credentials are incomplete, report the preflight result and do not claim that cloud operations ran. Continue an existing job with its job ID instead of starting a replacement job.
+
+## RAM permissions
+
+Before a task that reads or changes Alibaba Cloud resources, read
+[references/ram-policies.md](references/ram-policies.md). Grant only the exact actions required by the selected
+workflow; template-only and Runtime-cache workflows require no Alibaba Cloud RAM permission.
+
+## Observability
+
+All outbound HTTP requests made by this AgentHub Skill carry this `User-Agent` template:
+
+```text
+AlibabaCloud-Agent-Skills/{{SKILL_NAME}}/{session-id}
+```
+
+- `{{SKILL_NAME}}` is the fixed AgentHub Skill identifier and matches the frontmatter `name`.
+- The session ID must be a 32-character lowercase hexadecimal string generated exactly once per session.
+  It must be reused unchanged for every outbound HTTP request in that session. The bridge reads `SKILL_SESSION_ID`
+  after validation; if it is absent or invalid, the bridge generates the session ID with `uuid.uuid4().hex` and stores
+  it for that session.
+{{/AGENTHUB}}

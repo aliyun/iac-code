@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import tarfile
@@ -18,9 +19,11 @@ ROOT = Path(__file__).resolve().parents[2]
 BUILD_SCRIPT = ROOT / "skill-runtime/build_runtime.py"
 ASSEMBLE_SCRIPT = ROOT / "skill-runtime/assemble_manifest.py"
 PACKAGE_SCRIPT = ROOT / "skill-runtime/package_skill.py"
+PROFILE_SCRIPT = ROOT / "skill-runtime/skill_profiles.py"
 SOURCE_COMMIT = "a" * 40
 PUBLISHER_COMMIT = "b" * 40
 PUBLISHED_AT = "2026-08-15T10:30:00Z"
+NON_ENGLISH_SOURCE_PATTERN = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]")
 
 
 def _load_module(name: str, path: Path):
@@ -230,6 +233,99 @@ def test_skill_package_is_deterministic_whitelisted_and_pinned(tmp_path: Path) -
     assert manifest["skill"]["sha256"] == hashlib.sha256(first.read_bytes()).hexdigest()
 
 
+def test_skill_profiles_render_three_strict_product_shapes(tmp_path: Path) -> None:
+    subprocess.run([sys.executable, str(PROFILE_SCRIPT), "--check-defaults"], cwd=ROOT, check=True)
+    expected = {
+        "iac-code": ["SKILL.md", "agents/openai.yaml", "scripts/iac_code.py"],
+        "alibabacloud-iac-code": [
+            "SKILL.md",
+            "references/ram-policies.md",
+            "scripts/iac_code.py",
+        ],
+        "alibabacloud-ros-agent": [
+            "SKILL.md",
+            "references/ram-policies.md",
+            "scripts/requirements.txt",
+            "scripts/ros_agent.py",
+        ],
+    }
+    for name, files in expected.items():
+        output = tmp_path / name
+        subprocess.run(
+            [sys.executable, str(PROFILE_SCRIPT), "--profile", name, "--output", str(output)],
+            cwd=ROOT,
+            check=True,
+        )
+        actual = sorted(path.relative_to(output).as_posix() for path in output.rglob("*") if path.is_file())
+        assert actual == files
+        skill = (output / "SKILL.md").read_text(encoding="utf-8")
+        assert "name: {}".format(name) in skill
+        bridge_name = "ros_agent.py" if name == "alibabacloud-ros-agent" else "iac_code.py"
+        bridge = next(output.rglob(bridge_name)).read_text(encoding="utf-8")
+        if name.startswith("alibabacloud-"):
+            assert "## Observability" in skill
+            assert "references/ram-policies.md" in skill
+            assert "32-character lowercase hexadecimal string" in skill
+            assert 'SKILL_DISTRIBUTION = "agenthub"' in bridge
+            assert "AlibabaCloud-Agent-Skills/{}/{{session-id}}".format(name) in bridge
+            if name == "alibabacloud-ros-agent":
+                assert "`scripts/requirements.txt`" in skill
+                assert "requirements-code.txt" not in skill
+                assert 'REQUIREMENTS_FILE = "scripts/requirements.txt"' in bridge
+                assert NON_ENGLISH_SOURCE_PATTERN.search(bridge) is None
+        else:
+            assert "## Observability" not in skill
+            assert 'SKILL_DISTRIBUTION = "public"' in bridge
+
+
+def test_agenthub_profiles_package_as_independent_products(tmp_path: Path) -> None:
+    iac_archive = tmp_path / "alibabacloud-iac-code-skill-0.1.0.zip"
+    iac_manifest = tmp_path / "iac-manifest.json"
+    iac_command = _package_command(iac_archive, iac_manifest)
+    iac_command[2:2] = ["--profile", "alibabacloud-iac-code"]
+    subprocess.run(iac_command, cwd=ROOT, check=True)
+    with zipfile.ZipFile(iac_archive) as archive:
+        assert archive.namelist() == [
+            "alibabacloud-iac-code/SKILL.md",
+            "alibabacloud-iac-code/references/ram-policies.md",
+            "alibabacloud-iac-code/scripts/iac_code.py",
+        ]
+    assert json.loads(iac_manifest.read_text(encoding="utf-8"))["skillName"] == "alibabacloud-iac-code"
+
+    ros_archive = tmp_path / "alibabacloud-ros-agent-skill-0.1.0.zip"
+    ros_manifest = tmp_path / "ros-manifest.json"
+    subprocess.run(
+        [
+            sys.executable,
+            str(PACKAGE_SCRIPT),
+            "--profile",
+            "alibabacloud-ros-agent",
+            "--skill-version",
+            "0.1.0",
+            "--source-commit",
+            SOURCE_COMMIT,
+            "--publisher-commit",
+            PUBLISHER_COMMIT,
+            "--published-at",
+            PUBLISHED_AT,
+            "--output",
+            str(ros_archive),
+            "--manifest-output",
+            str(ros_manifest),
+        ],
+        cwd=ROOT,
+        check=True,
+    )
+    with zipfile.ZipFile(ros_archive) as archive:
+        assert archive.namelist() == [
+            "alibabacloud-ros-agent/SKILL.md",
+            "alibabacloud-ros-agent/references/ram-policies.md",
+            "alibabacloud-ros-agent/scripts/requirements.txt",
+            "alibabacloud-ros-agent/scripts/ros_agent.py",
+        ]
+    assert json.loads(ros_manifest.read_text(encoding="utf-8"))["skillName"] == "alibabacloud-ros-agent"
+
+
 def test_formal_skill_package_rejects_runtime_candidate(tmp_path: Path) -> None:
     command = _package_command(tmp_path / "skill.zip", tmp_path / "manifest.json")
     tag_index = command.index("--runtime-tag")
@@ -248,6 +344,23 @@ def test_publisher_contracts_are_explicit() -> None:
     assert runtime_contract["runtimePython"] == "cp312"
     assert len(runtime_contract["targets"]) == 3
     assert skill_contract["files"] == ["SKILL.md", "agents/openai.yaml", "scripts/iac_code.py"]
+    assert skill_contract["profileScript"] == "skill-runtime/skill_profiles.py"
+    assert sorted(skill_contract["profiles"]) == [
+        "alibabacloud-iac-code",
+        "alibabacloud-ros-agent",
+        "iac-code",
+    ]
+    assert skill_contract["profiles"]["alibabacloud-iac-code"]["files"] == [
+        "SKILL.md",
+        "references/ram-policies.md",
+        "scripts/iac_code.py",
+    ]
+    assert skill_contract["profiles"]["alibabacloud-ros-agent"]["files"] == [
+        "SKILL.md",
+        "references/ram-policies.md",
+        "scripts/requirements.txt",
+        "scripts/ros_agent.py",
+    ]
 
 
 def test_manifest_assembly_rejects_incomplete_target_matrix(tmp_path: Path) -> None:

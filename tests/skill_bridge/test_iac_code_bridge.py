@@ -2624,6 +2624,9 @@ def test_skill_contract_uses_implicit_trigger_normal_default_and_follow() -> Non
     skill = (ROOT / "skills/iac-code/SKILL.md").read_text(encoding="utf-8")
     agent_metadata = (ROOT / "skills/iac-code/agents/openai.yaml").read_text(encoding="utf-8")
     assert "even when the user does not mention iac-code, ROS, Terraform" in skill
+    assert "the first operational command must invoke the packaged bridge" in skill
+    assert "when the bridge returns `incompatible_host`" in skill
+    assert "do not bypass the bridge with direct cloud calls" in skill
     assert "Normal is the default" in skill
     assert "candidate-architecture, cost-comparison, plan-confirmation" in skill
     assert "start --mode normal" in skill and "--follow" in skill
@@ -2657,6 +2660,7 @@ def test_skill_contract_uses_implicit_trigger_normal_default_and_follow() -> Non
     assert "session.jsonl" not in skill
     assert "`pip install" not in skill
     assert "Default to normal" in agent_metadata
+    assert "fail closed if the bridge rejects the host" in agent_metadata
     assert "candidate architectures, cost comparison, plan confirmation" in agent_metadata
 
 
