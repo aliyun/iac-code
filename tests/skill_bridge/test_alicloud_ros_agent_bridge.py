@@ -46,7 +46,20 @@ def _write_fake_aliyun(tmp_path: Path, source: str) -> Path:
 
 
 def _clear_code_credential_env(monkeypatch) -> None:
-    for name in bridge.ACCESS_KEY_ID_ENV_NAMES + bridge.ACCESS_KEY_SECRET_ENV_NAMES + bridge.SECURITY_TOKEN_ENV_NAMES:
+    for name in (
+        "ALIBABA_CLOUD_ACCESS_KEY_ID",
+        "ALIBABACLOUD_ACCESS_KEY_ID",
+        "ALICLOUD_ACCESS_KEY_ID",
+        "ACCESS_KEY_ID",
+        "ALIBABA_CLOUD_ACCESS_KEY_SECRET",
+        "ALIBABACLOUD_ACCESS_KEY_SECRET",
+        "ALICLOUD_ACCESS_KEY_SECRET",
+        "ACCESS_KEY_SECRET",
+        "ALIBABA_CLOUD_SECURITY_TOKEN",
+        "ALIBABACLOUD_SECURITY_TOKEN",
+        "ALICLOUD_SECURITY_TOKEN",
+        "SECURITY_TOKEN",
+    ):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -405,7 +418,7 @@ def test_main_reads_skill_config_before_dispatch(monkeypatch, tmp_path: Path, ca
     assert json.loads(capsys.readouterr().out)["ok"] is True
 
 
-def test_managed_start_persists_effective_environment_identity_region_and_thinking(monkeypatch, tmp_path: Path) -> None:
+def test_managed_start_persists_default_chain_identity_region_and_thinking(monkeypatch, tmp_path: Path) -> None:
     _clear_code_credential_env(monkeypatch)
     _clear_region_and_profile_env(monkeypatch)
     monkeypatch.setenv("ALIBABACLOUD_ACCESS_KEY_ID", "fake-env-ak")
@@ -429,23 +442,18 @@ def test_managed_start_persists_effective_environment_identity_region_and_thinki
 
     assert result["ok"] is True
     assert captured["payload"]["profile"] is None
-    assert captured["payload"]["credentialSource"] == "environment"
+    assert captured["payload"]["credentialSource"] is None
     assert captured["payload"]["regionId"] == "cn-shenzhen"
     assert captured["payload"]["noThinking"] is True
 
 
-def test_check_returns_safe_current_profile_and_effective_skill_policy(monkeypatch) -> None:
+def test_check_returns_safe_default_chain_and_effective_skill_policy(monkeypatch) -> None:
     _clear_code_credential_env(monkeypatch)
     captured = {}
     monkeypatch.setattr(
         bridge,
         "_selected_cli_profile_record",
-        lambda profile: {
-            "name": profile or "test-profile",
-            "mode": "OAuth",
-            "language": "zh",
-            "regionId": "cn-hangzhou",
-        },
+        lambda _profile: pytest.fail("the default credential chain must not inspect CLI Profiles"),
     )
     monkeypatch.setattr(bridge, "_load_code_sdk", lambda: {"sdk": True})
     monkeypatch.setattr(
@@ -480,20 +488,14 @@ def test_check_returns_safe_current_profile_and_effective_skill_policy(monkeypat
         "managerIdleSeconds": bridge.MANAGER_IDLE_SECONDS,
         "enableThinking": True,
         "aliyunCLIProfile": "",
-        "currentProfile": {
-            "configured": True,
-            "name": "test-profile",
-            "mode": "OAuth",
-            "language": "zh",
-            "regionId": "cn-hangzhou",
-        },
+        "currentProfile": {"configured": True, "mode": "DefaultCredentialChain", "regionId": "cn-hangzhou"},
     }
     assert captured == {
         "sdk": {"sdk": True},
         "aliyunPath": "aliyun",
-        "profile": "test-profile",
+        "profile": None,
         "regionId": "cn-hangzhou",
-        "credentialSource": "profile",
+        "credentialSource": None,
     }
 
 
@@ -508,21 +510,34 @@ def test_check_rejects_an_unavailable_selected_profile(monkeypatch) -> None:
         ),
     )
     args = argparse.Namespace(command="check", aliyun_path="aliyun")
-    bridge.apply_skill_config(args, {})
+    bridge.apply_skill_config(args, {"aliyunCLIProfile": "missing-profile"})
 
     with pytest.raises(bridge.BridgeError) as error:
         bridge.run_check(args)
     assert error.value.code == "credential_failed"
 
 
-def test_code_check_prefers_cli_compatible_environment_credentials(monkeypatch) -> None:
+def test_code_check_delegates_identity_resolution_to_default_credential_chain(monkeypatch) -> None:
     _clear_code_credential_env(monkeypatch)
     monkeypatch.setenv("ALIBABA_CLOUD_ACCESS_KEY_ID", "fake-env-ak")
     monkeypatch.setenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET", "fake-env-secret")
     monkeypatch.setenv("ALIBABA_CLOUD_SECURITY_TOKEN", "fake-env-token")
     monkeypatch.setenv("ALIBABA_CLOUD_REGION_ID", "cn-shanghai")
-    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: pytest.fail("environment mode must not require CLI"))
-    monkeypatch.setattr(bridge, "_load_code_sdk", lambda: {})
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: pytest.fail("default chain must not require CLI"))
+    captured = []
+
+    class FakeCredentialClient:
+        def __init__(self):
+            captured.append("constructed-without-config")
+
+        def get_credential(self):
+            return SimpleNamespace(
+                access_key_id="fake-chain-ak",
+                access_key_secret="fake-chain-secret",
+                security_token="fake-chain-token",
+            )
+
+    monkeypatch.setattr(bridge, "_load_code_sdk", lambda: {"CredentialClient": FakeCredentialClient})
     args = argparse.Namespace(command="check", aliyun_path="aliyun")
     bridge.apply_skill_config(args, {})
 
@@ -530,32 +545,31 @@ def test_code_check_prefers_cli_compatible_environment_credentials(monkeypatch) 
 
     assert result["currentProfile"] == {
         "configured": True,
-        "mode": "Environment",
+        "mode": "DefaultCredentialChain",
         "regionId": "cn-shanghai",
     }
+    assert captured == ["constructed-without-config"]
     assert result["cli"] is None
     assert result["version"] is None
     assert "fake-env" not in json.dumps(result)
 
 
-def test_environment_credential_alias_order_matches_aliyun_cli_and_partial_values_fail(monkeypatch) -> None:
-    _clear_code_credential_env(monkeypatch)
-    monkeypatch.setenv("ALIBABA_CLOUD_ACCESS_KEY_ID", "first-ak")
-    monkeypatch.setenv("ACCESS_KEY_ID", "last-ak")
-    monkeypatch.setenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET", "first-secret")
-    monkeypatch.setenv("ACCESS_KEY_SECRET", "last-secret")
-    monkeypatch.setenv("ALICLOUD_SECURITY_TOKEN", "token")
-
-    assert bridge._environment_credentials() == ("first-ak", "first-secret", "token")
-
-    _clear_code_credential_env(monkeypatch)
-    monkeypatch.setenv("ALIBABACLOUD_ACCESS_KEY_ID", "orphan-ak")
-    with pytest.raises(bridge.BridgeError) as error:
-        bridge._environment_credentials()
-    assert error.value.code == "credential_failed"
+def test_bridge_does_not_parse_credential_environment_variables() -> None:
+    source = BRIDGE_PATH.read_text(encoding="utf-8")
+    for name in (
+        "ALIBABA_CLOUD_ACCESS_KEY_ID",
+        "ALIBABACLOUD_ACCESS_KEY_ID",
+        "ALICLOUD_ACCESS_KEY_ID",
+        "ACCESS_KEY_ID",
+        "ALIBABA_CLOUD_ACCESS_KEY_SECRET",
+        "ALIBABACLOUD_ACCESS_KEY_SECRET",
+        "ALICLOUD_ACCESS_KEY_SECRET",
+        "ACCESS_KEY_SECRET",
+    ):
+        assert name not in source
 
 
-def test_code_start_identity_uses_environment_region_without_requiring_cli(monkeypatch) -> None:
+def test_code_start_identity_uses_environment_region_without_inspecting_credentials_or_cli(monkeypatch) -> None:
     _clear_code_credential_env(monkeypatch)
     _clear_region_and_profile_env(monkeypatch)
     monkeypatch.setenv("ALIBABACLOUD_ACCESS_KEY_ID", "fake-env-ak")
@@ -564,7 +578,7 @@ def test_code_start_identity_uses_environment_region_without_requiring_cli(monke
     monkeypatch.setattr(
         bridge,
         "_selected_cli_profile_record",
-        lambda _profile: pytest.fail("environment credentials must not require a CLI Profile"),
+        lambda _profile: pytest.fail("default credentials must not require a CLI Profile"),
     )
     args = SimpleNamespace(
         transport="code",
@@ -576,11 +590,11 @@ def test_code_start_identity_uses_environment_region_without_requiring_cli(monke
     bridge._resolve_start_identity(args)
 
     assert args.profile is None
-    assert args.credential_source == "environment"
+    assert args.credential_source is None
     assert args.region_id == "cn-shanghai"
 
 
-def test_code_start_identity_defaults_environment_region_to_hangzhou(monkeypatch) -> None:
+def test_code_start_identity_defaults_region_to_hangzhou(monkeypatch) -> None:
     _clear_code_credential_env(monkeypatch)
     _clear_region_and_profile_env(monkeypatch)
     monkeypatch.setenv("ALIBABACLOUD_ACCESS_KEY_ID", "fake-env-ak")
@@ -594,7 +608,7 @@ def test_code_start_identity_defaults_environment_region_to_hangzhou(monkeypatch
 
     bridge._resolve_start_identity(args)
 
-    assert args.credential_source == "environment"
+    assert args.credential_source is None
     assert args.region_id == "cn-hangzhou"
 
 
@@ -867,6 +881,25 @@ def test_workspace_json_inputs_validate_context_and_flatten_attachments(tmp_path
     ]
 
 
+def test_client_context_rejects_sensitive_keys_at_any_depth(tmp_path: Path) -> None:
+    context = tmp_path / "context.json"
+    context.write_text(
+        json.dumps(
+            {
+                "region": "cn-hangzhou",
+                "page": {"metadata": [{"AccessKeyId": "must-not-be-sent"}]},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(bridge.BridgeError) as error:
+        bridge.load_client_context(tmp_path, str(context))
+
+    assert error.value.code == "invalid_input"
+    assert "credential or secret fields" in error.value.message
+
+
 def test_permission_query_projects_only_correlated_control_fields(tmp_path: Path) -> None:
     permission_file = tmp_path / "permission.json"
     permission_file.write_text(
@@ -948,6 +981,16 @@ def test_prompt_file_must_be_utf8_nonempty_and_inside_workspace(tmp_path: Path) 
     empty.write_text("  ", encoding="utf-8")
     with pytest.raises(bridge.BridgeError, match="empty"):
         bridge.read_prompt(workspace, str(empty))
+
+
+def test_authenticated_manager_accepts_existing_workspace_outside_home_policy(tmp_path: Path) -> None:
+    workspace = tmp_path / "agenthub-workspace"
+    workspace.mkdir()
+
+    assert bridge._trusted_manager_workspace(str(workspace)) == workspace.resolve()
+
+    with pytest.raises(bridge.BridgeError, match="existing directory"):
+        bridge._trusted_manager_workspace(str(workspace / "missing"))
 
 
 def test_sse_parser_handles_heartbeats_multiline_data_and_raw_json() -> None:
@@ -1876,22 +1919,20 @@ def test_open_code_request_loads_cli_profile_and_streams_with_sdk_signing(monkey
     _clear_code_credential_env(monkeypatch)
     captured = {}
 
-    class FakeCredentials:
-        def get_access_key_id(self):
-            return "fake-ak"
-
-        def get_access_key_secret(self):
-            return "fake-secret"
-
-        def get_security_token(self):
-            return "fake-token"
-
     class FakeProvider:
         def __init__(self, profile_name=None):
             captured["profile"] = profile_name
 
-        def get_credentials(self):
-            return FakeCredentials()
+    class FakeCredentialClient:
+        def __init__(self, provider=None):
+            captured["provider"] = provider
+
+        def get_credential(self):
+            return SimpleNamespace(
+                access_key_id="fake-ak",
+                access_key_secret="fake-secret",
+                security_token="fake-token",
+            )
 
     class FakeRaw:
         def read(self, _maximum, decode_content=False):
@@ -1918,12 +1959,17 @@ def test_open_code_request_loads_cli_profile_and_streams_with_sdk_signing(monkey
             captured["sessionClosed"] = True
 
     sdk = bridge._load_code_sdk()
+    sdk["CredentialClient"] = FakeCredentialClient
     sdk["CLIProfileCredentialsProvider"] = FakeProvider
     sdk["requests"] = SimpleNamespace(Session=FakeSession)
     monkeypatch.setattr(sdk["OpenApiUtils"], "get_timestamp", staticmethod(lambda: "2026-08-26T03:00:00Z"))
     monkeypatch.setattr(sdk["OpenApiUtils"], "get_nonce", staticmethod(lambda: "fixed-nonce"))
     monkeypatch.setattr(bridge, "_load_code_sdk", lambda: sdk)
-    monkeypatch.setattr(bridge, "_selected_cli_profile", lambda profile: (profile, "AK"))
+    monkeypatch.setattr(
+        bridge,
+        "_selected_cli_profile_record",
+        lambda profile: {"name": profile, "mode": "AK"},
+    )
 
     response = bridge._open_code_request(
         "StartChat",
@@ -1934,6 +1980,7 @@ def test_open_code_request_loads_cli_profile_and_streams_with_sdk_signing(monkey
         "aliyun",
         10,
         600,
+        "profile",
     )
 
     assert captured["profile"] == "skill-profile"
@@ -1956,19 +2003,38 @@ def test_open_code_request_loads_cli_profile_and_streams_with_sdk_signing(monkey
     assert captured["sessionClosed"] is True
 
 
-def test_code_credentials_use_environment_before_cli_profile(monkeypatch) -> None:
+def test_code_credentials_use_default_sdk_chain_without_profile_inspection(monkeypatch) -> None:
     _clear_code_credential_env(monkeypatch)
     monkeypatch.setenv("ALICLOUD_ACCESS_KEY_ID", "fake-env-ak")
     monkeypatch.setenv("ALICLOUD_ACCESS_KEY_SECRET", "fake-env-secret")
     monkeypatch.setenv("ALICLOUD_SECURITY_TOKEN", "fake-env-token")
+    captured = []
+
+    class FakeCredentialClient:
+        def __init__(self):
+            captured.append("constructed-without-config")
+
+        def get_credential(self):
+            return SimpleNamespace(
+                access_key_id="fake-chain-ak",
+                access_key_secret="fake-chain-secret",
+                security_token="fake-chain-token",
+            )
+
     sdk = {
-        "CLIProfileCredentialsProvider": lambda **_kwargs: pytest.fail("environment credentials must win"),
+        "CredentialClient": FakeCredentialClient,
+        "CLIProfileCredentialsProvider": lambda **_kwargs: pytest.fail("default chain must not pin a profile"),
     }
-    monkeypatch.setattr(bridge, "_selected_cli_profile", lambda *_args: pytest.fail("must not inspect Profile"))
+    monkeypatch.setattr(
+        bridge,
+        "_selected_cli_profile_record",
+        lambda *_args: pytest.fail("default chain must not inspect Profile"),
+    )
 
     credentials = bridge._code_credentials(sdk, "aliyun", "ignored-profile", "cn-hangzhou")
 
-    assert credentials == ("fake-env-ak", "fake-env-secret", "fake-env-token")
+    assert captured == ["constructed-without-config"]
+    assert credentials == ("fake-chain-ak", "fake-chain-secret", "fake-chain-token")
 
 
 def test_code_credentials_with_profile_source_do_not_fall_back_to_environment(monkeypatch) -> None:
@@ -1977,27 +2043,30 @@ def test_code_credentials_with_profile_source_do_not_fall_back_to_environment(mo
     monkeypatch.setenv("ALICLOUD_ACCESS_KEY_SECRET", "fake-env-secret")
     captured = {}
 
-    class FakeCredentials:
-        def get_access_key_id(self):
-            return "fake-profile-ak"
-
-        def get_access_key_secret(self):
-            return "fake-profile-secret"
-
-        def get_security_token(self):
-            return None
-
     class FakeProvider:
         def __init__(self, profile_name=None):
             captured["profile"] = profile_name
 
-        def get_credentials(self):
-            return FakeCredentials()
+    class FakeCredentialClient:
+        def __init__(self, provider=None):
+            captured["provider"] = provider
+
+        def get_credential(self):
+            return SimpleNamespace(
+                access_key_id="fake-profile-ak",
+                access_key_secret="fake-profile-secret",
+                security_token=None,
+            )
 
     sdk = {
+        "CredentialClient": FakeCredentialClient,
         "CLIProfileCredentialsProvider": FakeProvider,
     }
-    monkeypatch.setattr(bridge, "_selected_cli_profile", lambda profile: (profile, "AK"))
+    monkeypatch.setattr(
+        bridge,
+        "_selected_cli_profile_record",
+        lambda profile: {"name": profile, "mode": "AK"},
+    )
 
     credentials = bridge._code_credentials(
         sdk,
@@ -2011,102 +2080,39 @@ def test_code_credentials_with_profile_source_do_not_fall_back_to_environment(mo
     assert credentials == ("fake-profile-ak", "fake-profile-secret", None)
 
 
-def test_code_credentials_delegate_oauth_refresh_to_native_cli(monkeypatch, tmp_path: Path) -> None:
-    _clear_code_credential_env(monkeypatch)
-    config_path = tmp_path / "config.json"
-    commands = []
-    config_path.write_text(
-        json.dumps(
-            {
-                "current": "oauth-profile",
-                "profiles": [
-                    {
-                        "name": "oauth-profile",
-                        "mode": "OAuth",
-                        "access_key_id": "fake-expired-ak",
-                        "access_key_secret": "fake-expired-secret",
-                        "sts_token": "fake-expired-token",
-                        "sts_expiration": int(time.time()) - 1,
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
+def test_code_credentials_delegate_oauth_profile_resolution_and_refresh_to_sdk(monkeypatch) -> None:
+    captured = {}
 
-    def fake_run(command, **kwargs):
-        commands.append((command, kwargs))
-        assert command[1:3] == ["ros", "DescribeRegions"]
-        config_path.write_text(
-            json.dumps(
-                {
-                    "current": "oauth-profile",
-                    "profiles": [
-                        {
-                            "name": "oauth-profile",
-                            "mode": "OAuth",
-                            "access_key_id": "fake-refreshed-ak",
-                            "access_key_secret": "fake-refreshed-secret",
-                            "sts_token": "fake-refreshed-token",
-                            "sts_expiration": int(time.time()) + 3600,
-                        }
-                    ],
-                }
-            ),
-            encoding="utf-8",
-        )
-        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+    class FakeProvider:
+        def __init__(self, profile_name=None):
+            captured["profile"] = profile_name
 
-    sdk = {
-        "CLIProfileCredentialsProvider": lambda **_kwargs: pytest.fail("OAuth must be refreshed by native CLI"),
-    }
-    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/usr/local/bin/aliyun")
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
-    monkeypatch.setattr(bridge, "_cli_config_path", lambda: config_path)
+    class FakeCredentialClient:
+        def __init__(self, provider=None):
+            captured["provider"] = provider
 
-    credentials = bridge._code_credentials(sdk, "aliyun", "oauth-profile", "cn-hangzhou")
+        def get_credential(self):
+            return SimpleNamespace(
+                access_key_id="fake-sdk-ak",
+                access_key_secret="fake-sdk-secret",
+                security_token="fake-sdk-token",
+            )
 
-    assert credentials == ("fake-refreshed-ak", "fake-refreshed-secret", "fake-refreshed-token")
-    assert len(commands) == 1
-    refresh_command, refresh_options = commands[0]
-    assert "--dryrun" in refresh_command
-    assert refresh_command[refresh_command.index("--profile") + 1] == "oauth-profile"
-    assert refresh_command[refresh_command.index("--region") + 1] == "cn-hangzhou"
-    assert refresh_command[refresh_command.index("--user-agent") + 1] == bridge.USER_AGENT
-    assert refresh_options["stdout"] == bridge.subprocess.DEVNULL
-    assert refresh_options["stderr"] == bridge.subprocess.DEVNULL
-
-
-def test_code_credentials_reuse_unexpired_oauth_sts_without_starting_cli(monkeypatch, tmp_path: Path) -> None:
-    _clear_code_credential_env(monkeypatch)
-    config_path = tmp_path / "config.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "current": "oauth-profile",
-                "profiles": [
-                    {
-                        "name": "oauth-profile",
-                        "mode": "OAuth",
-                        "access_key_id": "fake-cached-ak",
-                        "access_key_secret": "fake-cached-secret",
-                        "sts_token": "fake-cached-token",
-                        "sts_expiration": int(time.time()) + 3600,
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
+    monkeypatch.setattr(
+        bridge,
+        "_selected_cli_profile_record",
+        lambda profile: {"name": profile, "mode": "OAuth"},
     )
     sdk = {
-        "CLIProfileCredentialsProvider": lambda **_kwargs: pytest.fail("OAuth must not use SDK refresh"),
+        "CredentialClient": FakeCredentialClient,
+        "CLIProfileCredentialsProvider": FakeProvider,
     }
-    monkeypatch.setattr(bridge, "_cli_config_path", lambda: config_path)
-    monkeypatch.setattr(bridge.subprocess, "run", lambda *_args, **_kwargs: pytest.fail("CLI must not start"))
 
-    credentials = bridge._code_credentials(sdk, "aliyun", None, "cn-hangzhou")
+    credentials = bridge._code_credentials(sdk, "aliyun", "oauth-profile", "cn-hangzhou", "profile")
 
-    assert credentials == ("fake-cached-ak", "fake-cached-secret", "fake-cached-token")
+    assert captured["profile"] == "oauth-profile"
+    assert isinstance(captured["provider"], FakeProvider)
+    assert credentials == ("fake-sdk-ak", "fake-sdk-secret", "fake-sdk-token")
 
 
 def test_code_transport_uses_same_profile_and_endpoint_for_stop_chat(monkeypatch, tmp_path: Path) -> None:

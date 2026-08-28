@@ -45,7 +45,20 @@ bridge = _load_module("start_chat_test_bridge", BRIDGE_PATH)
 
 
 def _clear_code_credential_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in bridge.ACCESS_KEY_ID_ENV_NAMES + bridge.ACCESS_KEY_SECRET_ENV_NAMES + bridge.SECURITY_TOKEN_ENV_NAMES:
+    for name in (
+        "ALIBABA_CLOUD_ACCESS_KEY_ID",
+        "ALIBABACLOUD_ACCESS_KEY_ID",
+        "ALICLOUD_ACCESS_KEY_ID",
+        "ACCESS_KEY_ID",
+        "ALIBABA_CLOUD_ACCESS_KEY_SECRET",
+        "ALIBABACLOUD_ACCESS_KEY_SECRET",
+        "ALICLOUD_ACCESS_KEY_SECRET",
+        "ACCESS_KEY_SECRET",
+        "ALIBABA_CLOUD_SECURITY_TOKEN",
+        "ALIBABACLOUD_SECURITY_TOKEN",
+        "ALICLOUD_SECURITY_TOKEN",
+        "SECURITY_TOKEN",
+    ):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -533,27 +546,30 @@ def test_code_transport_streams_through_sdk_to_endpoint_hook(
     relay_thread.start()
     endpoint = "127.0.0.1:{}".format(relay_server.server_address[1])
 
-    class FakeCredentials:
-        def get_access_key_id(self):
-            return "fake-access-key-id"
-
-        def get_access_key_secret(self):
-            return "fake-access-key-secret"
-
-        def get_security_token(self):
-            return "fake-security-token"
-
     class FakeProvider:
         def __init__(self, profile_name=None):
             captured["profile"] = profile_name
 
-        def get_credentials(self):
-            return FakeCredentials()
+    class FakeCredentialClient:
+        def __init__(self, provider=None):
+            captured["provider"] = provider
+
+        def get_credential(self):
+            return SimpleNamespace(
+                access_key_id="fake-access-key-id",
+                access_key_secret="fake-access-key-secret",
+                security_token="fake-security-token",
+            )
 
     sdk = bridge._load_code_sdk()
+    sdk["CredentialClient"] = FakeCredentialClient
     sdk["CLIProfileCredentialsProvider"] = FakeProvider
     monkeypatch.setattr(bridge, "_load_code_sdk", lambda: sdk)
-    monkeypatch.setattr(bridge, "_selected_cli_profile", lambda profile: (profile, "AK"))
+    monkeypatch.setattr(
+        bridge,
+        "_selected_cli_profile_record",
+        lambda profile: {"name": profile, "mode": "AK"},
+    )
     args = SimpleNamespace(
         aliyun_path="not-used",
         transport="code",
@@ -561,6 +577,7 @@ def test_code_transport_streams_through_sdk_to_endpoint_hook(
         connect_timeout=3,
         read_timeout=15,
         profile="sdk-profile",
+        credential_source="profile",
         region_id="cn-hangzhou",
         no_thinking=True,
         mode="normal",

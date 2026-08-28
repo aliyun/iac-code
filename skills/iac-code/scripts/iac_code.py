@@ -34,6 +34,9 @@ SKILL_VERSION = "0.1.0"
 RUNTIME_TAG = "v0.12.0"
 IAC_CODE_VERSION = "0.12.0"
 RUNTIME_PYTHON = "cp312"
+SKILL_DISTRIBUTION = "public"
+SKILL_NAME = "iac-code"
+USER_AGENT_TEMPLATE = "iac-code-skill/1"
 MANIFEST_URL = "https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill-runtime/releases/v0.12.0/runtime-manifest.json"
 # Replaced in a temporary staging directory by skill-runtime/package_skill.py.
 MANIFEST_SHA256 = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -102,6 +105,19 @@ _SECRET_PATTERN = re.compile(
     r"(?i)(authorization\s*:\s*bearer\s+|access[_-]?key[_-]?(?:secret|id)?\s*[=:]\s*|"
     r"api[_-]?key\s*[=:]\s*|token\s*[=:]\s*|password\s*[=:]\s*)([^\s,;]+)"
 )
+
+
+def _skill_user_agent():
+    if SKILL_DISTRIBUTION != "agenthub":
+        return USER_AGENT_TEMPLATE
+    value = os.environ.get("SKILL_SESSION_ID", "").strip().lower()
+    if re.fullmatch(r"[0-9a-f]{32}", value) is None:
+        value = uuid.uuid4().hex
+        os.environ["SKILL_SESSION_ID"] = value
+    return USER_AGENT_TEMPLATE.replace("{session-id}", value)
+
+
+_SKILL_USER_AGENT = _skill_user_agent()
 
 
 class BridgeError(Exception):
@@ -448,7 +464,7 @@ class InstallLock(object):
 
 
 def _download(url, destination, maximum, expected_size=None):
-    request = urllib.request.Request(url, headers={"User-Agent": "iac-code-skill/1"})
+    request = urllib.request.Request(url, headers={"User-Agent": _SKILL_USER_AGENT})
     downloaded = 0
     try:
         with urllib.request.urlopen(request, timeout=30) as response, destination.open("wb") as output:
@@ -825,7 +841,7 @@ def _pid_alive(pid):
 
 def _http_json(url, token=None, method="GET", payload=None, timeout=10):
     data = _json_bytes(payload) if payload is not None else None
-    headers = {"Accept": "application/json", "A2A-Version": "1.0"}
+    headers = {"Accept": "application/json", "A2A-Version": "1.0", "User-Agent": _SKILL_USER_AGENT}
     if payload is not None:
         headers["Content-Type"] = "application/json"
     if token:
@@ -887,7 +903,8 @@ def _runtime_configuration_readiness(record, require_cloud):
     readiness["cloud"]["requiredForStart"] = bool(require_cloud)
     if not readiness["llm"]["ready"]:
         message = (
-            "iac-code 的 LLM 配置不完整，请先在 iac-code 中配置模型提供商和 API Key。"
+            "iac-code \u7684 LLM \u914d\u7f6e\u4e0d\u5b8c\u6574\uff0c"
+            "\u8bf7\u5148\u5728 iac-code \u4e2d\u914d\u7f6e\u6a21\u578b\u63d0\u4f9b\u5546\u548c API Key\u3002"
             if _ACTIVE_LANGUAGE == "zh"
             else "iac-code's LLM configuration is incomplete. Configure its model provider and API key first."
         )
@@ -899,7 +916,8 @@ def _runtime_configuration_readiness(record, require_cloud):
         )
     if require_cloud and not readiness["cloud"]["ready"]:
         message = (
-            "该 Pipeline 需要阿里云凭证，请先在 iac-code 中完成云凭证配置。"
+            "\u8be5 Pipeline \u9700\u8981\u963f\u91cc\u4e91\u51ed\u8bc1\uff0c"
+            "\u8bf7\u5148\u5728 iac-code \u4e2d\u5b8c\u6210\u4e91\u51ed\u8bc1\u914d\u7f6e\u3002"
             if _ACTIVE_LANGUAGE == "zh"
             else "This Pipeline requires Alibaba Cloud credentials. Configure them in iac-code first."
         )
@@ -2205,6 +2223,7 @@ def _stream_jsonrpc(record, payload):
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
             "A2A-Version": "1.0",
+            "User-Agent": _SKILL_USER_AGENT,
             "Authorization": "Bearer " + record["token"],
         },
         method="POST",
@@ -2909,7 +2928,7 @@ def _job_result(
     ):
         elapsed = max(0, int(time.time()) - int(job.get("turnStartedAt", job.get("createdAt", time.time()))))
         result["heartbeat"] = (
-            "iac-code 仍在处理中（{} 秒）。".format(elapsed)
+            "iac-code \u4ecd\u5728\u5904\u7406\u4e2d\uff08{} \u79d2\uff09\u3002".format(elapsed)
             if _ACTIVE_LANGUAGE == "zh"
             else "iac-code is still working ({}s).".format(elapsed)
         )

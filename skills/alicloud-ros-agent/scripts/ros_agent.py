@@ -60,25 +60,23 @@ SUPPORTED_TRANSPORTS = {"code", "aliyun_cli"}
 DEFAULT_ALIYUN_CLI_EXECUTION_MODE = "local"
 SUPPORTED_ALIYUN_CLI_EXECUTION_MODES = {"local", "remote"}
 ROS_PLUGIN_COMMANDS = {"start-chat", "stop-chat"}
-USER_AGENT = "AlibabaCloud-Agent-Skills/alibabacloud-ros-agent"
-ACCESS_KEY_ID_ENV_NAMES = (
-    "ALIBABA_CLOUD_ACCESS_KEY_ID",
-    "ALIBABACLOUD_ACCESS_KEY_ID",
-    "ALICLOUD_ACCESS_KEY_ID",
-    "ACCESS_KEY_ID",
-)
-ACCESS_KEY_SECRET_ENV_NAMES = (
-    "ALIBABA_CLOUD_ACCESS_KEY_SECRET",
-    "ALIBABACLOUD_ACCESS_KEY_SECRET",
-    "ALICLOUD_ACCESS_KEY_SECRET",
-    "ACCESS_KEY_SECRET",
-)
-SECURITY_TOKEN_ENV_NAMES = (
-    "ALIBABA_CLOUD_SECURITY_TOKEN",
-    "ALIBABACLOUD_SECURITY_TOKEN",
-    "ALICLOUD_SECURITY_TOKEN",
-    "SECURITY_TOKEN",
-)
+SKILL_DISTRIBUTION = "public"
+SKILL_NAME = "alicloud-ros-agent"
+USER_AGENT_TEMPLATE = "AlibabaCloud-Agent-Skills/alicloud-ros-agent"
+REQUIREMENTS_FILE = "requirements-code.txt"
+
+
+def _skill_user_agent() -> str:
+    if SKILL_DISTRIBUTION != "agenthub":
+        return USER_AGENT_TEMPLATE
+    value = os.environ.get("SKILL_SESSION_ID", "").strip().lower()
+    if re.fullmatch(r"[0-9a-f]{32}", value) is None:
+        value = uuid.uuid4().hex
+        os.environ["SKILL_SESSION_ID"] = value
+    return USER_AGENT_TEMPLATE.replace("{session-id}", value)
+
+
+USER_AGENT = _skill_user_agent()
 PROFILE_ENV_NAMES = (
     "ALIBABACLOUD_PROFILE",
     "ALIBABA_CLOUD_PROFILE",
@@ -128,6 +126,17 @@ STEP_BOUNDARY_EVENT_TYPES = {
 SECRET_PATTERN = re.compile(
     r"(?i)((?:[\"']?)(?:access[-_ ]?key(?:[-_ ]?id|[-_ ]?secret)?|security[-_ ]?token|signature|"
     r"authorization)(?:[\"']?)\s*[:=]\s*(?:[\"']?)(?:bearer\s+)?)([^\"'\s,;&}]+)"
+)
+SENSITIVE_CLIENT_CONTEXT_KEY_PARTS = (
+    "accesskey",
+    "authorization",
+    "cookie",
+    "credential",
+    "password",
+    "profile",
+    "secret",
+    "signature",
+    "token",
 )
 
 
@@ -519,6 +528,15 @@ def _workspace(raw_path: Optional[str] = None) -> pathlib.Path:
     return path
 
 
+def _trusted_manager_workspace(raw_path: str) -> pathlib.Path:
+    """Resolve a workspace received over the authenticated local manager channel."""
+
+    path = pathlib.Path(os.path.realpath(raw_path)).resolve()
+    if not path.is_dir():
+        raise BridgeError("invalid_input", "The workspace must be an existing directory.")
+    return path
+
+
 def _read_workspace_file(workspace: pathlib.Path, raw_path: str, maximum: int, label: str) -> str:
     workspace_path = os.path.normcase(os.path.realpath(str(workspace)))
     resolved_path = os.path.normcase(os.path.realpath(os.path.expanduser(raw_path)))
@@ -552,12 +570,28 @@ def _load_json_file(workspace: pathlib.Path, raw_path: str, maximum: int, label:
         raise BridgeError("invalid_input", "{} must contain valid JSON.".format(label)) from exc
 
 
+def _contains_sensitive_client_context_key(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized = re.sub(r"[^a-z0-9]", "", str(key).lower())
+            if any(part in normalized for part in SENSITIVE_CLIENT_CONTEXT_KEY_PARTS):
+                return True
+            if _contains_sensitive_client_context_key(item):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(_contains_sensitive_client_context_key(item) for item in value)
+    return False
+
+
 def load_client_context(workspace: pathlib.Path, raw_path: Optional[str]) -> Optional[str]:
     if not raw_path:
         return None
     value = _load_json_file(workspace, raw_path, MAX_CONTEXT_BYTES, "The client context file")
     if not isinstance(value, dict):
         raise BridgeError("invalid_input", "The client context must be a JSON object.")
+    if _contains_sensitive_client_context_key(value):
+        raise BridgeError("invalid_input", "The client context must not contain credential or secret fields.")
     compact = json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     if len(compact.encode("utf-8")) > MAX_CONTEXT_BYTES:
         raise BridgeError("invalid_input", "The compact client context is too large.")
@@ -780,6 +814,7 @@ def build_stop_command(job: Dict[str, Any], session_id: str) -> List[str]:
 def _load_code_sdk() -> Dict[str, Any]:
     try:
         return {
+            "CredentialClient": getattr(importlib.import_module("alibabacloud_credentials.client"), "Client"),
             "CLIProfileCredentialsProvider": getattr(
                 importlib.import_module("alibabacloud_credentials.provider.cli_profile"),
                 "CLIProfileCredentialsProvider",
@@ -791,8 +826,8 @@ def _load_code_sdk() -> Dict[str, Any]:
     except (ImportError, AttributeError) as exc:
         raise BridgeError(
             "sdk_not_installed",
-            "The configured code transport requires the packages listed in requirements-code.txt for the Python "
-            "interpreter running this bridge. Do not switch transports; install them and run check again.",
+            "The configured code transport requires the packages listed in {} for the Python interpreter running "
+            "this bridge. Do not switch transports; install them and run check again.".format(REQUIREMENTS_FILE),
         ) from exc
 
 
@@ -801,20 +836,6 @@ def _first_nonempty_env(names: Tuple[str, ...]) -> Optional[str]:
         value = os.environ.get(name)
         if value:
             return value
-    return None
-
-
-def _environment_credentials() -> Optional[Tuple[str, str, Optional[str]]]:
-    access_key_id = _first_nonempty_env(ACCESS_KEY_ID_ENV_NAMES)
-    access_key_secret = _first_nonempty_env(ACCESS_KEY_SECRET_ENV_NAMES)
-    security_token = _first_nonempty_env(SECURITY_TOKEN_ENV_NAMES)
-    if bool(access_key_id) != bool(access_key_secret):
-        raise BridgeError(
-            "credential_failed",
-            "Alibaba Cloud access key environment variables must provide both the access key ID and secret.",
-        )
-    if access_key_id and access_key_secret:
-        return access_key_id, access_key_secret, security_token
     return None
 
 
@@ -919,11 +940,6 @@ def _selected_cli_profile_record(profile: Optional[str]) -> Dict[str, Any]:
     return result
 
 
-def _selected_cli_profile(profile: Optional[str]) -> Tuple[str, str]:
-    selected = _selected_cli_profile_record(profile)
-    return selected["name"], selected["mode"]
-
-
 def _resolve_start_identity(args: argparse.Namespace) -> None:
     if (
         args.transport == "aliyun_cli"
@@ -932,17 +948,14 @@ def _resolve_start_identity(args: argparse.Namespace) -> None:
         args.profile = None
         args.credential_source = "remote"
         return
-    environment = None  # type: Optional[Tuple[str, str, Optional[str]]]
     profile = None  # type: Optional[Dict[str, Any]]
     if args.transport == "code" and not getattr(args, "profile_pinned", False):
-        environment = _environment_credentials()
-    if args.transport == "aliyun_cli" or environment is None:
+        args.profile = None
+        args.credential_source = None
+    else:
         profile = _selected_cli_profile_record(args.profile)
         args.profile = profile["name"]
         args.credential_source = "profile"
-    else:
-        args.profile = None
-        args.credential_source = "environment"
 
     if not args.region_id:
         args.region_id = _environment_region()
@@ -952,80 +965,6 @@ def _resolve_start_identity(args: argparse.Namespace) -> None:
         args.region_id = "cn-hangzhou"
 
 
-def _refresh_oauth_profile_with_cli(
-    aliyun_path: str,
-    profile_name: str,
-    region_id: Optional[str],
-) -> None:
-    command = [
-        resolve_aliyun(aliyun_path),
-        "ros",
-        "DescribeRegions",
-        "--dryrun",
-        "--yes",
-        "--user-agent",
-        USER_AGENT,
-        "--profile",
-        profile_name,
-    ]
-    if region_id:
-        command.extend(["--region", region_id])
-    try:
-        result = subprocess.run(
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=60,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise BridgeError(
-            "credential_failed",
-            "Alibaba Cloud CLI could not refresh the selected OAuth Profile.",
-            True,
-        ) from exc
-    if result.returncode != 0:
-        raise BridgeError(
-            "credential_failed",
-            "Alibaba Cloud CLI could not refresh the selected OAuth Profile.",
-            True,
-        )
-
-
-def _read_oauth_profile_credentials(profile_name: str) -> Tuple[str, str, str]:
-    value = _read_cli_configuration()
-    selected = next(
-        (
-            item
-            for item in value["profiles"]
-            if isinstance(item, dict)
-            and item.get("name") == profile_name
-            and isinstance(item.get("mode"), str)
-            and item["mode"].lower() == "oauth"
-        ),
-        None,
-    )
-    if selected is None:
-        raise BridgeError("credential_failed", "The selected Alibaba Cloud CLI OAuth Profile is unavailable.")
-    access_key_id = selected.get("access_key_id")
-    access_key_secret = selected.get("access_key_secret")
-    security_token = selected.get("sts_token")
-    expiration = selected.get("sts_expiration")
-    if (
-        not isinstance(access_key_id, str)
-        or not access_key_id
-        or not isinstance(access_key_secret, str)
-        or not access_key_secret
-        or not isinstance(security_token, str)
-        or not security_token
-        or not isinstance(expiration, int)
-        or isinstance(expiration, bool)
-        or expiration <= int(time.time())
-    ):
-        raise BridgeError("credential_failed", "Alibaba Cloud CLI OAuth credentials are unavailable or expired.")
-    return access_key_id, access_key_secret, security_token
-
-
 def _code_credentials(
     sdk: Dict[str, Any],
     aliyun_path: str,
@@ -1033,32 +972,20 @@ def _code_credentials(
     region_id: Optional[str],
     credential_source: Optional[str] = None,
 ) -> Tuple[str, str, Optional[str]]:
-    if credential_source not in {None, "environment", "profile"}:
+    if credential_source not in {None, "profile"}:
         raise BridgeError("credential_failed", "The managed Alibaba Cloud credential source is invalid.")
-    environment = None if credential_source == "profile" else _environment_credentials()
-    if credential_source == "environment" and environment is None:
-        raise BridgeError(
-            "credential_failed",
-            "The Alibaba Cloud environment credentials selected when this job started are unavailable.",
-        )
-    if environment is not None:
-        access_key_id, access_key_secret, security_token = environment
+    if credential_source == "profile":
+        selected = _selected_cli_profile_record(profile)
+        provider = sdk["CLIProfileCredentialsProvider"](profile_name=selected["name"])
+        client = sdk["CredentialClient"](provider=provider)
     else:
-        profile_name, mode = _selected_cli_profile(profile)
-        if mode.lower() == "oauth":
-            try:
-                access_key_id, access_key_secret, security_token = _read_oauth_profile_credentials(profile_name)
-            except BridgeError:
-                _refresh_oauth_profile_with_cli(aliyun_path, profile_name, region_id)
-                access_key_id, access_key_secret, security_token = _read_oauth_profile_credentials(profile_name)
-        else:
-            provider = sdk["CLIProfileCredentialsProvider"](profile_name=profile_name)
-            credentials = provider.get_credentials()
-            access_key_id = credentials.get_access_key_id()
-            access_key_secret = credentials.get_access_key_secret()
-            security_token = credentials.get_security_token()
-            if not access_key_id or not access_key_secret:
-                raise ValueError("empty credentials")
+        client = sdk["CredentialClient"]()
+    credential = client.get_credential()
+    access_key_id = credential.access_key_id
+    access_key_secret = credential.access_key_secret
+    security_token = credential.security_token
+    if not access_key_id or not access_key_secret:
+        raise ValueError("empty credentials")
     return access_key_id, access_key_secret, security_token or None
 
 
@@ -2860,7 +2787,7 @@ def _format_conclusion(summary: Any, language: str) -> str:
     if requirement:
         parts.append(requirement)
     if region:
-        parts.append(("地域 " if language == "zh" else "region ") + region)
+        parts.append(("\u5730\u57df " if language == "zh" else "region ") + region)
     resources = summary.get("resources")
     if isinstance(resources, list):
         names = []
@@ -2870,13 +2797,16 @@ def _format_conclusion(summary: Any, language: str) -> str:
             product = sanitize_text(item.get("product"), 60)
             action = sanitize_text(item.get("action"), 32)
             if language == "zh":
-                action = {"create": "新建", "use_existing": "复用", "reference": "引用", "forbid": "禁止"}.get(
-                    action, action
-                )
+                action = {
+                    "create": "\u65b0\u5efa",
+                    "use_existing": "\u590d\u7528",
+                    "reference": "\u5f15\u7528",
+                    "forbid": "\u7981\u6b62",
+                }.get(action, action)
             if product:
                 names.append("{} ({})".format(product, action) if action else product)
         if names:
-            parts.append(("资源 " if language == "zh" else "resources ") + "、".join(names))
+            parts.append(("\u8d44\u6e90 " if language == "zh" else "resources ") + "\u3001".join(names))
     candidates = summary.get("candidates")
     if isinstance(candidates, list):
         names = []
@@ -2889,9 +2819,13 @@ def _format_conclusion(summary: Any, language: str) -> str:
                 names.append("{} ({})".format(name, estimate) if estimate else name)
         if names:
             count = summary.get("candidateCount")
-            prefix = "{} 个候选方案 ".format(count) if language == "zh" else "{} candidates ".format(count)
-            parts.append(prefix + "、".join(names))
-    return sanitize_text(("；" if language == "zh" else "; ").join(parts), 520)
+            prefix = (
+                "{} \u4e2a\u5019\u9009\u65b9\u6848 ".format(count)
+                if language == "zh"
+                else "{} candidates ".format(count)
+            )
+            parts.append(prefix + "\u3001".join(names))
+    return sanitize_text(("\uff1b" if language == "zh" else "; ").join(parts), 520)
 
 
 def _format_user_update(milestone: Dict[str, Any], language: str) -> str:
@@ -2899,12 +2833,12 @@ def _format_user_update(milestone: Dict[str, Any], language: str) -> str:
     detail = _coordinate_label(milestone) or sanitize_text(milestone.get("message"), 240)
     labels = {
         "zh": {
-            "step_started": "步骤开始",
-            "step_completed": "步骤完成",
-            "step_failed": "步骤失败",
-            "candidate_step_started": "候选步骤开始",
-            "candidate_step_completed": "候选步骤完成",
-            "candidate_step_failed": "候选步骤失败",
+            "step_started": "\u6b65\u9aa4\u5f00\u59cb",
+            "step_completed": "\u6b65\u9aa4\u5b8c\u6210",
+            "step_failed": "\u6b65\u9aa4\u5931\u8d25",
+            "candidate_step_started": "\u5019\u9009\u6b65\u9aa4\u5f00\u59cb",
+            "candidate_step_completed": "\u5019\u9009\u6b65\u9aa4\u5b8c\u6210",
+            "candidate_step_failed": "\u5019\u9009\u6b65\u9aa4\u5931\u8d25",
         },
         "en": {
             "step_started": "Step started",
@@ -2916,10 +2850,14 @@ def _format_user_update(milestone: Dict[str, Any], language: str) -> str:
         },
     }
     label = labels.get(language, labels["en"]).get(str(event_type), sanitize_text(str(event_type), 80))
-    separator = "：" if language == "zh" else ": "
+    separator = "\uff1a" if language == "zh" else ": "
     conclusion = _format_conclusion(milestone.get("conclusionSummary"), language)
     if conclusion:
-        detail = "{}{}{}".format(detail, "；结论：" if language == "zh" else "; conclusion: ", conclusion)
+        detail = "{}{}{}".format(
+            detail,
+            "\uff1b\u7ed3\u8bba\uff1a" if language == "zh" else "; conclusion: ",
+            conclusion,
+        )
     return sanitize_text(label + (separator + detail if detail else ""), 720)
 
 
@@ -3041,7 +2979,7 @@ def _job_result(
         elapsed = max(0, int(time.time()) - int(job.get("turnStartedAt") or job.get("createdAt") or time.time()))
         result["followTimedOut"] = True
         result["heartbeat"] = (
-            "ROS Agent 仍在处理中（{} 秒）。".format(elapsed)
+            "ROS Agent \u4ecd\u5728\u5904\u7406\u4e2d\uff08{} \u79d2\uff09\u3002".format(elapsed)
             if result["preferredLanguage"] == "zh"
             else "ROS Agent is still working ({}s).".format(elapsed)
         )
@@ -3370,7 +3308,7 @@ def _request_from_job(job: Dict[str, Any], prompt: str) -> Dict[str, Any]:
 
 
 def _start_job_local(payload: Dict[str, Any]) -> Dict[str, Any]:
-    workspace = _workspace(str(payload.get("workspace") or ""))
+    workspace = _trusted_manager_workspace(str(payload.get("workspace") or ""))
     prompt = payload.get("prompt")
     mode = payload.get("mode")
     endpoint = payload.get("endpoint")
@@ -3697,7 +3635,7 @@ def _run_stop_chat(job: Dict[str, Any], session_id: str) -> Dict[str, Any]:
             max(1, min(int(job.get("connectTimeout") or 10), 30)),
             int(STOP_REQUEST_TIMEOUT_SECONDS),
             credential_source=(
-                job.get("credentialSource") if job.get("credentialSource") in {"environment", "profile"} else None
+                job.get("credentialSource") if job.get("credentialSource") == "profile" else None
             ),
             error_code="stop_chat_failed",
         )
@@ -3844,7 +3782,7 @@ def run_worker(job_id: str, request_token: str) -> int:
     if not isinstance(prompt, str):
         fail_worker(BridgeError("invalid_input", "The worker prompt is invalid."))
         return 1
-    workspace = _workspace(str(request.get("workspace") or ""))
+    workspace = _trusted_manager_workspace(str(request.get("workspace") or ""))
     client_context = request.get("clientContext") if isinstance(request.get("clientContext"), str) else None
     attachments = request.get("attachments") if isinstance(request.get("attachments"), list) else []
     summary_mode = request.get("summaryMode") if request.get("summaryMode") in SUPPORTED_AGENT_MODES else args.mode
@@ -4253,12 +4191,9 @@ def _parse_profile_fields(output: bytes) -> Dict[str, str]:
 
 def run_check(args: argparse.Namespace) -> Dict[str, Any]:
     sdk = None  # type: Optional[Dict[str, Any]]
-    environment_credentials = None  # type: Optional[Tuple[str, str, Optional[str]]]
     cli_execution_mode = getattr(args, "aliyun_cli_execution_mode", DEFAULT_ALIYUN_CLI_EXECUTION_MODE)
     if args.transport == "code":
         sdk = _load_code_sdk()
-        if not args.profile_pinned:
-            environment_credentials = _environment_credentials()
 
     plugin_status = None  # type: Optional[Dict[str, Any]]
     plugin_auto_install = None  # type: Optional[bool]
@@ -4267,9 +4202,24 @@ def run_check(args: argparse.Namespace) -> Dict[str, Any]:
         current_profile = {"configured": True, "mode": "RemoteSandbox"}
         cli = "aliyun"
         version = None
-    elif environment_credentials is not None:
-        current_profile = {"configured": True, "mode": "Environment"}  # type: Dict[str, Any]
-        current_profile["regionId"] = _environment_region() or "cn-hangzhou"
+    elif args.transport == "code" and not args.profile_pinned:
+        assert sdk is not None
+        region_id = _environment_region() or "cn-hangzhou"
+        try:
+            _code_credentials(sdk, args.aliyun_path, None, region_id, None)
+        except BridgeError:
+            raise
+        except Exception as exc:
+            raise BridgeError(
+                "credential_failed",
+                "Alibaba Cloud SDK default credential chain could not resolve credentials.",
+                True,
+            ) from exc
+        current_profile = {
+            "configured": True,
+            "mode": "DefaultCredentialChain",
+            "regionId": region_id,
+        }  # type: Dict[str, Any]
         cli = None
         version = None
     else:
