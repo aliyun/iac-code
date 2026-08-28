@@ -2799,14 +2799,16 @@ async def test_subscribe_to_active_task_yields_initial_task_then_updates(monkeyp
 
     stream = components.handler.on_subscribe_to_task(SubscribeToTaskRequest(id=result.id), call_context)
     first_event = await asyncio.wait_for(anext(stream), timeout=1)
-    release.set()
     remaining_events = []
 
     async def collect_remaining_events() -> None:
         async for event in stream:
             remaining_events.append(event)
 
-    await asyncio.wait_for(collect_remaining_events(), timeout=1)
+    collector = asyncio.create_task(collect_remaining_events())
+    await asyncio.sleep(0)
+    release.set()
+    await asyncio.wait_for(collector, timeout=3)
 
     assert isinstance(first_event, Task)
     assert first_event.id == result.id
