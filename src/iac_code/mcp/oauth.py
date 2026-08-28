@@ -1713,7 +1713,8 @@ def get_oauth_access_token(
             now=clock,
             refresh_margin_seconds=refresh_margin_seconds,
         )
-    return access_token
+    # Another storage instance may have refreshed between the blob reads above.
+    return get_oauth_storage_secret(config, storage, "access_token", scope=scope)
 
 
 async def get_oauth_access_token_async(
@@ -1735,7 +1736,8 @@ async def get_oauth_access_token_async(
     refresh_marker = get_oauth_storage_secret(config, storage, "refresh_marker", scope=scope)
     clock = now or time.time
     if not refresh_token or expires_at is None or expires_at > clock() + refresh_margin_seconds:
-        return access_token
+        # Another storage instance may have refreshed between the blob reads above.
+        return get_oauth_storage_secret(config, storage, "access_token", scope=scope)
 
     coordinator = refresh_coordinator or _DEFAULT_REFRESH_COORDINATOR
 
