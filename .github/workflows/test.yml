@@ -164,7 +164,4 @@ jobs:
         run: uv sync --all-extras
 
       - name: Run tests
-        # Windows runners execute many subprocess-heavy Node, A2A, and Desktop
-        # tests. Keep the suite parallel without exhausting process/thread
-        # capacity and turning scheduling-sensitive tests into random failures.
-        run: uv run pytest tests/ -v --no-header -n 2
+        run: uv run pytest tests/ -v --no-header -n auto
