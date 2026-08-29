@@ -946,6 +946,55 @@ def test_permission_query_projects_only_correlated_control_fields(tmp_path: Path
     }
 
 
+def test_permission_input_preserves_safe_operation_details_and_redacts_nested_secrets() -> None:
+    projected = bridge._safe_input(
+        {
+            "schemaVersion": 1,
+            "kind": "permission",
+            "requestTaskId": "task-1",
+            "contextId": "session-1",
+            "inputId": "permission-1",
+            "toolUseId": "tool-1",
+            "toolName": "aliyun_api",
+            "scope": "candidate",
+            "subPipelineId": "candidate-a",
+            "operation": {
+                "product": "vpc",
+                "action": "CreateVpc",
+                "region": "cn-hangzhou",
+                "apiCalls": [{"product": "VPC", "action": "CreateVpc", "effect": "change"}],
+            },
+            "displayParameters": {
+                "format": "json",
+                "value": {
+                    "CidrBlock": "10.0.0.0/16",
+                    "Password": "must-not-leak",
+                    "Tags": [{"Key": "team", "Value": "platform"}],
+                },
+            },
+            "required": True,
+        }
+    )
+
+    assert projected is not None
+    assert projected["scope"] == "candidate"
+    assert projected["subPipelineId"] == "candidate-a"
+    assert projected["operation"] == {
+        "product": "vpc",
+        "action": "CreateVpc",
+        "region": "cn-hangzhou",
+        "apiCalls": [{"product": "VPC", "action": "CreateVpc", "effect": "change"}],
+    }
+    assert projected["displayParameters"] == {
+        "format": "json",
+        "value": {
+            "CidrBlock": "10.0.0.0/16",
+            "Password": {"redacted": True},
+            "Tags": [{"Key": "team", "Value": "platform"}],
+        },
+    }
+
+
 def test_permission_query_rejects_session_or_mode_mismatch(tmp_path: Path) -> None:
     permission_file = tmp_path / "permission.json"
     permission_file.write_text(

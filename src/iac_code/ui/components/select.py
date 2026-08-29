@@ -60,6 +60,7 @@ class Select:
         PageUp/PageDown moves by visible_count.
         No wrapping at edges.
         Enter selects TextOption or enters edit mode for InputOption.
+        With ``type_to_edit_input``, typing while an InputOption is focused starts editing immediately.
         Escape cancels (or exits edit mode if in one).
     """
 
@@ -70,11 +71,13 @@ class Select:
         layout: SelectLayout = SelectLayout.EXPANDED,
         visible_count: int = 10,
         keybinding_manager: object | None = None,
+        type_to_edit_input: bool = False,
     ) -> None:
         self._options = options
         self._layout = layout
         self._visible_count = visible_count
         self._keybinding_manager = keybinding_manager
+        self._type_to_edit_input = type_to_edit_input
 
         self.state = SelectState()
 
@@ -178,6 +181,23 @@ class Select:
                 self._active_search_box = None
                 return True
             return self._active_search_box.handle_key(key_event)
+
+        # Optional type-to-edit behavior for selectors whose final row is an inline input.
+        focused_option = self._options[self.state.focused_index] if self._options else None
+        direct_text = (
+            len(key_event.char) == 1 and key_event.char.isprintable()
+        ) or (key_event.key == "paste" and bool(key_event.char))
+        if (
+            self._type_to_edit_input
+            and isinstance(focused_option, InputOption)
+            and not key_event.ctrl
+            and not key_event.alt
+            and direct_text
+        ):
+            self._handle_enter()
+            if self._active_search_box is not None:
+                return self._active_search_box.handle_key(key_event)
+            return False
 
         # Navigation
         if key == "up" or (ctrl and key == "p"):

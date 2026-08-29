@@ -69,6 +69,8 @@ A área de composição é onde você escreve suas solicitações. Ela oferece o
 
 Uma sessão é executada como chat normal ou no modo **pipeline**. O chat normal transmite em linha as respostas do assistente, as chamadas de ferramentas e os resultados. O modo pipeline adiciona um espaço de trabalho que exibe as linhas do tempo das etapas, os diagnósticos, os diagramas, o progresso da implantação, a limpeza e os detalhes de transferência conforme o pipeline é executado. Consulte [Modo pipeline](./automation/pipeline-mode.md) para saber o que os pipelines fazem.
 
+O [pipeline `selling_solution_first`](./automation/solution-first-pipeline.md) usa esse espaço de trabalho para um fluxo de compra em três etapas: comparar arquiteturas candidatas, implementar a solução selecionada e implantá-la após a confirmação. As aprovações de ferramentas aparecem como cartões de permissão localizados sob a etapa que as solicitou; as aprovações pendentes retornam à mesma etapa quando a sessão é restaurada.
+
 ### Ferramentas e aprovações
 
 As chamadas de ferramentas são exibidas como cartões na transcrição. Quando uma ferramenta exige sua aprovação, uma solicitação de aprovação aparece em linha; o modo de permissão definido na área de composição determina quando você é consultado.

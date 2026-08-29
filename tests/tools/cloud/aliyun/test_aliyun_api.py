@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import time
 from contextlib import nullcontext
@@ -3682,3 +3683,97 @@ class TestAliyunApiDoesNotBlockEventLoop:
         assert result.is_error is False
         data = json.loads(result.content)
         assert data == {"Instances": []}
+
+
+@pytest.mark.asyncio
+async def test_production_runtime_maps_oauth_credential_failure_to_an_actionable_public_error(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A stale OAuth sign-in must be actionable and recorded, never the generic fallback.
+
+    The credential provider refreshes OAuth-backed STS credentials while a call is being
+    prepared. Its exceptions carry prose messages, so before the credential stage mapped
+    them every stale sign-in rendered as "could not be prepared safely" with nothing in the
+    log: the model retried a call that could never succeed and an operator had no signal.
+    """
+
+    cases = (
+        (
+            AliyunOAuthReloginRequired(
+                "Token refresh failed with status 400: error=invalid_grant, "
+                "error_description=refresh token rt-9a2c1d is no longer accepted",
+                error_code="invalid_grant",
+                status_code=400,
+            ),
+            "OAuth sign-in expired or was revoked",
+        ),
+        (
+            AliyunOAuthError("STS exchange request failed: ConnectTimeout"),
+            "OAuth credentials could not be refreshed",
+        ),
+    )
+
+    for error, expected_fragment in cases:
+        services, _, _, _ = _production_services()
+
+        def failing_provider(error: BaseException = error) -> Any:
+            raise error
+
+        services.credential_provider = failing_provider
+        stages: list[str] = []
+        monkeypatch.setattr(aliyun_api_module, "emit_aliyun_api_contract_error", stages.append)
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger=aliyun_api_module.__name__):
+            result = await _production_execute(
+                AliyunApi(services=services),
+                _target_test_input("DescribeInstances"),
+            )
+
+        assert result.is_error is True
+        assert expected_fragment in result.content
+        assert "could not be prepared safely" not in result.content
+        assert "DescribeInstances" in result.content
+        # The upstream message carries response detail and must not reach the model.
+        for detail in ("invalid_grant", "rt-9a2c1d", "400", "ConnectTimeout"):
+            assert detail not in result.content
+        # The failure is attributable in telemetry and diagnosable in the log.
+        assert stages == ["credential"]
+        records = [record for record in caplog.records if record.levelno == logging.WARNING]
+        assert len(records) == 1
+        assert type(error).__name__ in records[0].getMessage()
+        # A stale credential fails on every call of a run, so no traceback per call.
+        assert records[0].exc_info is None
+
+
+@pytest.mark.asyncio
+async def test_production_runtime_leaves_unrelated_credential_failures_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Only OAuth failures are reclassified; anything else keeps its existing public error."""
+
+    services, _, _, _ = _production_services()
+
+    def failing_provider() -> Any:
+        raise RuntimeError("credential_failure")
+
+    services.credential_provider = failing_provider
+    stages: list[str] = []
+    monkeypatch.setattr(aliyun_api_module, "emit_aliyun_api_contract_error", stages.append)
+    with caplog.at_level(logging.WARNING, logger=aliyun_api_module.__name__):
+        result = await _production_execute(
+            AliyunApi(services=services),
+            _target_test_input("DescribeInstances"),
+        )
+
+    assert result.is_error is True
+    assert result.content == public_aliyun_error(
+        "credential_failure",
+        product="Ecs",
+        action="DescribeInstances",
+        region_id="cn-hangzhou",
+    )
+    # Not an ApiContractError, so it still carries no stage -- but it is no longer silent.
+    assert stages == []
+    assert "RuntimeError" in caplog.text

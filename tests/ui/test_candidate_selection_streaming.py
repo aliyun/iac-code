@@ -152,7 +152,7 @@ class TestCandidateSelectionRendererStreaming:
 
         rendered = self._render_to_text(renderer.render())
 
-        assert "架构图优化中" in rendered
+        assert "Optimizing architecture diagram" in rendered
         tab = renderer._tabs[0]
         assert tab.mermaid_source == "graph TD; Draft-->B"
         assert tab.diagram_stage == "draft"
@@ -178,7 +178,7 @@ class TestCandidateSelectionRendererStreaming:
 
         rendered_after_update = self._render_to_text(renderer.render())
 
-        assert "架构图优化中" not in rendered_after_update
+        assert "Optimizing architecture diagram" not in rendered_after_update
         assert "架构概览" in rendered_after_update
         assert "应用详情" in rendered_after_update
         assert renderer._tabs[0].diagram_stage == "optimized"

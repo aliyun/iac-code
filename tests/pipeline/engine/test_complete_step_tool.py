@@ -1,4 +1,5 @@
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -138,6 +139,221 @@ class TestDynamicInputSchema:
 
         assert is_valid is False
         assert "rollback_request" in error
+
+    def test_pipeline_local_compact_schema_keeps_only_shallow_field_types(self):
+        full_schema = {
+            "type": "object",
+            "required": ["status", "payload"],
+            "properties": {
+                "status": {"type": "string", "enum": ["waiting", "done"], "description": "branch"},
+                "payload": {
+                    "type": "object",
+                    "required": ["large"],
+                    "properties": {"large": {"type": "string", "description": "x" * 5000}},
+                },
+            },
+            "additionalProperties": False,
+        }
+        tool = CompleteStepTool(
+            StepConfig(
+                step_id="compact",
+                conclusion_field="result",
+                forward=None,
+                conclusion_schema=full_schema,
+                compact_completion_schema=True,
+            )
+        )
+
+        conclusion_schema = tool.input_schema["properties"]["conclusion"]
+
+        assert conclusion_schema["required"] == ["status"]
+        assert conclusion_schema["properties"]["payload"] == {"type": "object"}
+        assert len(json.dumps(tool.input_schema)) < len(json.dumps(full_schema)) / 5
+
+    def test_compact_error_does_not_echo_invalid_large_payload(self):
+        tool = CompleteStepTool(
+            StepConfig(
+                step_id="compact",
+                conclusion_field="result",
+                forward=None,
+                conclusion_schema={
+                    "type": "object",
+                    "required": ["status"],
+                    "properties": {"status": {"type": "string", "enum": ["done"]}},
+                    "additionalProperties": False,
+                },
+                compact_completion_schema=True,
+                compact_completion_errors=True,
+            )
+        )
+
+        valid, error = tool.validate_input({"conclusion": {"status": "done", "unexpected": "secret" * 2000}})
+
+        assert valid is False
+        assert "secret" not in error
+        assert "Allowed conclusion fields" in error
+        assert len(error) < 1000
+
+
+class TestIncrementalConclusionNormalization:
+    @pytest.mark.asyncio
+    async def test_resume_delta_is_deep_merged_before_full_validation(self):
+        schema = {
+            "type": "object",
+            "required": ["status", "stable", "nested"],
+            "properties": {
+                "status": {"type": "string", "enum": ["waiting", "done"]},
+                "stable": {"type": "string"},
+                "nested": {
+                    "type": "object",
+                    "required": ["kept", "changed"],
+                    "properties": {"kept": {"type": "integer"}, "changed": {"type": "integer"}},
+                    "additionalProperties": False,
+                },
+            },
+            "additionalProperties": False,
+        }
+        tool = CompleteStepTool(
+            StepConfig(
+                step_id="merge",
+                conclusion_field="result",
+                forward=None,
+                conclusion_schema=schema,
+                compact_completion_schema=True,
+                conclusion_merge_context_field="saved",
+                conclusion_merge_statuses=("done",),
+            ),
+            completion_guard_state={
+                "context_snapshot": {
+                    "saved": {"status": "waiting", "stable": "preserved", "nested": {"kept": 1, "changed": 2}}
+                }
+            },
+        )
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "done", "nested": {"changed": 3}}},
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+        assert result.metadata["step_result"].conclusion == {
+            "status": "done",
+            "stable": "preserved",
+            "nested": {"kept": 1, "changed": 3},
+        }
+
+    def test_explicit_empty_object_clears_a_saved_override_map(self):
+        tool_input = {"conclusion": {"status": "waiting", "parameter_overrides": {}}}
+        tool = CompleteStepTool(
+            StepConfig(
+                step_id="merge",
+                conclusion_field="result",
+                forward=None,
+                conclusion_merge_context_field="saved",
+                conclusion_merge_statuses=("waiting",),
+            ),
+            completion_guard_state={
+                "context_snapshot": {
+                    "saved": {"status": "waiting", "parameter_overrides": {"InstanceType": "ecs.g7.large"}}
+                }
+            },
+        )
+
+        tool.normalize_input(tool_input)
+
+        assert tool_input["conclusion"]["parameter_overrides"] == {}
+
+    @pytest.mark.asyncio
+    async def test_candidate_duplicates_are_hydrated_by_runtime(self):
+        candidate = {"name": "方案 B", "output_path": "templates/2-b.yml"}
+        schema = {
+            "type": "object",
+            "required": ["status", "candidates", "selected_candidate_index", "selected_candidate"],
+            "properties": {
+                "status": {"type": "string", "enum": ["awaiting_selection", "selected"]},
+                "candidates": {"type": "array", "items": {"type": "object"}},
+                "selected_candidate_index": {"type": "integer"},
+                "selected_candidate_name": {"type": "string"},
+                "selected_candidate": {"type": "object"},
+            },
+            "additionalProperties": False,
+        }
+        tool = CompleteStepTool(
+            StepConfig(
+                step_id="select",
+                conclusion_field="solution_selection",
+                forward=None,
+                conclusion_schema=schema,
+                compact_completion_schema=True,
+                conclusion_merge_context_field="solution_selection",
+                conclusion_merge_statuses=("selected",),
+                hydrate_selected_candidate=True,
+            ),
+            completion_guard_state={
+                "context_snapshot": {
+                    "solution_selection": {
+                        "status": "awaiting_selection",
+                        "candidates": [{"name": "方案 A"}, candidate],
+                    }
+                }
+            },
+        )
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "selected", "selected_candidate_index": 1}},
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+        conclusion = result.metadata["step_result"].conclusion
+        assert conclusion["selected_candidate_name"] == "方案 B"
+        assert conclusion["selected_candidate"] == candidate
+
+    @pytest.mark.asyncio
+    async def test_authoritative_candidate_is_injected_into_both_handoff_fields(self):
+        candidate = {"name": "权威方案", "hard_constraints": []}
+        schema = {
+            "type": "object",
+            "required": ["status", "selected_candidate", "selected_candidate_result"],
+            "properties": {
+                "status": {"type": "string"},
+                "selected_candidate": {"type": "object"},
+                "selected_candidate_result": {
+                    "type": "object",
+                    "required": ["candidate", "solution_summary"],
+                    "properties": {"candidate": {"type": "object"}, "solution_summary": {"type": "string"}},
+                },
+            },
+        }
+        tool = CompleteStepTool(
+            StepConfig(
+                step_id="materialize",
+                conclusion_field="selected_plan",
+                forward=None,
+                conclusion_schema=schema,
+                compact_completion_schema=True,
+                authoritative_candidate_context_field="solution_selection.selected_candidate",
+                authoritative_candidate_targets=("selected_candidate", "selected_candidate_result.candidate"),
+            ),
+            completion_guard_state={
+                "context_snapshot": {"solution_selection": {"selected_candidate": candidate}}
+            },
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "status": "awaiting_confirmation",
+                    "selected_candidate_result": {"solution_summary": "summary"},
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+        conclusion = result.metadata["step_result"].conclusion
+        assert conclusion["selected_candidate"] == candidate
+        assert conclusion["selected_candidate_result"]["candidate"] == candidate
 
 
 class TestCompleteStepToolExecute:

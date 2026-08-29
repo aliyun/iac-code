@@ -29,6 +29,12 @@ PROMPT_FILE = Path(__file__).with_name("permission_wait_start_chat_prompt.md")
 DEFAULT_QODER_TURN_TIMEOUT_SECONDS = 900.0
 
 
+def _manager_runtime_root(run_id: str) -> Path:
+    """Keep Skill manager-owned paths inside Python's trusted temp tree."""
+
+    return Path(tempfile.gettempdir()).expanduser().resolve() / "iac-code-a2a-e2e-manager" / run_id
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--allow-real-cloud", action="store_true")
@@ -911,11 +917,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     repo_root = Path(__file__).resolve().parents[4]
     run_dir = args.run_dir.expanduser().resolve()
     run_dir.mkdir(parents=True, exist_ok=False)
+    run_id = "pwait-{}-{}".format(args.mode, uuid.uuid4().hex[:8])
+    manager_root = _manager_runtime_root(run_id)
     config_dir = run_dir / "iac-code-config"
     shared_root = run_dir / "shared-backup"
-    state_root = run_dir / "ros-agent-state"
+    state_root = manager_root / "ros-agent-state"
     agent_workspace = run_dir / "agent-workspace"
-    qoder_workspace = run_dir / "qoder-workspace"
+    qoder_workspace = manager_root / "qoder-workspace"
     for path in (shared_root, state_root, agent_workspace, qoder_workspace, run_dir / "runtime", run_dir / "logs"):
         path.mkdir(parents=True, exist_ok=True)
     source_config_dir = args.source_config_dir.expanduser().resolve()
@@ -926,7 +934,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     if not args.qoder_cli.expanduser().is_file():
         raise RuntimeError("Qoder CLI is unavailable")
 
-    run_id = "pwait-{}-{}".format(args.mode, uuid.uuid4().hex[:8])
     stack_name = (run_id + "-stack")[:64]
     vswitch_name = (run_id + "-vsw")[:128]
     normal_port, pipeline_port, relay_port = _free_port(), _free_port(), _free_port()

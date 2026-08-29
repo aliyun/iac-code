@@ -35,6 +35,18 @@ def _confirm_and_select_envelope():
     }
 
 
+def _materialized_confirmation_envelope(path="templates/final.yml"):
+    return {
+        "eventType": "input_required",
+        "step": {"id": "materialize_selected_candidate"},
+        "data": {
+            "stepId": "materialize_selected_candidate",
+            "kind": "deployment_confirmation",
+            "template_url": path,
+        },
+    }
+
+
 def _make_session(tmp_path):
     return SimpleNamespace(
         cwd=str(tmp_path),
@@ -169,6 +181,33 @@ async def test_maybe_trigger_skips_when_cached(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_materialized_confirmation_uses_old_optimizer_with_separate_key(monkeypatch, tmp_path):
+    monkeypatch.setattr(dc, "get_config_dir", lambda: tmp_path / "config")
+    _patch_engine(monkeypatch)
+    monkeypatch.setattr(
+        opt,
+        "model_selection_for_session",
+        lambda session: WebModelSelection(provider=None, model="m", effort=None),
+    )
+    template = tmp_path / "templates" / "final.yml"
+    template.parent.mkdir()
+    template.write_text(_TPL0, encoding="utf-8")
+    session = _make_session(tmp_path)
+    manager = _FakeManager([])
+
+    coord = opt.DiagramOptimizationCoordinator()
+    coord.maybe_trigger(session, manager, _materialized_confirmation_envelope())
+    await asyncio.gather(*list(session.active_local_tasks))
+
+    calls = [call.args for call in session.events.publish.call_args_list]
+    assert [event_type for event_type, _payload in calls] == ["diagram.optimizing", "diagram.optimized"]
+    for _event_type, payload in calls:
+        assert payload["optimizationKey"] == "materialized"
+        assert "candidateIndex" not in payload
+    assert dc.read_cached("ctx-1", "materialized", _TPL0) is not None
+
+
+@pytest.mark.asyncio
 async def test_non_candidate_input_required_ignored(monkeypatch, tmp_path):
     plan_spy: list = []
     _patch_engine(monkeypatch, plan_spy)
@@ -273,10 +312,11 @@ async def test_all_views_filtered_publishes_failed_and_skips_cache(monkeypatch, 
 def test_optimizing_indices_filters_by_context():
     # /outputs 据此把在途优化态挂到架构图的后端权威 optimizing 标志上,跨 resync 不倒退。
     coord = opt.DiagramOptimizationCoordinator()
-    coord._inflight.add(("ctx-1", 0))
-    coord._inflight.add(("ctx-1", 2))
-    coord._inflight.add(("ctx-2", 5))
-    assert coord.optimizing_indices("ctx-1") == {0, 2}
+    coord._inflight.add(("ctx-1", 0, "hash-a"))
+    coord._inflight.add(("ctx-1", 2, "hash-b"))
+    coord._inflight.add(("ctx-1", "materialized", "hash-c"))
+    coord._inflight.add(("ctx-2", 5, "hash-d"))
+    assert coord.optimizing_indices("ctx-1") == {0, 2, "materialized"}
     assert coord.optimizing_indices("ctx-2") == {5}
     assert coord.optimizing_indices("other") == set()
     assert coord.optimizing_indices(None) == set()

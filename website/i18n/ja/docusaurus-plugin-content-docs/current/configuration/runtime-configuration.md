@@ -135,12 +135,15 @@ permissions:
 | パターン | 意味 |
 |---|---|
 | `bash` | すべての bash コマンドにマッチ（ツール名のみ）。 |
+| `bash(**)` | コマンド解析器が複雑と判定する形式を含め、すべての Bash コマンドを明示的に一括許可。 |
 | `bash(git *)` | `git` で始まる bash コマンドにマッチ。 |
 | `bash(curl:*)` | `curl` で始まる bash コマンドにマッチ。 |
 | `write_file` | すべての write_file ツール呼び出しにマッチ。 |
 | `aliyun_api(ros:CreateStack)` | Alibaba Cloud API の product/action ペア 1 つにマッチ。 |
 
 ルールは次の順序で評価されます：**deny → ask → allow → デフォルト動作**。CLI 引数（`--allowed-tools`、`--disallowed-tools`）が最も高い優先度を持ちます。
+
+`bash(**)` がこの一括許可の意味を持つのは、設定または `--allowed-tools` から読み込まれる `allow` リストに完全一致で記述された場合だけです。明示的な `deny`／`ask` ルールと基本的な Shell 安全性チェックは引き続き優先されます。A2A セーフモードは Bash を利用可能なツールから除外でき、厳格なパス境界も引き続き強制します。`bash(**)` で Bash を再有効化したり、これらの制限を回避したりすることはできません。`bash(*)` を含む通常の Bash パターンは従来の動作を維持し、複雑なコマンドの確認を省略しません。
 
 ### Alibaba Cloud API 権限
 

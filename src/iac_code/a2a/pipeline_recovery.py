@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from typing import Any
 
 from a2a.server.context import ServerCallContext
@@ -198,6 +199,43 @@ class A2APipelineRecoveryService:
         task = await self._task_store.get(task_id, context=call_context)
         if task is None or task.context_id != context_id:
             raise ValueError(_("A2A pipeline state not found"))
+
+
+#: 只服务端用得上的快照字段：客户端恢复不读，却是响应体积的大头。
+#: ``seenEventIds`` 是事件去重台账，服务端拿磁盘快照做新鲜度判定
+#: （``_snapshot_seen_events_are_within_replay``）；客户端的增量锚点是
+#: ``lastSequence`` / ``afterSequence``。真实会话里它能占到整份响应的六成。
+_SERVER_ONLY_SNAPSHOT_KEYS = ("seenEventIds",)
+
+#: 精简模式（``?lean=1``）额外裁掉的 ``display`` 字段：恢复界面不读，调试工具才读。
+#: ``toolResults`` 是每次工具调用的完整留档（参数约束、云 API 原文这类大 JSON），
+#: 真实会话里 47 条就有 330 KB。控制台恢复只需要消息、图表与候选方案，
+#: 而 ``scripts/a2a/debugger.py``、``scripts/a2a/e2e/run_recovery_scenarios.py``
+#: 要靠它排查，所以默认仍然全量返回，只有显式要求精简时才裁。
+_LEAN_ONLY_DISPLAY_KEYS = ("toolResults",)
+
+
+def client_pipeline_state(state: Mapping[str, Any], *, lean: bool = False) -> dict[str, Any]:
+    """去掉只服务端用得上的字段，得到面向客户端的恢复状态。
+
+    磁盘快照与进程内状态都不受影响：这里只裁剪要发出去的那一份拷贝。
+    Web 应用走同进程调用（``get_state``），拿的仍是完整状态。
+
+    ``lean=True`` 再去掉只有调试工具会读的 ``display`` 字段，供恢复界面
+    （ROS 控制台经 bridge 拉取）少下载一大截；默认关闭，调试工具无需改动。
+    """
+
+    projected = dict(state)
+    snapshot = projected.get("snapshot")
+    if not isinstance(snapshot, Mapping):
+        return projected
+    trimmed = {key: value for key, value in snapshot.items() if key not in _SERVER_ONLY_SNAPSHOT_KEYS}
+    if lean:
+        display = trimmed.get("display")
+        if isinstance(display, Mapping):
+            trimmed["display"] = {key: value for key, value in display.items() if key not in _LEAN_ONLY_DISPLAY_KEYS}
+    projected["snapshot"] = trimmed
+    return projected
 
 
 def _int_value(value: Any, default: int) -> int:

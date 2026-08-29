@@ -65,9 +65,15 @@ def reconstruct_step_result(messages: list[Message], step_id: str) -> StepResult
     )
 
 
-def reconstruct_completion_guard_state(messages: list[Message]) -> dict[str, Any]:
+def reconstruct_completion_guard_state(
+    messages: list[Message],
+    *,
+    completion_record_contract: str | None = None,
+) -> dict[str, Any]:
     tool_uses = _tool_uses_by_id(messages)
     state = ensure_completion_guard_state({})
+    state["completion_record_contract"] = completion_record_contract
+    v2_records = completion_record_contract == "v2"
     for message in messages:
         if message.role != "user" or isinstance(message.content, str):
             continue
@@ -77,24 +83,28 @@ def reconstruct_completion_guard_state(messages: list[Message]) -> dict[str, Any
             tool_use = tool_uses.get(block.tool_use_id)
             if tool_use is None:
                 continue
+            content, evidence_unavailable = _tool_result_content_for_recovery(block)
+            if evidence_unavailable and v2_records:
+                content = "evidence_unavailable: externalized tool result cannot be restored"
             record_completion_guard_tool_result(
                 state,
                 tool_name=tool_use.name,
                 tool_input=tool_use.input,
-                content=_tool_result_content_for_recovery(block),
-                is_error=block.is_error,
+                content=content,
+                is_error=block.is_error or (evidence_unavailable and v2_records),
                 metadata=block.metadata,
+                record_id=block.tool_use_id,
             )
     return state
 
 
-def _tool_result_content_for_recovery(block: ToolResultBlock) -> str:
+def _tool_result_content_for_recovery(block: ToolResultBlock) -> tuple[str, bool]:
     metadata = block.metadata if isinstance(block.metadata, dict) else {}
     raw_path = metadata.get(EXTERNALIZED_RESULT_PATH_METADATA_KEY)
     if not isinstance(raw_path, str) or not raw_path:
-        return block.content
+        return block.content, False
     try:
-        return Path(raw_path).read_text(encoding="utf-8")
+        return Path(raw_path).read_text(encoding="utf-8"), False
     except OSError:
         logger.warning("Failed to read externalized tool result while rebuilding completion guard state", exc_info=True)
-        return block.content
+        return block.content, True

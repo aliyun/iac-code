@@ -13,7 +13,7 @@ from iac_code.i18n import _
 from iac_code.services.permissions.trusted_roots import build_session_trusted_read_directories
 from iac_code.services.session_storage import SessionStorage
 from iac_code.utils.public_errors import PublicError
-from iac_code.utils.public_paths import build_public_path_roots, redact_known_public_paths
+from iac_code.utils.public_paths import PublicPathRedactor, build_public_path_roots
 
 IAC_CODE_A2A_SAFE_MODE_ENV = "IAC_CODE_A2A_SAFE_MODE"
 _TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
@@ -79,7 +79,7 @@ def project_a2a_text(
     enabled = a2a_safe_mode_enabled() if safe_mode is None else safe_mode
     if not enabled:
         return value
-    return redact_known_public_paths(value, public_path_roots)
+    return PublicPathRedactor(public_path_roots).redact(value)
 
 
 def project_a2a_data(
@@ -99,7 +99,7 @@ def project_a2a_data(
     enabled = a2a_safe_mode_enabled() if safe_mode is None else safe_mode
     if not enabled:
         return copy.deepcopy(value)
-    return _project_path_only(value, public_path_roots=public_path_roots)
+    return _project_path_only(value, redactor=PublicPathRedactor(public_path_roots))
 
 
 def project_a2a_proto(
@@ -364,37 +364,28 @@ async def project_a2a_exception(
     )
 
 
-def _project_path_only(
-    value: Any,
-    *,
-    public_path_roots: Iterable[Mapping[str, str]] | None,
-) -> Any:
+def _project_path_only(value: Any, *, redactor: PublicPathRedactor) -> Any:
     if isinstance(value, str):
-        return redact_known_public_paths(value, public_path_roots)
+        return redactor.redact(value)
     if isinstance(value, Mapping):
-        return _project_mapping(value, public_path_roots=public_path_roots)
+        return _project_mapping(value, redactor=redactor)
     if isinstance(value, list):
-        return [_project_path_only(item, public_path_roots=public_path_roots) for item in value]
+        return [_project_path_only(item, redactor=redactor) for item in value]
     if isinstance(value, tuple):
-        return [_project_path_only(item, public_path_roots=public_path_roots) for item in value]
+        return [_project_path_only(item, redactor=redactor) for item in value]
     return copy.deepcopy(value)
 
 
-def _project_mapping(
-    value: Mapping[Any, Any],
-    *,
-    public_path_roots: Iterable[Mapping[str, str]] | None,
-) -> dict[Any, Any]:
-    unchanged_keys = {
-        key for key in value if not isinstance(key, str) or redact_known_public_paths(key, public_path_roots) == key
-    }
+def _project_mapping(value: Mapping[Any, Any], *, redactor: PublicPathRedactor) -> dict[Any, Any]:
+    redacted_keys = {key: redactor.redact(key) for key in value if isinstance(key, str)}
+    unchanged_keys = {key for key in value if not isinstance(key, str) or redacted_keys[key] == key}
     used_keys: set[Any] = set()
     projected: dict[Any, Any] = {}
     next_path_index = 1
 
     for key, item in value.items():
         output_key: Any = key
-        if isinstance(key, str) and redact_known_public_paths(key, public_path_roots) != key:
+        if isinstance(key, str) and redacted_keys[key] != key:
             while True:
                 candidate = "[PATH]" if next_path_index == 1 else f"[PATH#{next_path_index}]"
                 next_path_index += 1
@@ -402,5 +393,5 @@ def _project_mapping(
                     output_key = candidate
                     break
         used_keys.add(output_key)
-        projected[output_key] = _project_path_only(item, public_path_roots=public_path_roots)
+        projected[output_key] = _project_path_only(item, redactor=redactor)
     return projected

@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import types
+from copy import deepcopy
 from pathlib import Path
 from textwrap import dedent
 from types import SimpleNamespace
@@ -10,7 +11,14 @@ from unittest.mock import ANY, MagicMock, call, patch
 import pytest
 import yaml
 
-from iac_code.agent.message import Message, ToolResultBlock, ToolUseBlock, create_compaction_summary_message
+from iac_code.agent.message import (
+    ImageBlock,
+    Message,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    create_compaction_summary_message,
+)
 from iac_code.mcp.types import (
     MCPConfigScope,
     MCPConnectionMetadata,
@@ -26,6 +34,7 @@ from iac_code.pipeline.engine.session import PipelineSession
 from iac_code.pipeline.engine.state_machine import StateMachine
 from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorage
 from iac_code.pipeline.engine.types import StepResult, StepStatus
+from iac_code.pipeline.engine.ui_contract import SelectedCandidate, encode_selected_candidate
 from iac_code.services.context_manager import ContextManager
 from iac_code.services.permission_wait import RecoveredPermissionAuditBoundary
 from iac_code.services.session_backup import BackupReason, BackupResult, SessionBackupBlocked
@@ -1819,6 +1828,57 @@ async def test_rollback_cleanup_required_save_failure_stops_before_rollback_even
     )
 
 
+async def _stub_step_execute(step, context, session_id, user_message=None, **kwargs):
+    """最小步骤执行：只关心 run() 开头下发的 PIPELINE_STARTED，不跑真实 agent loop。"""
+    conclusion = {"value": step.step_id}
+    context.set_conclusion(step.conclusion_field, conclusion)
+    yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_started_carries_first_user_request_text(tmp_path):
+    """首句用户 prompt 随 PIPELINE_STARTED 下发（会话恢复的唯一持久化来源）。
+
+    流水线会话的 JSONL 只写 pipeline_init / step_complete 元信息，快照里也没有它，
+    所以这个事件字段一丢，刷新后「我发的第一句话」就再也找不回来了。
+    """
+    runner = _build_two_step_runner(tmp_path)
+    runner._step_executor.execute = _stub_step_execute
+
+    events = [event async for event in runner.run("帮我搭一个静态网站")]
+
+    started = next(
+        event
+        for event in events
+        if isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_STARTED
+    )
+    assert started.data["user_request"] == "帮我搭一个静态网站"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_started_user_request_is_text_only_for_multimodal_input(tmp_path):
+    """带图输入只带文本部分：事件会落盘进快照，不能把图片数据写进去。"""
+    runner = _build_two_step_runner(tmp_path)
+    runner._step_executor.execute = _stub_step_execute
+
+    events = [
+        event
+        async for event in runner.run(
+            [
+                TextBlock(text="按这张架构图搭一套"),
+                ImageBlock(media_type="image/png", data="iVBORw0KGgo="),
+            ]
+        )
+    ]
+
+    started = next(
+        event
+        for event in events
+        if isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_STARTED
+    )
+    assert started.data["user_request"] == "按这张架构图搭一套"
+
+
 @pytest.mark.asyncio
 async def test_initial_sidecar_save_failure_stops_before_pipeline_init_meta(tmp_path):
     runner = _build_two_step_runner(tmp_path)
@@ -1937,6 +1997,101 @@ async def test_step_rollback_forwards_reason_to_target_step(tmp_path):
         ("a", rollback_reason),
         ("b", None),
     ]
+
+
+@pytest.mark.asyncio
+async def test_rollback_from_resumed_waiting_step_starts_fresh_target_attempt(tmp_path):
+    runner = _build_two_step_runner(tmp_path, auto_advance_first=False)
+    runner.session = RecordingPipelineSession()
+    runner._loaded.steps[0].ui_mode = "candidate_selection"
+    runner._loaded.steps[1].ui_mode = "deployment_confirmation"
+    runner._loaded.steps[1].auto_advance = False
+    calls: list[tuple[str, str | None]] = []
+    counts = {"a": 0, "b": 0}
+    rollback_reason = "用户将部署目标从 VPC 改为安全组"
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        counts[step.step_id] += 1
+        calls.append((step.step_id, user_message))
+        rollback_request = None
+        if step.step_id == "a":
+            if counts["a"] == 1:
+                conclusion = {
+                    "status": "awaiting_selection",
+                    "user_prompt": "选择方案",
+                    "options": [{"name": "VPC 方案", "candidate_index": 0}],
+                }
+            elif counts["a"] == 2:
+                conclusion = {"status": "selected", "selected_candidate_name": "VPC 方案"}
+            else:
+                conclusion = {
+                    "status": "awaiting_selection",
+                    "user_prompt": "选择新方案",
+                    "options": [{"name": "安全组方案", "candidate_index": 0}],
+                }
+        elif counts["b"] == 1:
+            conclusion = {
+                "status": "awaiting_confirmation",
+                "user_prompt": "确认部署",
+                "options": [{"action": "confirm", "name": "确认部署"}],
+            }
+        else:
+            conclusion = {"status": "reselect_requested"}
+            rollback_request = ("a", rollback_reason)
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(
+            step_id=step.step_id,
+            status=StepStatus.COMPLETED,
+            conclusion=conclusion,
+            rollback_request=rollback_request,
+        )
+
+    runner._step_executor.execute = fake_execute
+
+    initial_events = [event async for event in runner._continue_from_current()]
+    assert any(
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.USER_INPUT_REQUIRED
+        and event.step_id == "a"
+        for event in initial_events
+    )
+
+    confirmation_events = [event async for event in runner.resume("VPC 方案")]
+    assert any(
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.USER_INPUT_REQUIRED
+        and event.step_id == "b"
+        for event in confirmation_events
+    )
+
+    rollback_events = [event async for event in runner.resume("改成创建安全组")]
+    boundaries = [
+        event
+        for event in rollback_events
+        if isinstance(event, PipelineEvent)
+        and event.type
+        in {
+            PipelineEventType.ROLLBACK_TRIGGERED,
+            PipelineEventType.STEP_STARTED,
+            PipelineEventType.USER_INPUT_REQUIRED,
+        }
+    ]
+
+    assert [(event.type, event.step_id) for event in boundaries] == [
+        (PipelineEventType.ROLLBACK_TRIGGERED, "b"),
+        (PipelineEventType.STEP_STARTED, "a"),
+        (PipelineEventType.USER_INPUT_REQUIRED, "a"),
+    ]
+    assert boundaries[1].data["attempt"] == 2
+    assert boundaries[1].data["ui_mode"] == "candidate_selection"
+    assert calls == [
+        ("a", None),
+        ("a", "VPC 方案"),
+        ("b", None),
+        ("b", "改成创建安全组"),
+        ("a", rollback_reason),
+    ]
+    assert runner.session.calls.count(("running", "a", 0, "step started")) == 2
 
 
 @pytest.mark.asyncio
@@ -4863,3 +5018,226 @@ class TestResolveIterateField:
         runner.context.snapshot = MagicMock(return_value={"plan": {"options": [{"x": 1}]}})
         result = runner._resolve_iterate_field("plan.options")
         assert result == [{"x": 1}]
+
+
+_NARROWING_CANDIDATES = [
+    {"name": "方案A：单机经济型", "output_path": "templates/1-single-ecs.yml"},
+    {"name": "方案B：高可用三层", "output_path": "templates/2-high-availability-slb.yml"},
+]
+_NARROWING_OPTIONS = [
+    {"name": "方案A：单机经济型", "candidate_index": 0},
+    {"name": "方案B：高可用三层", "candidate_index": 1},
+]
+
+
+class _ScriptedCandidateExecutor:
+    """Replace StepExecutor.execute with a scripted conclusion sequence."""
+
+    def __init__(self, conclusions):
+        self._conclusions = list(conclusions)
+        self.calls: list[str] = []
+
+    async def execute(self, step, context, session_id, user_message=None, **kwargs):
+        conclusion = deepcopy(self._conclusions.pop(0)) if self._conclusions else {}
+        self.calls.append(step.step_id)
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+
+async def _drain(events):
+    collected = []
+    async for event in events:
+        collected.append(event)
+    return collected
+
+
+def _waiting_events(events):
+    return [
+        event
+        for event in events
+        if isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_REQUIRED
+    ]
+
+
+def _build_candidate_runner(tmp_path, conclusions):
+    runner = _build_two_step_runner(tmp_path, auto_advance_first=False)
+    runner.session = RecordingPipelineSession()
+    runner.state_machine.current_step.ui_mode = "candidate_selection"
+    executor = _ScriptedCandidateExecutor(conclusions)
+    runner._step_executor.execute = executor.execute
+    return runner, executor
+
+
+class TestResumedCandidateSelectionNarrowing:
+    """恢复窄化：只有显式提交 ``status`` 的候选 Step 才改变既有推进/固化行为。"""
+
+    @pytest.mark.asyncio
+    async def test_conclusion_without_status_still_advances_after_resume(self, tmp_path):
+        # selling.confirm_and_select 的形状：没有 status，也没有 selected index/name。
+        runner, executor = _build_candidate_runner(
+            tmp_path,
+            [
+                {"user_prompt": "选择方案", "options": _NARROWING_OPTIONS, "candidates": _NARROWING_CANDIDATES},
+                {"user_prompt": "选择方案", "options": _NARROWING_OPTIONS, "candidates": _NARROWING_CANDIDATES},
+                {"design": "done"},
+            ],
+        )
+
+        await _drain(runner._continue_from_current())
+        assert runner.state_machine.current_step.step_id == "a"
+
+        await _drain(runner.resume(encode_selected_candidate("方案B：高可用三层", 1)))
+
+        assert executor.calls == ["a", "a", "b"]
+        conclusion = runner.context.get_conclusion("a_out")
+        # 既没有 status 就不固化，也不凭结构化载荷补写 selected_candidate*。
+        assert "selected_candidate_index" not in conclusion
+        assert "selected_candidate_name" not in conclusion
+        assert "selected_candidate" not in conclusion
+        assert "parameter_overrides" not in conclusion
+
+    @pytest.mark.asyncio
+    async def test_status_awaiting_selection_waits_again_instead_of_advancing(self, tmp_path):
+        replanned_options = [{"name": "方案C：容器化", "candidate_index": 0}]
+        runner, executor = _build_candidate_runner(
+            tmp_path,
+            [
+                {"status": "awaiting_selection", "user_prompt": "选择方案", "options": _NARROWING_OPTIONS},
+                {"status": "awaiting_selection", "user_prompt": "重新选择", "options": replanned_options},
+            ],
+        )
+
+        await _drain(runner._continue_from_current())
+        events = await _drain(runner.resume("换成容器方案"))
+
+        assert executor.calls == ["a", "a"]
+        assert runner.state_machine.current_step.step_id == "a"
+        assert _waiting_events(events)[-1].data["options"] == replanned_options
+        assert runner._waiting_input_options_by_step["a"] == replanned_options
+
+    @pytest.mark.asyncio
+    async def test_status_selected_fixes_the_authoritative_candidate_before_saving(self, tmp_path):
+        runner, executor = _build_candidate_runner(
+            tmp_path,
+            [
+                {
+                    "status": "awaiting_selection",
+                    "user_prompt": "选择方案",
+                    "options": _NARROWING_OPTIONS,
+                    "candidates": _NARROWING_CANDIDATES,
+                },
+                # 模型写错了下标，也丢掉了用户提交的参数覆盖。
+                {"status": "selected", "selected_candidate_index": 0, "candidates": _NARROWING_CANDIDATES},
+                {"design": "done"},
+            ],
+        )
+
+        await _drain(runner._continue_from_current())
+        await _drain(runner.resume(encode_selected_candidate("方案B：高可用三层", 1, {"InstanceType": "ecs.g7.large"})))
+
+        assert executor.calls == ["a", "a", "b"]
+        conclusion = runner.context.get_conclusion("a_out")
+        assert conclusion["selected_candidate_index"] == 1
+        assert conclusion["selected_candidate_name"] == "方案B：高可用三层"
+        assert conclusion["selected_candidate"] == _NARROWING_CANDIDATES[1]
+        assert conclusion["parameter_overrides"] == {"InstanceType": "ecs.g7.large"}
+        # 固化的候选是深拷贝，改动它不会污染候选列表。
+        conclusion["selected_candidate"]["output_path"] = "templates/hacked.yml"
+        assert conclusion["candidates"][1]["output_path"] == "templates/2-high-availability-slb.yml"
+
+    @pytest.mark.parametrize(
+        ("ui_mode", "retained_step_id"),
+        [("candidate_selection", "b"), ("plain", "a")],
+    )
+    def test_retained_selection_is_dropped_for_a_different_step_or_ui_mode(self, tmp_path, ui_mode, retained_step_id):
+        runner, _executor = _build_candidate_runner(tmp_path, [])
+        step = runner.state_machine.current_step
+        step.ui_mode = ui_mode
+        runner._resumed_candidate_selection = {
+            "step_id": retained_step_id,
+            "structured": SelectedCandidate(selected_candidate_name="方案B：高可用三层", selected_candidate_index=1),
+            "candidates": deepcopy(_NARROWING_CANDIDATES),
+        }
+        conclusion = {"status": "selected", "candidates": deepcopy(_NARROWING_CANDIDATES)}
+
+        runner._apply_authoritative_candidate_selection(
+            step, StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+        )
+
+        assert "selected_candidate" not in conclusion
+        assert "selected_candidate_index" not in conclusion
+        # 保留的选择只用一次，避免回滚后串到其他 Step。
+        assert runner._resumed_candidate_selection is None
+
+
+class TestAuthoritativeCandidateIndex:
+    """结构化选择优先，其次才验证模型自己映射的下标或名称。"""
+
+    @staticmethod
+    def _runner() -> PipelineRunner:
+        return PipelineRunner.__new__(PipelineRunner)
+
+    def test_structured_index_beats_model_written_index(self):
+        structured = SelectedCandidate(selected_candidate_name="方案B：高可用三层", selected_candidate_index=1)
+
+        index = self._runner()._authoritative_candidate_index(
+            structured, _NARROWING_CANDIDATES, {"selected_candidate_index": 0}
+        )
+
+        assert index == 1
+
+    def test_structured_evaluated_index_is_used_when_index_is_missing(self):
+        structured = SelectedCandidate(
+            selected_candidate_name="方案B：高可用三层",
+            selected_candidate_index=None,
+            selected_evaluated_candidate_index=1,
+        )
+
+        assert self._runner()._authoritative_candidate_index(structured, _NARROWING_CANDIDATES, {}) == 1
+
+    def test_structured_name_resolves_against_the_candidate_list(self):
+        structured = SelectedCandidate(selected_candidate_name="方案B：高可用三层")
+
+        assert self._runner()._authoritative_candidate_index(structured, _NARROWING_CANDIDATES, {}) == 1
+
+    def test_out_of_range_structured_index_falls_back_to_the_validated_model_index(self):
+        structured = SelectedCandidate(selected_candidate_name="", selected_candidate_index=7)
+
+        assert (
+            self._runner()._authoritative_candidate_index(
+                structured, _NARROWING_CANDIDATES, {"selected_candidate_index": 1}
+            )
+            == 1
+        )
+
+    def test_out_of_range_model_index_is_not_fabricated(self):
+        assert (
+            self._runner()._authoritative_candidate_index(None, _NARROWING_CANDIDATES, {"selected_candidate_index": 9})
+            is None
+        )
+
+    def test_model_name_must_match_exactly_one_candidate(self):
+        duplicated = [{"name": "同名方案"}, {"name": "同名方案"}]
+
+        runner = self._runner()
+        assert (
+            runner._authoritative_candidate_index(
+                None, _NARROWING_CANDIDATES, {"selected_candidate_name": "方案A：单机经济型"}
+            )
+            == 0
+        )
+        assert runner._authoritative_candidate_index(None, duplicated, {"selected_candidate_name": "同名方案"}) is None
+
+    def test_single_candidate_resolves_without_any_explicit_selection(self):
+        runner = self._runner()
+
+        assert runner._authoritative_candidate_index(None, [_NARROWING_CANDIDATES[0]], {}) == 0
+        assert runner._authoritative_candidate_index(None, _NARROWING_CANDIDATES, {}) is None
+
+    def test_boolean_index_is_not_treated_as_an_integer(self):
+        assert (
+            self._runner()._authoritative_candidate_index(
+                None, _NARROWING_CANDIDATES, {"selected_candidate_index": True}
+            )
+            is None
+        )

@@ -262,7 +262,7 @@ thinking-exposure:
 |--------|---------|-------------|
 | `auto-approve-permissions` | `false` | Automatically approve tool permission requests raised during A2A turns |
 
-Without `auto-approve-permissions: true`, A2A mode rejects permission prompts and emits permission metadata. With it enabled, permission decisions are written to the local permission audit log; any allow decision that requires an audit record fails closed if that record cannot be persisted. Protected Alibaba Cloud write APIs are not blanket-approved by ordinary allow rules; configure exact `aliyun_api(product:action)` allow rules for trusted automation.
+Without `auto-approve-permissions: true`, a tool permission request pauses the turn and returns a structured `input-required` response so the caller can send `allow_once` or `deny`. With automatic approval enabled, permission decisions are written to the local permission audit log; any allow decision that requires an audit record fails closed if that record cannot be persisted. Protected Alibaba Cloud write APIs are not blanket-approved by ordinary allow rules; configure exact `aliyun_api(product:action)` allow rules for trusted automation. See [Protocol Reference](./protocol-reference.md) for the response and resume contract.
 
 ## `iac-code a2a-client call`
 

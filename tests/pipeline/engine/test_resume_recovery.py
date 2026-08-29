@@ -26,6 +26,27 @@ def test_reconcile_resume_messages_filters_duplicate_tool_result_blocks_only():
     )
 
 
+def test_reconcile_resume_messages_replaces_synthetic_error_with_durable_success():
+    interrupted = Message(
+        role="user",
+        content=[
+            ToolResultBlock(
+                tool_use_id="ask-1",
+                content="Session interrupted before tool execution completed.",
+                is_error=True,
+            )
+        ],
+    )
+    answered = Message(
+        role="user",
+        content=[ToolResultBlock(tool_use_id="ask-1", content='{"free_text":"Node.js API"}')],
+    )
+
+    merged = reconcile_resume_messages([interrupted], [answered])
+
+    assert merged == [answered]
+
+
 def test_user_message_already_in_resume_matches_image_message():
     image_message = [
         TextBlock(text="参考这张图"),

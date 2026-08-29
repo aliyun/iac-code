@@ -219,7 +219,11 @@ def audit_provider_attempts(
         count_attrs: dict[str, Any] = {"provider": provider, "model": model, "status": status}
         if error_type:
             count_attrs["error_type"] = error_type
-        count_value = _latest_metric_value(metrics, name=_REQUEST_COUNT, required_attributes=count_attrs)
+        count_value = _cumulative_metric_value_across_resources(
+            metrics,
+            name=_REQUEST_COUNT,
+            required_attributes=count_attrs,
+        )
         if not isinstance(count_value, int | float) or count_value < expected_count:
             failures.append(
                 {
@@ -270,3 +274,36 @@ def _latest_metric_value(
         if latest is None or timestamp >= latest[0]:
             latest = (timestamp, record.get("value"))
     return latest[1] if latest is not None else None
+
+
+def _cumulative_metric_value_across_resources(
+    metrics: Iterable[Record],
+    *,
+    name: str,
+    required_attributes: Mapping[str, Any],
+) -> Any:
+    """Sum the latest cumulative counter from each telemetry resource.
+
+    A Web recovery scenario restarts the server several times. Each process has
+    its own cumulative counter starting at zero, while all processes export to
+    the same E2E receiver. Taking one globally latest sample undercounts every
+    completed request from earlier server epochs.
+    """
+
+    latest_by_resource: dict[str, tuple[int, Any]] = {}
+    for record in metrics:
+        if record.get("name") != name:
+            continue
+        attributes = record.get("attributes") or {}
+        if any(attributes.get(key) != value for key, value in required_attributes.items()):
+            continue
+        resource = record.get("resource") or {}
+        resource_key = json.dumps(resource, sort_keys=True, ensure_ascii=False, default=str)
+        timestamp = int(record.get("timestamp_unix_nano") or 0)
+        previous = latest_by_resource.get(resource_key)
+        if previous is None or timestamp >= previous[0]:
+            latest_by_resource[resource_key] = (timestamp, record.get("value"))
+    values = [value for _, value in latest_by_resource.values()]
+    if not values or not all(isinstance(value, int | float) for value in values):
+        return None
+    return sum(values)

@@ -143,6 +143,23 @@ class RecoverablePipelineInvalidParamsError(InvalidParamsError):
     jsonrpc_error_data_passthrough = True
 
 
+class PipelineIdentityMismatchError(InvalidParamsError):
+    """The requested pipeline disagrees with the pipeline already persisted for the session."""
+
+    code = -32602
+    jsonrpc_error_data_passthrough = True
+
+
+def _pipeline_identity_mismatch_error(*, requested: str, durable: str) -> PipelineIdentityMismatchError:
+    return PipelineIdentityMismatchError(
+        _("This session already runs pipeline {durable}; it cannot switch to {requested}.").format(
+            durable=durable,
+            requested=requested,
+        ),
+        data={"durablePipelineName": durable, "requestedPipelineName": requested},
+    )
+
+
 def _active_sidecar_mismatch_error(
     *,
     recoverable_task_id: str,
@@ -168,6 +185,14 @@ class A2APipelineRuntime:
     outbound_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     current_stream: Any | None = None
     pending_question: "_PendingAskUserQuestion | None" = None
+    preparing_question: AskUserQuestionEvent | None = None
+    question_answer_in_flight: asyncio.Event = field(default_factory=asyncio.Event)
+    question_answer_settled: asyncio.Event = field(default_factory=asyncio.Event)
+    pending_resume_envelope: dict[str, Any] | None = None
+    pending_resume_input: PipelineUserInput | None = None
+    pending_resume_settled: asyncio.Event = field(default_factory=asyncio.Event)
+    pending_resume_error: BaseException | None = None
+    pending_resume_boundary_in_flight: bool = False
     active_owner_task: asyncio.Task[Any] | None = None
     restart_after_interrupt: bool = False
     pause_after_interrupt: bool = False
@@ -310,6 +335,50 @@ class _SidecarRestoreFailedError(RuntimeError):
         self.reason = reason
 
 
+async def _stream_with_pending_rollback_cleanup(
+    *,
+    stream: AsyncIterator[Any],
+    pipeline: Any,
+    runtime: A2APipelineRuntime,
+    cwd: str,
+    session_id: str,
+) -> AsyncIterator[Any]:
+    """Run opt-in durable rollback cleanup before resuming a pipeline stream."""
+
+    feature_enabled = getattr(pipeline, "feature_enabled", None)
+    if callable(feature_enabled) and feature_enabled("a2a_cleanup_before_pipeline_resume"):
+        ledger_factory = getattr(pipeline, "cleanup_ledger", None)
+        ledger = ledger_factory() if callable(ledger_factory) else None
+        if isinstance(ledger, CleanupLedger) and not ledger.load_failed() and ledger.pending_resources():
+            # Imported lazily to reuse the normal-chat cleanup implementation without introducing
+            # an import cycle between the A2A executor and its pipeline adapter.
+            from iac_code.a2a.executor import _ensure_cleanup_prompt_in_session, _observe_cleanup_stream
+
+            agent_runtime = runtime.agent_runtime
+            agent_loop = getattr(agent_runtime, "agent_loop", None)
+            continue_streaming = getattr(agent_loop, "continue_streaming", None)
+            if callable(continue_streaming):
+                _ensure_cleanup_prompt_in_session(
+                    cwd=cwd,
+                    session_id=session_id,
+                    ledger=ledger,
+                    runtime=agent_runtime,
+                )
+                async for event in _observe_cleanup_stream(
+                    continue_streaming(),
+                    ledger,
+                    publisher=runtime.publisher,
+                ):
+                    yield event
+            if ledger.pending_resources():
+                return
+    try:
+        async for event in stream:
+            yield event
+    finally:
+        await _close_stream_safely(stream)
+
+
 class _PipelineBackupBlockedTransitionError(Exception):
     pass
 
@@ -342,6 +411,7 @@ class IacCodeA2APipelineExecutor:
         candidate_presentation: str | None = None,
         backup_service: Any | None = None,
         aliyun_delegated_executor_factory: Any | None = None,
+        pipeline_name: str | None = None,
     ) -> None:
         self._task_store = task_store
         self._model = model
@@ -367,6 +437,80 @@ class IacCodeA2APipelineExecutor:
         self._candidate_presentation = candidate_presentation
         self._backup_service = backup_service or SessionBackupService()
         self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
+        self._pipeline_name_override = pipeline_name or None
+
+    def _resolve_pipeline_name(self) -> str:
+        """Pipeline this executor must run.
+
+        Surfaces that let the user pick a pipeline per session (Web/Desktop mode
+        selector) pass it explicitly; everything else keeps the process-wide
+        ``IAC_CODE_PIPELINE_NAME``/``selling`` default.
+        """
+        return self._pipeline_name_override or get_pipeline_name()
+
+    def _resolve_request_pipeline_name(
+        self,
+        *,
+        cwd: str,
+        session_id: str,
+        session_storage: SessionStorage,
+    ) -> str:
+        """Pipeline for this request, cross-checked against the persisted session identity.
+
+        Pipeline identity is session level and immutable. The caller (POP →
+        ros-ai-agent) already enforces that, so a disagreement here means the
+        remote state and the sandbox state drifted apart — typically after a
+        backup restore. Reject it before any prerequisite/feature-flag pre-read
+        or runner create/restore so no snapshot is touched and no frozen
+        prerequisite of the other pipeline is consumed.
+        """
+        durable = self._peek_durable_pipeline_name(
+            cwd=cwd,
+            session_id=session_id,
+            session_storage=session_storage,
+        )
+        requested = self._pipeline_name_override
+        if requested and durable and requested != durable:
+            raise _pipeline_identity_mismatch_error(requested=requested, durable=durable)
+        if requested:
+            return requested
+        if durable:
+            return durable
+        return get_pipeline_name()
+
+    def _peek_durable_pipeline_name(
+        self,
+        *,
+        cwd: str,
+        session_id: str,
+        session_storage: SessionStorage,
+    ) -> str | None:
+        """Pipeline name already persisted for this session, if any.
+
+        The engine sidecar is authoritative because it is what a resume replays;
+        the A2A snapshot is the fallback for sessions whose sidecar is gone.
+        """
+        try:
+            meta_path = Path(session_storage.session_dir(cwd, session_id)) / "pipeline" / "meta.yaml"
+            if meta_path.exists():
+                raw = yaml.safe_load(meta_path.read_text(encoding="utf-8")) or {}
+                if isinstance(raw, dict):
+                    name = raw.get("pipeline_name")
+                    if isinstance(name, str) and name.strip():
+                        return name.strip()
+        except Exception:
+            logger.debug("Failed to peek pipeline sidecar identity", exc_info=True)
+        try:
+            pipeline_dir = existing_a2a_pipeline_dir_for_session(cwd=cwd, session_id=session_id)
+            snapshot = A2APipelineSnapshotStore(pipeline_dir).load()
+        except Exception:
+            logger.debug("Failed to peek A2A snapshot pipeline identity", exc_info=True)
+            return None
+        if isinstance(snapshot, dict):
+            name = snapshot.get("pipelineName")
+            if isinstance(name, str) and name.strip():
+                return name.strip()
+        return None
 
     async def rebuild_permission_audit_event(
         self,
@@ -384,6 +528,11 @@ class IacCodeA2APipelineExecutor:
             SessionBackupService(session_storage=session_storage).restore_session(cwd, session_id)
         else:
             restore_session(cwd, session_id)
+        pipeline_name = self._resolve_request_pipeline_name(
+            cwd=cwd,
+            session_id=session_id,
+            session_storage=session_storage,
+        )
         runtime = create_agent_runtime(
             AgentFactoryOptions(
                 model=self._model,
@@ -406,6 +555,7 @@ class IacCodeA2APipelineExecutor:
                     cwd=cwd,
                     runtime=runtime,
                     session_storage=session_storage,
+                    pipeline_name=pipeline_name,
                 )
                 rebuild = getattr(pipeline, "rebuild_permission_audit_event", None)
                 if not callable(rebuild):
@@ -474,6 +624,16 @@ class IacCodeA2APipelineExecutor:
 
         if ctx.lock is None:
             ctx.lock = asyncio.Lock()
+
+        # Resolve identity before any branch that can touch the running pipeline: a follow-up routed into an
+        # active task would otherwise inject this request's guidance into a pipeline whose durable identity
+        # disagrees with it. Read-only, so it is safe here; the create/restore path below reuses the result.
+        with self._request_context(session_id=ctx.session_id):
+            request_pipeline_name = self._resolve_request_pipeline_name(
+                cwd=cwd,
+                session_id=ctx.session_id,
+                session_storage=session_storage,
+            )
 
         if ctx.active_task_id is not None:
             self._clear_stale_recoverable_active_task(
@@ -554,7 +714,7 @@ class IacCodeA2APipelineExecutor:
                     if os.environ.get("IAC_CODE_DESKTOP_RUNTIME") == "1":
                         prerequisite_metadata = await asyncio.to_thread(
                             self._inspect_pipeline_prerequisite_metadata,
-                            pipeline_name=get_pipeline_name(),
+                            pipeline_name=request_pipeline_name,
                             cwd=cwd,
                             session_id=ctx.session_id,
                             session_storage=session_storage,
@@ -566,6 +726,7 @@ class IacCodeA2APipelineExecutor:
                             runtime=agent_runtime,
                             session_storage=session_storage,
                             prerequisite_metadata=prerequisite_metadata,
+                            pipeline_name=request_pipeline_name,
                         )
                     else:
                         pipeline = self._create_pipeline(
@@ -573,6 +734,7 @@ class IacCodeA2APipelineExecutor:
                             cwd=cwd,
                             runtime=agent_runtime,
                             session_storage=session_storage,
+                            pipeline_name=request_pipeline_name,
                         )
                     self._set_pipeline_telemetry_correlation(pipeline, task_id=task_id, context_id=context_id)
                     publisher = self._publisher(
@@ -591,6 +753,8 @@ class IacCodeA2APipelineExecutor:
                         task=task,
                         ctx=ctx,
                     )
+                    if permission_checkpoint is not None:
+                        await self._publish_recovered_permission_resolution(publisher, permission_checkpoint)
                     pipeline_runtime = A2APipelineRuntime(
                         agent_runtime=agent_runtime,
                         pipeline=pipeline,
@@ -607,6 +771,7 @@ class IacCodeA2APipelineExecutor:
                             session_storage=session_storage,
                             resume_from_sidecar=False,
                             prerequisite_metadata=prerequisite_metadata,
+                            pipeline_name=request_pipeline_name,
                         )
                         self._set_pipeline_telemetry_correlation(
                             fresh_pipeline,
@@ -620,7 +785,7 @@ class IacCodeA2APipelineExecutor:
                         async def fresh_pipeline_factory() -> Any:
                             prerequisite_metadata = await asyncio.to_thread(
                                 self._inspect_pipeline_prerequisite_metadata,
-                                pipeline_name=get_pipeline_name(),
+                                pipeline_name=request_pipeline_name,
                                 cwd=cwd,
                                 session_id=ctx.session_id,
                                 session_storage=session_storage,
@@ -662,7 +827,13 @@ class IacCodeA2APipelineExecutor:
                     pipeline_runtime.pipeline = pipeline
                     pipeline_runtime.publisher = publisher
                     self._task_store.mirror_context(ctx)
-                stream = selected.stream
+                stream = _stream_with_pending_rollback_cleanup(
+                    stream=selected.stream,
+                    pipeline=pipeline,
+                    runtime=pipeline_runtime,
+                    cwd=cwd,
+                    session_id=ctx.session_id,
+                )
                 ctx.active_task_id = task.task_id
                 task.active_task = owner_task
                 pipeline_runtime.active_owner_task = owner_task
@@ -698,7 +869,13 @@ class IacCodeA2APipelineExecutor:
                         if not stream_result.restart_requested:
                             break
 
-                        stream = self._continue_after_interrupt_stream(pipeline, pipeline_input)
+                        stream = _stream_with_pending_rollback_cleanup(
+                            stream=self._continue_after_interrupt_stream(pipeline, pipeline_input, pipeline_runtime),
+                            pipeline=pipeline,
+                            runtime=pipeline_runtime,
+                            cwd=cwd,
+                            session_id=ctx.session_id,
+                        )
 
                 if detached_permission is not None:
                     pending = detached_permission.pending
@@ -866,6 +1043,10 @@ class IacCodeA2APipelineExecutor:
                 )
                 await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
                 self._record_state(task.state)
+            except PipelineIdentityMismatchError:
+                # Identity guard: surface InvalidParams to the caller instead of failing the
+                # task, so no snapshot/sidecar of either pipeline is touched.
+                raise
             except RecoverablePipelineInvalidParamsError:
                 raise
             except _PipelineBackupBlockedTransitionError:
@@ -1143,6 +1324,33 @@ class IacCodeA2APipelineExecutor:
             ctx=ctx,
         )
 
+        try:
+            pending_resume_routed = await self._route_pending_pipeline_resume_input(
+                runtime,
+                publisher,
+                task_id=task_id,
+                context_id=context_id,
+                pipeline_input=pipeline_input,
+            )
+        except Exception as exc:
+            try:
+                await self._publish_exception_status(
+                    event_queue,
+                    task=task,
+                    task_id=task_id,
+                    context_id=context_id,
+                    exc=exc,
+                    preserve_task_record=preserve_task_record,
+                    pipeline_publisher=publisher,
+                )
+            except _PipelineBackupBlockedTransitionError:
+                await self._complete_backup_blocked_transition(task=task, ctx=ctx)
+            return True
+        if pending_resume_routed:
+            task.state = TASK_STATE_WORKING
+            self._task_store.mirror_task(task)
+            return True
+
         if _pending_pipeline_pause_input_from_sidecar(publisher, task_id=task_id, context_id=context_id) is not None:
             await settle_interrupt()
             await self._continue_active_pause_confirmation(
@@ -1327,6 +1535,13 @@ class IacCodeA2APipelineExecutor:
                 stream = pipeline.continue_from_sidecar(user_input=_pipeline_runner_input(pipeline_input))
             else:
                 stream = pipeline.continue_from_sidecar()
+            stream = _stream_with_pending_rollback_cleanup(
+                stream=stream,
+                pipeline=pipeline,
+                runtime=runtime,
+                cwd=cwd,
+                session_id=session_id,
+            )
             task.state = TASK_STATE_WORKING
             self._task_store.mirror_task(task)
             terminal_handoff_unavailable = False
@@ -1343,7 +1558,13 @@ class IacCodeA2APipelineExecutor:
                     )
                     if not stream_result.restart_requested:
                         break
-                    stream = self._continue_after_interrupt_stream(pipeline, pipeline_input)
+                    stream = _stream_with_pending_rollback_cleanup(
+                        stream=self._continue_after_interrupt_stream(pipeline, pipeline_input, runtime),
+                        pipeline=pipeline,
+                        runtime=runtime,
+                        cwd=cwd,
+                        session_id=session_id,
+                    )
 
             terminal_status_published = False
             terminal_sidecar = _is_terminal_sidecar_status(getattr(pipeline, "sidecar_status", None))
@@ -1437,8 +1658,9 @@ class IacCodeA2APipelineExecutor:
         session_storage: SessionStorage,
         resume_from_sidecar: bool = True,
         prerequisite_metadata: object = _PREREQUISITE_METADATA_UNSET,
+        pipeline_name: str | None = None,
     ) -> Any:
-        pipeline_name = get_pipeline_name()
+        pipeline_name = pipeline_name or self._resolve_pipeline_name()
         prerequisite_resolution = prerequisite_metadata
         if prerequisite_resolution is _PREREQUISITE_METADATA_UNSET:
             prerequisite_resolution = self._inspect_pipeline_prerequisite_metadata(
@@ -1566,7 +1788,15 @@ class IacCodeA2APipelineExecutor:
         except Exception:
             logger.warning("A2A pipeline telemetry correlation setup failed", exc_info=True)
 
-    def _continue_after_interrupt_stream(self, pipeline: Any, pipeline_input: PipelineUserInput) -> AsyncIterator[Any]:
+    def _continue_after_interrupt_stream(
+        self,
+        pipeline: Any,
+        pipeline_input: PipelineUserInput,
+        runtime: A2APipelineRuntime,
+    ) -> AsyncIterator[Any]:
+        pending_resume_input = runtime.pending_resume_input
+        if pending_resume_input is not None:
+            return pipeline.resume(_pipeline_runner_input(pending_resume_input))
         continue_after_interrupt = getattr(pipeline, "continue_after_interrupt", None)
         if callable(continue_after_interrupt):
             return continue_after_interrupt()
@@ -1758,6 +1988,8 @@ class IacCodeA2APipelineExecutor:
                     restart_event.clear()
                     runtime.restart_after_interrupt = False
                     await _cancel_task_safely(stream_driver)
+                    if next_event.done() and not next_event.cancelled():
+                        next_event.exception()
                     next_event = None
                     await _cancel_task_safely(restart_task)
                     restart_task = None
@@ -1770,6 +2002,8 @@ class IacCodeA2APipelineExecutor:
                     restart_event.clear()
                     runtime.pause_after_interrupt = False
                     await _cancel_task_safely(stream_driver)
+                    if next_event.done() and not next_event.cancelled():
+                        next_event.exception()
                     next_event = None
                     await _cancel_task_safely(restart_task)
                     restart_task = None
@@ -1785,6 +2019,34 @@ class IacCodeA2APipelineExecutor:
                     event = await next_event
                 except StopAsyncIteration:
                     next_event = None
+                    if runtime.pending_resume_boundary_in_flight and outbound is not None:
+                        # The Pipeline source is finite at an input boundary, but
+                        # the authoritative boundary may still be inside its
+                        # critical backup on the outbound worker.  Flush that
+                        # publication before deciding that the turn is finished:
+                        # a concurrent response can be staged while the backup is
+                        # blocked even though the source iterator is exhausted.
+                        await outbound.flush()
+                    if runtime.pending_resume_input is not None and runtime.restart_after_interrupt:
+                        # A finite Pipeline stream normally ends immediately after
+                        # USER_INPUT_REQUIRED.  When the response arrived inside
+                        # that event's critical backup, the serialized WORKING
+                        # pulse can still be waiting behind the publication while
+                        # the source stream is already exhausted.  The staged
+                        # input is itself authoritative restart intent, so do not
+                        # reject it merely because the explicit restart event has
+                        # not been emitted yet.
+                        restart_event.clear()
+                        runtime.restart_after_interrupt = False
+                        return _StreamConsumeResult(
+                            had_events=had_events,
+                            restart_requested=True,
+                            terminal_handoff_unavailable=terminal_handoff_unavailable,
+                        )
+                    self._fail_pending_pipeline_resume_input(
+                        runtime,
+                        RuntimeError(_("Pipeline ended before pending input was consumed.")),
+                    )
                     await self._publish_pending_mcp_warnings(
                         runtime=runtime,
                         outbound=outbound,
@@ -1823,6 +2085,7 @@ class IacCodeA2APipelineExecutor:
                     text = terminal_publication.text
                 else:
                     had_events = True
+                    self._prepare_pending_question(runtime, event)
                     await self._publish_pending_mcp_warnings(
                         runtime=runtime,
                         outbound=outbound,
@@ -1874,15 +2137,20 @@ class IacCodeA2APipelineExecutor:
                             )
                         elif outbound is not None:
                             delivery_text = _text_delta_output(event)
+
+                            def after_delivery(
+                                delivery_text: str | None = delivery_text,
+                                delivered_event: Any = event,
+                            ) -> None:
+                                if delivery_text is not None:
+                                    task.output_text.append(delivery_text)
+                                self._settle_pending_pipeline_resume_input(runtime, delivered_event)
+
                             await outbound.submit(
                                 event,
                                 permission_resolver=self._permission_resolver,
                                 auto_approve_permissions=self._auto_approve_permissions,
-                                after_delivery=(
-                                    lambda text=delivery_text: (
-                                        task.output_text.append(text) if text is not None else None
-                                    )
-                                ),
+                                after_delivery=after_delivery,
                             )
                             if _ask_user_question_from(event) is not None:
                                 await outbound.flush()
@@ -1893,6 +2161,7 @@ class IacCodeA2APipelineExecutor:
                                 permission_resolver=self._permission_resolver,
                                 auto_approve_permissions=self._auto_approve_permissions,
                             )
+                            self._settle_pending_pipeline_resume_input(runtime, event)
                         self._track_pending_question(runtime, publisher, event)
                         await self._maybe_publish_normal_handoff_ready(runtime.pipeline, publisher, event)
                 if terminal_handoff_result.attempted and not terminal_handoff_result.terminal_available:
@@ -1900,16 +2169,20 @@ class IacCodeA2APipelineExecutor:
                 if text:
                     task.output_text.append(text)
                 if _ask_user_question_from(event) is not None:
-                    return _StreamConsumeResult(
-                        had_events=had_events,
-                        restart_requested=False,
-                        terminal_handoff_unavailable=terminal_handoff_unavailable,
-                    )
+                    answered_during_publication = await self._wait_for_prepublication_question_answer(runtime, event)
+                    if not answered_during_publication:
+                        return _StreamConsumeResult(
+                            had_events=had_events,
+                            restart_requested=False,
+                            terminal_handoff_unavailable=terminal_handoff_unavailable,
+                        )
         except asyncio.CancelledError as exc:
             stream_exception = exc
+            self._fail_pending_pipeline_resume_input(runtime, exc)
             raise
         except BaseException as exc:
             stream_exception = exc
+            self._fail_pending_pipeline_resume_input(runtime, exc)
             raise
         finally:
             if next_event is not None and not next_event.done():
@@ -2067,6 +2340,70 @@ class IacCodeA2APipelineExecutor:
         if self._permission_input_registry is not None:
             await self._permission_input_registry.reopen_task(closing_token)
 
+    @staticmethod
+    async def _publish_recovered_permission_resolution(
+        publisher: PipelineA2AEventPublisher,
+        checkpoint: dict[str, Any],
+    ) -> None:
+        """Commit the durable decision before a recovered Pipeline tool can run."""
+
+        if checkpoint.get("permissionClass") != "pipeline":
+            return
+        input_id = checkpoint.get("inputId")
+        tool_use_id = checkpoint.get("toolUseId")
+        tool_name = checkpoint.get("toolName")
+        decision_record = checkpoint.get("decision")
+        decision = decision_record.get("value") if isinstance(decision_record, dict) else None
+        if (
+            not isinstance(input_id, str)
+            or not input_id
+            or not isinstance(tool_use_id, str)
+            or not tool_use_id
+            or decision not in {"allow_once", "deny"}
+        ):
+            raise RuntimeError(_("permission_resume_invalid: recovered Pipeline decision is incomplete"))
+
+        snapshot = publisher.snapshot_store.load() or {}
+        display = snapshot.get("display") if isinstance(snapshot.get("display"), dict) else {}
+        permissions = display.get("permissions") if isinstance(display, dict) else []
+        if isinstance(permissions, list) and any(
+            isinstance(item, dict)
+            and (item.get("inputId") == input_id or item.get("permissionId") == input_id)
+            and item.get("pending") is False
+            and item.get("decision") == decision
+            for item in permissions
+        ):
+            return
+
+        coordinates = checkpoint.get("pipelineCoordinates")
+        coordinates = coordinates if isinstance(coordinates, dict) else {}
+        if isinstance(coordinates.get("candidateStep"), dict):
+            scope = "candidate_step"
+        elif isinstance(coordinates.get("candidate"), dict):
+            scope = "candidate"
+        elif isinstance(coordinates.get("step"), dict):
+            scope = "step"
+        else:
+            scope = "pipeline"
+        resolved = await publisher.publish_manual(
+            "permission_resolved",
+            scope,
+            status="working",
+            data={
+                "kind": "permission",
+                "permissionId": input_id,
+                "inputId": input_id,
+                "toolUseId": tool_use_id,
+                "toolName": tool_name,
+                "decision": decision,
+                "pending": False,
+            },
+            coordinates=coordinates,
+            require_durable_metadata=True,
+        )
+        if resolved is None:
+            raise RuntimeError(_("permission_resume_invalid: recovered Pipeline decision could not be published"))
+
     def _publisher(
         self,
         *,
@@ -2082,13 +2419,14 @@ class IacCodeA2APipelineExecutor:
             pipeline_run_id=context_id,
             task_id=task_id,
             context_id=context_id,
-            pipeline_name=getattr(pipeline, "pipeline_name", get_pipeline_name()),
+            pipeline_name=getattr(pipeline, "pipeline_name", self._resolve_pipeline_name()),
             iac_code_session_id=session_id,
             parent_step_order=_pipeline_parent_step_order(pipeline),
             parent_step_ui_modes=_pipeline_parent_step_ui_modes(pipeline),
             candidate_step_order=_pipeline_candidate_step_order(pipeline),
             emit_stack_events=bool(getattr(pipeline, "emit_stack_events", False)),
             a2a_artifacts_by_step_id=_pipeline_a2a_artifacts_by_step_id(pipeline),
+            trusted_workspace_root=cwd,
         )
         journal = A2APipelineJournal(pipeline_dir)
         translator = PipelineEventTranslator(context)
@@ -2177,6 +2515,9 @@ class IacCodeA2APipelineExecutor:
                 return True
         else:
             self._mirror_a2a_snapshots_for_pipeline_publication(envelope, task=task, ctx=ctx)
+        if reason == BackupReason.INPUT_REQUIRED:
+            self._activate_prepared_pending_question(ctx.runtime, envelope)
+            self._activate_pending_pipeline_resume_input(ctx.runtime, envelope)
         await self._backup_pipeline_publication(
             envelope,
             publisher=publisher,
@@ -3042,8 +3383,53 @@ class IacCodeA2APipelineExecutor:
         if not isinstance(envelope, dict) or envelope.get("eventType") != "input_required":
             return
         if question.response_future is None or question.response_future.done():
+            if runtime.preparing_question is question:
+                runtime.preparing_question = None
             return
         runtime.pending_question = _PendingAskUserQuestion(event=question, envelope=dict(envelope))
+        if runtime.preparing_question is question:
+            runtime.preparing_question = None
+
+    @staticmethod
+    def _prepare_pending_question(runtime: A2APipelineRuntime, event: Any) -> None:
+        question = _ask_user_question_from(event)
+        if question is None:
+            return
+        future = question.response_future
+        if future is not None and not future.done():
+            runtime.question_answer_in_flight.clear()
+            runtime.question_answer_settled.clear()
+            runtime.preparing_question = question
+
+    @staticmethod
+    async def _wait_for_prepublication_question_answer(runtime: A2APipelineRuntime, event: Any) -> bool:
+        question = _ask_user_question_from(event)
+        if question is None:
+            return False
+        if runtime.question_answer_in_flight.is_set():
+            await runtime.question_answer_settled.wait()
+        future = question.response_future
+        return future is not None and future.done() and not future.cancelled()
+
+    @staticmethod
+    def _activate_prepared_pending_question(runtime: Any, envelope: dict[str, Any]) -> None:
+        if not isinstance(runtime, A2APipelineRuntime) or envelope.get("eventType") != "input_required":
+            return
+        data = envelope.get("data")
+        if not isinstance(data, dict) or data.get("kind") != "ask_user_question":
+            return
+        question = runtime.preparing_question
+        if not isinstance(question, AskUserQuestionEvent):
+            return
+        tool_use_id = str(data.get("toolUseId") or "")
+        if tool_use_id and tool_use_id != question.tool_use_id:
+            return
+        future = question.response_future
+        if future is None or future.done():
+            runtime.preparing_question = None
+            return
+        runtime.pending_question = _PendingAskUserQuestion(event=question, envelope=dict(envelope))
+        runtime.preparing_question = None
 
     async def _route_pending_question_answer(self, runtime: Any, pipeline_input: PipelineUserInput) -> str:
         pipeline_input = normalize_pipeline_user_input(pipeline_input)
@@ -3064,48 +3450,186 @@ class IacCodeA2APipelineExecutor:
             return _PENDING_QUESTION_NOT_ROUTED
 
         answer = _ask_user_question_answer_from_prompt(question, prompt)
-        published = await publish_manual(
-            "input_received",
-            str(pending.envelope.get("scope") or "pipeline"),
-            status="working",
-            data={
-                "kind": "ask_user_question",
-                "inputId": _pending_input_id(pending.envelope, question),
-                "toolUseId": question.tool_use_id,
-                "answerTextLength": len(prompt),
-                "selectedId": answer["selected_id"],
-                "selectedLabel": answer["selected_label"],
-                "freeTextLength": len(answer["free_text"]),
-                **_ask_user_question_echo(pending.envelope.get("data")),
-            },
-            coordinates=_coordinates_from_envelope(pending.envelope),
-        )
-        if published is None:
-            return _PENDING_QUESTION_NOT_ROUTED
-
-        if pipeline_input.has_images:
-            inject_pending_question_supplement = getattr(
-                getattr(runtime, "pipeline", None),
-                "inject_pending_question_supplement",
-                None,
+        answer_in_flight = getattr(runtime, "question_answer_in_flight", None)
+        answer_settled = getattr(runtime, "question_answer_settled", None)
+        if not isinstance(answer_in_flight, asyncio.Event):
+            answer_in_flight = asyncio.Event()
+            runtime.question_answer_in_flight = answer_in_flight
+        if not isinstance(answer_settled, asyncio.Event):
+            answer_settled = asyncio.Event()
+            runtime.question_answer_settled = answer_settled
+        if answer_in_flight.is_set():
+            await answer_settled.wait()
+            return _PENDING_QUESTION_STALE_FINISHED
+        answer_in_flight.set()
+        answer_settled.clear()
+        try:
+            published = await publish_manual(
+                "input_received",
+                str(pending.envelope.get("scope") or "pipeline"),
+                status="working",
+                data={
+                    "kind": "ask_user_question",
+                    "inputId": _pending_input_id(pending.envelope, question),
+                    "toolUseId": question.tool_use_id,
+                    "answerTextLength": len(prompt),
+                    "selectedId": answer["selected_id"],
+                    "selectedLabel": answer["selected_label"],
+                    "freeText": answer["free_text"],
+                    "freeTextLength": len(answer["free_text"]),
+                    **_ask_user_question_echo(pending.envelope.get("data")),
+                },
+                coordinates=_coordinates_from_envelope(pending.envelope),
             )
-            if callable(inject_pending_question_supplement):
-                try:
-                    injected = inject_pending_question_supplement(pipeline_input.content, envelope=pending.envelope)
-                    if inspect.isawaitable(injected):
-                        injected = await injected
-                except Exception:
+            if published is None:
+                return _PENDING_QUESTION_NOT_ROUTED
+
+            if pipeline_input.has_images:
+                inject_pending_question_supplement = getattr(
+                    getattr(runtime, "pipeline", None),
+                    "inject_pending_question_supplement",
+                    None,
+                )
+                if callable(inject_pending_question_supplement):
+                    try:
+                        injected = inject_pending_question_supplement(pipeline_input.content, envelope=pending.envelope)
+                        if inspect.isawaitable(injected):
+                            injected = await injected
+                    except Exception:
+                        await self._restore_pending_question_input_required(runtime, pending)
+                        raise
+                    if injected is False:
+                        await self._restore_pending_question_input_required(runtime, pending)
+                        raise RuntimeError(_("A2A ask_user_question image supplement could not be delivered."))
+                else:
                     await self._restore_pending_question_input_required(runtime, pending)
-                    raise
-                if injected is False:
-                    await self._restore_pending_question_input_required(runtime, pending)
-                    raise RuntimeError("A2A ask_user_question image supplement could not be delivered.")
-            else:
-                await self._restore_pending_question_input_required(runtime, pending)
-                raise RuntimeError("A2A pipeline cannot accept ask_user_question image supplement.")
-        future.set_result(answer)
-        runtime.pending_question = None
-        return _PENDING_QUESTION_ANSWERED
+                    raise RuntimeError(_("A2A pipeline cannot accept ask_user_question image supplement."))
+            future.set_result(answer)
+            runtime.pending_question = None
+            return _PENDING_QUESTION_ANSWERED
+        finally:
+            answer_in_flight.clear()
+            answer_settled.set()
+
+    async def _route_pending_pipeline_resume_input(
+        self,
+        runtime: Any,
+        publisher: PipelineA2AEventPublisher,
+        *,
+        task_id: str,
+        context_id: str,
+        pipeline_input: PipelineUserInput,
+    ) -> bool:
+        if not isinstance(runtime, A2APipelineRuntime):
+            return False
+        pending = runtime.pending_resume_envelope
+        if not _pending_pipeline_resume_envelope_matches(pending, task_id=task_id, context_id=context_id):
+            pending = _pending_pipeline_resume_input_from_sidecar(
+                publisher,
+                task_id=task_id,
+                context_id=context_id,
+            )
+        if pending is None:
+            return False
+        if runtime.pending_resume_input is not None:
+            raise InvalidParamsError(_("Pending Pipeline input is already being processed."))
+
+        runtime.pending_resume_input = normalize_pipeline_user_input(pipeline_input)
+        runtime.pending_resume_error = None
+        runtime.pending_resume_settled.clear()
+        runtime.restart_after_interrupt = True
+        try:
+            await self._publish_staged_pipeline_resume_working(
+                runtime,
+                publisher,
+                task_id=task_id,
+                context_id=context_id,
+            )
+        except BaseException as exc:
+            runtime.restart_after_interrupt = False
+            self._fail_pending_pipeline_resume_input(runtime, exc)
+            raise
+        _restart_requested_event(runtime).set()
+        await runtime.pending_resume_settled.wait()
+        if runtime.pending_resume_error is not None:
+            raise RuntimeError(_("Pending Pipeline input could not be consumed.")) from runtime.pending_resume_error
+        return True
+
+    async def _publish_staged_pipeline_resume_working(
+        self,
+        runtime: A2APipelineRuntime,
+        publisher: PipelineA2AEventPublisher,
+        *,
+        task_id: str,
+        context_id: str,
+    ) -> None:
+        """Keep the live A2A task open until the staged input is truly consumed."""
+
+        async def publish_working() -> None:
+            await self._publish_status(
+                publisher.event_queue,
+                task_id=task_id,
+                context_id=context_id,
+                state=TaskState.TASK_STATE_WORKING,
+            )
+
+        outbound = runtime.outbound
+        if outbound is not None:
+            # Queue behind the backup-gated INPUT_REQUIRED batch and ahead of
+            # the close/restart control item.  This avoids acknowledging input
+            # consumption early while preventing the SDK from ending the live
+            # task at the transient INPUT_REQUIRED status.
+            await outbound.run_serialized(publish_working)
+            return
+        async with publisher.delivery_transaction():
+            await publish_working()
+
+    @staticmethod
+    def _activate_pending_pipeline_resume_input(runtime: Any, envelope: dict[str, Any]) -> None:
+        if not isinstance(runtime, A2APipelineRuntime) or envelope.get("eventType") != "input_required":
+            return
+        data = envelope.get("data")
+        if not isinstance(data, dict) or data.get("kind") not in {
+            "candidate_selection",
+            "deployment_confirmation",
+        }:
+            return
+        runtime.pending_resume_envelope = dict(envelope)
+        runtime.pending_resume_boundary_in_flight = True
+
+    @staticmethod
+    def _settle_pending_pipeline_resume_input(runtime: A2APipelineRuntime, event: Any) -> None:
+        if not isinstance(event, PipelineEvent):
+            return
+        if event.type == PipelineEventType.USER_INPUT_REQUIRED and runtime.pending_resume_boundary_in_flight:
+            # This is the original waiting boundary whose backup made the
+            # response routable.  Clear the delivery marker even when no answer
+            # has arrived yet; if an answer was staged during the backup, this
+            # event is not a rejection of that answer.
+            runtime.pending_resume_boundary_in_flight = False
+            return
+        if runtime.pending_resume_input is None:
+            return
+        if event.type == PipelineEventType.USER_INPUT_RECEIVED:
+            runtime.pending_resume_envelope = None
+            runtime.pending_resume_input = None
+            runtime.pending_resume_error = None
+            runtime.pending_resume_settled.set()
+            return
+        if event.type == PipelineEventType.USER_INPUT_REQUIRED:
+            IacCodeA2APipelineExecutor._fail_pending_pipeline_resume_input(
+                runtime,
+                RuntimeError(_("Pipeline rejected the pending input.")),
+            )
+
+    @staticmethod
+    def _fail_pending_pipeline_resume_input(runtime: A2APipelineRuntime, exc: BaseException) -> None:
+        if runtime.pending_resume_input is None:
+            return
+        runtime.pending_resume_envelope = None
+        runtime.pending_resume_input = None
+        runtime.pending_resume_error = exc
+        runtime.pending_resume_settled.set()
 
     async def _restore_pending_question_input_required(self, runtime: Any, pending: "_PendingAskUserQuestion") -> None:
         publisher = getattr(runtime, "publisher", None)
@@ -3499,6 +4023,7 @@ async def _resume_pending_ask_user_question_stream(
             "answerTextLength": len(prompt),
             "selectedId": answer["selected_id"],
             "selectedLabel": answer["selected_label"],
+            "freeText": answer["free_text"],
             "freeTextLength": len(answer["free_text"]),
             **_ask_user_question_echo(pending_input),
         },
@@ -3697,6 +4222,45 @@ def _pending_pipeline_pause_input_from_sidecar(
     if pending_input is None:
         return None
     return pending_input if pending_input.get("kind") == "pipeline_pause_confirmation" else None
+
+
+def _pending_pipeline_resume_input_from_sidecar(
+    publisher: PipelineA2AEventPublisher,
+    *,
+    task_id: str,
+    context_id: str,
+) -> dict[str, Any] | None:
+    snapshot_store = getattr(publisher, "snapshot_store", None)
+    journal = getattr(publisher, "journal", None)
+    if snapshot_store is None or journal is None:
+        return None
+    pending_input = _pending_input_from_snapshot(
+        _authoritative_snapshot_for_task(
+            snapshot_store=snapshot_store,
+            journal=journal,
+            task_id=task_id,
+            context_id=context_id,
+        ),
+        task_id=task_id,
+        context_id=context_id,
+    )
+    if pending_input is None:
+        return None
+    return pending_input if pending_input.get("kind") in {"candidate_selection", "deployment_confirmation"} else None
+
+
+def _pending_pipeline_resume_envelope_matches(
+    pending: Any,
+    *,
+    task_id: str,
+    context_id: str,
+) -> bool:
+    if not isinstance(pending, dict):
+        return False
+    if pending.get("taskId") not in (None, task_id) or pending.get("contextId") not in (None, context_id):
+        return False
+    data = pending.get("data")
+    return isinstance(data, dict) and data.get("kind") in {"candidate_selection", "deployment_confirmation"}
 
 
 def _pending_backup_blocked_input_from_sidecar(

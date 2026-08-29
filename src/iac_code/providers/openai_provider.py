@@ -579,6 +579,11 @@ class OpenAIProvider(Provider):
                 for ev in parse_tool_input_events(tc.id, tc.function.name, raw_args):
                     if isinstance(ev, ToolUseEndEvent):
                         tool_use = {"id": ev.tool_use_id, "name": tc.function.name, "input": ev.input}
+                        if ev.input_error:
+                            # Non-streaming path: the agent loop still has to see the parse
+                            # failure, otherwise the tool runs on {} and answers with a schema
+                            # error about arguments the model did send.
+                            tool_use["input_error"] = ev.input_error
                         if ev.tool_use_id == tc.id and provider_metadata:
                             tool_use["provider_metadata"] = provider_metadata
                         tool_uses.append(tool_use)

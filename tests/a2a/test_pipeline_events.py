@@ -9,6 +9,7 @@ import pytest
 from iac_code.a2a.pipeline_events import PIPELINE_EVENTS_EXTENSION_URI, PipelineA2AContext, PipelineEventTranslator
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.step_spec import A2AArtifactSpec
+from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.services.permissions.audit import fingerprint_text
 from iac_code.tools.cloud.aliyun.result_contract import ALIYUN_HTTP_METADATA_KEY
 from iac_code.tools.cloud.base_stack import STACK_RESULT_METADATA_KEY
@@ -58,6 +59,42 @@ def test_message_start_preserves_provider_message_id() -> None:
     assert envelope["data"] == {"messageId": "provider-message"}
 
 
+def test_complete_step_tool_result_keeps_submitted_delta_and_authoritative_conclusion_separate() -> None:
+    translator = PipelineEventTranslator(_ctx())
+    original_input = {"conclusion": {"status": "confirmed"}}
+    tool_event = ToolUseEndEvent(tool_use_id="tool-complete", name="complete_step", input=original_input)
+    translator.translate(tool_event)
+    original_input["conclusion"]["status"] = "mutated-after-recording"
+
+    [envelope] = translator.translate(
+        ToolResultEvent(
+            tool_use_id="tool-complete",
+            tool_name="complete_step",
+            result="completed",
+            metadata={
+                "submitted_delta": {"conclusion": {"status": "confirmed"}},
+                "step_result": StepResult(
+                    step_id="materialize_selected_candidate",
+                    status=StepStatus.COMPLETED,
+                    conclusion={
+                        "status": "confirmed",
+                        "template_url": "templates/0-rds.yml",
+                        "selected_candidate_result": {"cost": {"monthly_estimate": "¥100/月"}},
+                    },
+                ),
+            },
+        )
+    )
+
+    assert envelope["eventType"] == "tool_result"
+    assert envelope["data"]["input"] == {"conclusion": {"status": "confirmed"}}
+    assert envelope["data"]["submittedDelta"] == {"conclusion": {"status": "confirmed"}}
+    assert envelope["data"]["normalizedConclusion"]["template_url"] == "templates/0-rds.yml"
+    assert envelope["data"]["normalizedConclusion"]["selected_candidate_result"]["cost"] == {
+        "monthly_estimate": "¥100/月"
+    }
+
+
 def _ctx() -> PipelineA2AContext:
     return PipelineA2AContext(
         pipeline_run_id="ctx-1",
@@ -104,7 +141,11 @@ def test_pipeline_started_has_stable_envelope() -> None:
         type=PipelineEventType.PIPELINE_STARTED,
         step_id=None,
         timestamp=1717821600.0,
-        data={"total_steps": 4, "step_names": ["intent_parsing", "architecture_planning"]},
+        data={
+            "total_steps": 4,
+            "step_names": ["intent_parsing", "architecture_planning"],
+            "user_request": "帮我搭一个静态网站",
+        },
     )
 
     envelopes = translator.translate(event)
@@ -124,6 +165,8 @@ def test_pipeline_started_has_stable_envelope() -> None:
     assert envelope["pipelineName"] == "selling"
     assert envelope["status"] == "working"
     assert envelope["data"]["totalSteps"] == 4
+    # 首句用户 prompt 走同一条别名通路提升为 camelCase，会话恢复靠它还原第一条用户消息
+    assert envelope["data"]["userRequest"] == "帮我搭一个静态网站"
 
 
 def test_mcp_progress_event_has_tool_progress_envelope() -> None:
@@ -174,6 +217,7 @@ def test_stack_progress_event_has_stack_progress_envelope() -> None:
             resources=[{"logicalId": "vpc", "status": "CREATE_COMPLETE"}],
             elapsed_seconds=12,
             tool_use_id="toolu-stack",
+            region_id="cn-hangzhou",
         )
     )
 
@@ -182,6 +226,9 @@ def test_stack_progress_event_has_stack_progress_envelope() -> None:
     assert envelope["data"]["toolUseId"] == "toolu-stack"
     assert envelope["data"]["stackId"] == "stack-1"
     assert envelope["data"]["stackName"] == "test-stack"
+    # The web live overlay keys in-progress stacks by ``region::stackName``; a frame
+    # without the region splits one stack into a duplicate row.
+    assert envelope["data"]["regionId"] == "cn-hangzhou"
     assert envelope["data"]["status"] == "CREATE_IN_PROGRESS"
     assert envelope["data"]["progressPercentage"] == 42.5
     assert envelope["data"]["resources"] == [{"logicalId": "vpc", "status": "CREATE_COMPLETE"}]
@@ -1019,6 +1066,12 @@ def test_nested_sub_pipeline_permission_request_uses_inner_candidate_scope() -> 
     assert envelopes[0]["candidate"]["runId"] == "candidate-evaluate_candidate_inner-0-1"
     assert envelopes[0]["permission"]["toolName"] == "aliyun_api"
     assert envelopes[0]["permission"]["inputSummary"]["tool_name"] == "aliyun_api"
+    assert envelopes[0]["permission"]["operation"] == {
+        "product": "ros",
+        "action": "CreateStack",
+        "apiCalls": [{"product": "ROS", "action": "CreateStack", "effect": "change"}],
+    }
+    assert envelopes[0]["permission"]["displayParameters"] == {"format": "json", "value": {}}
 
 
 def test_candidate_started_includes_candidate_step_skeleton() -> None:
@@ -1362,6 +1415,51 @@ def test_top_level_candidate_detail_is_attached_to_current_step() -> None:
             "totalMonthlyCost": "CNY 60",
         },
     }
+
+
+def test_progressive_candidate_metadata_is_preserved_on_detail_and_diagram_events() -> None:
+    translator = PipelineEventTranslator(_ctx())
+    translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.STEP_STARTED,
+            step_id="solution_planning_and_selection",
+            timestamp=time.time(),
+            data={"index": 0, "total": 3},
+        )
+    )
+
+    [detail] = translator.translate(
+        CandidateDetailEvent(
+            tool_use_id="outline-1:detail:0",
+            candidate_name="单机方案",
+            summary="一台 ECS",
+            cost_items=[],
+            total_monthly_cost="¥100/月",
+            candidate_index=0,
+            candidate_set_id="outline-1",
+            detail_stage="outline",
+            key_tradeoff="成本最低，但没有高可用",
+        )
+    )
+    [diagram] = translator.translate(
+        DiagramEvent(
+            candidate_name="单机方案",
+            template_content="",
+            mermaid_source='flowchart TD\n  ecs["ECS"]',
+            candidate_index=0,
+            candidate_set_id="outline-1",
+            detail_stage="detail",
+        )
+    )
+
+    assert detail["data"]["candidateSetId"] == "outline-1"
+    assert detail["data"]["detailStage"] == "outline"
+    assert detail["data"]["detail"]["candidateSetId"] == "outline-1"
+    assert detail["data"]["detail"]["detailStage"] == "outline"
+    assert detail["data"]["keyTradeoff"] == "成本最低，但没有高可用"
+    assert detail["data"]["detail"]["keyTradeoff"] == "成本最低，但没有高可用"
+    assert diagram["data"]["candidateSetId"] == "outline-1"
+    assert diagram["data"]["detailStage"] == "detail"
 
 
 def test_show_candidate_detail_tool_result_recovers_detail_from_tool_input() -> None:
@@ -1786,6 +1884,45 @@ def test_stack_current_changed_emits_after_successful_ros_deploy_recreate() -> N
         "isSuccess": True,
         "current": True,
     }
+
+
+def test_stack_current_changed_restores_tool_input_after_translator_restart() -> None:
+    ctx = _ctx()
+    ctx.emit_stack_events = True
+    before_restart = PipelineEventTranslator(ctx)
+    started = before_restart.translate(
+        ToolUseEndEvent(
+            tool_use_id="toolu-deploy",
+            name="ros_deploy",
+            input={
+                "action": "create",
+                "stack_name": "demo",
+                "template_url": "templates/demo.yml",
+                "region_id": "cn-hangzhou",
+            },
+        )
+    )
+
+    after_restart = PipelineEventTranslator(ctx)
+    after_restart.hydrate_from_events(started)
+    envelopes = after_restart.translate(
+        ToolResultEvent(
+            tool_use_id="toolu-deploy",
+            tool_name="ros_deploy",
+            result=json.dumps(
+                {
+                    "stack_id": "stack-1",
+                    "stack_name": "demo",
+                    "status": "CREATE_COMPLETE",
+                    "is_success": True,
+                }
+            ),
+            is_error=False,
+        )
+    )
+
+    assert [envelope["eventType"] for envelope in envelopes] == ["stack_current_changed", "tool_result"]
+    assert envelopes[0]["data"]["stackId"] == "stack-1"
 
 
 def test_stack_current_changed_uses_metadata_when_display_content_has_diagnostics() -> None:
@@ -2246,8 +2383,10 @@ def test_aliyun_permission_request_metadata_uses_summary_for_sensitive_safe_fiel
         [fingerprint_text("StackName"), fingerprint_text("TemplateBody")]
     )
     assert permission["inputSummary"]["params_field_count"] == 2
-    assert "StackName" not in rendered
-    assert "TemplateBody" not in rendered
+    assert permission["displayParameters"] == {
+        "format": "json",
+        "value": {"TemplateBody": "[REDACTED]", "StackName": "demo"},
+    }
     assert "private-body" not in rendered
     assert "BEGIN PRIVATE KEY" not in rendered
 

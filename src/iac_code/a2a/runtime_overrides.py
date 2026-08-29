@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any
 
+from google.protobuf.json_format import MessageToDict
+
+from iac_code.i18n import SUPPORTED_LANGUAGES, use_request_language
 from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.providers.aliyun import AliyunCredential, use_aliyun_credential
 from iac_code.services.telemetry import use_session_id, use_telemetry_channel, use_user_id
@@ -19,6 +22,24 @@ _preferred_language: contextvars.ContextVar[str | None] = contextvars.ContextVar
 def get_a2a_preferred_language() -> str | None:
     """Return the request-local language requested by the A2A caller."""
     return _preferred_language.get()
+
+
+def resolve_a2a_preferred_language(value: Any | None) -> str | None:
+    """Resolve ``metadata.iac_code.preferredLanguage`` without mutating global locale."""
+
+    metadata = getattr(value, "metadata", value)
+    if metadata is not None and hasattr(metadata, "DESCRIPTOR"):
+        metadata = MessageToDict(metadata, preserving_proto_field_name=False)
+    if not isinstance(metadata, Mapping):
+        return None
+    raw_iac_meta = metadata.get("iac_code")
+    if not isinstance(raw_iac_meta, Mapping):
+        return None
+    raw_language = raw_iac_meta.get("preferredLanguage") or raw_iac_meta.get("preferred_language")
+    if not isinstance(raw_language, str):
+        return None
+    language = raw_language.strip().lower().split("-", 1)[0].split("_", 1)[0]
+    return language if language in SUPPORTED_LANGUAGES else None
 
 
 @contextlib.contextmanager
@@ -36,6 +57,7 @@ def a2a_request_context(
         if preferred_language:
             token = _preferred_language.set(preferred_language)
             stack.callback(_preferred_language.reset, token)
+            stack.enter_context(use_request_language(preferred_language))
         if session_id:
             stack.enter_context(use_session_id(session_id))
         if user_id:

@@ -838,6 +838,18 @@ p {
   gap: 8px;
 }
 
+.pending-input-parameter-overrides {
+  width: 100%;
+  min-height: 88px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--white);
+  color: var(--ink);
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .pending-input-option {
   display: grid;
   gap: 4px;

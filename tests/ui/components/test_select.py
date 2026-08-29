@@ -372,6 +372,40 @@ class TestSelectExtras:
         assert consumed is True
         assert sel._active_search_box.value == "x"
 
+    def test_typing_starts_editing_when_focused_input_enables_type_to_edit(self):
+        options = [
+            TextOption(label="Confirm", value="confirm"),
+            InputOption(label="Other", value="other", placeholder="Type here"),
+        ]
+        sel = Select(options, default_value="other", type_to_edit_input=True)
+
+        consumed = sel.handle_key(KeyEvent(key="x", char="x"))
+
+        assert consumed is True
+        assert sel.state.is_in_input is True
+        assert sel._active_search_box is not None
+        assert sel._active_search_box.value == "x"
+
+    def test_typing_does_not_start_editing_by_default(self):
+        options = [InputOption(label="Other", value="other", placeholder="Type here")]
+        sel = Select(options)
+
+        consumed = sel.handle_key(KeyEvent(key="x", char="x"))
+
+        assert consumed is False
+        assert sel.state.is_in_input is False
+
+    def test_pasting_starts_editing_and_inserts_the_full_text(self):
+        options = [InputOption(label="Other", value="other", placeholder="Type here")]
+        sel = Select(options, type_to_edit_input=True)
+
+        consumed = sel.handle_key(KeyEvent(key="paste", char="change type\nand reprice"))
+
+        assert consumed is True
+        assert sel.state.is_in_input is True
+        assert sel._active_search_box is not None
+        assert sel._active_search_box.value == "change type and reprice"
+
     def test_enter_in_input_mode_without_on_select(self):
         """Enter in input mode with no on_select callback should not raise."""
         options = [InputOption(label="Name", value="name")]

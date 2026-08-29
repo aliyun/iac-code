@@ -3069,3 +3069,118 @@ async def test_async_transport_runner_starts_push_worker() -> None:
         "push_closed": True,
         "components_closed": True,
     }
+
+
+def test_pipeline_state_endpoint_omits_server_only_seen_event_ids(tmp_path) -> None:
+    """`seenEventIds` 是服务端去重台账，客户端恢复用不到，却能占到整份响应的六成。
+
+    这份台账只在服务端拿磁盘上的快照做新鲜度判定（``_snapshot_seen_events_are_within_replay``），
+    客户端要的增量锚点是 ``lastSequence`` / ``afterSequence``。因此响应里不再带它，
+    磁盘快照仍然照旧保存，服务端判定不受影响。
+    """
+
+    persistence_dir = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), "session-1") / "pipeline"
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(_pipeline_event(1, "evt-1"))
+    snapshot_store = A2APipelineSnapshotStore(pipeline_dir)
+    snapshot_store.save(reduce_pipeline_events([_pipeline_event(1, "evt-1")]))
+    stored = snapshot_store.load()
+    assert stored is not None
+    assert stored["seenEventIds"] == ["evt-1"]
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/iac-code/pipeline/state?contextId=ctx-1")
+
+    assert response.status_code == 200
+    snapshot = response.json()["snapshot"]
+    assert "seenEventIds" not in snapshot
+    # 恢复真正依赖的锚点与展示数据照旧
+    assert snapshot["lastSequence"] == 1
+    assert snapshot["contextId"] == "ctx-1"
+    assert "display" in snapshot
+    # 磁盘快照不受影响：服务端下次仍能用台账判定新鲜度
+    reloaded = snapshot_store.load()
+    assert reloaded is not None
+    assert reloaded["seenEventIds"] == ["evt-1"]
+
+
+def test_pipeline_state_endpoint_keeps_tool_results_for_debugging_clients(tmp_path) -> None:
+    """`display.toolResults` 仍要返回：pipeline debugger 与恢复 e2e 脚本都在读它。"""
+
+    persistence_dir = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), "session-1") / "pipeline"
+    event = _pipeline_event(1, "evt-1")
+    event["eventType"] = "tool_result"
+    event["data"] = {"toolUseId": "call-1", "toolName": "read_file", "result": "content"}
+    A2APipelineJournal(pipeline_dir).append(event)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([event]))
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/iac-code/pipeline/state?contextId=ctx-1")
+
+    display = response.json()["snapshot"]["display"]
+    assert [item["toolUseId"] for item in display["toolResults"]] == ["call-1"]
+
+
+def test_pipeline_state_endpoint_drops_tool_results_only_when_lean_is_requested(tmp_path) -> None:
+    """`?lean=1` 才裁 `display.toolResults`：控制台恢复不读它，调试工具默认仍要全量。
+
+    真实会话里 47 条工具留档就有 330 KB，占裁掉 ``seenEventIds`` 之后的四分之三。
+    恢复界面只用消息、图表与候选方案，所以 bridge 拉恢复时显式要求精简。
+    """
+
+    persistence_dir = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), "session-1") / "pipeline"
+    started = _pipeline_event(1, "evt-1")
+    tool_result = _pipeline_event(2, "evt-2")
+    tool_result["eventType"] = "tool_result"
+    tool_result["data"] = {"toolUseId": "call-1", "toolName": "read_file", "result": "content"}
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(started)
+    journal.append(tool_result)
+    snapshot = reduce_pipeline_events([started, tool_result])
+    snapshot["display"]["messages"].append({"eventId": "msg-1", "text": "first message"})
+    A2APipelineSnapshotStore(pipeline_dir).save(snapshot)
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        lean = client.get("/iac-code/pipeline/state?contextId=ctx-1&lean=1")
+        explicitly_full = client.get("/iac-code/pipeline/state?contextId=ctx-1&lean=0")
+        unrecognized = client.get("/iac-code/pipeline/state?contextId=ctx-1&lean=yes")
+
+    lean_display = lean.json()["snapshot"]["display"]
+    assert "toolResults" not in lean_display
+    # 恢复界面真正要用的展示数据一个不少
+    assert lean_display["messages"] == [{"eventId": "msg-1", "text": "first message"}]
+    assert lean.json()["snapshot"]["lastSequence"] == 2
+    # 显式关闭与认不出来的值都给全量：这个开关只影响体积，不该让客户端拿不到数据
+    for response in (explicitly_full, unrecognized):
+        display = response.json()["snapshot"]["display"]
+        assert [item["toolUseId"] for item in display["toolResults"]] == ["call-1"]

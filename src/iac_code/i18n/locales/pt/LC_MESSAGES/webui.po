@@ -280,6 +280,7 @@ msgstr "Fechar"
 
 #: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
 #: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/pipeline.js
 #: src/iac_code/web/static/js/components/workspace.js
 #: src/iac_code/web/static/js/token_transport.js
 msgid "Cancel"
@@ -289,6 +290,10 @@ msgstr "Cancelar"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Save"
 msgstr "Salvar"
+
+#: src/iac_code/web/static/js/api.js
+msgid "Event stream has no response body."
+msgstr "O fluxo de eventos não contém corpo de resposta."
 
 #: src/iac_code/web/static/js/app.js
 msgid "Desktop native bridge is unavailable."
@@ -385,6 +390,18 @@ msgstr "Pipeline de vendas"
 #: src/iac_code/web/static/js/app.js
 msgid "Pipeline planning, generation, and validation for sales scenarios"
 msgstr "Planejamento, geração e validação de pipeline para cenários de vendas"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Sales pipeline (solution first)"
+msgstr "Pipeline de vendas (solução primeiro)"
+
+#: src/iac_code/web/static/js/app.js
+msgid ""
+"Pick one solution from priced architecture candidates first, then "
+"implement and deploy only that solution"
+msgstr ""
+"Escolha primeiro uma solução entre candidatos de arquitetura com preço "
+"estimado e depois implemente e implante apenas essa solução"
 
 #: src/iac_code/web/static/js/app.js
 msgid "No context usage recorded yet"
@@ -542,6 +559,14 @@ msgid "{n}y"
 msgstr "{n}a"
 
 #: src/iac_code/web/static/js/app.js
+msgid "Operation failed"
+msgstr "Falha na operação"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Archive failed"
+msgstr "Falha ao arquivar"
+
+#: src/iac_code/web/static/js/app.js
 msgid "Read-only"
 msgstr "Somente leitura"
 
@@ -556,14 +581,6 @@ msgstr "Insira o conteúdo"
 #: src/iac_code/web/static/js/app.js
 msgid "Please enter a name"
 msgstr "Insira um nome"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Operation failed"
-msgstr "Falha na operação"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Archive failed"
-msgstr "Falha ao arquivar"
 
 #: src/iac_code/web/static/js/app.js
 #, python-brace-format
@@ -637,6 +654,19 @@ msgid "Select this option"
 msgstr "Selecionar esta opção"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Selected"
+msgstr "Selecionado"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Confirm selection?"
+msgstr "Confirmar seleção?"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Selecting…"
+msgstr "Selecionando…"
+
+#: src/iac_code/web/static/js/app.js
 msgid "Waiting for input"
 msgstr "Aguardando entrada"
 
@@ -658,19 +688,6 @@ msgstr "Otimizando"
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "Pending optimization"
 msgstr "Otimização pendente"
-
-#: src/iac_code/web/static/js/app.js
-#: src/iac_code/web/static/js/components/pipeline.js
-msgid "Selected"
-msgstr "Selecionado"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Confirm selection?"
-msgstr "Confirmar seleção?"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Selecting…"
-msgstr "Selecionando…"
 
 #: src/iac_code/web/static/js/app.js
 msgid "Pipeline completed"
@@ -874,6 +891,35 @@ msgid "Elapsed {n}s"
 msgstr "{n}s decorridos"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Accepted"
+msgstr "Aceito"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Pipeline started"
+msgstr "Pipeline iniciado"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Candidate selected"
+msgstr "Candidato selecionado"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Interrupt submitted"
+msgstr "Interrupção enviada"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Permission recovered"
+msgstr "Permissão restaurada"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pipeline session is unavailable."
+msgstr "A sessão do pipeline não está disponível."
+
+#: src/iac_code/web/static/js/app.js
 msgid "Failed to load session. Please try again."
 msgstr "Falha ao carregar a sessão. Tente novamente."
 
@@ -967,6 +1013,22 @@ msgid "Enter a valid access token."
 msgstr "Insira um token de acesso válido."
 
 #: src/iac_code/web/static/js/token_transport.js
+msgid "Request sequence exhausted."
+msgstr "A sequência de solicitações foi esgotada."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Invalid response sequence."
+msgstr "Sequência de resposta inválida."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Replayed response detected."
+msgstr "Uma resposta repetida foi detectada."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Invalid encrypted response."
+msgstr "Resposta criptografada inválida."
+
+#: src/iac_code/web/static/js/token_transport.js
 msgid "Unable to start an encrypted session."
 msgstr "Não foi possível iniciar uma sessão criptografada."
 
@@ -977,6 +1039,24 @@ msgstr "Versão de transporte criptografado não suportada."
 #: src/iac_code/web/static/js/token_transport.js
 msgid "The Web access token is incorrect."
 msgstr "O token de acesso Web está incorreto."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Encrypted transport only supports same-origin API requests."
+msgstr ""
+"O transporte criptografado aceita apenas solicitações de API da mesma "
+"origem."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Unsupported encrypted request body."
+msgstr "Corpo de solicitação criptografada não suportado."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Encrypted stream ended before response metadata."
+msgstr "O fluxo criptografado terminou antes dos metadados da resposta."
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Encrypted stream ended unexpectedly."
+msgstr "O fluxo criptografado terminou inesperadamente."
 
 #: src/iac_code/web/static/js/token_transport.js
 msgid "Complete OAuth login"
@@ -1298,6 +1378,11 @@ msgid "In progress / failed"
 msgstr "Em andamento / falhou"
 
 #: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Architecture diagram"
+msgstr "Diagrama de arquitetura"
+
+#: src/iac_code/web/static/js/components/output_panel.js
 msgid "File no longer exists"
 msgstr "O arquivo não existe mais"
 
@@ -1309,14 +1394,17 @@ msgstr "Pilhas de recursos"
 msgid "Template files"
 msgstr "Arquivos de modelo"
 
-#: src/iac_code/web/static/js/components/output_panel.js
-#: src/iac_code/web/static/js/components/pipeline.js
-msgid "Architecture diagram"
-msgstr "Diagrama de arquitetura"
-
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Recovered State"
 msgstr "Estado recuperado"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Confirm deployment"
+msgstr "Confirmar implantação"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Choose another solution"
+msgstr "Escolher outra solução"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Diagnostics"
@@ -1347,6 +1435,10 @@ msgid "No pipeline events."
 msgstr "Nenhum evento de pipeline."
 
 #: src/iac_code/web/static/js/components/pipeline.js
+msgid "Parameter overrides must be a valid JSON object."
+msgstr "As substituições de parâmetros devem ser um objeto JSON válido."
+
+#: src/iac_code/web/static/js/components/pipeline.js
 msgid "Parameter overrides"
 msgstr "Substituições de parâmetros"
 
@@ -1357,6 +1449,16 @@ msgstr "Selecionar candidato"
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Submitting..."
 msgstr "Enviando..."
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Summary"
+msgstr "Resumo"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Action"
+msgstr "Ação"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No architecture diagram"
@@ -1465,11 +1567,6 @@ msgid "Outcome"
 msgstr "Resultado"
 
 #: src/iac_code/web/static/js/components/pipeline.js
-#: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Summary"
-msgstr "Resumo"
-
-#: src/iac_code/web/static/js/components/pipeline.js
 msgid "No pipeline data."
 msgstr "Nenhum dado de pipeline."
 
@@ -1533,10 +1630,6 @@ msgstr "Caminho de saída"
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Cloud products"
 msgstr "Produtos de nuvem"
-
-#: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Action"
-msgstr "Ação"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Role"

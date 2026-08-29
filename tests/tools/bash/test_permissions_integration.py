@@ -218,6 +218,19 @@ class TestPipelineEndToEnd:
         assert r.behavior == "allow"
 
     @pytest.mark.asyncio
+    async def test_pipeline_double_wildcard_allows_complex_command(self):
+        from iac_code.services.permissions.pipeline import check_tool_permission
+        from iac_code.tools.bash.bash_tool import BashTool
+
+        tool = BashTool()
+        ctx = _ctx(allow={"project_settings": ["bash(**)"]})
+        r = await check_tool_permission(tool, {"command": "echo $(whoami)"}, ctx)
+
+        assert r.behavior == "allow"
+        assert r.audit is not None
+        assert r.audit.operation["blanket_bash_allow"] is True
+
+    @pytest.mark.asyncio
     async def test_pipeline_dont_ask_mode_denies(self):
         from iac_code.services.permissions.pipeline import check_tool_permission
         from iac_code.tools.bash.bash_tool import BashTool

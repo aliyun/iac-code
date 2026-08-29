@@ -280,6 +280,7 @@ msgstr "閉じる"
 
 #: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
 #: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/pipeline.js
 #: src/iac_code/web/static/js/components/workspace.js
 #: src/iac_code/web/static/js/token_transport.js
 msgid "Cancel"
@@ -289,6 +290,10 @@ msgstr "キャンセル"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Save"
 msgstr "保存"
+
+#: src/iac_code/web/static/js/api.js
+msgid "Event stream has no response body."
+msgstr "イベントストリームにレスポンス本文がありません。"
 
 #: src/iac_code/web/static/js/app.js
 msgid "Desktop native bridge is unavailable."
@@ -383,6 +388,16 @@ msgstr "販売パイプライン"
 #: src/iac_code/web/static/js/app.js
 msgid "Pipeline planning, generation, and validation for sales scenarios"
 msgstr "販売シナリオ向けのパイプラインによる計画、生成、検証"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Sales pipeline (solution first)"
+msgstr "販売パイプライン（ソリューション優先）"
+
+#: src/iac_code/web/static/js/app.js
+msgid ""
+"Pick one solution from priced architecture candidates first, then "
+"implement and deploy only that solution"
+msgstr "まず概算費用付きのアーキテクチャ候補から 1 つを選び、その方案だけを実装してデプロイします"
 
 #: src/iac_code/web/static/js/app.js
 msgid "No context usage recorded yet"
@@ -540,6 +555,14 @@ msgid "{n}y"
 msgstr "{n}年"
 
 #: src/iac_code/web/static/js/app.js
+msgid "Operation failed"
+msgstr "操作に失敗しました"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Archive failed"
+msgstr "アーカイブに失敗しました"
+
+#: src/iac_code/web/static/js/app.js
 msgid "Read-only"
 msgstr "読み取り専用"
 
@@ -554,14 +577,6 @@ msgstr "内容を入力してください"
 #: src/iac_code/web/static/js/app.js
 msgid "Please enter a name"
 msgstr "名前を入力してください"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Operation failed"
-msgstr "操作に失敗しました"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Archive failed"
-msgstr "アーカイブに失敗しました"
 
 #: src/iac_code/web/static/js/app.js
 #, python-brace-format
@@ -633,6 +648,19 @@ msgid "Select this option"
 msgstr "このオプションを選択"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Selected"
+msgstr "選択済み"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Confirm selection?"
+msgstr "選択を確定しますか？"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Selecting…"
+msgstr "選択しています…"
+
+#: src/iac_code/web/static/js/app.js
 msgid "Waiting for input"
 msgstr "入力を待機中"
 
@@ -654,19 +682,6 @@ msgstr "最適化中"
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "Pending optimization"
 msgstr "最適化待ち"
-
-#: src/iac_code/web/static/js/app.js
-#: src/iac_code/web/static/js/components/pipeline.js
-msgid "Selected"
-msgstr "選択済み"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Confirm selection?"
-msgstr "選択を確定しますか？"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Selecting…"
-msgstr "選択しています…"
 
 #: src/iac_code/web/static/js/app.js
 msgid "Pipeline completed"
@@ -866,6 +881,35 @@ msgid "Elapsed {n}s"
 msgstr "経過 {n} 秒"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Accepted"
+msgstr "受け付けました"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Pipeline started"
+msgstr "パイプラインを開始しました"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Candidate selected"
+msgstr "候補を選択しました"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Interrupt submitted"
+msgstr "割り込みを送信しました"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Permission recovered"
+msgstr "権限を復元しました"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pipeline session is unavailable."
+msgstr "パイプラインセッションを利用できません。"
+
+#: src/iac_code/web/static/js/app.js
 msgid "Failed to load session. Please try again."
 msgstr "セッションの読み込みに失敗しました。もう一度お試しください。"
 
@@ -955,6 +999,22 @@ msgid "Enter a valid access token."
 msgstr "有効なアクセストークンを入力してください。"
 
 #: src/iac_code/web/static/js/token_transport.js
+msgid "Request sequence exhausted."
+msgstr "リクエストシーケンスを使い切りました。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Invalid response sequence."
+msgstr "レスポンスシーケンスが無効です。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Replayed response detected."
+msgstr "再送されたレスポンスを検出しました。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Invalid encrypted response."
+msgstr "暗号化レスポンスが無効です。"
+
+#: src/iac_code/web/static/js/token_transport.js
 msgid "Unable to start an encrypted session."
 msgstr "暗号化セッションを開始できません。"
 
@@ -965,6 +1025,22 @@ msgstr "サポートされていない暗号化トランスポートのバージ
 #: src/iac_code/web/static/js/token_transport.js
 msgid "The Web access token is incorrect."
 msgstr "Web アクセストークンが正しくありません。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Encrypted transport only supports same-origin API requests."
+msgstr "暗号化トランスポートは同一オリジンの API リクエストのみサポートします。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Unsupported encrypted request body."
+msgstr "暗号化リクエスト本文はサポートされていません。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Encrypted stream ended before response metadata."
+msgstr "暗号化ストリームがレスポンスメタデータより前に終了しました。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Encrypted stream ended unexpectedly."
+msgstr "暗号化ストリームが予期せず終了しました。"
 
 #: src/iac_code/web/static/js/token_transport.js
 msgid "Complete OAuth login"
@@ -1278,6 +1354,11 @@ msgid "In progress / failed"
 msgstr "進行中／失敗"
 
 #: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Architecture diagram"
+msgstr "アーキテクチャ図"
+
+#: src/iac_code/web/static/js/components/output_panel.js
 msgid "File no longer exists"
 msgstr "ファイルは存在しません"
 
@@ -1289,14 +1370,17 @@ msgstr "リソーススタック"
 msgid "Template files"
 msgstr "テンプレートファイル"
 
-#: src/iac_code/web/static/js/components/output_panel.js
-#: src/iac_code/web/static/js/components/pipeline.js
-msgid "Architecture diagram"
-msgstr "アーキテクチャ図"
-
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Recovered State"
 msgstr "復元された状態"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Confirm deployment"
+msgstr "デプロイを確認"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Choose another solution"
+msgstr "別のソリューションを選ぶ"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Diagnostics"
@@ -1327,6 +1411,10 @@ msgid "No pipeline events."
 msgstr "パイプラインイベントはありません。"
 
 #: src/iac_code/web/static/js/components/pipeline.js
+msgid "Parameter overrides must be a valid JSON object."
+msgstr "パラメーターの上書きは有効な JSON オブジェクトである必要があります。"
+
+#: src/iac_code/web/static/js/components/pipeline.js
 msgid "Parameter overrides"
 msgstr "パラメーターの上書き"
 
@@ -1337,6 +1425,16 @@ msgstr "候補を選択"
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Submitting..."
 msgstr "送信中..."
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Summary"
+msgstr "サマリー"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Action"
+msgstr "操作"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No architecture diagram"
@@ -1445,11 +1543,6 @@ msgid "Outcome"
 msgstr "結果"
 
 #: src/iac_code/web/static/js/components/pipeline.js
-#: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Summary"
-msgstr "サマリー"
-
-#: src/iac_code/web/static/js/components/pipeline.js
 msgid "No pipeline data."
 msgstr "パイプラインデータはありません。"
 
@@ -1513,10 +1606,6 @@ msgstr "出力パス"
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Cloud products"
 msgstr "クラウド製品"
-
-#: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Action"
-msgstr "操作"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Role"

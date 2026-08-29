@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import shutil
 from pathlib import Path
 
 import setuptools
@@ -13,6 +14,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
 import iac_code
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SOLUTION_FIRST_SKILLS = PROJECT_ROOT / "src/iac_code/pipeline/selling_solution_first/skills"
 
 
 def _load_setup_module(monkeypatch):
@@ -43,22 +45,63 @@ def _assert_expanded_selling_references(package_root: Path, skill_names: tuple[s
         assert 'action="GetTemplateEstimateCost"' not in recommendation
 
 
+def _seed_solution_first_skill_files(package_root: Path) -> None:
+    """Model build_py copying package data before setup materializes references."""
+    target_skills = package_root / "pipeline" / "selling_solution_first" / "skills"
+    for skill_name in ("iac-aliyun-deploying", "iac-aliyun-materialize-selected-candidate"):
+        source = SOLUTION_FIRST_SKILLS / skill_name
+        target = target_skills / skill_name
+        target.mkdir(parents=True, exist_ok=True)
+        for filename in ("SKILL.md", "evals.json"):
+            source_file = source / filename
+            if source_file.is_file():
+                shutil.copy2(source_file, target / filename)
+
+
+def _assert_expanded_solution_first_resources(package_root: Path, setup_module) -> None:
+    skills = package_root / "pipeline" / "selling_solution_first" / "skills"
+    deploying = skills / "iac-aliyun-deploying"
+    materialize_references = skills / "iac-aliyun-materialize-selected-candidate" / "references"
+
+    assert deploying.is_dir() and not deploying.is_symlink()
+    assert (deploying / "SKILL.md").is_file()
+    assert (deploying / "evals.json").is_file()
+    assert (deploying / "SKILL.md").read_bytes() == (SOLUTION_FIRST_SKILLS / deploying.name / "SKILL.md").read_bytes()
+    assert (deploying / "evals.json").read_bytes() == (
+        SOLUTION_FIRST_SKILLS / deploying.name / "evals.json"
+    ).read_bytes()
+    assert materialize_references.is_dir() and not materialize_references.is_symlink()
+    _assert_expanded_selling_references(
+        package_root,
+        setup_module.SELLING_IAC_ALIYUN_SKILLS,
+    )
+    for references in (deploying / "references", materialize_references):
+        assert references.is_dir() and not references.is_symlink()
+        assert (references / "ros-template.md").is_file()
+        assert (references / "cloud-products" / "ecs.md").is_file()
+        assert (references / "solutions" / "iac-code-web.ros.yml").is_file()
+
+
 def test_selling_skill_references_are_expanded_for_installed_artifacts(monkeypatch, tmp_path):
     setup_module = _load_setup_module(monkeypatch)
     build_lib = tmp_path / "build_lib"
+    _seed_solution_first_skill_files(build_lib / "iac_code")
 
     setup_module._copy_selling_skill_references(str(build_lib))
 
     _assert_expanded_selling_references(build_lib / "iac_code", setup_module.SELLING_IAC_ALIYUN_SKILLS)
+    _assert_expanded_solution_first_resources(build_lib / "iac_code", setup_module)
 
 
 def test_selling_skill_references_are_expanded_for_sdist_release_tree(monkeypatch, tmp_path):
     setup_module = _load_setup_module(monkeypatch)
     release_tree = tmp_path / "iac_code-0.6.0"
+    _seed_solution_first_skill_files(release_tree / "src" / "iac_code")
 
     setup_module._copy_selling_skill_references_to_sdist_release_tree(str(release_tree))
 
     _assert_expanded_selling_references(release_tree / "src" / "iac_code", setup_module.SELLING_IAC_ALIYUN_SKILLS)
+    _assert_expanded_solution_first_resources(release_tree / "src" / "iac_code", setup_module)
 
 
 def test_selling_skill_references_expand_windows_symlink_placeholder_files(monkeypatch, tmp_path):
@@ -99,6 +142,7 @@ def test_selling_skill_references_expand_windows_symlink_placeholder_files(monke
     )
     monkeypatch.setattr(setup_module, "SELLING_REFERENCES_DIR", selling_refs)
     build_lib = tmp_path / "build_lib"
+    _seed_solution_first_skill_files(build_lib / "iac_code")
 
     setup_module._copy_selling_skill_references(str(build_lib))
 
@@ -109,6 +153,17 @@ def test_selling_skill_references_expand_windows_symlink_placeholder_files(monke
     )
     assert (references / "ros-template.md").read_text(encoding="utf-8") == "real ros template reference"
     assert (references / "cloud-products").is_dir()
+    solution_first = package_root / "pipeline" / "selling_solution_first" / "skills"
+    assert (solution_first / "iac-aliyun-deploying" / "SKILL.md").read_bytes() == (
+        SOLUTION_FIRST_SKILLS / "iac-aliyun-deploying" / "SKILL.md"
+    ).read_bytes()
+    assert (solution_first / "iac-aliyun-deploying" / "references" / "cloud-products").is_dir()
+    assert (
+        solution_first
+        / "iac-aliyun-materialize-selected-candidate"
+        / "references"
+        / "template-parameter-recommendation.md"
+    ).read_text(encoding="utf-8") == "pipeline ros_estimate_template_cost recommendation"
 
 
 def test_selling_pipeline_python_runtime_files_are_discovered_for_installed_artifacts():

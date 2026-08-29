@@ -106,6 +106,34 @@ def sanitize_public_paths(value: str, public_path_roots: Iterable[Mapping[str, s
     return _POSIX_PATH_TEXT_PATTERN.sub(replace, sanitized)
 
 
+class PublicPathRedactor:
+    """Redact many strings against one set of roots, normalized a single time.
+
+    :func:`_normalize_public_path_roots` resolves ``realpath`` for every root,
+    so normalizing per string turns one large projection into thousands of
+    filesystem lookups. Callers redacting more than a single string should build
+    one redactor and reuse it.
+    """
+
+    __slots__ = ("_roots",)
+
+    def __init__(self, public_path_roots: Iterable[Mapping[str, str]] | None) -> None:
+        self._roots = _normalize_public_path_roots(public_path_roots)
+
+    @property
+    def active(self) -> bool:
+        """Return whether any root was resolved, i.e. whether redaction applies."""
+
+        return bool(self._roots)
+
+    def redact(self, value: str) -> str:
+        """Replace paths proven to be under a root with ``[PATH]``."""
+
+        if not self._roots:
+            return value
+        return _redact_known_public_paths(value, self._roots)
+
+
 def redact_known_public_paths(value: str, public_path_roots: Iterable[Mapping[str, str]] | None) -> str:
     """Replace only paths proven to be under a server root with ``[PATH]``.
 
@@ -114,10 +142,10 @@ def redact_known_public_paths(value: str, public_path_roots: Iterable[Mapping[st
     root label, relative suffix, directory name, or filename.
     """
 
-    roots = _normalize_public_path_roots(public_path_roots)
-    if not roots:
-        return value
+    return PublicPathRedactor(public_path_roots).redact(value)
 
+
+def _redact_known_public_paths(value: str, roots: list[_NormalizedRoot]) -> str:
     leading_length = len(value) - len(value.lstrip())
     trailing_length = len(value) - len(value.rstrip())
     scalar_end = len(value) - trailing_length if trailing_length else len(value)

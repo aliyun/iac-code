@@ -952,6 +952,69 @@ def test_reload_weaves_midpipeline_answer_into_confirm_region(tmp_path, monkeypa
     assert idx_answer != len(messages) - 1
 
 
+def test_reload_matches_tagged_step2_answer_instead_of_unpersisted_step1_selection(tmp_path, monkeypatch) -> None:
+    """A button-only Step 1 choice has no persisted user row; the following free
+    text must not be consumed by Step 1's earlier input anchor."""
+    from iac_code.web.session_manager import WebSessionManager
+
+    cwd = str(tmp_path / "project")
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=cwd, mode="pipeline", session_id="pipe-weave-coordinates")
+    manager.persist_pipeline_user_prompt(session, "创建 VPC 和 VSwitch")
+    # Historical row written before prompt coordinates were persisted.
+    manager.persist_pipeline_user_prompt(session, "把 VSwitch 网段调整为 10.250.254.0/24")
+
+    def env(event_type: str, sequence: int, step: dict, **data):
+        return {"eventType": event_type, "scope": "step", "sequence": sequence, "step": step, "data": data}
+
+    step1 = {
+        "id": "solution_planning_and_selection",
+        "runId": "step-plan-1",
+        "index": 1,
+        "total": 3,
+    }
+    step2 = {
+        "id": "materialize_selected_candidate",
+        "runId": "step-materialize-1",
+        "index": 2,
+        "total": 3,
+    }
+    envelopes = [
+        env("step_started", 1, step1),
+        env("step_completed", 2, step1, durationS=10.0),
+        env("input_required", 3, step1, kind="candidate_selection", prompt="请选择方案"),
+        env(
+            "input_received",
+            4,
+            step1,
+            kind="candidate_selection",
+            selectedValue='{"selected_candidate_name":"方案 A","selected_candidate_index":0}',
+        ),
+        env("step_started", 5, step2),
+        env("step_completed", 6, step2, durationS=20.0),
+        env("input_required", 7, step2, kind="deployment_confirmation", prompt="请选择下一步操作"),
+        env("input_received", 8, step2, kind="deployment_confirmation", userInputLength=30),
+    ]
+    monkeypatch.setattr(manager, "_load_a2a_pipeline_envelopes", lambda _ctx: envelopes)
+
+    messages = manager.load_visible_transcript(session.session_id, cwd=cwd)["messages"]
+    answer_index = next(
+        index for index, message in enumerate(messages) if "10.250.254.0/24" in (message.get("content") or "")
+    )
+    step1_prompt_index = next(
+        index for index, message in enumerate(messages) if "请选择方案" in (message.get("content") or "")
+    )
+    step2_marker_index = next(
+        index for index, message in enumerate(messages) if message.get("messageId") == "plmk-step-materialize-1"
+    )
+    step2_prompt_index = next(
+        index for index, message in enumerate(messages) if "请选择下一步操作" in (message.get("content") or "")
+    )
+
+    assert step1_prompt_index < step2_marker_index < step2_prompt_index < answer_index
+    assert messages[answer_index]["pipelineInputStepId"] == "materialize_selected_candidate"
+
+
 def test_compute_replay_sequence_idle_normal_session_skips_buffer_replay() -> None:
     # 普通会话空闲(无进行中轮次)重载时,存储转录即完整历史;replaySequence 必须回到
     # latestSequence 以跳过整段缓冲区回放。否则已完成轮次会被回放,而回放的实时事件用

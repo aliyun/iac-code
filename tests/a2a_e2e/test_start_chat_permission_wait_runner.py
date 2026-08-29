@@ -21,6 +21,18 @@ def _runner():
     return module
 
 
+def _ros_agent_bridge():
+    spec = importlib.util.spec_from_file_location(
+        "permission_wait_ros_agent_bridge",
+        "skills/alicloud-ros-agent/scripts/ros_agent.py",
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_real_runner_requires_explicit_cloud_opt_in() -> None:
     runner = _runner()
 
@@ -59,6 +71,25 @@ def test_real_runner_explicit_skill_root_does_not_also_install_defaults(monkeypa
     args = runner._parse_args()
 
     assert args.skill_root == [root]
+
+
+def test_real_runner_places_manager_paths_under_python_temp_root(monkeypatch, tmp_path) -> None:
+    runner = _runner()
+    bridge = _ros_agent_bridge()
+    python_temp = tmp_path / "var" / "folders" / "session" / "T"
+    monkeypatch.setattr(runner.tempfile, "gettempdir", lambda: str(python_temp))
+
+    manager_root = runner._manager_runtime_root("pwait-normal-test")
+    workspace = manager_root / "qoder-workspace"
+    state_root = manager_root / "ros-agent-state"
+    workspace.mkdir(parents=True)
+    state_root.mkdir()
+    monkeypatch.setenv("ALICLOUD_ROS_AGENT_STATE_DIR", str(state_root))
+
+    assert manager_root == python_temp.resolve() / "iac-code-a2a-e2e-manager" / "pwait-normal-test"
+    assert manager_root.is_relative_to(python_temp.resolve())
+    assert bridge._trusted_manager_workspace(str(workspace)) == workspace.resolve()
+    assert bridge._state_root() == state_root.resolve()
 
 
 def test_real_runner_writes_fixed_start_chat_permission_policy(tmp_path) -> None:

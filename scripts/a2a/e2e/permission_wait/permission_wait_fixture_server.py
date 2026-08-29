@@ -8,6 +8,12 @@ import os
 from pathlib import Path
 from typing import Any
 
+SELLING_STAGE_IDS = (
+    "solution_planning_and_selection",
+    "materialize_selected_candidate",
+    "deploying",
+)
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -23,10 +29,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--sub-pipeline-timeout-seconds", type=float)
     parser.add_argument("--timeout-grace-seconds", type=float, default=30.0)
     parser.add_argument("--candidate-first", action="store_true")
+    parser.add_argument("--pipeline-step-id", choices=SELLING_STAGE_IDS)
+    parser.add_argument("--handoff-first", action="store_true")
     return parser.parse_args()
 
 
-def _create_fixture_runtime(options: Any, *, execution_log: Path) -> Any:
+def _create_fixture_runtime(options: Any, *, execution_log: Path, handoff_first: bool = False) -> Any:
     from iac_code.agent.agent_loop import AgentLoop
     from iac_code.providers.base import ToolDefinition
     from iac_code.services.agent_factory import AgentRuntime
@@ -42,10 +50,22 @@ def _create_fixture_runtime(options: Any, *, execution_log: Path) -> Any:
         Usage,
     )
 
+    tool_name = "ros_stack" if handoff_first else "fixture_write"
+    tool_input = (
+        {
+            "action": "UpdateStack",
+            "stack_name": "permission-handoff-stack",
+            "region_id": "cn-hangzhou",
+            "params": {"InstanceType": "ecs.g7.large", "Password": "never-publish-this"},
+        }
+        if handoff_first
+        else {"value": "executed"}
+    )
+
     class FixtureWriteTool(Tool):
         @property
         def name(self) -> str:
-            return "fixture_write"
+            return tool_name
 
         @property
         def description(self) -> str:
@@ -55,8 +75,7 @@ def _create_fixture_runtime(options: Any, *, execution_log: Path) -> Any:
         def input_schema(self) -> dict[str, Any]:
             return {
                 "type": "object",
-                "properties": {"value": {"type": "string"}},
-                "required": ["value"],
+                "additionalProperties": True,
             }
 
         async def check_permissions(
@@ -71,7 +90,7 @@ def _create_fixture_runtime(options: Any, *, execution_log: Path) -> Any:
             del context
             execution_log.parent.mkdir(parents=True, exist_ok=True)
             with execution_log.open("a", encoding="utf-8") as handle:
-                handle.write(str(tool_input["value"]) + "\n")
+                handle.write("executed\n")
                 handle.flush()
                 os.fsync(handle.fileno())
             return ToolResult.success("fixture write completed")
@@ -101,11 +120,11 @@ def _create_fixture_runtime(options: Any, *, execution_log: Path) -> Any:
 
             yield MessageStartEvent(message_id="fixture-permission")
             yield TextDeltaEvent(text="fixture permission required")
-            yield ToolUseStartEvent(tool_use_id="fixture-tool-1", name="fixture_write")
+            yield ToolUseStartEvent(tool_use_id="fixture-tool-1", name=tool_name)
             yield ToolUseEndEvent(
                 tool_use_id="fixture-tool-1",
-                name="fixture_write",
-                input={"value": "executed"},
+                name=tool_name,
+                input=tool_input,
             )
             yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
 
@@ -136,7 +155,14 @@ def _create_fixture_runtime(options: Any, *, execution_log: Path) -> Any:
     )
 
 
-def _create_fixture_pipeline(*, execution_log: Path, candidate_first: bool = False, **kwargs: Any) -> Any:
+def _create_fixture_pipeline(
+    *,
+    execution_log: Path,
+    candidate_first: bool = False,
+    pipeline_step_id: str | None = None,
+    handoff_first: bool = False,
+    **kwargs: Any,
+) -> Any:
     import asyncio
     import time
     from types import SimpleNamespace
@@ -162,11 +188,43 @@ def _create_fixture_pipeline(*, execution_log: Path, candidate_first: bool = Fal
         root_session_dir = storage.session_dir(cwd, session_id)
     transcript_id = "transcript_att_0001"
     transcript_storage = PipelineTranscriptStorage(root_session_dir / "pipeline")
+    permission_step_id = pipeline_step_id or "fixture_step"
+    pipeline_steps = list(SELLING_STAGE_IDS) if pipeline_step_id else ["fixture_step"]
+    permission_contracts: dict[str, tuple[str, dict[str, Any]]] = {
+        "solution_planning_and_selection": (
+            "aliyun_api",
+            {
+                "product": "vpc",
+                "action": "CreateVSwitch",
+                "region_id": "cn-hangzhou",
+                "params": {
+                    "VpcId": "vpc-permission-e2e",
+                    "VSwitchName": "permission-step1-vswitch",
+                    "Password": "never-publish-this",
+                },
+            },
+        ),
+        "materialize_selected_candidate": (
+            "write_file",
+            {"path": "templates/permission-step2.yml", "content": "ROSTemplateFormatVersion: '2015-09-01'\n"},
+        ),
+        "deploying": (
+            "ros_deploy",
+            {
+                "action": "create",
+                "stack_name": "permission-step3-stack",
+                "region_id": "cn-hangzhou",
+                "template_url": "templates/permission-step2.yml",
+            },
+        ),
+        "fixture_step": ("fixture_write", {"value": "executed"}),
+    }
+    tool_name, tool_input = permission_contracts[permission_step_id]
 
     class FixturePipeline:
-        pipeline_name = "selling"
+        pipeline_name = "selling_solution_first" if pipeline_step_id else "selling"
         emit_stack_events = False
-        handoff_enabled = False
+        handoff_enabled = handoff_first
 
         def __init__(self) -> None:
             self.session = SimpleNamespace(session_dir=root_session_dir / "pipeline")
@@ -174,12 +232,18 @@ def _create_fixture_pipeline(*, execution_log: Path, candidate_first: bool = Fal
             self.sidecar_status = None
             self.sidecar_restore_result = None
             self._loaded = SimpleNamespace(
-                steps=[SimpleNamespace(step_id="fixture_step", step_type="agent", ui_mode="default")],
+                steps=[
+                    SimpleNamespace(step_id=step_id, step_type="agent", ui_mode="default") for step_id in pipeline_steps
+                ],
                 sub_pipelines={},
             )
 
         async def run(self, prompt: str):
             del prompt
+            if handoff_first:
+                async for event in self._handoff_stream():
+                    yield event
+                return
             if candidate_first:
                 yield PipelineEvent(
                     type=PipelineEventType.PIPELINE_STARTED,
@@ -208,24 +272,38 @@ def _create_fixture_pipeline(*, execution_log: Path, candidate_first: bool = Fal
                     type=PipelineEventType.PIPELINE_STARTED,
                     step_id=None,
                     timestamp=time.time(),
-                    data={"total_steps": 1, "step_names": ["fixture_step"]},
+                    data={"total_steps": len(pipeline_steps), "step_names": pipeline_steps},
+                )
+            permission_index = pipeline_steps.index(permission_step_id)
+            for index, step_id in enumerate(pipeline_steps[:permission_index]):
+                yield PipelineEvent(
+                    type=PipelineEventType.STEP_STARTED,
+                    step_id=step_id,
+                    timestamp=time.time(),
+                    data={"step_index": index, "total_steps": len(pipeline_steps)},
+                )
+                yield PipelineEvent(
+                    type=PipelineEventType.STEP_COMPLETED,
+                    step_id=step_id,
+                    timestamp=time.time(),
+                    data={"conclusion": {"status": "success"}},
                 )
             yield PipelineEvent(
                 type=PipelineEventType.STEP_STARTED,
-                step_id="fixture_step",
+                step_id=permission_step_id,
                 timestamp=time.time(),
-                data={"step_index": 0, "total_steps": 1},
+                data={"step_index": permission_index, "total_steps": len(pipeline_steps)},
             )
             assistant = Message(
                 role="assistant",
-                content=[ToolUseBlock(id="fixture-pipeline-tool-1", name="fixture_write", input={"value": "executed"})],
+                content=[ToolUseBlock(id="fixture-pipeline-tool-1", name=tool_name, input=tool_input)],
             )
             transcript_storage.append(cwd, transcript_id, assistant)
             digest = canonical_digest([block.model_dump(mode="json") for block in assistant.content])
             response_future = asyncio.get_running_loop().create_future()
             permission = PermissionRequestEvent(
-                tool_name="fixture_write",
-                tool_input={"value": "executed"},
+                tool_name=tool_name,
+                tool_input=tool_input,
                 tool_use_id="fixture-pipeline-tool-1",
                 response_future=response_future,
                 continuation_frame={
@@ -247,6 +325,11 @@ def _create_fixture_pipeline(*, execution_log: Path, candidate_first: bool = Fal
                     "cwd": cwd,
                     "root_session_id": session_id,
                     "transcript_id": transcript_id,
+                    **(
+                        {"region": tool_input["region_id"]}
+                        if isinstance(tool_input.get("region_id"), str) and tool_input["region_id"]
+                        else {}
+                    ),
                 },
             )
             yield permission
@@ -306,18 +389,60 @@ def _create_fixture_pipeline(*, execution_log: Path, candidate_first: bool = Fal
             )
 
         async def _finish_stream(self):
+            permission_index = pipeline_steps.index(permission_step_id)
             yield PipelineEvent(
                 type=PipelineEventType.STEP_COMPLETED,
-                step_id="fixture_step",
+                step_id=permission_step_id,
                 timestamp=time.time(),
                 data={"conclusion": {"status": "success"}},
             )
+            for index, step_id in enumerate(pipeline_steps[permission_index + 1 :], start=permission_index + 1):
+                yield PipelineEvent(
+                    type=PipelineEventType.STEP_STARTED,
+                    step_id=step_id,
+                    timestamp=time.time(),
+                    data={"step_index": index, "total_steps": len(pipeline_steps)},
+                )
+                yield PipelineEvent(
+                    type=PipelineEventType.STEP_COMPLETED,
+                    step_id=step_id,
+                    timestamp=time.time(),
+                    data={"conclusion": {"status": "success"}},
+                )
             self.sidecar_status = "completed"
             yield PipelineEvent(
                 type=PipelineEventType.PIPELINE_COMPLETED,
                 step_id=None,
                 timestamp=time.time(),
-                data={"total_steps": 1},
+                data={"total_steps": len(pipeline_steps)},
+            )
+
+        async def _handoff_stream(self):
+            yield PipelineEvent(
+                type=PipelineEventType.PIPELINE_STARTED,
+                step_id=None,
+                timestamp=time.time(),
+                data={"total_steps": len(pipeline_steps), "step_names": pipeline_steps},
+            )
+            for index, step_id in enumerate(pipeline_steps):
+                yield PipelineEvent(
+                    type=PipelineEventType.STEP_STARTED,
+                    step_id=step_id,
+                    timestamp=time.time(),
+                    data={"step_index": index, "total_steps": len(pipeline_steps)},
+                )
+                yield PipelineEvent(
+                    type=PipelineEventType.STEP_COMPLETED,
+                    step_id=step_id,
+                    timestamp=time.time(),
+                    data={"conclusion": {"status": "success"}},
+                )
+            self.sidecar_status = "completed"
+            yield PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=time.time(),
+                data={"total_steps": len(pipeline_steps)},
             )
 
         def _record_execution(self) -> None:
@@ -335,7 +460,11 @@ def _create_fixture_pipeline(*, execution_log: Path, candidate_first: bool = Fal
 
         def should_switch_to_normal(self, data: dict[str, Any]) -> bool:
             del data
-            return False
+            return handoff_first
+
+        def build_normal_handoff_summary(self, data: dict[str, Any]) -> str:
+            del data
+            return "The selling pipeline completed; continue in normal chat."
 
         async def pause_agent_loops(self) -> None:
             return None
@@ -372,6 +501,7 @@ def main() -> int:
     executor_module.create_agent_runtime = lambda options: _create_fixture_runtime(
         options,
         execution_log=execution_log,
+        handoff_first=args.handoff_first,
     )
     pipeline_executor_module.create_agent_runtime = executor_module.create_agent_runtime
     fixture_pipelines: dict[str, Any] = {}
@@ -383,6 +513,8 @@ def main() -> int:
             pipeline = _create_fixture_pipeline(
                 execution_log=execution_log,
                 candidate_first=args.candidate_first,
+                pipeline_step_id=args.pipeline_step_id,
+                handoff_first=args.handoff_first,
                 **kwargs,
             )
             fixture_pipelines[session_id] = pipeline

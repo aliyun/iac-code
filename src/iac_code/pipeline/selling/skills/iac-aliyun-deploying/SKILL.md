@@ -5,25 +5,29 @@ when_to_use: 当用户确认部署 ROS 模板时
 user_invocable: false
 conclusion_schema:
   type: object
+  description: 部署步骤的最终结果；所有字段都放在 complete_step 的 conclusion 对象内。
   required: [status]
   additionalProperties: false
   properties:
     stack_id:
       type: string
-      description: ROS Stack ID（部署成功时必填）
+      description: ros_deploy 达到 CREATE_COMPLETE 后返回的真实 ROS Stack ID；status=success 时必填
     status:
       type: string
       enum: [success, failed, cancelled]
-      description: 部署状态
+      description: success 表示已有 CREATE_COMPLETE 工具证据；failed 表示恢复后仍失败；cancelled 只表示用户明确取消
     resources_created:
       type: array
+      description: ros_deploy 成功结果中确认已创建的真实资源标识或名称；没有返回时可省略
       items:
         type: string
+        description: 一个真实创建资源的标识或名称
     outputs:
       type: object
+      description: ros_deploy 在 CREATE_COMPLETE 后返回的真实 Stack Outputs；不得填模板表达式、占位符或推断值
     error:
       type: string
-      description: 失败原因（status 为 failed 时必填）
+      description: 最终无法部署的真实工具错误与恢复结果；status=failed 时必填
   allOf:
     - if:
         properties:

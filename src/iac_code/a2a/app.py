@@ -430,7 +430,7 @@ def create_app(
         permission_wait=permission_wait,
         thinking_exposure=thinking_exposure,
     )
-    from iac_code.a2a.pipeline_recovery import A2APipelineRecoveryService
+    from iac_code.a2a.pipeline_recovery import A2APipelineRecoveryService, client_pipeline_state
 
     idle_controller: _A2AIdleShutdownController | None = None
     if idle_shutdown_seconds > 0:
@@ -534,6 +534,7 @@ def create_app(
         after_sequence, parse_error = _parse_after_sequence(request.query_params.get("afterSequence"))
         if parse_error is not None:
             return JSONResponse({"error": parse_error}, status_code=400)
+        lean = _parse_lean(request.query_params.get("lean"))
 
         call_context = _call_context_from_request(request)
         try:
@@ -556,7 +557,8 @@ def create_app(
             context_id=context_id,
             task_id=task_id,
         )
-        return JSONResponse(project_a2a_data(state, public_path_roots=roots))
+        # 先裁掉不发给客户端的字段，再投影：既少发一大半字节，也少一大半要脱敏的字符串
+        return JSONResponse(project_a2a_data(client_pipeline_state(state, lean=lean), public_path_roots=roots))
 
     routes: list[BaseRoute] = [
         Route("/health", health, methods=["GET"]),
@@ -601,6 +603,22 @@ def _call_context_from_request(request: Request) -> ServerCallContext | None:
 def _agent_card_etag(card: dict[str, object]) -> str:
     body = json.dumps(card, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     return f'"sha256-{hashlib.sha256(body).hexdigest()}"'
+
+
+#: ``?lean=`` 认得的开启值：其余值一律按全量处理，只在日志里留痕。
+#: 这个开关只影响响应体积，认不出来时给全量数据（慢但完整）比报错拒绝更安全。
+_LEAN_TRUTHY_VALUES = frozenset({"1", "true"})
+
+
+def _parse_lean(value: str | None) -> bool:
+    if value is None or value == "":
+        return False
+    normalized = value.strip().lower()
+    if normalized in _LEAN_TRUTHY_VALUES:
+        return True
+    if normalized not in {"0", "false"}:
+        logger.warning("Ignoring unrecognized pipeline state lean value %r; returning the full snapshot", value)
+    return False
 
 
 def _parse_after_sequence(value: str | None) -> tuple[int | None, str | None]:

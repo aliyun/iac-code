@@ -275,6 +275,9 @@ export function reduceEvent(state = {}, event = {}) {
       message.content = message.text;
       message.imageIds = Array.isArray(payload.imageIds) ? payload.imageIds : [];
       message.fileRefs = Array.isArray(payload.fileRefs) ? payload.fileRefs : [];
+      message.pipelineInputKind = typeof payload.pipelineInputKind === "string" ? payload.pipelineInputKind : "";
+      message.pipelineInputStepId =
+        typeof payload.pipelineInputStepId === "string" ? payload.pipelineInputStepId : "";
       message.status = "completed";
       // 同进程 reload：A2A 回放的用户气泡已带正确转录序号（种子里的 seq）。事件缓冲区随后又会
       // 从 floor 回放本轮 live 的 user.message（其 web 序号更大），若在此覆盖就会把用户气泡挪到
@@ -464,6 +467,12 @@ export function reduceEvent(state = {}, event = {}) {
       tool.summary = payload.summary;
       tool.results.push(payload);
       tool.artifacts = payload.artifacts || [];
+      if (payload.submittedDelta && typeof payload.submittedDelta === "object") {
+        tool.submittedDelta = payload.submittedDelta;
+      }
+      if (payload.normalizedConclusion && typeof payload.normalizedConclusion === "object") {
+        tool.normalizedConclusion = payload.normalizedConclusion;
+      }
       attachToolToMessage(next.messages, tool, payload);
       break;
     }
@@ -719,15 +728,33 @@ export function reduceEvent(state = {}, event = {}) {
     }
     case "diagram.render": {
       next.diagrams.push(payload);
+      const architectureContext =
+        payload.architectureContext && typeof payload.architectureContext === "object"
+          ? payload.architectureContext
+          : {};
+      const diagramId = String(payload.diagramId || "");
+      // selling_solution_first Step 1 的规划图是时间线事件，不是步骤尾部的可变附件。
+      // 为它建立稳定消息，后续重新规划会新增一行而不是覆盖旧图。显式 source 标记
+      // 将行为限制在 show_architecture_plan，不改变旧 selling 的模板图。
+      if (architectureContext.source === "architecture_plan" && diagramId) {
+        const message = ensureMessage(next.messages, `pldiag-${diagramId}`);
+        message.role = "assistant";
+        message.kind = "pipeline_diagram";
+        message.pipelineDiagram = payload;
+        message.status = "completed";
+        if (!message.sequence) {
+          message.sequence = event.sequence || 0;
+        }
+      }
       break;
     }
     case "diagram.optimizing": {
-      const idx = String(payload.candidateIndex);
+      const idx = String(payload.optimizationKey ?? payload.candidateIndex);
       next.diagramOptimizing = { ...next.diagramOptimizing, [idx]: true };
       break;
     }
     case "diagram.optimized": {
-      const idx = String(payload.candidateIndex);
+      const idx = String(payload.optimizationKey ?? payload.candidateIndex);
       const optimizing = { ...next.diagramOptimizing };
       delete optimizing[idx];
       next.diagramOptimizing = optimizing;

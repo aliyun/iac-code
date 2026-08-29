@@ -1359,6 +1359,84 @@ def _safe_deployment_summary(value: Any) -> Optional[Dict[str, Any]]:
     return result or None
 
 
+def _is_secret_field(key: Any) -> bool:
+    normalized = re.sub(r"[^a-z0-9]", "", str(key).lower())
+    return any(
+        fragment in normalized
+        for fragment in (
+            "accesskey",
+            "apikey",
+            "auth",
+            "authorization",
+            "cookie",
+            "credential",
+            "passphrase",
+            "password",
+            "passwd",
+            "privatekey",
+            "pwd",
+            "secret",
+            "session",
+            "signature",
+            "ststoken",
+            "token",
+        )
+    )
+
+
+def _safe_display_value(key: Any, value: Any, depth: int = 0) -> Any:
+    if depth >= 16:
+        return {"truncated": True}
+    if _is_secret_field(key):
+        return {"redacted": True}
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return sanitize_text(value, 2000, True)
+    if isinstance(value, dict):
+        return {
+            sanitize_text(str(item_key), 200): _safe_display_value(item_key, item_value, depth + 1)
+            for item_key, item_value in list(value.items())[:64]
+        }
+    if isinstance(value, list):
+        return [_safe_display_value(key, item, depth + 1) for item in value[:64]]
+    return sanitize_text(str(value), 2000, True)
+
+
+def _safe_permission_operation(value: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(value, dict):
+        return None
+    result = {}
+    for key in ("product", "action", "region"):
+        if key in value:
+            result[key] = sanitize_text(value.get(key), 200)
+    target = value.get("target")
+    if isinstance(target, dict):
+        result["target"] = {
+            key: sanitize_text(target.get(key), 300)
+            for key in ("type", "name", "id")
+            if key in target
+        }
+    api_calls = value.get("apiCalls")
+    if isinstance(api_calls, list):
+        result["apiCalls"] = [
+            {
+                key: sanitize_text(item.get(key), 200)
+                for key in ("product", "action", "effect", "repeat")
+                if key in item
+            }
+            for item in api_calls[:20]
+            if isinstance(item, dict)
+        ]
+    return result or None
+
+
+def _safe_display_parameters(value: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(value, dict) or value.get("format") != "json" or "value" not in value:
+        return None
+    return {"format": "json", "value": _safe_display_value("value", value["value"])}
+
+
 def _safe_input(value: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(value, dict):
         return None
@@ -1376,6 +1454,10 @@ def _safe_input(value: Any) -> Optional[Dict[str, Any]]:
                 "isReadOnly",
                 "safeSummary",
                 "deploymentSummary",
+                "scope",
+                "subPipelineId",
+                "operation",
+                "displayParameters",
                 "language",
             }
         )
@@ -1394,6 +1476,8 @@ def _safe_input(value: Any) -> Optional[Dict[str, Any]]:
         ("target", 600),
         ("toolName", 120),
         ("language", 12),
+        ("scope", 120),
+        ("subPipelineId", 200),
     )
     for key, maximum in text_fields:
         if key in result:
@@ -1404,6 +1488,10 @@ def _safe_input(value: Any) -> Optional[Dict[str, Any]]:
         result["allowFreeText"] = result["allowFreeText"] is True
     if "deploymentSummary" in result:
         result["deploymentSummary"] = _safe_deployment_summary(result["deploymentSummary"])
+    if "operation" in result:
+        result["operation"] = _safe_permission_operation(result["operation"])
+    if "displayParameters" in result:
+        result["displayParameters"] = _safe_display_parameters(result["displayParameters"])
     options = value.get("options")
     if isinstance(options, list):
         safe_options = []

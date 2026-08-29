@@ -364,6 +364,28 @@ def test_build_display_tool_input_marks_long_strings_with_suffix() -> None:
     assert "rm -rf /" in display["command"]["suffix"]
 
 
+def test_build_display_tool_input_keeps_secret_parameter_names_but_not_values() -> None:
+    display = build_display_tool_input(
+        {
+            "params": {
+                "InstanceType": "ecs.g7.large",
+                "Password": "must-not-leak",
+                "nested": [{"access_token": "also-hidden", "Enabled": True}],
+            }
+        }
+    )
+
+    assert display == {
+        "params": {
+            "InstanceType": "ecs.g7.large",
+            "Password": {"redacted": True},
+            "nested": [{"access_token": {"redacted": True}, "Enabled": True}],
+        }
+    }
+    assert "must-not-leak" not in json.dumps(display)
+    assert "also-hidden" not in json.dumps(display)
+
+
 def test_build_prompt_tool_input_redacts_space_separated_secret_flags_and_preserves_paths() -> None:
     command = "cat /Users/alice/project/main.tf --token abc123value --password 'hunter2' --api-key sk-live-secret"
 
@@ -505,6 +527,51 @@ def test_boundary_audit_helper_emits_prompt_record(monkeypatch) -> None:
         "content": {"type": "str", "length": 11, "fingerprint": fingerprint_text("resource {}")},
         fingerprint_text("access_key_secret"): {"redacted": True},
     }
+
+
+def test_boundary_audit_keeps_the_user_visible_api_sequence_and_redacted_parameters(monkeypatch) -> None:
+    records = []
+    event = Mock(
+        tool_name="aliyun_api",
+        tool_input={"product": "vpc", "action": "CreateVSwitch", "params": {"Password": "secret"}},
+        tool_use_id="tool-api",
+        audit_context={
+            "session_id": "session-api-boundary",
+            "metadata": PermissionAuditMetadata(
+                scope="once",
+                source="permission_pipeline",
+                is_read_only=False,
+                operation={"product": "vpc", "action": "CreateVSwitch", "region": "cn-hangzhou"},
+            ),
+            "permission_display_snapshot": {
+                "operation": {
+                    "product": "vpc",
+                    "action": "CreateVSwitch",
+                    "region": "cn-hangzhou",
+                    "apiCalls": [{"product": "VPC", "action": "CreateVSwitch", "effect": "change"}],
+                },
+                "displayParameters": {
+                    "format": "json",
+                    "value": {"VpcId": "vpc-safe", "Password": {"redacted": True}},
+                },
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        "iac_code.services.permissions.audit.emit_permission_audit",
+        lambda record, settings=None: records.append(record),
+    )
+
+    assert emit_permission_boundary_audit(event, decision="allow", scope="once", source="a2a_user_permission")
+    [record] = records
+    row = audit_module._audit_row(record)
+    assert row["operation"]["apiCalls"] == [{"product": "VPC", "action": "CreateVSwitch", "effect": "change"}]
+    assert row["display_parameters"] == {
+        "format": "json",
+        "value": {"VpcId": "vpc-safe", "Password": {"redacted": True}},
+    }
+    assert "secret" not in json.dumps(row)
 
 
 def test_boundary_audit_persisted_mcp_operation_omits_legacy_read_only_key(tmp_path: Path, monkeypatch) -> None:

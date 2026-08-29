@@ -305,6 +305,22 @@ def public_aliyun_error(
             "Alibaba Cloud ECS instance RAM role credentials could not be refreshed before they expired, "
             "so {operation} cannot be signed. Check ECS metadata availability."
         ).format(operation=operation)
+    # OAuth credential failures. The credential provider refreshes OAuth-backed STS
+    # credentials while a call is being prepared, and its exceptions carry prose messages
+    # that no branch below recognizes, so without these two the whole class of stale
+    # sign-ins renders as the generic fallback text at the end of this function. The
+    # upstream message is deliberately not reused: `{operation} request failed: ...`
+    # carries response detail, while a stable code carries none.
+    if code == "aliyun_oauth_relogin_required":
+        return _(
+            "Alibaba Cloud OAuth sign-in expired or was revoked, so {operation} cannot be signed. "
+            "Sign in again with OAuth and retry."
+        ).format(operation=operation)
+    if code == "aliyun_oauth_refresh_failed":
+        return _(
+            "Alibaba Cloud OAuth credentials could not be refreshed, so {operation} cannot be signed. "
+            "Check network access to the sign-in service and retry."
+        ).format(operation=operation)
     if "endpoint" in code:
         return _(
             "No trusted Alibaba Cloud endpoint is available for {operation} in {region}. "

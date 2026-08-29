@@ -364,3 +364,33 @@ def test_http_projection_middleware_projects_sse_frames_incrementally(tmp_path, 
         "path": "[PATH]",
         "password": "real-secret",
     }
+
+
+def test_project_a2a_data_normalizes_public_path_roots_once(monkeypatch) -> None:
+    from iac_code.utils import public_paths
+
+    original = public_paths._normalize_public_path_roots
+    calls: list[int] = []
+
+    def counting_normalize(public_path_roots):
+        calls.append(1)
+        return original(public_path_roots)
+
+    monkeypatch.setattr(public_paths, "_normalize_public_path_roots", counting_normalize)
+
+    canonical = {
+        "events": [{"id": f"evt-{index}", "path": "/server-root/private/result.json"} for index in range(25)],
+        "/server-root/a": "first",
+        "nested": {"deep": ["/server-root/b", "keep"]},
+    }
+
+    projected = project_a2a_data(
+        canonical,
+        public_path_roots=[{"path": "/server-root", "label": "."}],
+        safe_mode=True,
+    )
+
+    assert projected["events"][0] == {"id": "evt-0", "path": "[PATH]"}
+    assert projected["nested"] == {"deep": ["[PATH]", "keep"]}
+    assert projected["[PATH]"] == "first"
+    assert len(calls) == 1

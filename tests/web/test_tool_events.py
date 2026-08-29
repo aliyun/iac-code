@@ -139,6 +139,122 @@ def test_normal_web_live_tool_result_strips_internal_render_carrier() -> None:
     assert TOOL_RENDER_METADATA_KEY not in json.dumps(translated)
 
 
+def test_normal_web_live_complete_step_projects_authoritative_conclusion_outside_artifacts() -> None:
+    from iac_code.pipeline.engine.types import StepResult, StepStatus
+    from iac_code.types.stream_events import ToolResultEvent
+    from iac_code.web.events import WebEventTranslator
+
+    translated = WebEventTranslator("session-1").translate_stream_event(
+        ToolResultEvent(
+            tool_use_id="tool-complete",
+            tool_name="complete_step",
+            result="completed",
+            metadata={
+                "submitted_delta": {"conclusion": {"status": "confirmed"}},
+                "step_result": StepResult(
+                    step_id="materialize_selected_candidate",
+                    status=StepStatus.COMPLETED,
+                    conclusion={
+                        "status": "confirmed",
+                        "template_url": "templates/0-rds.yml",
+                        "selected_candidate_result": {"cost": {"monthly_estimate": "¥100/月"}},
+                    },
+                ),
+            },
+        ),
+        turn_id="turn-1",
+    )
+
+    assert translated["payload"]["submittedDelta"] == {"conclusion": {"status": "confirmed"}}
+    assert translated["payload"]["normalizedConclusion"]["template_url"] == "templates/0-rds.yml"
+    assert translated["payload"]["artifacts"] == []
+
+
+def test_persisted_complete_step_result_preserves_completion_projection() -> None:
+    from iac_code.agent.message import Message, ToolResultBlock
+    from iac_code.pipeline.engine.types import StepResult, StepStatus
+    from iac_code.web.session_manager import _tool_result_payload
+
+    message = Message(
+        role="user",
+        content=[
+            ToolResultBlock(
+                tool_use_id="tool-complete",
+                content="completed",
+                metadata={
+                    "submitted_delta": {"conclusion": {"status": "confirmed"}},
+                    "step_result": StepResult(
+                        step_id="materialize_selected_candidate",
+                        status=StepStatus.COMPLETED,
+                        conclusion={"status": "confirmed", "template_url": "templates/0-rds.yml"},
+                    ),
+                },
+            )
+        ],
+    )
+    restored = Message.from_dict(json.loads(json.dumps(message.to_dict(), default=str)))
+    assert isinstance(restored.content, list)
+    restored_block = restored.content[0]
+    assert isinstance(restored_block, ToolResultBlock)
+
+    payload = _tool_result_payload(restored_block)
+
+    assert payload["submittedDelta"] == {"conclusion": {"status": "confirmed"}}
+    assert payload["normalizedConclusion"] == {
+        "status": "confirmed",
+        "template_url": "templates/0-rds.yml",
+    }
+
+
+def test_complete_step_card_prefers_normalized_conclusion_over_status_only_input(tmp_path: Path) -> None:
+    output = _run_reducer_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            import { reduceEvent } from __EVENTS_MODULE__;
+            import { completeStepConclusion } from __TOOL_CARDS_MODULE__;
+
+            let state = reduceEvent({}, {
+              type: "tool.started",
+              sequence: 1,
+              payload: { toolUseId: "tool-complete", toolName: "complete_step", status: "running" },
+            });
+            state = reduceEvent(state, {
+              type: "tool.input.delta",
+              sequence: 2,
+              payload: {
+                toolUseId: "tool-complete",
+                delta: "{\\"conclusion\\":{\\"status\\":\\"confirmed\\"}}",
+              },
+            });
+            state = reduceEvent(state, {
+              type: "tool.result",
+              sequence: 3,
+              payload: {
+                toolUseId: "tool-complete",
+                resultKind: "text",
+                summary: "completed",
+                submittedDelta: { conclusion: { status: "confirmed" } },
+                normalizedConclusion: {
+                  status: "confirmed",
+                  template_url: "templates/0-rds.yml",
+                  selected_candidate_result: { cost: { monthly_estimate: "¥100/月" } },
+                },
+              },
+            });
+            console.log(JSON.stringify({
+              card: completeStepConclusion(state.tools["tool-complete"]),
+              submittedDelta: state.tools["tool-complete"].submittedDelta,
+            }));
+            """
+        ),
+    )
+
+    assert output["card"]["template_url"] == "templates/0-rds.yml"
+    assert output["card"]["selected_candidate_result"]["cost"]["monthly_estimate"] == "¥100/月"
+    assert output["submittedDelta"] == {"conclusion": {"status": "confirmed"}}
+
+
 def test_normal_web_live_tool_result_render_only_metadata_yields_no_artifacts() -> None:
     # When the only metadata is the internal render carrier, artifacts must be empty
     # rather than a JSON blob of the carrier.
@@ -314,6 +430,39 @@ def test_stream_event_translator_backend_event_names_match_contract() -> None:
     assert [
         translator.translate_stream_event(stream_event, turn_id="turn-1")["type"] for stream_event, _event_type in cases
     ] == [event_type for _stream_event, event_type in cases]
+
+
+def test_candidate_detail_web_event_preserves_progressive_candidate_metadata() -> None:
+    from iac_code.types.stream_events import CandidateDetailEvent
+    from iac_code.web.events import WebEventTranslator
+
+    translated = WebEventTranslator("session-1").translate_stream_event(
+        CandidateDetailEvent(
+            tool_use_id="tool-detail-1",
+            candidate_name="单可用区最省",
+            summary="一台 ECS",
+            cost_items=[],
+            total_monthly_cost="¥100/月",
+            candidate_index=0,
+            candidate_set_id="outline-tool-1",
+            detail_stage="outline",
+            key_tradeoff="成本最低，但不提供跨可用区高可用",
+        ),
+        turn_id="turn-1",
+    )
+
+    assert translated["type"] == "candidate.detail"
+    assert translated["payload"] == {
+        "toolUseId": "tool-detail-1",
+        "candidateName": "单可用区最省",
+        "summary": "一台 ECS",
+        "costItems": [],
+        "totalMonthlyCost": "¥100/月",
+        "candidateIndex": 0,
+        "candidateSetId": "outline-tool-1",
+        "detailStage": "outline",
+        "keyTradeoff": "成本最低，但不提供跨可用区高可用",
+    }
 
 
 def test_stack_operation_started_bridges_to_resource_observed() -> None:
@@ -1750,7 +1899,155 @@ def test_pipeline_candidate_selection_posts_session_candidate_and_overrides(tmp_
             },
         }
     ]
-    assert "accepted" in " ".join(output["rendered"]["text"])
+    assert "Accepted" in " ".join(output["rendered"]["text"])
+
+
+def test_solution_first_candidate_selection_has_no_step_one_parameter_editor(tmp_path) -> None:
+    output = _run_reducer_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            import { renderPipelineWorkspace } from __PIPELINE_MODULE__;
+
+            class Element {
+              constructor(tagName) {
+                this.tagName = tagName.toUpperCase();
+                this.children = [];
+                this.dataset = {};
+                this.textContent = "";
+                this.className = "";
+                this.disabled = false;
+              }
+              append(...children) { this.children.push(...children); }
+              replaceChildren(...children) { this.children = children; }
+              addEventListener() {}
+              set innerHTML(value) { this._innerHTML = value; }
+              get innerHTML() { return this._innerHTML || ""; }
+              set colSpan(value) { this._colSpan = value; }
+            }
+            function count(node, tagName) {
+              return (node.tagName === tagName ? 1 : 0) +
+                (node.children || []).reduce((total, child) => total + count(child, tagName), 0);
+            }
+            globalThis.document = { createElement: (tagName) => new Element(tagName) };
+            const rendered = renderPipelineWorkspace({
+              currentSessionId: "web-session-1",
+              pipelineSnapshot: {
+                pipelineName: "selling_solution_first",
+                display: {candidateDetails: [{candidateName: "Plan A", candidateIndex: 0}]}
+              }
+            }, {onSelectCandidate: async () => ({accepted: true})});
+            console.log(JSON.stringify({textareas: count(rendered, "TEXTAREA")}));
+            """
+        ),
+    )
+
+    assert output == {"textareas": 0}
+
+
+def test_solution_first_deployment_confirmation_renders_compact_options_and_posts_action(tmp_path) -> None:
+    output = _run_reducer_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            import { renderPipelineWorkspace } from __PIPELINE_MODULE__;
+
+            class Element {
+              constructor(tagName) {
+                this.tagName = tagName.toUpperCase();
+                this.children = [];
+                this.dataset = {};
+                this.listeners = {};
+                this.textContent = "";
+                this.className = "";
+                this.value = "";
+                this.disabled = false;
+              }
+              append(...children) { this.children.push(...children); }
+              replaceChildren(...children) { this.children = children; }
+              addEventListener(type, handler) { this.listeners[type] = handler; }
+              querySelectorAll(selector) {
+                const result = [];
+                const visit = (node) => {
+                  if (selector === "button" && node.tagName === "BUTTON") result.push(node);
+                  for (const child of node.children || []) visit(child);
+                };
+                visit(this);
+                return result;
+              }
+              async click() { if (this.listeners.click) await this.listeners.click({preventDefault() {}}); }
+              set innerHTML(value) { this._innerHTML = value; }
+              get innerHTML() { return this._innerHTML || ""; }
+              set colSpan(value) { this._colSpan = value; }
+            }
+            function descendants(node, tagName, result = []) {
+              if (node.tagName === tagName) result.push(node);
+              for (const child of node.children || []) descendants(child, tagName, result);
+              return result;
+            }
+            function collectText(node, result = []) {
+              if (node.textContent) result.push(node.textContent);
+              for (const child of node.children || []) collectText(child, result);
+              return result;
+            }
+            globalThis.document = { createElement: (tagName) => new Element(tagName) };
+            const calls = [];
+            const rendered = renderPipelineWorkspace({
+              currentSessionId: "web-session-1",
+              pipelineSnapshot: {
+                pipelineName: "selling_solution_first",
+                pendingInput: {
+                  kind: "deployment_confirmation",
+                  prompt: "请确认更新后的方案",
+                  solution_summary: "杭州双 ECS 高可用方案",
+                  template_url: "templates/2-ha.yml",
+                  cost: {
+                    monthly_estimate: "¥1280/月（列表价，合同优惠后约¥1024/月）",
+                    resources: [{type: "ECS", spec: "ecs.g7.large x 2", cost: "¥480/月"}]
+                  },
+                  effective_deployment_parameters: {ZoneId: "cn-hangzhou-h"},
+                  parameter_overrides: {VSwitchCidr: "10.250.254.0/24"},
+                  options: [
+                    {action: "confirm", name: "确认部署", summary: "按当前方案创建云资源"},
+                    {action: "adjust", name: "调整参数"},
+                    {action: "reselect", name: "重新选择方案", summary: "返回方案规划步骤"},
+                    {action: "cancel", name: "取消", summary: "结束流程且不创建资源"}
+                  ]
+                }
+              }
+            }, {
+              onDeploymentConfirmation: async (payload) => { calls.push(payload); }
+            });
+            const buttons = descendants(rendered, "BUTTON");
+            const confirm = buttons.find((button) =>
+              button.className.includes("pipeline-deployment-confirmation-confirm")
+            );
+            await confirm.click();
+            console.log(JSON.stringify({
+              calls,
+              text: collectText(rendered),
+              textareas: descendants(rendered, "TEXTAREA").length,
+              buttonClasses: buttons.map((button) => button.className),
+            }));
+            """
+        ),
+    )
+
+    assert output["calls"] == [
+        {
+            "sessionId": "web-session-1",
+            "action": "confirm",
+            "parameterOverrides": {"VSwitchCidr": "10.250.254.0/24"},
+        }
+    ]
+    rendered_text = " ".join(output["text"])
+    assert "确认部署" in rendered_text
+    assert "按当前方案创建云资源" in rendered_text
+    assert "重新选择方案" in rendered_text
+    assert "取消" in rendered_text
+    assert "调整参数" not in rendered_text
+    assert output["textareas"] == 0
+    assert not any("pipeline-deployment-confirmation-adjust" in value for value in output["buttonClasses"])
 
 
 def test_pipeline_duplicate_candidate_names_select_only_matching_index(tmp_path) -> None:
@@ -1984,6 +2281,50 @@ def test_pipeline_selection_workspace_opens_only_for_unresolved_candidate_input(
     }
 
 
+def test_pipeline_pending_question_is_restored_from_snapshot(tmp_path) -> None:
+    output = _run_reducer_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            globalThis.document = { getElementById: () => null };
+            globalThis.window = { location: { hostname: "localhost", origin: "http://localhost" } };
+            const { pipelinePendingQuestionRequest } = await import(__APP_MODULE__);
+
+            const question = pipelinePendingQuestionRequest({
+              pendingInput: {
+                kind: "ask_user_question",
+                inputId: "ask-tool-1",
+                toolUseId: "tool-1",
+                question: "Pick an environment",
+                options: [{ id: "demo", label: "Demo" }],
+                allowFreeText: true,
+                freeTextPrompt: "Describe it",
+              },
+            });
+            console.log(JSON.stringify({
+              question,
+              candidate: pipelinePendingQuestionRequest({ pendingInput: { kind: "candidate_selection" } }),
+            }));
+            """
+        ),
+    )
+
+    assert output == {
+        "question": {
+            "requestId": "ask-tool-1",
+            "payload": {
+                "pipeline": True,
+                "toolUseId": "tool-1",
+                "question": "Pick an environment",
+                "options": [{"id": "demo", "label": "Demo"}],
+                "allowFreeText": True,
+                "freeTextPrompt": "Describe it",
+            },
+        },
+        "candidate": None,
+    }
+
+
 def test_pipeline_candidate_selection_discards_stale_error_after_session_switch(tmp_path) -> None:
     output = _run_reducer_script(
         tmp_path,
@@ -2101,7 +2442,7 @@ def test_pipeline_candidate_selection_marks_selected_optimistically_before_actio
         "candidateName": "经济型 ECS + RDS Serverless",
         "candidateIndex": 1,
     }
-    assert output["final"]["notice"] == "accepted · select_candidate"
+    assert output["final"]["notice"] == "Accepted"
     assert output["final"]["renders"] == 2
 
 
@@ -2915,7 +3256,7 @@ def test_stack_instances_progress_event_payload_includes_region_progress_and_loc
                     "stackId": "stack-i-1",
                     "regionId": "cn-shanghai",
                     "status": "OUTDATED",
-                    "statusReason": "AccessKeySecret=LTAI123456789012 blocked",
+                    "statusReason": "AccessKeySecret=test-placeholder blocked",
                 }
             ],
             elapsed_seconds=6,
@@ -2938,7 +3279,7 @@ def test_stack_instances_progress_event_payload_includes_region_progress_and_loc
                 "stackId": "stack-i-1",
                 "regionId": "cn-shanghai",
                 "status": "OUTDATED",
-                "statusReason": "AccessKeySecret=LTAI123456789012 blocked",
+                "statusReason": "AccessKeySecret=test-placeholder blocked",
             }
         ],
         "elapsedSeconds": 6,
@@ -4212,6 +4553,251 @@ def test_pipeline_step_diagrams_render_buttons(tmp_path) -> None:
     assert output["groupClass"] == "pipeline-step-diagrams"
 
 
+def test_solution_first_step2_renders_final_template_diagram_link(tmp_path) -> None:
+    output = _run_reducer_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            globalThis.document = {
+              getElementById: () => null,
+              createElement: (tag) => new Element(tag),
+            };
+            globalThis.window = { location: { hostname: "localhost", origin: "http://localhost" } };
+
+            class Element {
+              constructor(tag) {
+                this.tagName = (tag || "").toUpperCase();
+                this.children = [];
+                this.dataset = {};
+                this.className = "";
+                this.textContent = "";
+                this.type = "";
+                this._handlers = {};
+              }
+              append(...children) { this.children.push(...children); }
+              addEventListener(type, fn) { (this._handlers[type] ||= []).push(fn); }
+              setAttribute() {}
+              __click() { (this._handlers.click || []).forEach((fn) => fn()); }
+            }
+
+            function collectByClass(node, cls, out = []) {
+              if (node && typeof node.className === "string" && node.className.includes(cls)) out.push(node);
+              for (const child of node?.children || []) collectByClass(child, cls, out);
+              return out;
+            }
+
+            const { renderPipelineMarkerGroup } = await import(__APP_MODULE__);
+            const toggled = [];
+            const group = renderPipelineMarkerGroup(
+              {
+                messageId: "step2-marker",
+                kind: "pipeline_step",
+                pipelineStep: { stepId: "materialize_selected_candidate", status: "input" },
+              },
+              {
+                diagrams: [
+                  {
+                    diagramId: "final:templates/0-solution.yml",
+                    candidateIndex: null,
+                    stepId: "materialize_selected_candidate",
+                    sourceRelPath: "templates/0-solution.yml",
+                    mermaidSource: "graph TD\\n  A[VPC]",
+                  },
+                ],
+                toggleDiagram: (item) => { toggled.push(item); return true; },
+              },
+            );
+            const links = collectByClass(group.diagramGroup, "pipeline-step-diagram-link");
+            links[0].__click();
+            console.log(JSON.stringify({
+              count: links.length,
+              text: links[0].textContent,
+              toggled: toggled[0]?.diagramId,
+              openClass: links[0].className,
+            }));
+            """
+        ),
+    )
+
+    assert output["count"] == 1
+    assert "0-solution.yml" in output["text"]
+    assert "templates/" not in output["text"]
+    assert output["toggled"] == "final:templates/0-solution.yml"
+    assert "is-open" in output["openClass"]
+
+
+def test_pipeline_transcript_diagrams_merges_snapshot_live_and_derived(tmp_path) -> None:
+    output = _run_reducer_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            globalThis.document = { getElementById: () => null };
+            globalThis.window = { location: { hostname: "localhost", origin: "http://localhost" } };
+            const { pipelineTranscriptDiagrams } = await import(__APP_MODULE__);
+            const result = pipelineTranscriptDiagrams({
+              pipelineSnapshot: { display: { diagrams: [
+                { diagramId: "plan-0", candidateIndex: 0, mermaidSource: "snapshot-plan" },
+              ] } },
+              diagrams: [
+                { diagramId: "plan-1", candidateIndex: 1, mermaidSource: "live-plan" },
+              ],
+              webDiagrams: [
+                { diagramId: "final", candidateIndex: null, stepId: "materialize_selected_candidate",
+                  mermaidSource: "final-template" },
+              ],
+            });
+            console.log(JSON.stringify(result.map((item) => item.mermaidSource).sort()));
+            """
+        ),
+    )
+
+    assert output == ["final-template", "live-plan", "snapshot-plan"]
+
+
+def test_planning_diagram_event_creates_stable_timeline_message(tmp_path) -> None:
+    output = _run_reducer_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            import { reduceEvent } from __EVENTS_MODULE__;
+            let state = reduceEvent({}, {
+              type: "diagram.render",
+              sequence: 7,
+              payload: {
+                diagramId: "diagram-nginx",
+                stepId: "solution_planning_and_selection",
+                candidateName: "单台 ECS 测试/演示",
+                candidateIndex: 0,
+                mermaidSource: "flowchart LR\\n  Internet --> ECS",
+                architectureContext: { source: "architecture_plan" },
+              },
+            });
+            state = reduceEvent(state, {
+              type: "diagram.render",
+              sequence: 11,
+              payload: {
+                diagramId: "diagram-vpc",
+                stepId: "solution_planning_and_selection",
+                candidateName: "仅创建 VPC",
+                candidateIndex: 0,
+                mermaidSource: "flowchart LR\\n  VPC",
+                architectureContext: { source: "architecture_plan" },
+              },
+            });
+            console.log(JSON.stringify({
+              ids: Object.values(state.messages).map((message) => message.messageId),
+              sequences: Object.values(state.messages).map((message) => message.sequence),
+              diagrams: state.diagrams.map((diagram) => diagram.diagramId),
+            }));
+            """
+        ),
+    )
+
+    assert output == {
+        "ids": ["pldiag-diagram-nginx", "pldiag-diagram-vpc"],
+        "sequences": [7, 11],
+        "diagrams": ["diagram-nginx", "diagram-vpc"],
+    }
+
+
+def test_solution_first_step1_plan_is_final_and_uses_rough_price(tmp_path) -> None:
+    output = _run_reducer_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            globalThis.document = { getElementById: () => null };
+            globalThis.window = { location: { hostname: "localhost", origin: "http://localhost" } };
+            const { pipelineTranscriptDiagrams, diagramOptimizationState } = await import(__APP_MODULE__);
+            const state = {
+              pipelineSnapshot: { display: { candidateDetails: [
+                { candidateIndex: 0, detail: {
+                  candidateIndex: 0,
+                  totalMonthlyCost: "¥400～¥700/月",
+                  costItems: [{ name: "ECS", monthly_cost: "¥400～¥700/月" }],
+                } },
+              ] } },
+              diagrams: [
+                { diagramId: "plan-0", candidateIndex: 0, diagramStage: "optimized",
+                  mermaidSource: "flowchart TD\\n  A[ECS]" },
+              ],
+            };
+            const item = pipelineTranscriptDiagrams(state)[0];
+            console.log(JSON.stringify({
+              optimized: item.optimized,
+              optimizationState: diagramOptimizationState(item, state),
+              total: item.totalMonthlyCost,
+              costs: item.costItems,
+            }));
+            """
+        ),
+    )
+
+    assert output == {
+        "optimized": True,
+        "optimizationState": "done",
+        "total": "¥400～¥700/月",
+        "costs": [{"name": "ECS", "monthly_cost": "¥400～¥700/月"}],
+    }
+
+
+def test_solution_first_timeline_diagrams_keep_history_and_only_latest_is_selectable(tmp_path) -> None:
+    output = _run_reducer_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            globalThis.document = { getElementById: () => null };
+            globalThis.window = { location: { hostname: "localhost", origin: "http://localhost" } };
+            const { pipelineTimelineDiagramState } = await import(__APP_MODULE__);
+            const base = {
+              currentSession: { mode: "pipeline" },
+              pipelineSnapshot: {
+                status: "input-required",
+                pendingInput: { kind: "candidate_selection", required: true },
+                display: { candidateDetails: [] },
+              },
+              diagrams: [
+                { diagramId: "nginx", candidateIndex: 0, candidateName: "单台 ECS 测试/演示",
+                  diagramStage: "optimized", mermaidSource: "flowchart LR\\n  Internet --> ECS" },
+                { diagramId: "vpc", candidateIndex: 0, candidateName: "仅创建 VPC",
+                  mermaidSource: "flowchart LR\\n  VPC" },
+              ],
+              candidateDetails: [
+                { candidateIndex: 0, candidateName: "单台 ECS 测试/演示", totalMonthlyCost: "¥100/月" },
+                { candidateIndex: 0, candidateName: "仅创建 VPC", totalMonthlyCost: "¥0/月" },
+              ],
+              webCandidates: [{ candidateIndex: 0, candidateName: "仅创建 VPC" }],
+            };
+            const oldState = pipelineTimelineDiagramState(base.diagrams[0], base);
+            const currentState = pipelineTimelineDiagramState(base.diagrams[1], base);
+            const activeState = pipelineTimelineDiagramState(base.diagrams[1], {
+              ...base,
+              currentTurnActive: true,
+            });
+            console.log(JSON.stringify({
+              old: {
+                current: oldState.isCurrent,
+                selectable: oldState.canSelect,
+                price: oldState.diagram.totalMonthlyCost,
+                optimized: oldState.diagram.optimized,
+              },
+              current: {
+                current: currentState.isCurrent,
+                selectable: currentState.canSelect,
+                price: currentState.diagram.totalMonthlyCost,
+              },
+              activeSelectable: activeState.canSelect,
+            }));
+            """
+        ),
+    )
+
+    assert output == {
+        "old": {"current": False, "selectable": False, "price": "¥100/月", "optimized": True},
+        "current": {"current": True, "selectable": True, "price": "¥0/月"},
+        "activeSelectable": False,
+    }
+
+
 def test_pipeline_step_renders_all_authoritative_candidates_even_without_diagram(tmp_path) -> None:
     # 根因修复:选择器按权威候选表(input_required.options)渲染,而非「架构图能否渲染」。
     # 出了 2 个方案(idx0/idx1),但只有 idx1 的模板能转 mermaid(idx0 模板损坏无图)。
@@ -4674,6 +5260,46 @@ def test_regroup_pipeline_messages_makes_candidate_subtrees_contiguous(tmp_path)
     ]
     assert output["len"] == 9  # 不丢任何消息。
     assert output["plainOrdered"] == ["m1", "m2"]  # 普通对话零影响。
+
+
+def test_regroup_pipeline_messages_preserves_step1_user_and_diagram_timeline(tmp_path) -> None:
+    output = _run_reducer_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            globalThis.document = { getElementById: () => null };
+            globalThis.window = { location: { hostname: "localhost", origin: "http://localhost" } };
+            const { regroupPipelineMessages } = await import(__APP_MODULE__);
+            const stepId = "solution_planning_and_selection";
+            const messages = [
+              { messageId: "plmk-plan", kind: "pipeline_step", sequence: 1,
+                pipelineStep: { stepId, groupId: "step:plan", parentGroupId: null } },
+              { messageId: "pl-plan", role: "assistant", sequence: 2 },
+              { messageId: "pldiag-nginx", kind: "pipeline_diagram", role: "assistant", sequence: 3,
+                pipelineDiagram: { stepId, diagramId: "nginx" } },
+              { messageId: "user-vpc", role: "user", sequence: 4,
+                pipelineInputStepId: stepId, content: "我现在想创建vpc了" },
+              { messageId: "pldiag-vpc-draft", kind: "pipeline_diagram", role: "assistant", sequence: 5,
+                pipelineDiagram: { stepId, diagramId: "vpc-draft", candidateIndex: 0 } },
+              { messageId: "pl-plan#2", role: "assistant", sequence: 6 },
+              { messageId: "pl-plan#3", role: "assistant", sequence: 7 },
+              { messageId: "pldiag-vpc", kind: "pipeline_diagram", role: "assistant", sequence: 8,
+                pipelineDiagram: { stepId, diagramId: "vpc", candidateIndex: 0 } },
+            ];
+            console.log(JSON.stringify(regroupPipelineMessages(messages).map((message) => message.messageId)));
+            """
+        ),
+    )
+
+    assert output == [
+        "plmk-plan",
+        "pl-plan",
+        "pldiag-nginx",
+        "user-vpc",
+        "pl-plan#2",
+        "pl-plan#3",
+        "pldiag-vpc",
+    ]
 
 
 def test_pipeline_step_select_button_absent_when_not_awaiting_input(tmp_path) -> None:

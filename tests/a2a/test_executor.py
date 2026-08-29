@@ -126,6 +126,159 @@ def _committed_normal_handoff_events(
     return handoff, backup_ack
 
 
+@pytest.mark.asyncio
+async def test_handoff_normal_permission_is_restored_from_pipeline_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.executor import (
+        _persist_normal_permission_snapshot_request,
+        _persist_normal_permission_snapshot_resolution,
+    )
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    session_id = "session-normal-permission"
+    context_id = "ctx-normal-permission"
+    _ensure_v2_session(str(cwd), session_id)
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    handoff_events = _committed_normal_handoff_events(
+        context_id=context_id,
+        task_id="task-pipeline",
+        summary="handoff",
+    )
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append_many(handoff_events, durable=True)
+    snapshot_store = A2APipelineSnapshotStore(pipeline_dir)
+    snapshot_store.save(reduce_pipeline_events(handoff_events))
+
+    permission_envelope = {
+        "schemaVersion": 1,
+        "kind": "permission",
+        "requestTaskId": "task-normal",
+        "contextId": context_id,
+        "inputId": "permission-normal",
+        "toolUseId": "tool-normal",
+        "toolName": "write_memory",
+        "title": "Run write_memory",
+        "target": "handoff-note",
+        "isReadOnly": False,
+        "options": [
+            {"id": "allow_once", "label": "Allow once"},
+            {"id": "deny", "label": "Deny"},
+        ],
+    }
+    pending = SimpleNamespace(
+        input_id="permission-normal",
+        envelope=lambda: dict(permission_envelope),
+    )
+    await _persist_normal_permission_snapshot_request(
+        cwd=str(cwd),
+        session_id=session_id,
+        pending=pending,
+    )
+
+    requested_snapshot = snapshot_store.load()
+    assert requested_snapshot is not None
+    requested = requested_snapshot["display"]["permissions"]
+    assert len(requested) == 1
+    assert requested[0] == {
+        **permission_envelope,
+        "permissionId": "permission-normal",
+        "pending": True,
+        "id": "permission-normal",
+        "scope": "normal",
+        "runId": context_id,
+        "sequence": 3,
+        "createdAt": requested[0]["createdAt"],
+        "eventId": requested[0]["eventId"],
+    }
+    requested_created_at = requested[0]["createdAt"]
+
+    response = PermissionResponse(
+        task_id="task-normal",
+        context_id=context_id,
+        request_task_id="task-normal",
+        input_id="permission-normal",
+        tool_use_id="tool-normal",
+        decision="deny",
+    )
+    await _persist_normal_permission_snapshot_resolution(
+        cwd=str(cwd),
+        session_id=session_id,
+        response=response,
+        decision="deny",
+    )
+
+    resolved_snapshot = snapshot_store.load()
+    assert resolved_snapshot is not None
+    resolved = resolved_snapshot["display"]["permissions"]
+    assert len(resolved) == 1
+    assert resolved[0]["scope"] == "normal"
+    assert resolved[0]["inputId"] == "permission-normal"
+    assert resolved[0]["requestTaskId"] == "task-normal"
+    assert resolved[0]["decision"] == "deny"
+    assert resolved[0]["pending"] is False
+    assert resolved[0]["createdAt"] == requested_created_at
+    normal_events = [event for event in journal.read_all() if event.get("scope") == "normal"]
+    assert [event["eventType"] for event in normal_events] == ["permission_requested", "permission_resolved"]
+    assert [event["sequence"] for event in normal_events] == [3, 4]
+
+
+@pytest.mark.asyncio
+async def test_normal_permission_does_not_modify_snapshot_without_committed_normal_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.executor import _persist_normal_permission_snapshot_request
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    session_id = "session-active-pipeline"
+    _ensure_v2_session(str(cwd), session_id)
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    started = {
+        "schemaVersion": "1.0",
+        "eventId": "pipeline-started",
+        "sequence": 1,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "eventType": "pipeline_started",
+        "scope": "pipeline",
+        "pipelineRunId": "ctx-active",
+        "taskId": "task-pipeline",
+        "contextId": "ctx-active",
+        "pipelineName": "selling",
+        "status": "working",
+    }
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(started, durable=True)
+    snapshot_store = A2APipelineSnapshotStore(pipeline_dir)
+    snapshot_store.save(reduce_pipeline_events([started]))
+
+    pending = SimpleNamespace(
+        input_id="permission-normal",
+        envelope=lambda: {
+            "kind": "permission",
+            "inputId": "permission-normal",
+            "toolUseId": "tool-normal",
+            "toolName": "write_memory",
+        },
+    )
+    await _persist_normal_permission_snapshot_request(cwd=str(cwd), session_id=session_id, pending=pending)
+
+    snapshot = snapshot_store.load()
+    assert snapshot is not None
+    assert snapshot["status"] == "working"
+    assert snapshot["display"]["permissions"] == []
+    assert journal.read_all() == [started]
+
+
 class FailingBackupService:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, BackupReason, bool]] = []
@@ -2591,6 +2744,64 @@ async def test_executor_runs_normal_mode_when_iac_code_mode_is_normal(
 
 
 @pytest.mark.asyncio
+async def test_normal_mode_ignores_stale_pipeline_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    loop = FakeAgentLoop([TextDeltaEvent(text="normal")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+    context = FakeRequestContext(
+        metadata={
+            "iac_code": {
+                "cwd": str(tmp_path),
+                "run_mode": "normal",
+                "pipeline_name": "retired-pipeline",
+            }
+        }
+    )
+
+    await executor.execute(context, queue)
+
+    assert loop.prompts == ["hello"]
+    assert dump(queue.events[-1])["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+
+
+@pytest.mark.parametrize(
+    ("key", "invalid_mode"),
+    [
+        ("run_mode", "pipline"),
+        ("runMode", ""),
+        ("run_mode", None),
+        ("runMode", 1),
+    ],
+)
+@pytest.mark.asyncio
+async def test_executor_rejects_explicit_invalid_run_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    key: str,
+    invalid_mode: object,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "normal")
+    monkeypatch.setattr(
+        "iac_code.a2a.executor.create_agent_runtime",
+        lambda options: pytest.fail("runtime must not be created for an invalid run mode"),
+    )
+    executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
+
+    with pytest.raises(InvalidParamsError, match="Unsupported run mode"):
+        await executor.execute(
+            FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path), key: invalid_mode}}),
+            FakeEventQueue(),
+        )
+
+
+@pytest.mark.asyncio
 async def test_normal_mode_image_request_passes_image_blocks_to_agent_loop(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -3925,6 +4136,56 @@ class TestResolveAliyunCredential:
 
         assert result is None
 
+    def test_region_only_metadata_copies_configured_credential_without_mutating_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from iac_code.services.providers.aliyun import AliyunCredential
+
+        configured = AliyunCredential(
+            mode="StsToken",
+            access_key_id="configured-id",
+            access_key_secret="configured-secret",
+            region_id="cn-hangzhou",
+            sts_token="configured-token",
+        )
+        monkeypatch.setattr(
+            "iac_code.a2a.executor.AliyunCredentials.load",
+            lambda: configured,
+        )
+        executor = self._make_executor()
+
+        result = executor._resolve_aliyun_credential(
+            {"iac_code": {"alibaba_cloud_region_id": "cn-beijing"}}
+        )
+
+        assert result is not None
+        assert result is not configured
+        assert result.region_id == "cn-beijing"
+        assert result.access_key_id == "configured-id"
+        assert result.access_key_secret == "configured-secret"
+        assert result.sts_token == "configured-token"
+        assert configured.region_id == "cn-hangzhou"
+
+    def test_region_only_metadata_returns_none_without_configured_credential(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("iac_code.a2a.executor.AliyunCredentials.load", lambda: None)
+        executor = self._make_executor()
+
+        result = executor._resolve_aliyun_credential(
+            {"iac_code": {"alibaba_cloud_region_id": "cn-beijing"}}
+        )
+
+        assert result is None
+
+    def test_region_only_metadata_rejects_invalid_region(self) -> None:
+        executor = self._make_executor()
+
+        with pytest.raises(InvalidParamsError, match="Unsupported Alibaba Cloud region ID"):
+            executor._resolve_aliyun_credential(
+                {"iac_code": {"alibaba_cloud_region_id": "https://example.com"}}
+            )
+
 
 @pytest.mark.asyncio
 async def test_executor_applies_user_id_to_telemetry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -4382,6 +4643,54 @@ async def test_suspending_permission_answer_waits_for_owner_then_resumes_once(
 
 
 @pytest.mark.asyncio
+async def test_failed_live_permission_answer_releases_stale_pending_before_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id="input-1",
+        tool_use_id="tool-1",
+        decision="deny",
+    )
+    pending = SimpleNamespace()
+    calls: list[str] = []
+
+    async def pending_for_response(_response):
+        calls.append("lookup")
+        return pending
+
+    async def answer(_response):
+        calls.append("answer")
+        raise InvalidParamsError("permission boundary has no live owner")
+
+    async def complete(value):
+        assert value is pending
+        calls.append("complete")
+
+    async def resume(_context, _queue, *, response):
+        calls.append("recover")
+        return True
+
+    monkeypatch.setattr("iac_code.a2a.executor.parse_permission_response", lambda _message: response)
+    monkeypatch.setattr(executor._permission_input_registry, "pending_for_response", pending_for_response)
+    monkeypatch.setattr(executor._permission_input_registry, "answer", answer)
+    monkeypatch.setattr(executor._permission_input_registry, "complete", complete)
+    monkeypatch.setattr(executor, "_resume_persisted_permission", resume)
+
+    await executor._execute(
+        FakeRequestContext(task_id="task-1", context_id="ctx-1"),
+        FakeEventQueue(),
+        context_id="ctx-1",
+    )
+
+    assert calls == ["lookup", "answer", "complete", "recover"]
+
+
+@pytest.mark.asyncio
 async def test_normal_persisted_permission_recovery_publishes_final_and_terminal_state(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -4475,7 +4784,22 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
         if isinstance(event, TaskStatusUpdateEvent)
         and dump(event).get("metadata", {}).get("iac_code", {}).get("assistantFinal", {}).get("complete") is True
     ]
+    input_received_indices = [
+        index
+        for index, event in enumerate(queue.events)
+        if isinstance(event, TaskStatusUpdateEvent)
+        and dump(event).get("metadata", {}).get("iac_code", {}).get("inputReceived", {}).get("decision")
+        == "allow_once"
+    ]
+    final_indices = [
+        index
+        for index, event in enumerate(queue.events)
+        if isinstance(event, TaskStatusUpdateEvent)
+        and dump(event).get("metadata", {}).get("iac_code", {}).get("assistantFinal", {}).get("complete") is True
+    ]
     assert states[-1] == "TASK_STATE_INPUT_REQUIRED"
+    assert len(input_received_indices) == 1
+    assert input_received_indices[0] < final_indices[0]
     assert final_events[0]["status"]["message"]["parts"][0]["text"] == "Cleanup completed."
     assert "".join(task_record.output_text) == "Cleanup completed."
     assert task_record.state == "input-required"

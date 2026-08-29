@@ -414,6 +414,34 @@ def test_reducer_tracks_candidate_selection_phases(tmp_path):
     assert completed.selected_name == "低成本方案"
 
 
+def test_reducer_does_not_treat_deployment_confirmation_actions_as_candidates(tmp_path):
+    path = tmp_path / "display.jsonl"
+    recorder = PipelineDisplayRecorder(path)
+
+    recorder.record(
+        "step_started",
+        step_id="materialize_selected_candidate",
+        payload={"index": 2, "total": 3, "ui_mode": "deployment_confirmation"},
+    )
+    recorder.record(
+        "user_input_required",
+        step_id="materialize_selected_candidate",
+        payload={
+            "kind": "deployment_confirmation",
+            "options": [
+                {"action": "confirm", "name": "确认部署"},
+                {"action": "cancel", "name": "取消"},
+            ],
+        },
+    )
+
+    attempt = PipelineDisplayReducer().reduce(load_display_events(path)).attempts[-1]
+
+    assert attempt.status == "waiting_input"
+    assert attempt.candidate_selection.state == "none"
+    assert attempt.candidate_selection.options == []
+
+
 def test_load_display_events_skips_invalid_trailing_jsonl(tmp_path):
     path = tmp_path / "display.jsonl"
     path.write_text(

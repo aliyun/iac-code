@@ -416,11 +416,22 @@ def _camelize(value: Any) -> Any:
 
 
 def _tool_result_payload(block: ToolResultBlock) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "toolUseId": block.tool_use_id,
         "content": block.content,
         "isError": block.is_error,
     }
+    metadata = block.metadata if isinstance(block.metadata, Mapping) else {}
+    submitted_delta = metadata.get("submitted_delta")
+    step_result = metadata.get("step_result")
+    normalized_conclusion = (
+        step_result.get("conclusion") if isinstance(step_result, Mapping) else getattr(step_result, "conclusion", None)
+    )
+    if isinstance(submitted_delta, Mapping):
+        payload["submittedDelta"] = normalize_event_payload(dict(submitted_delta))
+    if isinstance(normalized_conclusion, Mapping):
+        payload["normalizedConclusion"] = normalize_event_payload(dict(normalized_conclusion))
+    return payload
 
 
 def _tool_results_by_id(messages: list[Message]) -> dict[str, list[ToolResultBlock]]:
@@ -516,12 +527,29 @@ def _label_from_project_storage_name(name: str) -> str:
     return "-".join(parts[-2:]) if len(parts) > 1 else parts[0]
 
 
+def _redact_runtime_cloud_summary(summary: Mapping[str, Any]) -> dict[str, Any]:
+    """Hide editable credential values from session/status responses.
+
+    The dedicated cloud-settings endpoint may return the saved values so the
+    local settings form can edit them. Session/status payloads only need the
+    configuration summary and must not duplicate that credential material.
+    Keep non-secret fields (including token expiry timestamps and detected
+    credential booleans) unchanged.
+    """
+
+    cloud = dict(summary)
+    for key in ("accessKeyId", "accessKeySecret", "stsToken"):
+        if key in cloud:
+            cloud[key] = "[REDACTED]" if cloud[key] else None
+    return cloud
+
+
 def _runtime_settings_payload() -> dict[str, Any]:
     try:
         from iac_code.web.settings import active_provider_summary, aliyun_cloud_summary
 
         active_provider = active_provider_summary()
-        cloud = aliyun_cloud_summary()
+        cloud = _redact_runtime_cloud_summary(aliyun_cloud_summary())
     except Exception:
         active_provider = {
             "provider": None,
@@ -545,6 +573,35 @@ def _runtime_settings_payload() -> dict[str, Any]:
             "cloud": cloud,
         }
     )
+
+
+def solution_first_pipeline_user_display_text(pipeline_name: str | None, raw_text: str) -> str:
+    """Render strict solution-first control payloads as user-facing actions.
+
+    The raw JSON remains the authoritative input passed to the pipeline. Only
+    the Web transcript bubble is simplified, so implementation details such as
+    ``parameter_overrides`` do not appear in the conversation UI. Free text,
+    malformed payloads, payloads with extra fields, and the legacy ``selling``
+    pipeline are deliberately left untouched.
+    """
+
+    if pipeline_name != "selling_solution_first":
+        return raw_text
+    try:
+        payload = json.loads(raw_text)
+    except (TypeError, json.JSONDecodeError):
+        return raw_text
+    if not isinstance(payload, dict) or set(payload) != {"action", "parameter_overrides"}:
+        return raw_text
+    if not isinstance(payload.get("parameter_overrides"), dict):
+        return raw_text
+    labels = {
+        "confirm": _("Confirm deployment"),
+        "adjust": _("Adjust parameters"),
+        "reselect": _("Choose another solution"),
+        "cancel": _("Cancel"),
+    }
+    return labels.get(payload.get("action"), raw_text)
 
 
 def _runtime_string(runtime: Mapping[str, Any], key: str) -> str | None:
@@ -1787,10 +1844,13 @@ class WebSessionManager:
             segment_tools: dict[str, dict[str, Any]] | None = None,
             kind: str = "",
             pipeline_step: dict[str, Any] | None = None,
+            pipeline_diagram: dict[str, Any] | None = None,
             elapsed_seconds: float = 0.0,
             message_id: str | None = None,
             image_ids: list[str] | None = None,
             file_refs: list[str] | None = None,
+            pipeline_input_kind: str = "",
+            pipeline_input_step_id: str = "",
         ) -> None:
             # Pipeline reload rows pass the translator's stable id (``plmk-*`` / ``pl-*``)
             # so a mid-run reload dedups against the replayed live SSE stream; normal rows
@@ -1814,10 +1874,16 @@ class WebSessionManager:
                 payload["kind"] = kind
             if pipeline_step:
                 payload["pipelineStep"] = pipeline_step
+            if pipeline_diagram:
+                payload["pipelineDiagram"] = pipeline_diagram
             if image_ids:
                 payload["imageIds"] = list(image_ids)
             if file_refs:
                 payload["fileRefs"] = list(file_refs)
+            if pipeline_input_kind:
+                payload["pipelineInputKind"] = pipeline_input_kind
+            if pipeline_input_step_id:
+                payload["pipelineInputStepId"] = pipeline_input_step_id
             visible.append(payload)
             for tool_id, tool in (segment_tools or {}).items():
                 tools[tool_id] = {**tool, "messageId": message_id}
@@ -1870,6 +1936,8 @@ class WebSessionManager:
                             message_id=message_id,
                             image_ids=message_image_ids if stable_segment_index == 0 else None,
                             file_refs=message_file_refs if stable_segment_index == 0 else None,
+                            pipeline_input_kind=str(message.metadata.get("pipelineInputKind") or ""),
+                            pipeline_input_step_id=str(message.metadata.get("pipelineInputStepId") or ""),
                         )
                         stable_segment_index += 1
                         text_blocks = []
@@ -1904,6 +1972,17 @@ class WebSessionManager:
                                     "input": block.input,
                                 }
                             )
+                            result_payloads = [_tool_result_payload(result) for result in result_blocks]
+                            completion_projection: dict[str, Any] = {}
+                            for result_payload in reversed(result_payloads):
+                                if isinstance(result_payload.get("submittedDelta"), Mapping):
+                                    completion_projection["submittedDelta"] = result_payload["submittedDelta"]
+                                if isinstance(result_payload.get("normalizedConclusion"), Mapping):
+                                    completion_projection["normalizedConclusion"] = result_payload[
+                                        "normalizedConclusion"
+                                    ]
+                                if {"submittedDelta", "normalizedConclusion"} <= completion_projection.keys():
+                                    break
                             segment_tools[block.id] = {
                                 "toolUseId": block.id,
                                 "toolName": block.name,
@@ -1913,8 +1992,9 @@ class WebSessionManager:
                                 else "completed"
                                 if result_blocks
                                 else "pending",
-                                "results": [_tool_result_payload(result) for result in result_blocks],
+                                "results": result_payloads,
                                 "stored": True,
+                                **completion_projection,
                             }
                         elif isinstance(block, ImageBlock):
                             block_payloads.append(
@@ -1936,6 +2016,8 @@ class WebSessionManager:
                         message_id=_persisted_message_stable_id(message),
                         image_ids=_metadata_string_list(message.metadata, "imageIds"),
                         file_refs=_metadata_string_list(message.metadata, "fileRefs"),
+                        pipeline_input_kind=str(message.metadata.get("pipelineInputKind") or ""),
+                        pipeline_input_step_id=str(message.metadata.get("pipelineInputStepId") or ""),
                     )
 
         def optional_int(value: Any) -> int | None:
@@ -2142,6 +2224,7 @@ class WebSessionManager:
                         content=str(row.get("content") or ""),
                         kind=kind,
                         pipeline_step=row.get("pipelineStep") or None,
+                        pipeline_diagram=row.get("pipelineDiagram") or None,
                         tool_use_ids=list(row.get("toolUseIds") or []),
                         segment_tools=dict(row.get("tools") or {}),
                         message_id=str(row.get("id") or "") or None,
@@ -2156,7 +2239,44 @@ class WebSessionManager:
                     for _slot in range(int(row.get("inputAnswerSlots") or 0)):
                         if not pipeline_answer_queue:
                             break
-                        answer = pipeline_answer_queue.pop(0)
+                        expected_kind = str(row.get("inputAnswerKind") or "")
+                        expected_step_id = str(row.get("inputAnswerStepId") or "")
+                        answer_index = next(
+                            (
+                                index
+                                for index, candidate in enumerate(pipeline_answer_queue)
+                                if (
+                                    str(candidate.metadata.get("pipelineInputKind") or "") == expected_kind
+                                    and str(candidate.metadata.get("pipelineInputStepId") or "") == expected_step_id
+                                    and (expected_kind or expected_step_id)
+                                )
+                            ),
+                            None,
+                        )
+                        # Backward compatibility for messages written before input
+                        # coordinates were persisted.  Never consume a *tagged*
+                        # answer for the wrong prompt (e.g. a Step 2 adjustment at
+                        # the unpersisted Step 1 button-selection anchor).
+                        if answer_index is None:
+                            answer_index = next(
+                                (
+                                    index
+                                    for index, candidate in enumerate(pipeline_answer_queue)
+                                    if not candidate.metadata.get("pipelineInputKind")
+                                    and not candidate.metadata.get("pipelineInputStepId")
+                                ),
+                                None,
+                            )
+                        if answer_index is None:
+                            break
+                        answer = pipeline_answer_queue.pop(answer_index)
+                        # Upgrade legacy untagged rows in-memory using the exact
+                        # journal anchor.  The visible transcript then nests them
+                        # in their owning step just like newly persisted replies.
+                        if expected_kind and not answer.metadata.get("pipelineInputKind"):
+                            answer.metadata["pipelineInputKind"] = expected_kind
+                        if expected_step_id and not answer.metadata.get("pipelineInputStepId"):
+                            answer.metadata["pipelineInputStepId"] = expected_step_id
                         consumed_answer_ids.add(id(answer))
                         append_transcript_messages([answer], tool_result_source=resume_messages)
                 return
@@ -2602,6 +2722,8 @@ class WebSessionManager:
         turn_id: str | None = None,
         image_ids: list[str] | None = None,
         file_refs: list[str] | None = None,
+        pipeline_input_kind: str = "",
+        pipeline_input_step_id: str = "",
     ) -> None:
         """把流水线回合的用户 prompt 落入 web 会话自身的 JSONL。
 
@@ -2632,6 +2754,10 @@ class WebSessionManager:
             metadata["imageIds"] = image_ids
         if file_refs:
             metadata["fileRefs"] = file_refs
+        if pipeline_input_kind:
+            metadata["pipelineInputKind"] = pipeline_input_kind
+        if pipeline_input_step_id:
+            metadata["pipelineInputStepId"] = pipeline_input_step_id
         self.storage.append(
             str(session.cwd),
             session.session_id,

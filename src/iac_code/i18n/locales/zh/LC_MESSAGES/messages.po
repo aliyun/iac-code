@@ -75,6 +75,26 @@ msgid ""
 msgstr "清理状态不可用。请手动检查会话文件和云资源。"
 
 #: src/iac_code/a2a/executor.py
+msgid "Normal permission restore snapshot identity is incomplete."
+msgstr "普通对话权限恢复快照标识不完整。"
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal permission restore snapshot is already resolved."
+msgstr "普通对话权限恢复快照已处理。"
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal permission restore request is missing from the snapshot."
+msgstr "快照中缺少普通对话权限恢复请求。"
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal permission restore decision conflicts with the snapshot."
+msgstr "普通对话权限恢复决定与快照冲突。"
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal permission restore snapshot could not be persisted."
+msgstr "无法持久化普通对话权限恢复快照。"
+
+#: src/iac_code/a2a/executor.py
 msgid ""
 "Rollback cleanup deferred prompt state is unavailable. Please repair it "
 "before continuing."
@@ -104,6 +124,18 @@ msgstr "仅清理模式的继续操作需要先完成 Pipeline 交接。"
 #: src/iac_code/a2a/transports/dispatcher.py
 msgid "Task canceled."
 msgstr "任务已取消。"
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal permission decision is unavailable before backup."
+msgstr "备份前无法获取普通对话权限决定。"
+
+#: src/iac_code/a2a/executor.py
+msgid "Unsupported pipeline name."
+msgstr "不支持的 pipeline 名称。"
+
+#: src/iac_code/a2a/executor.py
+msgid "Unsupported Alibaba Cloud region ID."
+msgstr "不支持的阿里云地域 ID。"
 
 #: src/iac_code/a2a/executor.py
 #, python-brace-format
@@ -278,6 +310,33 @@ msgstr "使用 {operation} 读取阿里云数据"
 msgid "Run {operation}"
 msgstr "执行 {operation}"
 
+#: src/iac_code/a2a/pipeline_events.py
+msgid "The finalized template path is missing."
+msgstr "缺少最终模板路径。"
+
+#: src/iac_code/a2a/pipeline_events.py
+msgid "The trusted workspace root is unavailable."
+msgstr "受信工作区根目录不可用。"
+
+#: src/iac_code/a2a/pipeline_events.py
+msgid "The finalized template file is unavailable."
+msgstr "最终模板文件不可用。"
+
+#: src/iac_code/a2a/pipeline_events.py
+msgid "The finalized template file is outside the trusted workspace."
+msgstr "最终模板文件位于受信工作区之外。"
+
+#: src/iac_code/a2a/pipeline_events.py
+msgid "The finalized template file could not be read."
+msgstr "无法读取最终模板文件。"
+
+#: src/iac_code/a2a/pipeline_executor.py
+#, python-brace-format
+msgid ""
+"This session already runs pipeline {durable}; it cannot switch to "
+"{requested}."
+msgstr "该会话已在运行 pipeline {durable}，无法切换到 {requested}。"
+
 #: src/iac_code/a2a/pipeline_executor.py
 #, python-brace-format
 msgid "Pipeline already running. Resume task {task_id}."
@@ -291,6 +350,40 @@ msgstr "未知"
 #, python-brace-format
 msgid "A2A pipeline sidecar restore failed: status={status}, reason={reason}"
 msgstr "A2A pipeline sidecar 恢复失败：status={status}，reason={reason}"
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "Pipeline ended before pending input was consumed."
+msgstr "流水线在消费待处理输入前已结束。"
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "permission_resume_invalid: recovered Pipeline decision is incomplete"
+msgstr "permission_resume_invalid：恢复的流水线决定不完整"
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid ""
+"permission_resume_invalid: recovered Pipeline decision could not be "
+"published"
+msgstr "permission_resume_invalid：无法发布恢复的流水线决定"
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "A2A ask_user_question image supplement could not be delivered."
+msgstr "A2A ask_user_question 图片补充内容无法送达。"
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "A2A pipeline cannot accept ask_user_question image supplement."
+msgstr "A2A 流水线无法接受 ask_user_question 图片补充内容。"
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "Pending Pipeline input is already being processed."
+msgstr "待处理的流水线输入正在处理中。"
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "Pending Pipeline input could not be consumed."
+msgstr "无法消费待处理的流水线输入。"
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "Pipeline rejected the pending input."
+msgstr "流水线拒绝了待处理输入。"
 
 #: src/iac_code/a2a/pipeline_executor.py
 msgid "Failed to persist A2A pipeline snapshot"
@@ -320,6 +413,10 @@ msgstr "需要输入"
 #: src/iac_code/utils/public_errors.py
 msgid "Stack trace omitted from public event; see error_id."
 msgstr "公开事件中已省略堆栈跟踪；请查看 error_id。"
+
+#: src/iac_code/a2a/request_mode.py
+msgid "Unsupported run mode."
+msgstr "不支持的运行模式。"
 
 #: src/iac_code/a2a/task_store.py
 msgid "A2A task expired"
@@ -557,6 +654,13 @@ msgstr "命令被信号终止：{signal}"
 msgid "Command failed with exit code {exit_code}"
 msgstr "命令失败，退出码为 {exit_code}"
 
+#: src/iac_code/agent/agent_loop.py
+msgid ""
+"The user explicitly denied this tool operation. This is not a cloud API "
+"or IAM permission error. Do not retry this operation or perform the same "
+"action with another tool unless the user asks again."
+msgstr "用户明确拒绝了此次工具操作。这不是云 API 或 IAM 权限错误。除非用户再次提出要求，否则不要重试此操作，也不要使用其他工具执行相同操作。"
+
 #: src/iac_code/agent/agent_loop.py src/iac_code/ui/repl.py
 msgid "Permission denied."
 msgstr "权限被拒绝。"
@@ -768,7 +872,6 @@ msgid "The A2A context identity changed unexpectedly."
 msgstr "A2A 上下文标识发生了意外变化。"
 
 #: src/iac_code/agui/errors.py
-#, python-brace-format
 msgid "The A2A execution failed."
 msgstr "A2A 执行失败。"
 
@@ -1267,7 +1370,6 @@ msgid "Exit after this many idle seconds; zero disables idle shutdown"
 msgstr "空闲达到该秒数后退出；设为零禁用空闲退出"
 
 #: src/iac_code/cli/main.py
-#, python-brace-format
 msgid "--port must be between 1 and 65535."
 msgstr "--port 必须在 1 到 65535 之间。"
 
@@ -3805,6 +3907,10 @@ msgid "Selling"
 msgstr "售卖"
 
 #: src/iac_code/pipeline/display_names.py
+msgid "Selling (solution first)"
+msgstr "售卖（先选方案）"
+
+#: src/iac_code/pipeline/display_names.py
 msgid "Intent parsing"
 msgstr "意图解析"
 
@@ -3819,6 +3925,14 @@ msgstr "评估候选方案"
 #: src/iac_code/pipeline/display_names.py
 msgid "Confirm and select"
 msgstr "确认并选择"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Solution planning and selection"
+msgstr "方案规划与选择"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Implement selected solution"
+msgstr "实现选中方案"
 
 #: src/iac_code/pipeline/display_names.py
 msgid "Deploying"
@@ -3855,6 +3969,10 @@ msgstr "询问用户"
 #: src/iac_code/pipeline/display_names.py
 msgid "Show architecture diagram"
 msgstr "展示架构图"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Show architecture plan"
+msgstr "展示架构规划图"
 
 #: src/iac_code/pipeline/display_names.py
 msgid "Show candidate details"
@@ -4174,6 +4292,44 @@ msgstr "每个用户明确提出的硬约束都必须由一条状态为满足的
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"A confirmed plan must point at the template file that "
+"ros_validate_template validated last."
+msgstr "确认结论必须指向 ros_validate_template 最后一次校验通过的模板文件。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"A confirmed plan must carry the latest ask_user_question deployment "
+"confirmation answer, and that answer must still be valid for the current "
+"template and parameters."
+msgstr "确认结论必须携带最近一次 ask_user_question 的部署确认回答，且该回答对当前模板和参数仍然有效。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"A structured deployment confirmation input must be handled exactly as "
+"submitted; parameter changes must be repriced and shown for confirmation "
+"before deployment."
+msgstr "结构化的部署确认输入必须按提交内容原样处理；参数变更必须重新询价，并在部署前再次展示给用户确认。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"Deployment can be confirmed only after the current plan was shown in the "
+"dedicated confirmation state."
+msgstr "只有当前方案已在专用确认状态中展示后，才能确认部署。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"Requesting a different solution must roll back to the solution planning "
+"and selection step."
+msgstr "要求更换方案时必须回滚到方案规划与选择步骤。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"The confirmed template was rewritten after ros_validate_template; rerun "
+"ros_validate_template for the same template path."
+msgstr "确认使用的模板在 ros_validate_template 之后被改写；请对同一模板路径重新运行 ros_validate_template。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr "调用此工具提交结论以完成当前步骤。如需回滚到较早步骤，请设置 rollback_request。"
@@ -4193,6 +4349,49 @@ msgstr "回滚原因"
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "Structured conclusion for the current step. Required and non-empty."
 msgstr "当前步骤的结构化结论。必填且不能为空。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"Submit the full first conclusion. On a resumed user-interaction branch, "
+"submit only changed fields; the pipeline merges them with the saved "
+"conclusion before full validation."
+msgstr "首次提交完整结论。在恢复的用户交互分支中，只提交已更改的字段；pipeline 会先将其与已保存的结论合并，再进行完整校验。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"complete_step arguments must be {\"conclusion\": {...}}; keep all "
+"conclusion fields, including candidates, inside conclusion and do not "
+"submit them at the tool input top level."
+msgstr ""
+"complete_step 的参数必须是 {\"conclusion\": {...}}；请把包括 candidates 在内的所有 "
+"结论字段都放在 conclusion 内部，不要提交到工具输入的顶层。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "Schema validation failed after {attempts} attempts: {error}"
+msgstr "Schema 校验在 {attempts} 次尝试后失败: {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"conclusion validation failed after exceeding the maximum retry count "
+"({max_retries}): {error}"
+msgstr "conclusion 校验失败，已超过最大重试次数 ({max_retries}): {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{error}\n"
+"Current step: {step_id}\n"
+"{schema_hint}\n"
+"Do not repeat unchanged saved fields on a resumed interaction; submit "
+"only the corrected fields."
+msgstr ""
+"{error}\n"
+"当前步骤：{step_id}\n"
+"{schema_hint}\n"
+"恢复交互时不要重复未更改的已保存字段；只提交修正后的字段。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -4218,6 +4417,21 @@ msgid ""
 "conclusion must be a non-empty object; fill the structured conclusion "
 "required by this step."
 msgstr "conclusion 必须是非空对象；请填写当前步骤要求的结构化结论。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "complete_step arguments must use the outer form {\"conclusion\": {...}}."
+msgstr "complete_step 参数必须使用外层形式 {\"conclusion\": {...}}。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "Allowed status values: {statuses}."
+msgstr "允许的状态值：{statuses}。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "Allowed conclusion fields: {fields}."
+msgstr "允许的结论字段：{fields}。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "conclusion must match this schema summary:\n"
@@ -4262,6 +4476,67 @@ msgid ""
 "{message} complete_step.conclusion must include one of these fields: "
 "{fields}."
 msgstr "{message} complete_step.conclusion 必须包含以下字段之一: {fields}。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "The saved pipeline context does not allow this conclusion yet."
+msgstr "已保存的流水线上下文尚不允许提交此结论。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "{message} Context field {field} must equal {expected}."
+msgstr "{message} 上下文字段 {field} 必须等于 {expected}。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A structured user input must be handled exactly as submitted."
+msgstr "结构化用户输入必须按提交内容原样处理。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} The submitted action was {actual}; this conclusion requires "
+"{expected}."
+msgstr "{message} 提交的操作是 {actual}；此结论要求 {expected}。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} complete_step.conclusion.{field} must record the exact "
+"structured input."
+msgstr "{message} complete_step.conclusion.{field} 必须记录完全一致的结构化输入。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} Recalculate PreviewStack, ROS pricing, and the solution "
+"summary, then return to awaiting_confirmation."
+msgstr "{message} 请重新执行 PreviewStack、ROS 询价并更新方案说明，然后返回 awaiting_confirmation。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A rollback request is required before completing the current step."
+msgstr "完成当前步骤前必须提交回滚请求。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} Set complete_step.rollback_request with target_step "
+"{target_step} and a reason."
+msgstr ""
+"{message} 请在 complete_step.rollback_request 中把 target_step 设为 "
+"{target_step} 并填写 reason。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} Set complete_step.rollback_request with a target_step and a "
+"reason."
+msgstr "{message} 请在 complete_step.rollback_request 中设置 target_step 并填写 reason。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} complete_step.rollback_request.target_step must be "
+"{target_step}."
+msgstr "{message} complete_step.rollback_request.target_step 必须是 {target_step}。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A completion guard is misconfigured."
@@ -4391,6 +4666,14 @@ msgid "<missing>"
 msgstr "<缺失>"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "completion enricher must return the outer tool input"
+msgstr "结论补全器必须返回最外层工具输入"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "complete_step.conclusion must be an object"
+msgstr "complete_step.conclusion 必须是对象"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
 msgid ""
 "Rollback count cannot exceed {max_rollbacks}. Complete the current step "
@@ -4412,18 +4695,6 @@ msgstr "可回滚目标数量不能超过 {limit} 个，当前有 {count} 个。
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
-msgid "Schema validation failed after {attempts} attempts: {error}"
-msgstr "Schema 校验在 {attempts} 次尝试后失败: {error}"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid ""
-"conclusion validation failed after exceeding the maximum retry count "
-"({max_retries}): {error}"
-msgstr "conclusion 校验失败，已超过最大重试次数 ({max_retries}): {error}"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
 msgid "conclusion validation failed; fix it and call complete_step again: {error}"
 msgstr "conclusion 校验失败；请修正后重新调用 complete_step: {error}"
 
@@ -4434,7 +4705,7 @@ msgstr "步骤 {step_id} 已完成。结论已提交。"
 
 #: src/iac_code/pipeline/engine/pipeline_runner.py
 #, python-brace-format
-msgid "用户反馈：{}"
+msgid "User feedback: {}"
 msgstr "用户反馈：{}"
 
 #: src/iac_code/pipeline/engine/pipeline_runner.py
@@ -4613,6 +4884,10 @@ msgstr "模板文件路径必须是相对于工作目录的路径"
 #: src/iac_code/pipeline/engine/show_diagram_tool.py
 msgid "Template file path cannot escape the working directory"
 msgstr "模板文件路径不能跳出工作目录"
+
+#: src/iac_code/pipeline/engine/step_executor.py
+msgid "complete_step is unavailable"
+msgstr "complete_step 不可用"
 
 #: src/iac_code/pipeline/engine/user_input.py
 msgid "[Image input]"
@@ -4870,6 +5145,694 @@ msgstr "月度总费用，例如 1,234 元/月"
 #, python-brace-format
 msgid "Displayed details for \"{candidate_name}\"."
 msgstr "已展示“{candidate_name}”的方案详情。"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/deploying.py
+msgid "Step 3 completion conclusion must be an object"
+msgstr "步骤 3 的完成结论必须是对象"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/deploying.py
+msgid "success requires a real ros_deploy CREATE_COMPLETE result"
+msgstr "success 状态需要真实的 ros_deploy CREATE_COMPLETE 结果"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/deploying.py
+msgid "failed requires a real failing ros_deploy result"
+msgstr "failed 状态需要真实失败的 ros_deploy 结果"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/deploying.py
+msgid "the failing ros_deploy record has no recoverable error"
+msgstr "失败的 ros_deploy 记录没有可恢复的错误"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/deploying.py
+msgid "Step 3 status must be success, failed, or cancelled"
+msgstr "步骤 3 状态必须是 success、failed 或 cancelled"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "solution_selection is missing"
+msgstr "缺少 solution_selection"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "solution_selection.status must be 'selected'"
+msgstr "solution_selection.status 必须是 selected"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "solution_selection.continue_pipeline is not true"
+msgstr "solution_selection.continue_pipeline 不是 true"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "solution_selection.candidates is empty or invalid"
+msgstr "solution_selection.candidates 为空或无效"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "selected_candidate_index is out of range"
+msgstr "selected_candidate_index 超出范围"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "selected candidate name mismatch"
+msgstr "所选候选方案名称不匹配"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "neither selected_candidate_index nor selected_candidate_name is present"
+msgstr "selected_candidate_index 和 selected_candidate_name 均未提供"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "selected candidate cannot be mapped uniquely"
+msgstr "无法将所选候选方案唯一映射"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "Step 2 completion conclusion must be an object"
+msgstr "步骤 2 的完成结论必须是对象"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "invalid Step 2 completion status"
+msgstr "步骤 2 的完成状态无效"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "reselect_requested requires a non-empty reselect_reason"
+msgstr "reselect_requested 需要非空的 reselect_reason"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "authoritative candidate is unavailable: {error}"
+msgstr "权威候选方案不可用：{error}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "authoritative candidate output_path is missing"
+msgstr "缺少权威候选方案的 output_path"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "validate the authoritative candidate output_path after its latest write"
+msgstr "权威候选方案的 output_path 在最后一次写入后必须重新校验"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid ""
+"ParameterSetAnchor is missing (quote_status=not_run): run "
+"ros_estimate_template_cost for output_path"
+msgstr ""
+"缺少 ParameterSetAnchor（quote_status=not_run）：请对 output_path 运行 "
+"ros_estimate_template_cost"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "ParameterSetAnchor input.parameters must be an object"
+msgstr "ParameterSetAnchor 的 input.parameters 必须是对象"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid ""
+"ParameterSetAnchor effective region is unavailable; pass region_id "
+"explicitly"
+msgstr "ParameterSetAnchor 的有效地域不可用；请显式传入 region_id"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "parameter_overrides must be an object"
+msgstr "parameter_overrides 必须是对象"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "awaiting_confirmation requires a new non-empty solution_summary"
+msgstr "awaiting_confirmation 需要新的非空 solution_summary"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "missing_deployment_parameters must be an array of objects"
+msgstr "missing_deployment_parameters 必须是对象数组"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#: src/iac_code/ui/repl.py
+msgid "Choose the next action"
+msgstr "请选择下一步操作"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "confirmed completion cannot contain user-required parameter gaps"
+msgstr "已确认的结论不能包含需要用户补充的参数缺口"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "Parameter names must be non-empty strings"
+msgstr "参数名必须是非空字符串"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Parameter {name} is not declared in template Parameters"
+msgstr "参数 {name} 未在模板 Parameters 中声明"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Parameter {name} must match the declared template type {declared_type}"
+msgstr "参数 {name} 必须符合声明的模板类型 {declared_type}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Parameter {name} is outside the template AllowedValues"
+msgstr "参数 {name} 不在模板 AllowedValues 中"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Parameter {name} does not match the template AllowedPattern"
+msgstr "参数 {name} 不符合模板 AllowedPattern"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Parameter {name} is below the template MinValue {minimum}"
+msgstr "参数 {name} 低于模板 MinValue {minimum}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Parameter {name} exceeds the template MaxValue {maximum}"
+msgstr "参数 {name} 超过模板 MaxValue {maximum}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Parameter {name} is shorter than the template MinLength {min_length}"
+msgstr "参数 {name} 的长度小于模板 MinLength {min_length}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Parameter {name} is longer than the template MaxLength {max_length}"
+msgstr "参数 {name} 的长度超过模板 MaxLength {max_length}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "{message}: {description}"
+msgstr "{message}：{description}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "authoritative template path is outside the workspace"
+msgstr "权威模板路径位于工作区之外"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "No Preview matches the final template, parameters, and region"
+msgstr "没有与最终模板、参数和地域匹配的预览结果"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "Preview failed"
+msgstr "预览失败"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "Pricing failed"
+msgstr "询价失败"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "ROS estimate failed"
+msgstr "ROS 询价失败"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Unsupported ROS estimate currency: {currency}"
+msgstr "不支持的 ROS 询价币种：{currency}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Unsupported ROS estimate resource currencies: {currencies}"
+msgstr "ROS 询价资源包含不支持的币种：{currencies}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "ROS estimate response contains only one price basis"
+msgstr "ROS 询价响应只包含一种价格口径"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "ROS estimate response normalized from OriginalAmount/TradeAmount"
+msgstr "ROS 询价响应已根据 OriginalAmount/TradeAmount 归一化"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "Cloud resource"
+msgstr "云资源"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "Pricing unavailable"
+msgstr "询价不可用"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "¥0/month"
+msgstr "¥0/月"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "{original}/month (list price; about {trade}/month after contract discount)"
+msgstr "{original}/月（目录价；合同优惠后约 {trade}/月）"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "{value}/month"
+msgstr "{value}/月"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "Price unavailable"
+msgstr "价格不可用"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#: src/iac_code/web/session_manager.py
+msgid "Confirm deployment"
+msgstr "确认部署"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "Create cloud resources using the current solution and parameters"
+msgstr "使用当前方案和参数创建云资源"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#: src/iac_code/web/session_manager.py
+msgid "Choose another solution"
+msgstr "重新选择方案"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "Return to solution planning and choose again"
+msgstr "返回方案规划并重新选择"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#: src/iac_code/web/session_manager.py
+msgid "Cancel"
+msgstr "取消"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "End the workflow without creating cloud resources"
+msgstr "结束流程且不创建云资源"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "hard_constraint_checks must cover every authoritative constraint"
+msgstr "hard_constraint_checks 必须覆盖所有权威约束"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "hard_constraint_checks must contain unique constraint_id values"
+msgstr "hard_constraint_checks 必须包含唯一的 constraint_id 值"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid ""
+"hard_constraint_checks must cover each authoritative constraint exactly "
+"once"
+msgstr "hard_constraint_checks 必须恰好覆盖每个权威约束一次"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "hard constraint {constraint_id} parameter_values must be an object"
+msgstr "硬约束 {constraint_id} 的 parameter_values 必须是对象"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "hard constraint {constraint_id} evidence must be an array"
+msgstr "硬约束 {constraint_id} 的 evidence 必须是数组"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "hard constraint {constraint_id} requires an LLM status"
+msgstr "硬约束 {constraint_id} 需要 LLM 状态"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "hard constraint evidence locator must be an object"
+msgstr "硬约束证据定位器必须是对象"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "tool evidence must reference a successful stable record_id and result_path"
+msgstr "工具证据必须引用成功且稳定的 record_id 和 result_path"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "tool evidence tool_name does not match record_id"
+msgstr "工具证据的 tool_name 与 record_id 不匹配"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "tool evidence result_path cannot be resolved"
+msgstr "无法解析工具证据的 result_path"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "{record_id} field {result_path}"
+msgstr "{record_id} 的字段 {result_path}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "context evidence path is outside the configured allowlist"
+msgstr "上下文证据路径不在配置的允许列表中"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "context evidence path cannot be resolved"
+msgstr "无法解析上下文证据路径"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Authoritative context field {path}"
+msgstr "权威上下文字段 {path}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "template evidence requires exactly one of template_path or parameter_name"
+msgstr "模板证据必须且只能提供 template_path 或 parameter_name 其中一个"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "template evidence parameter_name is not in anchor parameters"
+msgstr "模板证据的 parameter_name 不在锚点参数中"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Final parameter {parameter_name}"
+msgstr "最终参数 {parameter_name}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "template evidence template_path is invalid"
+msgstr "模板证据的 template_path 无效"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "template evidence template_path cannot be resolved"
+msgstr "无法解析模板证据的 template_path"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Final template field {template_field}"
+msgstr "最终模板字段 {template_field}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "hard constraint evidence type must be context, template, or tool"
+msgstr "硬约束证据类型必须是 context、template 或 tool"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "the final validated template cannot be parsed"
+msgstr "无法解析最终校验模板"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "the final validated template root must be an object"
+msgstr "最终校验模板的根节点必须是对象"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "Step 1 completion conclusion must be an object"
+msgstr "步骤 1 的完成结论必须是对象"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "Step 1 status must be awaiting_selection, selected, or rejected"
+msgstr "步骤 1 状态必须是 awaiting_selection、selected 或 rejected"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "rejected completion requires a non-empty rejection_reason"
+msgstr "rejected 状态需要非空的 rejection_reason"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "awaiting_selection requires a structured intent"
+msgstr "awaiting_selection 需要结构化 intent"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "intent.resource_intents must be an array of objects"
+msgstr "intent.resource_intents 必须是对象数组"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "intent.hard_constraints must be an array of objects"
+msgstr "intent.hard_constraints 必须是对象数组"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid ""
+"selected completion is blocked because a new candidate batch was "
+"generated; complete the new batch with status awaiting_selection before "
+"the user selects a candidate"
+msgstr "已生成新的候选方案批次，无法完成选择；用户选择前，请先以 awaiting_selection 状态完成新批次"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "selected completion requires saved authoritative candidates"
+msgstr "完成选择需要已保存的权威候选方案"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid ""
+"awaiting_selection requires a successful show_architecture_plan batch and"
+" rich detail for every candidate"
+msgstr "awaiting_selection 需要成功的 show_architecture_plan 批次以及每个候选方案的完整详情"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "candidate names must be unique within one planning batch"
+msgstr "同一规划批次中的候选方案名称必须唯一"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "Choose the solution to implement and deploy"
+msgstr "选择要实现并部署的方案"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "selected_candidate_index must identify one saved candidate"
+msgstr "selected_candidate_index 必须指向一个已保存的候选方案"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid "candidate {index} {name!r} is missing show_candidate_detail"
+msgstr "候选方案 {index} {name!r} 缺少 show_candidate_detail"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "latest detail call failed"
+msgstr "最近一次详情调用失败"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid "candidate {index} {name!r} detail failed: {summary}"
+msgstr "候选方案 {index} {name!r} 的详情失败：{summary}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid ""
+"candidate {index} detail must use candidate_name {name!r} from the active"
+" batch"
+msgstr "候选方案 {index} 的详情必须使用当前批次中的 candidate_name {name!r}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid "candidate {index} detail input is unavailable"
+msgstr "候选方案 {index} 的详情输入不可用"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid ""
+"candidate detail index {index} is outside active batch range "
+"0..{last_index}"
+msgstr "候选方案详情索引 {index} 超出当前批次范围 0..{last_index}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid "; {count} more error(s) omitted"
+msgstr "；另有 {count} 个错误已省略"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid ""
+"complete_step is blocked until the active candidate batch is fully "
+"detailed: {errors}{suffix}"
+msgstr "在当前候选方案批次补全详情前，complete_step 被阻止：{errors}{suffix}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid "candidates[{index}] must be an object"
+msgstr "candidates[{index}] 必须是对象"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid "candidates[{index}].name must be non-empty"
+msgstr "candidates[{index}].name 不能为空"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid "candidates[{index}].summary must be non-empty"
+msgstr "candidates[{index}].summary 不能为空"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid ""
+"candidates[{index}].decision_notes.{field} must list at least {minimum} "
+"non-empty entries tied to this candidate's architecture"
+msgstr "candidates[{index}].decision_notes.{field} 必须至少列出 {minimum} 条与该候选架构相关的非空内容"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid "candidates[{candidate_index}].resource_intents must be an array of objects"
+msgstr "candidates[{candidate_index}].resource_intents 必须是对象数组"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid "; {count} more omitted"
+msgstr "；另有 {count} 项已省略"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid ""
+"candidates[{candidate_index}].resource_intents must preserve "
+"authoritative intent lifecycle: {missing}{suffix}; submit a corrected "
+"candidate batch and details"
+msgstr ""
+"candidates[{candidate_index}].resource_intents "
+"必须保留权威意图的生命周期：{missing}{suffix}；请提交修正后的候选方案批次和详情"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/confirmed_ros_deploy_tool.py
+#, python-brace-format
+msgid ""
+"Deployment is not authorized: {reason}\n"
+"Do not call ros_deploy. Use complete_step with a rollback_request to "
+"materialize_selected_candidate to obtain a valid confirmed deployment "
+"hand-off."
+msgstr ""
+"未获得部署授权：{reason}\n"
+"不要调用 ros_deploy。请使用 complete_step 并携带回滚到 materialize_selected_candidate 的"
+" rollback_request，以取得有效的部署确认交接。"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid ""
+"Display one complete batch of lightweight candidate outlines before rich "
+"details are generated. Submit every current candidate in order with its "
+"name, summary, monthly estimate and key trade-off. Do not include "
+"topology nodes, resource inventory or detailed cost items."
+msgstr "在生成详细信息前，先一次性展示一批完整的轻量候选方案概览。按顺序提交当前每个候选方案的名称、摘要、月度估价和关键取舍。不要包含拓扑节点、资源清单或详细费用项。"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid ""
+"The complete current candidate batch. Array order defines zero-based "
+"candidate indexes."
+msgstr "当前完整候选方案批次。数组顺序定义从零开始的候选方案索引。"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid "Unique user-facing candidate name"
+msgstr "面向用户的唯一候选方案名称"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid "Short product combination and architecture summary"
+msgstr "简短的产品组合与架构摘要"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid "Rough monthly range, such as ¥230～¥380/month"
+msgstr "粗略月费范围，例如 ¥230～¥380/月"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid "The most important cost, availability or complexity trade-off"
+msgstr "最重要的成本、可用性或复杂度取舍"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid ""
+"candidates must be a non-empty array of unique outlines with "
+"candidate_name, summary, total_monthly_cost and key_tradeoff"
+msgstr ""
+"candidates 必须是非空且不重名的候选方案概览数组，每项包含 "
+"candidate_name、summary、total_monthly_cost 和 key_tradeoff"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid ""
+"This identical candidate outline batch is already active as "
+"candidateSetId={candidate_set_id}. Do not repeat show_architecture_plan; "
+"continue with show_candidate_detail for the first missing candidate."
+msgstr ""
+"完全相同的候选方案概览批次已作为 candidateSetId={candidate_set_id} 生效。不要重复调用 "
+"show_architecture_plan；请从第一个缺少详情的候选方案开始继续调用 show_candidate_detail。"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid ""
+"Displayed {count} candidate outlines; candidateSetId={candidate_set_id}. "
+"Do not repeat show_architecture_plan unless the user changes the "
+"candidate set; continue with show_candidate_detail."
+msgstr ""
+"已展示 {count} "
+"个候选方案概览；candidateSetId={candidate_set_id}。除非用户更改候选方案集合，否则不要重复调用 "
+"show_architecture_plan；请继续调用 show_candidate_detail。"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid "topology_graph must be an object with nodes and edges"
+msgstr "topology_graph 必须是包含 nodes 和 edges 的对象"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid "nodes must be a non-empty array of architecture nodes"
+msgstr "nodes 必须是非空的架构节点数组"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid "edges must be an array of architecture edges"
+msgstr "edges 必须是架构连线数组"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid "Only the first {limit} nodes are rendered; the plan declared {count}."
+msgstr "仅渲染前 {limit} 个节点；该方案声明了 {count} 个。"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid "nodes[{index}] must be an object"
+msgstr "nodes[{index}] 必须是对象"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid "nodes[{index}].id must not be empty"
+msgstr "nodes[{index}].id 不能为空"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid "Duplicate node id: {node_id}"
+msgstr "节点 id 重复：{node_id}"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid "Only the first {limit} edges are rendered."
+msgstr "仅渲染前 {limit} 条连线。"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid "Skipped edges[{index}]: not an object."
+msgstr "已跳过 edges[{index}]：不是对象。"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid ""
+"Skipped edge {source} -> {target}: it references a node id that is not "
+"defined."
+msgstr "已跳过连线 {source} -> {target}：引用了未定义的节点 id。"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid "Skipped self-referencing edge on node {node_id}."
+msgstr "已跳过节点 {node_id} 上的自环连线。"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
+msgid "Architecture plan"
+msgstr "架构规划"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid "Architecture plan unavailable"
+msgstr "架构方案不可用"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
+msgid ""
+"Display the rich detail for exactly one candidate from the latest "
+"show_architecture_plan batch. Call once per model turn in candidate index"
+" order. Include resource lifecycle intent, topology graph, resource "
+"inventory, cost assumptions and decision notes; do not repeat summary or "
+"monthly total."
+msgstr ""
+"仅展示最新 show_architecture_plan "
+"批次中一个候选方案的完整详情。每个模型轮次按候选方案索引顺序调用一次。包括资源生命周期意图、拓扑图、资源清单、费用假设和决策说明；不要重复摘要或月度总价。"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
+msgid "Zero-based index from the latest candidate outline batch"
+msgstr "最新候选方案概览批次中的从零开始的索引"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
+msgid "Exact candidate name at candidate_index in the latest outline batch"
+msgstr "最新候选方案概览批次中 candidate_index 对应的准确候选方案名称"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
+msgid ""
+"show_candidate_detail is not allowed before a successful "
+"show_architecture_plan outline batch."
+msgstr "成功调用 show_architecture_plan 展示候选方案概览批次之前，不允许调用 show_candidate_detail。"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
+#, python-brace-format
+msgid ""
+"All candidates in candidateSetId={candidate_set_id} already have rich "
+"details."
+msgstr "candidateSetId={candidate_set_id} 中的所有候选方案均已有详细信息。"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
+#, python-brace-format
+msgid ""
+"show_candidate_detail candidate_index={actual_index} is not allowed yet; "
+"expected candidate_index={expected_index}, "
+"candidate_name={expected_name!r} from candidateSetId={candidate_set_id}."
+msgstr ""
+"尚不允许 show_candidate_detail "
+"candidate_index={actual_index}；candidateSetId={candidate_set_id} 期望 "
+"candidate_index={expected_index}、candidate_name={expected_name!r}。"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
+#, python-brace-format
+msgid "Failed to render the candidate topology: {reason}"
+msgstr "渲染候选方案拓扑失败：{reason}"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
+#, python-brace-format
+msgid ""
+"Displayed rich detail for candidate {candidate_index} "
+"\"{candidate_name}\" in candidateSetId={candidate_set_id}."
+msgstr ""
+"已展示 candidateSetId={candidate_set_id} 中候选方案 "
+"{candidate_index}“{candidate_name}”的详细信息。"
 
 #: src/iac_code/providers/manager.py
 #, python-brace-format
@@ -5586,6 +6549,11 @@ msgid "read path uses shell expansion: {}"
 msgstr "读取路径使用了 shell 展开：{}"
 
 #: src/iac_code/tools/bash/permissions.py
+#, python-brace-format
+msgid "matched allow rule(s): {}"
+msgstr "匹配到允许规则：{}"
+
+#: src/iac_code/tools/bash/permissions.py
 msgid "sed in-place edit"
 msgstr "sed 原地编辑"
 
@@ -5602,6 +6570,10 @@ msgid "sed file write"
 msgstr "sed 文件写入"
 
 #: src/iac_code/tools/bash/permissions.py
+msgid "complex command requires confirmation"
+msgstr "复杂命令需要确认"
+
+#: src/iac_code/tools/bash/permissions.py
 #, python-brace-format
 msgid "matched deny rule(s): {}"
 msgstr "匹配到拒绝规则：{}"
@@ -5610,15 +6582,6 @@ msgstr "匹配到拒绝规则：{}"
 #, python-brace-format
 msgid "dangerous readonly argument requires confirmation: {}"
 msgstr "危险的只读参数需要确认：{}"
-
-#: src/iac_code/tools/bash/permissions.py
-msgid "complex command requires confirmation"
-msgstr "复杂命令需要确认"
-
-#: src/iac_code/tools/bash/permissions.py
-#, python-brace-format
-msgid "matched allow rule(s): {}"
-msgstr "匹配到允许规则：{}"
 
 #: src/iac_code/tools/bash/permissions.py
 msgid "command failed basic safety checks"
@@ -6203,6 +7166,20 @@ msgid ""
 "before they expired, so {operation} cannot be signed. Check ECS metadata "
 "availability."
 msgstr "阿里云 ECS 实例 RAM 角色凭证在过期前未能刷新，无法为 {operation} 签名。请检查 ECS 元数据服务是否可用。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud OAuth sign-in expired or was revoked, so {operation} cannot"
+" be signed. Sign in again with OAuth and retry."
+msgstr "阿里云 OAuth 登录已过期或被撤销，无法为 {operation} 签名。请重新使用 OAuth 登录后重试。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud OAuth credentials could not be refreshed, so {operation} "
+"cannot be signed. Check network access to the sign-in service and retry."
+msgstr "阿里云 OAuth 凭证刷新失败，无法为 {operation} 签名。请检查到登录服务的网络连通性后重试。"
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
@@ -9313,7 +10290,7 @@ msgid "  Candidate selection completed"
 msgstr "  方案选择已完成"
 
 #: src/iac_code/ui/components/candidate_selection.py
-#: src/iac_code/ui/pipeline_display_replay.py
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/repl.py
 msgid "Cost details"
 msgstr "费用明细"
 
@@ -9964,6 +10941,26 @@ msgid "  ✘ {name}: Failed"
 msgstr "  ✘ {name}: 失败"
 
 #: src/iac_code/ui/repl.py
+msgid "Solution description"
+msgstr "方案说明"
+
+#: src/iac_code/ui/repl.py
+msgid "Pricing overview"
+msgstr "询价概览"
+
+#: src/iac_code/ui/repl.py
+msgid "Enter another response"
+msgstr "直接输入"
+
+#: src/iac_code/ui/repl.py
+msgid "For example: change the ECS instance type and reprice"
+msgstr "例如：修改 ECS 规格后重新询价"
+
+#: src/iac_code/ui/repl.py
+msgid "Use Up/Down to select. Type directly on the last row, then press Enter."
+msgstr "使用上下方向键选择；聚焦最后一行后可直接输入；按 Enter 确认。"
+
+#: src/iac_code/ui/repl.py
 #, python-brace-format
 msgid "Pipeline warning: {reason}"
 msgstr "管道警告：{reason}"
@@ -10165,8 +11162,8 @@ msgid "Scroll down to view more"
 msgstr "向下滚动查看更多"
 
 #: src/iac_code/ui/components/candidate_selection.py
-msgid "架构图优化中..."
-msgstr "架构图优化中..."
+msgid "Optimizing architecture diagram..."
+msgstr "正在优化架构图..."
 
 #: src/iac_code/ui/components/candidate_selection.py
 msgid "Loading architecture diagram..."
@@ -11581,6 +12578,10 @@ msgid "sessionId is invalid"
 msgstr "sessionId 无效"
 
 #: src/iac_code/web/session_manager.py
+msgid "Adjust parameters"
+msgstr "调整参数"
+
+#: src/iac_code/web/session_manager.py
 msgid "New image chat"
 msgstr "新图片会话"
 
@@ -12180,4 +13181,97 @@ msgstr "允许 Bash?"
 #~ msgstr ""
 #~ "批准工具调用：{tool}\n"
 #~ "输入摘要：{summary}"
+
+#~ msgid "ROS price: {price}"
+#~ msgstr "ROS 价格：{price}"
+
+#~ msgid "Deployment parameters: {parameters}"
+#~ msgstr "部署参数：{parameters}"
+
+#~ msgid ""
+#~ "Enter an action in natural language, "
+#~ "or submit structured JSON with action"
+#~ " and parameter_overrides:"
+#~ msgstr "请用自然语言输入操作，或提交包含 action 和 parameter_overrides 的结构化 JSON："
+
+#~ msgid "Enter a number to choose, or describe what you want to change."
+#~ msgstr "输入序号进行选择，也可以直接说明想怎么调整。"
+
+#~ msgid ""
+#~ "Render a planned architecture from "
+#~ "structured nodes and edges (no ROS "
+#~ "template needed) and display it for "
+#~ "the candidate. Pass the candidate name,"
+#~ " its zero-based index and the "
+#~ "topology_graph nodes/edges. Mermaid source is"
+#~ " generated locally and is not "
+#~ "accepted as input."
+#~ msgstr ""
+#~ "根据结构化的节点和连线渲染规划中的架构（无需 ROS 模板），并为该候选方案展示。需传入候选方案名称、0 "
+#~ "基下标以及 topology_graph 的 nodes/edges。Mermaid "
+#~ "源码在本地生成，不接受作为入参。"
+
+#~ msgid ""
+#~ "Zero-based candidate index in "
+#~ "candidates; used to distinguish duplicate "
+#~ "names"
+#~ msgstr "候选方案在 candidates 中的 0 基下标；用于区分重名方案"
+
+#~ msgid "Node id, unique within this candidate"
+#~ msgstr "节点 id，在该候选方案内唯一"
+
+#~ msgid "Display text, such as Web ECS x 2"
+#~ msgstr "展示文本，例如 Web ECS x 2"
+
+#~ msgid "Alibaba Cloud product identifier, such as ECS"
+#~ msgstr "阿里云产品标识，例如 ECS"
+
+#~ msgid "Role of the node in the architecture, such as application compute"
+#~ msgstr "该节点在架构中的角色，例如应用计算"
+
+#~ msgid "Optional network or logical group the node belongs to"
+#~ msgstr "可选：该节点所属的网络或逻辑分组"
+
+#~ msgid "Architecture edges taken from the candidate topology_graph.edges"
+#~ msgstr "取自候选方案 topology_graph.edges 的架构连线"
+
+#~ msgid "Source node id; must reference a node defined in nodes"
+#~ msgstr "起点节点 id；必须引用 nodes 中已定义的节点"
+
+#~ msgid "Target node id; must reference a node defined in nodes"
+#~ msgstr "终点节点 id；必须引用 nodes 中已定义的节点"
+
+#~ msgid "Optional edge text, such as HTTPS"
+#~ msgstr "可选：连线文本，例如 HTTPS"
+
+#~ msgid "Optional relation kind, such as traffic or depends_on"
+#~ msgstr "可选：关系类型，例如 traffic 或 depends_on"
+
+#~ msgid "candidate_name must not be empty"
+#~ msgstr "candidate_name 不能为空"
+
+#~ msgid ""
+#~ "candidate_index must be an integer "
+#~ "greater than or equal to 0, got:"
+#~ " {value}"
+#~ msgstr "candidate_index 必须是大于或等于 0 的整数，实际收到：{value}"
+
+#~ msgid "Displayed the architecture plan for \"{candidate_name}\"."
+#~ msgstr "已展示“{candidate_name}”的架构规划图。"
+
+#~ msgid ""
+#~ "Failed to render the architecture plan: {reason}\n"
+#~ "Candidate selection is not blocked: keep"
+#~ " the written plan and resource "
+#~ "inventory, and continue with "
+#~ "show_candidate_detail."
+#~ msgstr ""
+#~ "架构规划图渲染失败：{reason}\n"
+#~ "候选选择不受阻断：保留已写出的方案说明和资源清单，继续调用 show_candidate_detail。"
+
+#~ msgid "用户反馈：{}"
+#~ msgstr "用户反馈：{}"
+
+#~ msgid "架构图优化中..."
+#~ msgstr "架构图优化中..."
 

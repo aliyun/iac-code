@@ -150,6 +150,8 @@ Fuehrt einen nicht streamenden A2A-Nachrichten-Turn aus. Die Antwort enthaelt ei
 | `parts` | array | Ja | Textartige, JSON-Daten-, Rohtext-, lokale File-URL- oder begrenzte multimodale Teile |
 | `metadata.iac_code.cwd` | string | Empfohlen | Absoluter Workspace-Pfad; faellt auf das Server-Prozessverzeichnis zurueck, wenn ausgelassen |
 | `metadata.iac_code.channel` | string | Optional | Telemetriekanal-Bindung fuer diese `contextId`; hat Vorrang vor `IAC_CODE_CHANNEL` |
+| `metadata.iac_code.run_mode` | string | Optional | Waehlt fuer diese Nachricht `normal` oder `pipeline`; ohne Angabe gilt der Servermodus |
+| `metadata.iac_code.pipeline_name` | string | Optional | Waehlt bei effektivem Pipeline-Modus `selling` oder `selling_solution_first` |
 | `metadata.iac_code.preferredLanguage` | string | Optional | Vom Aufrufer bevorzugte Anzeigesprache fuer diesen Task; fuer Benutzer sichtbarer Text wird pro Anfrage lokalisiert |
 | `metadata.iac_code.candidatePresentation` | string | Optional | Mit `rich-v1` liefert der Kandidatenbestaetigungs-Step der Pipeline strukturierte Rich-Praesentations-Payloads |
 
@@ -157,9 +159,11 @@ Fuehrt einen nicht streamenden A2A-Nachrichten-Turn aus. Die Antwort enthaelt ei
 
 `metadata.iac_code.channel` bindet `iac_code.channel` an die A2A-`contextId`. Der Wert wird getrimmt, auf 128 Zeichen begrenzt und hat Vorrang vor `IAC_CODE_CHANNEL`; leere Werte und Nicht-Strings werden ignoriert. Normale Turns, Pipeline-Turns, Input-Required-Folgeturns und normaler Chat nach einem Pipeline-Handoff verwenden die Bindung bei gleicher `contextId` erneut, auch nach Serverneustart und Context-Wiederherstellung. Ein spaeter gesendeter gueltiger Wert aktualisiert die Bindung. Ohne Bindung wird auf `IAC_CODE_CHANNEL` und danach auf `unknown` zurueckgefallen.
 
+`metadata.iac_code.run_mode` waehlt fuer eine Nachricht `normal` oder `pipeline`. Im Pipeline-Modus kann `metadata.iac_code.pipeline_name` `selling` oder `selling_solution_first` auswaehlen; ein nicht unterstuetzter, nicht leerer Wert wird abgelehnt. Bei Fortsetzung und Wiederherstellung hat die fuer Task und Context gespeicherte Pipeline-Identitaet Vorrang.
+
 `metadata.iac_code.preferredLanguage` wirkt sich nur auf fuer Benutzer sichtbaren Text aus (Fortschritt, Fragen, Berechtigungs-Prompts, Kandidatenpraesentationen, Ergebniseroerterungen); Protokollfeldnamen, Aufzaehlungen, IDs und Befehlsformen werden nie uebersetzt. Akzeptierte Werte sind die unterstuetzten Sprachen `en`, `zh`, `es`, `fr`, `de`, `ja`, `pt`; Werte werden normalisiert, indem Leerraum entfernt, kleingeschrieben und das Regionalsuffix entfernt wird (zum Beispiel wird `zh-CN` zu `zh`). Unbekannte Werte werden ignoriert, und der Server faellt auf seine Standardsprache zurueck. Das Feld gilt nur fuer den aktuellen Message-Turn; Folgeturns, die dieselbe `contextId` wiederverwenden, muessen es erneut uebertragen oder fallen auf die Standardsprache zurueck.
 
-`metadata.iac_code.candidatePresentation` mit `rich-v1` laesst den Kandidatenbestaetigungs-Step der Selling-Pipeline eine strukturierte, fuer Rich-Rendering geeignete Payload liefern (Kandidatenname, Zusammenfassung, Architekturdiagramm, monatliche Gesamtkosten, Kostenpositionen). Ohne das Feld bleibt das Verhalten der reinen Textpraesentation unveraendert.
+`metadata.iac_code.candidatePresentation` mit `rich-v1` laesst den Kandidatenbestaetigungs-Step einer Selling-Pipeline eine strukturierte, fuer Rich-Rendering geeignete Payload liefern (Kandidatenname, Zusammenfassung, Architekturdiagramm, monatliche Gesamtkosten, Kostenpositionen). Ohne das Feld bleibt das Verhalten der reinen Textpraesentation unveraendert.
 
 Unterstuetzte Eingabekategorien:
 
@@ -402,7 +406,7 @@ Die Metadaten der Statusaktualisierung enthalten:
 
 - `metadata.iac_code.input` - der Berechtigungs-Umschlag (`schemaVersion` 1) mit den Feldern:
   - Korrelationsfelder: `kind: "permission"`, `requestTaskId`, `contextId`, `inputId`, `toolUseId`, `toolName`
-  - Anzeigefelder: `title`, `purpose`, `effect`, `target`, `isReadOnly`, `safeSummary`, bei Deploy-Anfragen zusaetzlich `deploymentSummary`
+  - Anzeigefelder: `title`, `purpose`, `effect`, `target`, `isReadOnly`, `safeSummary`, bei Deploy-Anfragen zusaetzlich `deploymentSummary`; wenn verfuegbar auch `operation.apiCalls` und redigierte `displayParameters`
   - `prompt` und `options` (`allow_once` / `deny`), lokalisiert in der bevorzugten Sprache des Aufrufers
 - `metadata.iac_code.permission` - enthaelt `autoApproved: false`, `pending: true`, `toolName`, `toolUseId`
 
@@ -423,7 +427,7 @@ Der Aufrufer uebermittelt seine Entscheidung ueber eine Sideband-Nachricht: eine
 - Die aeussere `taskId` der Nachricht muss gleich `requestTaskId` sein; `contextId` stammt aus dem aeusseren Nachrichtenumschlag. Alle Korrelationsfelder muessen wortgleich erhalten bleiben; sie duerfen nicht anfrageuebergreifend wiederverwendet werden, und eine Antwort fuer eine Eingabe darf nie als eine andere uminterpretiert werden.
 - Sobald der Server die Entscheidung zuordnet, liefert er einen `permission_ack`-DataPart zurueck (`schemaVersion: 1`, `kind: "permission_ack"`, mit `inputId`, `toolUseId`, `decision`, `accepted: true`) und emittiert eine `TASK_STATE_WORKING`-Statusaktualisierung mit `metadata.iac_code.inputReceived`; der Turn wird fortgesetzt.
 
-Im Pipeline-Modus werden Berechtigungsanfragen als Pipeline-Ereignisse veroeffentlicht (der Umschlag traegt zusaetzlich `scope` und Step-/Kandidaten-Koordinaten); das Sideband-Antwortformat ist identisch.
+Im Pipeline-Modus werden Berechtigungsanfragen als `permission_requested`- und `permission_resolved`-Ereignisse veroeffentlicht. `scope` sowie Step-/Kandidaten-Koordinaten halten die Karte an ihrem Ausfuehrungspunkt; das Sideband-Antwortformat ist identisch. Nach einer Wiederherstellung stehen ungeloeste Umschlaege unter `metadata.iac_code.pendingPermissions`. Wartepunkte im normalen Chat und in der Top-Level-Pipeline koennen dauerhaft ausgesetzt und fortgesetzt werden; ein kandidatenbezogener Sub-Pipeline-Wartepunkt kann nach seinem konfigurierten Timeout automatisch aufgeloest werden.
 
 Mit aktiviertem `auto-approve-permissions` oder konfigurierten expliziten Berechtigungsregeln werden Berechtigungsanfragen nicht zu interaktiver Eingabe; sie werden automatisch genehmigt (mit Audit) oder nach den Regeln entschieden. Geschuetzte Alibaba-Cloud-Schreib-APIs werden durch normale Allow-Regeln nicht freigegeben und erfordern weiterhin eine exakte Autorisierung pro API. Berechtigungsentscheidungen werden lokal auditiert; jede Allow-Entscheidung, die einen Auditdatensatz erfordert, schlaegt fail-closed fehl, wenn der Datensatz nicht persistiert werden kann.
 

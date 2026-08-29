@@ -33,6 +33,7 @@ def known_tool_display_name(tool_name: str) -> str | None:
 def _known_pipeline_names() -> dict[str, str]:
     return {
         "selling": _("Selling"),
+        "selling_solution_first": _("Selling (solution first)"),
     }
 
 
@@ -42,6 +43,8 @@ def _known_step_names() -> dict[str, str]:
         "architecture_planning": _("Architecture planning"),
         "evaluate_candidates": _("Evaluate candidates"),
         "confirm_and_select": _("Confirm and select"),
+        "solution_planning_and_selection": _("Solution planning and selection"),
+        "materialize_selected_candidate": _("Implement selected solution"),
         "deploying": _("Deploying"),
         "evaluate_candidate": _("Evaluate candidate"),
         "template_generating": _("Template generation"),
@@ -56,6 +59,7 @@ def _known_tool_names() -> dict[str, str]:
         "complete_step": _("Complete step"),
         "ask_user_question": _("Ask user question"),
         "show_architecture_diagram": _("Show architecture diagram"),
+        "show_architecture_plan": _("Show architecture plan"),
         "show_candidate_detail": _("Show candidate details"),
         "ros_validate_template": _("ROS Validate Template"),
         "ros_get_template_parameter_constraints": _("ROS Template Parameters"),

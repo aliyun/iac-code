@@ -997,6 +997,8 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             raise TaskNotFoundError(f"Task {params.id} not found")
         if isinstance(self.task_store, A2ATaskStore) and not await self.task_store.is_task_active(params.id):
             raise TaskNotFoundError(f"Task {params.id} is not active")
+        active_task_registry = getattr(self, "_active_task_registry", None)
+        active_task = await active_task_registry.get(params.id) if active_task_registry is not None else None
         terminal_state_seen = False
         async for event in super().on_subscribe_to_task(params, context):
             event_state = _task_event_state(event)
@@ -1010,6 +1012,8 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         # a2a-sdk 1.1 can close its subscriber queue after the producer finishes but
         # before the consumer publishes the last update. Recover the persisted terminal
         # snapshot so subscribers do not observe a silent, non-terminal stream ending.
+        if active_task is not None:
+            await active_task._is_finished.wait()
         final_task = await self.task_store.get(params.id, context)
         if final_task is not None and final_task.status.state in TERMINAL_TASK_STATES:
             yield final_task

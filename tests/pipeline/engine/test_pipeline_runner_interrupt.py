@@ -308,6 +308,41 @@ class TestHandleUserInterrupt:
         assert result.action == "supplement"
 
     @pytest.mark.asyncio
+    async def test_supplement_injection_failure_can_restart_current_step(self, pipeline_runner):
+        """Opted-in steps preserve a racing supplement by restarting instead of dropping it."""
+        pipeline_runner.state_machine.current_step.config["supplement_injection_failure"] = "hard_interrupt"
+        pipeline_runner._current_step_user_input = "build a multi-zone website with ECS"
+        verdict = InterruptVerdict(action="supplement", reason="use only free network resources")
+
+        with (
+            patch.object(pipeline_runner, "_interrupt_controller") as mock_ctrl,
+            patch.object(pipeline_runner, "_inject_supplement", return_value=False),
+        ):
+            mock_ctrl.judge = AsyncMock(return_value=verdict)
+            result = await pipeline_runner.handle_user_interrupt("do not use ECS")
+
+        assert result.action == "hard_interrupt"
+        assert result.rollback_target == "a"
+        assert "build a multi-zone website with ECS" in result.rollback_context
+        assert "use only free network resources" in result.rollback_context
+        assert "restarting current step" in result.reason
+
+    @pytest.mark.asyncio
+    async def test_supplement_injection_failure_keeps_default_drop_contract(self, pipeline_runner):
+        """Pipelines without the opt-in retain the existing supplement behavior."""
+        verdict = InterruptVerdict(action="supplement", reason="extra info")
+
+        with (
+            patch.object(pipeline_runner, "_interrupt_controller") as mock_ctrl,
+            patch.object(pipeline_runner, "_inject_supplement", return_value=False),
+        ):
+            mock_ctrl.judge = AsyncMock(return_value=verdict)
+            result = await pipeline_runner.handle_user_interrupt("add more memory")
+
+        assert result.action == "supplement"
+        assert result.reason == "supplement_dropped (target=None): extra info"
+
+    @pytest.mark.asyncio
     async def test_continue_does_nothing(self, pipeline_runner):
         verdict = InterruptVerdict(action="continue", reason="irrelevant")
 
@@ -1657,7 +1692,7 @@ class TestRollbackContextPropagation:
         pipeline_runner.apply_hard_interrupt(verdict)
 
         assert pipeline_runner._rollback_context == (
-            "用户反馈：用户业务需求已变更：使用已有 VPC 创建一个安全组，不创建 VSwitch"
+            "User feedback: 用户业务需求已变更：使用已有 VPC 创建一个安全组，不创建 VSwitch"
         )
 
     def test_apply_hard_interrupt_translates_reason_fallback_prefix(self, monkeypatch, pipeline_runner):
@@ -1679,7 +1714,7 @@ class TestRollbackContextPropagation:
 
         pipeline_runner.apply_hard_interrupt(verdict)
 
-        assert seen_messages == ["用户反馈：{}"]
+        assert seen_messages == ["User feedback: {}"]
         assert pipeline_runner._rollback_context == "Translated user feedback: changed mind"
 
     @pytest.mark.asyncio

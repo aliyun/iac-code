@@ -16,7 +16,7 @@ _DELAY_SECONDS_ENV = "IAC_CODE_E2E_BACKUP_DELAY_SECONDS"
 _CONTROL_ENV = "IAC_CODE_E2E_BACKUP_DELAY_CONTROL"
 _ARM_WAIT_SECONDS = 5.0
 _claim_lock = threading.Lock()
-_claimed = False
+_claimed_controls: set[Path] = set()
 
 
 def _marker_path(control: Path, marker: str) -> Path:
@@ -31,8 +31,6 @@ def _write_marker(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _claim_delay(reason: Any) -> tuple[Path, float, float] | None:
-    global _claimed
-
     reason_value = getattr(reason, "value", reason)
     if reason_value != session_backup.BackupReason.INPUT_REQUIRED.value:
         return None
@@ -44,17 +42,25 @@ def _claim_delay(reason: Any) -> tuple[Path, float, float] | None:
     if not control_value or delay_seconds <= 0:
         return None
 
-    control = Path(control_value)
-    arm_path = _marker_path(control, "arm")
-    with _claim_lock:
-        if _claimed:
-            return None
-        deadline = time.monotonic() + _ARM_WAIT_SECONDS
-        while not arm_path.is_file() and time.monotonic() < deadline:
+    configured_control = Path(control_value)
+    deadline = time.monotonic() + _ARM_WAIT_SECONDS
+    control: Path | None = None
+    while control is None and time.monotonic() < deadline:
+        if configured_control.is_dir():
+            candidates = sorted(
+                arm_path.with_name(arm_path.name.removesuffix(".arm.json"))
+                for arm_path in configured_control.glob("backup-delay-*.arm.json")
+            )
+        else:
+            candidates = [configured_control] if _marker_path(configured_control, "arm").is_file() else []
+        with _claim_lock:
+            control = next((candidate for candidate in candidates if candidate not in _claimed_controls), None)
+            if control is not None:
+                _claimed_controls.add(control)
+        if control is None:
             time.sleep(0.02)
-        if not arm_path.is_file():
-            return None
-        _claimed = True
+    if control is None:
+        return None
 
     started_at = time.time()
     started_monotonic = time.monotonic()

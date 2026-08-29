@@ -135,12 +135,15 @@ Os padrões de permissão de ferramentas seguem o formato `tool_name(rule)`:
 | Padrão | Significado |
 |---|---|
 | `bash` | Corresponder a todos os comandos bash (nome de ferramenta simples). |
+| `bash(**)` | Permitir explicitamente todos os comandos Bash, incluindo os formatos classificados como complexos pelo analisador. |
 | `bash(git *)` | Corresponder a comandos bash que começam com `git`. |
 | `bash(curl:*)` | Corresponder a comandos bash que começam com `curl`. |
 | `write_file` | Corresponder a todas as chamadas da ferramenta write_file. |
 | `aliyun_api(ros:CreateStack)` | Corresponder a um par produto/ação de API Alibaba Cloud. |
 
 As regras são avaliadas na ordem: **deny → ask → allow → comportamento padrão**. Os argumentos CLI (`--allowed-tools`, `--disallowed-tools`) têm a maior precedência.
+
+`bash(**)` só tem esse significado global quando aparece exatamente em uma lista `allow` carregada das configurações ou de `--allowed-tools`. Regras explícitas `deny` e `ask`, além da verificação básica de segurança do Shell, continuam tendo prioridade. O modo seguro A2A pode remover o Bash do conjunto de ferramentas disponível e continua impondo seus limites estritos de caminhos; `bash(**)` não pode reativá-lo nem contornar essas restrições. Padrões Bash comuns, incluindo `bash(*)`, mantêm o comportamento existente e não ignoram a confirmação de comandos complexos.
 
 ### Permissões de API Alibaba Cloud
 

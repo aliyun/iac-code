@@ -21,13 +21,15 @@ _ROS_B = (
 )
 
 
-def _wf_envelope(path, content, index=None, name=None):
+def _wf_envelope(path, content, index=None, name=None, step_id=None):
     env = {
         "eventType": "tool_result",
         "data": {"toolName": "write_file", "input": {"path": path, "content": content}},
     }
     if index is not None:
         env["candidate"] = {"index": index, "name": name}
+    if step_id is not None:
+        env["step"] = {"id": step_id, "runId": f"step-{step_id}-1"}
     return env
 
 
@@ -56,6 +58,43 @@ def _completed_envelope(index, name, monthly_estimate, resources):
                     "resources": resources,
                 },
             },
+        },
+    }
+
+
+def _materialized_confirmation(path, monthly_estimate, resources):
+    return {
+        "eventType": "input_required",
+        "step": {"id": "materialize_selected_candidate"},
+        "data": {
+            "stepId": "materialize_selected_candidate",
+            "kind": "deployment_confirmation",
+            "template_url": path,
+            "cost": {
+                "quote_status": "succeeded",
+                "monthly_estimate": monthly_estimate,
+                "resources": resources,
+            },
+        },
+    }
+
+
+def _architecture_plan_envelope(index, name, source, *, event_id="evt-plan", marked=True, views=None):
+    architecture_context = {"version": "1.0", "nodes": []}
+    if marked:
+        architecture_context["source"] = "architecture_plan"
+    return {
+        "eventType": "diagram_shown",
+        "eventId": event_id,
+        "step": {"id": "solution_planning_and_selection"},
+        "data": {
+            "candidateName": name,
+            "candidateIndex": index,
+            "templateContent": "",
+            "mermaidSource": source,
+            "diagramStage": "optimized",
+            "views": views or [],
+            "architectureContext": architecture_context,
         },
     }
 
@@ -156,6 +195,165 @@ def test_diagram_items_skips_non_candidate_write(tmp_path):
     # 无一条 candidateName 为空(空名会在前端渲染成裸路径)。
     assert all(i["candidateName"] for i in items)
     assert all(i["candidateIndex"] is not None for i in items)
+
+
+def test_diagram_items_includes_solution_first_materialized_template(tmp_path):
+    manager = _Manager(
+        [
+            _wf_envelope(
+                "templates/0-solution.yml",
+                _ROS_A,
+                step_id="materialize_selected_candidate",
+            )
+        ]
+    )
+
+    items = diagram_items(manager, _session(tmp_path))
+
+    assert len(items) == 1
+    assert items[0]["candidateIndex"] is None
+    assert items[0]["stepId"] == "materialize_selected_candidate"
+    assert items[0]["sourceRelPath"] == "templates/0-solution.yml"
+    assert items[0]["mermaidSource"].startswith("graph TD")
+    assert items[0]["optimized"] is False
+    assert items[0]["optimizationKey"] == "materialized"
+
+
+def test_outputs_payload_includes_solution_first_step1_plan_and_rough_cost(tmp_path):
+    manager = _Manager(
+        [
+            _architecture_plan_envelope(
+                0,
+                "单机方案",
+                "flowchart TD\n  User --> ECS",
+                views=[
+                    {
+                        "id": "overview",
+                        "title": "架构规划",
+                        "purpose": "",
+                        "mermaid_source": "flowchart TD\n  User --> ECS",
+                    }
+                ],
+            ),
+            _detail_envelope(
+                0,
+                [{"name": "ECS", "spec": "2 vCPU / 4 GiB", "monthly_cost": "约 ¥300/月"}],
+                "约 ¥300/月（架构粗估）",
+            ),
+        ]
+    )
+    manager.storage = SimpleNamespace(load=lambda cwd, sid: [])
+
+    payload = outputs_payload(manager, _session(tmp_path))
+
+    assert len(payload["diagrams"]) == 1
+    item = payload["diagrams"][0]
+    assert item["diagramId"] == "evt-plan"
+    assert item["candidateIndex"] == 0
+    assert item["candidateName"] == "单机方案"
+    assert item["mermaidSource"] == "flowchart TD\n  User --> ECS"
+    assert item["diagramStage"] == "optimized"
+    assert item["optimized"] is True
+    assert item["totalMonthlyCost"] == "约 ¥300/月（架构粗估）"
+    assert item["costItems"] == [
+        {"name": "ECS", "spec": "2 vCPU / 4 GiB", "monthly_cost": "约 ¥300/月"}
+    ]
+    assert item["views"] == [
+        {
+            "id": "overview",
+            "title": "架构规划",
+            "purpose": "",
+            "mermaidSource": "flowchart TD\n  User --> ECS",
+        }
+    ]
+
+
+def test_diagram_items_keeps_latest_step1_plan_and_step2_template(tmp_path):
+    path = "templates/0-solution.yml"
+    manager = _Manager(
+        [
+            _architecture_plan_envelope(0, "旧方案", "flowchart TD\n  Old", event_id="evt-old"),
+            _architecture_plan_envelope(0, "新方案", "flowchart TD\n  New", event_id="evt-new"),
+            _wf_envelope(path, _ROS_A, step_id="materialize_selected_candidate"),
+            _materialized_confirmation(path, "¥0/月", []),
+        ]
+    )
+
+    items = diagram_items(manager, _session(tmp_path))
+
+    assert len(items) == 2
+    plan = next(item for item in items if item["candidateIndex"] == 0)
+    final = next(item for item in items if item["candidateIndex"] is None)
+    assert plan["diagramId"] == "evt-new"
+    assert plan["candidateName"] == "新方案"
+    assert plan["mermaidSource"] == "flowchart TD\n  New"
+    assert final["stepId"] == "materialize_selected_candidate"
+    assert final["totalMonthlyCost"] == "¥0/月"
+
+
+def test_diagram_items_ignores_unmarked_template_less_diagram(tmp_path):
+    manager = _Manager(
+        [_architecture_plan_envelope(0, "非规划图", "flowchart TD\n  A", marked=False)]
+    )
+
+    assert diagram_items(manager, _session(tmp_path)) == []
+
+
+def test_solution_first_materialized_diagram_uses_exact_quote_and_optimized_cache(monkeypatch, tmp_path):
+    monkeypatch.setattr(dc, "get_config_dir", lambda: tmp_path / "config")
+    path = "templates/0-solution.yml"
+    manager = _Manager(
+        [
+            _wf_envelope(path, _ROS_A, step_id="materialize_selected_candidate"),
+            _materialized_confirmation(
+                path,
+                "¥88/月",
+                [{"type": "ECS", "spec": "2 vCPU / 4 GiB", "cost": "¥88/月"}],
+            ),
+        ]
+    )
+    dc.write_cached(
+        "ctx1",
+        "materialized",
+        _ROS_A,
+        [{"id": "overview", "title": "优化总览", "mermaidSource": "graph TD\n  OPT[优化图]"}],
+        "m",
+    )
+
+    item = diagram_items(manager, _session(tmp_path))[0]
+
+    assert item["optimized"] is True
+    assert item["mermaidSource"] == "graph TD\n  OPT[优化图]"
+    assert item["views"][0]["title"] == "优化总览"
+    assert item["totalMonthlyCost"] == "¥88/月"
+    assert item["costItems"] == [
+        {"name": "ECS", "spec": "2 vCPU / 4 GiB", "monthly_cost": "¥88/月"}
+    ]
+
+
+def test_diagram_items_dedupes_solution_first_absolute_and_relative_template_paths(tmp_path):
+    template = tmp_path / "templates" / "0-solution.yml"
+    manager = _Manager(
+        [
+            _wf_envelope(
+                str(template),
+                _ROS_A,
+                step_id="materialize_selected_candidate",
+            ),
+            _wf_envelope(
+                "templates/0-solution.yml",
+                _ROS_B,
+                step_id="materialize_selected_candidate",
+            ),
+        ]
+    )
+
+    items = diagram_items(manager, _session(tmp_path))
+
+    assert len(items) == 1
+    assert items[0]["diagramId"] == "final:templates/0-solution.yml"
+    assert items[0]["sourceRelPath"] == "templates/0-solution.yml"
+    assert "MyEcs" in items[0]["mermaidSource"]
 
 
 def test_diagram_items_flags_optimizing_from_inflight(tmp_path):

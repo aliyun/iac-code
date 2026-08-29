@@ -12,7 +12,7 @@ from collections.abc import AsyncGenerator, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from loguru import logger
 
@@ -293,6 +293,13 @@ def _is_first_output_delta(event: Any) -> bool:
     return isinstance(event, (TextDeltaEvent, ThinkingDeltaEvent)) and bool(event.text)
 
 
+def _user_denied_tool_result() -> str:
+    return _(
+        "The user explicitly denied this tool operation. This is not a cloud API or IAM permission error. "
+        "Do not retry this operation or perform the same action with another tool unless the user asks again."
+    )
+
+
 class AgentLoop:
     """The main agent execution loop.
 
@@ -421,7 +428,7 @@ class AgentLoop:
 
     @property
     def can_accept_injected_user_message(self) -> bool:
-        """Whether a queued supplement can still be consumed by this run."""
+        """Whether this run can consume a queued supplement before it commits."""
         return self._accepting_injected_user_messages
 
     def try_inject_user_message(
@@ -430,7 +437,7 @@ class AgentLoop:
         *,
         metadata: dict[str, Any] | None = None,
     ) -> bool:
-        """Queue a supplement only when this loop still has a consumable turn."""
+        """Queue a supplement while this loop can still schedule a consuming turn."""
         if not self.can_accept_injected_user_message:
             return False
         self.inject_user_message(msg, metadata=metadata)
@@ -1010,6 +1017,7 @@ class AgentLoop:
                     log_event(Events.SESSION_CANCELLED, {"stage": "in_query"})
                     raise
             finally:
+                self._accepting_injected_user_messages = False
                 self._cancel_owned_contract_snapshots()
                 if not turn_cancelled:
                     # Recall prefetches are turn-scoped: ready results are consumed only at in-turn poll points.
@@ -1077,6 +1085,7 @@ class AgentLoop:
                     log_event(Events.SESSION_CANCELLED, {"stage": "in_query"})
                     raise
             finally:
+                self._accepting_injected_user_messages = False
                 self._cancel_owned_contract_snapshots()
                 self.context_manager.set_system_prompt(self.system_prompt)
                 elapsed = time.monotonic() - interaction_started
@@ -1086,6 +1095,46 @@ class AgentLoop:
                         GenAiAttr.OUTPUT_MESSAGES,
                         serialize_output_messages("".join(final_text_chunks), final_stop_reason),
                     )
+
+    def _canonical_permission_assistant_message_ref(
+        self,
+        *,
+        assistant_message_digest: str,
+        ordered_tool_use_ids: list[str],
+    ) -> str:
+        """Return the persisted index for the assistant tool-call message.
+
+        A resumed runtime can intentionally hold only a suffix of the canonical
+        session.  Its in-memory index therefore cannot be used as a durable
+        reference into the complete ``session.jsonl`` file.
+        """
+
+        message_index = len(self.context_manager.get_messages()) - 1
+        storage = self._session_storage
+        if storage is None:
+            return f"session.jsonl:{message_index}"
+        try:
+            persisted_messages = storage.load(self._cwd, self._session_id)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return f"session.jsonl:{message_index}"
+        if not isinstance(persisted_messages, list) or not persisted_messages:
+            return f"session.jsonl:{message_index}"
+
+        persisted_assistant = persisted_messages[-1]
+        if persisted_assistant.role != "assistant":
+            return f"session.jsonl:{message_index}"
+        persisted_content = (
+            [block.model_dump(mode="json") for block in persisted_assistant.content]
+            if isinstance(persisted_assistant.content, list)
+            else persisted_assistant.content
+        )
+        persisted_tool_use_ids = [tool_use.id for tool_use in persisted_assistant.get_tool_use_blocks()]
+        if (
+            canonical_digest(persisted_content) == assistant_message_digest
+            and persisted_tool_use_ids == ordered_tool_use_ids
+        ):
+            message_index = len(persisted_messages) - 1
+        return f"session.jsonl:{message_index}"
 
     async def resume_permission_boundary(
         self,
@@ -1194,10 +1243,17 @@ class AgentLoop:
             raise ValueError("permission_resume_invalid: tool decisions changed")
 
         for request_index, request in enumerate(requests):
-            permission, audit_context = await self._permission_for_recovered_request(request, context)
             recorded = continuation_decisions[request_index]
             state = recorded.get("state")
             source = recorded.get("source")
+            if state == "deny" and source == "input_error":
+                denied_by_id[request.id] = ToolResult.error(
+                    str(recorded.get("deniedResult") or _("Permission denied."))
+                )
+                self._reject_owned_contract_snapshot(request.snapshot_id)
+                continue
+
+            permission, audit_context = await self._permission_for_recovered_request(request, context)
             if request_index == current_index:
                 if permission is None:
                     raise ValueError("permission_resume_invalid: current tool is unavailable")
@@ -1210,6 +1266,8 @@ class AgentLoop:
                     raise ValueError("permission_resume_invalid: cloud execution identity changed")
                 state = "allow" if decision["value"] == "allow_once" else "deny"
                 source = "user"
+                if state == "deny":
+                    recorded["deniedResult"] = _user_denied_tool_result()
                 if permission.behavior != "deny":
                     additional_decision: Literal["allow", "deny"] = "allow" if state == "allow" else "deny"
                     additional_audit_ok = _emit_permission_audit_items(
@@ -1323,8 +1381,13 @@ class AgentLoop:
                     outcome = await asyncio.shield(response_future)
                     if outcome is PermissionWaitOutcome.SUSPEND:
                         raise PermissionWaitSuspended(permission_event.boundary_id)
-                    state = "allow" if bool(outcome) else "deny"
-                    source = "user"
+                    automatic_deny = outcome is PermissionWaitOutcome.AUTOMATIC_DENY
+                    state = "allow" if not automatic_deny and bool(outcome) else "deny"
+                    source = "automatic" if automatic_deny else "user"
+                    if state == "deny":
+                        recorded["deniedResult"] = (
+                            _("Permission denied.") if automatic_deny else _user_denied_tool_result()
+                        )
                     additional_audit_ok = _emit_permission_audit_items(
                         session_id=self._session_id,
                         cwd=context.cwd,
@@ -1395,7 +1458,37 @@ class AgentLoop:
 
         executed_by_id: dict[str, ToolResult] = {}
         if allowed_requests:
-            results = await self._tool_executor.execute_batch(allowed_requests, context)
+            exec_task = asyncio.create_task(self._tool_executor.execute_batch(allowed_requests, context))
+
+            async def poll_recovered_event_queues() -> AsyncGenerator[StreamEvent, None]:
+                while not exec_task.done():
+                    for queue in event_queues.values():
+                        try:
+                            while True:
+                                item = queue.get_nowait()
+                                if item is None:
+                                    break
+                                if isinstance(item, ToolEmittedEvent):
+                                    yield cast(StreamEvent, item)
+                        except asyncio.QueueEmpty:
+                            pass
+                    await asyncio.sleep(0.05)
+                for queue in event_queues.values():
+                    while not queue.empty():
+                        item = queue.get_nowait()
+                        if isinstance(item, ToolEmittedEvent):
+                            yield cast(StreamEvent, item)
+
+            try:
+                async for emitted_event in poll_recovered_event_queues():
+                    yield emitted_event
+                results = await exec_task
+            except asyncio.CancelledError:
+                if not exec_task.done():
+                    exec_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await exec_task
+                raise
             for request, result in zip(allowed_requests, results):
                 executed_by_id[request.id] = result
                 processed = self._result_storage.process(request.id, result.content)
@@ -1647,10 +1740,13 @@ class AgentLoop:
         for _turn in range(self._max_turns):
             # Pipeline interrupt/recovery can pause between LLM turns and
             # inject supplemental user text before the next provider call.
+            # Keep the queue open while the current provider/tool round is in
+            # flight: an injected message cannot change that request, but it
+            # can still be consumed by the next round.
+            self._accepting_injected_user_messages = _turn < self._max_turns - 1
             if self._pause_event is not None:
                 await self._pause_event.wait()
             self._drain_pending_injections()
-            self._accepting_injected_user_messages = False
             self._current_turn_text = ""
 
             system_prompt = self._prepare_provider_system_prompt()
@@ -1749,6 +1845,8 @@ class AgentLoop:
                         pending_tool_uses_by_id[event.tool_use_id]["id"] = event.tool_use_id
                         pending_tool_uses_by_id[event.tool_use_id]["name"] = event.name
                         pending_tool_uses_by_id[event.tool_use_id]["input"] = event.input
+                        if event.input_error:
+                            pending_tool_uses_by_id[event.tool_use_id]["input_error"] = event.input_error
                         if event.provider_metadata:
                             pending_tool_uses_by_id[event.tool_use_id]["provider_metadata"] = dict(
                                 event.provider_metadata
@@ -1757,7 +1855,6 @@ class AgentLoop:
                         pending_tool_uses_by_id.clear()
                         text_chunks.clear()
                         thinking_blocks_by_index.clear()
-                        self._accepting_injected_user_messages = False
                     elif isinstance(event, MessageEndEvent):
                         message_ended = True
                         turn_stop_reason = event.stop_reason
@@ -1824,6 +1921,9 @@ class AgentLoop:
 
                 # No tool calls -> end turn
                 if not completed_tools:
+                    if self._pending_injections and _turn < self._max_turns - 1:
+                        step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, "injected_message")
+                        continue
                     self._accepting_injected_user_messages = False
                     step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, "stop")
                     break
@@ -1834,9 +1934,12 @@ class AgentLoop:
                 tools_with_progress = {"agent", "ros_stack", "ros_stack_instances"}
                 requests = []
                 event_queues: dict[str, asyncio.Queue] = {}
+                input_errors: dict[str, str] = {}
                 for tu in completed_tools:
                     queue = None
                     tool = self.tool_registry.get(tu["name"])
+                    if tu.get("input_error"):
+                        input_errors[tu["id"]] = str(tu["input_error"])
                     invocation_input = tu.get("input", {})
                     prepare_invocation_input = getattr(tool, "prepare_invocation_input", None)
                     if callable(prepare_invocation_input):
@@ -1882,8 +1985,35 @@ class AgentLoop:
                     }
                     for request in requests
                 ]
+                for decision in continuation_decisions:
+                    input_error = input_errors.get(str(decision["toolUseId"]))
+                    if input_error:
+                        decision.update(
+                            state="deny",
+                            source="input_error",
+                            deniedResult=input_error,
+                        )
                 previous_permission_boundary_id: str | None = None
+                permission_assistant_message_ref: str | None = None
                 for request_index, request in enumerate(requests):
+                    # Arguments the provider could not parse never reach the tool: running it on
+                    # `{}` would answer with a schema error about fields the model actually sent,
+                    # and the model would burn another generation resending the same call.
+                    input_error = input_errors.get(request.id)
+                    if input_error:
+                        logger.warning(
+                            "Skipping tool call with unparseable arguments: tool={}, tool_use_id={}",
+                            request.name,
+                            request.id,
+                        )
+                        error_result = ToolResult.error(input_error)
+                        denied_results.append((request, error_result))
+                        continuation_decisions[request_index].update(
+                            state="deny",
+                            source="input_error",
+                            deniedResult=input_error,
+                        )
+                        continue
                     tool = self.tool_registry.get(request.name)
                     if tool is None:
                         allowed_requests.append(request)
@@ -2008,6 +2138,11 @@ class AgentLoop:
                         continue
 
                     continuation_decisions[request_index].update(state="pending", source=None)
+                    if permission_assistant_message_ref is None:
+                        permission_assistant_message_ref = self._canonical_permission_assistant_message_ref(
+                            assistant_message_digest=assistant_message_digest,
+                            ordered_tool_use_ids=[item.id for item in requests],
+                        )
                     response_future: asyncio.Future[bool | PermissionWaitOutcome] = (
                         asyncio.get_running_loop().create_future()
                     )
@@ -2019,9 +2154,7 @@ class AgentLoop:
                         permission_result=permission,
                         audit_context=audit_context,
                         continuation_frame={
-                            "assistantMessageRef": "session.jsonl:{}".format(
-                                len(self.context_manager.get_messages()) - 1
-                            ),
+                            "assistantMessageRef": permission_assistant_message_ref,
                             "assistantMessageDigest": assistant_message_digest,
                             "orderedToolUseIds": [item.id for item in requests],
                             "currentIndex": request_index,
@@ -2049,7 +2182,9 @@ class AgentLoop:
                     if outcome is PermissionWaitOutcome.SUSPEND:
                         raise PermissionWaitSuspended(permission_event.boundary_id)
                     previous_permission_boundary_id = permission_event.boundary_id
-                    approved = bool(outcome)
+                    automatic_deny = outcome is PermissionWaitOutcome.AUTOMATIC_DENY
+                    approved = not automatic_deny and bool(outcome)
+                    denial_source = "automatic" if automatic_deny else "user"
                     additional_audit_ok = _emit_permission_audit_items(
                         session_id=self._session_id,
                         cwd=context.cwd,
@@ -2061,6 +2196,7 @@ class AgentLoop:
                     )
                     if approved and not additional_audit_ok:
                         approved = False
+                        denial_source = "audit_failure"
                     if approved:
                         allowed_requests.append(request)
                         continuation_decisions[request_index].update(
@@ -2071,11 +2207,14 @@ class AgentLoop:
                         )
                     else:
                         self._reject_owned_contract_snapshot(request.snapshot_id)
-                        denied_results.append((request, ToolResult.error(_("Permission denied."))))
+                        denied_result = (
+                            _user_denied_tool_result() if denial_source == "user" else _("Permission denied.")
+                        )
+                        denied_results.append((request, ToolResult.error(denied_result)))
                         continuation_decisions[request_index].update(
                             state="deny",
-                            source="user",
-                            deniedResult=_("Permission denied."),
+                            source=denial_source,
+                            deniedResult=denied_result,
                         )
 
                 public_path_roots = build_public_path_roots(
@@ -2189,12 +2328,28 @@ class AgentLoop:
                     )
                     for request, result in denied_results
                 ]
-                for req, result in zip(requests, results):
-                    if (
+                for result_index, (req, result) in enumerate(zip(requests, results)):
+                    is_terminal_step_result = bool(
                         result.metadata
                         and result.metadata.get("step_result") is not None
                         and result.metadata.get("complete_step_terminal", True)
-                    ):
+                    )
+                    if is_terminal_step_result and self._pending_injections:
+                        result = replace(
+                            result,
+                            content=(
+                                "New user input arrived before step completion was committed. "
+                                "Reconsider the step with that input, then call complete_step again."
+                            ),
+                            is_error=True,
+                            metadata=None,
+                        )
+                        results[result_index] = result
+                    elif is_terminal_step_result:
+                        # This yield is the commit boundary. Supplements accepted
+                        # before it supersede the result above; later input must
+                        # be handled by the pipeline's next state.
+                        self._accepting_injected_user_messages = False
                         terminal_step_result = True
                     processed = self._result_storage.process(req.id, result.content)
                     self._mark_read_memory_tool_result(req, result)

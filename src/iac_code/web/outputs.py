@@ -239,7 +239,11 @@ def pipeline_candidate_costs(manager: Any, session: Any) -> dict[int, dict[str, 
     return costs
 
 
-def outputs_payload(manager: Any, session: Any, optimizing_indices: frozenset[int] = frozenset()) -> dict[str, Any]:
+def outputs_payload(
+    manager: Any,
+    session: Any,
+    optimizing_indices: frozenset[int | str] = frozenset(),
+) -> dict[str, Any]:
     """扫描会话已存储消息 + pipeline A2A 日志,派生资源栈与模板文件列表。
 
     optimizing_indices 透传给 diagram_items,把协调器在途优化态挂到架构图的后端权威 optimizing 标志上。

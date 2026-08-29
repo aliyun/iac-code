@@ -1,0 +1,279 @@
+{
+  "skill_name": "iac-aliyun-materialize-selected-candidate",
+  "description": "验证「先选方案」第二步：只为选中方案生成并校验模板、求解参数、PreviewStack、ROS 精确询价、补齐外部必填参数并请求部署确认",
+  "evals": [
+    {
+      "id": 1,
+      "name": "single-candidate-single-template",
+      "prompt": "实现我选择的方案",
+      "candidate_context": {
+        "candidate_id": "lightweight-nginx",
+        "name": "轻量 Nginx 方案",
+        "products": ["VPC", "ECS"],
+        "topology": "单可用区，VPC 内一台 ECS 部署 Nginx",
+        "output_path": "templates/1-simple-nginx.yml",
+        "resource_intents": [
+          {"product": "VPC", "action": "create"},
+          {"product": "ECS", "action": "create"}
+        ],
+        "hard_constraints": []
+      },
+      "expected_behavior": "只生成一份 ROS 模板并写入 selected_candidate.output_path，不生成第二个方案的模板",
+      "assertions": [
+        {"name": "single_write_file", "check": "只调用一次 write_file 生成模板，路径为 templates/1-simple-nginx.yml"},
+        {"name": "no_other_candidate", "check": "不为其它候选生成模板、Preview 或询价，不重新规划架构"},
+        {"name": "no_candidate_array_loop", "check": "不把单个方案包装成候选数组遍历，也没有并行候选实现"},
+        {"name": "is_ros_yaml", "check": "输出为 ROS YAML 格式，包含 ROSTemplateFormatVersion"},
+        {"name": "inventory_params", "check": "ZoneId、InstanceType、ImageId 等库存属性定义为 Parameters 且带 AssociationProperty"}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "template-path-consistent-across-tools",
+      "prompt": "实现我选择的方案并给出费用",
+      "candidate_context": {
+        "candidate_id": "web-standard",
+        "name": "Web 应用标准方案",
+        "products": ["VPC", "ECS", "RDS"],
+        "output_path": "templates/2-web-standard.yml",
+        "hard_constraints": []
+      },
+      "expected_behavior": "模板写入、ros_validate_template、ros_preview_template、ros_estimate_template_cost 和最终 template_url 使用同一个文件路径",
+      "assertions": [
+        {"name": "validate_uses_written_path", "check": "ros_validate_template 的 template_url 等于刚写入的 templates/2-web-standard.yml"},
+        {"name": "preview_uses_same_path", "check": "ros_preview_template 的 template_url 与校验通过的模板路径相同"},
+        {"name": "estimate_uses_same_path", "check": "ros_estimate_template_cost 的 template_url 与上述路径相同，且不传 TemplateBody"},
+        {"name": "conclusion_template_url_same", "check": "conclusion.template_url 与 selected_candidate_result.template.file_path 是同一字符串"},
+        {"name": "fix_in_place", "check": "需要修复模板时就地写回同一路径，不另写替代文件"}
+      ]
+    },
+    {
+      "id": 3,
+      "name": "validate-before-pricing",
+      "prompt": "实现方案，模板首次校验报 VSwitch 缺少 CidrBlock",
+      "candidate_context": {
+        "candidate_id": "lightweight-nginx",
+        "name": "轻量 Nginx 方案",
+        "output_path": "templates/1-simple-nginx.yml",
+        "hard_constraints": []
+      },
+      "expected_behavior": "先修复模板并重新校验通过，再进入参数求解与询价阶段",
+      "assertions": [
+        {"name": "no_pricing_before_valid", "check": "模板校验未通过前不调用 ros_preview_template 或 ros_estimate_template_cost"},
+        {"name": "repairs_and_revalidates", "check": "修复模板后重新调用 ros_validate_template 并通过"},
+        {"name": "reports_template_fixed", "check": "conclusion.selected_candidate_result.cost.template_fixed 为 true，并在 fix_summary 说明修复内容"}
+      ]
+    },
+    {
+      "id": 4,
+      "name": "preview-validated-pricing-parameter-set",
+      "prompt": "实现方案并精确询价",
+      "candidate_context": {
+        "candidate_id": "web-standard",
+        "name": "Web 应用标准方案",
+        "output_path": "templates/2-web-standard.yml",
+        "hard_constraints": []
+      },
+      "expected_behavior": "用 ros_get_template_parameter_constraints 求解库存参数，用 ros_preview_template 形成 Preview-Validated Pricing Parameter Set，再用同一参数集询价",
+      "assertions": [
+        {"name": "uses_constraints_tool", "check": "库存相关参数缺值时先调用 ros_get_template_parameter_constraints，不直接编造值"},
+        {"name": "uses_preview_tool_not_ros_stack", "check": "PreviewStack 通过 ros_preview_template 调用，不使用 ros_stack"},
+        {"name": "preview_stack_name_unique", "check": "ros_preview_template 传入带随机或时间后缀的唯一 stack_name，且该 stack_name 不写入 deployment_parameters"},
+        {"name": "pricing_params_match_preview", "check": "询价参数集与 PreviewStack 验证通过的参数集一致"},
+        {"name": "outputs_preview_validation", "check": "conclusion 中 preview_validation.succeeded 为 true，template_url 和 parameters 与预览调用一致"}
+      ]
+    },
+    {
+      "id": 5,
+      "name": "step-two-parameter-overrides-highest-priority",
+      "prompt": "实现方案后，用户在部署确认交互中指定了 InstanceType 与地域",
+      "candidate_context": {
+        "candidate_id": "web-standard",
+        "name": "Web 应用标准方案",
+        "output_path": "templates/2-web-standard.yml",
+        "hard_constraints": []
+      },
+      "parameter_overrides": {"InstanceType": "ecs.c7.xlarge"},
+      "expected_behavior": "Step 2 交互得到的 parameter_overrides 作为最高优先级值参与预览、询价和最终参数集；Step 1 不接收部署参数",
+      "assertions": [
+        {"name": "override_used_in_preview", "check": "PreviewStack 参数中 InstanceType 为 ecs.c7.xlarge"},
+        {"name": "override_used_in_pricing", "check": "询价参数中 InstanceType 为 ecs.c7.xlarge"},
+        {"name": "override_in_effective_params", "check": "conclusion.effective_deployment_parameters 包含该覆盖值且未被推荐值替换"},
+        {"name": "override_echoed", "check": "conclusion.parameter_overrides 原样保留用户覆盖值"}
+      ]
+    },
+    {
+      "id": 6,
+      "name": "hard-constraint-checks-copied-verbatim",
+      "prompt": "实现方案，用户要求 ECS 为 2 核 4 GiB",
+      "candidate_context": {
+        "candidate_id": "web-standard",
+        "name": "Web 应用标准方案",
+        "output_path": "templates/2-web-standard.yml",
+        "hard_constraints": [
+          {"id": "ecs-vcpu-eq-2", "target": "ECS", "property": "vcpu", "operator": "eq", "value": 2, "unit": "count", "verification_mode": "tool", "source": "user", "source_text": "2 核 4 GiB"},
+          {"id": "ecs-memory-eq-4", "target": "ECS", "property": "memory", "operator": "eq", "value": 4, "unit": "GiB", "verification_mode": "tool", "source": "user", "source_text": "2 核 4 GiB"}
+        ]
+      },
+      "expected_behavior": "每条硬约束在 hard_constraint_checks 中原样复制 constraint 对象，并提交真实工具证据与关联参数",
+      "assertions": [
+        {"name": "covers_all_constraints", "check": "hard_constraint_checks 覆盖 ecs-vcpu-eq-2 和 ecs-memory-eq-4 两条约束"},
+        {"name": "constraint_copied_verbatim", "check": "每个 check.constraint 与候选 hard_constraints 中的同 id 对象逐字段一致"},
+        {"name": "tool_evidence_for_tool_mode", "check": "verification_mode 为 tool 的约束提交 type 为 tool 的证据，含真实 tool_name 和 result_path"},
+        {"name": "parameter_values_subset", "check": "check.parameter_values 是 effective_deployment_parameters 的真实子集"},
+        {"name": "no_constraint_relaxation", "check": "不通过删除检查或放宽 operator/value 绕过约束校验"}
+      ]
+    },
+    {
+      "id": 7,
+      "name": "user-required-parameters-collected-before-confirm",
+      "prompt": "实现方案，模板需要已有 KeyPairName 和 VpcId",
+      "candidate_context": {
+        "candidate_id": "existing-network",
+        "name": "复用已有网络方案",
+        "output_path": "templates/1-existing-network.yml",
+        "resource_intents": [
+          {"product": "VPC", "action": "use_existing"},
+          {"product": "ECS", "action": "create"}
+        ],
+        "hard_constraints": []
+      },
+      "expected_behavior": "user_required 缺口在部署确认之前通过 ask_user_question 逐个收齐，确认时 user_required_missing_parameters 为空数组",
+      "assertions": [
+        {"name": "classifies_gaps", "check": "missing_deployment_parameters 中每条标注 classification 为 auto_solvable 或 user_required"},
+        {"name": "asks_one_parameter_at_a_time", "check": "每次 ask_user_question 只问一个参数，且允许自由输入"},
+        {"name": "no_fabricated_external_input", "check": "不编造 KeyPairName、VpcId 等外部输入，也不使用占位值"},
+        {"name": "user_required_empty_on_confirm", "check": "提交 status confirmed 时 user_required_missing_parameters 为空数组"},
+        {"name": "confirm_after_collection", "check": "外部必填参数收齐之后才提交 deployment_confirmation 等待态"}
+      ]
+    },
+    {
+      "id": 8,
+      "name": "deployment-confirmation-payload-self-contained",
+      "prompt": "实现方案后请求部署确认",
+      "candidate_context": {
+        "candidate_id": "web-standard",
+        "name": "Web 应用标准方案",
+        "output_path": "templates/2-web-standard.yml",
+        "hard_constraints": []
+      },
+      "expected_behavior": "专用 deployment_confirmation payload 包含最新方案说明、模板路径、参数摘要、ROS 询价总价和明细、Preview 状态及按候选数量精简的动作",
+      "assertions": [
+        {"name": "payload_includes_summary", "check": "awaiting_confirmation conclusion 包含最新 solution_summary、模板路径、参数摘要、ROS 询价结果或失败原因以及 Preview 状态"},
+        {"name": "no_candidate_detail_refresh", "check": "不调用 show_candidate_detail 刷新方案选择步骤的候选卡"},
+        {"name": "concise_actions", "check": "options 不含 adjust；单候选仅含 confirm、cancel，多候选额外包含 reselect"},
+        {"name": "dedicated_wait", "check": "最终确认不调用 ask_user_question，而是 complete_step 提交 awaiting_confirmation"},
+        {"name": "natural_language_supported", "check": "非结构化用户输入由 LLM 区分参数调整、架构重规划、全新部署意图、确认和取消，含义不清时才用 ask_user_question 澄清"},
+        {"name": "pricing_labeled_ros", "check": "价格标注为 ROS 询价，不使用方案选择步骤的架构粗估区间作为精确价格"}
+      ]
+    },
+    {
+      "id": 9,
+      "name": "confirmed-plan-normalized",
+      "prompt": "用户选择「确认部署」",
+      "candidate_context": {
+        "candidate_id": "web-standard",
+        "name": "Web 应用标准方案",
+        "output_path": "templates/2-web-standard.yml",
+        "hard_constraints": []
+      },
+      "expected_behavior": "同一次 complete_step 直接构造归一化 selected_plan；结构化确认按 action 确定性处理并记录真实输入",
+      "assertions": [
+        {"name": "status_confirmed", "check": "status 为 confirmed，deployment_confirmed 为 true，continue_pipeline 为 true，selection_valid 为 true"},
+        {"name": "confirmation_from_real_input", "check": "结构化 confirmation 的 action、input_type、user_input、parameter_overrides 与恢复输入逐字段一致"},
+        {"name": "result_candidate_matches", "check": "selected_candidate_result.candidate 与顶层 selected_candidate 一致，failed 为 false"},
+        {"name": "effective_params_complete", "check": "effective_deployment_parameters 是部署将使用的完整参数集，密码等真实值未被写成 *** 或 [REDACTED]"},
+        {"name": "no_tool_calls_after_confirm", "check": "提交确认结论前不再写模板、校验、查询参数约束、Preview 或询价"}
+      ]
+    },
+    {
+      "id": 10,
+      "name": "preview-failure-soft-gate",
+      "prompt": "实现方案，PreviewStack 因外部输入缺失失败",
+      "candidate_context": {
+        "candidate_id": "existing-network",
+        "name": "复用已有网络方案",
+        "output_path": "templates/1-existing-network.yml",
+        "hard_constraints": []
+      },
+      "expected_behavior": "Preview 失败不禁止确认；如实展示失败原因，preview_ready_for_create 为 false，仍输出已选参数集",
+      "assertions": [
+        {"name": "preview_validation_failed", "check": "preview_validation.succeeded 为 false 且 error 如实说明原因"},
+        {"name": "preview_ready_false", "check": "preview_ready_for_create 为 false"},
+        {"name": "keeps_parameter_set", "check": "deployment_parameters 与 effective_deployment_parameters 仍输出当前已选参数集，不被清空"},
+        {"name": "failure_disclosed_in_question", "check": "确认问题如实说明 Preview 或询价失败原因，不伪造成功"}
+      ]
+    },
+    {
+      "id": 11,
+      "name": "adjust-parameters-stays-in-step",
+      "prompt": "用户选择「调整参数」并要求改为按量付费的更小规格",
+      "candidate_context": {
+        "candidate_id": "web-standard",
+        "name": "Web 应用标准方案",
+        "output_path": "templates/2-web-standard.yml",
+        "hard_constraints": []
+      },
+      "expected_behavior": "在本步骤内重新求解参数、重新 Preview 和询价，重写 solution_summary，再提交 awaiting_confirmation",
+      "assertions": [
+        {"name": "reprices_with_new_params", "check": "使用用户新值重新执行必要的参数约束查询、PreviewStack 和询价"},
+        {"name": "rewrites_solution_summary", "check": "按新的规格、资源、价格和风险重新生成 solution_summary"},
+        {"name": "reconfirms", "check": "重新展示总价和价格明细后再次提交 awaiting_confirmation"},
+        {"name": "hard_constraints_intact", "check": "参数调整不静默改变用户硬约束；冲突时告知用户并要求明确修改原要求"}
+      ]
+    },
+    {
+      "id": 12,
+      "name": "reselect-requires-rollback-request",
+      "prompt": "用户选择「重新选择方案」",
+      "candidate_context": {
+        "candidate_id": "web-standard",
+        "name": "Web 应用标准方案",
+        "output_path": "templates/2-web-standard.yml",
+        "hard_constraints": []
+      },
+      "expected_behavior": "提交 reselect_requested 并携带 rollback_request 回到 solution_planning_and_selection",
+      "assertions": [
+        {"name": "status_reselect_requested", "check": "status 为 reselect_requested，deployment_confirmed 为 false，continue_pipeline 为 true"},
+        {"name": "has_rollback_request", "check": "同一次 complete_step 携带 rollback_request，target_step 为 solution_planning_and_selection"},
+        {"name": "reason_explains", "check": "reselect_reason 包含当前候选标识、用户新要求和需要重新规划的原因，且与 rollback_request.reason 一致"},
+        {"name": "no_new_candidate_here", "check": "不在本步骤内自行替换产品组合或创建新候选"}
+      ]
+    },
+    {
+      "id": 13,
+      "name": "cancel-and-invalid-selection",
+      "prompt": "用户选择「取消」；另一种情况是 selected_candidate 缺失",
+      "candidate_context": {
+        "candidate_id": "web-standard",
+        "name": "Web 应用标准方案",
+        "output_path": "templates/2-web-standard.yml",
+        "hard_constraints": []
+      },
+      "expected_behavior": "取消时提交 cancelled 并结束流程；选择无效时提交 selection_valid false 并回退",
+      "assertions": [
+        {"name": "cancel_status", "check": "取消时 status 为 cancelled，continue_pipeline 为 false，deployment_confirmed 为 false，并填写 cancellation_reason"},
+        {"name": "cancel_no_cloud_write", "check": "取消分支不进入部署，不创建任何云资源"},
+        {"name": "invalid_selection_no_template", "check": "selected_candidate 缺失或与候选列表不一致时不生成模板"},
+        {"name": "invalid_selection_rolls_back", "check": "提交 selection_valid false 与 selection_invalid_reason，并携带 rollback_request 回到 solution_planning_and_selection"}
+      ]
+    },
+    {
+      "id": 14,
+      "name": "no-cloud-writes-in-step",
+      "prompt": "实现方案",
+      "candidate_context": {
+        "candidate_id": "web-standard",
+        "name": "Web 应用标准方案",
+        "output_path": "templates/2-web-standard.yml",
+        "hard_constraints": []
+      },
+      "expected_behavior": "本步骤只做只读校验、Preview 和询价，不创建任何云资源",
+      "assertions": [
+        {"name": "no_ros_stack", "check": "不调用 ros_stack 或 ros_stack_instances"},
+        {"name": "no_ros_api_via_aliyun_api", "check": "模板校验、参数约束、预览和询价不通过 aliyun_api 直接调用对应 ROS 接口"},
+        {"name": "no_pricing_doc_search", "check": "不使用 aliyun_doc_search 查询价格，也不自行编造费用数据"}
+      ]
+    }
+  ]
+}

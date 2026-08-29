@@ -3492,6 +3492,7 @@ async def test_delegated_runtime_reuses_outer_triplet_and_rejects_self_created_b
     )
     result = await delegated.execute(outer_input, context)
     assert result.is_error is False
+    assert result.metadata["effective_region_id"] == "cn-hangzhou"
     assert runtime.contract_store.size == 0
 
     forged = _bound_context(

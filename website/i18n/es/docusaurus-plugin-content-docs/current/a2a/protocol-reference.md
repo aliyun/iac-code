@@ -150,6 +150,8 @@ Ejecuta un turno de mensaje A2A sin streaming. La respuesta contiene una tarea o
 | `parts` | array | Sí | Partes similares a texto, datos JSON, texto sin procesar, URL de archivo local o partes multimodales acotadas |
 | `metadata.iac_code.cwd` | string | Recomendado | Ruta absoluta del espacio de trabajo; si se omite, toma por defecto el directorio del proceso del servidor |
 | `metadata.iac_code.channel` | string | Opcional | Canal de telemetría vinculado a este `contextId`; tiene prioridad sobre `IAC_CODE_CHANNEL` |
+| `metadata.iac_code.run_mode` | string | Opcional | Selecciona `normal` o `pipeline` para este mensaje; si se omite, usa el modo del servidor |
+| `metadata.iac_code.pipeline_name` | string | Opcional | Selecciona `selling` o `selling_solution_first` cuando el modo efectivo es `pipeline` |
 | `metadata.iac_code.preferredLanguage` | string | Opcional | Idioma de visualización preferido por el llamador para esta tarea; el texto visible para el usuario se localiza por solicitud |
 | `metadata.iac_code.candidatePresentation` | string | Opcional | Con `rich-v1`, el paso de confirmación de candidatos del pipeline devuelve cargas estructuradas de presentación enriquecida |
 
@@ -157,9 +159,11 @@ Ejecuta un turno de mensaje A2A sin streaming. La respuesta contiene una tarea o
 
 `metadata.iac_code.channel` vincula `iac_code.channel` al `contextId` de A2A. El valor se recorta, se limita a 128 caracteres y tiene prioridad sobre `IAC_CODE_CHANNEL`; los valores vacíos o que no sean cadenas se ignoran. Los turnos normales, los turnos de pipeline, los seguimientos de input-required y el chat normal después de un handoff de pipeline reutilizan el vínculo con el mismo `contextId`, incluso tras reiniciar el servidor y restaurar el contexto. Un valor válido posterior actualiza el vínculo. Si no existe vínculo, se usa `IAC_CODE_CHANNEL` y después `unknown`.
 
+`metadata.iac_code.run_mode` selecciona `normal` o `pipeline` para un mensaje. En modo pipeline, `metadata.iac_code.pipeline_name` puede elegir `selling` o `selling_solution_first`; un valor no vacío no compatible se rechaza. Al continuar o recuperar, la identidad de pipeline guardada para la tarea y el contexto tiene prioridad.
+
 `metadata.iac_code.preferredLanguage` solo afecta al texto visible para el usuario (progreso, preguntas, avisos de permisos, presentaciones de candidatos, explicaciones de resultados); los nombres de campos del protocolo, los enumerados, los ID y las formas de los comandos nunca se traducen. Los valores aceptados son los idiomas admitidos `en`, `zh`, `es`, `fr`, `de`, `ja`, `pt`; los valores se normalizan recortando espacios, pasando a minúsculas y eliminando el sufijo regional (por ejemplo, `zh-CN` se resuelve a `zh`). Los valores no reconocidos se ignoran y el servidor vuelve a su idioma predeterminado. El campo se aplica solo al turno de mensaje actual; los turnos posteriores que reutilicen el mismo `contextId` deben volver a incluirlo o volverán al idioma predeterminado.
 
-`metadata.iac_code.candidatePresentation` con `rich-v1` hace que el paso de confirmación de candidatos del pipeline selling devuelva una carga estructurada apta para renderizado enriquecido (nombre del candidato, resumen, diagrama de arquitectura, coste mensual total, partidas de coste). Sin el campo, el comportamiento de presentación en texto simple no cambia.
+`metadata.iac_code.candidatePresentation` con `rich-v1` hace que el paso de confirmación de candidatos de un pipeline selling devuelva una carga estructurada apta para renderizado enriquecido (nombre del candidato, resumen, diagrama de arquitectura, coste mensual total, partidas de coste). Sin el campo, el comportamiento de presentación en texto simple no cambia.
 
 Categorías de entrada soportadas:
 
@@ -402,7 +406,7 @@ Los metadatos de la actualización de estado contienen:
 
 - `metadata.iac_code.input` — el sobre de permiso (`schemaVersion` 1), con los campos:
   - Campos de correlación: `kind: "permission"`, `requestTaskId`, `contextId`, `inputId`, `toolUseId`, `toolName`
-  - Campos de visualización: `title`, `purpose`, `effect`, `target`, `isReadOnly`, `safeSummary`, más `deploymentSummary` en solicitudes de despliegue
+  - Campos de visualización: `title`, `purpose`, `effect`, `target`, `isReadOnly`, `safeSummary`, más `deploymentSummary` en solicitudes de despliegue; cuando están disponibles, también `operation.apiCalls` y `displayParameters` redactados
   - `prompt` y `options` (`allow_once` / `deny`), localizados al idioma preferido del llamador
 - `metadata.iac_code.permission` — contiene `autoApproved: false`, `pending: true`, `toolName`, `toolUseId`
 
@@ -423,7 +427,7 @@ El llamador envía su decisión mediante un mensaje de banda lateral: un único 
 - El `taskId` externo del mensaje debe ser igual a `requestTaskId`; `contextId` procede del sobre externo del mensaje. Todos los campos de correlación deben conservarse literalmente; no deben reutilizarse entre solicitudes ni reinterpretarse una respuesta de una entrada como otra.
 - Cuando el servidor empareja la decisión, devuelve un DataPart `permission_ack` (`schemaVersion: 1`, `kind: "permission_ack"`, con `inputId`, `toolUseId`, `decision`, `accepted: true`) y emite una actualización de estado `TASK_STATE_WORKING` con `metadata.iac_code.inputReceived`; el turno se reanuda.
 
-En modo pipeline, las solicitudes de permiso se publican como eventos de pipeline (el sobre incluye además `scope` y coordenadas de paso/candidato); el formato de respuesta de banda lateral es idéntico.
+En modo pipeline, las solicitudes se publican como eventos `permission_requested` y `permission_resolved`. `scope` y las coordenadas de paso/candidato mantienen la tarjeta en su punto de ejecución; el formato de respuesta lateral es idéntico. Tras una recuperación, los sobres pendientes aparecen en `metadata.iac_code.pendingPermissions`. Las esperas del chat normal y del pipeline de nivel superior pueden suspenderse de forma duradera y reanudarse; una espera de subpipeline asociada a un candidato puede resolverse automáticamente tras su tiempo de espera configurado.
 
 Con `auto-approve-permissions` habilitado o reglas de permisos explícitas configuradas, las solicitudes de permiso no se convierten en entrada interactiva; se aprueban automáticamente (con auditoría) o se resuelven según las reglas. Las API protegidas de escritura de Alibaba Cloud no quedan liberadas por reglas allow ordinarias y siguen requiriendo autorización exacta por API. Las decisiones de permisos se auditan localmente; toda decisión allow que requiere un registro de auditoría falla en modo cerrado si el registro no puede persistirse.
 

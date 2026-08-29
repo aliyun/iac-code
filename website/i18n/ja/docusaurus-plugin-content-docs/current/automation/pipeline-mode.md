@@ -7,7 +7,7 @@ description: ステップごとに進むパイプラインモードで、複雑�
 
 パイプラインモードは、作業をステップごとに進める対話モードです。通常のチャットだけでは長すぎたり、間違いが起きやすかったりするインフラ作業に向いています。要件を理解し、方針を計画し、成果物を生成し、ユーザーに確認してもらい、その後の操作へ進みます。
 
-パイプライン自体は汎用機能です。現在組み込まれている実装は `selling` パイプラインです。`selling` は Alibaba Cloud インフラのシナリオを対象にしており、1 つのデプロイ要件から候補アーキテクチャ、ROS テンプレート、コスト見積もり、確認後のデプロイまで進められます。
+Pipeline 自体は汎用機能です。IaC Code には、デフォルトの `selling` と、明示的に選択する `selling_solution_first` という 2 つの Alibaba Cloud 購入向け Pipeline があります。どちらも計画、ROS テンプレート、コスト、確認、デプロイを扱いますが、候補を実装する順序が異なります。
 
 パイプラインモードに適した依頼の例:
 
@@ -42,14 +42,21 @@ iac-code
 IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling iac-code
 ```
 
-## Pipeline と selling の関係
+テンプレートを生成する前にアーキテクチャを選ぶ場合：
+
+```bash
+IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code
+```
+
+## 利用可能な Pipeline
 
 | 名前 | 意味 |
 |---|---|
 | パイプラインモード | 長いフロー、確認ポイント、復旧、進捗表示を扱うための IaC Code の汎用的なステップ実行モード。 |
-| `selling` パイプライン | Alibaba Cloud インフラの設計、テンプレート生成、コスト見積もり、デプロイに使う現在の組み込みパイプライン。 |
+| `selling` Pipeline | 候補テンプレートを生成・評価した後、ユーザーが 1 つを選んでデプロイします。引き続きデフォルトです。 |
+| `selling_solution_first` Pipeline | 最初にアーキテクチャを選び、そのソリューションだけを生成、プレビュー、価格算出します。 |
 
-将来さらにパイプラインが追加された場合は、`IAC_CODE_PIPELINE_NAME` で選択できます。現在のリリースに含まれるのは `selling` です。
+`IAC_CODE_PIPELINE_NAME` でどちらかを選択できます。3 ステージの流れ、確認と権限の独立した境界、復旧については[ソリューション優先 Pipeline](./solution-first-pipeline.md)を参照してください。
 
 ## 環境変数
 
@@ -97,7 +104,7 @@ ACP は現在パイプラインモードをサポートしていません。`--p
 
 ## 現在の制限
 
-- 現在のリリースに含まれるパイプラインは `selling` のみで、主に Alibaba Cloud インフラワークフロー向けです。
+- 現在のリリースには `selling` と `selling_solution_first` が含まれ、どちらも主に Alibaba Cloud インフラワークフロー向けです。デフォルトは `selling` です。
 - パイプラインモードには対話型 REPL が必要です。`IAC_CODE_MODE=pipeline` の場合、`--prompt` は拒否されます。
 - パイプラインモードはテキスト入力に対応しています。パイプラインが有効な間、REPL に貼り付けられた画像は無視されます。
 - パイプライン実行中、shell escape、スキルトリガー、大半の slash command は、パイプライン定義で明示的に許可されていない限り制限されます。`/help`、`/status`、`/resume`、`/exit` などの基本コマンドは引き続き利用できます。

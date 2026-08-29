@@ -31,21 +31,38 @@ class TestParseToolInputEvents:
         assert events[2].input == {"path": "b.txt"}
         assert events[2].tool_use_id == events[1].tool_use_id
 
-    def test_invalid_json_yields_empty_input_end_event(self):
+    def test_invalid_json_reports_input_error_so_the_tool_is_not_executed(self):
         events = list(parse_tool_input_events("toolu_1", "read_file", "{invalid"))
 
         assert len(events) == 1
         assert isinstance(events[0], ToolUseEndEvent)
         assert events[0].name == "read_file"
         assert events[0].input == {}
+        # Without this the tool runs on {} and answers with its own "missing
+        # required field" error — the opposite of what actually happened.
+        assert events[0].input_error is not None
+        assert "not valid JSON" in events[0].input_error
+        assert "not executed" in events[0].input_error
 
-    def test_empty_json_yields_empty_input_end_event(self):
+    def test_empty_json_yields_empty_input_without_error(self):
         events = list(parse_tool_input_events("toolu_1", "read_file", ""))
 
         assert len(events) == 1
         assert isinstance(events[0], ToolUseEndEvent)
         assert events[0].name == "read_file"
         assert events[0].input == {}
+        # Zero-parameter tools legitimately send no arguments.
+        assert events[0].input_error is None
+
+    def test_literal_newline_inside_a_string_value_is_recovered(self):
+        raw = '{"path":"a.txt","note":"line one\nline two"}'
+
+        events = list(parse_tool_input_events("toolu_1", "read_file", raw))
+
+        assert len(events) == 1
+        assert isinstance(events[0], ToolUseEndEvent)
+        assert events[0].input == {"path": "a.txt", "note": "line one\nline two"}
+        assert events[0].input_error is None
 
     def test_invalid_json_warning_interpolates_tool_metadata(self):
         messages: list[str] = []
@@ -58,6 +75,11 @@ class TestParseToolInputEvents:
 
         log_text = "".join(messages)
         assert "tool_use_id=toolu_1" in log_text
+        assert "tool=read_file" in log_text
         assert "length=8" in log_text
-        assert 'raw={"path":' in log_text
+        # A 200-character head is useless for an 8 KB argument blob, so the log
+        # carries the decoder message plus a repr window around the offset.
+        assert "Expecting value" in log_text
+        assert "around_pos=8" in log_text
+        assert '{"path":' in log_text
         assert "%s" not in log_text

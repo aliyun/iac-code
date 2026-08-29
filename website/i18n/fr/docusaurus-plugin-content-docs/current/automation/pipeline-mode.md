@@ -7,7 +7,7 @@ description: Utilisez le mode pipeline, exécuté étape par étape, pour guider
 
 Le mode pipeline est un mode interactif qui exécute le travail étape par étape. Il est utile pour les tâches d'infrastructure plus longues ou plus faciles à rater qu'une simple demande de chat : comprendre le besoin, planifier une approche, générer des artefacts, demander confirmation à l'utilisateur, puis poursuivre les actions suivantes.
 
-Le pipeline lui-même est une capacité générale. L'implémentation intégrée disponible aujourd'hui est le pipeline `selling`. `selling` vise les scénarios d'infrastructure Alibaba Cloud et peut faire passer une demande de déploiement par des architectures candidates, des modèles ROS, des estimations de coûts, puis un déploiement après confirmation.
+Le pipeline est une capacité générale. IaC Code comprend deux pipelines d'achat Alibaba Cloud : `selling`, utilisé par défaut, et `selling_solution_first`, sélectionné explicitement. Tous deux couvrent la planification, les modèles ROS, les coûts, la confirmation et le déploiement, mais ils implémentent les candidats dans un ordre différent.
 
 Exemples de demandes adaptées au mode pipeline :
 
@@ -42,14 +42,21 @@ Le nom de pipeline par défaut est `selling`. Pour l'indiquer explicitement :
 IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling iac-code
 ```
 
-## Relation entre Pipeline et selling
+Pour choisir une architecture avant de générer son modèle :
+
+```bash
+IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code
+```
+
+## Pipelines disponibles
 
 | Nom | Signification |
 |---|---|
 | Mode pipeline | Mode général d'exécution étape par étape de IaC Code, destiné aux flux longs, aux points de confirmation, à la reprise et à l'affichage de la progression. |
-| Pipeline `selling` | Pipeline intégré actuel pour la conception d'infrastructure Alibaba Cloud, la génération de modèles, l'estimation des coûts et le déploiement. |
+| Pipeline `selling` | Génère et évalue les modèles candidats avant que l'utilisateur n'en choisisse un à déployer. Il reste le choix par défaut. |
+| Pipeline `selling_solution_first` | Fait d'abord choisir une architecture, puis génère, prévisualise et chiffre uniquement cette solution. |
 
-Si d'autres pipelines sont ajoutés plus tard, vous pourrez les sélectionner avec `IAC_CODE_PIPELINE_NAME`. La version actuelle inclut `selling`.
+Sélectionnez l'un ou l'autre avec `IAC_CODE_PIPELINE_NAME`. Consultez le [pipeline avec solution en premier](./solution-first-pipeline.md) pour le flux en trois étapes, les limites distinctes de confirmation et d'autorisation et la récupération.
 
 ## Variables d'environnement
 
@@ -97,7 +104,7 @@ ACP ne prend pas actuellement en charge le mode pipeline. `--prompt` / le [mode 
 
 ## Limites actuelles
 
-- La version actuelle inclut uniquement le pipeline `selling`, principalement pour les workflows d'infrastructure Alibaba Cloud.
+- La version actuelle comprend `selling` et `selling_solution_first`, tous deux principalement destinés aux workflows d'infrastructure Alibaba Cloud. `selling` reste la valeur par défaut.
 - Le mode pipeline nécessite le REPL interactif. `--prompt` est refusé lorsque `IAC_CODE_MODE=pipeline`.
 - Le mode pipeline accepte les entrées texte. Les images collées dans le REPL sont ignorées lorsque le pipeline est actif.
 - Pendant un pipeline, les shell escapes, les déclencheurs de skills et la plupart des slash commands sont limités, sauf autorisation explicite dans la définition du pipeline. Les commandes de base comme `/help`, `/status`, `/resume` et `/exit` restent disponibles.

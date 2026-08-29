@@ -12,7 +12,7 @@ import httpx
 import pytest
 from ag_ui.core import EventType
 
-from iac_code.agui.adapter import AguiA2AAdapter
+from iac_code.agui.adapter import AguiA2AAdapter, _persistent_input
 from iac_code.agui.app import create_app
 from iac_code.agui.inputs import canonical_digest, parse_run_input
 from iac_code.agui.state import AguiStateStoreError, FileAguiThreadStateStore
@@ -79,6 +79,28 @@ def _permission(context_id: str, input_id: str, tool_id: str) -> dict[str, Any]:
         "options": [{"id": "allow_once", "label": "Allow once"}, {"id": "deny", "label": "Deny"}],
         "required": True,
     }
+
+
+def test_persistent_permission_keeps_scope_and_safe_display_details() -> None:
+    value = _permission("ctx-1", "permission-1", "tool-1")
+    value.update(
+        {
+            "scope": "candidate",
+            "subPipelineId": "candidate-a",
+            "operation": {
+                "product": "vpc",
+                "action": "CreateVpc",
+                "region": "cn-hangzhou",
+                "apiCalls": [{"product": "VPC", "action": "CreateVpc", "effect": "change"}],
+            },
+            "displayParameters": {
+                "format": "json",
+                "value": {"CidrBlock": "10.0.0.0/16", "Password": {"redacted": True}},
+            },
+        }
+    )
+
+    assert _persistent_input(value) == value
 
 
 @pytest.mark.parametrize(

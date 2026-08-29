@@ -69,6 +69,8 @@ Im Eingabebereich formulieren Sie Ihre Anfragen. Er bietet dieselben Steuereleme
 
 Eine Sitzung läuft entweder als normaler Chat oder im **Pipeline**-Modus. Der normale Chat streamt die Antworten des Assistenten, Werkzeugaufrufe und Ergebnisse inline. Der Pipeline-Modus ergänzt einen Arbeitsbereich, der während der Ausführung Schritt-Zeitleisten, Diagnosen, Diagramme, Bereitstellungsfortschritt, Aufräumarbeiten und Übergabedetails anzeigt. Was Pipelines leisten, erfahren Sie unter [Pipeline-Modus](./automation/pipeline-mode.md).
 
+Die [`selling_solution_first`-Pipeline](./automation/solution-first-pipeline.md) nutzt diesen Arbeitsbereich für einen dreistufigen Kaufablauf: Architekturvarianten vergleichen, die ausgewählte Lösung umsetzen und sie nach Bestätigung bereitstellen. Tool-Genehmigungen erscheinen als lokalisierte Berechtigungskarten unter dem auslösenden Schritt; offene Genehmigungen werden beim Wiederherstellen der Sitzung demselben Schritt zugeordnet.
+
 ### Werkzeuge und Genehmigungen
 
 Werkzeugaufrufe werden im Transkript als Karten dargestellt. Wenn ein Werkzeug Ihre Genehmigung benötigt, erscheint inline eine Genehmigungsanfrage; der im Eingabebereich eingestellte Berechtigungsmodus bestimmt, wann Sie gefragt werden.

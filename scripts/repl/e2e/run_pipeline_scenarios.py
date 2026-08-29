@@ -638,6 +638,7 @@ class ReplPty:
         child = self.child
         if child is None:
             return
+        alive_before_terminate = bool(child.isalive())
         try:
             if force:
                 child.kill(signal.SIGKILL)
@@ -645,7 +646,16 @@ class ReplPty:
                 child.terminate(force=True)
         finally:
             self._capture_child_output(str(getattr(child, "before", "") or ""))
-            self.events.append({"type": "terminate", "force": force, "at": _utc_now()})
+            self.events.append(
+                {
+                    "type": "terminate",
+                    "force": force,
+                    "aliveBeforeTerminate": alive_before_terminate,
+                    "exitStatus": getattr(child, "exitstatus", None),
+                    "signalStatus": getattr(child, "signalstatus", None),
+                    "at": _utc_now(),
+                }
+            )
 
     def drain_output(self) -> None:
         child = self.child

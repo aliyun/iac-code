@@ -563,6 +563,8 @@ async def publish_interactive_permission_boundary(
     permission_wait_cwd: str | None,
     permission_wait_backup_service: Any | None,
     permission_wait_metrics: Any | None = None,
+    before_permission_backup: Callable[[Any], Awaitable[None]] | None = None,
+    before_permission_claim_backup: Callable[[Any, dict[str, Any]], Awaitable[None]] | None = None,
     wait_for_response: bool,
 ) -> Any:
     """Publish one real external permission wait, optionally detaching Normal SSE."""
@@ -571,6 +573,7 @@ async def publish_interactive_permission_boundary(
         permission_event,
         task_id=task_id,
         context_id=context_id,
+        scope="normal",
     )
     try:
         if (
@@ -585,6 +588,8 @@ async def publish_interactive_permission_boundary(
                 permission_class="normal",
                 backup_service=permission_wait_backup_service,
                 metrics=permission_wait_metrics,
+                before_backup=before_permission_backup,
+                before_claim_backup=before_permission_claim_backup,
             )
         await _enqueue_status(
             event_queue,

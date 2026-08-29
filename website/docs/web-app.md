@@ -69,6 +69,8 @@ The composer is where you type requests. It exposes the same controls the CLI of
 
 A session runs either as a normal chat or in **pipeline** mode. Normal chat streams the assistant's replies, tool calls, and results inline. Pipeline mode adds a workspace that shows step timelines, diagnostics, diagrams, deployment progress, cleanup, and handoff details as the pipeline runs. See [Pipeline Mode](./automation/pipeline-mode.md) for what pipelines do.
 
+The [`selling_solution_first` pipeline](./automation/solution-first-pipeline.md) uses this workspace for a three-stage purchase flow: compare architecture candidates, implement the selected solution, then deploy it after confirmation. Tool approvals appear as localized permission cards under the step that requested them, and unresolved approvals return to the same step when you restore the session.
+
 ### Tools and Approvals
 
 Tool calls render as cards in the transcript. When a tool needs your approval, an approval request appears inline; the permission mode set in the composer determines when you are prompted.

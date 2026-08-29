@@ -131,6 +131,7 @@ _SECRET_KEY_PATTERN = (
 )
 _SECRET_ASSIGNMENT = re.compile(
     r"""(?ix)
+    (?<![A-Za-z0-9_.-])
     (?P<key>
         [A-Za-z0-9_.-]*
         (?:"""
@@ -204,6 +205,7 @@ class PermissionAuditRecord:
     rule: str | None = None
     rule_fingerprint: str | None = None
     operation: dict[str, Any] = field(default_factory=dict)
+    display_parameters: dict[str, Any] | None = None
     input_summary: dict[str, Any] = field(default_factory=dict)
     tool_input_redacted: dict[str, Any] | None = None
     audit_log_path: str | None = None
@@ -588,7 +590,8 @@ def emit_permission_boundary_audit(
             reason_detail=reason_detail if reason_detail is not None else getattr(metadata, "reason_detail", None),
             trigger_reason_type=_boundary_trigger_reason_type(reason_type=reason_type, metadata=metadata),
             rule=rule if rule is not None else getattr(metadata, "rule", None),
-            operation=permission_audit_operation(metadata),
+            operation=_permission_audit_operation_with_display(event, metadata),
+            display_parameters=_permission_display_parameters(event),
             input_summary=build_input_summary(event.tool_name, event.tool_input),
             tool_input_redacted=redacted_tool_input_for_settings(event.tool_input, settings),
             audit_log_path=_permission_audit_log_path(event),
@@ -640,7 +643,8 @@ def emit_auto_permission_audit(
             reason_type=getattr(metadata, "reason_type", None) or source,
             reason_detail=getattr(metadata, "reason_detail", None),
             rule=getattr(metadata, "rule", None),
-            operation=permission_audit_operation(metadata),
+            operation=_permission_audit_operation_with_display(event, metadata),
+            display_parameters=_permission_display_parameters(event),
             input_summary=build_input_summary(event.tool_name, event.tool_input),
             tool_input_redacted=redacted_tool_input_for_settings(event.tool_input, settings),
             audit_log_path=_permission_audit_log_path(event),
@@ -670,6 +674,24 @@ def permission_audit_operation(metadata: Any | None) -> dict[str, Any]:
         else:
             operation.setdefault("is_read_only", is_read_only)
     return operation
+
+
+def _permission_display_snapshot(event: Any) -> dict[str, Any]:
+    snapshot = _permission_audit_context(event).get("permission_display_snapshot")
+    return snapshot if isinstance(snapshot, dict) else {}
+
+
+def _permission_audit_operation_with_display(event: Any, metadata: Any | None) -> dict[str, Any]:
+    operation = permission_audit_operation(metadata)
+    displayed = _permission_display_snapshot(event).get("operation")
+    if isinstance(displayed, dict):
+        operation.update(displayed)
+    return operation
+
+
+def _permission_display_parameters(event: Any) -> dict[str, Any] | None:
+    value = _permission_display_snapshot(event).get("displayParameters")
+    return value if isinstance(value, dict) else None
 
 
 def _permission_audit_settings(event: Any) -> PermissionAuditSettings | None:
@@ -745,6 +767,7 @@ def _audit_row(record: PermissionAuditRecord, *, include_tool_input: bool = Fals
         "reason_type": _safe_reason_token(record.reason_type),
         "reason_detail": _safe_reason_detail(record),
         "operation": _sanitize_operation_metadata(record.operation),
+        "display_parameters": _sanitize_display_parameters(record.display_parameters),
         "input_summary": _sanitize_input_summary(record.input_summary),
         "timestamp": record.timestamp,
     }
@@ -829,7 +852,38 @@ def _sanitize_operation_metadata(operation: dict[str, Any]) -> dict[str, Any]:
         if isinstance(value, str) and value in allowed:
             sanitized[key] = value
 
+    api_calls = operation.get("apiCalls")
+    if isinstance(api_calls, list):
+        sanitized_calls: list[dict[str, Any]] = []
+        for call in api_calls[:8]:
+            if not isinstance(call, dict):
+                continue
+            sanitized_call: dict[str, Any] = {}
+            for key in ("product", "action"):
+                value = call.get(key)
+                if isinstance(value, str) and _SAFE_ID.fullmatch(value):
+                    sanitized_call[key] = value
+            effect = call.get("effect")
+            if effect in {"read", "change"}:
+                sanitized_call["effect"] = effect
+            repeat = call.get("repeat")
+            if repeat == "polling":
+                sanitized_call["repeat"] = repeat
+            if "action" in sanitized_call:
+                sanitized_calls.append(sanitized_call)
+        if sanitized_calls:
+            sanitized["apiCalls"] = sanitized_calls
+
     return sanitized
+
+
+def _sanitize_display_parameters(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(value, dict) or value.get("format") != "json" or "value" not in value:
+        return None
+    return {
+        "format": "json",
+        "value": build_display_tool_input({"value": value["value"]}).get("value"),
+    }
 
 
 def _safe_mcp_operation_text(value: Any) -> str | None:
@@ -1099,7 +1153,10 @@ def _display_field_name(key: Any) -> str:
     text = str(key)
     if _is_fingerprint(text):
         return text
-    if _SAFE_ID.fullmatch(text) and not _is_secret_key(text):
+    # Permission display parameters keep public API field names so the user can
+    # identify what they are approving.  Secret *values* are still replaced by
+    # ``{"redacted": True}`` before this name is emitted.
+    if _SAFE_ID.fullmatch(text):
         return text
     return fingerprint_text(text)
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -357,6 +357,10 @@ class A2APipelineActionRunner:
             permission_resolver=resolver,
             auto_approve_permissions=auto_approve,
             thinking_exposure_types=self._owner.thinking_exposure_types,
+            # The session owns the pipeline the user picked in the mode selector;
+            # without this the executor would always fall back to the process-wide
+            # IAC_CODE_PIPELINE_NAME default and silently run `selling`.
+            pipeline_name=_session_pipeline_name(session),
         )
 
     async def rebuild_permission_audit_event(
@@ -403,8 +407,13 @@ class A2APipelineActionRunner:
             permission_resolver=permission_resolver,
         )
         task = await self._task_store.get_or_create_task(task_id=session.task_id, context_id=session.context_id)
+        history_envelopes = await self._load_pipeline_envelope_history(session) if event_sink is not None else []
         event_queue = (
-            _ForwardingEventQueue(event_sink, envelope_observer=envelope_observer)
+            _ForwardingEventQueue(
+                event_sink,
+                envelope_observer=envelope_observer,
+                history_envelopes=history_envelopes,
+            )
             if event_sink is not None
             else _CollectingEventQueue()
         )
@@ -445,6 +454,29 @@ class A2APipelineActionRunner:
             response={"accepted": True, "action": action, "eventCount": len(event_queue.events)},
             events=result_events,
         )
+
+    async def _load_pipeline_envelope_history(self, session: Any) -> list[dict[str, Any]]:
+        """Load prior envelopes so a resumed live translator keeps cumulative state.
+
+        Each Web input invokes the A2A executor separately.  Without hydrating the
+        translator, the continuation does not know the paused step's marker, elapsed
+        segments, or pending question, so the live UI stays folded/at ``0s`` until a
+        reload reconstructs the journal.  Hydration mutates translator state only;
+        the historical Web events are deliberately discarded by the queue.
+        """
+        try:
+            from iac_code.a2a.pipeline_journal import A2APipelineJournal
+            from iac_code.a2a.pipeline_paths import existing_a2a_pipeline_dir_for_session
+
+            context = await self._task_store.get_context_record(session.context_id)
+            pipeline_dir = existing_a2a_pipeline_dir_for_session(
+                cwd=context.cwd,
+                session_id=context.session_id,
+            )
+            return A2APipelineJournal(pipeline_dir).read_all_repairing_tail()
+        except Exception:
+            logger.debug("Unable to hydrate Web pipeline transcript history", exc_info=True)
+            return []
 
     async def _terminal_result(self, session: Any, events: list[Any]) -> PipelineActionResult | None:
         event_result = _terminal_result_from_status_events(events)
@@ -503,10 +535,15 @@ class _ForwardingEventQueue:
         sink: PipelineEventSink,
         *,
         envelope_observer: Callable[[Mapping[str, Any]], None] | None = None,
+        history_envelopes: Sequence[Mapping[str, Any]] | None = None,
     ) -> None:
         self.events: list[Any] = []
         self._sink = sink
         self._translator = PipelineTranscriptTranslator()
+        # Prime all stateful folds (markers, durations, pending questions) without
+        # replaying historical events to the browser.  Only envelopes produced by
+        # this continuation are forwarded below.
+        self._translator.translate_all(history_envelopes or [])
         self._envelope_observer = envelope_observer
 
     async def enqueue_event(self, event: Any) -> None:
@@ -610,6 +647,27 @@ def _a2a_event_dict(event: Any) -> dict[str, Any]:
 
 def _string_value(value: Any) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _session_pipeline_name(session: Any) -> str | None:
+    """Pipeline override this session asks for, or ``None`` for the process default.
+
+    The stored name reaches us from settings.yml and from the create-session
+    payload, so an unknown value is possible (typo, or a session created against
+    a build that shipped another pipeline). Since this value now decides which
+    pipeline runs, an unchecked bad name would make every pipeline turn fail with
+    ``Unknown pipeline`` — fall back to the process default instead.
+    """
+    name = getattr(session, "pipeline_name", None)
+    if not isinstance(name, str) or not name.strip():
+        return None
+    name = name.strip()
+    from iac_code.pipeline import discover_pipelines
+
+    if name not in discover_pipelines():
+        logger.warning("Ignoring unknown session pipeline name %r; falling back to the process default", name)
+        return None
+    return name
 
 
 def _action_error(message: str, *, status_code: int, terminal_outcome: str | None = None) -> PipelineActionResult:

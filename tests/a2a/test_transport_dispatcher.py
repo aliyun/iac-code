@@ -1,7 +1,9 @@
 import asyncio
 import base64
+import contextlib
 import json
 import shutil
+import threading
 from types import SimpleNamespace
 
 import httpx
@@ -91,6 +93,34 @@ async def test_dispatcher_handles_unary_v03_message(monkeypatch, tmp_path) -> No
     session_id = components.task_store._contexts[response["result"]["contextId"]].session_id
     assert response["result"]["metadata"]["iac_code"]["iacCodeSessionId"] == session_id
     assert loop.prompts == ["hello"]
+    await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_rejects_explicit_invalid_run_mode(tmp_path) -> None:
+    components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
+    dispatcher = A2AJsonRpcDispatcher(components)
+
+    response = await dispatcher.dispatch(
+        {
+            "jsonrpc": "2.0",
+            "id": "invalid-run-mode",
+            "method": "message/send",
+            "params": {
+                "message": {
+                    "messageId": "msg-invalid-run-mode",
+                    "role": "user",
+                    "parts": [{"kind": "text", "text": "hello"}],
+                    "metadata": {"iac_code": {"cwd": str(tmp_path), "run_mode": "pipline"}},
+                },
+                "configuration": {"acceptedOutputModes": ["text/plain"]},
+            },
+        }
+    )
+
+    assert response["id"] == "invalid-run-mode"
+    assert response["error"]["code"] == -32602
+    assert response["error"]["message"] == "Unsupported run mode."
     await components.aclose()
 
 
@@ -1005,6 +1035,167 @@ async def test_dispatcher_routes_second_pipeline_stream_as_interrupt(monkeypatch
         await asyncio.wait_for(first_task, timeout=_STREAM_TEST_TIMEOUT)
         await dispatcher.aclose()
         await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_resumes_candidate_selection_submitted_during_input_backup(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setenv("IAC_CODE_A2A_EXTREME_PERFORMANCE", "true")
+    backup_started = threading.Event()
+    release_backup = threading.Event()
+
+    class BlockingBackupService(SessionBackupService):
+        def __init__(self) -> None:
+            super().__init__(retry_delays=())
+
+        def backup_session(self, _cwd, _session_id, *, reason, critical, publication_proofs=None) -> None:
+            del critical, publication_proofs
+            if reason == BackupReason.INPUT_REQUIRED:
+                backup_started.set()
+                if not release_backup.wait(timeout=_STREAM_TEST_TIMEOUT):
+                    raise TimeoutError("test backup gate was not released")
+
+    class CandidatePipeline:
+        pipeline_name = "selling"
+        sidecar_status = None
+        sidecar_restore_result = None
+
+        def __init__(self) -> None:
+            self.session = SimpleNamespace(session_dir=tmp_path / "sidecar")
+            self.resume_prompts: list[str] = []
+
+        async def run(self, _prompt: str):
+            yield PipelineEvent(
+                type=PipelineEventType.USER_INPUT_REQUIRED,
+                step_id="selection",
+                timestamp=1717821601.0,
+                data={
+                    "kind": "candidate_selection",
+                    "prompt": "请选择方案",
+                    "options": [{"candidate_index": 0, "name": "方案 A"}],
+                },
+            )
+
+        async def resume(self, prompt: str):
+            self.resume_prompts.append(prompt)
+            yield PipelineEvent(
+                type=PipelineEventType.USER_INPUT_RECEIVED,
+                step_id="selection",
+                timestamp=1717821602.0,
+                data={"kind": "candidate_selection", "selected_index": 0},
+            )
+            yield PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=1717821603.0,
+                data={"total_steps": 1},
+            )
+
+        def should_switch_to_normal(self, _data: dict) -> bool:
+            return False
+
+    pipeline = CandidatePipeline()
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: pipeline)
+    monkeypatch.setattr(
+        "iac_code.a2a.pipeline_executor.create_agent_runtime",
+        lambda options: SimpleNamespace(provider_manager=object(), tool_registry=object()),
+    )
+    components = create_runtime_components(
+        model="qwen3.6-plus",
+        host="127.0.0.1",
+        port=41242,
+        backup_service=BlockingBackupService(),
+    )
+    dispatcher = A2AJsonRpcDispatcher(components)
+    first_events: list[dict] = []
+    second_events: list[dict] = []
+
+    async def consume_first_stream() -> None:
+        async for event in dispatcher.dispatch_stream(
+            {
+                "jsonrpc": "2.0",
+                "id": "first",
+                "method": "message/stream",
+                "params": {
+                    "message": {
+                        "messageId": "msg-first",
+                        "role": "user",
+                        "parts": [{"kind": "text", "text": "start"}],
+                        "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            }
+        ):
+            first_events.append(event)
+
+    first_task = asyncio.create_task(consume_first_stream())
+    assert await asyncio.to_thread(backup_started.wait, _STREAM_TEST_TIMEOUT)
+    identity = _active_task_identity(components)
+
+    async def consume_second_stream() -> None:
+        async for event in dispatcher.dispatch_stream(
+            {
+                "jsonrpc": "2.0",
+                "id": "second",
+                "method": "message/stream",
+                "params": {
+                    "message": {
+                        "messageId": "msg-second",
+                        "role": "user",
+                        "parts": [{"kind": "text", "text": '{"selected_candidate_index": 0}'}],
+                        "contextId": identity.context_id,
+                        "taskId": identity.task_id,
+                        "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            }
+        ):
+            second_events.append(event)
+
+    second_task = asyncio.create_task(consume_second_stream())
+    diagnostic: dict[str, object] = {}
+    try:
+        for _ in range(_STREAM_TEST_TIMEOUT * 100):
+            runtime = components.task_store._contexts[identity.context_id].runtime
+            if getattr(runtime, "pending_resume_input", None) is not None:
+                break
+            await asyncio.sleep(0.01)
+        else:
+            raise AssertionError("Candidate selection was not staged during the critical backup")
+        release_backup.set()
+        await asyncio.wait_for(asyncio.gather(first_task, second_task), timeout=_STREAM_TEST_TIMEOUT)
+        runtime = components.task_store._contexts[identity.context_id].runtime
+        task_record = components.task_store._tasks[identity.task_id]
+        diagnostic = {
+            "pending_resume_input": getattr(runtime, "pending_resume_input", None) is not None,
+            "pending_resume_error": repr(getattr(runtime, "pending_resume_error", None)),
+            "pending_resume_settled": getattr(runtime, "pending_resume_settled").is_set(),
+            "pending_resume_boundary_in_flight": getattr(runtime, "pending_resume_boundary_in_flight", None),
+            "restart_after_interrupt": getattr(runtime, "restart_after_interrupt", None),
+            "restart_requested": getattr(runtime, "restart_requested").is_set(),
+            "active_owner_done": getattr(runtime, "active_owner_task", None) is None
+            or getattr(runtime, "active_owner_task").done(),
+            "task_state": task_record.state,
+            "first_event_count": len(first_events),
+            "second_event_count": len(second_events),
+        }
+    finally:
+        release_backup.set()
+        for task in (first_task, second_task):
+            if not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+        await dispatcher.aclose()
+        await components.aclose()
+
+    event_types = [event["eventType"] for event in A2APipelineJournal(pipeline.session.session_dir).read_all()]
+    assert pipeline.resume_prompts == ['{"selected_candidate_index": 0}'], json.dumps(diagnostic, sort_keys=True)
+    assert "input_received" in event_types
+    assert not {"interrupt_received", "interrupt_classified"}.intersection(event_types)
+    assert first_events or second_events
 
 
 @pytest.mark.asyncio

@@ -404,12 +404,24 @@ function actionResultMessage(result = {}) {
     return "";
   }
   return [
-    result.accepted === true ? "accepted" : result.status,
-    result.action || result.message || result.detail,
+    result.accepted === true ? t("Accepted") : result.status,
+    result.message || result.detail || pipelineActionLabel(result.action),
   ]
     .map(text)
     .filter(Boolean)
     .join(" · ");
+}
+
+function pipelineActionLabel(action) {
+  return {
+    started: t("Pipeline started"),
+    candidate_selected: t("Candidate selected"),
+    interrupt: t("Interrupt submitted"),
+    permission_recovered: t("Permission recovered"),
+    confirm: t("Confirm deployment"),
+    reselect: t("Choose another solution"),
+    cancel: t("Cancel"),
+  }[text(action)] || "";
 }
 
 function renderPipelineNotice(container, state) {
@@ -536,6 +548,21 @@ function pipelineSessionId(state) {
   return text(state.currentSessionId || state.currentSession?.webSessionId || state.currentSession?.sessionId);
 }
 
+function pipelineName(state) {
+  const snapshot = state.pipelineSnapshot || {};
+  return text(
+    snapshot.pipelineName ||
+      snapshot.identity?.pipelineName ||
+      snapshot.display?.pipelineName ||
+      state.currentSession?.pipelineName ||
+      state.currentSession?.pipeline_name,
+  );
+}
+
+function isSolutionFirstPipeline(state) {
+  return pipelineName(state) === "selling_solution_first";
+}
+
 function parseParameterOverrides(value) {
   const trimmed = text(value).trim();
   if (!trimmed) {
@@ -545,10 +572,10 @@ function parseParameterOverrides(value) {
   try {
     parsed = JSON.parse(trimmed);
   } catch (_error) {
-    throw new Error("Parameter overrides must be a valid JSON object.");
+    throw new Error(t("Parameter overrides must be a valid JSON object."));
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Parameter overrides must be a valid JSON object.");
+    throw new Error(t("Parameter overrides must be a valid JSON object."));
   }
   return parsed;
 }
@@ -565,20 +592,23 @@ function renderCandidateActions(card, candidate, state, callbacks, isSelected) {
   const actions = document.createElement("div");
   actions.className = "pipeline-candidate-actions";
 
-  const overrides = document.createElement("details");
-  overrides.className = "pipeline-candidate-overrides-panel";
-  const overridesSummary = document.createElement("summary");
-  overridesSummary.textContent = t("Parameter overrides");
-
-  const label = document.createElement("label");
-  label.className = "pipeline-candidate-override-label";
-
   const textarea = document.createElement("textarea");
-  textarea.className = "pipeline-candidate-overrides";
-  textarea.rows = 3;
-  textarea.placeholder = '{"InstanceType":"ecs.g7.large"}';
-  label.append(textarea);
-  overrides.append(overridesSummary, label);
+  if (!isSolutionFirstPipeline(state)) {
+    const overrides = document.createElement("details");
+    overrides.className = "pipeline-candidate-overrides-panel";
+    const overridesSummary = document.createElement("summary");
+    overridesSummary.textContent = t("Parameter overrides");
+
+    const label = document.createElement("label");
+    label.className = "pipeline-candidate-override-label";
+
+    textarea.className = "pipeline-candidate-overrides";
+    textarea.rows = 3;
+    textarea.placeholder = '{"InstanceType":"ecs.g7.large"}';
+    label.append(textarea);
+    overrides.append(overridesSummary, label);
+    actions.append(overrides);
+  }
 
   const row = document.createElement("div");
   row.className = "pipeline-candidate-action-row";
@@ -616,7 +646,7 @@ function renderCandidateActions(card, candidate, state, callbacks, isSelected) {
       });
       card.className = "pipeline-candidate is-selected";
       button.textContent = t("Selected");
-      setCandidateActionStatus(status, actionResultMessage(result) || "accepted", "notice");
+      setCandidateActionStatus(status, actionResultMessage(result) || t("Accepted"), "notice");
     } catch (error) {
       button.disabled = false;
       setCandidateActionStatus(status, error instanceof Error ? error.message : String(error), "error");
@@ -627,8 +657,107 @@ function renderCandidateActions(card, candidate, state, callbacks, isSelected) {
   }
 
   row.append(button, status);
-  actions.append(overrides, row);
+  actions.append(row);
   card.append(actions);
+}
+
+function rawDeploymentConfirmationInput(state) {
+  const pending = state.pipelineSnapshot?.pendingInput || state.pipelineSnapshot?.control?.waitingInput;
+  if (!pending || pending.kind !== "deployment_confirmation" || !isSolutionFirstPipeline(state)) {
+    return null;
+  }
+  return pending;
+}
+
+export function deploymentConfirmationKey(state) {
+  const pending = rawDeploymentConfirmationInput(state);
+  if (!pending) {
+    return "";
+  }
+  return text(pending.eventId || pending.inputId || `${text(pending.runId)}:${text(pending.createdAt)}`);
+}
+
+function deploymentConfirmationInput(state) {
+  const pending = rawDeploymentConfirmationInput(state);
+  const pendingKey = deploymentConfirmationKey(state);
+  if (pendingKey && pendingKey === text(state.pipelineConfirmationSubmittingKey)) {
+    return null;
+  }
+  return pending;
+}
+
+export function renderDeploymentConfirmationPanel(state, callbacks = {}) {
+  const pending = deploymentConfirmationInput(state);
+  if (!pending) {
+    return null;
+  }
+
+  const section = document.createElement("section");
+  section.className = "pipeline-deployment-confirmation blocking-panel blocking-panel-question";
+  const title = document.createElement("h3");
+  title.textContent = text(pending.prompt) || t("Summary");
+  section.append(title);
+
+  const list = document.createElement("div");
+  list.className = "blocking-option-list pipeline-deployment-confirmation-actions";
+  const status = document.createElement("p");
+  status.className = "pipeline-candidate-action-status";
+  const options = asArray(pending.options).filter((option) =>
+    ["confirm", "reselect", "cancel"].includes(text(option?.action)),
+  );
+  options.forEach((option, index) => {
+    const action = text(option.action);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `blocking-option-row pipeline-deployment-confirmation-${action}`;
+    const badge = document.createElement("span");
+    badge.className = "blocking-option-index";
+    badge.textContent = String(index + 1);
+    const label = document.createElement("span");
+    label.className = "blocking-option-label";
+    label.textContent = text(option.name) || pipelineActionLabel(action) || t("Action");
+    button.append(badge, label);
+    const description = text(option.summary || option.description);
+    if (description) {
+      const detail = document.createElement("span");
+      detail.className = "blocking-option-desc";
+      detail.textContent = description;
+      button.append(detail);
+    }
+    button.disabled = typeof callbacks.onDeploymentConfirmation !== "function" || !pipelineSessionId(state);
+    button.addEventListener("click", async () => {
+      const parameterOverrides =
+        action === "confirm" && (pending.parameter_overrides || pending.parameterOverrides)
+          ? { ...(pending.parameter_overrides || pending.parameterOverrides) }
+          : {};
+      for (const item of list.querySelectorAll("button")) {
+        item.disabled = true;
+      }
+      status.textContent = t("Submitting...");
+      try {
+        await callbacks.onDeploymentConfirmation({
+          sessionId: pipelineSessionId(state),
+          action,
+          parameterOverrides,
+        });
+      } catch (error) {
+        for (const item of list.querySelectorAll("button")) {
+          item.disabled = false;
+        }
+        setCandidateActionStatus(status, error instanceof Error ? error.message : String(error), "error");
+      }
+    });
+    list.append(button);
+  });
+  section.append(list, status);
+  return section;
+}
+
+function renderDeploymentConfirmation(container, state, callbacks) {
+  const panel = renderDeploymentConfirmationPanel(state, callbacks);
+  if (panel) {
+    container.append(panel);
+  }
 }
 
 function appendCandidateDiagram(card, candidate, diagrams) {
@@ -1135,6 +1264,7 @@ export function renderPipelineWorkspace(state = {}, callbacks = {}) {
   renderDiagnostics(leftColumn, renderState);
   renderStepper(leftColumn, renderState);
   renderDisplayReplay(rightColumn, renderState);
+  renderDeploymentConfirmation(rightColumn, renderState, callbacks);
   renderCandidates(rightColumn, renderState, callbacks);
   renderDiagrams(rightColumn, renderState);
   renderProgress(rightColumn, renderState);

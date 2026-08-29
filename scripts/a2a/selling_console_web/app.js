@@ -1,10 +1,38 @@
 (function () {
-  const STEP_ORDER = ["intent_parsing", "architecture_planning", "evaluate_candidates", "confirm_and_select", "deploying"];
+  // 控制台按 A2A envelope/snapshot 的顶层 pipelineName 选择时间线 profile。
+  // 未知或缺失的 pipelineName 一律回落到旧 selling 五步映射,保持既有行为不变。
+  const DEFAULT_PIPELINE_NAME = "selling";
+  const PIPELINE_STEP_PROFILES = {
+    selling: {
+      name: "selling",
+      order: ["intent_parsing", "architecture_planning", "evaluate_candidates", "confirm_and_select", "deploying"],
+      candidateSelectionStepId: "confirm_and_select",
+      // 候选卡挂在产出候选的那个步骤上:旧 selling 是 evaluate_candidates。
+      candidateCardStepId: "evaluate_candidates",
+      // 旧 selling 把候选评估放在 candidate sub-pipeline 里,子步骤 id 需要归并到 evaluate_candidates。
+      candidateSubPipelineAlias: true,
+    },
+    selling_solution_first: {
+      name: "selling_solution_first",
+      order: ["solution_planning_and_selection", "materialize_selected_candidate", "deploying"],
+      candidateSelectionStepId: "solution_planning_and_selection",
+      // 新 pipeline 的候选由 Step 1 产出并在同一步完成选择。
+      candidateCardStepId: "solution_planning_and_selection",
+      // 新 pipeline 三个顶层步骤都是普通 Step,没有 candidate sub-pipeline;
+      // 且 materialize_selected_candidate 含 "candidate" 子串,绝不能走 alias 归并。
+      candidateSubPipelineAlias: false,
+    },
+  };
+  const STEP_ORDER = PIPELINE_STEP_PROFILES[DEFAULT_PIPELINE_NAME].order;
+  // 控制台页面是 zh-CN 单语言(index.html lang="zh-CN"),因此标签只提供中文;
+  // step id 全局唯一,两个 pipeline 共用同一张回落标签表。
   const STEP_LABELS = {
     intent_parsing: "需求理解",
     architecture_planning: "架构规划",
     evaluate_candidates: "方案评估",
     confirm_and_select: "方案选择",
+    solution_planning_and_selection: "方案规划与选择",
+    materialize_selected_candidate: "实现选中方案",
     deploying: "确认部署",
   };
   const PROGRESS_VARIANT_ORDER = ["a", "b", "d"];
@@ -85,8 +113,41 @@
     "resource_evaluation",
   ]);
 
-  function createSteps() {
-    return STEP_ORDER.reduce((steps, stepId) => {
+  function pipelineProfile(pipelineName) {
+    const known =
+      typeof pipelineName === "string" && Object.prototype.hasOwnProperty.call(PIPELINE_STEP_PROFILES, pipelineName)
+        ? PIPELINE_STEP_PROFILES[pipelineName]
+        : null;
+    return known || PIPELINE_STEP_PROFILES[DEFAULT_PIPELINE_NAME];
+  }
+
+  function stateProfile(state) {
+    return pipelineProfile(state && state.pipelineName);
+  }
+
+  function stepOrderOf(state) {
+    return stateProfile(state).order;
+  }
+
+  function knownPipelineNameOf(source) {
+    const value = valueOf(source, "pipelineName", "pipeline_name");
+    return typeof value === "string" && Object.prototype.hasOwnProperty.call(PIPELINE_STEP_PROFILES, value) ? value : "";
+  }
+
+  function adoptPipelineName(state, pipelineName) {
+    if (!state || !pipelineName || pipelineName === state.pipelineName) {
+      return;
+    }
+    // pipeline 身份在一次运行内不变(每个 envelope 与 snapshot 都带同一个 pipelineName),
+    // 因此这里只在首次识别或换到另一个已知 profile 时重建 step 骨架。
+    state.pipelineName = pipelineName;
+    state.steps = createSteps(pipelineName);
+    state.currentStepId = "";
+    state.progressUi = mergeProgressUi(state.progressUi, pipelineName);
+  }
+
+  function createSteps(pipelineName) {
+    return pipelineProfile(pipelineName).order.reduce((steps, stepId) => {
       steps[stepId] = {
         id: stepId,
         label: STEP_LABELS[stepId],
@@ -107,15 +168,16 @@
     }, {});
   }
 
-  function mergeProgressUi(value) {
+  function mergeProgressUi(value, pipelineName) {
     const source = value && typeof value === "object" ? value : {};
+    const stepCount = pipelineProfile(pipelineName).order.length;
     const variant = PROGRESS_VARIANT_ORDER.includes(source.variant) ? source.variant : DEFAULT_PROGRESS_UI.variant;
     const rawActiveStepIndex =
       source.activeStepIndex === null || source.activeStepIndex === undefined ? null : Number(source.activeStepIndex);
     return {
       variant,
       activeStepIndex:
-        Number.isInteger(rawActiveStepIndex) && rawActiveStepIndex >= 0 && rawActiveStepIndex < STEP_ORDER.length
+        Number.isInteger(rawActiveStepIndex) && rawActiveStepIndex >= 0 && rawActiveStepIndex < stepCount
           ? rawActiveStepIndex
           : null,
       a: mergeProgressParams("a", source.a),
@@ -126,8 +188,10 @@
 
   function createInitialState(defaults = {}) {
     const stateDefaults = clonePlainData(defaults && typeof defaults === "object" ? defaults : {});
+    const pipelineName = knownPipelineNameOf(stateDefaults) || DEFAULT_PIPELINE_NAME;
     return {
       defaults: stateDefaults,
+      pipelineName,
       serverUrl: stateDefaults.serverUrl || "",
       cwd: stateDefaults.cwd || "",
       iacCodeModel: stateDefaults.iacCodeModel || "",
@@ -139,7 +203,7 @@
       status: "idle",
       pipelineStarted: Boolean(stateDefaults.pipelineStarted),
       normalHandoffReady: false,
-      steps: createSteps(),
+      steps: createSteps(pipelineName),
       candidates: [],
       selectedCandidateIndex: null,
       selectedPendingInputOptionId: stateDefaults.selectedPendingInputOptionId || "",
@@ -151,7 +215,7 @@
       expandedStepDetails: clonePlainData(stateDefaults.expandedStepDetails || {}),
       expandedCandidateSubpipelines: clonePlainData(stateDefaults.expandedCandidateSubpipelines || {}),
       expandedNormalProcesses: clonePlainData(stateDefaults.expandedNormalProcesses || {}),
-      progressUi: mergeProgressUi(stateDefaults.progressUi),
+      progressUi: mergeProgressUi(stateDefaults.progressUi, pipelineName),
       diagnostics: { requests: [], sse: [], snapshots: [] },
     };
   }
@@ -209,14 +273,16 @@
     if (!state) {
       return createInitialState();
     }
+    const pipelineName = stateProfile(state).name;
     const steps = {};
-    const defaultSteps = createSteps();
-    STEP_ORDER.forEach((stepId) => {
+    const defaultSteps = createSteps(pipelineName);
+    stepOrderOf(state).forEach((stepId) => {
       steps[stepId] = cloneStep(state.steps && state.steps[stepId] ? state.steps[stepId] : defaultSteps[stepId]);
     });
     return {
       ...state,
       defaults: clonePlainData(state.defaults || {}),
+      pipelineName,
       steps,
       candidates: Array.isArray(state.candidates) ? state.candidates.map(cloneCandidate) : [],
       selectedPendingInputOptionId: state.selectedPendingInputOptionId || "",
@@ -230,7 +296,7 @@
       expandedCandidateSubpipelines: clonePlainData(state.expandedCandidateSubpipelines || {}),
       expandedNormalProcesses: clonePlainData(state.expandedNormalProcesses || {}),
       pipelineStarted: Boolean(state.pipelineStarted),
-      progressUi: mergeProgressUi(state.progressUi),
+      progressUi: mergeProgressUi(state.progressUi, state.pipelineName),
       diagnostics: cloneDiagnostics(state.diagnostics),
     };
   }
@@ -391,17 +457,23 @@
     return statuses[eventType] || normalizeStatus(fallbackStatus);
   }
 
-  function normalizeStepId(step) {
+  function normalizeStepId(step, pipelineName) {
     const rawStepId = typeof step === "string" ? step : step && (step.id || step.name || step.stepId);
     if (!rawStepId) {
       return "";
     }
     const stepId = String(rawStepId);
-    if (CANDIDATE_STEP_IDS.has(stepId) || stepId.startsWith("candidate_") || stepId.includes("candidate")) {
-      return "evaluate_candidates";
-    }
-    if (STEP_ORDER.includes(stepId)) {
+    const profile = pipelineProfile(pipelineName);
+    // 先对当前 pipeline 的顶层步骤做精确匹配:selling_solution_first 的
+    // materialize_selected_candidate 含 "candidate" 子串,先归并会被误写成 evaluate_candidates。
+    if (profile.order.includes(stepId)) {
       return stepId;
+    }
+    if (
+      profile.candidateSubPipelineAlias &&
+      (CANDIDATE_STEP_IDS.has(stepId) || stepId.startsWith("candidate_") || stepId.includes("candidate"))
+    ) {
+      return "evaluate_candidates";
     }
     return stepId;
   }
@@ -851,6 +923,7 @@
     if (!snapshot || typeof snapshot !== "object") {
       return state;
     }
+    adoptPipelineName(state, knownPipelineNameOf(snapshot));
     const taskId = taskIdOf(snapshot);
     if (taskId) {
       state.pipelineTaskId = taskId;
@@ -869,7 +942,7 @@
 
     if (Array.isArray(snapshot.steps)) {
       snapshot.steps.forEach((step) => {
-        const stepId = normalizeStepId(step);
+        const stepId = normalizeStepId(step, state.pipelineName);
         if (stepId && state.steps[stepId]) {
           const status = normalizeStatus(step.status) || state.steps[stepId].status;
           state.steps[stepId].status = status;
@@ -916,7 +989,7 @@
     if (state && state.currentStepId && state.steps && state.steps[state.currentStepId] && isActive(state.currentStepId)) {
       return state.currentStepId;
     }
-    const activeStepId = STEP_ORDER.find((stepId) => isActive(stepId));
+    const activeStepId = stepOrderOf(state).find((stepId) => isActive(stepId));
     return activeStepId || "";
   }
 
@@ -934,6 +1007,7 @@
     if (!envelope) {
       return state;
     }
+    adoptPipelineName(state, knownPipelineNameOf(envelope));
     const eventType = eventTypeOf(envelope);
     const taskId = taskIdOf(envelope);
     if (taskId) {
@@ -948,7 +1022,7 @@
       state.status = normalizeStatus(envelope.status);
     }
 
-    const explicitStepId = normalizeStepId(envelope.step);
+    const explicitStepId = normalizeStepId(envelope.step, state.pipelineName);
     const stepId = inferredStepIdForEvent(state, envelope, explicitStepId);
     if (eventType === "pipeline_started" || stepId) {
       state.pipelineStarted = true;
@@ -1421,6 +1495,9 @@
   window.SellingConsoleReducers = {
     STEP_ORDER,
     STEP_LABELS,
+    DEFAULT_PIPELINE_NAME,
+    PIPELINE_STEP_PROFILES,
+    pipelineProfile,
     createInitialState,
     extractPipelineEnvelope,
     extractPipelineEnvelopes,
@@ -1439,6 +1516,8 @@
     architecture_planning: "拆解网络、计算、存储与安全资源拓扑。",
     evaluate_candidates: "比较规格、可用区、成本与运维复杂度。",
     confirm_and_select: "确认推荐方案并准备转入标准部署流程。",
+    solution_planning_and_selection: "理解需求、规划架构并给出带粗估价格的候选方案供选择。",
+    materialize_selected_candidate: "只为选中方案生成模板、求解参数、预览并精确询价。",
     deploying: "复核资源清单、交付方式与后续部署动作。",
   };
   const CONCLUSION_FIELD_LABELS = {
@@ -2261,10 +2340,10 @@
   }
 
   function renderStepCandidateResults(detail, step) {
-    if (!step || step.id !== "evaluate_candidates") {
+    const state = ensureState();
+    if (!step || step.id !== stateProfile(state).candidateCardStepId) {
       return false;
     }
-    const state = ensureState();
     const candidates = Array.isArray(state.candidates) ? state.candidates : [];
     if (candidates.length === 0) {
       return false;
@@ -2378,7 +2457,8 @@
         appendChild(card, detail);
         return;
       }
-      const handledByCandidateSummary = step.id === "evaluate_candidates" && renderStepCandidateProgress(detail);
+      const handledByCandidateSummary =
+        step.id === stateProfile(ensureState()).candidateCardStepId && renderStepCandidateProgress(detail);
       if (!handledByCandidateSummary) {
         const events = compactDisplayEvents(Array.isArray(step.events) ? step.events : []);
         const eventList = createElement("ul", "step-event-list");
@@ -2477,6 +2557,9 @@
     if (kind === "ask_user_question") {
       return "需要您确认";
     }
+    if (kind === "deployment_confirmation") {
+      return "确认部署方案";
+    }
     return "需要您处理";
   }
 
@@ -2487,7 +2570,8 @@
   }
 
   function pendingOptionId(option, index) {
-    const rawId = option && (option.id ?? option.value ?? option.candidateIndex ?? option.candidate_index ?? index);
+    const rawId =
+      option && (option.id ?? option.value ?? option.action ?? option.candidateIndex ?? option.candidate_index ?? index);
     return rawId === null || rawId === undefined ? String(index) : String(rawId);
   }
 
@@ -2555,6 +2639,31 @@
       renderAll();
       return;
     }
+    if (kind === "deployment_confirmation") {
+      const action = option && option.action ? String(option.action) : optionId;
+      let parameterOverrides =
+        pendingInput.parameter_overrides && typeof pendingInput.parameter_overrides === "object"
+          ? pendingInput.parameter_overrides
+          : {};
+      const overridesInput = byId("deployment-parameter-overrides");
+      if (overridesInput && "value" in overridesInput && String(overridesInput.value || "").trim()) {
+        try {
+          const parsed = JSON.parse(String(overridesInput.value));
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new Error("参数覆盖必须是 JSON 对象");
+          }
+          parameterOverrides = parsed;
+        } catch (error) {
+          showStatus(`参数覆盖格式错误：${errorMessage(error)}`, "error");
+          return;
+        }
+      }
+      if (composer && "value" in composer) {
+        composer.value = JSON.stringify({ action, parameter_overrides: parameterOverrides });
+      }
+      renderAll();
+      return;
+    }
     if (candidateIndex !== null && candidateIndex !== undefined) {
       controller.state = selectCandidate(state, candidateIndex);
       controller.state.selectedPendingInputOptionId = optionId;
@@ -2578,6 +2687,36 @@
     }
     appendChild(card, createElement("h2", "", pendingInputKindLabel(kind)));
     appendChild(card, renderMarkdownText(pendingInputPrompt(pendingInput), "pending-input-prompt"));
+    if (kind === "deployment_confirmation") {
+      const solutionSummary = pendingInput.solution_summary || pendingInput.solutionSummary || "";
+      if (solutionSummary) {
+        appendChild(card, renderMarkdownText(solutionSummary, "pending-input-solution-summary"));
+      }
+      const cost = pendingInput.cost && typeof pendingInput.cost === "object" ? pendingInput.cost : {};
+      const monthlyEstimate = cost.monthly_estimate || cost.monthlyEstimate || "";
+      if (monthlyEstimate) {
+        appendChild(card, createElement("p", "pending-input-price", `ROS 询价：${monthlyEstimate}`));
+      }
+      const resources = Array.isArray(cost.resources) ? cost.resources : [];
+      if (resources.length > 0) {
+        const costList = createElement("ul", "pending-input-cost-list");
+        resources.forEach((resource) => {
+          appendChild(
+            costList,
+            createElement("li", "", [resource.type, resource.spec, resource.cost].filter(Boolean).join(" · ")),
+          );
+        });
+        appendChild(card, costList);
+      }
+      const overrides = createElement("textarea", "pending-input-parameter-overrides");
+      if (overrides) {
+        overrides.setAttribute("id", "deployment-parameter-overrides");
+        overrides.setAttribute("rows", "5");
+        overrides.setAttribute("aria-label", "部署参数覆盖（JSON）");
+        overrides.value = JSON.stringify(pendingInput.parameter_overrides || pendingInput.parameterOverrides || {}, null, 2);
+      }
+      appendChild(card, overrides);
+    }
     const options = Array.isArray(pendingInput.options) ? pendingInput.options : [];
     if (options.length > 0) {
       const optionList = createElement("div", "pending-input-options");
@@ -2662,8 +2801,8 @@
   }
 
   function stepModelsForProgress(state, ui, options = {}) {
-    const steps = STEP_ORDER.map((stepId, index) => {
-      const step = state.steps && state.steps[stepId] ? state.steps[stepId] : createSteps()[stepId];
+    const steps = stepOrderOf(state).map((stepId, index) => {
+      const step = state.steps && state.steps[stepId] ? state.steps[stepId] : createSteps(state.pipelineName)[stepId];
       const status = stepStatusClass(normalizeStatus(step.status) || "pending");
       return {
         id: stepId,
@@ -2839,6 +2978,8 @@
     const shell = createElement("div", "fusion-label");
     if (shell) {
       shell.setAttribute("data-active-index", String(activeIndex));
+      // 步骤数随 pipeline profile 变化,动画阶段直接读渲染时的权威计数。
+      shell.setAttribute("data-step-count", String(models.steps.length));
       shell.setAttribute("style", `--fusion-sweep-duration: ${params.t1}ms;`);
     }
     const steps = createElement("div", "fusion-steps");
@@ -3056,10 +3197,10 @@
       return { position: "after_normal_handoff" };
     }
     if (state && pendingInputIsCandidateSelection(state.pendingInput)) {
-      return { position: "after_step", afterStepId: "confirm_and_select" };
+      return { position: "after_step", afterStepId: stateProfile(state).candidateSelectionStepId };
     }
     const steps = (state && state.steps) || {};
-    const activeStepId = STEP_ORDER.find((stepId) => {
+    const activeStepId = stepOrderOf(state).find((stepId) => {
       const status = stepStatusClass(normalizeStatus(steps[stepId] && steps[stepId].status));
       return status === "working" || status === "waiting_input";
     });
@@ -3078,8 +3219,8 @@
     clearElement(stepList);
     const renderedUserMessages = new Set();
     renderUserMessages(stepList, state, "start", "", renderedUserMessages);
-    STEP_ORDER.forEach((stepId, index) => {
-      const step = state.steps && state.steps[stepId] ? state.steps[stepId] : createSteps()[stepId];
+    stepOrderOf(state).forEach((stepId, index) => {
+      const step = state.steps && state.steps[stepId] ? state.steps[stepId] : createSteps(state.pipelineName)[stepId];
       if (!stepIsVisible(step)) {
         return;
       }
@@ -3141,7 +3282,7 @@
       return;
     }
     clearElement(progress);
-    const ui = mergeProgressUi(state.progressUi);
+    const ui = mergeProgressUi(state.progressUi, state.pipelineName);
     state.progressUi = ui;
     const isDebugPreview = debugDrawerIsOpen();
     if (!isDebugPreview && !state.pipelineStarted) {
@@ -3190,6 +3331,8 @@
       return;
     }
     const activeIndex = Number(label.getAttribute("data-active-index"));
+    const renderedStepCount = Number(label.getAttribute("data-step-count"));
+    const stepCount = Number.isInteger(renderedStepCount) && renderedStepCount > 0 ? renderedStepCount : STEP_ORDER.length;
     const timing = ui.d;
 
     const percent = (value) => `${Math.max(0, Math.min(100, value)).toFixed(2)}%`;
@@ -3207,7 +3350,7 @@
       const activeEnd = ((activeRect.right - labelRect.left) / labelRect.width) * 100;
       const blueStart = activeIndex === 0 ? 0 : activeStart;
       const greenEnd = activeIndex === 0 ? 0 : activeStart;
-      const blueEnd = activeIndex === STEP_ORDER.length - 1 ? 100 : activeEnd;
+      const blueEnd = activeIndex === stepCount - 1 ? 100 : activeEnd;
       label.style.setProperty("--fusion-green-end", percent(greenEnd));
       label.style.setProperty("--fusion-blue-start", percent(blueStart));
       label.style.setProperty("--fusion-blue-end", percent(blueEnd));
@@ -3405,7 +3548,8 @@
     if (!progress || progress.hidden) {
       return;
     }
-    const ui = mergeProgressUi(ensureState().progressUi);
+    const animationState = ensureState();
+    const ui = mergeProgressUi(animationState.progressUi, animationState.pipelineName);
     if (progress.getAttribute("data-progress-variant") === "b") {
       startSignalProgressAnimation(progress, ui);
     }
@@ -3768,7 +3912,7 @@
 
   function setProgressVariant(variant) {
     const state = ensureState();
-    const ui = mergeProgressUi(state.progressUi);
+    const ui = mergeProgressUi(state.progressUi, state.pipelineName);
     if (PROGRESS_VARIANT_ORDER.includes(variant)) {
       ui.variant = variant;
     }
@@ -3778,7 +3922,7 @@
 
   function setProgressParam(variant, key, value) {
     const state = ensureState();
-    const ui = mergeProgressUi(state.progressUi);
+    const ui = mergeProgressUi(state.progressUi, state.pipelineName);
     if (!PROGRESS_VARIANT_ORDER.includes(variant) || !Object.prototype.hasOwnProperty.call(ui[variant], key)) {
       return;
     }
@@ -3792,9 +3936,10 @@
 
   function setProgressStep(index) {
     const state = ensureState();
-    const ui = mergeProgressUi(state.progressUi);
+    const ui = mergeProgressUi(state.progressUi, state.pipelineName);
     const numericIndex = Number(index);
-    ui.activeStepIndex = Number.isInteger(numericIndex) && numericIndex >= 0 && numericIndex < STEP_ORDER.length ? numericIndex : null;
+    const stepCount = stepOrderOf(state).length;
+    ui.activeStepIndex = Number.isInteger(numericIndex) && numericIndex >= 0 && numericIndex < stepCount ? numericIndex : null;
     state.progressUi = ui;
     renderAll();
   }
@@ -3805,7 +3950,7 @@
       return;
     }
     const state = ensureState();
-    const ui = mergeProgressUi(state.progressUi);
+    const ui = mergeProgressUi(state.progressUi, state.pipelineName);
     state.progressUi = ui;
     clearElement(panel);
 
@@ -3831,13 +3976,14 @@
     const stepControl = createElement("div", "demo-step-control progress-demo-step-control");
     const stepLabel = createElement("label");
     appendChild(stepLabel, createElement("span", "", "演示 Step"));
-    appendChild(stepLabel, createElement("output", "", STEP_LABELS[STEP_ORDER[activeIndex]]));
+    const debugStepOrder = stepOrderOf(state);
+    appendChild(stepLabel, createElement("output", "", STEP_LABELS[debugStepOrder[activeIndex]]));
     appendChild(stepControl, stepLabel);
     const stepSwitch = createElement("div", "step-switch");
     if (stepSwitch) {
       stepSwitch.setAttribute("aria-label", "进度条演示当前步骤");
     }
-    STEP_ORDER.forEach((stepId, index) => {
+    debugStepOrder.forEach((stepId, index) => {
       const button = createElement("button", index === activeIndex ? "active" : "", String(index + 1));
       if (button) {
         button.setAttribute("type", "button");

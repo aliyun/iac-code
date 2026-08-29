@@ -69,6 +69,8 @@ La zona de redacción es donde escribes tus solicitudes. Ofrece los mismos contr
 
 Una sesión se ejecuta como chat normal o en modo **canalización** (pipeline). El chat normal transmite en línea las respuestas del asistente, las llamadas a herramientas y los resultados. El modo canalización añade un espacio de trabajo que muestra las líneas de tiempo de los pasos, los diagnósticos, los diagramas, el progreso del despliegue, la limpieza y los detalles de traspaso a medida que se ejecuta la canalización. Consulta [Modo canalización](./automation/pipeline-mode.md) para saber qué hacen las canalizaciones.
 
+La [canalización `selling_solution_first`](./automation/solution-first-pipeline.md) usa este espacio de trabajo para un proceso de compra en tres etapas: comparar arquitecturas candidatas, implementar la solución elegida y desplegarla tras la confirmación. Las aprobaciones de herramientas aparecen como tarjetas de permiso localizadas bajo el paso que las solicitó; las aprobaciones pendientes vuelven al mismo paso al restaurar la sesión.
+
 ### Herramientas y aprobaciones
 
 Las llamadas a herramientas se muestran como tarjetas dentro de la transcripción. Cuando una herramienta requiere tu aprobación, aparece una solicitud de aprobación en línea; el modo de permisos definido en la zona de redacción determina cuándo se te consulta.

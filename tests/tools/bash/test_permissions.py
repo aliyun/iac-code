@@ -5,7 +5,16 @@ from iac_code.tools.bash.permissions import bash_tool_check_permission, bash_too
 from iac_code.types.permissions import PermissionMode, ToolPermissionContext
 
 
-def _ctx(mode=PermissionMode.DEFAULT, allow=None, deny=None, ask=None, cwd="/project", trusted_read_directories=None):
+def _ctx(
+    mode=PermissionMode.DEFAULT,
+    allow=None,
+    deny=None,
+    ask=None,
+    cwd="/project",
+    trusted_read_directories=None,
+    strict_read_directories=None,
+    read_path_violation_behavior="ask",
+):
     return ToolPermissionContext(
         mode=mode,
         cwd=cwd,
@@ -13,6 +22,8 @@ def _ctx(mode=PermissionMode.DEFAULT, allow=None, deny=None, ask=None, cwd="/pro
         deny_rules=deny or {},
         ask_rules=ask or {},
         trusted_read_directories=trusted_read_directories or [],
+        strict_read_directories=strict_read_directories or [],
+        read_path_violation_behavior=read_path_violation_behavior,
     )
 
 
@@ -418,3 +429,148 @@ class TestIsComplexPermission:
         cmd = SimpleCommand(text="docker build .", argv=["docker", "build", "."], is_complex=False)
         r = bash_tool_check_permission(cmd, _ctx())
         assert r.behavior == "passthrough"
+
+
+class TestBashBlanketAllow:
+    @pytest.mark.asyncio
+    async def test_double_wildcard_allows_complex_command(self):
+        ctx = _ctx(allow={"project_settings": ["bash(**)"]})
+
+        result = await bash_tool_has_permission("echo $(whoami)", ctx)
+
+        assert result.behavior == "allow"
+        assert result.audit is not None
+        assert result.audit.rule_source == "project_settings"
+        assert result.audit.rule == "bash(**)"
+        assert result.audit.operation == {"is_read_only": False, "blanket_bash_allow": True}
+
+    @pytest.mark.asyncio
+    async def test_single_wildcard_keeps_complex_confirmation(self):
+        ctx = _ctx(allow={"project_settings": ["bash(*)"]})
+
+        result = await bash_tool_has_permission("echo $(whoami)", ctx)
+
+        assert result.behavior == "ask"
+        assert result.reason is not None
+        assert result.reason.type == "complex_command"
+
+    @pytest.mark.asyncio
+    async def test_double_wildcard_allows_parse_error_outside_safe_mode(self):
+        ctx = _ctx(allow={"user_settings": ["bash(**)"]})
+
+        result = await bash_tool_has_permission("cat <> /etc/passwd", ctx)
+
+        assert result.behavior == "allow"
+
+    @pytest.mark.asyncio
+    async def test_double_wildcard_allows_compound_guard_outside_safe_mode(self):
+        ctx = _ctx(allow={"local_settings": ["bash(**)"]})
+
+        result = await bash_tool_has_permission("cd one && cd two && git status", ctx)
+
+        assert result.behavior == "allow"
+        assert result.audit is not None
+        assert result.audit.rule_source == "local_settings"
+
+    @pytest.mark.asyncio
+    async def test_double_wildcard_does_not_override_explicit_deny(self):
+        ctx = _ctx(
+            allow={"user_settings": ["bash(**)"]},
+            deny={"project_settings": ["bash(rm:*)"]},
+        )
+
+        result = await bash_tool_has_permission("echo ok && rm file.txt", ctx)
+
+        assert result.behavior == "deny"
+
+    @pytest.mark.asyncio
+    async def test_double_wildcard_does_not_override_explicit_ask(self):
+        ctx = _ctx(
+            allow={"user_settings": ["bash(**)"]},
+            ask={"project_settings": ["bash(echo:*)"]},
+        )
+
+        result = await bash_tool_has_permission("echo $(whoami)", ctx)
+
+        assert result.behavior == "ask"
+        assert result.reason is not None
+        assert result.reason.type == "rule"
+
+    @pytest.mark.asyncio
+    async def test_session_double_wildcard_is_not_blanket_permission(self):
+        ctx = _ctx(allow={"session": ["bash(**)"]})
+
+        result = await bash_tool_has_permission("echo $(whoami)", ctx)
+
+        assert result.behavior == "ask"
+        assert result.reason is not None
+        assert result.reason.type == "complex_command"
+
+    @pytest.mark.asyncio
+    async def test_double_wildcard_keeps_basic_command_safety_check(self):
+        ctx = _ctx(allow={"user_settings": ["bash(**)"]})
+
+        result = await bash_tool_has_permission("echo 'unterminated", ctx)
+
+        assert result.behavior == "ask"
+        assert result.reason is not None
+        assert result.reason.type == "safety_check"
+
+    @pytest.mark.asyncio
+    async def test_safe_mode_strict_read_root_denies_blanket_read(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        outside = tmp_path / "outside.txt"
+        outside.write_text("secret", encoding="utf-8")
+        ctx = _ctx(
+            cwd=str(workspace),
+            allow={"user_settings": ["bash(**)"]},
+            strict_read_directories=[str(workspace)],
+            read_path_violation_behavior="deny",
+        )
+
+        result = await bash_tool_has_permission("cat {}".format(outside), ctx)
+
+        assert result.behavior == "deny"
+        assert result.reason is not None
+        assert result.reason.type == "path_constraint"
+
+    @pytest.mark.asyncio
+    async def test_safe_mode_keeps_unanalyzable_command_confirmation(self, tmp_path):
+        ctx = _ctx(
+            cwd=str(tmp_path),
+            allow={"user_settings": ["bash(**)"]},
+            strict_read_directories=[str(tmp_path)],
+            read_path_violation_behavior="deny",
+        )
+
+        result = await bash_tool_has_permission("cat <> /etc/passwd", ctx)
+
+        assert result.behavior == "ask"
+        assert result.reason is not None
+        assert result.reason.type == "parse_error"
+
+    @pytest.mark.asyncio
+    async def test_safe_mode_keeps_complex_command_confirmation(self, tmp_path):
+        ctx = _ctx(
+            cwd=str(tmp_path),
+            allow={"user_settings": ["bash(**)"]},
+            strict_read_directories=[str(tmp_path)],
+            read_path_violation_behavior="deny",
+        )
+
+        result = await bash_tool_has_permission("echo $(whoami)", ctx)
+
+        assert result.behavior == "ask"
+        assert result.reason is not None
+        assert result.reason.type == "complex_command"
+
+    @pytest.mark.asyncio
+    async def test_cli_double_wildcard_is_blanket_permission(self):
+        ctx = _ctx(allow={"cli_arg": ["bash(**)"]})
+
+        result = await bash_tool_has_permission("source .venv/bin/activate && pytest -q", ctx)
+
+        assert result.behavior == "allow"
+        assert result.audit is not None
+        assert result.audit.rule_source == "cli_arg"

@@ -51,6 +51,7 @@ def validate_hard_constraint_checks(
     *,
     tool_result_records: list[Any] | None = None,
     validate_tool_records: bool = True,
+    evidence_contract: str | None = None,
 ) -> list[ConstraintValidationIssue]:
     """Validate coverage and accept each constraint when either LLM or code verification succeeds."""
 
@@ -99,8 +100,12 @@ def validate_hard_constraint_checks(
 
         parameter_values = check.get("parameter_values")
         if not isinstance(parameter_values, dict):
-            issues.append(ConstraintValidationIssue("invalid_constraint_parameter_values", constraint_id))
-            continue
+            issue = ConstraintValidationIssue("invalid_constraint_parameter_values", constraint_id)
+            if evidence_contract == "v2":
+                code_issues.append(issue)
+            else:
+                issues.append(issue)
+                continue
         else:
             for name, value in parameter_values.items():
                 if name not in deployment_parameters or not _values_equal(deployment_parameters[name], value):
@@ -110,8 +115,13 @@ def validate_hard_constraint_checks(
 
         evidence = check.get("evidence")
         if not isinstance(evidence, list) or not evidence:
-            issues.append(ConstraintValidationIssue("missing_constraint_evidence", constraint_id))
-            continue
+            issue = ConstraintValidationIssue("missing_constraint_evidence", constraint_id)
+            if evidence_contract == "v2":
+                code_issues.append(issue)
+            else:
+                issues.append(issue)
+                continue
+            evidence = []
         matching_evidence = [
             item
             for item in evidence
@@ -126,11 +136,19 @@ def validate_hard_constraint_checks(
             elif not any(_values_equal(item.get("actual_value"), actual_value) for item in tool_evidence):
                 code_issues.append(ConstraintValidationIssue("tool_evidence_value_mismatch", constraint_id))
         if validate_tool_records:
-            code_issues.extend(_validate_tool_evidence(constraint_id, tool_evidence, tool_result_records or []))
+            code_issues.extend(
+                _validate_tool_evidence(
+                    constraint_id,
+                    tool_evidence,
+                    tool_result_records or [],
+                    evidence_contract=evidence_contract,
+                )
+            )
 
         llm_passed = check.get("status") == "satisfied"
         code_passed = not code_issues
-        if not (llm_passed or code_passed):
+        accepted = llm_passed or code_passed
+        if not accepted:
             issues.append(ConstraintValidationIssue("constraint_not_satisfied", constraint_id))
             issues.extend(code_issues)
 
@@ -185,19 +203,31 @@ def _validate_tool_evidence(
     constraint_id: str,
     tool_evidence: list[dict[str, Any]],
     records: list[Any],
+    *,
+    evidence_contract: str | None = None,
 ) -> list[ConstraintValidationIssue]:
     issues: list[ConstraintValidationIssue] = []
     for item in tool_evidence:
-        if not _matching_tool_evidence_exists(item, records):
+        if not _matching_tool_evidence_exists(item, records, evidence_contract=evidence_contract):
             issues.append(ConstraintValidationIssue("tool_evidence_not_found", constraint_id))
     return issues
 
 
-def _matching_tool_evidence_exists(evidence: dict[str, Any], records: list[Any]) -> bool:
+def _matching_tool_evidence_exists(
+    evidence: dict[str, Any],
+    records: list[Any],
+    *,
+    evidence_contract: str | None = None,
+) -> bool:
+    required_record_id = evidence.get("record_id") if evidence_contract == "v2" else None
+    if evidence_contract == "v2" and (not isinstance(required_record_id, str) or not required_record_id):
+        return False
     for record in records:
         if not isinstance(record, dict) or record.get("is_error"):
             continue
-        if record.get("tool_name") != evidence.get("tool_name"):
+        if required_record_id is not None and record.get("record_id") != required_record_id:
+            continue
+        if evidence.get("tool_name") and record.get("tool_name") != evidence.get("tool_name"):
             continue
         tool_input = record.get("input") if isinstance(record.get("input"), dict) else {}
         if (

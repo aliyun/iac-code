@@ -6,7 +6,7 @@ from typing import Any, cast
 
 from iac_code.agent.message import RECALLED_MEMORY_MARKER
 from iac_code.agent.system_prompt import split_by_dynamic_boundary
-from iac_code.providers.base import Message
+from iac_code.providers.base import ContentBlock, Message
 from iac_code.providers.openai_provider import OpenAIProvider
 from iac_code.providers.thinking import ThinkingFamily, get_thinking_spec, normalize_effort
 
@@ -89,6 +89,22 @@ class DashScopeProvider(OpenAIProvider):
         )
 
     # -- Explicit context cache ------------------------------------------------
+
+    def _convert_content_blocks(self, role: str, blocks: list[ContentBlock]) -> list[dict[str, Any]]:
+        messages = super()._convert_content_blocks(role, blocks)
+        # DashScope rejects a thinking-only assistant history message when its
+        # OpenAI-compatible content field is null. This happens when a reasoning
+        # model reaches max_tokens before emitting text or a tool call. Preserve
+        # reasoning_content for continuation, but send the required string field.
+        for message in messages:
+            if (
+                message.get("role") == "assistant"
+                and message.get("content") is None
+                and bool(message.get("reasoning_content"))
+                and not message.get("tool_calls")
+            ):
+                message["content"] = ""
+        return messages
 
     def _supports_explicit_cache(self) -> bool:
         return self._model.startswith(_EXPLICIT_CACHE_MODEL_PREFIXES)

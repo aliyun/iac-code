@@ -493,6 +493,63 @@ async def test_external_permission_decision_is_backed_up_before_future_delivery(
 
 
 @pytest.mark.asyncio
+async def test_normal_permission_snapshot_callbacks_run_before_each_critical_backup(tmp_path, monkeypatch) -> None:
+    workspace, session_id, store, registry = _durable_permission_fixture(tmp_path, monkeypatch)
+    queue = FakeEventQueue()
+    order: list[str] = []
+
+    class OrderedBackup(_ObservedBoundaryBackup):
+        def backup_session(self, *args, **kwargs):
+            order.append("backup")
+            return super().backup_session(*args, **kwargs)
+
+    backup = OrderedBackup(queue, store)
+    future = pending_future()
+    event = PermissionRequestEvent(
+        tool_name="aliyun_api",
+        tool_input={"product": "ros", "action": "CreateStack"},
+        tool_use_id="tool-write",
+        response_future=future,
+        continuation_frame=_permission_frame("tool-write"),
+    )
+
+    async def persist_request(_pending) -> None:
+        order.append("request-snapshot")
+
+    async def persist_resolution(_pending, checkpoint) -> None:
+        assert checkpoint["decision"]["value"] == "allow_once"
+        order.append("resolution-snapshot")
+
+    pending = await publish_interactive_permission_boundary(
+        queue,
+        permission_event=event,
+        permission_input_registry=registry,
+        task_id="task-1",
+        context_id="ctx-1",
+        iac_code_session_id=session_id,
+        permission_wait_cwd=str(workspace),
+        permission_wait_backup_service=backup,
+        before_permission_backup=persist_request,
+        before_permission_claim_backup=persist_resolution,
+        wait_for_response=False,
+    )
+    assert order == ["request-snapshot", "backup"]
+
+    assert await registry.answer(
+        PermissionResponse(
+            task_id="task-1",
+            context_id="ctx-1",
+            request_task_id="task-1",
+            input_id=pending.input_id,
+            tool_use_id="tool-write",
+            decision="allow_once",
+        )
+    )
+    assert order == ["request-snapshot", "backup", "resolution-snapshot", "backup"]
+    await registry.complete(pending)
+
+
+@pytest.mark.asyncio
 async def test_failed_decision_backup_keeps_claim_retriable_without_delivering_future(tmp_path, monkeypatch) -> None:
     workspace, session_id, store, registry = _durable_permission_fixture(tmp_path, monkeypatch)
     queue = FakeEventQueue()

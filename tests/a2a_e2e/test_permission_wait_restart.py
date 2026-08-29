@@ -57,6 +57,8 @@ def test_permission_wait_response_recovers_after_real_a2a_process_restart(
     assert result["toolExecutions"] == expected_executions
     assert result["duplicateAcknowledged"] is True
     assert result["conflictRejected"] is True
+    assert result["durableWaitingPermissionRestored"] is True
+    assert result["restoredPermissionProjectionPreserved"] is (mode == "pipeline")
     assert result["taskId"]
     assert result["contextId"]
     if mode == "normal":
@@ -103,3 +105,100 @@ def test_pipeline_permission_after_candidate_selection_recovers_on_new_response_
     assert result["checkpointPhase"] == "RESOLVED"
     assert result["toolExecutions"] == 1
     assert result["pipelineJournalOrdered"] is True
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(90)
+@pytest.mark.parametrize("decision", ["allow_once", "deny"])
+@pytest.mark.parametrize(
+    "pipeline_step_id",
+    [
+        "solution_planning_and_selection",
+        "materialize_selected_candidate",
+        "deploying",
+    ],
+)
+def test_each_solution_first_stage_permission_recovers_with_allow_or_deny(
+    tmp_path: Path,
+    pipeline_step_id: str,
+    decision: str,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    runner = repo_root / "scripts" / "a2a" / "e2e" / "permission_wait" / "run_permission_wait_restart.py"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(runner),
+            "--run-dir",
+            str(tmp_path / "{}-{}".format(pipeline_step_id, decision)),
+            "--decision",
+            decision,
+            "--mode",
+            "pipeline",
+            "--pipeline-step-id",
+            pipeline_step_id,
+            "--timeout",
+            "20",
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=80,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert result["passed"] is True
+    assert result["pipelineStepId"] == pipeline_step_id
+    assert result["decision"] == decision
+    assert result["toolExecutions"] == (1 if decision == "allow_once" else 0)
+    assert result["durableWaitingPermissionRestored"] is True
+    assert result["restoredPermissionProjectionPreserved"] is True
+    assert result["pipelineCoordinatesPreserved"] is True
+    assert result["pipelineJournalOrdered"] is True
+    assert result["pipelineRollbackAbsent"] is True
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(90)
+@pytest.mark.parametrize("decision", ["allow_once", "deny"])
+def test_normal_chat_permission_after_solution_first_handoff_recovers_with_allow_or_deny(
+    tmp_path: Path,
+    decision: str,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    runner = repo_root / "scripts" / "a2a" / "e2e" / "permission_wait" / "run_permission_wait_restart.py"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(runner),
+            "--run-dir",
+            str(tmp_path / "handoff-{}".format(decision)),
+            "--decision",
+            decision,
+            "--mode",
+            "pipeline",
+            "--handoff-first",
+            "--timeout",
+            "20",
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=80,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert result["passed"] is True
+    assert result["handoffFirst"] is True
+    assert result["decision"] == decision
+    assert result["toolExecutions"] == (1 if decision == "allow_once" else 0)
+    assert result["normalHandoffPublished"] is True
+    assert result["normalPermissionAfterHandoff"] is True
+    assert result["durableWaitingPermissionRestored"] is True
+    assert result["assistantFinalPublished"] is True

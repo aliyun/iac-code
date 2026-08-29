@@ -398,7 +398,14 @@ def _wait_for_health(base_url: str, process: subprocess.Popen[str], *, timeout: 
     raise TimeoutError(f"timed out waiting for Web health: {last_error}")
 
 
-def _json_request(base_url: str, method: str, path: str, payload: Any | None = None) -> dict[str, Any]:
+def _json_request(
+    base_url: str,
+    method: str,
+    path: str,
+    payload: Any | None = None,
+    *,
+    timeout: float = 20,
+) -> dict[str, Any]:
     data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = Request(
         base_url + path,
@@ -406,7 +413,7 @@ def _json_request(base_url: str, method: str, path: str, payload: Any | None = N
         method=method,
         headers={"content-type": "application/json"} if data is not None else {},
     )
-    with urlopen(request, timeout=20) as response:
+    with urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -477,25 +484,39 @@ def _contains_text(value: Any, expected: str) -> bool:
     return isinstance(value, str) and expected in value
 
 
-def _verify_browser(*, base_url: str, session_id: str, expected_text: str, screenshot: Path) -> None:
+def _verify_browser(
+    *,
+    base_url: str,
+    session_id: str,
+    expected_text: str,
+    screenshot: Path,
+    dom_snapshot: Path | None = None,
+    audit: Path | None = None,
+    require_quote: bool = False,
+    expand_pipeline_history: bool = False,
+) -> None:
     script = REPO_ROOT / "scripts" / "web" / "e2e" / "verify_contract_dom.mjs"
-    subprocess.run(
-        [
-            "node",
-            str(script),
-            "--url",
-            base_url,
-            "--sessionId",
-            session_id,
-            "--expectedText",
-            expected_text,
-            "--screenshot",
-            str(screenshot),
-        ],
-        cwd=REPO_ROOT,
-        check=True,
-        timeout=60,
-    )
+    command = [
+        "node",
+        str(script),
+        "--url",
+        base_url,
+        "--sessionId",
+        session_id,
+        "--expectedText",
+        expected_text,
+        "--screenshot",
+        str(screenshot),
+    ]
+    if dom_snapshot is not None:
+        command.extend(("--domSnapshot", str(dom_snapshot)))
+    if audit is not None:
+        command.extend(("--audit", str(audit)))
+    if require_quote:
+        command.extend(("--requireQuote", "true"))
+    if expand_pipeline_history:
+        command.extend(("--expandPipelineHistory", "true"))
+    subprocess.run(command, cwd=REPO_ROOT, check=True, timeout=60)
 
 
 def _terminal_count(records: list[dict[str, Any]]) -> int:

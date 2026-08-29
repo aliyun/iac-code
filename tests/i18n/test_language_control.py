@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -50,3 +51,30 @@ def test_load_webui_catalog_zh_is_populated():
 def test_display_names_cover_all_supported():
     for lang in i18n.SUPPORTED_LANGUAGES:
         assert lang in i18n.LANGUAGE_DISPLAY_NAMES
+
+
+@pytest.mark.asyncio
+async def test_request_language_is_task_local_and_restores_process_language(monkeypatch):
+    i18n.set_language("en")
+    monkeypatch.setattr(
+        i18n,
+        "translate_message",
+        lambda message, *, language: f"{language}:{message}",
+    )
+    monkeypatch.setattr(
+        i18n,
+        "translate_plural",
+        lambda singular, plural, n, *, language: f"{language}:{singular if n == 1 else plural}",
+    )
+
+    async def translated(language: str) -> tuple[str, str, str]:
+        with i18n.use_request_language(language):
+            await asyncio.sleep(0)
+            return i18n.get_current_language(), i18n._("Hello"), i18n.ngettext("item", "items", 2)
+
+    assert await asyncio.gather(translated("zh"), translated("ja")) == [
+        ("zh", "zh:Hello", "zh:items"),
+        ("ja", "ja:Hello", "ja:items"),
+    ]
+    assert i18n.get_current_language() == "en"
+    assert i18n._("Hello") == "Hello"

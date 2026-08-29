@@ -359,7 +359,13 @@ def test_create_agent_runtime_respects_disabled_skills(tmp_path, monkeypatch) ->
 
 def test_create_agent_runtime_a2a_safe_mode_filters_tools_and_skips_mcp(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "settings.yml").write_text(
+        'permissions:\n  allow:\n    - "bash(**)"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
     monkeypatch.setattr(
         "iac_code.services.cloud_credentials.CloudCredentials.has_provider",
         lambda self, provider: provider == "aliyun",
@@ -421,6 +427,7 @@ def test_create_agent_runtime_a2a_safe_mode_filters_tools_and_skips_mcp(tmp_path
 
     permission_context = runtime.agent_loop._permission_context
     session_dir = runtime.agent_loop._session_storage.session_dir(str(tmp_path), "safe-session")
+    assert permission_context.allow_rules["user_settings"] == ["bash(**)"]
     assert permission_context.read_path_violation_behavior == "deny"
     assert str(tmp_path) in permission_context.strict_read_directories
     assert str(session_dir) in permission_context.strict_read_directories

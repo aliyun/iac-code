@@ -78,15 +78,17 @@ from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     CandidateDetailEvent,
     DiagramEvent,
+    MessageEndEvent,
     PermissionRequestEvent,
     StackProgressEvent,
     SubPipelineStreamEvent,
     TextDeltaEvent,
+    ThinkingDeltaEvent,
     ToolInputDeltaEvent,
     ToolUseStartEvent,
 )
 from iac_code.ui.banner import print_welcome_banner, render_update_prompt_header
-from iac_code.ui.components.select import InputOption, Select, SelectLayout, TextOption
+from iac_code.ui.components.select import InputOption, OptionType, Select, SelectLayout, TextOption
 from iac_code.ui.core.in_place_render import InPlaceRenderer
 from iac_code.ui.core.input_history import InputHistory
 from iac_code.ui.core.prompt_input import PromptInput, PromptInputResult
@@ -3762,6 +3764,11 @@ class InlineREPL:
         except (AttributeError, IndexError):
             return False
 
+    def _pipeline_feature_enabled(self, name: str) -> bool:
+        pipeline = getattr(self, "_pipeline", None)
+        feature_enabled = getattr(pipeline, "feature_enabled", None)
+        return callable(feature_enabled) and feature_enabled(name) is True
+
     async def _resume_pipeline_sidecar_on_startup(self) -> bool:
         from iac_code.pipeline.config import RunMode
 
@@ -3772,12 +3779,31 @@ class InlineREPL:
             return False
         self._render_pipeline_display_replay_on_startup()
         pending_ask = self._pending_ask_user_question_from_pipeline()
+        pending_confirmation = self._pending_deployment_confirmation_from_pipeline() if pending_ask is None else None
+        restored_status = self._pipeline_restored_status
         resume_candidate_selection = (
             pending_ask is None
-            and self._pipeline_restored_status == "waiting_input"
+            and restored_status == "waiting_input"
             and self._pipeline_current_step_is_candidate_selection() is True
         )
-        if pending_ask is None and not resume_candidate_selection:
+        resume_running = (
+            pending_ask is None
+            and pending_confirmation is None
+            and restored_status in {"running", "backup_blocked"}
+            and self._pipeline_feature_enabled("repl_auto_resume_running_on_startup")
+        )
+        resume_deployment_confirmation = (
+            pending_ask is None
+            and pending_confirmation is not None
+            and restored_status == "waiting_input"
+            and self._pipeline_feature_enabled("repl_auto_resume_running_on_startup")
+        )
+        if (
+            pending_ask is None
+            and not resume_candidate_selection
+            and not resume_deployment_confirmation
+            and not resume_running
+        ):
             return False
 
         terminal_event = None
@@ -3789,8 +3815,15 @@ class InlineREPL:
             self._pipeline_waiting_input = False
             if pending_ask is not None:
                 terminal_event = await self._resume_pending_ask_user_question_from_sidecar(pending_ask)
-            else:
+            elif resume_candidate_selection:
                 terminal_event = await self._resume_waiting_candidate_selection_from_sidecar()
+            elif resume_deployment_confirmation:
+                assert pending_confirmation is not None
+                terminal_event = await self._resume_pending_deployment_confirmation_from_sidecar(pending_confirmation)
+            else:
+                self._pipeline_restored_status = None
+                event_stream = cast(Any, self._pipeline).continue_from_sidecar(user_input=None)
+                terminal_event = await self._render_pipeline_stream(event_stream)
             if terminal_event is None:
                 self._pipeline_waiting_input = True
         finally:
@@ -3818,6 +3851,34 @@ class InlineREPL:
         if not isinstance(question, str) or not isinstance(options, list):
             return None
         return dict(pending)
+
+    def _pending_deployment_confirmation_from_pipeline(self) -> dict[str, Any] | None:
+        pipeline = getattr(self, "_pipeline", None)
+        getter = getattr(pipeline, "pending_deployment_confirmation", None)
+        if not callable(getter):
+            return None
+        pending = getter()
+        if not isinstance(pending, dict) or pending.get("kind") != "deployment_confirmation":
+            return None
+        options = pending.get("options")
+        if not isinstance(options, list):
+            return None
+        return dict(pending)
+
+    async def _resume_pending_deployment_confirmation_from_sidecar(
+        self,
+        pending: dict[str, Any],
+    ) -> PipelineEvent | None:
+        pipeline = getattr(self, "_pipeline", None)
+        resume = getattr(pipeline, "resume", None)
+        if pipeline is None or not callable(resume):
+            return None
+        self._render_deployment_confirmation(pending)
+        response = await self._prompt_deployment_confirmation(pending)
+        if response is None:
+            return None
+        self._pipeline_waiting_input = False
+        return await self._render_pipeline_stream(resume(response))
 
     async def _resume_pending_ask_user_question_from_sidecar(
         self,
@@ -4572,9 +4633,17 @@ class InlineREPL:
                             current_index = event.data.get("index", 1) - 1
                             self._update_pipeline_state_from_event(event)
                             self._render_pipeline_event(event)
-                            selection_result = await self._render_candidate_selection_tabs(
-                                event_stream, progress_bar_fn=_make_header_fn()
-                            )
+                            if event.step_id == "solution_planning_and_selection":
+                                selection_result = await self._render_candidate_selection_tabs(
+                                    event_stream,
+                                    progress_bar_fn=_make_header_fn(),
+                                    show_agent_prelude=True,
+                                )
+                            else:
+                                selection_result = await self._render_candidate_selection_tabs(
+                                    event_stream,
+                                    progress_bar_fn=_make_header_fn(),
+                                )
                             if isinstance(selection_result, PipelineEvent) and selection_result.type in (
                                 PipelineEventType.PIPELINE_COMPLETED,
                                 PipelineEventType.BACKUP_BLOCKED,
@@ -4630,6 +4699,19 @@ class InlineREPL:
                             continue
 
                         self._update_pipeline_state_from_event(event)
+
+                        if event.type == PipelineEventType.ROLLBACK_TRIGGERED:
+                            # STEP_COMPLETED is emitted before ROLLBACK_TRIGGERED, so
+                            # the progress bar has already marked the source step as
+                            # complete.  A rollback invalidates the target step and
+                            # everything after it; keep only the steps strictly
+                            # before the rollback target.
+                            rollback_target = str(event.data.get("to_step") or "")
+                            if rollback_target in step_names:
+                                target_index = step_names.index(rollback_target)
+                                completed_indices.intersection_update(range(target_index))
+                                self._pipeline_completed_indices.intersection_update(range(target_index))
+
                         self._render_pipeline_event(event)
 
                         if event.type in (PipelineEventType.PIPELINE_COMPLETED, PipelineEventType.BACKUP_BLOCKED):
@@ -4640,8 +4722,60 @@ class InlineREPL:
                             completed_indices = self._pipeline_completed_indices
 
                         if event.type == PipelineEventType.USER_INPUT_REQUIRED:
-                            # Renderer + queue already torn down by the top-level teardown guard
-                            # for this event type. Just mark the waiting flag and return.
+                            # Renderer + queue are already torn down by the top-level teardown guard.
+                            if event.data.get(
+                                "kind"
+                            ) == PipelineUiMode.CANDIDATE_SELECTION.value and self._pipeline_feature_enabled(
+                                "repl_auto_resume_running_on_startup"
+                            ):
+                                # A restored running Step can reach its candidate
+                                # boundary without emitting another STEP_STARTED.
+                                # Re-enter the selector from the durable display
+                                # journal instead of falling through to a blank
+                                # generic waiting prompt. The feature is opt-in so
+                                # the legacy selling pipeline keeps its old path.
+                                try:
+                                    await event_stream.aclose()
+                                except Exception:
+                                    logger.debug(
+                                        "candidate boundary event stream close failed",
+                                        exc_info=True,
+                                    )
+                                terminal_event = await self._resume_waiting_candidate_selection_from_sidecar()
+                                if terminal_event is not None:
+                                    return terminal_event
+                                self._pipeline_waiting_input = True
+                                return None
+                            if event.data.get("kind") == PipelineUiMode.DEPLOYMENT_CONFIRMATION.value:
+                                response = await self._prompt_deployment_confirmation(event.data)
+                                if response is not None and self._pipeline is not None:
+                                    self._pipeline_waiting_input = False
+                                    try:
+                                        await event_stream.aclose()
+                                    except Exception:
+                                        logger.debug(
+                                            "deployment confirmation event stream close failed",
+                                            exc_info=True,
+                                        )
+                                    # ``PipelineRunner.resume`` continues the same step and emits
+                                    # USER_INPUT_RECEIVED rather than a new STEP_STARTED event.  The
+                                    # confirmation boundary above has already torn down the renderer,
+                                    # so restart it here before consuming resumed agent/tool events.
+                                    # Otherwise a permission request (for example write_file after a
+                                    # parameter change) is dropped and its unresolved future deadlocks
+                                    # the AgentLoop.
+                                    event_stream = self._pipeline.resume(response)
+                                    agent_events_queue = asyncio.Queue()
+                                    renderer_task = asyncio.create_task(
+                                        self.renderer.run_streaming_output(
+                                            _agent_event_gen(agent_events_queue),
+                                            permission_handler=self.renderer.prompt_permission,
+                                            live_header=_make_header_fn(),
+                                            on_escape=_on_escape,
+                                        )
+                                    )
+                                    restarted = True
+                                    break
                             self._pipeline_waiting_input = True
                             return
 
@@ -4760,7 +4894,11 @@ class InlineREPL:
                         logger.warning("renderer_task cleanup failed: %s", exc, exc_info=True)
 
     async def _render_candidate_selection_tabs(
-        self, event_stream, progress_bar_fn=None
+        self,
+        event_stream,
+        progress_bar_fn=None,
+        *,
+        show_agent_prelude: bool = False,
     ) -> str | bool | PipelineEvent | None:
         """Render candidate selection with tabbed architecture diagrams and details.
 
@@ -4772,14 +4910,19 @@ class InlineREPL:
         from iac_code.pipeline.engine.ui_contract import encode_selected_candidate
         from iac_code.ui.components.candidate_selection import CandidateSelectionRenderer
         from iac_code.ui.core.raw_input import RawInputCapture
+        from iac_code.ui.stream_accumulator import StreamAccumulator
 
         tabs = CandidateSelectionRenderer(console=self.renderer.console)
+        prelude = StreamAccumulator()
         waiting_input = False
         selected = None
         interrupted = False
         interrupt_feedback = ""
         terminal_event: PipelineEvent | None = None
         render_terminal_event_after_live = False
+        candidate_view_active = not show_agent_prelude
+        prelude_archived = not show_agent_prelude
+        prelude_status_message = ""
 
         detail_tool_ids: set[str] = set()
         detail_accumulated: dict[str, str] = {}
@@ -4790,11 +4933,58 @@ class InlineREPL:
             transient=True,
         )
 
-        def _live_update(content):
+        def _live_update(content, *, immediate: bool = False):
             if progress_bar_fn is not None:
                 live.update(Group(content, progress_bar_fn()))
             else:
                 live.update(content)
+            if immediate:
+                refresh = getattr(live, "refresh", None)
+                if callable(refresh):
+                    refresh()
+
+        def _render_current_content():
+            if candidate_view_active:
+                return tabs.render()
+            content = self.renderer._render_segments(
+                prelude.segments,
+                spinner=None,
+                text_buffer=prelude.text_buffer,
+                thinking_buffer=prelude.thinking_buffer,
+                embedded=True,
+            )
+            if prelude_status_message:
+                return Group(content, Text(prelude_status_message, style="dim italic"))
+            return content
+
+        def _set_status_message(message: str) -> None:
+            nonlocal prelude_status_message
+            if candidate_view_active:
+                tabs.set_status_message(message)
+            else:
+                prelude_status_message = message
+
+        def _archive_prelude(*, restart_live: bool = True) -> None:
+            nonlocal prelude_archived
+            if prelude_archived:
+                return
+            prelude.finalize_text()
+            live.stop()
+            if prelude.segments:
+                self.renderer._print_segments_to_scrollback(prelude.segments, "")
+                prelude.segments.clear()
+            prelude_archived = True
+            if restart_live:
+                live.start()
+
+        def _activate_candidate_view() -> None:
+            nonlocal candidate_view_active
+            if candidate_view_active:
+                return
+            _archive_prelude()
+            candidate_view_active = True
+            if prelude_status_message:
+                tabs.set_status_message(prelude_status_message)
 
         stop_keys = asyncio.Event()
         interrupt_requested = asyncio.Event()
@@ -4832,7 +5022,7 @@ class InlineREPL:
                                 stop_keys.set()
                             continue
                         if tabs.handle_key(key_event):
-                            _live_update(tabs.render())
+                            _live_update(_render_current_content())
             except (OSError, ValueError):
                 pass
 
@@ -4845,8 +5035,8 @@ class InlineREPL:
             live_stopped = False
             try:
                 await _cancel_key_task()
-                tabs.set_status_message("✎")
-                _live_update(tabs.render())
+                _set_status_message("✎")
+                _live_update(_render_current_content())
 
                 live.stop()
                 live_stopped = True
@@ -4855,25 +5045,25 @@ class InlineREPL:
                 live_stopped = False
 
                 if not user_input.is_empty:
-                    tabs.set_status_message(_("Judging your input..."))
-                    _live_update(tabs.render())
+                    _set_status_message(_("Judging your input..."))
+                    _live_update(_render_current_content())
                     needs_restart, feedback = await self._handle_mid_pipeline_message(user_input, suppress_render=True)
                     if feedback:
-                        tabs.set_status_message(feedback)
+                        _set_status_message(feedback)
                     else:
-                        tabs.set_status_message("")
+                        _set_status_message("")
                     if needs_restart:
                         interrupt_feedback = feedback
                         return True
                 else:
-                    tabs.set_status_message("")
+                    _set_status_message("")
             finally:
                 if live_stopped:
                     live.start()
                 if self._pipeline and not getattr(self, "_last_interrupt_paused", False):
                     self._pipeline.resume_agent_loops()
             interrupt_requested.clear()
-            _live_update(tabs.render())
+            _live_update(_render_current_content())
             return False
 
         key_task: asyncio.Task | None = None
@@ -4897,6 +5087,8 @@ class InlineREPL:
 
         try:
             live.start()
+            if show_agent_prelude:
+                _live_update(_render_current_content())
             key_task = asyncio.create_task(key_reader())
 
             async for event in event_stream:
@@ -4911,7 +5103,25 @@ class InlineREPL:
                     key_task = asyncio.create_task(key_reader())
 
                 if isinstance(event, PipelineEvent):
+                    if event.type != PipelineEventType.USER_INPUT_REQUIRED:
+                        self._record_pipeline_display_event(event)
                     if event.type == PipelineEventType.USER_INPUT_REQUIRED:
+                        options = event.data.get("options", [])
+                        tabs.seed_candidates(options if isinstance(options, list) else [])
+                        _activate_candidate_view()
+                        waiting_input = True
+                        tabs.enter_selection_mode()
+                        self._pipeline_waiting_input = True
+                        # A restored candidate stream can consist of this one
+                        # event followed immediately by an input wait. Force a
+                        # frame here so the options are visible before cbreak
+                        # input blocks; the periodic Live refresh may otherwise
+                        # never paint the restored selector.
+                        _live_update(_render_current_content(), immediate=True)
+                        # This durable signal is consumed by REPL automation. It
+                        # must mean the cbreak key reader can already accept an
+                        # Enter; recording it before ``waiting_input`` was set
+                        # created a race where fast drivers lost the key press.
                         recorder = getattr(self, "_pipeline_display_recorder", None)
                         if recorder is not None:
                             try:
@@ -4923,15 +5133,6 @@ class InlineREPL:
                                 )
                             except Exception as exc:
                                 logger.warning("Failed to record candidate selection ready event: {}", exc)
-                    else:
-                        self._record_pipeline_display_event(event)
-                    if event.type == PipelineEventType.USER_INPUT_REQUIRED:
-                        options = event.data.get("options", [])
-                        tabs.seed_candidates(options if isinstance(options, list) else [])
-                        waiting_input = True
-                        tabs.enter_selection_mode()
-                        self._pipeline_waiting_input = True
-                        _live_update(tabs.render())
                         while not stop_keys.is_set():
                             done, _pending = await asyncio.wait(
                                 [
@@ -5001,6 +5202,12 @@ class InlineREPL:
 
                 elif isinstance(event, ToolUseStartEvent):
                     self._record_pipeline_display_tool_use(event)
+                    if not candidate_view_active:
+                        # Candidate display tools mark the boundary between the
+                        # normal Step 1 prelude and the dedicated comparison UI.
+                        # Finalize the current thought/text without rendering the
+                        # implementation-oriented tool header itself.
+                        prelude.finalize_text()
                     if event.name == "show_candidate_detail":
                         detail_tool_ids.add(event.tool_use_id)
                         detail_accumulated[event.tool_use_id] = ""
@@ -5015,11 +5222,65 @@ class InlineREPL:
                         if cname and summary:
                             tabs.update_streaming_summary(cname, summary, candidate_index=candidate_index)
 
+                elif isinstance(event, ThinkingDeltaEvent | TextDeltaEvent):
+                    if not candidate_view_active:
+                        prelude.process(event)
+
+                elif isinstance(event, MessageEndEvent):
+                    if not candidate_view_active:
+                        prelude.finalize_text()
+
+                elif isinstance(event, AskUserQuestionEvent):
+                    # Candidate-selection steps can ask for clarification before
+                    # any candidate is ready. The dedicated candidate stream owns
+                    # the response future, so it must suspend its raw key reader
+                    # and Live display while the normal question dialog runs.
+                    await _cancel_key_task()
+                    live.stop()
+                    try:
+                        await self._persist_pending_ask_user_question(event)
+                    except Exception as exc:
+                        if event.response_future is not None and not event.response_future.done():
+                            event.response_future.set_result(None)
+                        self._handle_pipeline_state_persistence_failure(exc)
+                        return None
+                    try:
+                        answer = await self.renderer.prompt_user_question(event)
+                    except (asyncio.CancelledError, KeyboardInterrupt):
+                        self._acknowledge_pending_ask_user_question(event.tool_use_id)
+                        if event.response_future is not None and not event.response_future.done():
+                            event.response_future.set_result(None)
+                        raise
+                    except Exception as exc:
+                        self._acknowledge_pending_ask_user_question(event.tool_use_id)
+                        if event.response_future is not None and not event.response_future.done():
+                            event.response_future.set_result(None)
+                        msg = _("Error: {error}").format(error=str(exc))
+                        self.renderer.print_system_message(msg, style="red")
+                    else:
+                        if answer is not None:
+                            try:
+                                await self._persist_pending_ask_user_question_answer(event.tool_use_id, answer)
+                                self._acknowledge_pending_ask_user_question(event.tool_use_id)
+                            except Exception as exc:
+                                if event.response_future is not None and not event.response_future.done():
+                                    event.response_future.set_result(None)
+                                self._handle_pipeline_state_persistence_failure(exc)
+                                return None
+                        else:
+                            self._acknowledge_pending_ask_user_question(event.tool_use_id)
+                        if event.response_future is not None and not event.response_future.done():
+                            event.response_future.set_result(answer)
+                    finally:
+                        live.start()
+                    key_task = asyncio.create_task(key_reader())
+
                 elif isinstance(event, StepResult):
                     continue
 
                 if tabs.tab_count > 0:
-                    _live_update(tabs.render())
+                    _activate_candidate_view()
+                _live_update(_render_current_content())
 
         except (asyncio.CancelledError, KeyboardInterrupt):
             self._pipeline_waiting_input = False
@@ -5028,7 +5289,10 @@ class InlineREPL:
             try:
                 await _stop_key_reader()
             finally:
-                live.stop()
+                if not prelude_archived:
+                    _archive_prelude(restart_live=False)
+                else:
+                    live.stop()
 
         if interrupted:
             self._pipeline_waiting_input = False
@@ -5452,11 +5716,106 @@ class InlineREPL:
         error_details = data.get("error_details", {})
         return isinstance(error_details, dict) and error_details.get("type") == "PipelineStatePersistenceError"
 
+    def _render_deployment_confirmation(self, data: dict[str, Any]) -> None:
+        """Render the user-facing solution and quote before the interactive selector."""
+
+        con = self.renderer.console
+        solution_summary = str(data.get("solution_summary") or "").strip()
+        raw_cost = data.get("cost")
+        cost: dict[str, Any] = raw_cost if isinstance(raw_cost, dict) else {}
+        monthly_estimate = str(cost.get("monthly_estimate") or "").strip()
+        raw_resources = cost.get("resources")
+        resources: list[Any] = raw_resources if isinstance(raw_resources, list) else []
+
+        con.print()
+        if solution_summary:
+            con.print(Text(_("Solution description"), style="bold cyan"))
+            con.print(Text(solution_summary))
+
+        if monthly_estimate:
+            con.print()
+            con.print(Text(_("Pricing overview"), style="bold cyan"))
+            con.print(Text(monthly_estimate, style="bold"))
+
+        price_lines = [
+            " · ".join(str(value) for value in (item.get("type"), item.get("spec"), item.get("cost")) if value)
+            for item in resources
+            if isinstance(item, dict)
+        ]
+        price_lines = [line for line in price_lines if line]
+        if price_lines:
+            con.print()
+            con.print(Text(_("Cost details"), style="bold cyan"))
+            for line in price_lines:
+                con.print(Text(f"- {line}"))
+
+    async def _prompt_deployment_confirmation(self, data: dict[str, Any]) -> str | None:
+        """Select an action with arrow keys or enter a custom natural-language response."""
+
+        # ``adjust`` remains accepted by the structured protocol, but parameter,
+        # architecture and intent changes use the free-text row in the interactive UI.
+        action_options = [
+            option
+            for option in data.get("options", [])
+            if isinstance(option, dict) and option.get("action") != "adjust"
+        ]
+        select_options: list[OptionType] = [
+            TextOption(
+                label=str(option.get("name") or option.get("action") or ""),
+                value=str(option.get("action") or ""),
+                description=str(option.get("summary") or ""),
+            )
+            for option in action_options
+            if option.get("action")
+        ]
+        free_text_value = "__deployment_confirmation_free_text__"
+        select_options.append(
+            InputOption(
+                label=_("Enter another response"),
+                value=free_text_value,
+                placeholder=_("For example: change the ECS instance type and reprice"),
+            )
+        )
+        default_value = select_options[0].value if select_options else free_text_value
+        selector = Select(
+            options=select_options,
+            default_value=default_value,
+            layout=SelectLayout.COMPACT_VERTICAL,
+            visible_count=len(select_options),
+            type_to_edit_input=True,
+        )
+
+        con = self.renderer.console
+        con.print()
+        con.print(Text(_("Choose the next action"), style="bold"))
+        con.print(Text(_("Use Up/Down to select. Type directly on the last row, then press Enter."), style="dim"))
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, lambda: selector.run(console=con))
+        if result is None:
+            return None
+        if result == free_text_value:
+            free_text = str(selector.state.input_values.get(free_text_value) or "").strip()
+            if not free_text:
+                return None
+            con.print(Text(f"  > {free_text}", style="cyan"))
+            return free_text
+
+        action = str(result)
+        label = next(
+            (str(option.get("name") or action) for option in action_options if option.get("action") == action),
+            action,
+        )
+        con.print("  [green]✓[/] {} [bold]{}[/]".format(_("Selected:"), label))
+        from iac_code.pipeline.engine.ui_contract import encode_deployment_confirmation
+
+        return encode_deployment_confirmation(action)
+
     def _render_pipeline_event(self, event):
         from rich.panel import Panel
 
         from iac_code.pipeline.display_names import display_pipeline_name, display_step_name
         from iac_code.pipeline.engine.events import PipelineEventType
+        from iac_code.pipeline.engine.ui_contract import PipelineUiMode
         from iac_code.ui.pipeline_styles import PIPELINE_PANEL_BORDER_STYLE, pipeline_step_header, pipeline_title
 
         con = self.renderer.console
@@ -5495,6 +5854,9 @@ class InlineREPL:
             case PipelineEventType.USER_INPUT_REQUIRED:
                 options = event.data.get("options", [])
                 prompt_text = event.data.get("prompt", "")
+                if event.data.get("kind") == PipelineUiMode.DEPLOYMENT_CONFIRMATION.value:
+                    self._render_deployment_confirmation(event.data)
+                    return
                 if prompt_text:
                     con.print(f"\n{prompt_text}")
                 if options:

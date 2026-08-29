@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import mimetypes
 import uuid
@@ -18,6 +20,7 @@ from iac_code.a2a.input_required import (
 )
 from iac_code.a2a.pipeline_journal import to_json_safe
 from iac_code.a2a.runtime_overrides import get_a2a_preferred_language
+from iac_code.i18n import _
 from iac_code.mcp.progress import mcp_progress_metadata
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.services.permissions.audit import build_input_summary, build_redacted_tool_input, fingerprint_text
@@ -91,6 +94,7 @@ _TOP_LEVEL_DATA_KEY_ALIASES = {
     "total_sub_steps": "totalSubSteps",
     "ui_mode": "uiMode",
     "user_input_length": "userInputLength",
+    "user_request": "userRequest",
     "valid_targets": "validTargets",
 }
 _NESTED_DATA_KEY_ALIASES = {
@@ -112,6 +116,7 @@ class PipelineA2AContext:
     candidate_step_order: list[str] = field(default_factory=list)
     emit_stack_events: bool = False
     a2a_artifacts_by_step_id: dict[str, list[Any]] = field(default_factory=dict)
+    trusted_workspace_root: str | None = None
 
 
 @dataclass
@@ -144,6 +149,7 @@ class PipelineEventTranslator:
         self._current_parent_step_id: str | None = None
         self._tool_inputs: dict[str, dict[str, Any]] = {}
         self._emitted_candidate_detail_tool_ids: set[str] = set()
+        self._emitted_artifact_keys: set[str] = set()
 
     @property
     def last_sequence(self) -> int:
@@ -164,6 +170,28 @@ class PipelineEventTranslator:
             sequence = _int_or_none(event.get("sequence")) or 0
             self._sequence = max(self._sequence, sequence)
             self._hydrate_candidate_state(event)
+            if event.get("eventType") == "artifact_created":
+                data = event.get("data")
+                artifact = event.get("artifact")
+                dedupe_key = None
+                if isinstance(data, dict):
+                    dedupe_key = data.get("dedupeKey")
+                if not isinstance(dedupe_key, str) and isinstance(artifact, dict):
+                    dedupe_key = artifact.get("dedupeKey")
+                if isinstance(dedupe_key, str) and dedupe_key:
+                    self._emitted_artifact_keys.add(dedupe_key)
+
+            if event.get("eventType") == "tool_started":
+                data = event.get("data")
+                if isinstance(data, dict):
+                    tool_use_id = _string_or_none(data.get("toolUseId"))
+                    tool_name = _string_or_none(data.get("toolName"))
+                    tool_input = data.get("input")
+                    if tool_use_id is not None and tool_name is not None and isinstance(tool_input, dict):
+                        self._tool_inputs[tool_use_id] = {
+                            "toolName": tool_name,
+                            "input": copy.deepcopy(tool_input),
+                        }
 
             step = event.get("step")
             if not isinstance(step, dict):
@@ -527,10 +555,50 @@ class PipelineEventTranslator:
 
         root = _artifact_expression_root(completed)
         events: list[dict[str, Any]] = []
-        for spec in specs:
-            artifact = _artifact_from_spec(spec, root)
+        for spec_index, spec in enumerate(specs):
+            conditions = _artifact_spec_mapping(spec, "when_conclusion_field_equals")
+            conclusion = root.get("conclusion")
+            if conditions and (
+                not isinstance(conclusion, dict)
+                or not all(
+                    _resolve_artifact_expression(conclusion, field) == value
+                    for field, value in conditions.items()
+                )
+            ):
+                continue
+            artifact, artifact_error = _artifact_from_spec(
+                spec,
+                root,
+                trusted_workspace_root=self._context.trusted_workspace_root,
+            )
+            if artifact_error is not None:
+                warning = self._envelope(
+                    "pipeline_warning",
+                    str(completed.get("scope") or "step"),
+                    "working",
+                    {"code": "artifact_file_unavailable", "message": artifact_error, "source": "conclusion"},
+                )
+                for key in ("step", "candidate", "candidateStep"):
+                    value = completed.get(key)
+                    if isinstance(value, dict):
+                        warning[key] = dict(value)
+                events.append(warning)
+                continue
             if artifact is None:
                 continue
+            dedupe_material = "\0".join(
+                (
+                    step_id,
+                    str(spec_index),
+                    str(artifact.get("supersedesPath") or ""),
+                    str(artifact.get("contentSha256") or ""),
+                )
+            )
+            dedupe_key = hashlib.sha256(dedupe_material.encode("utf-8")).hexdigest()
+            if dedupe_key in self._emitted_artifact_keys:
+                continue
+            self._emitted_artifact_keys.add(dedupe_key)
+            artifact["dedupeKey"] = dedupe_key
             envelope = self._envelope(
                 "artifact_created",
                 str(completed.get("scope") or "step"),
@@ -593,6 +661,9 @@ class PipelineEventTranslator:
                 cost_items=inner.cost_items,
                 total_monthly_cost=inner.total_monthly_cost,
                 candidate_index=inner.candidate_index,
+                candidate_set_id=inner.candidate_set_id,
+                detail_stage=inner.detail_stage,
+                key_tradeoff=inner.key_tradeoff,
             )
             self._mark_candidate_detail_emitted(inner.tool_use_id)
             input_data = None
@@ -709,6 +780,9 @@ class PipelineEventTranslator:
             cost_items=event.cost_items,
             total_monthly_cost=event.total_monthly_cost,
             candidate_index=event.candidate_index,
+            candidate_set_id=event.candidate_set_id,
+            detail_stage=event.detail_stage,
+            key_tradeoff=event.key_tradeoff,
         )
         self._mark_candidate_detail_emitted(event.tool_use_id)
         return self._translate_parent_scoped_display_event("candidate_detail_shown", data)
@@ -752,6 +826,16 @@ class PipelineEventTranslator:
         tool_input = self._recorded_tool_input(event.tool_use_id)
         if tool_input is not None:
             data["input"] = tool_input
+        metadata = event.metadata if isinstance(event.metadata, dict) else {}
+        submitted_delta = metadata.get("submitted_delta")
+        if isinstance(submitted_delta, dict):
+            data["submittedDelta"] = to_json_safe(copy.deepcopy(submitted_delta))
+        step_result = metadata.get("step_result")
+        normalized_conclusion = (
+            step_result.get("conclusion") if isinstance(step_result, dict) else getattr(step_result, "conclusion", None)
+        )
+        if isinstance(normalized_conclusion, dict):
+            data["normalizedConclusion"] = to_json_safe(copy.deepcopy(normalized_conclusion))
         envelopes.append(self._translate_parent_scoped_display_event("tool_result", data))
         return envelopes
 
@@ -766,7 +850,7 @@ class PipelineEventTranslator:
         return _sanitize_tool_input(tool_input) if isinstance(tool_input, dict) else None
 
     def _remember_tool_input(self, event: ToolUseEndEvent) -> None:
-        self._tool_inputs[event.tool_use_id] = {"toolName": event.name, "input": dict(event.input)}
+        self._tool_inputs[event.tool_use_id] = {"toolName": event.name, "input": copy.deepcopy(event.input)}
 
     def _translate_candidate_detail_from_tool_result(self, event: ToolResultEvent) -> dict[str, Any] | None:
         if event.is_error or self._has_emitted_candidate_detail(event.tool_use_id):
@@ -1509,12 +1593,18 @@ def _stack_progress_data(event: StackProgressEvent) -> dict[str, Any]:
 
     Field names mirror the web consumers (``pipeline.js`` workspace panel and
     the inline tool card via ``pipeline_transcript`` → ``events.js``): stackName,
-    stackId, status, progressPercentage, resources, elapsedSeconds, toolUseId.
+    stackId, regionId, status, progressPercentage, resources, elapsedSeconds,
+    toolUseId.
+
+    ``regionId`` must be carried even though the frontend has a fallback: the web
+    live overlay keys in-progress stacks by ``region::stackName`` and would split
+    into a duplicate row when the frame arrives without a region.
     """
     return {
         "toolUseId": event.tool_use_id,
         "stackId": event.stack_id,
         "stackName": event.stack_name,
+        "regionId": event.region_id,
         "status": event.status,
         "progressPercentage": event.progress_percentage,
         "resources": event.resources,
@@ -1553,16 +1643,45 @@ def _artifact_expression_root(envelope: dict[str, Any]) -> dict[str, Any]:
     return {"data": data, **data}
 
 
-def _artifact_from_spec(spec: Any, root: dict[str, Any]) -> dict[str, Any] | None:
+def _artifact_from_spec(
+    spec: Any,
+    root: dict[str, Any],
+    *,
+    trusted_workspace_root: str | None = None,
+) -> tuple[dict[str, Any] | None, str | None]:
     path_expression = _artifact_spec_field(spec, "path") or _artifact_spec_field(spec, "source")
     content_expression = _artifact_spec_field(spec, "content")
-    if path_expression is None or content_expression is None:
-        return None
+    content_from_file_expression = _artifact_spec_field(spec, "content_from_file")
+    if path_expression is None or (content_expression is None) == (content_from_file_expression is None):
+        return None, None
 
     path = _resolve_artifact_expression(root, path_expression)
-    content = _resolve_artifact_expression(root, content_expression)
-    if not isinstance(path, str) or not isinstance(content, str):
-        return None
+    if not isinstance(path, str):
+        return None, None
+    if content_expression is not None:
+        content = _resolve_artifact_expression(root, content_expression)
+        if not isinstance(content, str):
+            return None, None
+    else:
+        source_path = _resolve_artifact_expression(root, str(content_from_file_expression))
+        if not isinstance(source_path, str) or not source_path:
+            return None, _("The finalized template path is missing.")
+        if not isinstance(trusted_workspace_root, str) or not trusted_workspace_root:
+            return None, _("The trusted workspace root is unavailable.")
+        trusted_root = Path(trusted_workspace_root).resolve()
+        candidate_path = Path(source_path).expanduser()
+        if not candidate_path.is_absolute():
+            candidate_path = trusted_root / candidate_path
+        try:
+            candidate_path = candidate_path.resolve(strict=True)
+        except OSError:
+            return None, _("The finalized template file is unavailable.")
+        if not candidate_path.is_relative_to(trusted_root) or not candidate_path.is_file():
+            return None, _("The finalized template file is outside the trusted workspace.")
+        try:
+            content = candidate_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            return None, _("The finalized template file could not be read.")
 
     media_type = _artifact_spec_field(spec, "media_type") or _artifact_spec_field(spec, "mediaType") or "auto"
     if media_type == "auto":
@@ -1582,19 +1701,28 @@ def _artifact_from_spec(spec: Any, root: dict[str, Any]) -> dict[str, Any] | Non
     except UnsafeArtifactNameError:
         filename = "artifact.txt"
 
-    return {
-        "filename": filename,
-        "mediaType": media_type,
-        "content": content,
-        "role": role,
-        "supersedesPath": supersedes_path,
-        "supersedesKey": fingerprint_text(supersedes_path),
-    }
+    return (
+        {
+            "filename": filename,
+            "mediaType": media_type,
+            "content": content,
+            "contentSha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            "role": role,
+            "supersedesPath": supersedes_path,
+            "supersedesKey": fingerprint_text(supersedes_path),
+        },
+        None,
+    )
 
 
 def _artifact_spec_field(spec: Any, field_name: str) -> str | None:
     value = spec.get(field_name) if isinstance(spec, dict) else getattr(spec, field_name, None)
     return value if isinstance(value, str) and value else None
+
+
+def _artifact_spec_mapping(spec: Any, field_name: str) -> dict[str, Any]:
+    value = spec.get(field_name) if isinstance(spec, dict) else getattr(spec, field_name, None)
+    return value if isinstance(value, dict) else {}
 
 
 def _resolve_artifact_expression(root: dict[str, Any], expression: str) -> Any:
@@ -1632,6 +1760,9 @@ def _candidate_detail_data(
     cost_items: list[dict],
     total_monthly_cost: str,
     candidate_index: int | None = None,
+    candidate_set_id: str | None = None,
+    detail_stage: str | None = None,
+    key_tradeoff: str | None = None,
 ) -> dict[str, Any]:
     detail: dict[str, Any] = {
         "candidateName": candidate_name,
@@ -1647,6 +1778,15 @@ def _candidate_detail_data(
     if candidate_index is not None:
         data["candidateIndex"] = candidate_index
         detail["candidateIndex"] = candidate_index
+    if candidate_set_id:
+        data["candidateSetId"] = candidate_set_id
+        detail["candidateSetId"] = candidate_set_id
+    if detail_stage:
+        data["detailStage"] = detail_stage
+        detail["detailStage"] = detail_stage
+    if key_tradeoff:
+        data["keyTradeoff"] = key_tradeoff
+        detail["keyTradeoff"] = key_tradeoff
     return data
 
 
@@ -1704,6 +1844,10 @@ def _diagram_data(event: DiagramEvent) -> dict[str, Any]:
         data["candidateIndex"] = event.candidate_index
     if event.architecture_context is not None:
         data["architectureContext"] = event.architecture_context
+    if event.candidate_set_id:
+        data["candidateSetId"] = event.candidate_set_id
+    if event.detail_stage:
+        data["detailStage"] = event.detail_stage
     return data
 
 

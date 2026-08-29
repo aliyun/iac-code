@@ -70,6 +70,10 @@ def test_aliyun_public_error_templates_are_directly_extractable(tmp_path: Path) 
         "Alibaba Cloud API {operation} content_type does not match the request body. Use a compatible media type.",
         "Alibaba Cloud API {operation} content_type is invalid. Use a valid media type such as application/json.",
         "Alibaba Cloud API {operation} could not be prepared safely. Check the request and try again.",
+        "Alibaba Cloud OAuth sign-in expired or was revoked, so {operation} cannot be signed. "
+        "Sign in again with OAuth and retry.",
+        "Alibaba Cloud OAuth credentials could not be refreshed, so {operation} cannot be signed. "
+        "Check network access to the sign-in service and retry.",
         "Alibaba Cloud API {operation} cannot be executed from its current metadata. "
         "Choose another API version or action.",
         "Alibaba Cloud API {operation} metadata uses a schema this runtime cannot execute. "
@@ -349,3 +353,67 @@ def test_ecs_credential_errors_never_echo_metadata_content() -> None:
         assert secret not in message
     # Sanity check: the redaction holds because the code, not the upstream text, drives the message.
     assert str(sdk_error) not in message
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        (
+            "aliyun_oauth_relogin_required",
+            "Alibaba Cloud OAuth sign-in expired or was revoked, so Ros/CreateStack cannot be signed. "
+            "Sign in again with OAuth and retry.",
+        ),
+        (
+            "aliyun_oauth_refresh_failed",
+            "Alibaba Cloud OAuth credentials could not be refreshed, so Ros/CreateStack cannot be signed. "
+            "Check network access to the sign-in service and retry.",
+        ),
+    ],
+)
+def test_oauth_credential_errors_are_actionable(code: str, expected: str) -> None:
+    assert public_aliyun_error(code, product="Ros", action="CreateStack", region_id="cn-hangzhou") == expected
+
+
+def test_oauth_credential_codes_do_not_collide_with_the_generic_fallback() -> None:
+    """A stale sign-in must not read as "could not be prepared safely"."""
+    fallback = public_aliyun_error("something_unmapped", product="Ros", action="CreateStack")
+    messages = {
+        code: public_aliyun_error(code, product="Ros", action="CreateStack")
+        for code in ("aliyun_oauth_relogin_required", "aliyun_oauth_refresh_failed")
+    }
+
+    assert len(set(messages.values())) == len(messages)
+    for code, message in messages.items():
+        assert message != fallback
+        assert code not in message
+        assert "Ros/CreateStack" in message
+        assert message.endswith(".")
+
+
+def test_oauth_credential_errors_never_echo_the_upstream_message() -> None:
+    """The OAuth message carries response detail, so only the stable code may be rendered."""
+    from iac_code.services.providers.aliyun_oauth import AliyunOAuthError, AliyunOAuthReloginRequired
+
+    transient = AliyunOAuthError(
+        "STS exchange failed with status 502: error=upstream_unavailable, "
+        "error_description=backend pool oauth-sts-7f3a is draining",
+        error_code="upstream_unavailable",
+        status_code=502,
+    )
+    permanent = AliyunOAuthReloginRequired(
+        "Token refresh failed with status 400: error=invalid_grant, "
+        "error_description=refresh token rt-9a2c1d is no longer accepted",
+        error_code="invalid_grant",
+        status_code=400,
+    )
+
+    messages = (
+        public_aliyun_error("aliyun_oauth_refresh_failed", product="Ros", action="CreateStack"),
+        public_aliyun_error("aliyun_oauth_relogin_required", product="Ros", action="CreateStack"),
+    )
+
+    for message in messages:
+        for detail in ("502", "400", "invalid_grant", "upstream_unavailable", "oauth-sts-7f3a", "rt-9a2c1d"):
+            assert detail not in message
+    assert str(transient) not in messages[0]
+    assert str(permanent) not in messages[1]

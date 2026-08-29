@@ -25,7 +25,9 @@ from iac_code.web.session_manager import (
     _context_usage_payload,
     _is_listable_session,
     _read_web_session_metadata,
+    _runtime_settings_payload,
     reorder_compaction_markers,
+    solution_first_pipeline_user_display_text,
 )
 
 
@@ -59,6 +61,76 @@ class _FakeAgentLoop:
         self.injected.append(message)
         self.injected_metadata.append(metadata)
         return True
+
+
+def test_runtime_settings_payload_redacts_only_editable_cloud_credentials(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "iac_code.web.settings.active_provider_summary",
+        lambda: {
+            "provider": "dashscope",
+            "model": "fixture-model",
+            "effort": None,
+            "apiBase": None,
+            "hasApiKey": True,
+        },
+    )
+    monkeypatch.setattr(
+        "iac_code.web.settings.aliyun_cloud_summary",
+        lambda: {
+            "configured": True,
+            "mode": "STS",
+            "region": "cn-hangzhou",
+            "oauthAccessTokenExpire": 123,
+            "accessKeyId": "fixture-access-key-id",
+            "accessKeySecret": "fixture-access-key-secret",
+            "stsToken": "fixture-sts-token",
+            "detected": {
+                "accessKeyId": "fixt****",
+                "hasAccessKeySecret": True,
+                "hasStsToken": True,
+            },
+        },
+    )
+
+    cloud = _runtime_settings_payload()["cloud"]
+
+    assert cloud["accessKeyId"] == "[REDACTED]"
+    assert cloud["accessKeySecret"] == "[REDACTED]"
+    assert cloud["stsToken"] == "[REDACTED]"
+    assert cloud["oauthAccessTokenExpire"] == 123
+    assert cloud["detected"] == {
+        "accessKeyId": "fixt****",
+        "hasAccessKeySecret": True,
+        "hasStsToken": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("action", "expected"),
+    (
+        ("confirm", "Confirm deployment"),
+        ("adjust", "Adjust parameters"),
+        ("reselect", "Choose another solution"),
+        ("cancel", "Cancel"),
+    ),
+)
+def test_solution_first_pipeline_user_display_text_hides_structured_control_json(
+    action: str, expected: str
+) -> None:
+    raw = json.dumps({"action": action, "parameter_overrides": {"ZoneId": "cn-hangzhou-i"}})
+
+    assert solution_first_pipeline_user_display_text("selling_solution_first", raw) == expected
+    assert solution_first_pipeline_user_display_text("selling", raw) == raw
+
+
+def test_solution_first_pipeline_user_display_text_preserves_non_control_input() -> None:
+    for raw in (
+        "我想创建另一个资源",
+        '{"action":"confirm"}',
+        '{"action":"confirm","parameter_overrides":{},"extra":true}',
+        '{"action":"unknown","parameter_overrides":{}}',
+    ):
+        assert solution_first_pipeline_user_display_text("selling_solution_first", raw) == raw
 
 
 def test_create_session_uses_directory_storage_and_metadata(tmp_path) -> None:

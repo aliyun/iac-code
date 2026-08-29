@@ -135,12 +135,15 @@ Les modèles de permissions d'outils suivent le format `tool_name(rule)` :
 | Modèle | Signification |
 |---|---|
 | `bash` | Correspondre à toutes les commandes bash (nom d'outil nu). |
+| `bash(**)` | Autoriser explicitement toutes les commandes Bash, y compris celles que l'analyseur classe comme complexes. |
 | `bash(git *)` | Correspondre aux commandes bash commençant par `git`. |
 | `bash(curl:*)` | Correspondre aux commandes bash commençant par `curl`. |
 | `write_file` | Correspondre à tous les appels d'outil write_file. |
 | `aliyun_api(ros:CreateStack)` | Correspondre à une paire produit/action d'API Alibaba Cloud. |
 
 Les règles sont évaluées dans l'ordre : **deny → ask → allow → comportement par défaut**. Les arguments CLI (`--allowed-tools`, `--disallowed-tools`) ont la priorité la plus élevée.
+
+`bash(**)` n'a ce sens global que lorsqu'il apparaît exactement dans une liste `allow` chargée depuis la configuration ou `--allowed-tools`. Les règles explicites `deny` et `ask`, ainsi que le contrôle de sécurité Shell de base, restent prioritaires. Le mode sécurisé A2A peut retirer Bash des outils disponibles et continue d'imposer ses limites strictes de chemins ; `bash(**)` ne peut ni le réactiver ni contourner ces restrictions. Les motifs Bash ordinaires, dont `bash(*)`, conservent leur comportement existant et ne contournent pas la confirmation des commandes complexes.
 
 ### Permissions d'API Alibaba Cloud
 

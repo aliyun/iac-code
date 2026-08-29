@@ -1258,18 +1258,18 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-315" in html
-    assert "/static/js/app.js?v=web-repl-ui-338" in html
+    assert "/static/styles.css?v=web-repl-ui-316" in html
+    assert "/static/js/app.js?v=web-repl-ui-347" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
     # 已归档面板复刻(archived tab)新增 listArchivedSessions/deleteArchivedSessions,
     # 同样需 bump api.js 版本位,否则回访浏览器拿不到新导出。
-    assert "./api.js?v=web-repl-ui-311" in app_source
+    assert "./api.js?v=web-repl-ui-312" in app_source
     assert "./components/composer.js?v=session-model-v20" in app_source
     # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
     assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
-    assert "./components/tool_cards.js?v=live-inline-tools-v25" in app_source
+    assert "./components/tool_cards.js?v=live-inline-tools-v26" in app_source
     assert "./components/blocking.js?v=blocking-keys-v5" in app_source
     # events.js 承载队列/消息 reducer,历次修复都在此;它的 import 必须带版本位,
     # 否则回访浏览器会加载「新 app.js + 旧缓存 events.js」,让队列行为与当前代码不一致。
@@ -1293,10 +1293,10 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-338" in index_html
-    assert "web-repl-ui-334" not in index_html
+    assert "web-repl-ui-347" in index_html
+    assert "web-repl-ui-333" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
-    assert "./events.js?v=web-repl-ui-319" in app_source
+    assert "./events.js?v=web-repl-ui-323" in app_source
     assert "./components/workspace.js?v=cloud-creds-v58" in app_source
     # ECS RAM Role 面板改动后旧 token 不得残留,否则回访浏览器仍加载旧缓存 workspace.js。
     assert "./components/workspace.js?v=cloud-creds-v57" not in app_source
@@ -1341,7 +1341,7 @@ def test_token_mode_frontend_uses_only_encrypted_transport_for_business_data() -
     app_source = _source(APP_JS)
     composer_source = _source(COMPOSER_JS)
 
-    assert 'from "./token_transport.js?v=token-transport-v3"' in api_source
+    assert 'from "./token_transport.js?v=token-transport-v4"' in api_source
     assert 'fetch("/api/token/challenge"' in transport_source
     assert 'fetch("/api/token/ping"' in transport_source
     assert 'stream ? "/api/token/stream" : "/api/token/request"' in transport_source
@@ -1907,6 +1907,11 @@ def test_complete_step_tool_renders_conclusion_card() -> None:
     assert "function renderCompleteStepDetail" in tool_cards
     assert "function renderConclusionValue" in tool_cards
     assert "function completeStepConclusion" in tool_cards
+    assert "tool.normalizedConclusion" in tool_cards
+    conclusion_helper = tool_cards[tool_cards.index("export function completeStepConclusion") :]
+    assert conclusion_helper.index("tool.normalizedConclusion") < conclusion_helper.index(
+        "const input = inputObject(tool)"
+    )
 
     # The card title reflects the completed step, and the detail reads the nested conclusion.
     assert "Completed step" in tool_cards
@@ -2345,6 +2350,13 @@ def test_expand_state_persists_across_full_rebuild() -> None:
     # a same-session resync keeps it so an in-progress expand survives the reload.
     assert "clearDetailsOpenOverrides();" in app_source
     assert "previousSessionId && previousSessionId !== state.currentSessionId" in app_source
+    # Step lifecycle transitions clear a stale manual override once, allowing a
+    # resumed step to auto-open and a completed step to auto-close. Same-status
+    # rerenders still preserve the user's explicit choice.
+    assert "const pipelineDetailsLifecycleStatuses = new Map();" in app_source
+    assert "syncPipelineDetailsLifecycle(details, status);" in app_source
+    assert "previous !== undefined && previous !== status" in app_source
+    assert "pipelineDetailsLifecycleStatuses.clear();" in app_source
 
     # Tool cards + groups carry stable open keys and default running ones to open;
     # the transcript-tail latest card/group also stays open until the next
@@ -10858,8 +10870,8 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-338" in html
-    assert "web-repl-ui-334" not in html
+    assert "web-repl-ui-347" in html
+    assert "web-repl-ui-343" not in html
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:
@@ -11093,8 +11105,8 @@ def test_styles_define_review_step_prerequisite_progress() -> None:
 
 def test_app_uses_bumped_api_version_for_outputs() -> None:
     source = _source(APP_JS)
-    assert "./api.js?v=web-repl-ui-311" in source
-    assert "./api.js?v=web-repl-ui-310" not in source
+    assert "./api.js?v=web-repl-ui-312" in source
+    assert "./api.js?v=web-repl-ui-311" not in source
     assert "./api.js?v=web-repl-ui-159" not in source
 
 
@@ -11113,7 +11125,7 @@ def test_output_panel_module_exists_and_wired() -> None:
     assert "getOutputs" in source
     app_source = _source(APP_JS)
     assert "createOutputController" in app_source
-    assert "output_panel.js?v=output-panel-v23" in app_source
+    assert "output_panel.js?v=output-panel-v24" in app_source
 
 
 def test_desktop_resource_stack_links_use_native_external_opener() -> None:
@@ -11197,8 +11209,8 @@ def test_output_preview_and_highlight() -> None:
     assert "File no longer exists" in source
     assert "tok-" in source
     app_source = _source(APP_JS)
-    assert "output_panel.js?v=output-panel-v23" in app_source
-    assert "output_panel.js?v=output-panel-v22" not in app_source
+    assert "output_panel.js?v=output-panel-v24" in app_source
+    assert "output_panel.js?v=output-panel-v23" not in app_source
 
 
 def test_output_preview_tok_css() -> None:
@@ -11308,7 +11320,29 @@ def test_pipeline_js_import_is_versioned() -> None:
     # pipeline.js 之前是 app.js 里唯一无版本位的 import;内容改动(含本轮 index 优先
     # 匹配修复)在回访浏览器的 warm cache 下不会重新拉取。加版本位以确保修复落地。
     app_source = _source(APP_JS)
-    assert "./components/pipeline.js?v=pipeline-arch-v7" in app_source
+    assert "./components/pipeline.js?v=pipeline-solution-confirm-v3" in app_source
+
+
+def test_solution_first_deployment_confirmation_uses_compact_actual_options() -> None:
+    source = _source(PIPELINE_JS)
+    start = source.index("export function renderDeploymentConfirmationPanel")
+    end = source.index("function renderDeploymentConfirmation(", start)
+    confirmation_source = source[start:end]
+
+    assert "blocking-panel blocking-panel-question" in confirmation_source
+    assert '["confirm", "reselect", "cancel"].includes' in confirmation_source
+    assert 'for (const action of ["confirm", "adjust", "reselect", "cancel"])' not in confirmation_source
+    assert "pipeline-deployment-overrides" not in confirmation_source
+    assert "option.summary || option.description" in confirmation_source
+
+
+def test_deployment_confirmation_submission_hides_stale_panel_optimistically() -> None:
+    app_source = _source(APP_JS)
+    pipeline_source = _source(PIPELINE_JS)
+
+    assert "pipelineConfirmationSubmittingKey: pendingKey" in app_source
+    assert "onSubmitAccepted: handleSubmitAccepted" in app_source
+    assert "pendingKey === text(state.pipelineConfirmationSubmittingKey)" in pipeline_source
 
 
 def test_app_stores_web_diagrams_from_outputs() -> None:
@@ -11818,7 +11852,10 @@ def test_output_controller_exposes_open_diagram_preview() -> None:
 def test_app_renders_step4_diagram_link_and_select() -> None:
     js = _source(APP_JS)
     # step4 守卫 + 链接/选择按钮类名 + 文案 + 调用点注入(链接切换、选择两击确认)。
-    assert 'stepId === "confirm_and_select"' in js
+    # 守卫是「做候选选择的步骤」白名单:selling 是 confirm_and_select,
+    # selling_solution_first 把规划与选择合成 solution_planning_and_selection;
+    # 会话级候选状态是 latest-wins,不能放开成「有候选就渲染」。
+    assert 'CANDIDATE_SELECTION_STEP_IDS = new Set(["confirm_and_select", "solution_planning_and_selection"])' in js
     assert "pipeline-step-diagram-link" in js
     assert "pipeline-step-select-button" in js
     assert 't("View diagram")' in js
@@ -11829,7 +11866,7 @@ def test_app_renders_step4_diagram_link_and_select() -> None:
     assert "toggleDiagram: (item) => outputController?.toggleDiagramPreview?.(item)" in js
     assert "handleSelectPipelineCandidate({ candidateName: item.candidateName," in js
     assert "candidateIndex: item.candidateIndex })" in js
-    assert "diagrams: overlayDiagramOptimization(state.webDiagrams || [], state)" in js
+    assert "diagrams: pipelineTranscriptDiagrams(state)" in js
     # 已选方案:该候选行绿色对勾;选中判定复用 resolvePipelineSelectedCandidate(与工作台弹窗同源)。
     assert "pipeline-step-diagram-check" in js
     assert "isSelectedDiagramCandidate" in js
@@ -11841,7 +11878,10 @@ def test_app_renders_step4_diagram_link_and_select() -> None:
     # 候选表为空时回退到「按可渲染架构图」旧逻辑。缺图候选仍成行、可选(纯文本名标签占位)。
     assert "const candidates = Array.isArray(options.candidates) ? options.candidates : [];" in js
     assert "candidateRows" in js
-    assert 'if (stepId === "confirm_and_select" && candidateRows.length)' in js
+    assert (
+        "if (CANDIDATE_SELECTION_STEP_IDS.has(stepId) && candidateRows.length "
+        "&& options.inlineCandidateDiagrams !== true)" in js
+    )
     assert "for (const item of candidateRows)" in js
     assert "candidates: state.webCandidates || []" in js
     assert "pipeline-step-diagram-name" in js
@@ -11867,8 +11907,8 @@ def test_app_regroups_pipeline_messages_before_render() -> None:
 
 def test_app_output_panel_import_bumped_for_desktop_external_links() -> None:
     js = _source(APP_JS)
-    assert "output-panel-v23" in js
-    assert "output-panel-v22" not in js
+    assert "output-panel-v24" in js
+    assert "output-panel-v23" not in js
 
 
 def test_appearance_theme_css_blocks_present() -> None:
@@ -12195,6 +12235,18 @@ def test_app_passes_pipeline_options_to_workspace():
     app = _source(APP_JS)
     # 新会话默认面板的「默认流水线」下拉数据源来自 app.js 的 PIPELINE_OPTIONS。
     assert "pipelineOptions: PIPELINE_OPTIONS" in app
+
+
+def test_pipeline_options_expose_solution_first_without_changing_the_default():
+    app = _source(APP_JS)
+    # 「先选方案」流水线必须出现在模式选择器里,否则 Web/Desktop 无法启动新流水线;
+    # 默认仍是 selling,新增选项不得改写 DEFAULT_PIPELINE_NAME。
+    assert 'const DEFAULT_PIPELINE_NAME = "selling";' in app
+    assert 'id: "selling_solution_first",' in app
+    assert 'label: t("Sales pipeline (solution first)"),' in app
+    options_block = app.split("const PIPELINE_OPTIONS = [", 1)[1].split("\n];", 1)[0]
+    assert options_block.count("id:") == 2
+    assert options_block.index("DEFAULT_PIPELINE_NAME") < options_block.index('"selling_solution_first"')
 
 
 def test_restart_server_wired_across_frontend():

@@ -3,9 +3,12 @@
 This module provides translation capabilities using Python's standard gettext library.
 """
 
+import contextlib
+import contextvars
 import gettext
 import os
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Callable
 
@@ -43,14 +46,18 @@ def _default_ngettext(singular: str, plural: str, n: int) -> str:
 _gettext_func: Callable[[str], str] = _default_gettext
 _ngettext_func: Callable[[str, str, int], str] = _default_ngettext
 _current_language: str = DEFAULT_LANGUAGE
+_request_language: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "iac_code_i18n_request_language",
+    default=None,
+)
 
 
 def _(message: str) -> str:
     """Translate a message string.
 
-    Delegates to the current gettext function. This wrapper function
-    remains stable after import, while the underlying translation
-    function can be updated via setup_i18n().
+    A request-local language takes precedence when present; otherwise this
+    delegates to the process-wide gettext function configured by setup_i18n().
+    The wrapper remains stable after import in either case.
 
     Args:
         message: The message string to translate.
@@ -58,11 +65,17 @@ def _(message: str) -> str:
     Returns:
         The translated message string.
     """
+    request_language = _request_language.get()
+    if request_language:
+        return translate_message(message, language=request_language)
     return _gettext_func(message)
 
 
 def ngettext(singular: str, plural: str, n: int) -> str:
     """Translate singular/plural message strings based on count."""
+    request_language = _request_language.get()
+    if request_language:
+        return translate_plural(singular, plural, n, language=request_language)
     return _ngettext_func(singular, plural, n)
 
 
@@ -103,8 +116,22 @@ _LEGACY_FEATURE_PIPELINE_STRINGS = [
 
 
 def get_current_language() -> str:
-    """Return the currently detected language code (e.g., 'zh', 'en')."""
-    return _current_language
+    """Return the request-local language, falling back to the process locale."""
+    return _request_language.get() or _current_language
+
+
+@contextlib.contextmanager
+def use_request_language(language: str | None) -> Iterator[None]:
+    """Apply a supported language to the current async/thread context only."""
+
+    if not language or language not in SUPPORTED_LANGUAGES:
+        yield
+        return
+    token = _request_language.set(language)
+    try:
+        yield
+    finally:
+        _request_language.reset(token)
 
 
 def _detect_language() -> str:
@@ -248,6 +275,26 @@ def translate_message(message: str, *, language: str) -> str:
             translation = gettext.NullTranslations()
         _messages_catalog_cache[language] = translation
     return translation.gettext(message)
+
+
+def translate_plural(singular: str, plural: str, n: int, *, language: str) -> str:
+    """Translate one pluralized message for a request-local language."""
+    if language == DEFAULT_LANGUAGE or language not in SUPPORTED_LANGUAGES:
+        return singular if n == 1 else plural
+    translation = _messages_catalog_cache.get(language)
+    if translation is None:
+        locales_dir = Path(__file__).parent / "locales"
+        try:
+            translation = gettext.translation(
+                "messages",
+                localedir=str(locales_dir),
+                languages=[language],
+                fallback=True,
+            )
+        except Exception:
+            translation = gettext.NullTranslations()
+        _messages_catalog_cache[language] = translation
+    return translation.ngettext(singular, plural, n)
 
 
 def load_webui_catalog(lang: str) -> dict[str, str]:
