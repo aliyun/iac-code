@@ -1175,6 +1175,156 @@ async def test_resume_candidate_selection_rejects_invalid_structured_input_witho
 
 
 @pytest.mark.asyncio
+async def test_resume_deployment_confirmation_keeps_waiting_on_illegal_parameters(tmp_path):
+    runner = _build_runner(tmp_path)
+    step = runner.state_machine.current_step
+    step.ui_mode = "deployment_confirmation"
+    step.config = {"deterministic_structured_confirmation": True, "confirmation_accepts_parameter_overrides": True}
+    step.validate_structured_confirmation = MagicMock(
+        return_value="参数 ZoneId 的取值不在模板 AllowedValues 允许范围内"
+    )
+    options = [{"action": "confirm", "name": "确认部署"}, {"action": "cancel", "name": "取消"}]
+    started_at = 123.0
+    runner._waiting_input_options_by_step["s1"] = options
+    runner._waiting_input_started_at["s1"] = started_at
+    runner.context.set_conclusion(
+        "x", {"status": "awaiting_confirmation", "user_prompt": "请选择下一步操作", "options": options}
+    )
+    runner._observability.user_input_received = MagicMock()
+    runner._set_current_step_user_input = MagicMock()
+
+    async def fail_continue(**_kwargs):
+        raise AssertionError("illegal parameters must not continue the pipeline")
+        yield
+
+    runner._continue_from_current = fail_continue
+    user_input = json.dumps({"action": "confirm", "parameter_overrides": {"ZoneId": "cn-beijing-a"}})
+
+    events = [event async for event in runner.resume(user_input)]
+
+    required = next(event for event in events if isinstance(event, PipelineEvent))
+    assert required.type == PipelineEventType.USER_INPUT_REQUIRED
+    assert required.data == {
+        "step_id": "s1",
+        "prompt": "请选择下一步操作",
+        "options": options,
+        "validation_error": "invalid_deployment_parameters",
+        "validation_message": "参数 ZoneId 的取值不在模板 AllowedValues 允许范围内",
+    }
+    assert runner._waiting_input_options_by_step["s1"] == options
+    assert runner._waiting_input_started_at["s1"] == started_at
+    assert "user_input" not in runner.context.get_conclusion("x")
+    runner._set_current_step_user_input.assert_not_called()
+    runner._observability.user_input_received.assert_not_called()
+    hook_kwargs = step.validate_structured_confirmation.call_args.kwargs
+    assert hook_kwargs["user_message"] == user_input
+    assert hook_kwargs["cwd"] == "/proj"
+    assert hook_kwargs["conclusion"]["status"] == "awaiting_confirmation"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("config", "hook_result", "hook_called"),
+    [
+        ({"confirmation_accepts_parameter_overrides": True}, None, True),
+        ({}, "参数 ZoneId 的取值不在模板 AllowedValues 允许范围内", False),
+    ],
+)
+async def test_resume_deployment_confirmation_continues_without_a_blocking_pre_check(
+    tmp_path,
+    config,
+    hook_result,
+    hook_called,
+):
+    runner = _build_runner(tmp_path)
+    step = runner.state_machine.current_step
+    step.ui_mode = "deployment_confirmation"
+    step.config = config
+    step.validate_structured_confirmation = MagicMock(return_value=hook_result)
+    runner._waiting_input_options_by_step["s1"] = [{"action": "confirm", "name": "确认部署"}]
+    runner.context.set_conclusion("x", {"status": "awaiting_confirmation", "user_prompt": "请选择下一步操作"})
+    continued = False
+
+    async def fake_continue(**_kwargs):
+        nonlocal continued
+        continued = True
+        if False:
+            yield
+
+    runner._continue_from_current = fake_continue
+
+    events = [event async for event in runner.resume('{"action":"confirm"}')]
+
+    assert continued is True
+    assert step.validate_structured_confirmation.called is hook_called
+    assert not [
+        event
+        for event in events
+        if isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_REQUIRED
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("accepts_overrides", [True, False])
+async def test_resume_deployment_confirmation_changed_overrides_skip_the_model_only_when_enabled(
+    tmp_path,
+    accepts_overrides,
+):
+    """Changed parameters resolve deterministically only for a step that opted in.
+
+    With the capability flag on, a one-shot confirm carrying different parameters is finalized in
+    Python and handed to the continuation as ``resolved_step_result`` — no model turn. With the flag
+    off (the shared default, i.e. old ``selling``), the same input must fall back to the step LLM.
+    """
+
+    runner = _build_runner(tmp_path)
+    step = runner.state_machine.current_step
+    step.ui_mode = "deployment_confirmation"
+    step.config = {"deterministic_structured_confirmation": True}
+    if accepts_overrides:
+        step.config["confirmation_accepts_parameter_overrides"] = True
+    step.validate_structured_confirmation = MagicMock(return_value=None)
+    runner._waiting_input_options_by_step["s1"] = [{"action": "confirm", "name": "确认部署"}]
+    runner.context.set_conclusion(
+        "x",
+        {
+            "status": "awaiting_confirmation",
+            "user_prompt": "请选择下一步操作",
+            "parameter_overrides": {"DBInstanceStorage": 120},
+        },
+    )
+    finalized = StepResult(step_id="s1", status=StepStatus.COMPLETED, conclusion={"status": "confirmed"})
+    finalize = MagicMock(return_value=finalized)
+    runner._step_executor.finalize_completion_input_from_transcript = finalize
+    continue_kwargs: dict = {}
+
+    async def fake_continue(**kwargs):
+        continue_kwargs.update(kwargs)
+        if False:
+            yield
+
+    runner._continue_from_current = fake_continue
+    user_input = json.dumps({"action": "confirm", "parameter_overrides": {"ZoneId": "cn-hangzhou-k"}})
+
+    events = [event async for event in runner.resume(user_input)]
+
+    assert not [
+        event
+        for event in events
+        if isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_REQUIRED
+    ]
+    assert "resolved_step_result" in continue_kwargs
+    if accepts_overrides:
+        assert continue_kwargs["resolved_step_result"] is finalized
+        assert finalize.call_count == 1
+        assert finalize.call_args.kwargs["tool_input"] == {"conclusion": {"status": "confirmed"}}
+        assert finalize.call_args.kwargs["user_message"] == user_input
+    else:
+        assert continue_kwargs["resolved_step_result"] is None
+        finalize.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_resume_candidate_selection_extracts_index_from_structured_json(tmp_path):
     runner = _build_runner(tmp_path)
     runner.state_machine.current_step.ui_mode = "candidate_selection"
@@ -1418,6 +1568,16 @@ async def test_resume_ask_user_question_injects_tool_result_and_guard_state(tmp_
                 }
             ],
         ),
+        Message(
+            role="user",
+            content=[
+                ToolResultBlock(
+                    tool_use_id="ask-1",
+                    content="Session interrupted before tool execution completed.",
+                    is_error=True,
+                )
+            ],
+        ),
     ]
     runner._session_storage.load.return_value = history
     captured = {}
@@ -1448,17 +1608,23 @@ async def test_resume_ask_user_question_injects_tool_result_and_guard_state(tmp_
         )
     ]
 
-    user_message = captured["user_message"]
-    assert isinstance(user_message, list)
-    assert len(user_message) == 1
-    assert isinstance(user_message[0], ToolResultBlock)
-    assert user_message[0].tool_use_id == "ask-1"
-    assert json.loads(user_message[0].content) == {
+    # 无 supplemental 分支把 tool result 追加到 resume_messages（而不是当成新 prompt），
+    # 这样恢复后的 guard state 能重建带原始 question 的 ask_user_question record。
+    assert captured["user_message"] is None
+    resumed = captured["resume_messages"]
+    # The synthetic interruption result is replaced, not retained alongside
+    # the real answer for the same tool_use_id.
+    assert resumed[:-1] == history[:-1]
+    tail_blocks = resumed[-1].content
+    assert isinstance(tail_blocks, list)
+    assert len(tail_blocks) == 1
+    assert isinstance(tail_blocks[0], ToolResultBlock)
+    assert tail_blocks[0].tool_use_id == "ask-1"
+    assert json.loads(tail_blocks[0].content) == {
         "selected_id": "nginx",
         "selected_label": "Nginx 网站",
         "free_text": "",
     }
-    assert captured["resume_messages"] == history
     assert captured["precompleted_tools"] == {
         "ask_user_question": {"selected_id": "nginx", "selected_label": "Nginx 网站", "free_text": ""}
     }
@@ -1558,6 +1724,49 @@ async def test_pending_ask_user_question_answer_is_durable_until_resume_stream_s
     restored = _build_two_step_runner(tmp_path, resume_from_sidecar=True)
 
     assert restored.pending_ask_user_question()["answer"] == answer
+
+
+def test_pending_deployment_confirmation_is_rebuilt_from_durable_conclusion(tmp_path):
+    from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
+
+    runner = MagicMock()
+    runner.state_machine.current_step.step_id = "materialize_selected_candidate"
+    runner.state_machine.current_step.ui_mode = "deployment_confirmation"
+    runner.state_machine.current_step.conclusion_field = "selected_plan"
+    runner.context.get_conclusion.return_value = {
+        "status": "awaiting_confirmation",
+        "user_prompt": "请选择下一步操作",
+        "options": [
+            {"action": "confirm", "name": "确认部署"},
+            {"action": "cancel", "name": "取消"},
+        ],
+        "template_url": "templates/selected.yml",
+        "effective_deployment_parameters": {"VpcName": "demo"},
+        "parameter_overrides": {},
+        "preview_ready_for_create": True,
+        "selected_candidate_result": {
+            "solution_summary": "创建一个测试 VPC",
+            "cost": {"monthly_estimate": "¥0/月", "resources": []},
+        },
+    }
+
+    pending = PipelineRunner.pending_deployment_confirmation(runner)
+
+    assert pending == {
+        "kind": "deployment_confirmation",
+        "step_id": "materialize_selected_candidate",
+        "prompt": "请选择下一步操作",
+        "options": [
+            {"action": "confirm", "name": "确认部署"},
+            {"action": "cancel", "name": "取消"},
+        ],
+        "solution_summary": "创建一个测试 VPC",
+        "template_url": "templates/selected.yml",
+        "cost": {"monthly_estimate": "¥0/月", "resources": []},
+        "effective_deployment_parameters": {"VpcName": "demo"},
+        "parameter_overrides": {},
+        "preview_ready_for_create": True,
+    }
 
 
 def test_resume_from_sidecar_accepts_list_valued_context_fields(tmp_path):

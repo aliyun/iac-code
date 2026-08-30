@@ -7,7 +7,7 @@ description: 使用按步骤运行的 Pipeline 模式，引导完成复杂基础
 
 Pipeline 模式是一种按步骤执行任务的交互模式。它适合处理比普通聊天更长、更容易出错的基础设施工作：先理解需求，再规划方案、生成产物、让用户确认，最后继续执行后续动作。
 
-Pipeline 本身是通用能力；当前内置实现的是 `selling` pipeline。`selling` 面向阿里云基础设施场景，可以帮助用户从一句部署需求出发，逐步得到候选架构、ROS 模板、成本估算，并在确认方案后继续部署。
+Pipeline 本身是通用能力。IaC Code 内置两条面向阿里云购买场景的流水线：默认的 `selling` 和需要显式选择的 `selling_solution_first`。两者都覆盖架构规划、ROS 模板、成本估算、确认和部署，但实现候选方案的顺序不同。
 
 适合使用 Pipeline 模式的请求包括：
 
@@ -42,20 +42,27 @@ iac-code
 IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling iac-code
 ```
 
+如需先选择架构、再生成对应模板：
+
+```bash
+IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code
+```
+
 对于 SDK 子进程客户端，可以用 stream-json 输入和输出启动 process 模式：
 
 ```bash
 IAC_CODE_MODE=pipeline iac-code --input-format stream-json --output-format stream-json
 ```
 
-## Pipeline 与 selling 的关系
+## 可用的流水线
 
 | 名称 | 含义 |
 |---|---|
 | Pipeline 模式 | IaC Code 的通用分步执行模式，用来承载长流程、确认点、恢复和进度展示。 |
-| `selling` pipeline | 当前内置的 pipeline，用于阿里云基础设施方案设计、模板生成、成本估算和部署。 |
+| `selling` pipeline | 先生成并评估候选模板，再由用户选择一个方案部署；它仍是默认值。 |
+| `selling_solution_first` pipeline | 先由用户选择架构，再只为该方案生成模板、执行预览和询价，最后部署。 |
 
-后续如果提供更多 pipeline，可以通过 `IAC_CODE_PIPELINE_NAME` 选择。当前发布版本内置的是 `selling`。
+可通过 `IAC_CODE_PIPELINE_NAME` 选择其中一条。三阶段流程、独立的部署确认与权限边界以及恢复行为，请参阅[方案优先流水线](./solution-first-pipeline.md)。
 
 ## 环境变量
 
@@ -105,7 +112,7 @@ ACP 目前不支持 Pipeline 模式。`--prompt` / [非交互模式](./non-inter
 
 ## 当前限制
 
-- 当前内置 pipeline 只有 `selling`，主要面向阿里云基础设施工作流。
+- 当前内置 `selling` 和 `selling_solution_first`，两者主要面向阿里云基础设施工作流；`selling` 仍是默认值。
 - Pipeline 模式支持交互式 REPL 和 SDK process 模式；当 `IAC_CODE_MODE=pipeline` 时，`--prompt` 会被拒绝。
 - Pipeline 模式支持文本输入。Pipeline 激活时，粘贴到 REPL 的图片会被忽略。
 - Pipeline 运行期间，shell escape、技能触发器和大多数 slash command 会被限制，除非 pipeline 定义显式允许。`/help`、`/status`、`/resume`、`/exit` 等基础命令仍然可用。

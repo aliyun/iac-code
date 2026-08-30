@@ -13,6 +13,14 @@ copy can invalidate the source for the next scenario. It then fixes the server
 policy at `300 / 300 / 30`, enables the shared-backup commit protocol, uses
 unique Stack/VSwitch names, and performs an exact-name cleanup fallback.
 
+`--run-dir` remains the output root for logs and evidence and may use paths such
+as `/tmp/...`. The runner places the Qoder workspace and ROS Agent manager state
+under Python's `tempfile.gettempdir()` automatically, because the managed Skill
+accepts local manager paths only under the current user's home or
+Python-recognized temporary tree. This matters on macOS, where `/tmp` resolves
+to `/private/tmp` while Python commonly reports a different per-user temporary
+root.
+
 The Qoder flag that bypasses host Bash/file confirmation applies only to the
 test driver. It does not approve ROS Agent permissions: the isolated iac-code
 settings use the default permission mode, explicitly allow incidental tools,
@@ -98,6 +106,13 @@ The restart matrix covers Normal/Pipeline × allow/deny without real
 credentials. The Sub-Pipeline fixture asserts one denial ToolResult, continued
 Agent-loop execution, parent candidate selection/completion, and the absence of
 grace, durable permission checkpoints, and permission-critical backup.
+
+The same restart suite also covers all three `selling_solution_first` steps
+(`solution_planning_and_selection`, `materialize_selected_candidate`, and
+`deploying`) plus normal chat after the pipeline handoff. Every scope runs both
+`allow_once` and `deny`, emits exactly one permission, restarts the real HTTP
+A2A server before answering, verifies the safe operation/parameter projection,
+and uses deterministic local tools only—no cloud write is performed.
 
 This directory contains headless end-to-end checks for A2A pipeline session
 recovery and redaction regressions. The runner drives the public A2A JSON-RPC

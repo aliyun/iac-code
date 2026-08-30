@@ -23,10 +23,12 @@ class A2AArtifactSpec:
     """A file artifact extracted from a completed step conclusion."""
 
     path: str
-    content: str
+    content: str | None = None
     media_type: str = "auto"
     role: str = "final"
     supersedes_path: str | None = None
+    content_from_file: str | None = None
+    when_conclusion_field_equals: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -74,12 +76,16 @@ class StepSpec:
     hooks_file: str | None = None
     on_enter: Callable[[PipelineContext], None] | None = None
     on_exit: Callable[[PipelineContext, dict], None] | None = None
+    completion_enricher: Callable[..., dict[str, Any]] | None = None
     on_resource_observed: Callable[..., object] | None = None
     on_rollback_cleanup_required: Callable[..., object] | None = None
+    #: Optional pre-check for structured waiting-input payloads. Returning a message keeps the step waiting.
+    validate_structured_confirmation: Callable[..., str | None] | None = None
     base_prompt_sections: IncludeExcludeConfig | None = None
     inject_tools: list[str] = field(default_factory=list)
     ui_mode: str | None = None
     conclusion_schema: dict | None = None
+    completion_input_schema: dict | None = None
     max_conclusion_retries: int = 2
     interrupt_judge_failure: str = "continue"
     completion_guards: list[dict] = field(default_factory=list)
@@ -208,16 +214,15 @@ def _render_prompt_value(
 
     result = template.replace("{" + field_name + "}", replacement)
 
-    if isinstance(value, dict):
-        for key in _collect_dotted_refs(result, field_name):
-            sub_value = _resolve_dotted(value, key)
-            if sub_value is None:
-                sub_replacement = ""
-            elif isinstance(sub_value, str):
-                sub_replacement = sub_value
-            else:
-                sub_replacement = json.dumps(sub_value, ensure_ascii=False, indent=2)
-            result = result.replace("{" + field_name + "." + key + "}", sub_replacement)
+    for key in _collect_dotted_refs(result, field_name):
+        sub_value = _resolve_dotted(value, key) if isinstance(value, dict) else None
+        if sub_value is None:
+            sub_replacement = ""
+        elif isinstance(sub_value, str):
+            sub_replacement = sub_value
+        else:
+            sub_replacement = json.dumps(sub_value, ensure_ascii=False, indent=2)
+        result = result.replace("{" + field_name + "." + key + "}", sub_replacement)
     return result
 
 

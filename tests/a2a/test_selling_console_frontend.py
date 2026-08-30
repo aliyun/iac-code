@@ -3392,6 +3392,57 @@ return {
     }
 
 
+def test_controller_renders_deployment_confirmation_and_encodes_structured_adjustment() -> None:
+    output = controller_harness(
+        """
+controller.init();
+const next = reducers.reducePipelinePayload(debug.state(), {
+  metadata: {iac_code: {pipeline: {
+    eventType: "input_required",
+    status: "input_required",
+    pipelineName: "selling_solution_first",
+    step: {id: "materialize_selected_candidate"},
+    input: {
+      kind: "deployment_confirmation",
+      prompt: "请确认更新后的方案",
+      solution_summary: "杭州双 ECS 高可用方案",
+      cost: {
+        monthly_estimate: "¥1280/月（列表价，合同优惠后约¥1024/月）",
+        resources: [{type: "ECS", spec: "ecs.g7.large x 2", cost: "¥480/月"}]
+      },
+      parameter_overrides: {},
+      options: [
+        {action: "confirm", name: "确认部署"},
+        {action: "adjust", name: "调整参数"},
+        {action: "reselect", name: "重新选择方案"},
+        {action: "cancel", name: "取消"}
+      ]
+    }
+  }}}
+});
+Object.assign(debug.state(), next);
+debug.render();
+all("[data-pending-input-option]")
+  .find((option) => option.getAttribute("data-pending-input-option") === "adjust")
+  .click();
+return {
+  cardText: text(all("[data-pending-input-kind]")[0]),
+  optionIds: all("[data-pending-input-option]").map((option) => option.getAttribute("data-pending-input-option")),
+  composerValue: elementById("composer-input").value
+};
+"""
+    )
+
+    assert "杭州双 ECS 高可用方案" in output["cardText"]
+    assert "ROS 询价：¥1280/月（列表价，合同优惠后约¥1024/月）" in output["cardText"]
+    assert "ECS · ecs.g7.large x 2 · ¥480/月" in output["cardText"]
+    assert output["optionIds"] == ["confirm", "adjust", "reselect", "cancel"]
+    assert json.loads(output["composerValue"]) == {
+        "action": "adjust",
+        "parameter_overrides": {},
+    }
+
+
 def test_controller_renders_pending_input_markdown_for_questions_and_candidate_selection() -> None:
     output = controller_harness(
         """
@@ -4965,3 +5016,307 @@ return {
         "activeTaskId": "",
         "contextId": "ctx-1",
     }
+
+
+def test_reducer_keeps_selling_five_step_timeline_by_default() -> None:
+    output = reducer_harness(
+        """
+const initial = reducers.createInitialState({});
+const legacy = reducers.reducePipelinePayload(initial, {
+  metadata: {iac_code: {pipeline: {
+    eventType: "pipeline_started",
+    status: "working",
+    pipelineName: "selling",
+    taskId: "task-1"
+  }}}
+});
+const unknown = reducers.reducePipelinePayload(initial, {
+  metadata: {iac_code: {pipeline: {
+    eventType: "pipeline_started",
+    status: "working",
+    pipelineName: "some_future_pipeline",
+    taskId: "task-2"
+  }}}
+});
+return {
+  initialPipelineName: initial.pipelineName,
+  initialSteps: Object.keys(initial.steps),
+  legacyPipelineName: legacy.pipelineName,
+  legacySteps: Object.keys(legacy.steps),
+  unknownPipelineName: unknown.pipelineName,
+  unknownSteps: Object.keys(unknown.steps)
+};
+"""
+    )
+
+    selling_steps = [
+        "intent_parsing",
+        "architecture_planning",
+        "evaluate_candidates",
+        "confirm_and_select",
+        "deploying",
+    ]
+    assert output == {
+        "initialPipelineName": "selling",
+        "initialSteps": selling_steps,
+        "legacyPipelineName": "selling",
+        "legacySteps": selling_steps,
+        "unknownPipelineName": "selling",
+        "unknownSteps": selling_steps,
+    }
+
+
+def test_reducer_switches_to_solution_first_three_step_timeline() -> None:
+    output = reducer_harness(
+        """
+const state = reducers.createInitialState({});
+const next = reducers.reducePipelinePayload(state, {
+  metadata: {iac_code: {pipeline: {
+    eventType: "pipeline_started",
+    status: "working",
+    pipelineName: "selling_solution_first",
+    taskId: "task-1",
+    data: {pipelineType: "selling_solution_first", totalSteps: 3}
+  }}}
+});
+const started = reducers.reducePipelinePayload(next, {
+  metadata: {iac_code: {pipeline: {
+    eventType: "step_started",
+    status: "working",
+    pipelineName: "selling_solution_first",
+    step: {id: "solution_planning_and_selection"}
+  }}}
+});
+return {
+  pipelineName: started.pipelineName,
+  steps: Object.keys(started.steps),
+  labels: Object.keys(started.steps).map((stepId) => started.steps[stepId].label),
+  currentStepId: started.currentStepId,
+  planningStatus: started.steps.solution_planning_and_selection.status
+};
+"""
+    )
+
+    assert output == {
+        "pipelineName": "selling_solution_first",
+        "steps": [
+            "solution_planning_and_selection",
+            "materialize_selected_candidate",
+            "deploying",
+        ],
+        "labels": ["方案规划与选择", "实现选中方案", "确认部署"],
+        "currentStepId": "solution_planning_and_selection",
+        "planningStatus": "working",
+    }
+
+
+def test_reducer_does_not_fold_materialize_selected_candidate_into_evaluate_candidates() -> None:
+    output = reducer_harness(
+        """
+const solutionFirst = reducers.createInitialState({pipelineName: "selling_solution_first"});
+const materializing = reducers.reducePipelinePayload(solutionFirst, {
+  metadata: {iac_code: {pipeline: {
+    eventType: "step_started",
+    status: "working",
+    pipelineName: "selling_solution_first",
+    step: {id: "materialize_selected_candidate"}
+  }}}
+});
+return {
+  normalizedForSolutionFirst: reducers.normalizeStepId(
+    {id: "materialize_selected_candidate"},
+    "selling_solution_first"
+  ),
+  normalizedForSelling: reducers.normalizeStepId({id: "candidate_generation"}, "selling"),
+  normalizedDefault: reducers.normalizeStepId({id: "candidate_generation"}),
+  currentStepId: materializing.currentStepId,
+  materializeStatus: materializing.steps.materialize_selected_candidate.status,
+  hasEvaluateCandidates: Object.prototype.hasOwnProperty.call(
+    materializing.steps,
+    "evaluate_candidates"
+  )
+};
+"""
+    )
+
+    assert output == {
+        "normalizedForSolutionFirst": "materialize_selected_candidate",
+        "normalizedForSelling": "evaluate_candidates",
+        "normalizedDefault": "evaluate_candidates",
+        "currentStepId": "materialize_selected_candidate",
+        "materializeStatus": "working",
+        "hasEvaluateCandidates": False,
+    }
+
+
+def test_reducer_adopts_solution_first_timeline_from_task_snapshot() -> None:
+    output = reducer_harness(
+        """
+const state = reducers.createInitialState({});
+const next = reducers.reducePipelinePayload(state, {
+  snapshot: {
+    pipelineName: "selling_solution_first",
+    taskId: "task-1",
+    contextId: "ctx-1",
+    status: "waiting_input",
+    lastSequence: 7,
+    steps: [
+      {id: "solution_planning_and_selection", status: "waiting_input"},
+      {id: "materialize_selected_candidate", status: "pending"},
+      {id: "deploying", status: "pending"}
+    ],
+    pendingInput: {
+      kind: "candidate_selection",
+      prompt: "请选择要实现的方案：",
+      options: [{id: "0", label: "ECS 单机方案", candidateIndex: 0}]
+    }
+  }
+});
+return {
+  pipelineName: next.pipelineName,
+  steps: Object.keys(next.steps),
+  planningStatus: next.steps.solution_planning_and_selection.status,
+  currentStepId: next.currentStepId,
+  pendingKind: next.pendingInput && next.pendingInput.kind
+};
+"""
+    )
+
+    assert output == {
+        "pipelineName": "selling_solution_first",
+        "steps": [
+            "solution_planning_and_selection",
+            "materialize_selected_candidate",
+            "deploying",
+        ],
+        "planningStatus": "waiting_input",
+        "currentStepId": "solution_planning_and_selection",
+        "pendingKind": "candidate_selection",
+    }
+
+
+def test_controller_renders_solution_first_three_step_progress_and_cards() -> None:
+    output = controller_harness(
+        """
+controller.init();
+function applyPayload(payload) {
+  const next = reducers.reducePipelinePayload(debug.state(), payload);
+  Object.assign(debug.state(), next);
+  debug.render();
+}
+applyPayload({
+  metadata: {iac_code: {pipeline: {
+    eventType: "pipeline_started",
+    status: "working",
+    pipelineName: "selling_solution_first",
+    taskId: "task-1"
+  }}}
+});
+applyPayload({
+  metadata: {iac_code: {pipeline: {
+    eventType: "step_started",
+    status: "working",
+    pipelineName: "selling_solution_first",
+    step: {id: "solution_planning_and_selection"},
+    data: {summary: "正在规划架构"}
+  }}}
+});
+const progressSteps = all("[data-progress-step]");
+return {
+  progressStepIds: progressSteps.map((step) => step.getAttribute("data-progress-step")),
+  progressText: text(elementById("composer-progress")),
+  stepCardIds: all("[data-step-id]").map((card) => card.getAttribute("data-step-id"))
+};
+"""
+    )
+
+    assert output == {
+        "progressStepIds": [
+            "solution_planning_and_selection",
+            "materialize_selected_candidate",
+            "deploying",
+        ],
+        "progressText": "方案规划与选择实现选中方案确认部署",
+        "stepCardIds": ["solution_planning_and_selection"],
+    }
+
+
+def test_controller_places_candidate_selection_message_after_solution_planning_step() -> None:
+    output = controller_harness(
+        """
+controller.init();
+global.fetch = async () => ({
+  ok: true,
+  status: 200,
+  body: null,
+  text: async () => ""
+});
+const next = reducers.reducePipelinePayload(debug.state(), {
+  metadata: {iac_code: {pipeline: {
+    eventType: "pipeline_started",
+    status: "working",
+    pipelineName: "selling_solution_first",
+    taskId: "task-1"
+  }}}
+});
+Object.assign(debug.state(), next);
+const state = debug.state();
+state.pipelineStarted = true;
+state.steps.solution_planning_and_selection.status = "waiting_input";
+state.status = "waiting_input";
+state.pendingInput = {
+  kind: "candidate_selection",
+  prompt: "请选择要实现的方案：",
+  options: [{id: "0", label: "方案0"}]
+};
+debug.render();
+elementById("composer-input").value = "选择方案0";
+await controller.sendComposerMessage();
+const messages = all("[data-chat-message]").map((item) => text(item));
+const indexOf = (needle) => messages.findIndex((item) => item.includes(needle));
+return {
+  planningStep: indexOf("方案规划与选择"),
+  selectionMessage: indexOf("选择方案0")
+};
+"""
+    )
+
+    assert output["planningStep"] >= 0
+    assert output["selectionMessage"] > output["planningStep"]
+
+
+def test_controller_renders_solution_first_candidate_result_cards_on_planning_step() -> None:
+    output = controller_harness(
+        """
+controller.init();
+const next = reducers.reducePipelinePayload(debug.state(), {
+  metadata: {iac_code: {pipeline: {
+    eventType: "pipeline_started",
+    status: "working",
+    pipelineName: "selling_solution_first",
+    taskId: "task-1"
+  }}}
+});
+Object.assign(debug.state(), next);
+const state = debug.state();
+state.pipelineStarted = true;
+state.steps.solution_planning_and_selection.status = "completed";
+state.expandedStepDetails = {solution_planning_and_selection: true};
+state.candidates = [
+  {candidateIndex: 0, name: "ECS 单机方案", totalMonthlyCost: "120 元/月"},
+  {candidateIndex: 1, name: "轻量应用服务器方案", totalMonthlyCost: "90 元/月"}
+];
+debug.render();
+const planningCard = all("[data-step-id]").find(
+  (card) => card.getAttribute("data-step-id") === "solution_planning_and_selection"
+);
+return {
+  cardText: planningCard ? text(planningCard) : "",
+  resultCount: all("[data-step-candidate-result]").length
+};
+"""
+    )
+
+    assert "ECS 单机方案" in output["cardText"]
+    assert "轻量应用服务器方案" in output["cardText"]
+    assert output["resultCount"] == 2

@@ -117,6 +117,13 @@ class SearchBox:
             self._notify(old_value)
             return True
 
+        if key == "paste" and key_event.char:
+            pasted = " ".join(part for part in key_event.char.splitlines() if part)
+            self._text[self._cursor : self._cursor] = list(pasted)
+            self._cursor += len(pasted)
+            self._notify(old_value)
+            return True
+
         # --- Character insertion ---
         # Only handle printable characters (single char, no ctrl modifier)
         char = key_event.char

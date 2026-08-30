@@ -74,6 +74,7 @@ _CONTRACT_ERROR_STAGES = frozenset(
         "product",
         "version",
         "api",
+        "credential",
         "security",
         "parameter",
         "media_type",

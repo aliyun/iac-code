@@ -135,12 +135,15 @@ Tool permission patterns follow the format `tool_name(rule)`:
 | Pattern | Meaning |
 |---|---|
 | `bash` | Match all bash commands (bare tool name). |
+| `bash(**)` | Explicitly blanket-allow every Bash command, including forms the command analyzer classifies as complex. |
 | `bash(git *)` | Match bash commands starting with `git`. |
 | `bash(curl:*)` | Match bash commands starting with `curl`. |
 | `write_file` | Match all write_file tool calls. |
 | `aliyun_api(ros:CreateStack)` | Match one Alibaba Cloud API product/action pair. |
 
 Rules are evaluated in order: **deny → ask → allow → default behavior**. CLI arguments (`--allowed-tools`, `--disallowed-tools`) take the highest precedence.
+
+`bash(**)` has this blanket meaning only when it appears exactly in an `allow` list loaded from settings or `--allowed-tools`. Explicit `deny` and `ask` rules and the basic shell safety check still take precedence. A2A safe mode may remove Bash from the available tool set and continues to enforce its strict path boundaries; `bash(**)` cannot re-enable or escape those restrictions. Ordinary Bash patterns, including `bash(*)`, keep their existing behavior and do not bypass complex-command confirmation.
 
 ### Alibaba Cloud API Permissions
 

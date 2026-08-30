@@ -264,6 +264,6 @@ For the full option list, see [Command Reference](./command-reference.md).
 
 - Bind to `127.0.0.1` for local-only usage.
 - Use `token` in the A2A config or `IACCODE_A2A_HTTP_TOKEN` before binding to a shared network interface.
-- A2A mode rejects tool permission requests automatically unless `auto-approve-permissions` or an explicit permission rule allows them. Permission decisions are audited locally; any allow decision that requires an audit record fails closed if that record cannot be persisted. Protected Alibaba Cloud write APIs require exact per-API authorization outside blanket bypass modes.
+- By default, a tool permission request pauses as a structured `input-required` wait that the caller can resume with `allow_once` or `deny`. `auto-approve-permissions` or an explicit permission rule can resolve a request without waiting. Permission decisions are audited locally; any allow decision that requires an audit record fails closed if that record cannot be persisted. Protected Alibaba Cloud write APIs require exact per-API authorization outside blanket bypass modes.
 - Active runtime state is in memory. Persistence mirrors task and context metadata, but restarting the process does not resume in-flight asyncio work.
 - One context can run only one task at a time; separate contexts can run concurrently.

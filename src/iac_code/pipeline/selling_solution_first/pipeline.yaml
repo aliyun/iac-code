@@ -1,0 +1,1149 @@
+# Solution-first selling pipeline: pick the architecture plan first, then implement it.
+#
+# Three ordinary steps, no sub-pipeline and no parallel candidate materialization:
+#   1. solution_planning_and_selection  intent + architecture + candidate selection
+#   2. materialize_selected_candidate   template + parameters + preview + pricing + confirmation
+#   3. deploying                        ROS stack creation behind a hard confirmation gate
+name: selling_solution_first
+emit_stack_events: true
+
+feature_flags:
+  a2a_cleanup_before_pipeline_resume:
+    default: true
+  repl_auto_resume_running_on_startup:
+    default: true
+
+base_prompt_sections:
+  include:
+    - identity
+    - system
+    - env
+    - cloud_config
+    - tools
+    - runtime_context
+    - doing_tasks
+    - actions
+    - output_style
+
+allow_user_escapes:
+  skill: false
+  command: false
+  shell: false
+
+on_complete:
+  action: switch_to_normal
+  apply_on: [completed, early_exit, failed, canceled]
+  handoff_context:
+    include:
+      - solution_selection
+      - selected_plan
+      - deployment
+
+context_dependencies:
+  solution_selection: []
+  selected_plan: [solution_selection]
+  deployment: [solution_selection, selected_plan]
+
+max_rollbacks: 3
+
+steps:
+  - id: solution_planning_and_selection
+    conclusion_field: solution_selection
+    forward: materialize_selected_candidate
+    description: Analyze the requirement, plan candidate architectures, and let the user choose one.
+    skill: iac-aliyun-solution-first
+    prompt: prompts/solution_planning_and_selection.md
+    hooks_file: hooks/solution_planning_and_selection.py
+    context_fields: [solution_selection]
+    auto_advance: false
+    ui_mode: candidate_selection
+    config:
+      accept_parameter_overrides: false
+      compact_completion_schema: true
+      compact_completion_errors: true
+      completion_validation_error_limit: 5
+      # Keep display-tool inputs as runtime-only evidence. Step 1 uses them to ensure the
+      # final candidate array is the same batch the user actually saw after replanning.
+      completion_record_contract: v2
+      fresh_agent_context_on_resume: true
+      conclusion_merge_context_field: solution_selection
+      conclusion_merge_statuses: [selected]
+      hydrate_selected_candidate: true
+      deterministic_structured_candidate_selection: true
+      supplement_injection_failure: hard_interrupt
+    max_agent_turns: 60
+    max_conclusion_retries: 3
+    exit_condition:
+      field: continue_pipeline
+      value: false
+    inject_tools:
+      - ask_user_question
+      - show_architecture_plan
+      - show_candidate_detail
+    tools:
+      include: [read_memory, read_file, list_files, glob, grep, web_fetch, aliyun_doc_search, aliyun_api]
+      exclude: []
+    conclusion_schema:
+      type: object
+      description: >-
+        Step 1 的完整结论。首次规划用 awaiting_selection 并提交全部候选和选项；用户选择后用 selected
+        并提交权威候选；用户取消或拒绝阿里云时用 rejected。始终把所有字段放在 conclusion 对象内。
+      required: [status, continue_pipeline, is_infra_intent]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [awaiting_selection, selected, rejected]
+          description: >-
+            当前分支：awaiting_selection 表示候选已展示、等待用户选择；selected 表示用户已选择候选；
+            rejected 表示用户取消、拒绝阿里云或确认不是基础设施需求。awaiting_selection 必须同时提交
+            candidates/user_prompt/options；selected 必须同时提交 candidates/options/selected_candidate_name/
+            selected_candidate_index/selected_candidate；rejected 必须提交 rejection_reason。
+        continue_pipeline:
+          type: boolean
+          description: awaiting_selection/selected 必须为 true；rejected 必须为 false。
+        is_infra_intent:
+          type: boolean
+          description: awaiting_selection/selected 必须为 true；rejected 必须为 false。
+        rejection_reason:
+          type: string
+          description: status=rejected 时必填，说明结束流程的真实用户意图或平台原因。
+        intent:
+          type: object
+          description: 从用户最新权威需求提取的结构化阿里云部署意图；重新规划时用新需求替换旧意图。
+        candidate_set_id:
+          type: string
+          description: Python 从当前有效 show_architecture_plan 工具调用生成的候选批次标识。
+        candidates:
+          type: array
+          description: >-
+            本轮展示的完整候选数组；awaiting_selection 和 selected 都必须保留同一批候选，数组下标是唯一的
+            0 基候选坐标。
+          items:
+            type: object
+            description: 一个完整且可独立选择的架构候选；selected_candidate 必须原样取自该数组。
+            required:
+              - candidate_id
+              - name
+              - summary
+              - output_path
+              - products
+              - resource_intents
+              - hard_constraints
+              - topology
+              - topology_graph
+              - resource_inventory
+              - rough_cost
+              - why_recommended
+              - problems_solved
+              - pros
+              - cons
+            properties:
+              candidate_id:
+                type: string
+                description: 本批候选内稳定且唯一的机器标识。
+              name:
+                type: string
+                description: 展示给用户的唯一方案名称。
+              summary:
+                type: string
+                description: 面向用户的简短架构与产品组合说明。
+              applicable_scenarios:
+                type: array
+                description: 该候选适用的业务场景列表。
+                items: {type: string}
+              output_path:
+                type: string
+                description: Step 2 唯一允许写入的模板路径，格式为 templates/{序号}-{英文简写}.yml。
+              products:
+                type: array
+                description: 该候选涉及的阿里云产品名称集合。
+                items: {type: string}
+              resource_intents:
+                type: array
+                description: 每类资源的新建、复用、引用或禁止生命周期意图；Step 2 必须严格遵循。
+                items:
+                  type: object
+                  description: 一项资源生命周期要求。
+                  required: [product, action]
+                  properties:
+                    product:
+                      type: string
+                      description: 阿里云产品或资源类别。
+                    action:
+                      type: string
+                      enum: [create, use_existing, reference, forbid]
+                      description: create 新建；use_existing 复用已有资源；reference 外部引用；forbid 禁止创建或使用。
+                    role:
+                      type: string
+                      description: 该资源在方案中的职责。
+                    source:
+                      type: string
+                      description: 该生命周期要求的来源，例如 user 或 predefined_solution。
+                    notes:
+                      type: string
+                      description: 对生命周期或引用方式的补充说明。
+              hard_constraints:
+                type: array
+                description: 用户明确提出、Step 2 必须逐条验证的硬约束快照。
+                items:
+                  type: object
+                  description: 一条稳定、可验证的用户硬约束。
+                  required: [id, target, property, operator, value, verification_mode, source, source_text]
+                  properties:
+                    id:
+                      type: string
+                      description: 本次需求内稳定且唯一的约束 ID。
+                    target:
+                      type: string
+                      description: 约束作用的产品、资源或参数目标。
+                    property:
+                      type: string
+                      description: 被约束的属性或参数名。
+                    operator:
+                      type: string
+                      enum: [eq, ne, gt, gte, lt, lte, in, not_in, contains, not_contains]
+                      description: value 与实际值之间的比较运算符。
+                    value:
+                      description: 用户要求的原始结构化目标值，不得擅自改写。
+                    unit:
+                      type: string
+                      description: value 的单位；无单位时可省略。
+                    verification_mode:
+                      type: string
+                      enum: [direct, tool]
+                      description: direct 可由模板或参数直接证明；tool 应优先使用真实工具结果证据。
+                    source:
+                      type: string
+                      description: 约束来源，例如 user。
+                    source_text:
+                      type: string
+                      description: 用户表达该约束的原始文本片段。
+              topology:
+                type: string
+                description: 面向用户的文字版拓扑概述。
+              topology_graph:
+                type: object
+                description: 由 show_candidate_detail 提交并由 Python 渲染的结构化简单架构图。
+                required: [nodes, edges]
+                properties:
+                  nodes:
+                    type: array
+                    description: 架构图节点列表；同一候选内 id 唯一。
+                    items:
+                      type: object
+                      description: 一个产品或逻辑资源节点。
+                      required: [id, label, product]
+                      properties:
+                        id:
+                          type: string
+                          description: 节点唯一标识，供 edges 引用。
+                        label:
+                          type: string
+                          description: 架构图中展示的节点名称。
+                        product:
+                          type: string
+                          description: 节点对应的阿里云产品。
+                        role:
+                          type: string
+                          description: 节点的业务或技术职责。
+                        group:
+                          type: string
+                          description: 可选的网络、可用区或逻辑分组。
+                  edges:
+                    type: array
+                    description: 架构图节点之间的连接关系。
+                    items:
+                      type: object
+                      description: 一条从 source 节点到 target 节点的有向关系。
+                      required: [source, target]
+                      properties:
+                        source:
+                          type: string
+                          description: 起点 node.id。
+                        target:
+                          type: string
+                          description: 终点 node.id。
+                        label:
+                          type: string
+                          description: 面向用户展示的连接说明。
+                        relation:
+                          type: string
+                          description: 机器可读的关系类型。
+              resource_inventory:
+                type: array
+                description: 该候选包含的详细资源清单，包括数量、规格、计费和生命周期。
+                items:
+                  type: object
+                  description: 一项计划新建或引用的资源清单记录。
+                  required: [resource_id, product, purpose, quantity, lifecycle]
+                  properties:
+                    resource_id:
+                      type: string
+                      description: 候选内稳定且唯一的资源清单标识。
+                    product:
+                      type: string
+                      description: 用户可理解的阿里云产品名称。
+                    resource_type:
+                      type: string
+                      description: 对应 ROS 资源类型；尚未确定时可省略。
+                    purpose:
+                      type: string
+                      description: 该资源在架构中的用途。
+                    quantity:
+                      type: integer
+                      description: 计划资源数量。
+                    recommended_spec:
+                      type: string
+                      description: 用于规划和粗估的建议规格。
+                    billing_method:
+                      type: string
+                      description: 用于粗估的计费方式，例如按量付费。
+                    rough_monthly_cost:
+                      type: string
+                      description: 该清单项的月度粗估区间或免费说明。
+                    lifecycle:
+                      type: string
+                      enum: [create, use_existing, reference, forbid]
+                      description: 与 resource_intents 一致的资源生命周期。
+              rough_cost:
+                type: object
+                description: Step 1 的架构级月度粗估，不是 ROS 精确询价结果。
+                required: [currency, monthly_range, items, assumptions, exclusions, confidence]
+                properties:
+                  currency:
+                    type: string
+                    enum: [CNY]
+                    description: 粗估费用币种，固定为 CNY。
+                  monthly_range:
+                    type: string
+                    description: 面向用户的月度总费用区间，例如 ¥500～¥800/月。
+                  items:
+                    type: array
+                    description: 构成月度粗估的主要计费项。
+                    items:
+                      type: object
+                      description: 一项产品或资源的粗估费用。
+                      properties:
+                        name:
+                          type: string
+                          description: 计费产品或资源名称。
+                        spec:
+                          type: string
+                          description: 采用的粗估规格与数量。
+                        monthly_cost:
+                          type: string
+                          description: 该项月度粗估区间或免费说明。
+                  assumptions:
+                    type: array
+                    description: 粗估成立所依据的地域、用量、规格和计费假设。
+                    items: {type: string}
+                  exclusions:
+                    type: array
+                    description: 未计入粗估的流量、存储增长或第三方费用等项目。
+                    items: {type: string}
+                  confidence:
+                    type: string
+                    enum: [high, medium, low]
+                    description: 粗估可信度，信息越完整越高。
+              why_recommended:
+                type: array
+                description: 面向用户的推荐理由，逐条把用户需求或硬约束映射到本方案的架构决策。
+                items: {type: string}
+              problems_solved:
+                type: array
+                description: 本方案解决的用户问题或痛点，逐条说明方案如何覆盖。
+                items: {type: string}
+              pros:
+                type: array
+                description: 该候选相对用户目标的主要优势。
+                items: {type: string}
+              cons:
+                type: array
+                description: 该候选的主要代价或不足。
+                items: {type: string}
+              risks:
+                type: array
+                description: 会影响实施、费用或稳定性的风险。
+                items: {type: string}
+              tradeoffs:
+                type: array
+                description: 与其它候选相比的关键取舍。
+                items: {type: string}
+        user_prompt:
+          type: string
+          description: status=awaiting_selection 时展示给用户的选择提示。
+        options:
+          type: array
+          description: >-
+            status=awaiting_selection/selected 时提交的候选同序全集；options[i] 必须对应 candidates[i]，
+            candidate_index 必须等于 i。
+          items:
+            type: object
+            description: 一个候选选择项。
+            required: [name, candidate_index]
+            properties:
+              name:
+                type: string
+                description: 必须与对应 candidate.name 完全一致。
+              summary:
+                type: string
+                description: 面向选择界面的简短决策摘要，必须包含核心架构、粗估月费和关键取舍，供自然语言偏好选择。
+              candidate_index:
+                type: integer
+                description: 对应 candidates 数组的 0 基下标。
+        user_input:
+          type: string
+          description: status=selected 时保存用户本轮选择的原始输入；首次等待时可省略。
+        selected_candidate_name:
+          type: string
+          description: status=selected 时必填，必须等于所选 candidates[index].name。
+        selected_candidate_index:
+          type: integer
+          description: status=selected 时必填，所选候选在 candidates 中的 0 基下标。
+        selected_candidate:
+          type: object
+          description: status=selected 时必填，必须原样等于 candidates[selected_candidate_index] 的完整对象。
+        clarification_choice:
+          type: string
+          description: ask_user_question 返回的已选选项语义；没有选项时可省略。
+        clarification_text:
+          type: string
+          description: ask_user_question 返回的用户自由输入；没有自由输入时可省略。
+      allOf:
+        - if:
+            properties:
+              status: {const: awaiting_selection}
+            required: [status]
+          then:
+            required: [candidates, user_prompt, options, continue_pipeline]
+            properties:
+              continue_pipeline: {const: true}
+              is_infra_intent: {const: true}
+        - if:
+            properties:
+              status: {const: selected}
+            required: [status]
+          then:
+            required:
+              - candidates
+              - options
+              - selected_candidate_name
+              - selected_candidate_index
+              - selected_candidate
+            properties:
+              continue_pipeline: {const: true}
+              is_infra_intent: {const: true}
+        - if:
+            properties:
+              status: {const: rejected}
+            required: [status]
+          then:
+            required: [rejection_reason]
+            properties:
+              continue_pipeline: {const: false}
+              is_infra_intent: {const: false}
+    completion_input_schema:
+      type: object
+      description: >-
+        模型只提交意图、选择坐标或拒绝原因；完整候选由 Python 从当前有效的方案摘要和逐候选详情工具记录生成。
+      required: [status]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [awaiting_selection, selected, rejected]
+          description: 当前语义状态。
+        intent:
+          type: object
+          description: 用户的结构化部署意图；首次规划或重新规划时提交，纯重新选择时由 Python 复用。
+          required: [resource_intents, hard_constraints]
+          properties:
+            resource_intents:
+              type: array
+              minItems: 1
+              description: 用户权威资源生命周期；保留 create/use_existing/reference/forbid；不用 ECS 改 FC 须含 ECS:forbid 与 FC:create。
+            hard_constraints:
+              type: array
+              description: 用户明确提出且必须逐条验证的硬约束。
+              items:
+                type: object
+                required: [id, target, property, operator, value, verification_mode, source, source_text]
+                additionalProperties: false
+                properties:
+                  id: {type: string, minLength: 1, description: 本次需求内稳定且唯一的约束 ID。}
+                  target: {type: string}
+                  property: {type: string}
+                  operator:
+                    type: string
+                    enum: [eq, ne, gt, gte, lt, lte, in, not_in, contains, not_contains]
+                  value: {description: 用户要求的结构化目标值。}
+                  unit: {type: string}
+                  verification_mode: {type: string, enum: [direct, tool]}
+                  source: {type: string}
+                  source_text: {type: string}
+          additionalProperties: true
+        selected_candidate_index:
+          type: integer
+          minimum: 0
+          description: selected 时只提交保存候选数组的 0 基下标。
+        rejection_reason: {type: string, minLength: 1}
+      allOf:
+        - if: {properties: {status: {const: selected}}, required: [status]}
+          then: {required: [selected_candidate_index]}
+        - if: {properties: {status: {const: rejected}}, required: [status]}
+          then: {required: [rejection_reason]}
+
+  - id: materialize_selected_candidate
+    conclusion_field: selected_plan
+    forward: deploying
+    description: Generate, validate, price and confirm the single selected solution.
+    skill: iac-aliyun-materialize-selected-candidate
+    prompt: prompts/materialize_selected_candidate.md
+    context_fields: [solution_selection, selected_plan]
+    hooks_file: hooks/materialize_selected_candidate.py
+    auto_advance: false
+    ui_mode: deployment_confirmation
+    config:
+      deterministic_structured_confirmation: true
+      compact_completion_schema: true
+      compact_completion_errors: true
+      completion_validation_error_limit: 5
+      fresh_agent_context_on_resume: true
+      conclusion_merge_context_field: selected_plan
+      conclusion_merge_statuses: [awaiting_confirmation, confirmed, cancelled, reselect_requested]
+      completion_record_contract: v2
+      hard_constraint_evidence_contract: v2
+      # The UI prices "template body + newest parameters" itself, so an explicit confirm may
+      # carry parameter overrides that differ from the last ROS quote input. Accepting them in
+      # one shot is scoped to this step by this flag; shared defaults (and old `selling`) keep
+      # requiring a fresh quote before confirmation.
+      confirmation_accepts_parameter_overrides: true
+      completion_context_paths:
+        - solution_selection.intent
+        - solution_selection.selected_candidate
+        - selected_plan.effective_deployment_parameters
+    max_agent_turns: 80
+    max_conclusion_retries: 4
+    exit_condition:
+      field: continue_pipeline
+      value: false
+    inject_tools:
+      - ask_user_question
+      - ros_validate_template
+      - ros_get_template_parameter_constraints
+      - ros_preview_template
+      - ros_estimate_template_cost
+    # No template artifact: the frontend downloads the certified workspace template through the
+    # ros-ai-agent workspace endpoint, so the body never has to travel through A2A.
+    tools:
+      include: []
+      exclude: [write_memory, ros_stack, ros_stack_instances]
+    completion_guards:
+      # Structured UI payloads are authoritative. Natural-language input is intentionally
+      # left to the LLM, matching the old pipeline's free-text confirmation behavior.
+      # An explicit `confirm` may never land back in awaiting_confirmation, with or without
+      # parameter overrides — the user must not be asked to confirm twice. Only `adjust`
+      # legitimately re-materializes, re-previews and re-prices before waiting again.
+      - when_conclusion_field_equals:
+          status: awaiting_confirmation
+        require_structured_user_input_action:
+          actions: [adjust]
+        message_key: solution_first_structured_confirmation_action_required
+      - when_conclusion_field_equals:
+          status: confirmed
+        require_context_field_equals:
+          selected_plan.status: awaiting_confirmation
+        message_key: solution_first_confirmation_wait_required
+      - when_conclusion_field_equals:
+          status: confirmed
+        require_structured_user_input_action:
+          action: confirm
+          confirmation_field: confirmation
+          parameter_overrides_context_field: selected_plan.parameter_overrides
+        message_key: solution_first_structured_confirmation_action_required
+      - when_conclusion_field_equals:
+          status: cancelled
+        require_structured_user_input_action:
+          action: cancel
+        message_key: solution_first_structured_confirmation_action_required
+      - when_conclusion_field_equals:
+          status: reselect_requested
+        require_structured_user_input_action:
+          action: reselect
+        message_key: solution_first_structured_confirmation_action_required
+      # The confirmed template must be the exact file the model validated last.
+      - when_conclusion_field_equals:
+          status: confirmed
+        require_tool_result:
+          tool: ros_validate_template
+          latest_match: true
+          match_conclusion_field: selected_candidate_result.template.file_path
+          match_result_field: input.template_url
+          # Rewriting the same template after the matched validation invalidates it.
+          disallow_tool_results_after_match:
+            - tools: [write_file, edit_file]
+              match_conclusion_field: selected_candidate_result.template.file_path
+              match_result_field: result.file_path
+              message_key: solution_first_revalidate_after_template_write
+        message_key: solution_first_confirmed_template_validated
+      # Hard constraints from the authoritative candidate must be verified with evidence.
+      - when_conclusion_field_equals:
+          status: confirmed
+        require_context_constraint_coverage:
+          source_fields: [solution_selection.selected_candidate.hard_constraints]
+          checks_field: selected_candidate_result.cost.hard_constraint_checks
+          deployment_parameters_field: effective_deployment_parameters
+        message_key: hard_constraint_verification_required
+      # Reselecting a solution must actually roll back to step 1.
+      - when_conclusion_field_equals:
+          status: reselect_requested
+        require_rollback_request:
+          target_step: solution_planning_and_selection
+        message_key: solution_first_reselect_rollback_required
+    conclusion_schema:
+      type: object
+      description: >-
+        Step 2 的完整物化与确认结论。首次物化后用 awaiting_confirmation 展示方案并等待用户；
+        用户确认后用 confirmed；取消用 cancelled；要求改变方案或部署目标时用 reselect_requested。
+        始终把所有字段放在 conclusion 对象内，rollback_request 是 complete_step 的同级外层参数。
+      required: [status, continue_pipeline, deployment_confirmed]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [awaiting_confirmation, confirmed, cancelled, reselect_requested]
+          description: >-
+            awaiting_confirmation 表示模板、参数、Preview、询价和方案说明已就绪并等待用户；confirmed
+            表示用户已明确授权当前方案；cancelled 表示结束；reselect_requested 表示必须回滚 Step 1。
+            awaiting_confirmation 必须提交完整 selected_candidate_result/template_url/
+            effective_deployment_parameters/preview_ready_for_create/user_prompt/options/selection_valid；confirmed
+            用 confirmation 替代 user_prompt/options；reselect_requested 必须提交 reselect_reason 和外层 rollback_request。
+        continue_pipeline:
+          type: boolean
+          description: awaiting_confirmation/confirmed/reselect_requested 必须为 true；cancelled 必须为 false。
+        deployment_confirmed:
+          type: boolean
+          description: 只有 status=confirmed 时为 true，其余状态必须为 false。
+        selection_valid:
+          type: boolean
+          description: 选中候选是否仍与 Step 1 的权威候选一致；等待或确认时必须为 true。
+        selection_invalid_reason:
+          type: string
+          description: selection_valid=false 时说明候选缺失、下标越界或身份不一致的原因。
+        selected_candidate_result:
+          type: object
+          description: 当前最终参数下唯一选中方案的模板、方案说明、ROS 精确询价和验证证据。
+          required: [solution_summary, template, cost]
+          properties:
+            solution_summary:
+              type: string
+              minLength: 1
+              description: >-
+                面向最终用户的 2～5 句方案说明，描述产品组合、拓扑、地域、规格、数量和新建/复用关系；
+                不写内部校验状态、模板路径、参数 JSON 或重复价格。
+            template:
+              type: object
+              description: 已写入并通过 ros_validate_template 的唯一 ROS 模板结果。
+              required: [file_path, region]
+              properties:
+                file_path:
+                  type: string
+                  description: >-
+                    必须等于 solution_selection.selected_candidate.output_path、顶层 template_url，且是最后一次
+                    ros_validate_template 使用的同一路径。
+                region:
+                  type: string
+                  description: 模板、Preview 和询价使用的目标阿里云地域 ID。
+            cost:
+              type: object
+              description: 使用最终有效参数得到的 ROS 精确询价、参数和验证结果，不得填 Step 1 粗估价。
+              required:
+                - quote_status
+                - monthly_estimate
+                - currency
+                - resources
+                - deployment_parameters
+                - hard_constraint_checks
+                - preview_validation
+              properties:
+                quote_status:
+                  type: string
+                  enum: [succeeded, failed, unavailable, not_run]
+                  description: Python 根据 ParameterSetAnchor 对应真实询价记录生成的状态。
+                monthly_estimate:
+                  type: string
+                  description: >-
+                    ROS 询价月度总价；同时有 OriginalAmount/TradeAmount 时使用“列表价，合同优惠后约...”双口径，
+                    询价失败时如实填“询价失败”。
+                currency:
+                  type: string
+                  enum: [CNY]
+                  description: 询价币种，固定为 CNY。
+                resources:
+                  type: array
+                  description: ROS 询价返回并按统一月度周期整理的费用明细。
+                  items:
+                    type: object
+                    description: 一项用户可理解的产品或资源费用。
+                    required: [type, cost]
+                    properties:
+                      type:
+                        type: string
+                        description: 用户可理解的产品或资源名称，不使用 ALIYUN::... 内部资源类型。
+                      spec:
+                        type: string
+                        description: 实际询价使用的主要规格与数量。
+                      cost:
+                        type: string
+                        description: 该资源的月度价格；可保留列表价与合同优惠价双口径。
+                deployment_parameters:
+                  type: object
+                  description: 实际用于最后一次 Preview 和 ROS 询价的完整参数字典。
+                missing_deployment_parameters:
+                  type: array
+                  description: 询价阶段仍未求解的模板参数；confirmed 时不得包含 user_required 缺口。
+                  items:
+                    type: object
+                    description: 一个未求解参数及其原因和可解类型。
+                    required: [name, reason]
+                    properties:
+                      name:
+                        type: string
+                        description: ROS Parameters 参数名。
+                      reason:
+                        type: string
+                        description: 尚未得到合法真实值的原因。
+                      classification:
+                        type: string
+                        enum: [auto_solvable, user_required]
+                        description: auto_solvable 可在部署前自动生成/查询；user_required 只能由用户提供。
+                user_required_missing_parameters:
+                  type: array
+                  description: 只能由用户提供的外部参数缺口；status=confirmed 时必须是空数组。
+                  items:
+                    type: object
+                    description: 一个尚待用户提供的外部必填参数。
+                    required: [name, reason]
+                    properties:
+                      name:
+                        type: string
+                        description: ROS Parameters 参数名。
+                      reason:
+                        type: string
+                        description: 参数用途、格式以及为什么不能自动生成。
+                hard_constraint_checks:
+                  type: array
+                  description: >-
+                    对 selected_candidate.hard_constraints 的逐条同序验证；每条约束必须原样复制。Python 会保留
+                    可解析的真实证据；工具结果没有可定位字段时 evidence 可为空，由 LLM-or-code 规则决定是否放行。
+                  items:
+                    type: object
+                    description: 一条用户硬约束的验证结果。
+                    required: [constraint, status, actual_value, parameter_values, evidence]
+                    properties:
+                      # Copied verbatim from solution_selection.selected_candidate.hard_constraints
+                      # so require_context_constraint_coverage can compare the objects directly.
+                      constraint:
+                        type: object
+                        description: 必须逐字段原样复制 Step 1 权威 hard_constraints 中对应对象。
+                        required: [id, target, property, operator, value, verification_mode, source, source_text]
+                        properties:
+                          id:
+                            type: string
+                            minLength: 1
+                            description: 与 Step 1 约束完全一致的稳定 ID。
+                          target:
+                            type: string
+                            description: 与 Step 1 约束完全一致的目标。
+                          property:
+                            type: string
+                            description: 与 Step 1 约束完全一致的属性。
+                          operator:
+                            type: string
+                            enum: [eq, ne, gt, gte, lt, lte, in, not_in, contains, not_contains]
+                            description: 与 Step 1 约束完全一致的运算符。
+                          value:
+                            description: 与 Step 1 约束完全一致的目标值。
+                          unit:
+                            type: string
+                            description: 与 Step 1 约束完全一致的单位；原对象没有时可省略。
+                          verification_mode:
+                            type: string
+                            enum: [direct, tool]
+                            description: 与 Step 1 约束完全一致的验证方式。
+                          source:
+                            type: string
+                            description: 与 Step 1 约束完全一致的来源。
+                          source_text:
+                            type: string
+                            description: 与 Step 1 约束完全一致的用户原文。
+                      status:
+                        type: string
+                        enum: [satisfied, conflict, unresolved]
+                        description: >-
+                          LLM 对该约束的独立判断。确认门禁在此值为 satisfied 或 Python 代码验证通过时放行；
+                          只有 LLM 和 Python 都不通过时才阻止确认。
+                      actual_value:
+                        description: 从最终参数、模板或工具结果取得的真实实际值。
+                      actual_unit:
+                        type: string
+                        description: actual_value 的单位；无单位时可省略。
+                      parameter_values:
+                        type: object
+                        description: 证明该约束时使用的相关最终部署参数子集；没有相关参数时使用空对象。
+                      evidence:
+                        type: array
+                        description: >-
+                          Python 成功解析出的上下文、模板或工具证据；工具没有可定位结果时允许为空，此时使用
+                          LLM status 参与兼容性放行，不能伪造 record_id/result_path。
+                        items:
+                          type: object
+                          description: 一项可追溯的约束验证证据。
+                          required: [type, summary, actual_value]
+                          properties:
+                            type:
+                              type: string
+                              enum: [context, template, tool]
+                              description: 证据来源类型；verification_mode=tool 时优先使用可解析的 tool 证据。
+                            summary:
+                              type: string
+                              description: 说明证据如何证明该约束。
+                            actual_value:
+                              description: 从该证据得到的真实值。
+                            tool_name:
+                              type: string
+                              description: type=tool 时使用的真实工具名称。
+                            record_id:
+                              type: string
+                              description: type=tool 时对应有序工具记录的稳定 ID。
+                            product:
+                              type: string
+                              description: type=tool 时查询的阿里云产品。
+                            action:
+                              type: string
+                              description: type=tool 时执行的只读动作。
+                            result_path:
+                              type: string
+                              description: type=tool 时实际值在工具结果中的字段路径。
+                            context_path:
+                              type: string
+                              description: type=context 时使用的受限权威上下文字段路径。
+                            template_path:
+                              type: string
+                              description: type=template 时使用的最终 ROS 模板字段路径。
+                            parameter_name:
+                              type: string
+                              description: type=template 时直接引用 ParameterSetAnchor 参数名。
+                preview_validation:
+                  type: object
+                  description: 最后一次 PreviewStack 对最终模板和参数的验证记录；失败也必须如实记录。
+                  required: [succeeded]
+                  properties:
+                    succeeded:
+                      type: boolean
+                      description: ros_preview_template 是否对同一模板和最终参数成功。
+                    template_url:
+                      type: string
+                      description: Preview 成功时必须等于顶层 template_url；失败或未执行时可省略。
+                    parameters:
+                      type: object
+                      description: Preview 成功时必须等于最终 effective_deployment_parameters。
+                    region_id:
+                      type: string
+                      description: Preview 调用的真实有效地域，必须与 ParameterSetAnchor 一致。
+                    stack_name:
+                      type: string
+                      description: Preview 调用使用的临时 StackName。
+                    error:
+                      type: string
+                      description: Preview 失败或未执行时的真实原因。
+                error:
+                  type: string
+                  description: ROS 询价或参数求解失败时的真实错误摘要。
+                api_raw_summary:
+                  type: string
+                  description: 询价响应中价格字段、缺失口径或失败信息的简短原始摘要。
+        template_url:
+          type: string
+          description: 必须与 selected_candidate.output_path 和 selected_candidate_result.template.file_path 完全一致。
+        parameter_overrides:
+          type: object
+          description: 用户明确提供且本次生效的 ROS Parameters 覆盖；没有覆盖时必须使用空对象，不代表缺失。
+        effective_deployment_parameters:
+          type: object
+          description: 最终将交给部署的完整参数字典，等于求解参数与 parameter_overrides 合并后的真实值。
+        preview_ready_for_create:
+          type: boolean
+          description: >-
+            仅当 Preview 成功、模板路径一致、Preview 参数等于 effective_deployment_parameters 且没有参数缺口时为 true；
+            hook 会重新计算，不要猜测。
+        confirmation:
+          type: object
+          description: status=confirmed 时记录本轮真实用户确认输入；必须与恢复消息的 action、文本和参数覆盖一致。
+          required: [action, input_type, user_input, parameter_overrides]
+          properties:
+            action:
+              type: string
+              enum: [confirm, adjust, reselect, cancel]
+              description: confirmed 时必须为 confirm；其它 action 不能伪装成部署授权。
+            input_type:
+              type: string
+              enum: [structured, natural_language]
+              description: 用户提交 JSON action 时为 structured；由 LLM 判断自然语言时为 natural_language。
+            user_input:
+              type: string
+              description: 本轮授权部署的原始用户输入，不能改写成摘要或选项标签。
+            parameter_overrides:
+              type: object
+              description: 本轮确认输入实际携带的覆盖参数；没有携带时沿用确认前已生效的覆盖参数。顶层 parameter_overrides 是历史覆盖与本轮覆盖合并后的累计结果。
+        user_prompt:
+          type: string
+          description: status=awaiting_confirmation 时展示给用户的下一步操作提示。
+        options:
+          type: array
+          minItems: 2
+          maxItems: 4
+          description: >-
+            专用确认界面的结构化操作项；必须含 confirm 和 cancel，只有多个候选时才含 reselect，
+            不展示 adjust（用户可直接输入参数调整）。
+          items:
+            type: object
+            description: 一个确认界面操作项。
+            required: [action, name]
+            properties:
+              action:
+                type: string
+                enum: [confirm, adjust, reselect, cancel]
+                description: UI 提交的确定性动作标识。
+              name:
+                type: string
+                description: 展示给用户的简短操作名称。
+              summary:
+                type: string
+                description: 该操作将产生的结果说明。
+          allOf:
+            - contains:
+                type: object
+                properties:
+                  action: {const: confirm}
+                required: [action]
+            - contains:
+                type: object
+                properties:
+                  action: {const: cancel}
+                required: [action]
+        cancellation_reason:
+          type: string
+          description: status=cancelled 时说明用户取消当前部署流程的原因或原始输入。
+        reselect_reason:
+          type: string
+          description: >-
+            status=reselect_requested 时必填，完整保留用户的新架构要求或全新部署目标；同一次 complete_step
+            必须在外层携带 rollback_request.target_step=solution_planning_and_selection。
+      allOf:
+        - if:
+            properties:
+              status: {const: awaiting_confirmation}
+            required: [status]
+          then:
+            required:
+              - selected_candidate_result
+              - template_url
+              - effective_deployment_parameters
+              - preview_ready_for_create
+              - user_prompt
+              - options
+              - selection_valid
+            properties:
+              continue_pipeline: {const: true}
+              deployment_confirmed: {const: false}
+              selection_valid: {const: true}
+        - if:
+            properties:
+              status: {const: confirmed}
+            required: [status]
+          then:
+            required:
+              - selected_candidate_result
+              - template_url
+              - effective_deployment_parameters
+              - preview_ready_for_create
+              - confirmation
+              - selection_valid
+            properties:
+              continue_pipeline: {const: true}
+              deployment_confirmed: {const: true}
+              selection_valid: {const: true}
+              template_url:
+                type: string
+                minLength: 1
+              confirmation:
+                type: object
+                properties:
+                  action: {const: confirm}
+              selected_candidate_result:
+                type: object
+                properties:
+                  cost:
+                    type: object
+                    required: [user_required_missing_parameters]
+                    properties:
+                      user_required_missing_parameters:
+                        type: array
+                        maxItems: 0
+        - if:
+            properties:
+              status: {const: cancelled}
+            required: [status]
+          then:
+            properties:
+              continue_pipeline: {const: false}
+              deployment_confirmed: {const: false}
+        - if:
+            properties:
+              status: {const: reselect_requested}
+            required: [status]
+          then:
+            required: [reselect_reason]
+            properties:
+              continue_pipeline: {const: true}
+              deployment_confirmed: {const: false}
+    completion_input_schema:
+      type: object
+      description: 模型只提交方案语义、参数缺口和证据定位器；模板、Preview、价格、确认和控制字段由 Python 生成。
+      required: [status]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [awaiting_confirmation, confirmed, cancelled, reselect_requested]
+          description: 当前物化与确认语义状态。
+        solution_summary:
+          type: string
+          minLength: 1
+          description: 最终参数和真实询价下的新方案说明。
+        parameter_overrides:
+          type: object
+          description: 本轮用户明确覆盖且已经进入最终询价参数集的参数子集；无覆盖时使用空对象。
+        missing_deployment_parameters:
+          type: array
+          description: 仍未求解的模板参数及其可解分类。
+          items:
+            type: object
+            required: [name, reason, classification]
+            additionalProperties: false
+            properties:
+              name: {type: string, minLength: 1}
+              reason: {type: string, minLength: 1}
+              classification: {type: string, enum: [auto_solvable, user_required]}
+        hard_constraint_checks:
+          type: array
+          description: >-
+            提交约束 ID、LLM 独立判断、语义实际值、相关最终参数和可用的权威证据定位器。Python 会独立
+            校验；LLM 或 Python 任一判断满足即放行，只有两者都不通过才阻止。
+          items:
+            type: object
+            required: [constraint_id, status, actual_value, parameter_values, evidence]
+            additionalProperties: false
+            properties:
+              constraint_id: {type: string, minLength: 1}
+              status:
+                type: string
+                enum: [satisfied, conflict, unresolved]
+                description: LLM 根据用户目标、最终方案和工具响应作出的独立判断。
+              actual_value: {description: 模型识别的实际值，必须与所有 locator 解析出的权威值一致。}
+              actual_unit: {type: string}
+              parameter_values:
+                type: object
+                description: 与该约束相关的最终参数真实子集。
+              evidence:
+                type: array
+                description: >-
+                  有可解析证据时提交 locator；工具已尝试但响应没有可定位证据时提交空数组，由 LLM status
+                  与 Python code verification 的 OR 规则决定是否放行。
+                items:
+                  oneOf:
+                    - type: object
+                      required: [type, record_id, result_path]
+                      additionalProperties: false
+                      properties:
+                        type: {const: tool}
+                        record_id:
+                          type: string
+                          minLength: 1
+                          description: 对应本步骤真实 ordered tool record 的稳定 ID。
+                        tool_name: {type: string}
+                        result_path: {type: string, minLength: 1}
+                    - type: object
+                      required: [type, context_path]
+                      additionalProperties: false
+                      properties:
+                        type: {const: context}
+                        context_path:
+                          type: string
+                          minLength: 1
+                          description: 必须位于 pipeline 配置白名单内的 normalized context 字段路径。
+                    - type: object
+                      required: [type]
+                      additionalProperties: false
+                      properties:
+                        type: {const: template}
+                        template_path: {type: string, minLength: 1}
+                        parameter_name: {type: string, minLength: 1}
+                      oneOf:
+                        - required: [template_path]
+                        - required: [parameter_name]
+        reselect_reason:
+          type: string
+          minLength: 1
+          description: 用户新的架构要求或全新部署目标。
+      allOf:
+        - if: {properties: {status: {const: awaiting_confirmation}}, required: [status]}
+          then:
+            required: [solution_summary, parameter_overrides, missing_deployment_parameters, hard_constraint_checks]
+        - if: {properties: {status: {const: reselect_requested}}, required: [status]}
+          then: {required: [reselect_reason]}
+
+  - id: deploying
+    conclusion_field: deployment
+    forward: null
+    description: Create the ROS stack for the confirmed plan and report the real result.
+    skill: iac-aliyun-deploying
+    prompt: prompts/deploying.md
+    context_fields: [solution_selection, selected_plan]
+    hooks_file: hooks/deploying.py
+    complete_step_terminal: false
+    interrupt_judge_failure: pause
+    config:
+      completion_record_contract: v2
+      completion_validation_error_limit: 5
+    max_agent_turns: 80
+    inject_tools:
+      - ros_validate_template
+      - ros_get_template_parameter_constraints
+      - ros_deploy # pipeline-local confirmed wrapper delegating to the existing RosDeployTool
+    tools:
+      include: []
+      exclude: [write_memory, write_file, ros_stack, ros_stack_instances]
+    completion_input_schema:
+      type: object
+      description: 模型只决定部署步骤终态；Stack 事实与错误由 Python 从 ros_deploy 记录注入。
+      required: [status]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [success, failed, cancelled]
+          description: success 必须有 CREATE_COMPLETE 证据；failed 必须有真实失败记录。
+    completion_guards:
+      - when_conclusion_field_equals:
+          status: success
+        required_conclusion_field: stack_id
+        require_tool_result:
+          tool: ros_deploy
+          action_in: [create, continue_create, delete_and_create, wait]
+          is_success: true
+          status_in: [CREATE_COMPLETE]
+          match_conclusion_field: stack_id
+        message_key: deploy_wait_create_complete

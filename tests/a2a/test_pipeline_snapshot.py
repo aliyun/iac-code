@@ -427,6 +427,82 @@ def test_reduce_ask_user_question_input_received_reopens_waiting_step() -> None:
     assert "completedAt" not in snapshot["steps"][0]
 
 
+def test_reduce_records_first_user_request_from_pipeline_started() -> None:
+    """会话恢复要还原「用户发的第一句话」。
+
+    流水线会话的 JSONL 只记录 pipeline_init / step_complete 元信息,首句 prompt 只随
+    pipeline_started 落到快照里,因此这里是唯一的持久化点。
+    """
+    started = _base("evt-1", 1, "pipeline_started")
+    started["data"] = {
+        "pipelineType": "selling_solution_first",
+        "totalSteps": 3,
+        "userRequest": "帮我搭一个静态网站",
+    }
+
+    snapshot = reduce_pipeline_events([started])
+
+    assert snapshot["control"]["userRequest"] == "帮我搭一个静态网站"
+
+
+def test_reduce_pipeline_started_without_user_request_leaves_control_absent() -> None:
+    """旧快照/旧事件没有该字段时不写空值,前端据此退回原来的行为。"""
+    started = _base("evt-1", 1, "pipeline_started")
+    started["data"] = {"totalSteps": 3, "userRequest": ""}
+
+    snapshot = reduce_pipeline_events([started])
+
+    assert "userRequest" not in snapshot["control"]
+
+
+def test_reduce_ask_user_question_input_history_keeps_free_text() -> None:
+    """问答卡的自由文本要能回填。
+
+    控制台的问答卡只渲染「选中项 label」与「自由文本」,恢复时两者都得从 inputHistory 拿到,
+    所以 input_received 不能只留 freeTextLength。
+    """
+    step = _base("evt-1", 1, "step_started", scope="step")
+    step["step"] = {
+        "runId": "step-confirm_and_select-1",
+        "id": "confirm_and_select",
+        "index": 1,
+        "total": 3,
+        "attempt": 1,
+    }
+    waiting = _base("evt-2", 2, "input_required", scope="step", status="input_required")
+    waiting["step"] = step["step"]
+    waiting["input"] = {
+        "inputId": "ask-ask-1",
+        "kind": "ask_user_question",
+        "toolUseId": "ask-1",
+        "question": "要不要高可用?",
+        "prompt": "要不要高可用?",
+        "options": [{"id": "cheap", "label": "不需要"}],
+        "allowFreeText": True,
+    }
+    received = _base("evt-3", 3, "input_received", scope="step")
+    received["step"] = step["step"]
+    received["data"] = {
+        "kind": "ask_user_question",
+        "toolUseId": "ask-1",
+        "answerTextLength": 8,
+        "selectedId": "cheap",
+        "selectedLabel": "不需要",
+        "freeText": "预算优先",
+        "freeTextLength": 4,
+    }
+
+    snapshot = reduce_pipeline_events([step, waiting, received])
+
+    history = snapshot["control"]["inputHistory"]
+    assert [item["eventType"] for item in history] == ["input_required", "input_received"]
+    assert history[0]["options"] == [{"id": "cheap", "label": "不需要"}]
+    assert history[0]["allowFreeText"] is True
+    assert history[1]["selectedId"] == "cheap"
+    assert history[1]["selectedLabel"] == "不需要"
+    assert history[1]["freeText"] == "预算优先"
+
+
 def test_reduce_pipeline_pause_confirmation_input_received_reopens_waiting_step() -> None:
     step = _base("evt-1", 1, "step_started", scope="step")
     step["step"] = {
@@ -457,6 +533,40 @@ def test_reduce_pipeline_pause_confirmation_input_received_reopens_waiting_step(
     assert "completedAt" not in snapshot["steps"][0]
 
 
+def test_reduce_deployment_confirmation_resumes_step_and_accumulates_processing_time() -> None:
+    step_coordinate = {
+        "runId": "step-materialize-selected-candidate-1",
+        "id": "materialize_selected_candidate",
+        "index": 2,
+        "total": 3,
+        "attempt": 1,
+    }
+    started = _base("evt-1", 1, "step_started", scope="step")
+    started["step"] = step_coordinate
+    first_completed = _base("evt-2", 2, "step_completed", scope="step")
+    first_completed["step"] = step_coordinate
+    first_completed["data"] = {"durationS": 135.4}
+    waiting = _base("evt-3", 3, "input_required", scope="step", status="input_required")
+    waiting["step"] = step_coordinate
+    waiting["data"] = {"kind": "deployment_confirmation", "prompt": "请选择下一步"}
+    received = _base("evt-4", 4, "input_received", scope="step")
+    received["step"] = step_coordinate
+    received["data"] = {"kind": "deployment_confirmation", "userInputLength": 12}
+
+    resumed = reduce_pipeline_events([started, first_completed, waiting, received])
+
+    assert resumed["steps"][0]["status"] == "working"
+    assert "completedAt" not in resumed["steps"][0]
+
+    second_completed = _base("evt-5", 5, "step_completed", scope="step")
+    second_completed["step"] = step_coordinate
+    second_completed["data"] = {"durationS": 0.04}
+    completed = reduce_pipeline_events([started, first_completed, waiting, received, second_completed])
+
+    assert completed["steps"][0]["status"] == "completed"
+    assert completed["steps"][0]["durationS"] == 135.44
+
+
 def test_reduce_records_input_interrupt_and_handoff_histories() -> None:
     step = _base("evt-step", 1, "step_started", scope="step")
     step["step"] = {
@@ -482,7 +592,7 @@ def test_reduce_records_input_interrupt_and_handoff_histories() -> None:
         "selectedIndex": 0,
     }
     interrupt_received = _base("evt-interrupt-received", 4, "interrupt_received", scope="interrupt")
-    interrupt_received["data"] = {"messageLength": 8}
+    interrupt_received["data"] = {"messageLength": 8, "userInput": "change it"}
     interrupt_classified = _base("evt-interrupt-classified", 5, "interrupt_classified", scope="interrupt")
     interrupt_classified["data"] = {
         "action": "supplement",
@@ -525,6 +635,7 @@ def test_reduce_records_input_interrupt_and_handoff_histories() -> None:
         "interrupt_classified",
         "rollback_completed",
     ]
+    assert snapshot["control"]["interruptHistory"][0]["userInput"] == "change it"
     assert snapshot["control"]["interruptHistory"][1]["action"] == "supplement"
     assert snapshot["control"]["interruptHistory"][2]["step"]["id"] == "confirm_and_select"
     assert len(snapshot["control"]["handoffHistory"]) == 1
@@ -627,6 +738,311 @@ def test_reduce_text_deltas_append_per_scope_run_id() -> None:
     assert len(snapshot["display"]["messages"]) == 1
     assert snapshot["display"]["messages"][0]["runId"] == "step-a-1"
     assert snapshot["display"]["messages"][0]["text"] == "hello world"
+
+
+def _step_text_delta(event_id: str, sequence: int, text: str, run_id: str = "step-a-1") -> dict:
+    event = _base(event_id, sequence, "text_delta", scope="step")
+    event["step"] = {"runId": run_id, "id": "a", "index": 1, "total": 1, "attempt": 1}
+    event["data"] = {"text": text}
+    return event
+
+
+def _step_input_received(
+    event_id: str,
+    sequence: int,
+    *,
+    run_id: str = "step-a-1",
+    kind: str = "candidate_selection",
+    selected_value: str = "再便宜一点",
+) -> dict:
+    event = _base(event_id, sequence, "input_received", scope="step")
+    event["step"] = {"runId": run_id, "id": "a", "index": 1, "total": 1, "attempt": 1}
+    event["data"] = {"kind": kind, "selectedValue": selected_value}
+    return event
+
+
+def test_reduce_text_deltas_open_new_round_after_user_input() -> None:
+    """A re-plan inside one step attempt must not merge into one narration blob.
+
+    Answering mid-step resumes the same attempt (same runId), so without rounds both
+    plans accumulate into a single message and replay cannot tell them apart.
+    """
+    events = [
+        _step_text_delta("evt-1", 1, "first plan"),
+        _step_input_received("evt-2", 2),
+        _step_text_delta("evt-3", 3, "second plan"),
+        _step_text_delta("evt-4", 4, " continued"),
+    ]
+
+    snapshot = reduce_pipeline_events(events)
+
+    messages = snapshot["display"]["messages"]
+    assert [(message["round"], message["text"]) for message in messages] == [
+        (1, "first plan"),
+        (2, "second plan continued"),
+    ]
+    assert [message["id"] for message in messages] == [
+        "message-step-step-a-1",
+        "message-step-step-a-1-round-2",
+    ]
+    assert all(message["runId"] == "step-a-1" for message in messages)
+
+
+def test_reduce_text_deltas_open_new_round_after_active_supplement() -> None:
+    interrupt_received = _base("evt-2", 2, "interrupt_received", scope="interrupt")
+    interrupt_received["data"] = {"messageLength": 9, "userInput": "add a subnet"}
+    interrupt_classified = _base("evt-3", 3, "interrupt_classified", scope="interrupt")
+    interrupt_classified["data"] = {"action": "supplement", "reason": "additional constraint"}
+
+    snapshot = reduce_pipeline_events(
+        [
+            _step_text_delta("evt-1", 1, "first plan"),
+            interrupt_received,
+            interrupt_classified,
+            _step_text_delta("evt-4", 4, "supplemented plan"),
+        ]
+    )
+
+    assert [(message["round"], message["text"]) for message in snapshot["display"]["messages"]] == [
+        (1, "first plan"),
+        (2, "supplemented plan"),
+    ]
+
+
+def test_reduce_message_rounds_are_scoped_to_the_answering_run() -> None:
+    events = [
+        _step_text_delta("evt-1", 1, "step a"),
+        _step_text_delta("evt-2", 2, "step b", run_id="step-b-1"),
+        _step_input_received("evt-3", 3),
+        _step_text_delta("evt-4", 4, " more b", run_id="step-b-1"),
+        _step_text_delta("evt-5", 5, "round two a"),
+    ]
+
+    snapshot = reduce_pipeline_events(events)
+
+    assert [(message["runId"], message["round"], message["text"]) for message in snapshot["display"]["messages"]] == [
+        ("step-a-1", 1, "step a"),
+        ("step-b-1", 1, "step b more b"),
+        ("step-a-1", 2, "round two a"),
+    ]
+
+
+def test_reduce_resumed_snapshot_keeps_appending_to_the_open_round() -> None:
+    initial = reduce_pipeline_events([_step_text_delta("evt-1", 1, "first plan"), _step_input_received("evt-2", 2)])
+
+    resumed = reduce_pipeline_events([_step_text_delta("evt-3", 3, "second plan")], existing_snapshot=initial)
+
+    assert [(message["round"], message["text"]) for message in resumed["display"]["messages"]] == [
+        (1, "first plan"),
+        (2, "second plan"),
+    ]
+
+
+def test_reduce_resumes_pre_round_snapshot_into_the_next_round() -> None:
+    """Snapshots written before rounds existed carry no ``round`` on their message.
+
+    ``inputHistory`` still records every answer, so the recovered counter puts new
+    text in a fresh round instead of appending it to the merged historical blob.
+    """
+    existing = reduce_pipeline_events([])
+    existing["display"]["messages"] = [{"scope": "step", "runId": "step-a-1", "text": "merged history"}]
+    existing["control"]["inputHistory"] = [
+        {
+            "eventType": "input_received",
+            "eventId": "evt-old",
+            "sequence": 2,
+            "runId": "step-a-1",
+            "kind": "candidate_selection",
+        }
+    ]
+
+    resumed = reduce_pipeline_events([_step_text_delta("evt-3", 3, "after reload")], existing_snapshot=existing)
+
+    messages = resumed["display"]["messages"]
+    assert [(message["round"], message["text"]) for message in messages] == [
+        (1, "merged history"),
+        (2, "after reload"),
+    ]
+
+
+def _step_message_started(
+    event_id: str,
+    sequence: int,
+    *,
+    run_id: str = "step-a-1",
+    message_id: str = "msg-1",
+) -> dict:
+    event = _base(event_id, sequence, "message_started", scope="step")
+    event["step"] = {"runId": run_id, "id": "a", "index": 1, "total": 1, "attempt": 1}
+    event["data"] = {"messageId": message_id}
+    return event
+
+
+def _step_thinking_delta(
+    event_id: str,
+    sequence: int,
+    text: str,
+    *,
+    run_id: str = "step-a-1",
+) -> dict:
+    event = _base(event_id, sequence, "thinking_delta", scope="step")
+    event["step"] = {"runId": run_id, "id": "a", "index": 1, "total": 1, "attempt": 1}
+    event["data"] = {"text": text}
+    return event
+
+
+def test_reduce_persists_public_narrative_shape_without_thinking_content() -> None:
+    events = [
+        _step_thinking_delta("evt-1", 1, "private reasoning one"),
+        _step_thinking_delta("evt-2", 2, "private reasoning two"),
+        _step_text_delta("evt-3", 3, "public answer one"),
+        _step_thinking_delta("evt-4", 4, "private reasoning three"),
+        _step_text_delta("evt-5", 5, "public answer two"),
+    ]
+
+    snapshot = reduce_pipeline_events(events)
+
+    message = snapshot["display"]["messages"][0]
+    assert message["text"] == "public answer onepublic answer two"
+    assert message["segments"] == [
+        {"kind": "thinking"},
+        {"kind": "text", "text": "public answer one"},
+        {"kind": "thinking"},
+        {"kind": "text", "text": "public answer two"},
+    ]
+    assert "private reasoning" not in json.dumps(snapshot)
+
+
+def test_reduce_public_narrative_shape_survives_incremental_reduction() -> None:
+    initial = reduce_pipeline_events(
+        [
+            _step_thinking_delta("evt-1", 1, "private one"),
+            _step_text_delta("evt-2", 2, "public one"),
+        ]
+    )
+
+    resumed = reduce_pipeline_events(
+        [
+            _step_thinking_delta("evt-3", 3, "private two"),
+            _step_text_delta("evt-4", 4, "public two"),
+        ],
+        existing_snapshot=initial,
+    )
+
+    assert resumed["display"]["messages"][0]["segments"] == [
+        {"kind": "thinking"},
+        {"kind": "text", "text": "public one"},
+        {"kind": "thinking"},
+        {"kind": "text", "text": "public two"},
+    ]
+
+
+def test_reduce_legacy_message_keeps_marker_fallback_after_resume() -> None:
+    existing = reduce_pipeline_events([])
+    existing["display"]["messages"] = [
+        {"scope": "step", "runId": "step-a-1", "round": 1, "text": "legacy public text"}
+    ]
+
+    resumed = reduce_pipeline_events(
+        [
+            _step_thinking_delta("evt-1", 1, "new private reasoning"),
+            _step_text_delta("evt-2", 2, " plus new public text"),
+        ],
+        existing_snapshot=existing,
+    )
+
+    message = resumed["display"]["messages"][0]
+    assert message["text"] == "legacy public text plus new public text"
+    assert "segments" not in message
+    assert "new private reasoning" not in json.dumps(resumed)
+
+
+def test_reduce_breaks_the_paragraph_at_each_llm_turn_boundary() -> None:
+    """Live, the tool run between two LLM turns opens a fresh text block.
+
+    Replay has no tool segments to separate them, so without a break here the two
+    turns render as one run-on paragraph ("best practicesResource schemas").
+    """
+    events = [
+        _step_message_started("evt-1", 1),
+        _step_text_delta("evt-2", 2, "restricted SSH access as per best practices"),
+        _step_message_started("evt-3", 3, message_id="msg-2"),
+        _step_text_delta("evt-4", 4, "Resource schemas confirmed."),
+    ]
+
+    snapshot = reduce_pipeline_events(events)
+
+    messages = snapshot["display"]["messages"]
+    assert len(messages) == 1
+    assert messages[0]["text"] == (
+        "restricted SSH access as per best practices\n\n<!-- iac-code:model-run -->\n\nResource schemas confirmed."
+    )
+    assert messages[0]["segments"] == [
+        {"kind": "text", "text": "restricted SSH access as per best practices"},
+        {"kind": "turn"},
+        {"kind": "text", "text": "Resource schemas confirmed."},
+    ]
+
+
+def test_reduce_collapses_repeated_turn_boundaries_into_one_break() -> None:
+    """A turn that only ran tools carries no text, so it adds no second break."""
+    events = [
+        _step_text_delta("evt-1", 1, "first turn"),
+        _step_message_started("evt-2", 2, message_id="msg-2"),
+        _step_message_started("evt-3", 3, message_id="msg-3"),
+        _step_text_delta("evt-4", 4, "second turn"),
+    ]
+
+    snapshot = reduce_pipeline_events(events)
+
+    assert [message["text"] for message in snapshot["display"]["messages"]] == [
+        "first turn\n\n<!-- iac-code:model-run -->\n\nsecond turn"
+    ]
+    assert snapshot["display"]["messages"][0]["segments"] == [
+        {"kind": "text", "text": "first turn"},
+        {"kind": "turn"},
+        {"kind": "text", "text": "second turn"},
+    ]
+
+
+def test_reduce_turn_boundary_before_any_text_creates_no_message() -> None:
+    snapshot = reduce_pipeline_events([_step_message_started("evt-1", 1)])
+
+    assert snapshot["display"]["messages"] == []
+
+
+def test_reduce_turn_boundary_survives_incremental_reduction() -> None:
+    """Reduction resumes from the stored snapshot, so the break must live in the text."""
+    initial = reduce_pipeline_events([_step_text_delta("evt-1", 1, "first turn")])
+    resumed = reduce_pipeline_events([_step_message_started("evt-2", 2, message_id="msg-2")], existing_snapshot=initial)
+
+    final = reduce_pipeline_events([_step_text_delta("evt-3", 3, "second turn")], existing_snapshot=resumed)
+
+    assert [message["text"] for message in final["display"]["messages"]] == [
+        "first turn\n\n<!-- iac-code:model-run -->\n\nsecond turn"
+    ]
+    assert final["display"]["messages"][0]["segments"] == [
+        {"kind": "text", "text": "first turn"},
+        {"kind": "turn"},
+        {"kind": "text", "text": "second turn"},
+    ]
+
+
+def test_reduce_preserves_turn_boundary_between_adjacent_thinking_segments() -> None:
+    snapshot = reduce_pipeline_events(
+        [
+            _step_thinking_delta("evt-1", 1, "private first"),
+            _step_message_started("evt-2", 2, message_id="msg-2"),
+            _step_thinking_delta("evt-3", 3, "private second"),
+        ]
+    )
+
+    assert snapshot["display"]["messages"][0]["segments"] == [
+        {"kind": "thinking"},
+        {"kind": "turn"},
+        {"kind": "thinking"},
+    ]
+    assert "private" not in json.dumps(snapshot)
 
 
 def test_reduce_resumes_existing_snapshot_and_skips_seen_events() -> None:
@@ -847,6 +1263,100 @@ def test_reduce_display_items_and_rollback_are_deduplicated() -> None:
     assert len(snapshot["control"]["rollbackHistory"]) == 1
 
 
+def test_reduce_snapshot_preserves_progressive_candidate_batch_metadata() -> None:
+    detail = _base("evt-1", 1, "candidate_detail_shown", scope="step")
+    detail["step"] = {"id": "solution_planning_and_selection", "runId": "step-plan-1"}
+    detail["data"] = {
+        "detailId": "detail-outline-1-0",
+        "candidateSetId": "outline-1",
+        "candidateIndex": 0,
+        "detailStage": "outline",
+        "keyTradeoff": "成本最低，但没有高可用",
+        "detail": {
+            "candidateName": "单机方案",
+            "candidateSetId": "outline-1",
+            "candidateIndex": 0,
+            "detailStage": "outline",
+            "keyTradeoff": "成本最低，但没有高可用",
+        },
+    }
+    diagram = _base("evt-2", 2, "diagram_shown", scope="step")
+    diagram["step"] = detail["step"]
+    diagram["data"] = {
+        "diagramId": "diagram-outline-1-0",
+        "candidateSetId": "outline-1",
+        "candidateIndex": 0,
+        "detailStage": "detail",
+        "format": "mermaid",
+        "mermaidSource": "flowchart TD",
+    }
+
+    snapshot = reduce_pipeline_events([detail, diagram])
+
+    restored_detail = snapshot["display"]["candidateDetails"][0]
+    restored_diagram = snapshot["display"]["diagrams"][0]
+    assert restored_detail["candidateSetId"] == "outline-1"
+    assert restored_detail["detailStage"] == "outline"
+    assert restored_detail["keyTradeoff"] == "成本最低，但没有高可用"
+    assert restored_detail["detail"]["keyTradeoff"] == "成本最低，但没有高可用"
+    assert restored_diagram["candidateSetId"] == "outline-1"
+    assert restored_diagram["detailStage"] == "detail"
+
+
+def test_solution_first_canonical_conclusion_keeps_full_candidate_in_snapshot() -> None:
+    completed = _base("evt-complete", 1, "step_completed", scope="step")
+    completed["step"] = {
+        "id": "solution_planning_and_selection",
+        "runId": "step-plan-1",
+        "attempt": 1,
+    }
+    candidate = {
+        "candidate_id": "candidate-0",
+        "name": "单机方案",
+        "summary": "一台 ECS",
+        "topology_graph": {
+            "nodes": [{"id": "ecs", "label": "ECS", "product": "ECS"}],
+            "edges": [],
+        },
+        "resource_inventory": [
+            {
+                "resource_id": "ecs",
+                "product": "ECS",
+                "purpose": "应用计算",
+                "quantity": 1,
+                "lifecycle": "create",
+            }
+        ],
+        "rough_cost": {
+            "currency": "CNY",
+            "monthly_range": "¥100/月",
+            "items": [{"name": "ECS", "spec": "ecs.e-c1m1.large", "monthly_cost": "¥100/月"}],
+            "assumptions": ["杭州地域"],
+            "exclusions": ["流量费"],
+            "confidence": "medium",
+        },
+        "why_recommended": ["成本最低"],
+        "problems_solved": ["快速上线"],
+        "pros": ["简单", "便宜"],
+        "cons": ["无高可用"],
+    }
+    completed["data"] = {
+        "conclusionField": "solution_selection",
+        "conclusion": {
+            "status": "awaiting_selection",
+            "candidate_set_id": "outline-1",
+            "candidates": [candidate],
+            "options": [{"name": "单机方案", "candidate_index": 0}],
+        },
+    }
+
+    snapshot = reduce_pipeline_events([completed])
+
+    conclusion = snapshot["steps"][0]["conclusion"]
+    assert conclusion["candidate_set_id"] == "outline-1"
+    assert conclusion["candidates"] == [candidate]
+
+
 def test_reduce_permission_and_tool_result_display_items() -> None:
     permission = _base("evt-permission", 1, "permission_requested", scope="pipeline")
     permission["permission"] = {
@@ -856,6 +1366,12 @@ def test_reduce_permission_and_tool_result_display_items() -> None:
         "safeSummary": "bash permission request (fields: cmd)",
         "approved": True,
         "decision": "allow_once",
+        "operation": {
+            "product": "ROS",
+            "action": "DeleteStack",
+            "apiCalls": [{"product": "ROS", "action": "DeleteStack", "effect": "change"}],
+        },
+        "displayParameters": {"format": "json", "value": {"StackId": "stack-1"}},
     }
     permission["data"] = {"toolName": "bash", "toolUseId": "toolu-1"}
     tool_result = _base("evt-tool", 2, "tool_result", scope="pipeline")
@@ -871,6 +1387,8 @@ def test_reduce_permission_and_tool_result_display_items() -> None:
     assert snapshot["lastSequence"] == 2
     assert snapshot["display"]["permissions"][0]["permissionId"] == "perm-toolu-1"
     assert snapshot["display"]["permissions"][0]["approved"] is True
+    assert snapshot["display"]["permissions"][0]["operation"]["apiCalls"][0]["action"] == "DeleteStack"
+    assert snapshot["display"]["permissions"][0]["displayParameters"]["value"] == {"StackId": "stack-1"}
     assert "toolInput" not in snapshot["display"]["permissions"][0]
     assert snapshot["display"]["toolResults"][0]["toolUseId"] == "toolu-1"
     assert snapshot["display"]["toolResults"][0]["result"] == {"stdout": "done"}
@@ -1478,5 +1996,5 @@ def test_store_returns_none_for_invalid_utf8_snapshot(tmp_path) -> None:
 
 
 def test_snapshot_schema_version_is_exported() -> None:
-    assert SNAPSHOT_SCHEMA_VERSION == "1.1"
+    assert SNAPSHOT_SCHEMA_VERSION == "1.2"
     assert "SNAPSHOT_SCHEMA_VERSION" in pipeline_snapshot.__all__

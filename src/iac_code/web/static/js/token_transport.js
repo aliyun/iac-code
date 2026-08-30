@@ -115,14 +115,14 @@ function aad(sessionId, direction, messageType, sequence) {
 
 function nextRequestSequence(session) {
   session.requestSequence += 1;
-  if (!Number.isSafeInteger(session.requestSequence)) throw new Error("request sequence exhausted");
+  if (!Number.isSafeInteger(session.requestSequence)) throw new Error(t("Request sequence exhausted."));
   return session.requestSequence;
 }
 
 function acceptResponseSequence(session, sequence) {
-  if (!Number.isSafeInteger(sequence) || sequence <= 0) throw new Error("invalid response sequence");
+  if (!Number.isSafeInteger(sequence) || sequence <= 0) throw new Error(t("Invalid response sequence."));
   const floor = Math.max(0, session.responseMaximum - REPLAY_WINDOW_SIZE + 1);
-  if (sequence < floor || session.responseSeen.has(sequence)) throw new Error("replayed response");
+  if (sequence < floor || session.responseSeen.has(sequence)) throw new Error(t("Replayed response detected."));
   session.responseSeen.add(sequence);
   if (sequence > session.responseMaximum) {
     session.responseMaximum = sequence;
@@ -154,7 +154,7 @@ function decryptEnvelope(session, envelope, expectedType) {
     envelope.type !== expectedType ||
     !Number.isSafeInteger(envelope.sequence)
   ) {
-    throw new Error("invalid encrypted response");
+    throw new Error(t("Invalid encrypted response."));
   }
   const plaintext = chacha20poly1305Decrypt(
     session.responseKey,
@@ -246,7 +246,7 @@ async function ensureSession() {
 function requestTarget(url) {
   const target = new URL(url, window.location.href);
   if (target.origin !== window.location.origin || !target.pathname.startsWith("/api/")) {
-    throw new Error("encrypted transport only supports same-origin API requests");
+    throw new Error(t("Encrypted transport only supports same-origin API requests."));
   }
   return `${target.pathname}${target.search}`;
 }
@@ -266,7 +266,7 @@ async function requestBody(options) {
   if (options.body instanceof Uint8Array) return options.body;
   if (options.body instanceof ArrayBuffer) return new Uint8Array(options.body);
   if (typeof Blob !== "undefined" && options.body instanceof Blob) return new Uint8Array(await options.body.arrayBuffer());
-  throw new Error("unsupported encrypted request body");
+  throw new Error(t("Unsupported encrypted request body."));
 }
 
 async function encryptedRequest(url, options, stream, allowRetry) {
@@ -339,7 +339,7 @@ async function* responseLines(body) {
 async function decodeStreamResponse(session, outerResponse) {
   const iterator = responseLines(outerResponse.body)[Symbol.asyncIterator]();
   const first = await iterator.next();
-  if (first.done) throw new Error("encrypted stream ended before response metadata");
+  if (first.done) throw new Error(t("Encrypted stream ended before response metadata."));
   const start = JSON.parse(decoder.decode(decryptEnvelope(session, first.value, "stream-start")));
   let ended = false;
   const body = new ReadableStream({
@@ -347,7 +347,7 @@ async function decodeStreamResponse(session, outerResponse) {
       if (ended) return;
       try {
         const item = await iterator.next();
-        if (item.done) throw new Error("encrypted stream ended unexpectedly");
+        if (item.done) throw new Error(t("Encrypted stream ended unexpectedly."));
         if (item.value.type === "stream-end") {
           decryptEnvelope(session, item.value, "stream-end");
           ended = true;

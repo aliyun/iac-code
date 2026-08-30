@@ -12,6 +12,7 @@ import stat
 import time
 from collections import deque
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
@@ -25,6 +26,7 @@ from iac_code.pipeline.engine.cleanup import (
     CleanupResource,
     ObservedResource,
 )
+from iac_code.pipeline.engine.complete_step_tool import CompletionValidationError
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.display_replay import DISPLAY_TRANSCRIPT_FILENAME
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType, backup_blocked_event
@@ -40,7 +42,13 @@ from iac_code.pipeline.engine.step_executor import StepExecutor
 from iac_code.pipeline.engine.step_spec import AllowUserEscapes, LoadedPipeline, OnCompletePolicy, StepSpec
 from iac_code.pipeline.engine.sub_pipeline_executor import SubPipelineExecutor
 from iac_code.pipeline.engine.types import StepResult, StepStatus
-from iac_code.pipeline.engine.ui_contract import PipelineStepType, parse_selected_candidate
+from iac_code.pipeline.engine.ui_contract import (
+    PipelineStepType,
+    SelectedCandidate,
+    encode_deployment_confirmation,
+    parse_deployment_confirmation,
+    parse_selected_candidate,
+)
 from iac_code.pipeline.engine.user_input import (
     PipelineInputContent,
     PipelineUserInput,
@@ -287,6 +295,21 @@ def _user_input_received_data(
     data: dict[str, Any] = {"user_input_length": len(user_input.display_text)}
     if user_input.has_images:
         data["has_images"] = True
+    if ui_mode == "deployment_confirmation":
+        data.update(
+            {
+                "kind": "deployment_confirmation",
+                "selected_value": user_input.display_text,
+            }
+        )
+        confirmation = parse_deployment_confirmation(user_input.display_text)
+        if confirmation is not None:
+            data["action"] = confirmation.action
+            data["parameter_overrides"] = dict(confirmation.parameter_overrides)
+            data["structured"] = True
+        else:
+            data["structured"] = False
+        return data
     if ui_mode != "candidate_selection":
         return data
     data.update(
@@ -302,6 +325,47 @@ def _user_input_received_data(
             if isinstance(selected_option, dict):
                 data["selected_option"] = dict(selected_option)
     return data
+
+
+def _deployment_confirmation_required_data(conclusion: dict[str, Any]) -> dict[str, Any]:
+    """Build the public Step 2 confirmation payload without duplicating the template body."""
+
+    result = conclusion.get("selected_candidate_result")
+    result = result if isinstance(result, dict) else {}
+    template = result.get("template")
+    template = template if isinstance(template, dict) else {}
+    cost = result.get("cost")
+    cost = cost if isinstance(cost, dict) else {}
+    return {
+        "kind": "deployment_confirmation",
+        "solution_summary": str(result.get("solution_summary") or ""),
+        "template_url": str(conclusion.get("template_url") or template.get("file_path") or ""),
+        "cost": deepcopy(cost),
+        "effective_deployment_parameters": deepcopy(conclusion.get("effective_deployment_parameters") or {}),
+        "parameter_overrides": deepcopy(conclusion.get("parameter_overrides") or {}),
+        "preview_ready_for_create": conclusion.get("preview_ready_for_create") is True,
+    }
+
+
+def _normalize_deployment_confirmation_choice(
+    user_input: PipelineUserInput,
+    waiting_options: list[Any],
+) -> PipelineUserInput:
+    """Turn an ask-style numeric choice into the dedicated structured action payload."""
+
+    if user_input.has_images:
+        return user_input
+    choice = user_input.display_text.strip()
+    if not choice.isdecimal():
+        return user_input
+    index = int(choice) - 1
+    if index < 0 or index >= len(waiting_options):
+        return user_input
+    option = waiting_options[index]
+    action = option.get("action") if isinstance(option, dict) else None
+    if not isinstance(action, str) or parse_deployment_confirmation({"action": action}) is None:
+        return user_input
+    return normalize_pipeline_user_input(encode_deployment_confirmation(action))
 
 
 def _pipeline_pause_input_received_data(user_input: PipelineUserInput) -> dict[str, Any]:
@@ -456,6 +520,23 @@ def _latest_ask_user_question_tool_use_id(messages: list[Message]) -> str | None
     return None
 
 
+def _without_tool_result(messages: list[Message], tool_use_id: str) -> list[Message]:
+    """Remove a stale/synthetic result before supplying the real resumed answer."""
+    filtered: list[Message] = []
+    for message in messages:
+        if message.role != "user" or isinstance(message.content, str):
+            filtered.append(message)
+            continue
+        content = [
+            block
+            for block in message.content
+            if not isinstance(block, ToolResultBlock) or block.tool_use_id != tool_use_id
+        ]
+        if content:
+            filtered.append(message.model_copy(update={"content": content}))
+    return filtered
+
+
 def _initial_prompt_text(initial_prompt: str | list[ContentBlock]) -> str:
     if isinstance(initial_prompt, str):
         return initial_prompt
@@ -537,7 +618,7 @@ def _rollback_context_for_interrupt_verdict(verdict: InterruptVerdict) -> str:
     if rollback_context:
         return rollback_context
     reason = (verdict.reason or "").strip()
-    return _("用户反馈：{}").format(reason) if reason else ""
+    return _("User feedback: {}").format(reason) if reason else ""
 
 
 class PipelineRunner:
@@ -629,6 +710,7 @@ class PipelineRunner:
         self._last_applied_interrupt_verdict: InterruptVerdict | None = None
         self._waiting_input_started_at: dict[str, float] = {}
         self._waiting_input_options_by_step: dict[str, list[Any]] = {}
+        self._resumed_candidate_selection: dict[str, Any] | None = None
         self._step_attempts: dict[str, int] = {}
 
         # Single shared pause event for all AgentLoops spawned by this pipeline.
@@ -714,6 +796,11 @@ class PipelineRunner:
     @property
     def emit_stack_events(self) -> bool:
         return self._loaded.emit_stack_events
+
+    def feature_enabled(self, name: str) -> bool:
+        """Return an opt-in pipeline feature without coupling integrations to pipeline names."""
+
+        return self._loaded.feature_flags.get(name, False) is True
 
     @property
     def sidecar_status(self) -> str | None:
@@ -1104,6 +1191,27 @@ class PipelineRunner:
     def pending_ask_user_question(self) -> dict[str, Any] | None:
         pending = PendingAskUserQuestion.from_dict(self._execution.get(_PENDING_ASK_USER_QUESTION_INPUT_KEY))
         return pending.to_dict() if pending is not None else None
+
+    def pending_deployment_confirmation(self) -> dict[str, Any] | None:
+        """Return the durable confirmation payload for a restored waiting step."""
+
+        try:
+            step = self.state_machine.current_step
+        except (AttributeError, IndexError):
+            return None
+        if step.ui_mode != "deployment_confirmation":
+            return None
+        conclusion = self.context.get_conclusion(step.conclusion_field)
+        if not isinstance(conclusion, dict) or conclusion.get("status") != "awaiting_confirmation":
+            return None
+        options = conclusion.get("options")
+        payload: dict[str, Any] = {
+            "step_id": step.step_id,
+            "prompt": str(conclusion.get("user_prompt") or ""),
+            "options": deepcopy(options) if isinstance(options, list) else [],
+        }
+        payload.update(_deployment_confirmation_required_data(conclusion))
+        return payload
 
     async def persist_pending_ask_user_question(self, event: AskUserQuestionEvent) -> None:
         pending = PendingAskUserQuestion.from_event(event)
@@ -2591,6 +2699,102 @@ class PipelineRunner:
         )
         return has_explicit_index or self._is_explicit_candidate_selection_payload(selected_value)
 
+    def _retain_resumed_candidate_selection(
+        self,
+        step: StepSpec,
+        conclusion: dict[str, Any],
+        user_text: str,
+    ) -> None:
+        """Keep the waiting-state candidates and parsed selection for authoritative fixation."""
+        candidates = conclusion.get("candidates")
+        self._resumed_candidate_selection = {
+            "step_id": step.step_id,
+            "structured": parse_selected_candidate(user_text),
+            "candidates": deepcopy(candidates) if isinstance(candidates, list) else [],
+        }
+
+    def _authoritative_candidate_index(
+        self,
+        structured: SelectedCandidate | None,
+        candidates: list[Any],
+        conclusion: dict[str, Any],
+    ) -> int | None:
+        count = len(candidates)
+
+        def unique_name_index(value: Any) -> int | None:
+            if not isinstance(value, str) or not value.strip():
+                return None
+            wanted = value.strip()
+            matches = [
+                index
+                for index, candidate in enumerate(candidates)
+                if isinstance(candidate, dict) and candidate.get("name") == wanted
+            ]
+            return matches[0] if len(matches) == 1 else None
+
+        def valid_index(value: Any) -> int | None:
+            if isinstance(value, bool) or not isinstance(value, int):
+                return None
+            return value if 0 <= value < count else None
+
+        if structured is not None:
+            for raw_index in (structured.selected_candidate_index, structured.selected_evaluated_candidate_index):
+                resolved = valid_index(raw_index)
+                if resolved is not None:
+                    return resolved
+            resolved = unique_name_index(structured.selected_candidate_name)
+            if resolved is not None:
+                return resolved
+        # 自然语言偏好无法由 runner 唯一解析时，才验证并接受模型映射到候选列表的结果。
+        resolved = valid_index(conclusion.get("selected_candidate_index"))
+        if resolved is not None:
+            return resolved
+        resolved = unique_name_index(conclusion.get("selected_candidate_name"))
+        if resolved is not None:
+            return resolved
+        return 0 if count == 1 else None
+
+    def _apply_authoritative_candidate_selection(self, step: StepSpec, step_result: StepResult) -> None:
+        """Fix the structured selection and parameter overrides before the conclusion is saved.
+
+        只在候选 Step 明确提交 ``status: selected`` 时生效，因此对没有 ``status`` 字段的
+        既有候选 Step（如 ``selling.confirm_and_select``）天然 no-op。
+        """
+        retained = self._resumed_candidate_selection
+        self._resumed_candidate_selection = None
+        if step.ui_mode != "candidate_selection" or not isinstance(retained, dict):
+            return
+        if retained.get("step_id") != step.step_id:
+            return
+        conclusion = step_result.conclusion
+        if not isinstance(conclusion, dict) or conclusion.get("status") != "selected":
+            return
+        candidates = retained.get("candidates")
+        if not isinstance(candidates, list) or not candidates:
+            candidates = conclusion.get("candidates")
+        if not isinstance(candidates, list) or not candidates:
+            return
+        structured = retained.get("structured")
+        structured = structured if isinstance(structured, SelectedCandidate) else None
+        index = self._authoritative_candidate_index(structured, candidates, conclusion)
+        if index is None:
+            return
+        candidate = candidates[index]
+        if not isinstance(candidate, dict):
+            return
+        conclusion["selected_candidate_index"] = index
+        candidate_name = candidate.get("name")
+        if isinstance(candidate_name, str) and candidate_name:
+            conclusion["selected_candidate_name"] = candidate_name
+        conclusion["selected_candidate"] = deepcopy(candidate)
+        if (
+            step.config.get("accept_parameter_overrides", True) is not False
+            and structured is not None
+            and structured.parameter_overrides
+        ):
+            conclusion["parameter_overrides"] = deepcopy(structured.parameter_overrides)
+        self.context.set_conclusion(step.conclusion_field, conclusion)
+
     def _next_step_attempt(self, step_id: str) -> int:
         attempt = self._step_attempts.get(step_id, 0) + 1
         self._step_attempts[step_id] = attempt
@@ -2671,6 +2875,10 @@ class PipelineRunner:
                 "pipeline_type": self._loaded.name,
                 "total_steps": self.state_machine.total_steps,
                 "step_names": list(self.state_machine._order),
+                # 首句用户 prompt 只存在于本次调用的入参：流水线会话的 JSONL 只记录
+                # pipeline_init / step_complete 元信息,快照也没有它。会话恢复要还原
+                # 「我发的第一句话」就必须让它随本事件一起持久化(仅文本,不含图片)。
+                "user_request": pipeline_input.display_text,
             },
         )
         mcp_status_event = self._mcp_status_event(force=True)
@@ -2698,7 +2906,6 @@ class PipelineRunner:
             return
 
         pipeline_input = normalize_pipeline_user_input(user_input)
-        user_text = pipeline_input.display_text
         step = self.state_machine.current_step
         step_index = self.state_machine.current_step_index + 1
         step_attempt = self._current_step_attempt(step.step_id)
@@ -2710,6 +2917,9 @@ class PipelineRunner:
             restored_options = current_conclusion.get("options")
             if isinstance(restored_options, list):
                 waiting_options = restored_options
+        if step.ui_mode == "deployment_confirmation":
+            pipeline_input = _normalize_deployment_confirmation_choice(pipeline_input, waiting_options)
+        user_text = pipeline_input.display_text
         selected_index: int | None = None
         if step.ui_mode == "candidate_selection":
             selected_index = self._infer_selected_index(user_text, waiting_options)
@@ -2738,12 +2948,70 @@ class PipelineRunner:
                     },
                 )
                 return
+        if (
+            step.ui_mode == "deployment_confirmation"
+            and step.config.get("confirmation_accepts_parameter_overrides") is True
+            and step.validate_structured_confirmation is not None
+        ):
+            validation_message = self._structured_confirmation_validation_message(
+                step, current_conclusion, user_text
+            )
+            if validation_message:
+                # The submitted parameters are illegal, so the step keeps its waiting input untouched: no
+                # bookkeeping is popped, no state is saved and no model turn is spent.
+                yield PipelineEvent(
+                    type=PipelineEventType.USER_INPUT_REQUIRED,
+                    step_id=step.step_id,
+                    timestamp=time.time(),
+                    data={
+                        "step_id": step.step_id,
+                        "prompt": current_conclusion.get("user_prompt", "")
+                        if isinstance(current_conclusion.get("user_prompt", ""), str)
+                        else "",
+                        "options": waiting_options,
+                        "validation_error": "invalid_deployment_parameters",
+                        "validation_message": validation_message,
+                    },
+                )
+                return
         wait_started_at = self._waiting_input_started_at.pop(step.step_id, None)
         wait_duration_ms = self._observability.duration_ms(wait_started_at) if wait_started_at is not None else None
         self._waiting_input_options_by_step.pop(step.step_id, None)
-        current_conclusion["user_input"] = user_text
+        if step.ui_mode == "candidate_selection":
+            self._retain_resumed_candidate_selection(step, current_conclusion, user_text)
+        if step.config.get("deterministic_structured_confirmation") is True:
+            # Step 2 receives the answer separately as ``user_message``. Persisting this runner-only
+            # field would pollute the saved conclusion and violate its additionalProperties=false schema.
+            current_conclusion.pop("user_input", None)
+        else:
+            current_conclusion["user_input"] = user_text
         self.context.set_conclusion(step.conclusion_field, current_conclusion)
         self._set_current_step_user_input(pipeline_input)
+
+        confirmation_resume_messages: list[Message] | None = None
+        resolved_step_result: StepResult | None = None
+        if step.config.get("deterministic_structured_confirmation") is True:
+            confirmation_resume_messages = self._resume_messages_for_current_parent_step(step.step_id)
+            resolved_step_result = self._resolve_structured_deployment_confirmation(
+                step,
+                current_conclusion,
+                user_text,
+                confirmation_resume_messages,
+            )
+        elif step.config.get("deterministic_structured_candidate_selection") is True and selected_index is not None:
+            confirmation_resume_messages = self._resume_messages_for_current_parent_step(step.step_id)
+            finalized_selection = self._step_executor.finalize_completion_input_from_transcript(
+                step,
+                self.context,
+                user_message=user_text,
+                tool_input={"conclusion": {"status": "selected", "selected_candidate_index": selected_index}},
+                resume_messages=confirmation_resume_messages,
+                rollback_targets=self.state_machine.completed_non_future_rollback_targets(),
+                rollback_count=self.state_machine.rollback_count,
+                max_rollbacks=self.state_machine.max_rollbacks,
+            )
+            if not isinstance(finalized_selection, CompletionValidationError):
+                resolved_step_result = finalized_selection
         try:
             await self._save_running(step.step_id, reason="user input received")
         except PipelineStatePersistenceError as exc:
@@ -2781,10 +3049,19 @@ class PipelineRunner:
             ),
         )
 
-        async for event in self._continue_from_current(
-            **self._continue_input_kwargs(pipeline_input),
-            resume_waiting_step=True,
-        ):
+        if confirmation_resume_messages is not None:
+            continued = self._continue_from_current(
+                **self._continue_input_kwargs(pipeline_input),
+                resume_messages=confirmation_resume_messages,
+                resolved_step_result=resolved_step_result,
+                resume_waiting_step=True,
+            )
+        else:
+            continued = self._continue_from_current(
+                **self._continue_input_kwargs(pipeline_input),
+                resume_waiting_step=True,
+            )
+        async for event in continued:
             if (
                 not selection_observed
                 and step.ui_mode == "candidate_selection"
@@ -2822,6 +3099,92 @@ class PipelineRunner:
                         selection_observed = True
             yield event
 
+    def _structured_confirmation_validation_message(
+        self,
+        step: StepSpec,
+        current_conclusion: dict[str, Any],
+        user_text: str,
+    ) -> str:
+        """Ask the step hook whether a structured confirmation payload may be resolved at all."""
+
+        hook = step.validate_structured_confirmation
+        if hook is None:
+            return ""
+        try:
+            message = hook(
+                conclusion=current_conclusion,
+                user_message=user_text,
+                cwd=self._cwd,
+                config=step.config,
+            )
+        except Exception:  # pragma: no cover - a hook defect must not break the waiting step
+            logger.warning("Structured confirmation pre-check failed: step_id=%s", step.step_id, exc_info=True)
+            return ""
+        if not isinstance(message, str) or not message.strip():
+            return ""
+        logger.info(
+            "Structured confirmation rejected illegal parameters: step_id=%s reason_length=%d",
+            step.step_id,
+            len(message),
+        )
+        return message.strip()
+
+    def _resolve_structured_deployment_confirmation(
+        self,
+        step: StepSpec,
+        current_conclusion: dict[str, Any],
+        user_text: str,
+        resume_messages: list[Message],
+    ) -> StepResult | None:
+        """Resolve deterministic structured confirmation actions without asking the LLM."""
+
+        structured = parse_deployment_confirmation(user_text)
+        if structured is None or current_conclusion.get("status") != "awaiting_confirmation":
+            return None
+
+        if structured.action == "cancel":
+            conclusion = {"status": "cancelled"}
+        elif structured.action == "reselect":
+            conclusion = {
+                "status": "reselect_requested",
+                "reselect_reason": user_text,
+            }
+        elif structured.action != "confirm":
+            # Adjustments must still be interpreted, materialized, previewed and repriced by the step LLM.
+            return None
+        else:
+            raw_current_overrides = current_conclusion.get("parameter_overrides")
+            current_overrides = raw_current_overrides if isinstance(raw_current_overrides, dict) else {}
+            if (
+                structured.parameter_overrides_provided
+                and structured.parameter_overrides != current_overrides
+                and step.config.get("confirmation_accepts_parameter_overrides") is not True
+            ):
+                # Default semantics: changed parameters invalidate the quote, so the step LLM has to
+                # re-materialize, re-preview and re-price before the user confirms again.
+                return None
+
+            conclusion = {"status": "confirmed"}
+        tool_input: dict[str, Any] = {"conclusion": conclusion}
+        finalized = self._step_executor.finalize_completion_input_from_transcript(
+            step,
+            self.context,
+            user_message=user_text,
+            tool_input=tool_input,
+            resume_messages=resume_messages,
+            rollback_targets=self.state_machine.completed_non_future_rollback_targets(),
+            rollback_count=self.state_machine.rollback_count,
+            max_rollbacks=self.state_machine.max_rollbacks,
+        )
+        if isinstance(finalized, CompletionValidationError):
+            logger.info(
+                "Structured deployment confirmation requires agent recovery: step_id=%s reason=%s",
+                step.step_id,
+                sanitize_strict_text(finalized.message),
+            )
+            return None
+        return finalized
+
     async def resume_ask_user_question(
         self,
         answer: dict[str, str],
@@ -2843,6 +3206,11 @@ class PipelineRunner:
             raise ValueError(
                 f"ask_user_question tool_use_id mismatch: expected {expected_tool_use_id!r}, got {tool_use_id!r}"
             )
+        # ``repair_interrupted`` adds a synthetic error result for the paused
+        # ask tool call.  Replace it with the user's real answer; keeping both
+        # makes providers treat the ask as interrupted even though the answer
+        # was durably accepted.
+        resume_messages = _without_tool_result(resume_messages, tool_use_id)
         self.acknowledge_pending_ask_user_question(tool_use_id)
         answer_text = payload["free_text"] or payload["selected_label"] or payload["selected_id"]
         if payload["selected_id"] and payload["free_text"]:
@@ -2928,10 +3296,12 @@ class PipelineRunner:
                 yield event
             return
 
-        resume_kwargs: dict[str, Any] = {"user_input": user_message}
+        # 把刚生成的 tool result 追加到包含原 ToolUse 的 resume_messages，而不是仅通过
+        # precompleted_tools 注入：这样恢复时能重建带原始 question/options 的 guard record，
+        # 用于把最终 conclusion 绑定到真实回答，同时不重复把 tool result 当作新 prompt。
         async for event in self._continue_from_current(
-            **resume_kwargs,
-            resume_messages=resume_messages,
+            user_input=None,
+            resume_messages=[*resume_messages, tool_result_message],
             precompleted_tools={"ask_user_question": payload},
             resume_waiting_step=True,
         ):
@@ -3069,13 +3439,38 @@ class PipelineRunner:
         if verdict.action == "supplement":
             injected = self._inject_supplement(verdict, pipeline_input.content)
             if not injected:
-                # Don't silently lose the user's message — flag it via reason
-                # prefix so the UI can render a clear "supplement was dropped"
-                # warning instead of the misleading "已补充" feedback.
-                verdict = replace(
-                    verdict,
-                    reason=f"supplement_dropped (target={verdict.supplement_target}): {verdict.reason}",
-                )
+                current_step = getattr(self.state_machine, "current_step", None)
+                step_config = getattr(current_step, "config", {})
+                fallback = step_config.get("supplement_injection_failure") if isinstance(step_config, dict) else None
+                if fallback == "hard_interrupt":
+                    step_id = getattr(current_step, "step_id", None)
+                    rollback_context = verdict.rollback_context or verdict.reason
+                    active_input = getattr(self, "_current_step_user_input", None)
+                    if isinstance(active_input, str) and active_input.strip():
+                        rollback_context = (
+                            "Continue the original deployment request below and apply the latest user supplement "
+                            "as an authoritative constraint.\n\n"
+                            f"Original request:\n{active_input}\n\n"
+                            f"Interrupt classification:\n{rollback_context}"
+                        )
+                    verdict = replace(
+                        verdict,
+                        action="hard_interrupt",
+                        rollback_target=step_id,
+                        rollback_context=rollback_context,
+                        reason=(
+                            "supplement injection unavailable; restarting current step so the input is preserved: "
+                            f"{verdict.reason}"
+                        ),
+                    )
+                else:
+                    # Don't silently lose the user's message — flag it via reason
+                    # prefix so the UI can render a clear "supplement was dropped"
+                    # warning instead of the misleading "已补充" feedback.
+                    verdict = replace(
+                        verdict,
+                        reason=f"supplement_dropped (target={verdict.supplement_target}): {verdict.reason}",
+                    )
 
         return verdict
 
@@ -3811,6 +4206,7 @@ class PipelineRunner:
         user_input_display_text: str | None = None,
         resume_messages: list[Message] | None = None,
         precompleted_tools: dict[str, dict[str, Any]] | None = None,
+        resolved_step_result: StepResult | None = None,
         resume_waiting_step: bool = False,
         resume_running_step: bool = False,
         permission_checkpoint: dict[str, Any] | None = None,
@@ -4111,6 +4507,18 @@ class PipelineRunner:
                 }
                 if step_precompleted_tools is not None:
                     execute_kwargs["precompleted_tools"] = step_precompleted_tools
+                if first_step and resolved_step_result is not None:
+                    execute_kwargs["resolved_step_result"] = resolved_step_result
+                    # A deterministic result belongs only to the resumed step. A rollback can make
+                    # another step the loop's new "first" step and must not replay this result there.
+                    resolved_step_result = None
+                if (
+                    first_step
+                    and step.config.get("deterministic_structured_confirmation") is True
+                    and step_resume_messages
+                    and step_user_message is not None
+                ):
+                    execute_kwargs["skip_completed_step_restore"] = True
 
                 try:
                     parameters = inspect.signature(self._step_executor.execute).parameters
@@ -4155,6 +4563,10 @@ class PipelineRunner:
                                 yield self._persistence_failure_event(exc)
                                 return
                         yield event
+
+            if step_result is not None and step_result.status == StepStatus.COMPLETED:
+                # 在保存最终 conclusion 前固化权威候选选择和参数覆盖。
+                self._apply_authoritative_candidate_selection(step, step_result)
 
             if (
                 step_result is not None
@@ -4381,6 +4793,13 @@ class PipelineRunner:
                 first_step_resume_messages = None
                 first_step_precompleted_tools = None
                 is_first_step = True
+                # ``resume_waiting_step`` / ``resume_running_step`` apply only to
+                # the step that originally resumed this generator.  A parent
+                # rollback creates a fresh target attempt; carrying either flag
+                # across this boundary suppresses its STEP_STARTED event and
+                # makes surfaces keep rendering with the previous step's UI.
+                resume_waiting_step = False
+                resume_running_step = False
                 try:
                     for warning_event in self._mark_rollback_cleanup_required(
                         step,
@@ -4424,7 +4843,25 @@ class PipelineRunner:
                 )
                 continue
 
-            if step.auto_advance or resume_current_step:
+            # 恢复中的候选 Step 若再次输出 awaiting_selection（例如用户要求改架构，或从
+            # ask_user_question 恢复后重新规划），必须重新等待选择而不是直接前进。没有
+            # status 字段的既有候选 Step 保持原有「恢复后前进」行为。
+            awaiting_selection_again = (
+                resume_current_step
+                and not step.auto_advance
+                and isinstance(step_result.conclusion, dict)
+                and (
+                    (
+                        step.ui_mode == "candidate_selection"
+                        and step_result.conclusion.get("status") == "awaiting_selection"
+                    )
+                    or (
+                        step.ui_mode == "deployment_confirmation"
+                        and step_result.conclusion.get("status") == "awaiting_confirmation"
+                    )
+                )
+            )
+            if step.auto_advance or (resume_current_step and not awaiting_selection_again):
                 completed_step_id = step.step_id
                 self.state_machine.advance()
                 try:
@@ -4513,15 +4950,20 @@ class PipelineRunner:
                         ui_mode=step.ui_mode,
                         option_count=len(options),
                     )
+                input_required_data: dict[str, Any] = {
+                    "step_id": step.step_id,
+                    "prompt": prompt if isinstance(prompt, str) else "",
+                    "options": options,
+                }
+                if step.ui_mode == "candidate_selection":
+                    input_required_data["kind"] = "candidate_selection"
+                elif step.ui_mode == "deployment_confirmation":
+                    input_required_data.update(_deployment_confirmation_required_data(conclusion))
                 yield PipelineEvent(
                     type=PipelineEventType.USER_INPUT_REQUIRED,
                     step_id=step.step_id,
                     timestamp=time.time(),
-                    data={
-                        "step_id": step.step_id,
-                        "prompt": prompt if isinstance(prompt, str) else "",
-                        "options": options,
-                    },
+                    data=input_required_data,
                 )
                 return
 

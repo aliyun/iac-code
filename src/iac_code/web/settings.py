@@ -232,7 +232,8 @@ _VALID_SESSION_MODES = ("normal", "pipeline")
 _VALID_PERMISSION_MODES = frozenset(mode.value for mode in PermissionMode)
 DEFAULT_SESSION_PERMISSION_MODE = PermissionMode.DEFAULT.value
 DEFAULT_SESSION_MODE = "normal"
-# 前端 PIPELINE_OPTIONS 目前只有 selling(售卖流水线);流水线默认落此 flavor。
+# 前端 PIPELINE_OPTIONS 现有 selling(售卖流水线)和 selling_solution_first(先选方案);
+# 未显式选择时流水线仍落 selling 这个 flavor。
 DEFAULT_SESSION_PIPELINE_NAME = "selling"
 
 
@@ -255,7 +256,10 @@ def get_session_defaults() -> dict[str, str]:
         mode = DEFAULT_SESSION_MODE
     pipeline_name = section.get("pipelineName")
     if not isinstance(pipeline_name, str) or not pipeline_name.strip():
-        pipeline_name = DEFAULT_SESSION_PIPELINE_NAME
+        # 未在 settings.yml 里选过时沿用进程级 IAC_CODE_PIPELINE_NAME:前端草稿总会
+        # 显式回传 pipelineName,若这里看不到 env,用 env 启动的 pipeline 就会被草稿
+        # 默认值静默遮蔽。
+        pipeline_name = os.environ.get("IAC_CODE_PIPELINE_NAME", "").strip() or DEFAULT_SESSION_PIPELINE_NAME
     return {"permissionMode": permission_mode, "mode": mode, "pipelineName": pipeline_name.strip()}
 
 

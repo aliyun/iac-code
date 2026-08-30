@@ -78,6 +78,51 @@ def extract_json_int_value(accumulated: str, key: str) -> int | None:
         return None
 
 
+def describe_json_error(raw: str, exc: Exception) -> str:
+    """One-line, log-safe description of *why* ``raw`` is not valid JSON.
+
+    A 200-character head is useless for an 8 KB model-emitted argument blob:
+    the defect is almost always somewhere in the middle (an unescaped newline
+    inside a string, a truncated tail). This reports the decoder message, the
+    error offset and a ``repr`` window around it, so control characters are
+    visible instead of silently reflowing the log line.
+    """
+    pos = getattr(exc, "pos", None)
+    detail = f"error={exc.__class__.__name__}: {exc}, length={len(raw)}"
+    if isinstance(pos, int) and 0 <= pos <= len(raw):
+        window = raw[max(0, pos - 80) : pos + 80]
+        return f"{detail}, around_pos={pos} {window!r}"
+    return f"{detail}, head={raw[:120]!r}, tail={raw[-120:]!r}"
+
+
+def parse_json_tolerant(raw: str) -> tuple[Any | None, str | None]:
+    """Parse JSON, retrying with ``strict=False`` before giving up.
+
+    ``json.loads`` rejects literal control characters inside string values, so a
+    model that emits a real newline in a long description produces an otherwise
+    perfectly good object that strict parsing throws away. The lenient retry
+    keeps that payload; anything else (truncation, mangled escapes) still fails
+    and comes back with a description of the actual defect.
+
+    Returns:
+        ``(value, None)`` on success, ``(None, description)`` on failure.
+    """
+    if not raw:
+        return None, "empty input"
+    try:
+        return json.loads(raw), None
+    except (json.JSONDecodeError, ValueError) as strict_exc:
+        try:
+            value = json.loads(raw, strict=False)
+        except (json.JSONDecodeError, ValueError) as lenient_exc:
+            return None, describe_json_error(raw, lenient_exc)
+        logger.warning(
+            "JSON accepted only with strict=False (literal control character in a string); {}",
+            describe_json_error(raw, strict_exc),
+        )
+        return value, None
+
+
 def safe_parse_json(raw: str | None) -> Any | None:
     """Parse a JSON string safely, never raises.
 
@@ -88,8 +133,8 @@ def safe_parse_json(raw: str | None) -> Any | None:
         return None
     try:
         return json.loads(raw)
-    except (json.JSONDecodeError, ValueError):
-        logger.error("Failed to parse JSON, raw={}", raw[:200])
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.error("Failed to parse JSON, {}", describe_json_error(raw, exc))
         return None
 
 

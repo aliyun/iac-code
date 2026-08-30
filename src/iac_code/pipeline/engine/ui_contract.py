@@ -25,6 +25,7 @@ class PipelineUiMode(str, Enum):
     """Pipeline UI modes consumed by terminal renderers."""
 
     CANDIDATE_SELECTION = "candidate_selection"
+    DEPLOYMENT_CONFIRMATION = "deployment_confirmation"
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,18 @@ class SelectedCandidate:
     selected_candidate_index: int | None = None
     selected_evaluated_candidate_index: int | None = None
     parameter_overrides: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DeploymentConfirmation:
+    """Structured response submitted by the solution-first deployment confirmation UI."""
+
+    action: str
+    parameter_overrides: dict[str, Any] = field(default_factory=dict)
+    parameter_overrides_provided: bool = False
+
+
+_DEPLOYMENT_CONFIRMATION_ACTIONS = frozenset({"confirm", "adjust", "reselect", "cancel"})
 
 
 def encode_selected_candidate(
@@ -98,6 +111,49 @@ def parse_selected_candidate(value: Any) -> SelectedCandidate | None:
         selected_candidate_index=index,
         selected_evaluated_candidate_index=evaluated_index,
         parameter_overrides=parameter_overrides,
+    )
+
+
+def encode_deployment_confirmation(action: str, parameter_overrides: dict[str, Any] | None = None) -> str:
+    """Encode a deployment confirmation action for ``PipelineRunner.resume``."""
+
+    payload: dict[str, Any] = {"action": action}
+    if parameter_overrides is not None:
+        payload["parameter_overrides"] = parameter_overrides
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def parse_deployment_confirmation(value: Any) -> DeploymentConfirmation | None:
+    """Parse only explicit structured confirmation payloads; natural language returns ``None``."""
+
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            return None
+    elif isinstance(value, dict):
+        payload = value
+    else:
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    action = payload.get("action")
+    if not isinstance(action, str):
+        return None
+    normalized_action = action.strip().lower()
+    if normalized_action not in _DEPLOYMENT_CONFIRMATION_ACTIONS:
+        return None
+    parameter_overrides = _parse_parameter_overrides(payload)
+    if parameter_overrides is None:
+        return None
+    return DeploymentConfirmation(
+        action=normalized_action,
+        parameter_overrides=parameter_overrides,
+        parameter_overrides_provided=bool(parameter_overrides),
     )
 
 

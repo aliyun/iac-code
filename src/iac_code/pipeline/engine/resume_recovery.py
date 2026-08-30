@@ -32,6 +32,38 @@ def _without_seen_tool_results(message: Message, seen_tool_result_ids: set[str])
     return message.model_copy(update={"content": content})
 
 
+def _successful_tool_result_ids(messages: list[Message]) -> set[str]:
+    result: set[str] = set()
+    for message in messages:
+        if not isinstance(message.content, list):
+            continue
+        result.update(
+            block.tool_use_id
+            for block in message.content
+            if isinstance(block, ToolResultBlock) and block.tool_use_id and not block.is_error
+        )
+    return result
+
+
+def _without_overridden_error_results(message: Message, successful_ids: set[str]) -> Message | None:
+    if not isinstance(message.content, list):
+        return message
+    content = [
+        block
+        for block in message.content
+        if not (
+            isinstance(block, ToolResultBlock)
+            and block.is_error
+            and block.tool_use_id in successful_ids
+        )
+    ]
+    if not content:
+        return None
+    if len(content) == len(message.content):
+        return message
+    return message.model_copy(update={"content": content})
+
+
 def reconcile_resume_messages(
     transcript_messages: list[Message] | None,
     sidecar_messages: list[Message] | None,
@@ -42,6 +74,18 @@ def reconcile_resume_messages(
         return merged or None
     if not merged:
         return list(sidecar_messages)
+
+    # ``repair_interrupted`` may have inserted a synthetic error result for a
+    # tool call that the durable sidecar has since answered successfully.  The
+    # real result is authoritative; otherwise the duplicate-id filter below
+    # would discard it and leave providers seeing only the interruption.
+    successful_sidecar_ids = _successful_tool_result_ids(sidecar_messages)
+    if successful_sidecar_ids:
+        merged = [
+            filtered
+            for message in merged
+            if (filtered := _without_overridden_error_results(message, successful_sidecar_ids)) is not None
+        ]
 
     seen_keys = {_message_key(message) for message in merged}
     seen_tool_result_ids: set[str] = set()

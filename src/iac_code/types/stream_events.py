@@ -135,6 +135,11 @@ class ToolUseEndEvent:
     input: dict[str, Any]
     type: Literal["tool_use_end"] = "tool_use_end"
     provider_metadata: dict[str, Any] | None = field(default=None, kw_only=True)
+    # Set when the provider could not parse the model's raw arguments. ``input``
+    # is then ``{}`` and the tool must NOT run: the agent loop turns this into
+    # the tool result so the model sees the real defect instead of a schema
+    # error about arguments it did send.
+    input_error: str | None = field(default=None, kw_only=True)
 
 
 @dataclass
@@ -196,6 +201,7 @@ class PermissionWaitOutcome(str, Enum):
     """Internal outcomes that must not be projected as a user decision."""
 
     SUSPEND = "suspend"
+    AUTOMATIC_DENY = "automatic_deny"
 
 
 class PermissionWaitSuspended(RuntimeError):  # noqa: N818 - domain event, not an error outcome
@@ -417,6 +423,8 @@ class DiagramEvent(ToolEmittedEvent):
     architecture_context: dict[str, Any] | None = None
     diagram_stage: Literal["draft", "optimized"] = "optimized"
     views: list[dict[str, str]] = field(default_factory=list)
+    candidate_set_id: str | None = None
+    detail_stage: Literal["outline", "detail"] | None = None
     type: Literal["diagram"] = "diagram"
 
 
@@ -430,6 +438,9 @@ class CandidateDetailEvent(ToolEmittedEvent):
     cost_items: list[dict]
     total_monthly_cost: str
     candidate_index: int | None = None
+    candidate_set_id: str | None = None
+    detail_stage: Literal["outline", "detail"] | None = None
+    key_tradeoff: str | None = None
     type: Literal["candidate_detail"] = "candidate_detail"
 
 

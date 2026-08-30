@@ -28,7 +28,7 @@ from iac_code.services.cloud_credentials import CloudCredentials
 from iac_code.services.permissions.audit import fingerprint_text
 from iac_code.services.permissions.rule_scope import scope_for_rule_source
 from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredential, AliyunCredentials
-from iac_code.services.providers.aliyun_oauth import AliyunOAuthError
+from iac_code.services.providers.aliyun_oauth import AliyunOAuthError, AliyunOAuthReloginRequired
 from iac_code.services.telemetry import add_metric, get_session_id, get_user_id, log_event, start_span
 from iac_code.services.telemetry.names import (
     ALIYUN_API_TARGET_OUTCOMES,
@@ -95,6 +95,7 @@ from iac_code.types.permissions import (
 from iac_code.types.stream_events import ResourceObservedEvent
 
 logger = logging.getLogger(__name__)
+_MAX_CREDENTIAL_LOG_DETAIL_CHARS = 200
 
 
 @dataclass(frozen=True)
@@ -849,6 +850,12 @@ def _runtime_contract_error_stage(error: ApiContractError) -> str | None:
         return "product"
     if "version" in code:
         return "version"
+    # Credential-stage codes must be recognized before the generic branches below, which
+    # would otherwise leave every credential failure without a stage and therefore without
+    # a metric. "security"/"auth_type" stay separate: those describe an unsupported auth
+    # scheme in the API contract, not a missing or stale credential.
+    if "credential" in code or "oauth" in code:
+        return "credential"
     if "security" in code or "auth_type" in code:
         return "security"
     if "media" in code or "content_type" in code:
@@ -868,6 +875,46 @@ def _runtime_contract_error_stage(error: ApiContractError) -> str | None:
     if any(token in code for token in ("parameter", "params", "pathname", "region", "body", "template", "input")):
         return "parameter"
     return None
+
+
+def _credential_stage_error(error: BaseException, *, product: Any, action: Any) -> BaseException:
+    """Classify a credential-provider failure and record it before the tool reports it.
+
+    The credential provider refreshes OAuth-backed STS credentials on demand, and those
+    failures carry prose messages. Without this mapping they reach `public_aliyun_error`
+    as an unrecognized code, render the generic "could not be prepared safely" text, and
+    leave nothing in the log, so neither the model nor an operator can tell that the run
+    needs a new sign-in and the model keeps retrying a call that can never succeed.
+
+    Classification uses the exception type, never the message: the OAuth client already
+    raises `AliyunOAuthReloginRequired` for exactly the permanent error codes and plain
+    `AliyunOAuthError` for the transient ones. Unrelated exceptions are returned unchanged
+    so existing stable codes keep their own public messages.
+
+    Only the stable code crosses the tool boundary. The upstream message stays in the log:
+    `{operation} request failed: ...` carries response detail, and a tool result is read by
+    the model and kept in the transcript.
+    """
+
+    if isinstance(error, AliyunOAuthReloginRequired):
+        code: str | None = "aliyun_oauth_relogin_required"
+    elif isinstance(error, AliyunOAuthError):
+        code = "aliyun_oauth_refresh_failed"
+    else:
+        code = None
+    detail = " ".join(str(error).split())[:_MAX_CREDENTIAL_LOG_DETAIL_CHARS]
+    # One bounded line, deliberately without `exc_info`: a stale credential fails on every
+    # call of a run, and a traceback per call buries everything else in the log.
+    logger.warning(
+        "Aliyun credential stage failed for %s/%s: %s: %s (error_code=%s, status_code=%s)",
+        product,
+        action,
+        type(error).__name__,
+        detail,
+        getattr(error, "error_code", None),
+        getattr(error, "status_code", None),
+    )
+    return ApiContractError(code) if code is not None else error
 
 
 def _runtime_call_shape(
@@ -2188,12 +2235,19 @@ class AliyunApi(BaseCloudApi):
                     region_id=shape.get("region_id"),
                 )
             )
-        return await self._execute_runtime(
-            api_input=self.prepare_invocation_input(shape),
+        prepared_shape = self.prepare_invocation_input(shape)
+        result = await self._execute_runtime(
+            api_input=prepared_shape,
             binding_input=tool_input,
             context=context,
             trust_path="delegated",
         )
+        effective_region = prepared_shape.get("region_id")
+        if not result.is_error and isinstance(effective_region, str) and effective_region:
+            metadata = dict(result.metadata or {})
+            metadata["effective_region_id"] = effective_region
+            result.metadata = metadata
+        return result
 
     async def execute_action_group(
         self,
@@ -2504,9 +2558,18 @@ class AliyunApi(BaseCloudApi):
                 credential_provider = getattr(runtime, "credential_provider", None)
                 if not callable(credential_provider):
                     raise ApiContractError("aliyun_credential_provider_required")
-                credential = credential_provider()
-                if inspect.isawaitable(credential):
-                    credential = await credential
+                try:
+                    credential = credential_provider()
+                    if inspect.isawaitable(credential):
+                        credential = await credential
+                except Exception as error:
+                    # The provider refreshes OAuth-backed STS credentials here, so this is
+                    # where a stale sign-in surfaces. `asyncio.CancelledError` derives from
+                    # `BaseException` and is left to propagate untouched.
+                    mapped = _credential_stage_error(error, product=contract.product, action=contract.action)
+                    if mapped is error:
+                        raise
+                    raise mapped from error
                 if credential is None:
                     raise ApiContractError("aliyun_credentials_required")
 

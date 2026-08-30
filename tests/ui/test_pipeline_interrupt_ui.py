@@ -475,6 +475,101 @@ class TestEventsBetweenSteps:
         assert "ToolResultEvent" in kinds, f"ToolResultEvent dropped between steps! captured={kinds}"
         assert result is terminal_event
 
+    @pytest.mark.asyncio
+    async def test_rollback_rewinds_completed_progress_to_before_target(self, mock_repl):
+        """A rollback to step 1 must not leave step 1 or step 2 checked."""
+        import time
+
+        from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+
+        progress_snapshots: list[tuple[set[int], int]] = []
+
+        async def fake_run_streaming_output(events_iter, *, live_header=None, **kwargs):
+            if live_header is not None:
+                live_header()
+            async for _event in events_iter:
+                if live_header is not None:
+                    live_header()
+
+        def capture_progress(_step_names, completed, current_index, _spinner_frame):
+            progress_snapshots.append((set(completed), current_index))
+            return "progress"
+
+        mock_repl.renderer = MagicMock()
+        mock_repl.renderer.run_streaming_output = fake_run_streaming_output
+        mock_repl.renderer.prompt_permission = None
+        mock_repl._build_progress_bar = MagicMock(side_effect=capture_progress)
+        mock_repl._render_pipeline_event = MagicMock()
+        mock_repl._pipeline_step_names = []
+        mock_repl._pipeline_completed_indices = set()
+        mock_repl._pipeline.pause_agent_loops = MagicMock()
+        mock_repl._pipeline.resume_agent_loops = MagicMock()
+
+        step_names = ["solution_planning_and_selection", "materialize_selected_candidate", "deploying"]
+        terminal_event = PipelineEvent(
+            type=PipelineEventType.PIPELINE_COMPLETED,
+            step_id=None,
+            timestamp=time.time(),
+            data={"total_steps": 3},
+        )
+
+        async def stream():
+            yield PipelineEvent(
+                type=PipelineEventType.PIPELINE_STARTED,
+                step_id=None,
+                timestamp=time.time(),
+                data={"step_names": step_names},
+            )
+            for index, step_id in enumerate(step_names[:2], start=1):
+                yield PipelineEvent(
+                    type=PipelineEventType.STEP_STARTED,
+                    step_id=step_id,
+                    timestamp=time.time(),
+                    data={
+                        "index": index,
+                        "total": 3,
+                        "name": step_id,
+                        "step_type": "agent_loop",
+                        "ui_mode": "default",
+                    },
+                )
+                yield PipelineEvent(
+                    type=PipelineEventType.STEP_COMPLETED,
+                    step_id=step_id,
+                    timestamp=time.time(),
+                    data={"duration_s": 0.1},
+                )
+            yield PipelineEvent(
+                type=PipelineEventType.ROLLBACK_TRIGGERED,
+                step_id="materialize_selected_candidate",
+                timestamp=time.time(),
+                data={
+                    "from_step": "materialize_selected_candidate",
+                    "to_step": "solution_planning_and_selection",
+                    "reason": "deployment target changed",
+                },
+            )
+            yield PipelineEvent(
+                type=PipelineEventType.STEP_STARTED,
+                step_id="solution_planning_and_selection",
+                timestamp=time.time(),
+                data={
+                    "index": 1,
+                    "total": 3,
+                    "name": "solution_planning_and_selection",
+                    "step_type": "agent_loop",
+                    "ui_mode": "default",
+                },
+            )
+            yield terminal_event
+
+        result = await mock_repl._render_pipeline_stream(stream())
+
+        assert result is terminal_event
+        assert mock_repl._pipeline_completed_indices == set()
+        assert (set(), 0) in progress_snapshots
+        assert progress_snapshots[-1] == (set(), 0)
+
 
 class TestPipelineAskUserQuestion:
     """ask_user_question must be handled by the pipeline stream owner.

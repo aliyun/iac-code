@@ -39,6 +39,15 @@ function escapeHtml(text) {
     .replace(/\u0027/g, "&#39;");
 }
 
+function outputLeafName(path) {
+  const normalized = String(path || "").replaceAll("\\", "/");
+  return normalized.split("/").filter(Boolean).pop() || "";
+}
+
+function diagramDisplayName(item) {
+  return item.candidateName || outputLeafName(item.sourceRelPath) || t("Architecture diagram");
+}
+
 // 轻量正则高亮(无第三方依赖):先整体转义,再按 token 包裹。
 export function highlightTemplate(text, format) {
   const escaped = escapeHtml(text);
@@ -223,7 +232,7 @@ export function createOutputController({
   async function openDiagramPreview(item) {
     const id = getSessionId?.();
     if (!id || !preview) return;
-    const title = item.candidateName || item.sourceRelPath;
+    const title = diagramDisplayName(item);
     const st = getDiagramState(item);
     // 用唯一 diagramId 做陈旧性键(重名候选的 title 可能相同,无法区分)。
     const key = item.diagramId || title;
@@ -399,7 +408,7 @@ export function createOutputController({
     row.dataset.diagramId = item.diagramId;
     const name = document.createElement("span");
     name.className = "output-row-name";
-    name.textContent = item.candidateName || item.sourceRelPath;
+    name.textContent = diagramDisplayName(item);
     const badge = document.createElement("span");
     badge.className = "output-badge output-format-" + item.format;
     badge.textContent = String(item.format).toUpperCase();

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -23,6 +24,7 @@ from iac_code.services.permission_wait import (
     permission_execution_identity,
 )
 from iac_code.services.permissions.audit import (
+    build_display_tool_input,
     build_prompt_tool_input,
     emit_permission_boundary_audit,
     sanitize_prompt_text,
@@ -34,6 +36,56 @@ PERMISSION_DECISIONS = frozenset({"allow_once", "deny"})
 PERMISSION_QUERY_PREFIX = "IAC_CODE_PERMISSION:"
 _SAFE_SUMMARY_MAX_CHARS = 1200
 _DISPLAY_FIELD_MAX_CHARS = 500
+
+_ROS_TEMPLATE_API_ACTIONS = {
+    "ros_validate_template": "ValidateTemplate",
+    "ros_get_template_parameter_constraints": "GetTemplateParameterConstraints",
+    "ros_preview_template": "PreviewStack",
+    "ros_estimate_template_cost": "GetTemplateEstimateCost",
+}
+_ROS_TOOLS = frozenset(
+    {
+        *_ROS_TEMPLATE_API_ACTIONS,
+        "ros_stack",
+        "ros_stack_instances",
+        "ros_stack_group",
+        "ros_template",
+        "ros_template_scratch",
+        "ros_diagnostic",
+        "ros_resource_type_registration",
+        "ros_tag",
+        "ros_deploy",
+    }
+)
+_TOOLS_WITHOUT_PARAMETER_DETAILS = frozenset(
+    {
+        "read_file",
+        "write_file",
+        "edit_file",
+        "list_files",
+        "glob",
+        "grep",
+        "bash",
+        "web_fetch",
+        "read_memory",
+        "write_memory",
+        "task_list",
+        "task_get",
+        "task_stop",
+        "agent",
+        "skill",
+        "aliyun_doc_search",
+        "aliyun_api_doc",
+        "ask_user_question",
+        "complete_step",
+        "show_architecture_diagram",
+        "show_architecture_plan",
+        "show_candidate_detail",
+        "infraguard_scan",
+        "list_mcp_resources",
+        "read_mcp_resource",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -68,6 +120,10 @@ class PendingPermission:
     backup_session_id: str | None = field(default=None, repr=False)
     backup_service: Any | None = field(default=None, repr=False)
     backup_metrics: Any | None = field(default=None, repr=False)
+    before_claim_backup: Callable[[PendingPermission, dict[str, Any]], Awaitable[None]] | None = field(
+        default=None,
+        repr=False,
+    )
 
     def envelope(self) -> dict[str, Any]:
         return permission_input_envelope(
@@ -130,6 +186,10 @@ def permission_input_envelope(
     }
     if deployment_summary := display.get("deploymentSummary"):
         envelope["deploymentSummary"] = deployment_summary
+    if operation := display.get("operation"):
+        envelope["operation"] = operation
+    if display_parameters := display.get("displayParameters"):
+        envelope["displayParameters"] = display_parameters
     return envelope
 
 
@@ -162,7 +222,8 @@ def permission_display_fields(request: PermissionRequestEvent, *, language: str 
     region = _safe_scalar(operation.get("region"))
     stack_name = _safe_scalar(operation.get("stackName"))
     stack_id = _safe_scalar(operation.get("stackId"))
-    safe_input = build_prompt_tool_input(request.tool_input)
+    safe_input = build_display_tool_input(request.tool_input)
+    safe_prompt_input = build_prompt_tool_input(request.tool_input)
     language = language or get_a2a_preferred_language() or "en"
     deployment_summary = _safe_deployment_summary(operation.get("deploymentSummary"))
 
@@ -194,8 +255,8 @@ def permission_display_fields(request: PermissionRequestEvent, *, language: str 
                 "Execute a local command needed for the requested infrastructure task.", language=language
             )
         command = None
-        if isinstance(safe_input, dict):
-            command = safe_input.get("command") or safe_input.get("cmd")
+        if isinstance(safe_prompt_input, dict):
+            command = safe_prompt_input.get("command") or safe_prompt_input.get("cmd")
         if isinstance(command, str) and command.strip():
             command_fallback = translate_message("shell command", language=language)
             target = translate_message("the current local workspace; command: {command}", language=language).format(
@@ -207,25 +268,39 @@ def permission_display_fields(request: PermissionRequestEvent, *, language: str 
     elif tool_name in {"write_file", "edit_file"}:
         title = translate_message("Change a workspace file", language=language)
         purpose = translate_message("Write a file needed for the requested infrastructure task.", language=language)
-        target = _safe_input_target(safe_input, language=language) or translate_message(
+        target = _safe_input_target(safe_prompt_input, language=language) or translate_message(
             "a file in the current workspace", language=language
         )
         effect = "file_change"
     elif tool_name in {"read_file", "glob", "grep"} or is_read_only:
         title = translate_message("Read workspace data with {tool}", language=language).format(tool=public_tool)
         purpose = translate_message("Read local data needed for the requested infrastructure task.", language=language)
-        target = _safe_input_target(safe_input, language=language) or translate_message(
+        target = _safe_input_target(safe_prompt_input, language=language) or translate_message(
             "the current local workspace", language=language
         )
         effect = "read"
     else:
         title = translate_message("Run {tool}", language=language).format(tool=public_tool)
         purpose = translate_message("Run this operation for the requested infrastructure task.", language=language)
-        target = _safe_input_target(safe_input, language=language) or translate_message(
+        target = _safe_input_target(safe_prompt_input, language=language) or translate_message(
             "the current task workspace or cloud account", language=language
         )
         effect = "local_or_remote_change" if read_only_known else "unknown"
 
+    structured_operation = _permission_operation(
+        tool_name,
+        operation,
+        request.tool_input,
+        is_read_only=is_read_only,
+    )
+    target = _permission_target(
+        tool_name,
+        safe_input,
+        prompt_input=safe_prompt_input,
+        operation=structured_operation,
+        fallback=target,
+        language=language,
+    )
     display: dict[str, Any] = {
         "title": _display_text(title, fallback=translate_message("Permission required", language=language)),
         "purpose": _display_text(
@@ -238,7 +313,318 @@ def permission_display_fields(request: PermissionRequestEvent, *, language: str 
     }
     if deployment_summary:
         display["deploymentSummary"] = deployment_summary
+    if structured_operation:
+        display["operation"] = structured_operation
+    if display_parameters := _permission_display_parameters(
+        tool_name,
+        request.tool_input,
+        is_read_only=is_read_only,
+    ):
+        display["displayParameters"] = display_parameters
+    audit_context = request.audit_context if isinstance(request.audit_context, dict) else {}
+    audit_context["permission_display_snapshot"] = {
+        key: display[key] for key in ("operation", "displayParameters") if isinstance(display.get(key), dict)
+    }
+    request.audit_context = audit_context
     return display
+
+
+def _permission_operation(
+    tool_name: str,
+    audit_operation: dict[str, Any],
+    tool_input: dict[str, Any],
+    *,
+    is_read_only: bool,
+) -> dict[str, Any] | None:
+    """Return the public, structured operation facts used by every A2A permission surface."""
+
+    product = _safe_scalar(audit_operation.get("product"))
+    action = _safe_scalar(audit_operation.get("action"))
+    region = _safe_scalar(audit_operation.get("region"))
+    if not product:
+        product = _safe_tool_input_scalar(tool_input, "product")
+    if not action:
+        action = _safe_tool_input_scalar(tool_input, "action")
+    if not region:
+        region = _safe_tool_input_scalar(tool_input, "region_id", "regionId", "region")
+
+    deploy_action = _safe_scalar(audit_operation.get("deployAction"))
+    if tool_name == "ros_deploy":
+        deploy_action = deploy_action or _safe_tool_input_scalar(tool_input, "action")
+        if not deploy_action:
+            deploy_action = {
+                "CreateStack": "create",
+                "ContinueCreateStack": "continue_create",
+                "GetStackStatus": "wait",
+                "GetStack": "wait",
+            }.get(action, "")
+        action = deploy_action or action
+        product = product or "ros"
+    elif tool_name in _ROS_TEMPLATE_API_ACTIONS:
+        action = _ROS_TEMPLATE_API_ACTIONS[tool_name]
+        product = product or "ros"
+    elif tool_name in _ROS_TOOLS:
+        product = product or "ros"
+
+    projected: dict[str, Any] = {}
+    if product:
+        projected["product"] = product
+    if action:
+        projected["action"] = action
+    if region:
+        projected["region"] = region
+
+    target: dict[str, str] = {}
+    stack_name = _safe_scalar(audit_operation.get("stackName")) or _safe_tool_input_scalar(
+        tool_input, "stack_name", "StackName"
+    )
+    stack_id = _safe_scalar(audit_operation.get("stackId")) or _safe_tool_input_scalar(
+        tool_input, "stack_id", "StackId"
+    )
+    if stack_name or stack_id:
+        target["type"] = "resource"
+        if stack_name:
+            target["name"] = stack_name
+        if stack_id:
+            target["id"] = stack_id
+    if target:
+        projected["target"] = target
+
+    api_calls = _permission_api_calls(
+        tool_name,
+        product=product,
+        action=action,
+        deploy_action=deploy_action,
+        is_read_only=is_read_only,
+    )
+    if api_calls:
+        projected["apiCalls"] = api_calls
+    return projected or None
+
+
+def _permission_api_calls(
+    tool_name: str,
+    *,
+    product: str,
+    action: str,
+    deploy_action: str,
+    is_read_only: bool,
+) -> list[dict[str, str]]:
+    product_label = product.upper() if product else ""
+    if tool_name == "ros_deploy":
+        if deploy_action == "delete_and_create":
+            return [
+                {"product": "ROS", "action": "DeleteStack", "effect": "change"},
+                {"product": "ROS", "action": "CreateStack", "effect": "change"},
+            ]
+        deploy_api = {
+            "create": "CreateStack",
+            "continue_create": "ContinueCreateStack",
+            "wait": "GetStack",
+        }.get(deploy_action)
+        if deploy_api:
+            call = {
+                "product": "ROS",
+                "action": deploy_api,
+                "effect": "read" if deploy_action == "wait" else "change",
+            }
+            if deploy_action == "wait":
+                call["repeat"] = "polling"
+            return [call]
+        return []
+    if tool_name in _ROS_TEMPLATE_API_ACTIONS:
+        return [{"product": "ROS", "action": _ROS_TEMPLATE_API_ACTIONS[tool_name], "effect": "read"}]
+    if product and action:
+        return [
+            {
+                "product": product_label,
+                "action": action,
+                "effect": "read" if is_read_only else "change",
+            }
+        ]
+    return []
+
+
+def _permission_display_parameters(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    *,
+    is_read_only: bool,
+) -> dict[str, Any] | None:
+    """Build the decision-time JSON view without exposing raw credentials or request headers."""
+
+    parameter_value: Any = None
+    if tool_name == "aliyun_api":
+        if is_read_only:
+            return None
+        roa_parts = {
+            key: tool_input[key]
+            for key in ("pathname", "query", "body")
+            if key in tool_input and tool_input[key] not in (None, "", {}, [])
+        }
+        parameter_value = roa_parts or tool_input.get("params", {})
+    elif tool_name in _ROS_TOOLS:
+        parameter_value = tool_input.get("parameters") if tool_name == "ros_deploy" else tool_input.get("params")
+        if parameter_value in (None, "", {}, []):
+            return None
+    elif tool_name in _TOOLS_WITHOUT_PARAMETER_DETAILS:
+        return None
+    elif tool_name.startswith("mcp__") or not is_read_only:
+        parameter_value = tool_input
+
+    if parameter_value is None:
+        return None
+    projected = build_display_tool_input({"value": parameter_value}).get("value")
+    if projected is None:
+        return None
+    return {"format": "json", "value": projected}
+
+
+def _permission_target(
+    tool_name: str,
+    safe_input: dict[str, Any],
+    *,
+    prompt_input: dict[str, Any],
+    operation: dict[str, Any] | None,
+    fallback: str,
+    language: str,
+) -> str:
+    def values(*keys: str) -> list[str]:
+        return [_safe_display_scalar(safe_input.get(key)) for key in keys]
+
+    def join(*parts: str) -> str:
+        return " · ".join(part for part in parts if part)
+
+    def prompt_values(*keys: str) -> list[str]:
+        return [_safe_display_scalar(prompt_input.get(key)) for key in keys]
+
+    if tool_name in {"read_file", "write_file", "edit_file", "list_files"}:
+        return join(*prompt_values("file_path", "filePath", "path"), *values("filePath")) or fallback
+    if tool_name in {"glob", "grep"}:
+        path = next((value for value in [*prompt_values("path"), *values("cwd")] if value), "")
+        pattern = next((value for value in values("pattern", "glob", "query") if value), "")
+        return join(path, pattern) or fallback
+    if tool_name == "bash":
+        return fallback
+    if tool_name == "web_fetch":
+        return join(*values("url")) or fallback
+    if tool_name in {"read_memory", "write_memory"}:
+        return join(*values("name", "memory_name", "memoryName")) or fallback
+    if tool_name in {"task_get", "task_stop"}:
+        task_id = join(*values("task_id", "taskId", "id"))
+        return task_id or fallback
+    if tool_name == "task_list":
+        return fallback
+    if tool_name == "agent":
+        return join(*values("subagent_type", "agent_type", "type"), *values("description", "prompt")) or fallback
+    if tool_name == "skill":
+        return join(*values("name", "skill_name"), *values("source")) or fallback
+    if tool_name == "aliyun_doc_search":
+        return join(*values("query", "keywords")) or fallback
+    if tool_name == "aliyun_api_doc":
+        return join(*values("product"), *values("action")) or fallback
+    if tool_name == "ask_user_question":
+        return join(*values("question")) or fallback
+    if tool_name == "complete_step":
+        return join(*values("step_id", "stepId")) or fallback
+    if tool_name in {"show_architecture_diagram", "infraguard_scan"}:
+        return join(*values("template_path", "templatePath", "path", "candidate_name")) or fallback
+    if tool_name in {"show_architecture_plan", "show_candidate_detail"}:
+        return (
+            join(*values("candidate_name", "candidateName", "candidate_index", "candidateIndex", "batch_id"))
+            or fallback
+        )
+    if tool_name == "read_mcp_resource":
+        return join(*values("server", "server_name"), *values("uri", "resource_uri")) or fallback
+    if tool_name == "list_mcp_resources":
+        return join(*values("server", "server_name")) or fallback
+    if tool_name.startswith("mcp__"):
+        return _mcp_target(tool_name, safe_input, operation) or fallback
+
+    if tool_name == "aliyun_api":
+        api_calls = operation.get("apiCalls") if operation else None
+        if (
+            isinstance(api_calls, list)
+            and api_calls
+            and all(isinstance(call, dict) and call.get("effect") == "read" for call in api_calls)
+        ):
+            return fallback
+        params = safe_input.get("params")
+        params = params if isinstance(params, dict) else {}
+        identifiers = (
+            "ResourceId",
+            "ResourceIds",
+            "StackName",
+            "StackId",
+            "InstanceName",
+            "InstanceId",
+            "VpcName",
+            "VpcId",
+            "VSwitchName",
+            "VSwitchId",
+            "Name",
+        )
+        target_values = [_safe_display_scalar(params.get(key)) for key in identifiers]
+        target_values.extend(values("pathname"))
+        region = _safe_scalar(operation.get("region")) if operation else ""
+        unique_targets = list(dict.fromkeys(value for value in target_values if value))
+        return join(*unique_targets[:3], region) or fallback
+
+    if tool_name in _ROS_TOOLS:
+        params = safe_input.get("params")
+        params = params if isinstance(params, dict) else {}
+        identifiers = (
+            "StackName",
+            "StackId",
+            "StackGroupName",
+            "OperationId",
+            "TemplateName",
+            "TemplateId",
+            "TemplateScratchId",
+            "DiagnosticId",
+            "ResourceType",
+            "RegistrationId",
+        )
+        target_values = [_safe_display_scalar(params.get(key)) for key in identifiers]
+        target_values.extend(values("stack_name", "stack_id", "template_url"))
+        region = ""
+        if operation:
+            region = _safe_scalar(operation.get("region"))
+            operation_target = operation.get("target")
+            if isinstance(operation_target, dict):
+                target_values.extend(_safe_scalar(operation_target.get(key)) for key in ("name", "id"))
+        unique_targets = list(dict.fromkeys(value for value in target_values if value))
+        return join(*unique_targets, region) or fallback
+    return fallback
+
+
+def _mcp_target(tool_name: str, safe_input: dict[str, Any], operation: dict[str, Any] | None) -> str:
+    del operation
+    public_parts = tool_name.split("__")
+    if len(public_parts) >= 3:
+        return ":".join((public_parts[1], "__".join(public_parts[2:])))
+    return _safe_display_scalar(safe_input.get("server"))
+
+
+def _safe_tool_input_scalar(value: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        candidate = value.get(key)
+        if isinstance(candidate, str) and candidate.strip():
+            return _display_text(candidate, fallback="", maximum=300)
+    return ""
+
+
+def _safe_display_scalar(value: Any) -> str:
+    if isinstance(value, str) and value.strip():
+        return _display_text(value, fallback="", maximum=300)
+    if isinstance(value, int | float):
+        return str(value)
+    if isinstance(value, dict) and value.get("type") == "str" and value.get("truncated") is True:
+        prefix = value.get("prefix")
+        suffix = value.get("suffix")
+        if isinstance(prefix, str) and isinstance(suffix, str):
+            return "{}…{}".format(prefix, suffix)
+    return ""
 
 
 def permission_safe_summary(request: PermissionRequestEvent) -> str:
@@ -529,6 +915,8 @@ class PermissionInputRegistry:
         metrics: Any | None = None,
         pipeline_coordinates: dict[str, Any] | None = None,
         perform_backup: bool = True,
+        before_backup: Callable[[PendingPermission], Awaitable[None]] | None = None,
+        before_claim_backup: Callable[[PendingPermission, dict[str, Any]], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """Persist and critically back up a real external wait before publication."""
 
@@ -574,8 +962,11 @@ class PermissionInputRegistry:
         pending.backup_session_id = session_id
         pending.backup_service = backup_service
         pending.backup_metrics = metrics
+        pending.before_claim_backup = before_claim_backup
 
         if perform_backup:
+            if before_backup is not None:
+                await before_backup(pending)
             await self.backup_durable_boundary(
                 pending,
                 cwd,
@@ -739,7 +1130,7 @@ class PermissionInputRegistry:
                     value="allow_once" if response.decision == "allow_once" else "deny",
                     source="user",
                     on_new_claim=audit_new_claim,
-                    before_delivery=lambda _record: self._backup_claim_before_delivery(pending),
+                    before_delivery=lambda record: self._backup_claim_before_delivery(pending, record),
                 )
             except (LookupError, ValueError) as exc:
                 raise InvalidParamsError(f"permission_resume_invalid: {exc}") from exc
@@ -786,7 +1177,9 @@ class PermissionInputRegistry:
         if principal_ref != record.get("principalRef") or region != record.get("region"):
             raise InvalidParamsError("permission_resume_invalid: cloud execution identity changed.")
 
-    async def _backup_claim_before_delivery(self, pending: PendingPermission) -> None:
+    async def _backup_claim_before_delivery(self, pending: PendingPermission, record: dict[str, Any]) -> None:
+        if pending.before_claim_backup is not None:
+            await pending.before_claim_backup(pending, record)
         store = pending.checkpoint_store
         boundary_id = pending.boundary_id
         cwd = pending.backup_cwd

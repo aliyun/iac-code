@@ -162,6 +162,8 @@ Runs a non-streaming A2A message turn. The response contains a task or message a
 | `metadata.iac_code.alibaba_cloud_access_key_secret` | string | Optional | Alibaba Cloud AccessKey Secret for this task |
 | `metadata.iac_code.alibaba_cloud_region_id` | string | Optional | Alibaba Cloud region for this task; defaults to `cn-hangzhou` when omitted with task credentials |
 | `metadata.iac_code.alibaba_cloud_security_token` | string | Optional | Alibaba Cloud STS token for this task |
+| `metadata.iac_code.run_mode` | string | Optional | Selects `normal` or `pipeline` for this message; falls back to the server mode when omitted |
+| `metadata.iac_code.pipeline_name` | string | Optional | Selects `selling` or `selling_solution_first` when the effective run mode is `pipeline` |
 | `metadata.iac_code.preferredLanguage` | string | Optional | Caller's preferred display language for this task; user-visible text is localized per request |
 | `metadata.iac_code.candidatePresentation` | string | Optional | When set to `rich-v1`, the pipeline candidate confirmation step returns structured rich presentation payloads |
 
@@ -177,9 +179,11 @@ When `metadata.iac_code` includes both `alibaba_cloud_access_key_id` and `alibab
 
 `metadata.iac_code.iac_code_api_key` only affects the current A2A message turn. It takes priority over `IAC_CODE_API_KEY` and `.credentials.yml` for the provider selected by the effective model. Follow-up turns without this metadata field reload normal credentials, so a per-call key does not leak across reused `contextId`s. This field is for the LLM provider key and is separate from A2A transport authentication such as `api-key` / `IACCODE_A2A_API_KEY`.
 
+`metadata.iac_code.run_mode` can select `normal` or `pipeline` for one message. When the effective mode is `pipeline`, `metadata.iac_code.pipeline_name` can select `selling` or `selling_solution_first`; an unsupported non-empty value is rejected. On continuation and recovery, the pipeline identity stored for the existing task/context takes precedence so a caller cannot accidentally resume durable state with another pipeline.
+
 `metadata.iac_code.preferredLanguage` only affects user-visible text (progress, questions, permission prompts, candidate presentations, result explanations); protocol field names, enums, IDs, and command shapes are never translated. Accepted values are the supported languages `en`, `zh`, `es`, `fr`, `de`, `ja`, `pt`; values are normalized by trimming whitespace, lowercasing, and stripping region suffixes (for example `zh-CN` resolves to `zh`). Unrecognized values are ignored and the server falls back to its default language. The field applies only to the current message turn; follow-up turns reusing the same `contextId` must carry it again or fall back to the default language.
 
-`metadata.iac_code.candidatePresentation` set to `rich-v1` makes the selling pipeline's candidate confirmation step return a structured payload suitable for rich rendering (candidate name, summary, architecture diagram, total monthly cost, cost items). Without the field, the plain-text presentation behavior is unchanged.
+`metadata.iac_code.candidatePresentation` set to `rich-v1` makes a selling pipeline's candidate confirmation step return a structured payload suitable for rich rendering (candidate name, summary, architecture diagram, total monthly cost, cost items). Without the field, the plain-text presentation behavior is unchanged.
 
 Supported input categories:
 
@@ -423,7 +427,7 @@ The status update metadata contains:
 
 - `metadata.iac_code.input` — the permission envelope (`schemaVersion` 1), with fields:
   - Correlation fields: `kind: "permission"`, `requestTaskId`, `contextId`, `inputId`, `toolUseId`, `toolName`
-  - Display fields: `title`, `purpose`, `effect`, `target`, `isReadOnly`, `safeSummary`, plus `deploymentSummary` for deployment requests
+  - Display fields: `title`, `purpose`, `effect`, `target`, `isReadOnly`, `safeSummary`, plus `deploymentSummary` for deployment requests; `operation.apiCalls` and redacted `displayParameters` are included when the tool can provide structured cloud-operation details
   - `prompt` and `options` (`allow_once` / `deny`), localized to the caller's preferred language
 - `metadata.iac_code.permission` — contains `autoApproved: false`, `pending: true`, `toolName`, `toolUseId`
 
@@ -444,7 +448,7 @@ The caller submits its decision through a sideband message: a single `ROLE_USER`
 - The outer message `taskId` must equal `requestTaskId`; `contextId` comes from the outer message envelope. All correlation fields must be preserved verbatim; they must not be reused across requests, and an answer for one input must never be reinterpreted as another.
 - Once the server matches the decision, it returns a `permission_ack` DataPart (`schemaVersion: 1`, `kind: "permission_ack"`, with `inputId`, `toolUseId`, `decision`, `accepted: true`) and emits a `TASK_STATE_WORKING` status update carrying `metadata.iac_code.inputReceived`; the turn then resumes.
 
-In pipeline mode, permission requests are published as pipeline events (the envelope additionally carries `scope` and step/candidate coordinates); the sideband response format is identical.
+In pipeline mode, permission requests are published as `permission_requested` and `permission_resolved` pipeline events. The envelope additionally carries `scope` and step/candidate coordinates so a client can keep the card at its original execution point; the sideband response format is identical. Restored task metadata exposes unresolved envelopes in `metadata.iac_code.pendingPermissions`. Normal chat and top-level pipeline waits can be durably suspended and resumed, while a candidate-scoped sub-pipeline wait may resolve automatically after its configured timeout.
 
 With `auto-approve-permissions` enabled or explicit permission rules configured, permission requests do not become interactive input; they are auto-approved (with audit) or resolved by the rules. Protected Alibaba Cloud write APIs are not released by ordinary allow rules and still require exact per-API authorization. Permission decisions are audited locally; any allow decision that requires an audit record fails closed when the record cannot be persisted.
 

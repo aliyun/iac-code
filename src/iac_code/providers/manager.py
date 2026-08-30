@@ -8,7 +8,7 @@ import sys
 import time
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -90,6 +90,20 @@ _RETRYABLE_TRANSPORT_ERRORS = (
     OpenAIAPIConnectionError,
     AnthropicAPIConnectionError,
 )
+
+
+def _retryable_provider_status(exc: BaseException) -> int | None:
+    """Provider HTTP status of *exc* when the same request is worth repeating, else ``None``."""
+    status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    if status in {408, 409, 429} or (isinstance(status, int) and 500 <= status < 600):
+        return status
+    return None
+
+
+def _is_retryable_provider_error(exc: BaseException) -> bool:
+    """Whether *exc* is a transient provider failure rather than a rejected request."""
+    return _retryable_provider_status(exc) is not None or isinstance(exc, _RETRYABLE_TRANSPORT_ERRORS)
+
 
 _TOKEN_METRIC_SCOPE_KEYS = frozenset(
     {
@@ -315,6 +329,25 @@ def _capture_request_content(
             attrs[GenAiAttr.TOOL_DEFINITIONS] = serialize_tool_definitions(tools)
     except Exception:
         logger.opt(exception=True).warning("Provider telemetry request content capture failed")
+
+
+@dataclass
+class _StreamAttemptOutcome:
+    """What one streaming attempt left behind, for the retry / downgrade decision.
+
+    ``retryable_stream_error`` is set only when the stream died on a transient
+    provider failure — the one shape of failure that repeating the same stream
+    can survive.
+    """
+
+    streaming_failed: bool = False
+    refusal_detected: bool = False
+    buffer_until_accepted: bool = False
+    retryable_stream_error: BaseException | None = None
+    provider_name: str = ""
+    sanitized_model: str = ""
+    orphaned_message_ids: list[str] = field(default_factory=list)
+    orphaned_tool_use_ids: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -973,7 +1006,7 @@ class ProviderManager:
             captured_parent=captured_parent,
         )
 
-    async def _stream_impl(
+    async def _stream_attempt(
         self,
         messages: list[Message],
         system: str,
@@ -983,7 +1016,14 @@ class ProviderManager:
         telemetry_messages: list[Any] | None,
         captured_scope: dict[str, str | int],
         captured_parent: Any,
+        outcome: _StreamAttemptOutcome,
     ) -> AsyncGenerator[StreamEvent, None]:
+        """Run one streaming request, reporting how it ended through *outcome*.
+
+        Yields only what the stream itself produced; deciding whether a failed
+        attempt is retried or downgraded to a non-streaming request belongs to
+        ``_stream_impl``.
+        """
         try:
             self._check_qwenpaw_config_change()
         except ProviderConfigurationError as exc:
@@ -992,6 +1032,8 @@ class ProviderManager:
         provider, model = self._active_provider_and_model()
         provider_name = _telemetry_provider_name(provider)
         sanitized_model = sanitize_model_name(model)
+        outcome.provider_name = provider_name
+        outcome.sanitized_model = sanitized_model
 
         started = time.monotonic()
 
@@ -1024,6 +1066,8 @@ class ProviderManager:
         close_attempted = False
         close_completed = False
         end_attempted = False
+        stream_exception: BaseException | None = None
+        idle_timeout_hit = False
 
         with replace_span_attributes(captured_scope):
             span = _safe_start_detached_span(span_name, span_attrs, captured_parent)
@@ -1178,14 +1222,17 @@ class ProviderManager:
                     # Stream idle watchdog fired: no event arrived within the idle
                     # window. Emit a rich diagnostic before re-raising into the generic
                     # handler (whose asyncio.TimeoutError carries an empty message, so
-                    # "Streaming failed, falling back to non-streaming: " alone is
-                    # useless). message_started disambiguates the two failure shapes:
+                    # the generic handler's message alone is useless). message_started
+                    # disambiguates the two failure shapes:
                     #   message_started=False → nothing arrived at all (request never got
                     #     a response: connection-level / upstream-queue stall);
                     #   message_started=True, first_token_received=False → response opened
                     #     then went silent before any content (mid-stream / slow generation).
                     # scope carries the pipeline candidate, so a parallel-candidate stall
                     # can be attributed to the exact candidate that starved.
+                    # An exhausted idle window is not worth another stream: retrying
+                    # would stall for the same window again before downgrading.
+                    idle_timeout_hit = True
                     idle_elapsed = time.monotonic() - started
                     logger.warning(
                         "Provider stream idle timeout: waited {:.1f}s (idle_limit={:.0f}s) "
@@ -1281,7 +1328,8 @@ class ProviderManager:
             if already_terminal:
                 raise
             streaming_failed = True
-            logger.warning(f"Streaming failed, falling back to non-streaming: {exc}")
+            stream_exception = exc
+            logger.warning(f"Streaming failed: {exc}")
         except BaseException as exc:
             commit_failure(
                 exc,
@@ -1298,12 +1346,96 @@ class ProviderManager:
             if watchdog is not None:
                 watchdog.stop()
 
-        if streaming_failed:
-            if not buffer_until_accepted:
-                for msg_id in orphaned_message_ids:
+        outcome.streaming_failed = streaming_failed
+        outcome.refusal_detected = refusal_detected
+        outcome.buffer_until_accepted = buffer_until_accepted
+        outcome.orphaned_message_ids = orphaned_message_ids
+        outcome.orphaned_tool_use_ids = orphaned_tool_use_ids
+        if (
+            streaming_failed
+            and stream_exception is not None
+            and not idle_timeout_hit
+            and _is_retryable_provider_error(stream_exception)
+        ):
+            outcome.retryable_stream_error = stream_exception
+
+    async def _stream_impl(
+        self,
+        messages: list[Message],
+        system: str,
+        tools: list[ToolDefinition] | None,
+        max_tokens: int,
+        *,
+        telemetry_messages: list[Any] | None,
+        captured_scope: dict[str, str | int],
+        captured_parent: Any,
+    ) -> AsyncGenerator[StreamEvent, None]:
+        """Stream one turn, retrying the stream itself before downgrading it.
+
+        A transient provider failure (429, 5xx, dropped connection) used to
+        downgrade the whole turn to a single non-streaming request. That
+        downgrade is invisible to the caller and emits nothing until the model
+        has finished the *entire* answer — 75s of silence on one observed
+        pipeline step, which the UI can only render as a step frozen mid-run.
+        Repeating the stream with the same backoff the non-streaming path uses
+        keeps incremental output instead. A retry is only safe while nothing has
+        reached the caller: once events are out, a second attempt would
+        duplicate them, so that case still downgrades (behind a tombstone).
+        """
+        attempt = 0
+        # Bound before the loop as well so the post-loop read is unambiguous.
+        outcome = _StreamAttemptOutcome()
+        while True:
+            outcome = _StreamAttemptOutcome()
+            emitted = False
+            attempt_stream = self._stream_attempt(
+                messages,
+                system,
+                tools,
+                max_tokens,
+                telemetry_messages=telemetry_messages,
+                captured_scope=captured_scope,
+                captured_parent=captured_parent,
+                outcome=outcome,
+            )
+            try:
+                async for event in attempt_stream:
+                    emitted = True
+                    yield event
+            finally:
+                await attempt_stream.aclose()
+            retryable_error = outcome.retryable_stream_error
+            if retryable_error is None or emitted or attempt >= self._retry_config.max_retries:
+                break
+            delay = self._retry_config.calculate_delay(attempt)
+            attempt += 1
+            logger.warning(
+                "Streaming failed before any event reached the caller; retrying the stream "
+                "in {:.1f}s (attempt {}/{}): {}",
+                delay,
+                attempt,
+                self._retry_config.max_retries,
+                retryable_error,
+            )
+            _safe_log_event(
+                Events.API_REQUEST_RETRIED,
+                {
+                    "provider": outcome.provider_name,
+                    "model": outcome.sanitized_model,
+                    "attempt": attempt,
+                    "error_type": type(retryable_error).__name__,
+                    "streaming": True,
+                },
+            )
+            await asyncio.sleep(delay)
+
+        if outcome.streaming_failed:
+            logger.warning("Falling back to non-streaming after the stream failed")
+            if not outcome.buffer_until_accepted:
+                for msg_id in outcome.orphaned_message_ids:
                     yield TombstoneEvent(
                         message_id=msg_id,
-                        affected_tool_use_ids=orphaned_tool_use_ids.get(msg_id, []),
+                        affected_tool_use_ids=outcome.orphaned_tool_use_ids.get(msg_id, []),
                     )
             try:
                 with replace_span_attributes(captured_scope), _safe_attach_parent_context(captured_parent):
@@ -1313,7 +1445,7 @@ class ProviderManager:
                         tools,
                         max_tokens,
                         telemetry_messages=telemetry_messages,
-                        refusal_detected=refusal_detected,
+                        refusal_detected=outcome.refusal_detected,
                     )
             except Exception as e:
                 yield _error_event_from_exception(e)
@@ -1350,6 +1482,7 @@ class ProviderManager:
                     name=tu["name"],
                     input=tu["input"],
                     provider_metadata=provider_metadata,
+                    input_error=tu.get("input_error"),
                 )
             yield MessageEndEvent(stop_reason=response.stop_reason, usage=response.usage)
 
@@ -1637,10 +1770,9 @@ class ProviderManager:
                     provider=provider,
                 )
             except Exception as e:
-                status = getattr(e, "status_code", None) or getattr(e, "status", None)
-                retryable_status = status in {408, 409, 429} or (isinstance(status, int) and 500 <= status < 600)
-                if retryable_status:
-                    raise RetryableError(f"{type(e).__name__}: {e}", status_code=status) from e
+                retryable_status = _retryable_provider_status(e)
+                if retryable_status is not None:
+                    raise RetryableError(f"{type(e).__name__}: {e}", status_code=retryable_status) from e
                 if isinstance(e, _RETRYABLE_TRANSPORT_ERRORS):
                     raise RetryableError(f"{type(e).__name__}: {e}") from e
                 raise

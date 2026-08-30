@@ -11,6 +11,7 @@ from iac_code.types.stream_events import (
     MessageEndEvent,
     PermissionRequestEvent,
     TombstoneEvent,
+    ToolResultEvent,
     ToolUseEndEvent,
     ToolUseStartEvent,
     Usage,
@@ -88,18 +89,25 @@ class TestCheckedInjection:
         assert agent_loop._pending_injections == deque(["补充信息"])
 
     @pytest.mark.asyncio
-    async def test_message_end_without_tools_is_not_accepting_when_observed(self):
+    async def test_message_end_without_tools_consumes_injection_before_finishing(self):
         class NoToolProvider:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.messages_seen = []
+
             def get_model_name(self) -> str:
                 return "test-model"
 
             async def stream(self, messages, system, tools=None):
+                self.calls += 1
+                self.messages_seen.append(messages)
                 yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
 
         from iac_code.agent.agent_loop import AgentLoop
 
+        provider = NoToolProvider()
         loop = AgentLoop(
-            provider_manager=NoToolProvider(),
+            provider_manager=provider,
             system_prompt="test",
             tool_registry=ToolRegistry(),
             max_turns=5,
@@ -110,8 +118,15 @@ class TestCheckedInjection:
             event = await anext(stream)
 
             assert isinstance(event, MessageEndEvent)
+            assert loop.can_accept_injected_user_message is True
+            assert loop.try_inject_user_message("补充信息") is True
+            async for _ in stream:
+                pass
+
+            assert provider.calls == 2
+            user_messages = [msg.content for msg in provider.messages_seen[-1] if msg.role == "user"]
+            assert "补充信息" in user_messages
             assert loop.can_accept_injected_user_message is False
-            assert loop.try_inject_user_message("too late") is False
         finally:
             await stream.aclose()
 
@@ -150,7 +165,7 @@ class TestCheckedInjection:
             await stream.aclose()
 
     @pytest.mark.asyncio
-    async def test_retracted_tool_call_never_accepts_injection_while_streaming(self):
+    async def test_retracted_tool_call_keeps_injection_queued_while_streaming(self):
         class RetractedToolProvider:
             def get_model_name(self) -> str:
                 return "test-model"
@@ -176,12 +191,82 @@ class TestCheckedInjection:
             event = await anext(stream)
 
             assert isinstance(event, ToolUseEndEvent)
-            assert loop.can_accept_injected_user_message is False
-            assert loop.try_inject_user_message("too early") is False
+            assert loop.can_accept_injected_user_message is True
+            assert loop.try_inject_user_message("补充信息") is True
             assert isinstance(await anext(stream), TombstoneEvent)
-            assert loop.can_accept_injected_user_message is False
+            assert loop.can_accept_injected_user_message is True
             assert isinstance(await anext(stream), MessageEndEvent)
-            assert loop.can_accept_injected_user_message is False
+            assert loop._pending_injections == deque(["补充信息"])
+        finally:
+            await stream.aclose()
+
+    @pytest.mark.asyncio
+    async def test_injection_during_provider_stream_supersedes_terminal_tool_result(self):
+        class CompleteTool(Tool):
+            @property
+            def name(self) -> str:
+                return "complete_step"
+
+            @property
+            def description(self) -> str:
+                return "Complete the current step."
+
+            @property
+            def input_schema(self) -> dict:
+                return {"type": "object", "properties": {}}
+
+            def is_read_only(self, input: dict | None = None) -> bool:
+                return True
+
+            async def execute(self, *, tool_input: dict, context: ToolContext) -> ToolResult:
+                return ToolResult(
+                    content="done",
+                    metadata={"step_result": object(), "complete_step_terminal": True},
+                )
+
+        class Provider:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.messages_seen = []
+
+            def get_model_name(self) -> str:
+                return "test-model"
+
+            async def stream(self, messages, system, tools=None):
+                self.calls += 1
+                self.messages_seen.append(messages)
+                if self.calls == 1:
+                    yield ToolUseStartEvent(tool_use_id="done_1", name="complete_step")
+                    yield ToolUseEndEvent(tool_use_id="done_1", name="complete_step", input={})
+                    yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+                    return
+                yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        from iac_code.agent.agent_loop import AgentLoop
+
+        provider = Provider()
+        registry = ToolRegistry()
+        registry.register(CompleteTool())
+        loop = AgentLoop(
+            provider_manager=provider,
+            system_prompt="test",
+            tool_registry=registry,
+            max_turns=3,
+        )
+
+        stream = loop._run_streaming_inner("use tool")
+        try:
+            assert isinstance(await anext(stream), ToolUseStartEvent)
+            assert loop.try_inject_user_message("补充：再创建一个 VSwitch") is True
+            events = [event async for event in stream]
+
+            terminal_result = next(event for event in events if isinstance(event, ToolResultEvent))
+            assert terminal_result.is_error is True
+            assert "New user input arrived" in terminal_result.result
+            assert not (terminal_result.metadata or {}).get("step_result")
+            assert provider.calls == 2
+            user_messages = [msg.content for msg in provider.messages_seen[-1] if msg.role == "user"]
+            assert "补充：再创建一个 VSwitch" in user_messages
         finally:
             await stream.aclose()
 

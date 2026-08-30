@@ -149,6 +149,38 @@ def test_reconstruct_completion_guard_state_from_ask_user_question():
     }
 
 
+def test_reconstruct_completion_guard_state_records_ask_question_input_for_guards():
+    """重放要和实时回答产出同样的有序记录，否则恢复后无法把结论绑定到真实回答。"""
+    ask_input = {"question": "确认部署这份模板？", "options": [{"id": "confirm", "label": "确认部署"}]}
+    messages = [
+        Message(
+            role="assistant",
+            content=[ToolUseBlock(id="tu_question", name="ask_user_question", input=ask_input)],
+        ),
+        Message(
+            role="user",
+            content=[
+                ToolResultBlock(
+                    tool_use_id="tu_question",
+                    content='{"selected_id": "confirm", "selected_label": "确认部署", "free_text": ""}',
+                    is_error=False,
+                )
+            ],
+        ),
+    ]
+
+    state = reconstruct_completion_guard_state(messages)
+
+    assert state["tool_result_records"] == [
+        {
+            "tool_name": "ask_user_question",
+            "input": ask_input,
+            "result": {"selected_id": "confirm", "selected_label": "确认部署", "free_text": ""},
+            "is_error": False,
+        }
+    ]
+
+
 def test_reconstruct_completion_guard_state_ignores_failed_tools():
     messages = [
         Message(
@@ -330,6 +362,165 @@ def test_reconstruct_completion_guard_state_records_structured_tool_results_for_
             "is_error": False,
         }
     ]
+
+
+@pytest.mark.parametrize("state_source", ["live", "resume"])
+@pytest.mark.parametrize(
+    "diagnostic_header",
+    [
+        "ROS local preflight diagnostics:",
+        "ROS 本地预检诊断：",
+        "Diagnostic local avant exécution de ROS :",
+    ],
+)
+def test_completion_guard_state_records_ros_validate_result_with_preflight_diagnostics(state_source, diagnostic_header):
+    tool_input = {"template_url": "templates/security-group.yml", "region_id": "cn-hangzhou"}
+    content = (
+        json.dumps({"ResourceTypes": {"Resources": ["ALIYUN::ECS::SecurityGroup"]}})
+        + f"\n\n---\n{diagnostic_header}\n"
+        + "ROS local validation completed: 0 errors, 0 warnings, 1 limitation."
+    )
+    if state_source == "live":
+        state = {}
+        record_completion_guard_tool_result(
+            state,
+            tool_name="ros_validate_template",
+            tool_input=tool_input,
+            content=content,
+            is_error=False,
+        )
+    else:
+        state = reconstruct_completion_guard_state(
+            [
+                Message(
+                    role="assistant",
+                    content=[ToolUseBlock(id="tool-validate", name="ros_validate_template", input=tool_input)],
+                ),
+                Message(
+                    role="user",
+                    content=[ToolResultBlock(tool_use_id="tool-validate", content=content, is_error=False)],
+                ),
+            ]
+        )
+
+    assert state["successful_tools"] == {"ros_validate_template"}
+    assert state["tool_result_records"] == [
+        {
+            "tool_name": "ros_validate_template",
+            "input": tool_input,
+            "result": {"ResourceTypes": {"Resources": ["ALIYUN::ECS::SecurityGroup"]}},
+            "is_error": False,
+        }
+    ]
+
+
+@pytest.mark.parametrize("state_source", ["live", "resume"])
+@pytest.mark.parametrize(
+    ("tool_name", "payload"),
+    [
+        ("ros_get_template_parameter_constraints", {"ParameterConstraints": []}),
+        ("ros_preview_template", {"Stack": {"StackName": "preview-stack"}}),
+        ("ros_estimate_template_cost", {"Resources": {}}),
+    ],
+)
+def test_solution_first_ros_tools_record_json_before_preflight_diagnostics(state_source, tool_name, payload):
+    tool_input = {"template_url": "templates/free-network.yml", "region_id": "cn-hangzhou"}
+    content = (
+        json.dumps(payload)
+        + "\n\n---\nROS local preflight diagnostics:\n"
+        + "ROS local validation completed: 0 errors, 0 warnings, 0 limitations."
+    )
+    if state_source == "live":
+        state = {"completion_record_contract": "v2"}
+        record_completion_guard_tool_result(
+            state,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            content=content,
+            is_error=False,
+            record_id="tool-1",
+        )
+    else:
+        state = reconstruct_completion_guard_state(
+            [
+                Message(
+                    role="assistant",
+                    content=[ToolUseBlock(id="tool-1", name=tool_name, input=tool_input)],
+                ),
+                Message(
+                    role="user",
+                    content=[ToolResultBlock(tool_use_id="tool-1", content=content, is_error=False)],
+                ),
+            ],
+            completion_record_contract="v2",
+        )
+
+    assert state["tool_result_records"][0]["result"] == payload
+    assert state["tool_results"][tool_name] == payload
+
+
+def test_completion_guard_state_rejects_unrecognized_trailing_text_for_ros_result(caplog):
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.completion_guard_state")
+    state = {}
+
+    record_completion_guard_tool_result(
+        state,
+        tool_name="ros_validate_template",
+        tool_input={"template_url": "templates/security-group.yml"},
+        content='{"ResourceTypes": {}} trailing text',
+        is_error=False,
+    )
+
+    assert state["successful_tools"] == set()
+    assert state["tool_results"] == {}
+    assert "Failed to parse completion guard state" in caplog.text
+
+
+def test_completion_guard_state_does_not_warn_for_a_failed_ros_result(caplog):
+    """A failed tool result is a localized error message by contract, not JSON.
+
+    Warning about it turned every failing call into a `JSONDecodeError` traceback, which
+    buried the error the operator was actually looking for -- a stale credential fails on
+    every call of a run, so the noise scaled with the failure.
+    """
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.completion_guard_state")
+    state = {"completion_record_contract": "v2"}
+
+    record_completion_guard_tool_result(
+        state,
+        tool_name="ros_validate_template",
+        tool_input={"template_url": "templates/security-group.yml"},
+        content=(
+            "Alibaba Cloud OAuth sign-in expired or was revoked, so ROS/ValidateTemplate cannot be signed. "
+            "Sign in again with OAuth and retry."
+        ),
+        is_error=True,
+    )
+
+    assert caplog.text == ""
+    # Recording still happens: the failure joins the ordered records and stays unsuccessful.
+    assert state["successful_tools"] == set()
+    assert state["tool_results"] == {}
+    assert [record["tool_name"] for record in state["tool_result_records"]] == ["ros_validate_template"]
+    assert state["tool_result_records"][0]["is_error"] is True
+
+
+def test_completion_guard_state_still_parses_a_failed_result_that_is_json(caplog):
+    """Suppressing the warning must not stop parsing: some failures do return JSON."""
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.completion_guard_state")
+    state = {"completion_record_contract": "v2"}
+    payload = {"error": "completion_input_schema_validation_failed", "expected": ["conclusion"]}
+
+    record_completion_guard_tool_result(
+        state,
+        tool_name="ros_validate_template",
+        tool_input={"template_url": "templates/security-group.yml"},
+        content=json.dumps(payload),
+        is_error=True,
+    )
+
+    assert caplog.text == ""
+    assert state["tool_result_records"][0]["result"] == payload
 
 
 @pytest.mark.parametrize("state_source", ["live", "resume"])
@@ -608,6 +799,67 @@ def test_reconstruct_completion_guard_state_falls_back_when_externalized_tool_re
     assert state["tool_results"] == {}
 
 
+def test_missing_externalized_result_keeps_legacy_fallback_semantics(tmp_path):
+    content = json.dumps({"value": "from-inline-fallback"})
+    messages = [
+        Message(
+            role="assistant",
+            content=[ToolUseBlock(id="tool-legacy", name="aliyun_api", input={})],
+        ),
+        Message(
+            role="user",
+            content=[
+                ToolResultBlock(
+                    tool_use_id="tool-legacy",
+                    content=content,
+                    metadata={EXTERNALIZED_RESULT_PATH_METADATA_KEY: str(tmp_path / "missing.json")},
+                )
+            ],
+        ),
+    ]
+
+    state = reconstruct_completion_guard_state(messages)
+
+    assert state["successful_tools"] == {"aliyun_api"}
+    assert state["tool_results"]["aliyun_api"] == {"value": "from-inline-fallback"}
+    assert state["tool_result_records"][0]["is_error"] is False
+
+
+def test_missing_externalized_result_becomes_explicit_v2_failure_record(tmp_path):
+    messages = [
+        Message(
+            role="assistant",
+            content=[ToolUseBlock(id="tool-v2", name="aliyun_api", input={})],
+        ),
+        Message(
+            role="user",
+            content=[
+                ToolResultBlock(
+                    tool_use_id="tool-v2",
+                    content=json.dumps({"value": "truncated-inline-content"}),
+                    metadata={EXTERNALIZED_RESULT_PATH_METADATA_KEY: str(tmp_path / "missing.json")},
+                )
+            ],
+        ),
+    ]
+
+    state = reconstruct_completion_guard_state(messages, completion_record_contract="v2")
+
+    assert state["successful_tools"] == set()
+    assert state["tool_results"] == {}
+    assert state["tool_result_records"] == [
+        {
+            "record_id": "tool-v2",
+            "sequence": 1,
+            "tool_name": "aliyun_api",
+            "input": {},
+            "result": {},
+            "is_error": True,
+            "error_summary": "evidence_unavailable: externalized tool result cannot be restored",
+        }
+    ]
+
+
 def test_reconstruct_completion_guard_state_records_ros_deploy_owned_failed_create_stack():
     messages = [
         Message(
@@ -728,6 +980,50 @@ def test_completion_guard_state_does_not_warn_for_plain_text_unstructured_tool_r
     assert "Failed to parse completion guard state" not in caplog.text
     assert state["successful_tools"] == set()
     assert state["tool_results"] == {}
+
+
+def test_completion_guard_state_preserves_candidate_batch_metadata():
+    state = {"completion_record_contract": "v2"}
+
+    record_completion_guard_tool_result(
+        state,
+        tool_name="show_candidate_detail",
+        tool_input={"candidate_index": 0, "candidate_name": "方案 A"},
+        content="displayed",
+        is_error=False,
+        metadata={"candidate_set_id": "outline-batch-1"},
+        record_id="detail-1",
+    )
+
+    assert state["tool_result_records"][0]["candidate_set_id"] == "outline-batch-1"
+
+    restored = reconstruct_completion_guard_state(
+        [
+            Message(
+                role="assistant",
+                content=[
+                    ToolUseBlock(
+                        id="detail-1",
+                        name="show_candidate_detail",
+                        input={"candidate_index": 0, "candidate_name": "方案 A"},
+                    )
+                ],
+            ),
+            Message(
+                role="user",
+                content=[
+                    ToolResultBlock(
+                        tool_use_id="detail-1",
+                        content="displayed",
+                        metadata={"candidate_set_id": "outline-batch-1"},
+                    )
+                ],
+            ),
+        ],
+        completion_record_contract="v2",
+    )
+
+    assert restored["tool_result_records"][0]["candidate_set_id"] == "outline-batch-1"
 
 
 def test_completion_guard_state_records_file_mutations_with_plain_text_results():

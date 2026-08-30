@@ -16,7 +16,7 @@ from typing import Any
 from iac_code.agent.message import ContentBlock, Message
 from iac_code.agent.system_prompt import SECTION_BUILDERS, build_base_sections
 from iac_code.mcp.prompt_dispatch import mcp_prompt_command_stream
-from iac_code.pipeline.engine.complete_step_tool import CompleteStepTool
+from iac_code.pipeline.engine.complete_step_tool import CompleteStepTool, CompletionValidationError
 from iac_code.pipeline.engine.completion_guard_state import (
     ensure_completion_guard_state,
     record_completion_guard_tool_result,
@@ -204,6 +204,8 @@ class StepExecutor:
         resume_messages: list | None = None,
         precompleted_tools: dict[str, dict[str, Any]] | None = None,
         resume_candidate_selection: bool = False,
+        resolved_step_result: StepResult | None = None,
+        skip_completed_step_restore: bool = False,
         rollback_targets: list[str] | None = None,
         rollback_count: int = 0,
         max_rollbacks: int = 5,
@@ -222,6 +224,14 @@ class StepExecutor:
         if step.on_enter:
             step.on_enter(context)
 
+        if resolved_step_result is not None:
+            conclusion = resolved_step_result.conclusion or {}
+            context.set_conclusion(step.conclusion_field, conclusion)
+            if step.on_exit:
+                step.on_exit(context, conclusion)
+            yield resolved_step_result
+            return
+
         agent_context = self.build_agent_loop_context(
             step,
             context,
@@ -232,6 +242,7 @@ class StepExecutor:
             resume_messages=resume_messages,
             precompleted_tools=precompleted_tools,
             compact_candidate_selection=compact_candidate_selection,
+            skip_completed_step_restore=skip_completed_step_restore,
             rollback_targets=rollback_targets,
             rollback_count=rollback_count,
             max_rollbacks=max_rollbacks,
@@ -269,15 +280,36 @@ class StepExecutor:
         pending_tool_inputs: dict[str, dict[str, Any]] = {}
         pending_complete_input: dict[str, dict] = {}
         complete_step_input: dict | None = None
+        completed_step_result: StepResult | None = None
         terminal_failed_step_result: StepResult | None = None
         max_nudges = 2
         last_complete_step_error: str | None = None
         last_complete_step_input: dict | None = None
 
+        # Permission resume continues an already-persisted assistant tool batch.
+        # AgentLoop therefore emits ToolResultEvent directly instead of replaying
+        # ToolUseEndEvent. Seed the correlation map from that canonical trailing
+        # assistant message so resumed results remain available to completion guards.
+        if permission_checkpoint is not None and agent_context.resume_messages:
+            trailing_message = agent_context.resume_messages[-1]
+            frame = permission_checkpoint.get("continuationFrame")
+            tool_uses = trailing_message.get_tool_use_blocks() if trailing_message.role == "assistant" else []
+            ordered_tool_use_ids = [tool_use.id for tool_use in tool_uses]
+            if isinstance(frame, dict) and ordered_tool_use_ids == frame.get("orderedToolUseIds"):
+                for tool_use in tool_uses:
+                    pending_tool_inputs[tool_use.id] = {
+                        "tool_name": tool_use.name,
+                        "input": copy.deepcopy(tool_use.input),
+                    }
+                    if tool_use.name == "complete_step":
+                        complete_step_ids.add(tool_use.id)
+                        pending_complete_input[tool_use.id] = tool_use.input
+
         async def consume_complete_step_events(
             stream: AsyncIterator[Any],
         ) -> AsyncGenerator[StreamEvent | PipelineEvent, None]:
             nonlocal complete_step_input
+            nonlocal completed_step_result
             nonlocal last_complete_step_error
             nonlocal last_complete_step_input
             nonlocal terminal_failed_step_result
@@ -315,6 +347,7 @@ class StepExecutor:
                                 is_error=event.is_error,
                                 cwd=self._cwd,
                                 metadata=event.metadata,
+                                record_id=event.tool_use_id,
                             )
                         if event.tool_use_id in complete_step_ids:
                             step_result = (event.metadata or {}).get("step_result")
@@ -323,7 +356,17 @@ class StepExecutor:
                             if not event.is_error:
                                 if self._pause_event is not None and not self._pause_event.is_set():
                                     return
-                                complete_step_input = pending_complete_input.get(event.tool_use_id)
+                                if isinstance(step_result, StepResult):
+                                    completed_step_result = step_result
+                                    complete_step_input = {"conclusion": copy.deepcopy(step_result.conclusion or {})}
+                                    if step_result.rollback_request is not None:
+                                        target_step, reason = step_result.rollback_request
+                                        complete_step_input["rollback_request"] = {
+                                            "target_step": target_step,
+                                            "reason": reason,
+                                        }
+                                else:
+                                    complete_step_input = pending_complete_input.get(event.tool_use_id)
                             else:
                                 last_complete_step_error = event.result
                                 last_complete_step_input = pending_complete_input.get(event.tool_use_id)
@@ -428,6 +471,12 @@ class StepExecutor:
 
         if terminal_failed_step_result is not None:
             step_result = terminal_failed_step_result
+        elif completed_step_result is not None:
+            step_result = completed_step_result
+            conclusion = step_result.conclusion or {}
+            context.set_conclusion(step.conclusion_field, conclusion)
+            if step.on_exit:
+                step.on_exit(context, conclusion)
         elif complete_step_input is not None:
             conclusion = complete_step_input.get("conclusion", {})
             conclusion = self._merge_preserved_candidate_selection(preserved_selection, conclusion)
@@ -464,6 +513,7 @@ class StepExecutor:
         precompleted_tools: dict[str, dict[str, Any]] | None = None,
         completion_guard_state_seed: dict[str, Any] | None = None,
         compact_candidate_selection: bool = False,
+        skip_completed_step_restore: bool = False,
         rollback_targets: list[str] | None = None,
         rollback_count: int = 0,
         max_rollbacks: int = 5,
@@ -474,8 +524,22 @@ class StepExecutor:
 
         repaired_messages = list(resume_messages or [])
         completion_guard_state: dict[str, Any] = ensure_completion_guard_state(
-            reconstruct_completion_guard_state(repaired_messages)
+            reconstruct_completion_guard_state(
+                repaired_messages,
+                completion_record_contract=self._optional_config_string(
+                    step.config.get("completion_record_contract")
+                ),
+            )
         )
+        saved_step_conclusion = context.snapshot().get(step.conclusion_field)
+        fresh_agent_context = (
+            step.config.get("fresh_agent_context_on_resume") is True
+            and isinstance(saved_step_conclusion, dict)
+            and bool(saved_step_conclusion)
+            and user_message is not None
+            and bool(repaired_messages)
+        )
+        agent_resume_messages = [] if fresh_agent_context else repaired_messages
         if self._cwd:
             completion_guard_state["cwd"] = self._cwd
         if precompleted_tools:
@@ -511,7 +575,11 @@ class StepExecutor:
             completion_guard_state,
             **build_tool_kwargs,
         )
-        restored_step_result = self._restore_completed_step_result(step, tool_registry, repaired_messages)
+        restored_step_result = (
+            None
+            if (skip_completed_step_restore or fresh_agent_context) and user_message is not None
+            else self._restore_completed_step_result(step, tool_registry, repaired_messages)
+        )
         if restored_step_result is not None:
             return StepAgentLoopContext(
                 agent_loop=None,
@@ -571,7 +639,7 @@ class StepExecutor:
             transcript_id=transcript_id,
             result_storage_dir=result_storage_dir,
             audit_log_path=audit_log_path,
-            resume_messages=repaired_messages or None,
+            resume_messages=agent_resume_messages or None,
             cwd=self._cwd,
             pause_event=self._pause_event,
             permission_context_getter=self._permission_context_getter,
@@ -589,6 +657,70 @@ class StepExecutor:
             completion_guard_state=completion_guard_state,
         )
 
+    def validate_completion_input_from_transcript(
+        self,
+        step: StepSpec,
+        context: PipelineContext,
+        *,
+        user_message: str,
+        tool_input: dict[str, Any],
+        resume_messages: list[Message],
+        rollback_targets: list[str] | None = None,
+        rollback_count: int = 0,
+        max_rollbacks: int = 5,
+    ) -> str | None:
+        """Validate a deterministic completion against real tool evidence from a prior attempt."""
+
+        finalized = self.finalize_completion_input_from_transcript(
+            step,
+            context,
+            user_message=user_message,
+            tool_input=tool_input,
+            resume_messages=resume_messages,
+            rollback_targets=rollback_targets,
+            rollback_count=rollback_count,
+            max_rollbacks=max_rollbacks,
+        )
+        return finalized.message if isinstance(finalized, CompletionValidationError) else None
+
+    def finalize_completion_input_from_transcript(
+        self,
+        step: StepSpec,
+        context: PipelineContext,
+        *,
+        user_message: str,
+        tool_input: dict[str, Any],
+        resume_messages: list[Message],
+        rollback_targets: list[str] | None = None,
+        rollback_count: int = 0,
+        max_rollbacks: int = 5,
+    ) -> StepResult | CompletionValidationError:
+        """Finalize deterministic input using the same tool and recovered evidence as the LLM path."""
+
+        completion_guard_state = ensure_completion_guard_state(
+            reconstruct_completion_guard_state(
+                list(resume_messages),
+                completion_record_contract=self._optional_config_string(
+                    step.config.get("completion_record_contract")
+                ),
+            )
+        )
+        if self._cwd:
+            completion_guard_state["cwd"] = self._cwd
+        registry = self._build_step_tools(
+            step,
+            context,
+            user_message,
+            completion_guard_state,
+            rollback_targets=rollback_targets,
+            rollback_count=rollback_count,
+            max_rollbacks=max_rollbacks,
+        )
+        complete_step = registry.get("complete_step")
+        if not isinstance(complete_step, CompleteStepTool):
+            return CompletionValidationError("complete_step is unavailable", "runtime")
+        return complete_step.finalize_completion_input(copy.deepcopy(tool_input))
+
     @staticmethod
     def _restore_completed_step_result(
         step: StepSpec,
@@ -602,8 +734,10 @@ class StepExecutor:
         normalized_input = copy.deepcopy(complete_step_input)
         complete_step_tool = tool_registry.get("complete_step")
         if isinstance(complete_step_tool, CompleteStepTool):
-            if complete_step_tool.validate_completion_input(normalized_input) is not None:
+            finalized = complete_step_tool.finalize_completion_input(normalized_input)
+            if isinstance(finalized, CompletionValidationError):
                 return None
+            return finalized
         elif complete_step_tool is not None:
             complete_step_tool.normalize_input(normalized_input)
 
@@ -758,11 +892,16 @@ class StepExecutor:
         invalid_input: dict | None,
         step: StepSpec | None = None,
     ) -> str:
+        compact_feedback = StepExecutor._uses_compact_completion_feedback(step)
         step_line = f"当前步骤：{step.step_id}\n" if step is not None else ""
         schema_hint = StepExecutor._complete_step_schema_hint(step)
-        example = json.dumps(
-            {"conclusion": StepExecutor._example_from_schema(step.conclusion_schema if step else None)},
-            ensure_ascii=False,
+        example = (
+            '{"conclusion":{"status":"<按当前分支填写>","<changed_field>":"<真实值>"}}'
+            if compact_feedback
+            else json.dumps(
+                {"conclusion": StepExecutor._example_from_schema(StepExecutor._completion_input_schema(step))},
+                ensure_ascii=False,
+            )
         )
         wrapper_instruction = (
             f"{step_line}"
@@ -777,7 +916,7 @@ class StepExecutor:
                 f"{wrapper_instruction}"
             )
 
-        invalid_json = json.dumps(invalid_input or {}, ensure_ascii=False)
+        invalid_json = StepExecutor._completion_invalid_input_hint(invalid_input, compact=compact_feedback)
         if "ask_user_question" in error:
             return (
                 f"上一次 complete_step 调用失败：{error}\n"
@@ -811,10 +950,15 @@ class StepExecutor:
         invalid_input: dict | None,
         step: StepSpec,
     ) -> str:
-        invalid_json = json.dumps(invalid_input or {}, ensure_ascii=False)
-        example = json.dumps(
-            {"conclusion": StepExecutor._example_from_schema(step.conclusion_schema)},
-            ensure_ascii=False,
+        compact_feedback = StepExecutor._uses_compact_completion_feedback(step)
+        invalid_json = StepExecutor._completion_invalid_input_hint(invalid_input, compact=compact_feedback)
+        example = (
+            '{"conclusion":{"status":"<按当前分支填写>","<changed_field>":"<真实值>"}}'
+            if compact_feedback
+            else json.dumps(
+                {"conclusion": StepExecutor._example_from_schema(StepExecutor._completion_input_schema(step))},
+                ensure_ascii=False,
+            )
         )
         return (
             "重新执行当前步骤的收口。\n"
@@ -831,11 +975,47 @@ class StepExecutor:
 
     @staticmethod
     def _complete_step_schema_hint(step: StepSpec | None) -> str:
-        schema = step.conclusion_schema if step else None
+        schema = StepExecutor._completion_input_schema(step)
         if not schema:
             return "当前 conclusion 必须是非空对象；请根据当前步骤的输出要求填写完整结构化结论。"
+        if StepExecutor._uses_compact_completion_feedback(step):
+            properties = schema.get("properties")
+            field_names = sorted(properties) if isinstance(properties, dict) else []
+            status_schema = properties.get("status") if isinstance(properties, dict) else None
+            statuses = status_schema.get("enum") if isinstance(status_schema, dict) else None
+            status_hint = "、".join(map(str, statuses)) if isinstance(statuses, list) else "按当前分支填写"
+            return (
+                f"status 可选值：{status_hint}。允许的 conclusion 顶层字段：{', '.join(field_names)}。"
+                "恢复交互时，已保存字段会由运行时合并，只提交状态和本轮真正变化的字段。"
+            )
         compact = StepExecutor._compact_schema(schema)
         return "当前 conclusion 必须符合此 schema 摘要：\n" + json.dumps(compact, ensure_ascii=False)
+
+    @staticmethod
+    def _completion_input_schema(step: StepSpec | None) -> dict[str, Any] | None:
+        if step is None:
+            return None
+        return step.completion_input_schema or step.conclusion_schema
+
+    @staticmethod
+    def _uses_compact_completion_feedback(step: StepSpec | None) -> bool:
+        return step is not None and step.config.get("compact_completion_errors") is True
+
+    @staticmethod
+    def _completion_invalid_input_hint(invalid_input: dict | None, *, compact: bool) -> str:
+        if not compact:
+            return json.dumps(invalid_input or {}, ensure_ascii=False)
+        if not isinstance(invalid_input, dict) or not invalid_input:
+            return "{}"
+        conclusion = invalid_input.get("conclusion")
+        if not isinstance(conclusion, dict):
+            return json.dumps({key: "<omitted>" for key in invalid_input}, ensure_ascii=False)
+        summary: dict[str, Any] = {"conclusion": {"fields": sorted(conclusion)}}
+        if "status" in conclusion:
+            summary["conclusion"]["status"] = conclusion["status"]
+        if "rollback_request" in invalid_input:
+            summary["rollback_request"] = "<present>"
+        return json.dumps(summary, ensure_ascii=False)
 
     @staticmethod
     def _compact_schema(schema: Any, *, depth: int = 0) -> Any:
@@ -979,6 +1159,7 @@ class StepExecutor:
             if step.tools.exclude:
                 registry = registry.exclude(step.tools.exclude)
 
+        saved_step_conclusion = context.snapshot().get(step.conclusion_field)
         step_config = StepConfig(
             step_id=step.step_id,
             conclusion_field=step.conclusion_field,
@@ -987,15 +1168,50 @@ class StepExecutor:
             complete_step_terminal=step.complete_step_terminal,
             max_agent_turns=step.max_agent_turns,
             conclusion_schema=step.conclusion_schema,
+            completion_input_schema=step.completion_input_schema,
+            completion_enricher=step.completion_enricher,
             rollback_targets=rollback_targets if rollback_targets is not None else [],
             max_conclusion_retries=step.max_conclusion_retries,
             rollback_count=rollback_count,
             max_rollbacks=max_rollbacks,
+            compact_completion_schema=(
+                step.config.get("compact_completion_schema") is True
+                and isinstance(saved_step_conclusion, dict)
+                and bool(saved_step_conclusion)
+            ),
+            compact_completion_errors=step.config.get("compact_completion_errors") is True,
+            completion_validation_error_limit=self._config_positive_int(
+                step.config.get("completion_validation_error_limit"),
+                default=1,
+                maximum=20,
+            ),
+            conclusion_merge_context_field=self._optional_config_string(
+                step.config.get("conclusion_merge_context_field")
+            ),
+            conclusion_merge_statuses=self._config_string_tuple(step.config.get("conclusion_merge_statuses")),
+            hydrate_selected_candidate=step.config.get("hydrate_selected_candidate") is True,
+            authoritative_candidate_context_field=self._optional_config_string(
+                step.config.get("authoritative_candidate_context_field")
+            ),
+            authoritative_candidate_targets=self._config_string_tuple(
+                step.config.get("authoritative_candidate_targets")
+            ),
+            completion_record_contract=self._optional_config_string(
+                step.config.get("completion_record_contract")
+            ),
+            hard_constraint_evidence_contract=self._optional_config_string(
+                step.config.get("hard_constraint_evidence_contract")
+            ),
+            completion_context_paths=self._config_string_tuple(step.config.get("completion_context_paths")),
+            confirmation_accepts_parameter_overrides=(
+                step.config.get("confirmation_accepts_parameter_overrides") is True
+            ),
         )
         guard_state = ensure_completion_guard_state(
             completion_guard_state if completion_guard_state is not None else {}
         )
         guard_state["context_snapshot"] = context.snapshot()
+        guard_state["completion_record_contract"] = step_config.completion_record_contract
         registry.register(
             CompleteStepTool(
                 step_config,
@@ -1010,6 +1226,22 @@ class StepExecutor:
             self._register_injectable_tools(registry, inject_tools, guard_state, step=step)
 
         return registry
+
+    @staticmethod
+    def _config_positive_int(value: Any, *, default: int, maximum: int) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            return default
+        return min(value, maximum)
+
+    @staticmethod
+    def _optional_config_string(value: Any) -> str | None:
+        return value if isinstance(value, str) and value else None
+
+    @staticmethod
+    def _config_string_tuple(value: Any) -> tuple[str, ...]:
+        if not isinstance(value, list | tuple):
+            return ()
+        return tuple(item for item in value if isinstance(item, str) and item)
 
     def _register_injectable_tools(
         self,
@@ -1052,15 +1284,28 @@ class StepExecutor:
                 elif name == "ros_deploy":
                     registry.register(tool_cls(completion_guard_state=completion_guard_state))
                 else:
-                    registry.register(self._instantiate_pipeline_tool(tool_cls, step=None))
+                    registry.register(
+                        self._instantiate_pipeline_tool(
+                            tool_cls,
+                            step=None,
+                            completion_guard_state=completion_guard_state,
+                        )
+                    )
 
-    def _instantiate_pipeline_tool(self, tool_cls: type, step: StepSpec | None) -> Any:
+    def _instantiate_pipeline_tool(
+        self,
+        tool_cls: type,
+        step: StepSpec | None,
+        completion_guard_state: dict[str, Any] | None = None,
+    ) -> Any:
         try:
             parameters = inspect.signature(tool_cls).parameters
         except (TypeError, ValueError):
             parameters = {}
         if step is not None and "step_config" in parameters:
             return tool_cls(step_config=step.config)
+        if completion_guard_state is not None and "completion_guard_state" in parameters:
+            return tool_cls(completion_guard_state=completion_guard_state)
         if "delegated_executor" in parameters and self._aliyun_delegated_executor_factory is not None:
             action = getattr(tool_cls, "action", "")
             return tool_cls(delegated_executor=self._aliyun_delegated_executor_factory(str(action)))

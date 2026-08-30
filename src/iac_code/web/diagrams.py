@@ -11,6 +11,10 @@ from iac_code.pipeline.engine.show_diagram_tool import ros_template_to_mermaid
 from iac_code.web.diagram_cache import read_cached
 from iac_code.web.outputs import TEMPLATE_SUFFIXES, is_template_content, pipeline_candidate_costs
 
+_MATERIALIZED_STEP_ID = "materialize_selected_candidate"
+_MATERIALIZED_OPTIMIZATION_KEY = "materialized"
+_ARCHITECTURE_PLAN_SOURCE = "architecture_plan"
+
 
 def _mermaid_or_none(content: str, suffix: str) -> str | None:
     """仅对 ROS YAML 模板产出 mermaid;非 YAML/非模板/解析失败一律 None。"""
@@ -92,8 +96,62 @@ def iter_candidate_templates(manager: Any, session: Any) -> list[CandidateTempla
     return list(latest.values())
 
 
-def diagram_items(manager: Any, session: Any, optimizing_indices: frozenset[int] = frozenset()) -> list[dict[str, Any]]:
-    """扫描 pipeline A2A envelope 里各候选生成的模板,产出架构图列表(按候选去重,保留最新)。
+def _materialized_costs(manager: Any, session: Any) -> dict[str, dict[str, Any]]:
+    """Return the latest exact Step 2 quote keyed by canonical template path.
+
+    ``selling_solution_first`` publishes the Python-normalized quote in its
+    deployment-confirmation ``input_required`` envelope.  That is the same public
+    value used by the confirmation UI, so the architecture preview must not parse
+    raw ROS responses again or trust model-authored text.
+    """
+
+    cwd = Path(session.cwd).expanduser().resolve()
+    costs: dict[str, dict[str, Any]] = {}
+    for envelope in manager._load_a2a_pipeline_envelopes(getattr(session, "context_id", None)):
+        if envelope.get("eventType") != "input_required":
+            continue
+        step = envelope.get("step")
+        step = step if isinstance(step, dict) else {}
+        data = envelope.get("data")
+        if (
+            not isinstance(data, dict)
+            or str(step.get("id") or data.get("stepId") or "") != _MATERIALIZED_STEP_ID
+            or data.get("kind") != "deployment_confirmation"
+        ):
+            continue
+        template_url = data.get("template_url")
+        cost = data.get("cost")
+        if not template_url or not isinstance(cost, dict):
+            continue
+        raw_path = Path(str(template_url))
+        canonical = str((raw_path if raw_path.is_absolute() else cwd / raw_path).resolve())
+        resources = cost.get("resources")
+        items = []
+        if isinstance(resources, list):
+            for resource in resources:
+                if not isinstance(resource, dict):
+                    continue
+                item: dict[str, str] = {
+                    "name": str(resource.get("type") or resource.get("name") or ""),
+                    "monthly_cost": str(resource.get("cost") or resource.get("monthly_cost") or ""),
+                }
+                if resource.get("spec"):
+                    item["spec"] = str(resource["spec"])
+                items.append(item)
+        total = cost.get("monthly_estimate")
+        costs[canonical] = {
+            "costItems": items,
+            "totalMonthlyCost": total if isinstance(total, str) else "",
+        }
+    return costs
+
+
+def diagram_items(
+    manager: Any,
+    session: Any,
+    optimizing_indices: frozenset[int | str] = frozenset(),
+) -> list[dict[str, Any]]:
+    """扫描 pipeline A2A envelope 里的规划图与候选模板，产出架构图列表。
 
     optimizing_indices:当前仍在后台优化的候选 index(来自协调器 _inflight)。优化进度态本只活在前端
     事件归约态,resync 会清空;把它挂到后端权威 optimizing 标志上,徽标才能跨 resync 不倒退成「待优化」。
@@ -101,7 +159,62 @@ def diagram_items(manager: Any, session: Any, optimizing_indices: frozenset[int]
     cwd = Path(session.cwd).expanduser().resolve()
     by_key: dict[str, dict[str, Any]] = {}
     costs = pipeline_candidate_costs(manager, session)
+    materialized_costs = _materialized_costs(manager, session)
     for envelope in manager._load_a2a_pipeline_envelopes(getattr(session, "context_id", None)):
+        if envelope.get("eventType") == "diagram_shown":
+            data = envelope.get("data")
+            data = data if isinstance(data, dict) else {}
+            architecture_context = data.get("architectureContext")
+            architecture_context = architecture_context if isinstance(architecture_context, dict) else {}
+            index = data.get("candidateIndex")
+            source = data.get("mermaidSource")
+            # selling_solution_first Step 1 没有 ROS 模板，show_architecture_plan 直接发出
+            # template-less DiagramEvent。只接受工具写入的显式 source 标记，避免改变旧 selling
+            # 及其他 diagram_shown 事件的输出集合；同一候选多轮规划按日志顺序保留最新图。
+            if (
+                architecture_context.get("source") == _ARCHITECTURE_PLAN_SOURCE
+                and isinstance(index, int)
+                and not isinstance(index, bool)
+                and isinstance(source, str)
+                and source.strip()
+            ):
+                raw_views = data.get("views")
+                views: list[dict[str, Any]] = []
+                if isinstance(raw_views, list):
+                    for raw_view in raw_views:
+                        if not isinstance(raw_view, dict):
+                            continue
+                        view_source = raw_view.get("mermaidSource") or raw_view.get("mermaid_source")
+                        if not isinstance(view_source, str) or not view_source.strip():
+                            continue
+                        views.append(
+                            {
+                                "id": str(raw_view.get("id") or "overview"),
+                                "title": str(raw_view.get("title") or ""),
+                                "purpose": str(raw_view.get("purpose") or ""),
+                                "mermaidSource": view_source,
+                            }
+                        )
+                stage = str(data.get("diagramStage") or "optimized")
+                entry: dict[str, Any] = {
+                    "diagramId": str(data.get("diagramId") or envelope.get("eventId") or f"plan:{index}"),
+                    "candidateName": str(data.get("candidateName") or ""),
+                    "candidateIndex": index,
+                    "format": "mermaid",
+                    "mermaidSource": source,
+                    "optimized": stage == "optimized",
+                    "optimizing": False,
+                    "diagramStage": stage,
+                    "architectureContext": architecture_context,
+                }
+                if views:
+                    entry["views"] = views
+                cost = costs.get(index)
+                if cost is not None:
+                    entry["costItems"] = cost["costItems"]
+                    entry["totalMonthlyCost"] = cost["totalMonthlyCost"]
+                by_key[str(index)] = entry
+            continue
         if envelope.get("eventType") != "tool_result":
             continue
         data = envelope.get("data")
@@ -118,10 +231,46 @@ def diagram_items(manager: Any, session: Any, optimizing_indices: frozenset[int]
         candidate = envelope.get("candidate")
         candidate = candidate if isinstance(candidate, dict) else {}
         index = candidate.get("index")
-        # 架构图仅呈现「各候选生成的模板」。无候选归属的写入(index None,如收尾/部署步把选中
-        # 候选的最终模板再写一次)既无候选名、又与已有候选图重复,若收录会以裸绝对路径命名多出一张,
-        # 故跳过——只保留候选作用域内的模板写入。
+        # 旧 selling 的无候选归属写入是候选模板的重复副本，继续跳过。新
+        # selling_solution_first 的 Step 2 则第一次产生真实 ROS 模板；仅为这个唯一
+        # step 派生最终架构图，避免按 pipeline 名称分支或改变旧流程的输出集合。
         if index is None:
+            step = envelope.get("step")
+            step = step if isinstance(step, dict) else {}
+            step_id = str(step.get("id") or data.get("stepId") or "")
+            if step_id != _MATERIALIZED_STEP_ID:
+                continue
+            raw_path = Path(str(tool_input.get("path") or ""))
+            resolved_path = (raw_path if raw_path.is_absolute() else cwd / raw_path).resolve()
+            try:
+                rel = resolved_path.relative_to(cwd).as_posix()
+            except ValueError:
+                rel = str(raw_path)
+            canonical_key = str(resolved_path)
+            cached = read_cached(
+                getattr(session, "context_id", None),
+                _MATERIALIZED_OPTIMIZATION_KEY,
+                content,
+            )
+            entry: dict[str, Any] = {
+                "diagramId": f"final:{rel}",
+                "candidateName": "",
+                "candidateIndex": None,
+                "format": "mermaid",
+                "mermaidSource": cached[0]["mermaidSource"] if cached else source,
+                "optimized": cached is not None,
+                "optimizing": _MATERIALIZED_OPTIMIZATION_KEY in optimizing_indices,
+                "optimizationKey": _MATERIALIZED_OPTIMIZATION_KEY,
+                "sourceRelPath": rel,
+                "stepId": step_id,
+                "diagramStage": "optimized" if cached else "draft",
+            }
+            if cached:
+                entry["views"] = cached
+            exact_cost = materialized_costs.get(canonical_key)
+            if exact_cost is not None:
+                entry.update(exact_cost)
+            by_key[f"final:{canonical_key}"] = entry
             continue
         name = candidate.get("name")
         rel = str(tool_input.get("path") or "")

@@ -7380,6 +7380,17 @@ body.is-resizing-sidebar {
   cursor: default;
 }
 
+.pipeline-step-select-button.is-disabled,
+.pipeline-step-select-button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.pipeline-step-select-button.is-disabled:hover,
+.pipeline-step-select-button:disabled:hover {
+  background: var(--codex-panel-raised, #2b2b2b);
+}
+
 /* 已选方案:该候选行「查看架构图」链接后一枚绿色对勾(用可在深色背景读清的成功绿,与
    .pipeline-outcome--success 一致)。选定后按钮消失,仅留此勾标出用户最终选择。 */
 .pipeline-step-diagram-check {

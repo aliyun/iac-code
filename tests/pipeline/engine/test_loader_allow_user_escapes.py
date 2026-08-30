@@ -103,6 +103,91 @@ def test_loader_parses_step_a2a_artifacts(tmp_path):
     ]
 
 
+def test_loader_parses_file_backed_conditional_a2a_artifact(tmp_path):
+    _write_pipeline(
+        tmp_path,
+        {
+            "steps": [
+                {
+                    "id": "s1",
+                    "conclusion_field": "x",
+                    "forward": None,
+                    "prompt": "prompts/s1.md",
+                    "a2a_artifacts": [
+                        {
+                            "path": "conclusion.file_path",
+                            "content_from_file": "conclusion.file_path",
+                            "when_conclusion_field_equals": {"confirmed": True},
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    [spec] = load_pipeline_dir(tmp_path).steps[0].a2a_artifacts
+    assert spec.content is None
+    assert spec.content_from_file == "conclusion.file_path"
+    assert spec.when_conclusion_field_equals == {"confirmed": True}
+
+
+@pytest.mark.parametrize(
+    "artifact",
+    [
+        {
+            "path": "conclusion.file_path",
+            "content": "conclusion.template",
+            "content_from_file": "conclusion.file_path",
+        },
+        {"path": "conclusion.file_path"},
+    ],
+)
+def test_loader_requires_exactly_one_a2a_artifact_content_source(tmp_path, artifact):
+    _write_pipeline(
+        tmp_path,
+        {
+            "steps": [
+                {
+                    "id": "s1",
+                    "conclusion_field": "x",
+                    "forward": None,
+                    "prompt": "prompts/s1.md",
+                    "a2a_artifacts": [artifact],
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValueError, match="exactly one"):
+        load_pipeline_dir(tmp_path)
+
+
+def test_loader_rejects_non_mapping_a2a_artifact_condition(tmp_path):
+    _write_pipeline(
+        tmp_path,
+        {
+            "steps": [
+                {
+                    "id": "s1",
+                    "conclusion_field": "x",
+                    "forward": None,
+                    "prompt": "prompts/s1.md",
+                    "a2a_artifacts": [
+                        {
+                            "path": "conclusion.file_path",
+                            "content": "conclusion.template",
+                            "when_conclusion_field_equals": [],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(ValueError, match="when_conclusion_field_equals"):
+        load_pipeline_dir(tmp_path)
+
+
 @pytest.mark.parametrize("config", [["strict"], "strict"])
 def test_loader_rejects_invalid_step_config(tmp_path, config):
     _write_pipeline(

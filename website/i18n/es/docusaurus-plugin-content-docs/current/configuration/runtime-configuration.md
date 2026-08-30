@@ -135,12 +135,15 @@ Los patrones de permisos de herramientas siguen el formato `tool_name(rule)`:
 | Patrón | Significado |
 |---|---|
 | `bash` | Coincidir con todos los comandos bash (nombre de herramienta simple). |
+| `bash(**)` | Permitir explícitamente todos los comandos Bash, incluidos los que el analizador clasifica como complejos. |
 | `bash(git *)` | Coincidir con comandos bash que comienzan con `git`. |
 | `bash(curl:*)` | Coincidir con comandos bash que comienzan con `curl`. |
 | `write_file` | Coincidir con todas las llamadas a la herramienta write_file. |
 | `aliyun_api(ros:CreateStack)` | Coincidir con un par producto/acción de API de Alibaba Cloud. |
 
 Las reglas se evalúan en orden: **deny → ask → allow → comportamiento predeterminado**. Los argumentos CLI (`--allowed-tools`, `--disallowed-tools`) tienen la mayor precedencia.
+
+`bash(**)` solo tiene este significado global cuando aparece exactamente en una lista `allow` cargada desde la configuración o desde `--allowed-tools`. Las reglas explícitas `deny` y `ask`, así como la comprobación básica de seguridad del shell, siguen teniendo prioridad. El modo seguro de A2A puede eliminar Bash del conjunto de herramientas disponible y continúa aplicando sus límites estrictos de rutas; `bash(**)` no puede volver a habilitarlo ni eludir esas restricciones. Los patrones Bash normales, incluido `bash(*)`, conservan su comportamiento anterior y no omiten la confirmación de comandos complejos.
 
 ### Permisos de API de Alibaba Cloud
 

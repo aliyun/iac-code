@@ -10,6 +10,9 @@ from iac_code.web.session_manager import WebSessionManager
 @pytest.fixture(autouse=True)
 def _isolated_config(tmp_path, monkeypatch):
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    # The stored pipeline default now falls back to the process-wide env choice;
+    # keep the ambient environment out of these assertions.
+    monkeypatch.delenv("IAC_CODE_PIPELINE_NAME", raising=False)
     yield
 
 
@@ -56,6 +59,31 @@ def test_get_session_defaults_ignores_invalid_stored():
         "mode": "normal",
         "pipelineName": "selling",
     }
+
+
+def test_get_session_defaults_falls_back_to_the_env_pipeline(monkeypatch):
+    """用 IAC_CODE_PIPELINE_NAME 启动 Web 时,浏览器新会话草稿必须默认到同一条流水线。"""
+    monkeypatch.setenv("IAC_CODE_PIPELINE_NAME", "selling_solution_first")
+    assert settings.get_session_defaults()["pipelineName"] == "selling_solution_first"
+
+
+def test_get_session_defaults_prefers_saved_pipeline_over_env(monkeypatch):
+    """用户在设置里明确选过流水线时,该选择优先于进程 env。"""
+    settings.save_session_defaults("default", "pipeline", "selling")
+    monkeypatch.setenv("IAC_CODE_PIPELINE_NAME", "selling_solution_first")
+    assert settings.get_session_defaults()["pipelineName"] == "selling"
+
+
+def test_get_session_defaults_ignores_blank_env_pipeline(monkeypatch):
+    monkeypatch.setenv("IAC_CODE_PIPELINE_NAME", "   ")
+    assert settings.get_session_defaults()["pipelineName"] == "selling"
+
+
+def test_index_injects_env_pipeline_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("IAC_CODE_PIPELINE_NAME", "selling_solution_first")
+    client = _client(tmp_path)
+    html = client.get("/").text
+    assert 'data-default-pipeline-name="selling_solution_first"' in html
 
 
 def test_save_session_defaults_preserves_other_keys():

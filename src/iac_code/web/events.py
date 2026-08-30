@@ -298,16 +298,20 @@ class WebEventTranslator:
         result_kind: str,
         summary: Any,
         artifacts: list[Any],
+        submitted_delta: dict[str, Any] | None = None,
+        normalized_conclusion: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return self._make(
-            "tool.result",
-            {
-                "toolUseId": tool_use_id,
-                "resultKind": result_kind,
-                "summary": summary,
-                "artifacts": list(artifacts),
-            },
-        )
+        payload = {
+            "toolUseId": tool_use_id,
+            "resultKind": result_kind,
+            "summary": summary,
+            "artifacts": list(artifacts),
+        }
+        if isinstance(submitted_delta, dict):
+            payload["submittedDelta"] = submitted_delta
+        if isinstance(normalized_conclusion, dict):
+            payload["normalizedConclusion"] = normalized_conclusion
+        return self._make("tool.result", payload)
 
     def tool_finished(
         self,
@@ -392,6 +396,13 @@ class WebEventTranslator:
             from iac_code.types.stream_events import TOOL_RENDER_METADATA_KEY
 
             public_metadata = dict(event.metadata or {})
+            submitted_delta = public_metadata.pop("submitted_delta", None)
+            step_result = public_metadata.pop("step_result", None)
+            normalized_conclusion = (
+                step_result.get("conclusion")
+                if isinstance(step_result, Mapping)
+                else getattr(step_result, "conclusion", None)
+            )
             # 与回放路径对齐:内部渲染载体(_iac_code_tool_render)与阿里云 HTTP 诊断
             # (aliyun_http)都是内部键,不能作为「Artifacts」原样下发给前端。
             public_metadata.pop(ALIYUN_HTTP_METADATA_KEY, None)
@@ -401,6 +412,10 @@ class WebEventTranslator:
                 result_kind="error" if event.is_error else "text",
                 summary=event.result,
                 artifacts=[public_metadata] if public_metadata else [],
+                submitted_delta=submitted_delta if isinstance(submitted_delta, dict) else None,
+                normalized_conclusion=(
+                    normalized_conclusion if isinstance(normalized_conclusion, dict) else None
+                ),
             )
         if isinstance(event, MCPProgressEvent):
             payload = mcp_progress_metadata(event)
@@ -546,26 +561,38 @@ class WebEventTranslator:
                 },
             )
         if isinstance(event, DiagramEvent):
+            data = {
+                "candidateName": event.candidate_name,
+                "templateContent": event.template_content,
+                "mermaidSource": event.mermaid_source,
+                "candidateIndex": event.candidate_index,
+            }
+            if event.candidate_set_id:
+                data["candidateSetId"] = event.candidate_set_id
+            if event.detail_stage:
+                data["detailStage"] = event.detail_stage
             return self._make(
                 "diagram.render",
-                {
-                    "candidateName": event.candidate_name,
-                    "templateContent": event.template_content,
-                    "mermaidSource": event.mermaid_source,
-                    "candidateIndex": event.candidate_index,
-                },
+                data,
             )
         if isinstance(event, CandidateDetailEvent):
+            data = {
+                "toolUseId": event.tool_use_id,
+                "candidateName": event.candidate_name,
+                "summary": event.summary,
+                "costItems": event.cost_items,
+                "totalMonthlyCost": event.total_monthly_cost,
+                "candidateIndex": event.candidate_index,
+            }
+            if event.candidate_set_id:
+                data["candidateSetId"] = event.candidate_set_id
+            if event.detail_stage:
+                data["detailStage"] = event.detail_stage
+            if event.key_tradeoff:
+                data["keyTradeoff"] = event.key_tradeoff
             return self._make(
                 "candidate.detail",
-                {
-                    "toolUseId": event.tool_use_id,
-                    "candidateName": event.candidate_name,
-                    "summary": event.summary,
-                    "costItems": event.cost_items,
-                    "totalMonthlyCost": event.total_monthly_cost,
-                    "candidateIndex": event.candidate_index,
-                },
+                data,
             )
         if isinstance(event, StackProgressEvent):
             return self._make(

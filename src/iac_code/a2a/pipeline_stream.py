@@ -70,7 +70,13 @@ logger = logging.getLogger(__name__)
 PENDING_BACKUP_VISIBILITY = "pending_backup"
 COMMITTED_BACKUP_VISIBILITY = "committed"
 BACKUP_COMMITTED_EVENT_TYPE = "backup_committed"
-_ARTIFACT_SEMANTIC_METADATA_KEYS = ("role", "supersedesPath", "supersedesKey", "supersedesFingerprint")
+_ARTIFACT_SEMANTIC_METADATA_KEYS = (
+    "role",
+    "supersedesPath",
+    "supersedesKey",
+    "supersedesFingerprint",
+    "dedupeKey",
+)
 _RECOVERY_SEMANTIC_EVENT_TYPES = {
     "pipeline_started",
     "pipeline_resumed",
@@ -698,7 +704,7 @@ class PipelineA2AEventPublisher:
                 self.translator.manual_event(
                     "interrupt_received",
                     "interrupt",
-                    data={"messageLength": len(prompt)},
+                    data={"messageLength": len(prompt), "userInput": prompt},
                 )
             )
         envelopes.append(
@@ -764,7 +770,7 @@ class PipelineA2AEventPublisher:
             self.translator.manual_event(
                 "interrupt_received",
                 "interrupt",
-                data={"messageLength": len(prompt)},
+                data={"messageLength": len(prompt), "userInput": prompt},
             )
         )
 
@@ -1523,7 +1529,7 @@ class _PipelinePermissionResolutionOwner:
                 raise PipelineA2APersistenceError("Failed to publish Sub Pipeline permission timeout")
             future = pending.request.response_future
             if future is not None and not future.done():
-                future.set_result(False)
+                future.set_result(PermissionWaitOutcome.AUTOMATIC_DENY)
             await registry.complete(pending)
         except asyncio.CancelledError:
             return
@@ -1800,6 +1806,8 @@ def _unified_input_projection(
         options = permission.get("options")
         language = permission.get("language")
         deployment_summary = permission.get("deploymentSummary")
+        operation = permission.get("operation")
+        display_parameters = permission.get("displayParameters")
         if not all(isinstance(value, str) and value for value in (input_id, tool_use_id, tool_name, safe_summary)):
             return None
         fallback_language = language if isinstance(language, str) and language else "en"
@@ -1852,6 +1860,10 @@ def _unified_input_projection(
             sub_pipeline_id = candidate.get("id") or candidate.get("subPipelineId")
             if isinstance(sub_pipeline_id, str) and sub_pipeline_id:
                 projection["subPipelineId"] = sub_pipeline_id
+        if isinstance(operation, dict):
+            projection["operation"] = to_json_safe(operation)
+        if isinstance(display_parameters, dict):
+            projection["displayParameters"] = to_json_safe(display_parameters)
         return projection
     raw_input = envelope.get("input")
     if not isinstance(raw_input, dict):

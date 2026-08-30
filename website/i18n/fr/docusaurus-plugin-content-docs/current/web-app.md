@@ -69,6 +69,8 @@ La zone de saisie est l'endroit où vous rédigez vos requêtes. Elle expose les
 
 Une session s'exécute soit en discussion normale, soit en mode **pipeline**. La discussion normale diffuse en ligne les réponses de l'assistant, les appels d'outils et les résultats. Le mode pipeline ajoute un espace de travail qui affiche les chronologies des étapes, les diagnostics, les diagrammes, la progression du déploiement, le nettoyage et les détails de transfert au fur et à mesure de l'exécution du pipeline. Consultez [Mode pipeline](./automation/pipeline-mode.md) pour savoir ce que font les pipelines.
 
+Le [pipeline `selling_solution_first`](./automation/solution-first-pipeline.md) utilise cet espace de travail pour un parcours d'achat en trois étapes : comparer les architectures candidates, mettre en œuvre la solution retenue, puis la déployer après confirmation. Les approbations d'outils apparaissent sous forme de cartes d'autorisation localisées sous l'étape qui les a demandées ; les approbations en attente reviennent à la même étape lors de la restauration de la session.
+
 ### Outils et approbations
 
 Les appels d'outils s'affichent sous forme de cartes dans la transcription. Lorsqu'un outil requiert votre approbation, une demande d'approbation apparaît en ligne ; le mode d'autorisation défini dans la zone de saisie détermine à quel moment vous êtes sollicité.

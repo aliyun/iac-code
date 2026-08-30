@@ -29,6 +29,39 @@ def _repl_pty_unit_instance(runner, *, args, run_dir: Path, cwd: Path, env: dict
     return pty
 
 
+def test_repl_terminate_records_preexisting_child_exit_status(tmp_path: Path) -> None:
+    runner = _load_runner()
+    pty = _repl_pty_unit_instance(runner, args=None, run_dir=tmp_path, cwd=tmp_path, env={})
+
+    class Child:
+        before = "process output"
+        exitstatus = 3
+        signalstatus = None
+
+        @staticmethod
+        def isalive() -> bool:
+            return False
+
+        @staticmethod
+        def terminate(*, force: bool) -> None:
+            assert force is True
+
+    pty.child = Child()
+
+    pty.terminate()
+
+    assert pty.events == [
+        {
+            "type": "terminate",
+            "force": False,
+            "aliveBeforeTerminate": False,
+            "exitStatus": 3,
+            "signalStatus": None,
+            "at": pty.events[0]["at"],
+        }
+    ]
+
+
 def _install_flow_fake_pty(
     monkeypatch,
     runner,

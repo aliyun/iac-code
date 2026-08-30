@@ -5,7 +5,12 @@ import pytest
 from iac_code.agent.agent_loop import AgentLoop
 from iac_code.agent.message import Message, ToolUseBlock
 from iac_code.providers.base import ToolDefinition
-from iac_code.services.permission_wait import PermissionWaitPolicy, build_permission_checkpoint, canonical_digest
+from iac_code.services.permission_wait import (
+    PermissionWaitPolicy,
+    build_permission_checkpoint,
+    canonical_digest,
+    recover_permission_audit_boundary,
+)
 from iac_code.services.session_storage import SessionStorage
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
 from iac_code.types.permissions import PermissionAuditMetadata, PermissionResult
@@ -15,11 +20,17 @@ from iac_code.types.stream_events import (
     PermissionRequestEvent,
     PermissionWaitOutcome,
     PermissionWaitSuspended,
+    StackProgressEvent,
     TextDeltaEvent,
     ToolResultEvent,
     ToolUseEndEvent,
     ToolUseStartEvent,
     Usage,
+)
+
+USER_DENIED_TOOL_RESULT = (
+    "The user explicitly denied this tool operation. This is not a cloud API or IAM permission error. "
+    "Do not retry this operation or perform the same action with another tool unless the user asks again."
 )
 
 
@@ -90,7 +101,7 @@ async def test_agent_loop_emits_permission_request_before_write_tool() -> None:
 
     assert any(isinstance(event, PermissionRequestEvent) for event in events)
     assert any(
-        isinstance(event, ToolResultEvent) and event.is_error and event.result == "Permission denied."
+        isinstance(event, ToolResultEvent) and event.is_error and event.result == USER_DENIED_TOOL_RESULT
         for event in events
     )
     assert tool.executed is False
@@ -227,6 +238,123 @@ async def test_resume_permission_boundary_executes_ordered_multi_tool_batch_once
         "tool-2",
     ]
     assert not any(isinstance(event, PermissionRequestEvent) for event in events)
+
+
+@pytest.mark.asyncio
+async def test_resume_permission_boundary_tells_model_the_user_denied_operation() -> None:
+    class ContinueProvider:
+        def get_model_name(self) -> str:
+            return "fake"
+
+        async def stream(self, messages, system, tools=None):
+            yield MessageStartEvent(message_id="continued")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+    tool = WriteTool()
+    registry = ToolRegistry()
+    registry.register(tool)
+    assistant = Message(
+        role="assistant",
+        content=[ToolUseBlock(id="tool-1", name="write_test", input={"value": "blocked"})],
+    )
+    digest = canonical_digest([block.model_dump(mode="json") for block in assistant.content])
+    loop = AgentLoop(
+        provider_manager=ContinueProvider(),
+        system_prompt="system",
+        tool_registry=registry,
+        max_turns=1,
+        resume_messages=[assistant],
+    )
+    checkpoint = {
+        "toolUseId": "tool-1",
+        "toolName": "write_test",
+        "payloadDigest": canonical_digest({"name": "write_test", "input": {"value": "blocked"}}),
+        "decision": {"status": "claimed", "value": "deny", "claimId": "claim-1"},
+        "continuationFrame": {
+            "assistantMessageRef": "session.jsonl:0",
+            "assistantMessageDigest": digest,
+            "orderedToolUseIds": ["tool-1"],
+            "currentIndex": 0,
+            "decisions": [
+                {"toolUseId": "tool-1", "state": "pending", "source": None, "deniedResult": None},
+            ],
+        },
+    }
+
+    events = [event async for event in loop.resume_permission_boundary(checkpoint)]
+
+    denied = [event for event in events if isinstance(event, ToolResultEvent)]
+    assert len(denied) == 1
+    assert denied[0].is_error is True
+    assert denied[0].result == USER_DENIED_TOOL_RESULT
+    assert tool.executed is False
+
+
+@pytest.mark.asyncio
+async def test_resume_permission_boundary_forwards_tool_progress_events() -> None:
+    class ProgressTool(WriteTool):
+        def needs_event_queue(self) -> bool:
+            return True
+
+        async def execute(self, *, tool_input: dict, context: ToolContext) -> ToolResult:
+            assert context.event_queue is not None
+            await context.event_queue.put(
+                StackProgressEvent(
+                    stack_id="stack-1",
+                    stack_name="demo",
+                    status="CREATE_COMPLETE",
+                    progress_percentage=100,
+                    resources=[],
+                    elapsed_seconds=1,
+                    region_id="cn-hangzhou",
+                    tool_use_id="tool-1",
+                )
+            )
+            return ToolResult.success("created")
+
+    class ContinueProvider:
+        def get_model_name(self) -> str:
+            return "fake"
+
+        async def stream(self, messages, system, tools=None):
+            yield MessageStartEvent(message_id="continued")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+    tool = ProgressTool()
+    registry = ToolRegistry()
+    registry.register(tool)
+    assistant = Message(
+        role="assistant",
+        content=[ToolUseBlock(id="tool-1", name="write_test", input={"value": "first"})],
+    )
+    digest = canonical_digest([block.model_dump(mode="json") for block in assistant.content])
+    loop = AgentLoop(
+        provider_manager=ContinueProvider(),
+        system_prompt="system",
+        tool_registry=registry,
+        max_turns=1,
+        resume_messages=[assistant],
+    )
+    checkpoint = {
+        "toolUseId": "tool-1",
+        "payloadDigest": canonical_digest({"name": "write_test", "input": {"value": "first"}}),
+        "decision": {"status": "claimed", "value": "allow_once", "claimId": "claim-1"},
+        "continuationFrame": {
+            "assistantMessageRef": "session.jsonl:0",
+            "assistantMessageDigest": digest,
+            "orderedToolUseIds": ["tool-1"],
+            "currentIndex": 0,
+            "decisions": [
+                {"toolUseId": "tool-1", "state": "pending", "source": None, "deniedResult": None},
+            ],
+        },
+    }
+
+    events = [event async for event in loop.resume_permission_boundary(checkpoint)]
+
+    progress_index = next(index for index, event in enumerate(events) if isinstance(event, StackProgressEvent))
+    result_index = next(index for index, event in enumerate(events) if isinstance(event, ToolResultEvent))
+    assert progress_index < result_index
 
 
 @pytest.mark.asyncio
@@ -922,6 +1050,75 @@ async def test_permission_recovery_after_tool_injected_messages_uses_persisted_t
     persisted_after_resume = storage.load(cwd, session_id)
     assert persisted_after_resume[-1].content == "post-approval instructions"
     assert len(persisted_after_resume) == len(resumed_loop.context_manager.get_messages())
+
+
+@pytest.mark.asyncio
+async def test_permission_recovery_uses_full_session_index_when_resumed_context_is_partial(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cwd = str(workspace)
+    session_id = "session-with-partial-resume-context"
+    storage = SessionStorage(projects_dir=tmp_path / "projects")
+    history = [
+        Message(role="user", content="first request"),
+        Message(role="assistant", content="first answer"),
+        Message(role="user", content="second request"),
+        Message(role="assistant", content="second answer"),
+    ]
+    for message in history:
+        storage.append(cwd, session_id, message)
+
+    tool = WriteTool()
+    registry = ToolRegistry()
+    registry.register(tool)
+    live_loop = AgentLoop(
+        provider_manager=FakeProviderManager(),
+        system_prompt="system",
+        tool_registry=registry,
+        max_turns=1,
+        session_storage=storage,
+        session_id=session_id,
+        cwd=cwd,
+        resume_messages=history[-2:],
+    )
+
+    permission_event = None
+    with pytest.raises(PermissionWaitSuspended):
+        async for event in live_loop.run_streaming("write"):
+            if isinstance(event, PermissionRequestEvent):
+                permission_event = event
+                assert event.response_future is not None
+                event.response_future.set_result(PermissionWaitOutcome.SUSPEND)
+
+    assert permission_event is not None
+    assert permission_event.continuation_frame is not None
+    persisted = storage.load(cwd, session_id)
+    assert len(live_loop.context_manager.get_messages()) == 4
+    assert len(persisted) == 6
+    assert permission_event.continuation_frame["assistantMessageRef"] == "session.jsonl:5"
+
+    checkpoint = build_permission_checkpoint(
+        session_id=session_id,
+        task_id="task-1",
+        context_id="context-1",
+        input_id="input-1",
+        tool_use_id=permission_event.tool_use_id,
+        tool_name=permission_event.tool_name,
+        tool_input=permission_event.tool_input,
+        permission_class="normal",
+        continuation_frame=permission_event.continuation_frame,
+        policy=PermissionWaitPolicy(),
+    )
+    recovered = recover_permission_audit_boundary(
+        checkpoint,
+        cwd=cwd,
+        session_id=session_id,
+        storage=storage,
+    )
+
+    assert recovered is not None
+    assert recovered.tool_use_id == "tool1"
+    assert recovered.tool_input == {"value": "ok"}
 
 
 @pytest.mark.asyncio

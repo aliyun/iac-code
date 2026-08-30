@@ -32,11 +32,11 @@ def template_hash(template_content: str) -> str:
     return hashlib.sha256(template_content.encode("utf-8")).hexdigest()[:16]
 
 
-def cache_path(context_id: str, candidate_index: int, thash: str) -> Path:
+def cache_path(context_id: str, candidate_index: int | str, thash: str) -> Path:
     return get_config_dir() / DIAGRAM_CACHE_DIR_NAME / context_id / "{}-{}.json".format(candidate_index, thash)
 
 
-def read_cached(context_id: str | None, candidate_index: int, template_content: str) -> list[dict] | None:
+def read_cached(context_id: str | None, candidate_index: int | str, template_content: str) -> list[dict] | None:
     safe = _safe_context_id(context_id)
     if safe is None:
         return None
@@ -67,7 +67,7 @@ def read_cached(context_id: str | None, candidate_index: int, template_content: 
 
 def write_cached(
     context_id: str | None,
-    candidate_index: int,
+    candidate_index: int | str,
     template_content: str,
     views: list[dict],
     model: str | None,

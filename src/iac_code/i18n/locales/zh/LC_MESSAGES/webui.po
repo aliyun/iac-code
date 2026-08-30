@@ -280,6 +280,7 @@ msgstr "关闭"
 
 #: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
 #: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/pipeline.js
 #: src/iac_code/web/static/js/components/workspace.js
 #: src/iac_code/web/static/js/token_transport.js
 msgid "Cancel"
@@ -289,6 +290,10 @@ msgstr "取消"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Save"
 msgstr "保存"
+
+#: src/iac_code/web/static/js/api.js
+msgid "Event stream has no response body."
+msgstr "事件流没有响应正文。"
 
 #: src/iac_code/web/static/js/app.js
 msgid "Desktop native bridge is unavailable."
@@ -381,6 +386,16 @@ msgstr "售卖流水线"
 #: src/iac_code/web/static/js/app.js
 msgid "Pipeline planning, generation, and validation for sales scenarios"
 msgstr "售卖场景的流水线规划、生成和验证"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Sales pipeline (solution first)"
+msgstr "售卖流水线（先选方案）"
+
+#: src/iac_code/web/static/js/app.js
+msgid ""
+"Pick one solution from priced architecture candidates first, then "
+"implement and deploy only that solution"
+msgstr "先从带粗估价格的架构候选方案中选定一个，再只实现并部署该方案"
 
 #: src/iac_code/web/static/js/app.js
 msgid "No context usage recorded yet"
@@ -538,6 +553,14 @@ msgid "{n}y"
 msgstr "{n}年"
 
 #: src/iac_code/web/static/js/app.js
+msgid "Operation failed"
+msgstr "操作失败"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Archive failed"
+msgstr "归档失败"
+
+#: src/iac_code/web/static/js/app.js
 msgid "Read-only"
 msgstr "只读"
 
@@ -552,14 +575,6 @@ msgstr "请输入内容"
 #: src/iac_code/web/static/js/app.js
 msgid "Please enter a name"
 msgstr "请输入名称"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Operation failed"
-msgstr "操作失败"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Archive failed"
-msgstr "归档失败"
 
 #: src/iac_code/web/static/js/app.js
 #, python-brace-format
@@ -631,6 +646,19 @@ msgid "Select this option"
 msgstr "选择该方案"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Selected"
+msgstr "已选择"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Confirm selection?"
+msgstr "确认选择?"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Selecting…"
+msgstr "选择中…"
+
+#: src/iac_code/web/static/js/app.js
 msgid "Waiting for input"
 msgstr "等待输入"
 
@@ -652,19 +680,6 @@ msgstr "优化中"
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "Pending optimization"
 msgstr "待优化"
-
-#: src/iac_code/web/static/js/app.js
-#: src/iac_code/web/static/js/components/pipeline.js
-msgid "Selected"
-msgstr "已选择"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Confirm selection?"
-msgstr "确认选择?"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Selecting…"
-msgstr "选择中…"
 
 #: src/iac_code/web/static/js/app.js
 msgid "Pipeline completed"
@@ -864,6 +879,35 @@ msgid "Elapsed {n}s"
 msgstr "已用 {n} 秒"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Accepted"
+msgstr "已接受"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Pipeline started"
+msgstr "流水线已启动"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Candidate selected"
+msgstr "已选择候选方案"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Interrupt submitted"
+msgstr "已提交中断"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Permission recovered"
+msgstr "权限已恢复"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Pipeline session is unavailable."
+msgstr "流水线会话不可用。"
+
+#: src/iac_code/web/static/js/app.js
 msgid "Failed to load session. Please try again."
 msgstr "会话加载失败，请重试。"
 
@@ -953,6 +997,22 @@ msgid "Enter a valid access token."
 msgstr "请输入有效的 Web 访问口令。"
 
 #: src/iac_code/web/static/js/token_transport.js
+msgid "Request sequence exhausted."
+msgstr "请求序列号已耗尽。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Invalid response sequence."
+msgstr "响应序列号无效。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Replayed response detected."
+msgstr "检测到重放响应。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Invalid encrypted response."
+msgstr "加密响应无效。"
+
+#: src/iac_code/web/static/js/token_transport.js
 msgid "Unable to start an encrypted session."
 msgstr "无法启动加密会话。"
 
@@ -963,6 +1023,22 @@ msgstr "不支持的加密传输版本。"
 #: src/iac_code/web/static/js/token_transport.js
 msgid "The Web access token is incorrect."
 msgstr "Web 访问口令不正确。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Encrypted transport only supports same-origin API requests."
+msgstr "加密传输仅支持同源 API 请求。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Unsupported encrypted request body."
+msgstr "不支持的加密请求正文。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Encrypted stream ended before response metadata."
+msgstr "加密流在响应元数据之前已结束。"
+
+#: src/iac_code/web/static/js/token_transport.js
+msgid "Encrypted stream ended unexpectedly."
+msgstr "加密流意外结束。"
 
 #: src/iac_code/web/static/js/token_transport.js
 msgid "Complete OAuth login"
@@ -1276,6 +1352,11 @@ msgid "In progress / failed"
 msgstr "进行中/失败"
 
 #: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Architecture diagram"
+msgstr "架构图"
+
+#: src/iac_code/web/static/js/components/output_panel.js
 msgid "File no longer exists"
 msgstr "文件已不存在"
 
@@ -1287,14 +1368,17 @@ msgstr "资源栈"
 msgid "Template files"
 msgstr "模板文件"
 
-#: src/iac_code/web/static/js/components/output_panel.js
-#: src/iac_code/web/static/js/components/pipeline.js
-msgid "Architecture diagram"
-msgstr "架构图"
-
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Recovered State"
 msgstr "已恢复状态"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Confirm deployment"
+msgstr "确认部署"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Choose another solution"
+msgstr "选择其他方案"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Diagnostics"
@@ -1325,6 +1409,10 @@ msgid "No pipeline events."
 msgstr "没有流水线事件。"
 
 #: src/iac_code/web/static/js/components/pipeline.js
+msgid "Parameter overrides must be a valid JSON object."
+msgstr "参数覆盖必须是有效的 JSON 对象。"
+
+#: src/iac_code/web/static/js/components/pipeline.js
 msgid "Parameter overrides"
 msgstr "参数覆盖"
 
@@ -1335,6 +1423,16 @@ msgstr "选择候选方案"
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "Submitting..."
 msgstr "提交中..."
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Summary"
+msgstr "摘要"
+
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Action"
+msgstr "操作"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No architecture diagram"
@@ -1443,11 +1541,6 @@ msgid "Outcome"
 msgstr "结果"
 
 #: src/iac_code/web/static/js/components/pipeline.js
-#: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Summary"
-msgstr "摘要"
-
-#: src/iac_code/web/static/js/components/pipeline.js
 msgid "No pipeline data."
 msgstr "没有流水线数据。"
 
@@ -1511,10 +1604,6 @@ msgstr "输出路径"
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Cloud products"
 msgstr "云产品"
-
-#: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Action"
-msgstr "操作"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Role"

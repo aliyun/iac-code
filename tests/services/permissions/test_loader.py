@@ -56,6 +56,18 @@ class TestLoadPermissionContext:
         assert ctx.mode == PermissionMode.DEFAULT
         assert "bash(git *)" in ctx.allow_rules.get("user_settings", [])
 
+    def test_blanket_bash_allow_preserves_configured_source(self, tmp_path, monkeypatch):
+        global_settings = tmp_path / "settings.yml"
+        global_settings.write_text(
+            yaml.dump({"permissions": {"allow": ["bash(**)"]}}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("iac_code.services.permissions.loader._get_global_settings_path", lambda: global_settings)
+
+        ctx = load_permission_context(str(tmp_path))
+
+        assert ctx.allow_rules == {"user_settings": ["bash(**)"]}
+
     def test_cli_overrides(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
             "iac_code.services.permissions.loader._get_global_settings_path", lambda: tmp_path / "nonexistent.yml"

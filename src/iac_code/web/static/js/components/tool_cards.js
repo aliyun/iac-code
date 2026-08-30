@@ -461,7 +461,10 @@ function renderConclusionValue(value) {
   return dl;
 }
 
-function completeStepConclusion(tool = {}) {
+export function completeStepConclusion(tool = {}) {
+  if (tool.normalizedConclusion && typeof tool.normalizedConclusion === "object") {
+    return tool.normalizedConclusion;
+  }
   const input = inputObject(tool);
   if (input && Object.prototype.hasOwnProperty.call(input, "conclusion")) {
     return input.conclusion;

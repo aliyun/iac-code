@@ -441,7 +441,15 @@ class PipelineDisplayReducer:
 
             if event_type == "user_input_required" and attempt is not None:
                 attempt.status = "waiting_input"
-                self._mark_candidate_selection_waiting(attempt, payload)
+                # USER_INPUT_REQUIRED is shared by ask_user_question,
+                # candidate selection and deployment confirmation. Only the
+                # candidate boundary belongs in the candidate replay model;
+                # treating confirmation actions as candidates makes startup
+                # replay render "confirm/cancel" as architecture plans.
+                if payload.get("kind") == "candidate_selection" or (
+                    not payload.get("kind") and attempt.ui_mode == "candidate_selection"
+                ):
+                    self._mark_candidate_selection_waiting(attempt, payload)
                 continue
 
             if event_type == "candidate_selection_ready" and attempt is not None:

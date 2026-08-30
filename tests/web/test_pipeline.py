@@ -330,6 +330,33 @@ def test_pipeline_state_route_replays_events_after_sequence_and_preserves_snapsh
     assert [event["eventId"] for event in data["events"]] == ["evt-2"]
 
 
+def test_web_pipeline_state_route_keeps_full_snapshot_for_the_local_web_app(monkeypatch, tmp_path) -> None:
+    """Web 版恢复必须拿到完整快照：精简只针对 ROS 控制台走的 A2A HTTP 接口。
+
+    A2A 那边 ``client_pipeline_state`` 会裁掉 ``seenEventIds`` 之类只服务端用得上的字段
+    （见 ``tests/a2a/test_app.py``）。本地 Web 应用是同进程直接调 ``get_state``，
+    前端读的是完整 ``display``，所以这里必须一个字段都不少。
+    """
+
+    app, config_dir = _config_app(monkeypatch, tmp_path)
+    project = tmp_path / "project"
+    _write_pipeline_state(config_dir, project)
+    pipeline_dir = SessionStorage().session_dir(str(project), "session-1") / "pipeline"
+    store = A2APipelineSnapshotStore(pipeline_dir)
+    snapshot = store.load()
+    assert snapshot is not None
+    snapshot["display"]["toolResults"].append({"toolUseId": "call-1", "content": "tool output"})
+    store.save(snapshot)
+
+    with TestClient(app) as client:
+        response = client.get("/api/pipeline/state", params={"contextId": "ctx-1"})
+
+    assert response.status_code == 200
+    payload = response.json()["snapshot"]
+    assert payload["seenEventIds"] == ["evt-1"]
+    assert payload["display"]["toolResults"] == [{"toolUseId": "call-1", "content": "tool output"}]
+
+
 def test_pipeline_state_route_resolves_state_by_task_id(monkeypatch, tmp_path) -> None:
     app, config_dir = _config_app(monkeypatch, tmp_path)
     _write_pipeline_state(config_dir, tmp_path / "project")
@@ -657,6 +684,42 @@ def test_pipeline_message_route_publishes_user_message_bubble(tmp_path) -> None:
     assert user_event["payload"]["source"] == "pipeline"
     assert user_event["payload"]["fileRefs"] == ["main.tf"]
     assert user_event["payload"]["imageIds"] == []
+
+
+def test_solution_first_structured_confirmation_uses_display_label_but_keeps_raw_pipeline_input(tmp_path) -> None:
+    import time
+
+    from iac_code.web.app import create_app
+    from iac_code.web.session_manager import WebSessionManager
+
+    project = tmp_path / "project"
+    project.mkdir()
+    manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=project)
+    runner = _RecordingPipelineActionRunner()
+    session = manager.create_session(
+        mode="pipeline",
+        pipeline_name="selling_solution_first",
+        session_id="session-1",
+    )
+    app = create_app(session_manager=manager, pipeline_action_runner_factory=lambda: runner)
+    raw = json.dumps({"action": "confirm", "parameter_overrides": {}}, ensure_ascii=False)
+
+    with TestClient(app) as client:
+        response = client.post(f"/api/sessions/{session.session_id}/messages", json={"text": raw})
+        assert response.status_code == 202
+        deadline = time.monotonic() + 5
+        events: list[dict[str, Any]] = []
+        while time.monotonic() < deadline:
+            events = session.events.replay_after(0)
+            if any(event["type"] == "turn.done" for event in events):
+                break
+            time.sleep(0.02)
+
+    user_event = next(event for event in events if event["type"] == "user.message")
+    assert user_event["payload"]["text"] == "Confirm deployment"
+    assert runner.start_calls[0]["message"] == raw
+    stored = [message for message in manager.load_resume_messages(session.session_id) if message.role == "user"]
+    assert [message.get_text() for message in stored] == ["Confirm deployment"]
 
 
 def test_pipeline_message_route_sets_session_title_from_first_prompt(tmp_path) -> None:

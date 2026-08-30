@@ -1,12 +1,16 @@
-import * as api from "./api.js?v=web-repl-ui-311";
+import * as api from "./api.js?v=web-repl-ui-312";
 import { createComposerController } from "./components/composer.js?v=session-model-v20";
 import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v5";
-import { renderPipelineWorkspace } from "./components/pipeline.js?v=pipeline-arch-v7";
-import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v25";
+import {
+  deploymentConfirmationKey,
+  renderDeploymentConfirmationPanel,
+  renderPipelineWorkspace,
+} from "./components/pipeline.js?v=pipeline-solution-confirm-v3";
+import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v26";
 import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v58";
-import { createOutputController } from "./components/output_panel.js?v=output-panel-v23";
+import { createOutputController } from "./components/output_panel.js?v=output-panel-v24";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
-import { reduceEvent } from "./events.js?v=web-repl-ui-319";
+import { reduceEvent } from "./events.js?v=web-repl-ui-323";
 import { applyDomI18n, t } from "./i18n.js?v=web-repl-ui-277";
 
 const root = document.getElementById("iac-code-web-root");
@@ -181,7 +185,17 @@ const PROJECT_THREAD_EXPANDED_LIMIT = 200;
 const DEFAULT_PIPELINE_NAME = "selling";
 const PIPELINE_OPTIONS = [
   { id: DEFAULT_PIPELINE_NAME, label: t("Sales pipeline"), detail: t("Pipeline planning, generation, and validation for sales scenarios") },
+  {
+    id: "selling_solution_first",
+    label: t("Sales pipeline (solution first)"),
+    detail: t("Pick one solution from priced architecture candidates first, then implement and deploy only that solution"),
+  },
 ];
+// 会话级候选状态是 latest-wins 的,候选行必须限定在真正做候选选择的步骤上,否则其他步骤会误渲染
+// 上一次的候选清单。selling 是 confirm_and_select,selling_solution_first 把规划与选择合成了
+// solution_planning_and_selection——两者都要显式列入白名单,不能改成「有候选就渲染」。
+const CANDIDATE_SELECTION_STEP_IDS = new Set(["confirm_and_select", "solution_planning_and_selection"]);
+const DEPLOYMENT_CONFIRMATION_STEP_ID = "materialize_selected_candidate";
 
 export function configureMarkdownLinkTargets(renderer) {
   const rules = renderer?.renderer?.rules;
@@ -630,6 +644,8 @@ function normalizeStoredMessage(message, index) {
     content,
     kind: typeof message.kind === "string" ? message.kind : "",
     pipelineStep: message.pipelineStep && typeof message.pipelineStep === "object" ? message.pipelineStep : null,
+    pipelineDiagram:
+      message.pipelineDiagram && typeof message.pipelineDiagram === "object" ? message.pipelineDiagram : null,
     thinking: typeof message.thinking === "string" ? message.thinking : "",
     toolUseIds: Array.isArray(message.toolUseIds) ? message.toolUseIds.map(text).filter(Boolean) : [],
     blocks: Array.isArray(message.blocks) ? message.blocks : [],
@@ -637,6 +653,8 @@ function normalizeStoredMessage(message, index) {
     // 读到 undefined→不渲染,重开会话时图片消失(实时 user.message 事件一直设置这两个字段)。
     imageIds: Array.isArray(message.imageIds) ? message.imageIds.map(text).filter(Boolean) : [],
     fileRefs: Array.isArray(message.fileRefs) ? message.fileRefs.map(text).filter(Boolean) : [],
+    pipelineInputKind: typeof message.pipelineInputKind === "string" ? message.pipelineInputKind : "",
+    pipelineInputStepId: typeof message.pipelineInputStepId === "string" ? message.pipelineInputStepId : "",
     status: "completed",
     sequence: index + 1,
     stored: true,
@@ -2580,7 +2598,7 @@ export function overlayDiagramOptimization(diagrams, state) {
   const optimizing = (state && state.diagramOptimizing) || {};
   const optimized = (state && state.diagramOptimized) || {};
   return (diagrams || []).map((d) => {
-    const idx = String(d.candidateIndex);
+    const idx = String(d.optimizationKey ?? d.candidateIndex);
     if (Object.prototype.hasOwnProperty.call(optimized, idx)) {
       const views = optimized[idx];
       const first = Array.isArray(views) && views.length ? views[0].mermaidSource : d.mermaidSource;
@@ -2597,6 +2615,205 @@ export function overlayDiagramOptimization(diagrams, state) {
   });
 }
 
+export function pipelineTranscriptDiagrams(candidateState = {}) {
+  const snapshotDiagrams = Array.isArray(candidateState.pipelineSnapshot?.display?.diagrams)
+    ? candidateState.pipelineSnapshot.display.diagrams
+    : [];
+  const liveDiagrams = Array.isArray(candidateState.diagrams) ? candidateState.diagrams : [];
+  const derivedDiagrams = Array.isArray(candidateState.webDiagrams) ? candidateState.webDiagrams : [];
+  // Step 1 的 show_architecture_plan 与 show_candidate_detail 是两个并行展示事件：前者
+  // 携带结构化规划图，后者携带架构粗估。按 candidateIndex 合并价格，避免预览图明明
+  // 已有 rough_cost 却显示“暂无询价信息”。snapshot 的 detail 有一层 detail 包装，live
+  // candidate.detail 则是扁平结构，两种形态在这里统一。
+  const priceByCandidate = new Map();
+  const snapshotDetails = Array.isArray(candidateState.pipelineSnapshot?.display?.candidateDetails)
+    ? candidateState.pipelineSnapshot.display.candidateDetails
+    : [];
+  const liveDetails = Array.isArray(candidateState.candidateDetails) ? candidateState.candidateDetails : [];
+  for (const raw of [...snapshotDetails, ...liveDetails]) {
+    if (!raw || typeof raw !== "object") continue;
+    const detail = raw.detail && typeof raw.detail === "object" ? raw.detail : raw;
+    const index = raw.candidateIndex ?? detail.candidateIndex;
+    if (index === undefined || index === null) continue;
+    priceByCandidate.set(String(index), {
+      costItems: Array.isArray(detail.costItems) ? detail.costItems : [],
+      totalMonthlyCost: text(detail.totalMonthlyCost),
+    });
+  }
+  const merged = new Map();
+  for (const diagram of [...snapshotDiagrams, ...liveDiagrams, ...derivedDiagrams]) {
+    if (!diagram || typeof diagram !== "object") {
+      continue;
+    }
+    const candidateIndex = diagram.candidateIndex;
+    const key =
+      candidateIndex !== null && candidateIndex !== undefined
+        ? `candidate:${candidateIndex}`
+        : `diagram:${text(diagram.diagramId || diagram.id || diagram.sourceRelPath || merged.size)}`;
+    const price = candidateIndex !== null && candidateIndex !== undefined
+      ? priceByCandidate.get(String(candidateIndex))
+      : null;
+    const diagramHasPrice =
+      Boolean(diagram.totalMonthlyCost) || (Array.isArray(diagram.costItems) && diagram.costItems.length > 0);
+    // diagramStage 是 DiagramEvent 的权威阶段。Step 1 的规划图由本地结构化数据一次性
+    // 渲染，事件阶段为 optimized，不能套用旧 selling 的后台优化三态而显示“待优化”。
+    merged.set(key, {
+      ...diagram,
+      ...(price && !diagramHasPrice ? price : {}),
+      optimized:
+        typeof diagram.optimized === "boolean"
+          ? diagram.optimized
+          : text(diagram.diagramStage) === "optimized",
+    });
+  }
+  return overlayDiagramOptimization([...merged.values()], candidateState);
+}
+
+function diagramCandidatePrice(diagram, candidateState = {}) {
+  const index = diagram?.candidateIndex;
+  const name = text(diagram?.candidateName);
+  const details = [
+    ...(Array.isArray(candidateState.pipelineSnapshot?.display?.candidateDetails)
+      ? candidateState.pipelineSnapshot.display.candidateDetails
+      : []),
+    ...(Array.isArray(candidateState.candidateDetails) ? candidateState.candidateDetails : []),
+  ];
+  let fallback = null;
+  for (let position = details.length - 1; position >= 0; position -= 1) {
+    const raw = details[position];
+    if (!raw || typeof raw !== "object") continue;
+    const detail = raw.detail && typeof raw.detail === "object" ? raw.detail : raw;
+    const detailIndex = raw.candidateIndex ?? detail.candidateIndex;
+    if (index !== undefined && index !== null && String(detailIndex) !== String(index)) continue;
+    const detailName = text(detail.candidateName || raw.candidateName);
+    const price = {
+      costItems: Array.isArray(detail.costItems) ? detail.costItems : [],
+      totalMonthlyCost: text(detail.totalMonthlyCost),
+    };
+    if (name && detailName === name) return price;
+    if (!fallback) fallback = price;
+  }
+  return fallback;
+}
+
+function sameDiagramIdentity(left, right) {
+  const leftId = text(left?.diagramId || left?.id);
+  const rightId = text(right?.diagramId || right?.id);
+  if (leftId && rightId) return leftId === rightId;
+  return (
+    String(left?.candidateIndex ?? "") === String(right?.candidateIndex ?? "") &&
+    text(left?.candidateName) === text(right?.candidateName) &&
+    text(left?.mermaidSource) === text(right?.mermaidSource)
+  );
+}
+
+function sameCandidateIdentity(left, right) {
+  const leftIndex = left?.candidateIndex;
+  const rightIndex = right?.candidateIndex;
+  if (leftIndex !== undefined && leftIndex !== null && rightIndex !== undefined && rightIndex !== null) {
+    if (String(leftIndex) !== String(rightIndex)) return false;
+  }
+  const leftName = text(left?.candidateName);
+  const rightName = text(right?.candidateName);
+  return !leftName || !rightName || leftName === rightName;
+}
+
+export function pipelineTimelineDiagramState(rawDiagram, candidateState = {}) {
+  const price = diagramCandidatePrice(rawDiagram, candidateState);
+  const hasPrice =
+    Boolean(rawDiagram?.totalMonthlyCost) ||
+    (Array.isArray(rawDiagram?.costItems) && rawDiagram.costItems.length > 0);
+  const diagram = {
+    ...rawDiagram,
+    ...(price && !hasPrice ? price : {}),
+    optimized:
+      typeof rawDiagram?.optimized === "boolean"
+        ? rawDiagram.optimized
+        : text(rawDiagram?.diagramStage) === "optimized",
+  };
+  const current = pipelineTranscriptDiagrams(candidateState).find((item) =>
+    sameDiagramIdentity(item, diagram),
+  );
+  const offered = (Array.isArray(candidateState.webCandidates) ? candidateState.webCandidates : []).some((item) =>
+    sameCandidateIdentity(item, diagram),
+  );
+  const selected = resolvePipelineSelectedCandidate(candidateState);
+  const isSelected = Boolean(selected && sameCandidateIdentity(selected, diagram));
+  const canSelect =
+    Boolean(current) &&
+    offered &&
+    !isSelected &&
+    candidateState.currentTurnActive !== true &&
+    pipelineSelectionRequiresWorkspace(candidateState);
+  return { diagram, isCurrent: Boolean(current), isSelected, canSelect };
+}
+
+export function renderPipelineTimelineDiagram(message, options = {}) {
+  const { diagram, isSelected, canSelect } = pipelineTimelineDiagramState(
+    message?.pipelineDiagram || {},
+    options.state || {},
+  );
+  const group = document.createElement("div");
+  group.className = "pipeline-step-diagrams pipeline-timeline-diagram";
+  const row = document.createElement("div");
+  row.className = isSelected ? "pipeline-step-diagram-item is-selected" : "pipeline-step-diagram-item";
+
+  const link = document.createElement("button");
+  link.type = "button";
+  link.className = "pipeline-step-diagram-link";
+  link.textContent = `${t("View diagram")} · ${text(diagram.candidateName)}`;
+  link.addEventListener("click", () => {
+    const open = options.toggleDiagram?.(diagram);
+    link.className = open === true ? "pipeline-step-diagram-link is-open" : "pipeline-step-diagram-link";
+  });
+  row.append(link);
+
+  if (isSelected) {
+    const check = document.createElement("span");
+    check.className = "pipeline-step-diagram-check";
+    check.textContent = "✓";
+    check.setAttribute("aria-label", t("Selected"));
+    row.append(check);
+  } else {
+    const selectButton = document.createElement("button");
+    selectButton.type = "button";
+    selectButton.className = canSelect
+      ? "pipeline-step-select-button"
+      : "pipeline-step-select-button is-disabled";
+    selectButton.textContent = t("Select this option");
+    selectButton.disabled = !canSelect || typeof options.onSelectCandidate !== "function";
+    selectButton.addEventListener("click", () => {
+      if (selectButton.disabled || selectSubmitting) return;
+      if (armedSelectButton !== selectButton) {
+        disarmSelectButton();
+        selectButton.className = "pipeline-step-select-button is-confirming";
+        selectButton.textContent = t("Confirm selection?");
+        armedSelectButton = selectButton;
+        return;
+      }
+      armedSelectButton = null;
+      selectSubmitting = true;
+      selectButton.className = "pipeline-step-select-button is-submitting";
+      selectButton.disabled = true;
+      selectButton.textContent = t("Selecting…");
+      Promise.resolve(
+        options.onSelectCandidate({
+          candidateName: diagram.candidateName,
+          candidateIndex: diagram.candidateIndex,
+        }),
+      ).catch(() => {
+        selectSubmitting = false;
+        selectButton.className = "pipeline-step-select-button";
+        selectButton.disabled = false;
+        selectButton.textContent = t("Select this option");
+      });
+    });
+    row.append(selectButton);
+  }
+  group.append(row);
+  return group;
+}
+
 // 架构图优化三态(供输出面板行/预览头挂徽标):
 //  - "optimizing":该候选正在后台优化(diagram.optimizing 事件在途,或 resync 后由 /outputs 的
 //    后端 inflight 标志恢复) → 「优化中」
@@ -2606,7 +2823,7 @@ export function overlayDiagramOptimization(diagrams, state) {
 // 仅对「候选方案架构图」(带 candidateIndex)判态;优化只在 step4 触发,故草图在生成
 // 阶段(step1-3)即以 pending 呈现,正是用户「早就识别出方案架构图」的那段窗口。
 export function diagramOptimizationState(item, state) {
-  const idx = item && item.candidateIndex;
+  const idx = item && (item.optimizationKey ?? item.candidateIndex);
   if (idx === undefined || idx === null) return "none";
   const key = String(idx);
   const optimizing = (state && state.diagramOptimizing) || {};
@@ -2638,6 +2855,7 @@ export function renderPipelineMarkerGroup(message, options = {}) {
   // 稳定键（markerId，live 与 reload 同源）让用户的展开/收起态跨帧重建保留，不再被自动收起。
   // 等待输入的步骤打上 forceOpen 标记，applyDetailsOpenOverrides 会跳过它，保证强制展开。
   details.dataset.openKey = `mk:${text(message.messageId || message.id || "")}`;
+  syncPipelineDetailsLifecycle(details, status);
   details.open = status === "working" || status === "" || awaitingInput;
   if (awaitingInput) {
     details.dataset.forceOpen = "1";
@@ -2749,7 +2967,7 @@ export function renderPipelineMarkerGroup(message, options = {}) {
   // 提示文字等所有内联消息落进 body 之后再把它 append 到 body 末尾，保证按钮位于提示文字
   // 下方（marker 构造时 body 为空、prompt 后到流式追加，若在此直接挂载会浮在提示之上）。
   let diagramGroup = null;
-  if (stepId === "confirm_and_select" && candidateRows.length) {
+  if (CANDIDATE_SELECTION_STEP_IDS.has(stepId) && candidateRows.length && options.inlineCandidateDiagrams !== true) {
     diagramGroup = document.createElement("div");
     diagramGroup.className = "pipeline-step-diagrams";
     for (const item of candidateRows) {
@@ -2846,7 +3064,56 @@ export function renderPipelineMarkerGroup(message, options = {}) {
     }
   }
 
-  return { body, details, diagramGroup };
+  // Step 2 of solution-first materializes the selected plan into the first real
+  // ROS template.  Show that final template diagram in its own step, while the
+  // candidate-selection branch above remains limited to candidate-indexed plans.
+  if (stepId === DEPLOYMENT_CONFIRMATION_STEP_ID) {
+    const finalDiagrams = diagrams.filter(
+      (item) => item && item.candidateIndex == null && text(item.stepId) === DEPLOYMENT_CONFIRMATION_STEP_ID,
+    );
+    if (finalDiagrams.length) {
+      diagramGroup = document.createElement("div");
+      diagramGroup.className = "pipeline-step-diagrams";
+      for (const diagram of finalDiagrams) {
+        const row = document.createElement("div");
+        row.className = "pipeline-step-diagram-item";
+        const link = document.createElement("button");
+        link.type = "button";
+        link.className = "pipeline-step-diagram-link";
+        const sourcePath = text(diagram.sourceRelPath).replaceAll("\\", "/");
+        const label = text(diagram.candidateName) || sourcePath.split("/").filter(Boolean).pop() || "";
+        link.textContent = label ? `${t("View diagram")} · ${label}` : t("View diagram");
+        link.addEventListener("click", () => {
+          const open = toggleDiagram(diagram);
+          link.className = open === true ? "pipeline-step-diagram-link is-open" : "pipeline-step-diagram-link";
+        });
+        row.append(link);
+        // Step 2 的最终模板图复用旧 selling 的后台语义优化。Step 1 的规划图已经是
+        // 最终结构化展示，不会进入这里，也不会再出现“待优化”徽标。
+        if (diagram.optimizing) {
+          const badge = document.createElement("span");
+          badge.className = "diagram-optimizing";
+          badge.textContent = t("Optimizing");
+          row.append(badge);
+        } else if (!diagram.optimized) {
+          const badge = document.createElement("span");
+          badge.className = "diagram-pending";
+          badge.textContent = t("Pending optimization");
+          row.append(badge);
+        }
+        diagramGroup.append(row);
+      }
+    }
+  }
+
+  const confirmationPanel =
+    awaitingInput && stepId === DEPLOYMENT_CONFIRMATION_STEP_ID
+      ? renderDeploymentConfirmationPanel(options.state || {}, {
+          onDeploymentConfirmation: options.onDeploymentConfirmation,
+        })
+      : null;
+
+  return { body, details, diagramGroup, confirmationPanel };
 }
 
 // 流水线四种终态 → 中文文案 / 颜色类 / 图标。与后端 handoff.py 的 TerminalOutcome
@@ -3552,11 +3819,28 @@ function syncMessageStackOverflow(stack) {
 // (data-open-key) 记住每个 details 的用户意图，重建后恢复；只记录“用户主动点击”产生的态，
 // 不记录渲染时的程序化默认（toggle 事件异步派发，无法用标志位区分，故改用 click 捕获）。
 const detailsOpenOverrides = new Map();
+const pipelineDetailsLifecycleStatuses = new Map();
+
+// A lifecycle transition owns the initial open state exactly once: working/input
+// opens, terminal closes.  Subsequent renders at the same status keep the user's
+// manual choice instead of fighting it every frame.
+function syncPipelineDetailsLifecycle(details, status) {
+  const key = details?.dataset?.openKey;
+  if (!key) {
+    return;
+  }
+  const previous = pipelineDetailsLifecycleStatuses.get(key);
+  if (previous !== undefined && previous !== status) {
+    detailsOpenOverrides.delete(key);
+  }
+  pipelineDetailsLifecycleStatuses.set(key, status);
+}
 
 // 清空用户展开态（切换/重载会话时调用）：不同流水线会话可能复用同一 markerId（如
 // plmk-step-intent_parsing-1），不清会串台。
 function clearDetailsOpenOverrides() {
   detailsOpenOverrides.clear();
+  pipelineDetailsLifecycleStatuses.clear();
 }
 
 // 渲染后统一回放用户展开态：凡带 data-open-key 且用户有过记录的 details，覆盖其默认 open。
@@ -3644,6 +3928,50 @@ function scheduleMessageStackOverflowSync(stack) {
 // DFS 输出「标记→其全部子孙→下一同级」,使渲染循环的顺序嵌套与真实归属一致。普通对话的消息全部
 // 落到 TOP 且保持原序号次序,输出与输入完全一致,零风险。
 const PIPELINE_CONTAINER_KINDS = new Set(["pipeline_step", "pipeline_candidate", "pipeline_sub_step"]);
+
+function settlePlanningDiagramEpoch(messages, intentionallyOmitted) {
+  const regular = [];
+  const latestDiagramByCandidate = new Map();
+  for (const message of messages) {
+    if (message.kind !== "pipeline_diagram") {
+      regular.push(message);
+      continue;
+    }
+    const diagram = message.pipelineDiagram || {};
+    const index = diagram.candidateIndex;
+    const key =
+      index !== null && index !== undefined
+        ? `candidate:${index}`
+        : `diagram:${text(diagram.candidateName || diagram.diagramId || message.messageId)}`;
+    // 同一轮里 guard 重试/重新展示可能为同一候选发出多张图。该轮最终图才是
+    // 用户可选择的权威版本；Map 删除后重插可同时保留最终事件的相对顺序。
+    const superseded = latestDiagramByCandidate.get(key);
+    if (superseded) intentionallyOmitted.add(superseded);
+    latestDiagramByCandidate.delete(key);
+    latestDiagramByCandidate.set(key, message);
+  }
+  return [...regular, ...latestDiagramByCandidate.values()];
+}
+
+function settlePlanningTimeline(messages, stepId, intentionallyOmitted) {
+  const settled = [];
+  let epoch = [];
+  const flush = () => {
+    settled.push(...settlePlanningDiagramEpoch(epoch, intentionallyOmitted));
+    epoch = [];
+  };
+  for (const message of messages) {
+    if (message.role === "user" && text(message.pipelineInputStepId) === stepId) {
+      flush();
+      settled.push(message);
+    } else {
+      epoch.push(message);
+    }
+  }
+  flush();
+  return settled;
+}
+
 export function regroupPipelineMessages(messages) {
   if (!Array.isArray(messages) || messages.length === 0) {
     return messages;
@@ -3651,8 +3979,18 @@ export function regroupPipelineMessages(messages) {
   const idOf = (message) => message.messageId || message.id || null;
   const markerById = new Map();
   const markerIdByGroupId = new Map();
+  const ownerMarkerIdByMessage = new Map();
+  const latestMarkerIdByStepId = new Map();
   for (const message of messages) {
     if (!PIPELINE_CONTAINER_KINDS.has(message.kind)) {
+      const stepId =
+        message.role === "user"
+          ? text(message.pipelineInputStepId)
+          : message.kind === "pipeline_diagram"
+            ? text(message.pipelineDiagram?.stepId)
+            : "";
+      const ownerId = stepId ? latestMarkerIdByStepId.get(stepId) : null;
+      if (ownerId) ownerMarkerIdByMessage.set(message, ownerId);
       continue;
     }
     const id = idOf(message);
@@ -3664,6 +4002,8 @@ export function regroupPipelineMessages(messages) {
     if (groupId) {
       markerIdByGroupId.set(String(groupId), id);
     }
+    const stepId = text(message.pipelineStep?.stepId);
+    if (stepId) latestMarkerIdByStepId.set(stepId, id);
   }
   // 没有任何流水线容器标记 → 与原数组等价,直接返回,避免多余工作。
   if (markerById.size === 0) {
@@ -3671,6 +4011,10 @@ export function regroupPipelineMessages(messages) {
   }
   const TOP = Symbol("pipeline-top");
   const parentKeyOf = (message) => {
+    const explicitOwner = ownerMarkerIdByMessage.get(message);
+    if (explicitOwner && markerById.has(explicitOwner)) {
+      return explicitOwner;
+    }
     const id = idOf(message);
     if (PIPELINE_CONTAINER_KINDS.has(message.kind)) {
       // 容器:挂到其 parentGroupId 对应的标记下;无父(顶层 step)→ TOP。
@@ -3694,6 +4038,7 @@ export function regroupPipelineMessages(messages) {
     return TOP;
   };
   const children = new Map();
+  const intentionallyOmitted = new Set();
   children.set(TOP, []);
   for (const message of messages) {
     const key = parentKeyOf(message);
@@ -3701,6 +4046,19 @@ export function regroupPipelineMessages(messages) {
       children.set(key, []);
     }
     children.get(key).push(message);
+  }
+  // selling_solution_first Step 1 允许用户在候选选择阶段直接替换目标。每条用户输入
+  // 划分一个规划段：段内 agent loop 保持原序，架构图在该段结束时展示；若同一候选
+  // 因 guard 重试展示多次，只保留本段最终图。旧段最终图仍保留，按钮由当前候选状态禁用。
+  for (const [markerId, marker] of markerById.entries()) {
+    if (text(marker.pipelineStep?.stepId) !== "solution_planning_and_selection") continue;
+    const markerChildren = children.get(markerId);
+    if (markerChildren) {
+      children.set(
+        markerId,
+        settlePlanningTimeline(markerChildren, "solution_planning_and_selection", intentionallyOmitted),
+      );
+    }
   }
   const ordered = [];
   const emit = (message) => {
@@ -3717,10 +4075,10 @@ export function regroupPipelineMessages(messages) {
     emit(message);
   }
   // 防御:若某些容器因数据异常成环/失联导致未被 DFS 覆盖,补回原序,绝不丢消息。
-  if (ordered.length !== messages.length) {
+  if (ordered.length !== messages.length - intentionallyOmitted.size) {
     const seen = new Set(ordered);
     for (const message of messages) {
-      if (!seen.has(message)) {
+      if (!seen.has(message) && !intentionallyOmitted.has(message)) {
         ordered.push(message);
       }
     }
@@ -3751,6 +4109,7 @@ function renderMessages(state) {
   });
   // 序号排序后再按父子关系把并行候选子树重排成连续段（修复方案子 step 错位；见 regroupPipelineMessages）。
   const orderedMessages = regroupPipelineMessages(messages);
+  const hasInlinePlanningDiagrams = orderedMessages.some((message) => message.kind === "pipeline_diagram");
   // 转录尾部最新一张工具卡：保持展开直到下一条消息/工具到来才收起，避免工具"闪一下"（Issue 3）。
   const latestToolUseId = latestToolUseIdForTranscript(orderedMessages, state);
   // 流水线会话:进度不再走轮询。executor 发出的细粒度 A2A 信封由后端翻译器(pipeline_transcript)
@@ -3919,28 +4278,53 @@ function renderMessages(state) {
         pipelineStack.pop();
       }
       const group = renderPipelineMarkerGroup(message, {
-        diagrams: overlayDiagramOptimization(state.webDiagrams || [], state),
+        diagrams: pipelineTranscriptDiagrams(state),
         candidates: state.webCandidates || [],
         toggleDiagram: (item) => outputController?.toggleDiagramPreview?.(item),
         onSelectCandidate: (item) =>
           handleSelectPipelineCandidate({ candidateName: item.candidateName, candidateIndex: item.candidateIndex }),
+        onDeploymentConfirmation: handlePipelineDeploymentConfirmation,
+        state,
         selectedCandidate: resolvePipelineSelectedCandidate(state),
+        inlineCandidateDiagrams: hasInlinePlanningDiagrams,
       });
       pipelineStack[pipelineStack.length - 1].body.append(group.details);
-      pipelineStack.push({ depth, body: group.body });
+      pipelineStack.push({ depth, body: group.body, stepId: text(message.pipelineStep?.stepId || "") });
       stepGroups.push({
         details: group.details,
         body: group.body,
         status: text(message.pipelineStep?.status || ""),
         diagramGroup: group.diagramGroup || null,
+        confirmationPanel: group.confirmationPanel || null,
       });
+      continue;
+    }
+
+    if (message.kind === "pipeline_diagram") {
+      flushPendingTurn(false);
+      pipelineStack[pipelineStack.length - 1].body.append(
+        renderPipelineTimelineDiagram(message, {
+          state,
+          toggleDiagram: (item) => outputController?.toggleDiagramPreview?.(item),
+          onSelectCandidate: (item) =>
+            handleSelectPipelineCandidate({
+              candidateName: item.candidateName,
+              candidateIndex: item.candidateIndex,
+            }),
+        }),
+      );
       continue;
     }
 
     // 流水线步骤里出现的用户消息（如对 confirm_and_select 的选择答复「0」）并不属于任何步骤，
     // 它是步骤之间的一次用户操作。收起当前流水线栈，让它作为独立用户气泡在两个步骤标记之间
     // 于顶层渲染——否则会被折叠进已完成（reload 后收起）的步骤组里而彻底不可见（Issue 2）。
-    if (message.role === "user" && pipelineStack.length > 1) {
+    if (
+      message.role === "user" &&
+      pipelineStack.length > 1 &&
+      (!message.pipelineInputStepId ||
+        text(pipelineStack[pipelineStack.length - 1].stepId) !== text(message.pipelineInputStepId))
+    ) {
       while (pipelineStack.length > 1) {
         pipelineStack.pop();
       }
@@ -3972,6 +4356,9 @@ function renderMessages(state) {
   for (const group of stepGroups) {
     if (group.diagramGroup) {
       group.body.append(group.diagramGroup);
+    }
+    if (group.confirmationPanel) {
+      group.body.append(group.confirmationPanel);
     }
   }
   // 流水线事件间隙：回合仍活跃时，给每个进行中的叶子步骤（可能多个并行）在其 body 内各补一枚
@@ -4352,7 +4739,12 @@ function renderPipeline(state) {
   if (!workspace) {
     return;
   }
-  workspace.replaceChildren(renderPipelineWorkspace(state, { onSelectCandidate: handleSelectPipelineCandidate }));
+  workspace.replaceChildren(
+    renderPipelineWorkspace(state, {
+      onSelectCandidate: handleSelectPipelineCandidate,
+      onDeploymentConfirmation: handlePipelineDeploymentConfirmation,
+    }),
+  );
 }
 
 // 遗留的 pipeline 工作区模态入口已从产品中移除:主区内联体验已完整覆盖流水线，
@@ -5344,13 +5736,41 @@ async function loadPipelineState(session) {
   }
 }
 
+export function pipelinePendingQuestionRequest(snapshot = {}) {
+  const pending = snapshot?.pendingInput || snapshot?.control?.waitingInput;
+  if (!pending || text(pending.kind) !== "ask_user_question") {
+    return null;
+  }
+  const toolUseId = text(pending.toolUseId);
+  const requestId = text(pending.inputId || (toolUseId ? `ask-${toolUseId}` : ""));
+  if (!requestId) {
+    return null;
+  }
+  return {
+    requestId,
+    payload: {
+      pipeline: true,
+      toolUseId,
+      question: text(pending.question || pending.prompt),
+      options: Array.isArray(pending.options) ? pending.options : [],
+      allowFreeText: pending.allowFreeText === true,
+      freeTextPrompt: text(pending.freeTextPrompt),
+    },
+  };
+}
+
 function pipelineActionMessage(result = {}) {
   if (!result || typeof result !== "object") {
     return "";
   }
   return [
-    result.accepted === true ? "accepted" : result.status,
-    result.action || result.message || result.detail,
+    result.accepted === true ? t("Accepted") : result.status,
+    result.message || result.detail || {
+      started: t("Pipeline started"),
+      candidate_selected: t("Candidate selected"),
+      interrupt: t("Interrupt submitted"),
+      permission_recovered: t("Permission recovered"),
+    }[text(result.action)] || "",
   ]
     .map(text)
     .filter(Boolean)
@@ -5465,7 +5885,7 @@ export function createPipelineCandidateSelectionHandler({ selectCandidate, getSt
         ...getState(),
         pipelineActionResult: result,
         pipelineActionError: "",
-        pipelineNotice: pipelineActionMessage(result) || "accepted",
+        pipelineNotice: pipelineActionMessage(result) || t("Accepted"),
         pipelineSelectedCandidate: {
           candidateName: selection.candidateName,
           candidateIndex: selection.candidateIndex,
@@ -5504,6 +5924,48 @@ const handleSelectPipelineCandidate = createPipelineCandidateSelectionHandler({
   renderState: render,
 });
 
+async function handlePipelineDeploymentConfirmation(input = {}) {
+  const sessionId = input.sessionId || state.currentSessionId;
+  if (!sessionId) {
+    throw new Error(t("Pipeline session is unavailable."));
+  }
+  const action = text(input.action).trim();
+  const payload = {
+    action,
+    parameter_overrides:
+      input.parameterOverrides && typeof input.parameterOverrides === "object" ? input.parameterOverrides : {},
+  };
+  const pendingKey = deploymentConfirmationKey(state);
+  if (state.currentSessionId === sessionId && pendingKey) {
+    state = { ...state, pipelineConfirmationSubmittingKey: pendingKey };
+    render(state);
+  }
+  let result;
+  try {
+    result = await api.postMessage(sessionId, { text: JSON.stringify(payload) });
+  } catch (error) {
+    if (state.currentSessionId === sessionId && state.pipelineConfirmationSubmittingKey === pendingKey) {
+      state = {
+        ...state,
+        pipelineConfirmationSubmittingKey: "",
+        pipelineActionError: error instanceof Error ? error.message : String(error),
+      };
+      render(state);
+    }
+    return Promise.reject(error);
+  }
+  if (state.currentSessionId === sessionId) {
+    state = {
+      ...state,
+      pipelineActionResult: result,
+      pipelineActionError: "",
+      pipelineNotice: pipelineActionMessage(result) || t("Accepted"),
+    };
+    render(state);
+  }
+  return result;
+}
+
 async function loadSession(sessionId, options = {}) {
   const generation = Number.isInteger(options.generation) ? options.generation : ++sessionLoadGeneration;
   const previousSessionId = state.currentSessionId || null;
@@ -5520,6 +5982,13 @@ async function loadSession(sessionId, options = {}) {
     return false;
   }
   const { messages, tools: storedTools } = buildStoredTranscript(storedMessages);
+  const pendingQuestions = Object.fromEntries(
+    (session.pendingQuestions || []).map((request) => [request.requestId, request]),
+  );
+  const pipelineQuestion = pipelinePendingQuestionRequest(hydratedPipelineState.pipelineSnapshot);
+  if (pipelineQuestion && !pendingQuestions[pipelineQuestion.requestId]) {
+    pendingQuestions[pipelineQuestion.requestId] = pipelineQuestion;
+  }
   state = {
     ...emptyState(),
     sessions: state.sessions || [],
@@ -5531,7 +6000,7 @@ async function loadSession(sessionId, options = {}) {
     messages,
     tools: storedTools,
     permissions: Object.fromEntries((session.pendingPermissions || []).map((request) => [request.requestId, request])),
-    questions: Object.fromEntries((session.pendingQuestions || []).map((request) => [request.requestId, request])),
+    questions: pendingQuestions,
     elicitations: Object.fromEntries(
       (session.pendingElicitations || []).map((request) => [request.requestId, request]),
     ),
@@ -5973,6 +6442,19 @@ function promoteMaterializedDraftSession(event = {}) {
   render(state);
 }
 
+function handleSubmitAccepted(event = {}) {
+  promoteMaterializedDraftSession(event);
+  if (event.kind !== "message" || event.sessionId !== state.currentSessionId) {
+    return;
+  }
+  const pendingKey = deploymentConfirmationKey(state);
+  if (!pendingKey) {
+    return;
+  }
+  state = { ...state, pipelineConfirmationSubmittingKey: pendingKey };
+  render(state);
+}
+
 const RAIL_WIDTH_STORAGE_KEY = "iac-code:rail-width";
 const RAIL_DEFAULT_WIDTH = 264;
 const RAIL_MIN_WIDTH = 216;
@@ -6337,7 +6819,7 @@ async function start() {
       isPipelineMode: () =>
         text(state.currentSession?.mode) === "pipeline" ||
         Boolean(state.newSessionDraft?.active && state.newSessionDraft?.mode === "pipeline"),
-      onSubmitAccepted: promoteMaterializedDraftSession,
+      onSubmitAccepted: handleSubmitAccepted,
       onPermissionModeChange: (mode) => {
         if (state.newSessionDraft?.active) {
           setDraftSessionPatch({ permissionMode: mode });

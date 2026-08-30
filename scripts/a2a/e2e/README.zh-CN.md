@@ -9,6 +9,11 @@
 一次性副本中刷新并轮换 OAuth refresh token，导致源配置在下一个场景失效。随后把服务端策略固定为
 `300 / 300 / 30`，启用共享备份提交协议，使用唯一的 Stack/VSwitch 名称，并在结束时仅按精确名称做兜底清理。
 
+`--run-dir` 仍是日志和证据的输出根目录，可以继续使用 `/tmp/...` 等路径。runner 会自动把 Qoder 工作区和
+ROS Agent manager 状态放到 Python 的 `tempfile.gettempdir()` 下，因为托管 Skill 只接受位于当前用户主目录
+或 Python 所识别临时目录中的本地 manager 路径。这一点在 macOS 上尤其重要：`/tmp` 会解析为
+`/private/tmp`，而 Python 通常返回另一个用户级临时目录。
+
 Qoder 的 host 权限绕过只用于允许测试驱动执行本地 Bash/文件操作，不会批准 ROS Agent 权限。隔离的 iac-code
 配置使用默认权限模式，显式允许辅助工具并要求云资源变更工具确认；A2A server 同时保持
 `auto_approve_permissions: false`，非只读云操作仍必须通过带完整关联字段的 StartChat 权限回答。
@@ -79,6 +84,12 @@ uv run pytest -q tests/a2a_e2e/test_permission_wait_restart.py
 进程重启矩阵覆盖 Normal/Pipeline × allow/deny。Sub Pipeline fixture 断言只生成一次拒绝 ToolResult、
 Agent loop 继续、父 Pipeline 进入 candidate 选择并完成，且全程没有 grace、持久化 permission checkpoint
 或权限关键备份。
+
+同一套重启测试还覆盖 `selling_solution_first` 的三个步骤
+（`solution_planning_and_selection`、`materialize_selected_candidate`、`deploying`）以及
+Pipeline handoff 后的普通对话。每个作用域都分别执行 `allow_once` 和 `deny`，严格只触发一次权限，
+在回答前重启真实 HTTP A2A server，并校验安全 operation/参数投影。fixture 只执行确定性的本地工具，
+不会产生真实云写操作。
 
 本目录包含用于 A2A pipeline 会话恢复和脱敏回归的 headless 端到端检查。Runner 会驱动公开的
 A2A JSON-RPC streaming endpoint 并记录 SSE 事件和 pipeline snapshot。恢复场景会用 `SIGKILL`

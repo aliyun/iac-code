@@ -22,6 +22,10 @@ SELLING_IAC_ALIYUN_SKILLS = (
     "iac-aliyun-cost",
     "iac-aliyun-deploying",
 )
+SELLING_SOLUTION_FIRST_REFERENCE_SKILLS = (
+    "iac-aliyun-deploying",
+    "iac-aliyun-materialize-selected-candidate",
+)
 INSTALL_REQUIRES = [
     "anthropic>=0.40",
     "pydantic>=2.0",
@@ -270,20 +274,33 @@ def _copy_reference_tree(source: Path, target: Path) -> None:
         _copy_reference_entry(child, target / child.name)
 
 
+def _replace_with_materialized_tree(source: Path, target: Path) -> None:
+    """Replace a source link/placeholder with a real directory tree in a release artifact."""
+    if target.is_symlink() or target.is_file():
+        target.unlink()
+    elif target.exists():
+        shutil.rmtree(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _copy_reference_tree(source, target)
+
+
 def _copy_selling_skill_references_to_package_root(package_root) -> None:
-    """Expand selling-skill reference symlinks into real dirs under an iac_code package root."""
+    """Materialize shared selling skills/references under an iac_code package root."""
     if not SELLING_REFERENCES_DIR.is_dir():
         raise RuntimeError("references directory not found: %s" % SELLING_REFERENCES_DIR)
 
     package_root = Path(package_root)
+    _replace_with_materialized_tree(
+        SELLING_REFERENCES_DIR,
+        package_root / "pipeline" / "selling" / "references",
+    )
     for skill_name in SELLING_IAC_ALIYUN_SKILLS:
         target = package_root / "pipeline" / "selling" / "skills" / skill_name / "references"
-        if target.is_symlink() or target.is_file():
-            target.unlink()
-        elif target.exists():
-            shutil.rmtree(target)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        _copy_reference_tree(SELLING_REFERENCES_DIR, target)
+        _replace_with_materialized_tree(SELLING_REFERENCES_DIR, target)
+
+    solution_first_skills = package_root / "pipeline" / "selling_solution_first" / "skills"
+    for skill_name in SELLING_SOLUTION_FIRST_REFERENCE_SKILLS:
+        _replace_with_materialized_tree(SELLING_REFERENCES_DIR, solution_first_skills / skill_name / "references")
 
 
 def _copy_selling_skill_references(build_lib: str) -> None:

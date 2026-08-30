@@ -135,12 +135,15 @@ permissions:
 | 模式 | 含义 |
 |---|---|
 | `bash` | 匹配所有 bash 命令（裸工具名）。 |
+| `bash(**)` | 显式允许所有 Bash 命令，包括命令分析器判定为复杂的形式。 |
 | `bash(git *)` | 匹配以 `git` 开头的 bash 命令。 |
 | `bash(curl:*)` | 匹配以 `curl` 开头的 bash 命令。 |
 | `write_file` | 匹配所有 write_file 工具调用。 |
 | `aliyun_api(ros:CreateStack)` | 匹配一个阿里云 API 产品/动作对。 |
 
 规则按以下顺序评估：**deny → ask → allow → 默认行为**。CLI 参数（`--allowed-tools`、`--disallowed-tools`）具有最高优先级。
+
+只有当精确的 `bash(**)` 出现在设置文件的 `allow` 列表或 `--allowed-tools` 中时，才具有上述全量允许语义。显式 `deny`、`ask` 规则以及基础 Shell 安全检查仍然优先。A2A safe mode 可能直接从可用工具集中移除 Bash，并继续强制执行严格路径边界；`bash(**)` 不能重新启用 Bash，也不能绕过这些限制。包括 `bash(*)` 在内的普通 Bash 模式保持原有行为，不能跳过复杂命令确认。
 
 ### 阿里云 API 权限
 

@@ -135,12 +135,15 @@ Werkzeug-Berechtigungsmuster folgen dem Format `tool_name(rule)`:
 | Muster | Bedeutung |
 |---|---|
 | `bash` | Alle Bash-Befehle abgleichen (bloßer Werkzeugname). |
+| `bash(**)` | Alle Bash-Befehle ausdrücklich pauschal erlauben, einschließlich der vom Analysemodul als komplex eingestuften Formen. |
 | `bash(git *)` | Bash-Befehle abgleichen, die mit `git` beginnen. |
 | `bash(curl:*)` | Bash-Befehle abgleichen, die mit `curl` beginnen. |
 | `write_file` | Alle write_file-Werkzeugaufrufe abgleichen. |
 | `aliyun_api(ros:CreateStack)` | Ein Alibaba-Cloud-API-Produkt/Aktion-Paar abgleichen. |
 
 Regeln werden in folgender Reihenfolge ausgewertet: **deny → ask → allow → Standardverhalten**. CLI-Argumente (`--allowed-tools`, `--disallowed-tools`) haben die höchste Priorität.
+
+`bash(**)` hat diese pauschale Bedeutung nur, wenn es exakt in einer aus Einstellungen oder `--allowed-tools` geladenen `allow`-Liste steht. Explizite `deny`- und `ask`-Regeln sowie die grundlegende Shell-Sicherheitsprüfung haben weiterhin Vorrang. Der A2A-Sicherheitsmodus kann Bash aus dem verfügbaren Werkzeugsatz entfernen und erzwingt weiterhin seine strikten Pfadgrenzen; `bash(**)` kann Bash weder wieder aktivieren noch diese Beschränkungen umgehen. Gewöhnliche Bash-Muster einschließlich `bash(*)` behalten ihr bisheriges Verhalten und überspringen die Bestätigung komplexer Befehle nicht.
 
 ### Alibaba-Cloud-API-Berechtigungen
 

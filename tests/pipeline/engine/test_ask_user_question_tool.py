@@ -158,3 +158,80 @@ class TestAskUserQuestionToolExecute:
 
         assert result.is_error is True
         assert "event queue" in result.content.lower()
+
+
+class TestAskUserQuestionToolGuardRecords:
+    """回答必须进入 completion guard 的有序记录，供最终确认绑定真实回答。"""
+
+    @staticmethod
+    async def _answer(state, answer, tool_input=None):
+        queue: asyncio.Queue = asyncio.Queue()
+        tool = AskUserQuestionTool(state)
+        task = asyncio.create_task(
+            tool.execute(tool_input=tool_input or _input(), context=ToolContext(event_queue=queue))
+        )
+        event = await asyncio.wait_for(queue.get(), timeout=1)
+        event.response_future.set_result(answer)
+        return await asyncio.wait_for(task, timeout=1)
+
+    @pytest.mark.asyncio
+    async def test_answer_appends_an_ordered_record_with_the_original_question(self):
+        state: dict = {}
+
+        result = await self._answer(
+            state, {"selected_id": "deploy_to_aliyun", "selected_label": "部署到阿里云", "free_text": "cn-hangzhou"}
+        )
+
+        assert result.is_error is False
+        payload = {
+            "selected_id": "deploy_to_aliyun",
+            "selected_label": "部署到阿里云",
+            "free_text": "cn-hangzhou",
+        }
+        assert state["successful_tools"] == {"ask_user_question"}
+        assert state["tool_results"]["ask_user_question"] == payload
+        assert state["tool_result_records"] == [
+            {"tool_name": "ask_user_question", "input": _input(), "result": payload, "is_error": False}
+        ]
+
+    @pytest.mark.asyncio
+    async def test_records_keep_submission_order_for_repeated_questions(self):
+        state: dict = {}
+        second_input = {**_input(), "question": "确认部署这份模板？"}
+
+        await self._answer(state, {"selected_id": "not_iac", "selected_label": "不是基础设施需求"})
+        await self._answer(state, {"selected_id": "confirm", "selected_label": "确认部署"}, tool_input=second_input)
+
+        records = state["tool_result_records"]
+        assert [record["input"]["question"] for record in records] == ["请选择下一步", "确认部署这份模板？"]
+        assert records[-1]["result"]["selected_id"] == "confirm"
+        # 最近一次回答同时更新聚合视图。
+        assert state["tool_results"]["ask_user_question"]["selected_id"] == "confirm"
+
+    @pytest.mark.asyncio
+    async def test_record_input_snapshot_is_not_aliased_to_the_tool_input(self):
+        state: dict = {}
+        tool_input = _input()
+
+        await self._answer(
+            state, {"selected_id": "not_iac", "selected_label": "不是基础设施需求"}, tool_input=tool_input
+        )
+        tool_input["question"] = "被改写的问题"
+
+        assert state["tool_result_records"][0]["input"]["question"] == "请选择下一步"
+
+    @pytest.mark.asyncio
+    async def test_cancelled_question_records_nothing(self):
+        state: dict = {}
+
+        result = await self._answer(state, None)
+
+        assert result.is_error is True
+        assert state == {}
+
+    @pytest.mark.asyncio
+    async def test_missing_guard_state_still_returns_the_answer(self):
+        result = await self._answer(None, {"selected_id": "not_iac", "selected_label": "不是基础设施需求"})
+
+        assert result.is_error is False
+        assert json.loads(result.content)["selected_id"] == "not_iac"

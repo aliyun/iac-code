@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from a2a.types import TaskStatusUpdateEvent
+from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.artifacts import A2AArtifactStore
@@ -60,6 +61,68 @@ from .fakes import FakeEventQueue, FakeRequestContext
 
 RETRY_TEXT = "A temporary error occurred. Please retry."
 _A2A_ASYNC_TEST_TIMEOUT = 5
+
+
+@pytest.mark.asyncio
+async def test_opt_in_pipeline_runs_pending_cleanup_before_resume(tmp_path: Path, monkeypatch) -> None:
+    import iac_code.a2a.executor as executor_module
+    from iac_code.a2a.pipeline_executor import A2APipelineRuntime, _stream_with_pending_rollback_cleanup
+
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    resource = CleanupResource(
+        provider="ros",
+        resource_type="stack",
+        resource_id="stack-old",
+        region_id="cn-hangzhou",
+    )
+    ledger.mark_cleanup_required([resource], source_step_id="deploying", reason="rollback")
+    prompt_injected: list[bool] = []
+
+    def fake_ensure_cleanup_prompt_in_session(**_kwargs) -> None:
+        prompt_injected.append(True)
+
+    async def cleanup_events():
+        yield TextDeltaEvent(text="cleanup")
+
+    async def fake_observe_cleanup_stream(events, observed_ledger, *, publisher=None):
+        del publisher
+        async for event in events:
+            observed_ledger.update_resource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-old",
+                region_id="cn-hangzhou",
+                cleanup_status="completed",
+                progress_status="DELETE_COMPLETE",
+            )
+            yield event
+
+    monkeypatch.setattr(executor_module, "_ensure_cleanup_prompt_in_session", fake_ensure_cleanup_prompt_in_session)
+    monkeypatch.setattr(executor_module, "_observe_cleanup_stream", fake_observe_cleanup_stream)
+    agent_loop = SimpleNamespace(continue_streaming=cleanup_events)
+    runtime = A2APipelineRuntime(agent_runtime=SimpleNamespace(agent_loop=agent_loop))
+    pipeline = SimpleNamespace(
+        feature_enabled=lambda name: name == "a2a_cleanup_before_pipeline_resume",
+        cleanup_ledger=lambda: ledger,
+    )
+
+    async def pipeline_events():
+        yield TextDeltaEvent(text="pipeline")
+
+    observed = [
+        event.text
+        async for event in _stream_with_pending_rollback_cleanup(
+            stream=pipeline_events(),
+            pipeline=pipeline,
+            runtime=runtime,
+            cwd=str(tmp_path),
+            session_id="session",
+        )
+    ]
+
+    assert prompt_injected == [True]
+    assert observed == ["cleanup", "pipeline"]
+    assert ledger.pending_resources() == []
 
 
 @pytest.mark.asyncio
@@ -428,6 +491,80 @@ def test_create_pipeline_resume_empty_sidecar_prerequisites_skip_a2a_inspection(
 
     assert create_kwargs["resume_from_sidecar"] is True
     assert create_kwargs["prerequisite_resolution"] == {}
+
+
+def _pipeline_name_passed_to_create_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    pipeline_name: str | None,
+) -> str:
+    from iac_code.a2a import pipeline_executor as pipeline_executor_module
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+
+    pipeline_dir = tmp_path / "pipeline-def"
+    _write_pipeline_yaml(pipeline_dir)
+    loaded: list[str] = []
+
+    def fake_create_pipeline(name, *args, **kwargs):
+        loaded.append(name)
+        return object()
+
+    monkeypatch.setattr(pipeline_executor_module, "discover_pipelines", lambda: {"test-pipeline": pipeline_dir})
+    monkeypatch.setattr(pipeline_executor_module, "get_pipeline_name", lambda: "test-pipeline")
+    monkeypatch.setattr(pipeline_executor_module, "create_pipeline", fake_create_pipeline)
+
+    IacCodeA2APipelineExecutor(
+        task_store=MagicMock(),
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+        pipeline_name=pipeline_name,
+    )._create_pipeline(
+        session_id="session-1",
+        cwd=str(tmp_path),
+        runtime=_fake_runtime(),
+        session_storage=MagicMock(),
+        resume_from_sidecar=False,
+        prerequisite_metadata=None,
+    )
+
+    assert len(loaded) == 1
+    return loaded[0]
+
+
+def test_create_pipeline_loads_the_pipeline_selected_for_this_session(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Web/Desktop 会话选中的 pipeline 必须真的被加载,而不是回落到进程级默认。"""
+    loaded = _pipeline_name_passed_to_create_pipeline(
+        monkeypatch,
+        tmp_path,
+        pipeline_name="selling_solution_first",
+    )
+
+    assert loaded == "selling_solution_first"
+
+
+@pytest.mark.parametrize("pipeline_name", [None, ""])
+def test_create_pipeline_without_a_session_selection_keeps_the_process_default(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    pipeline_name: str | None,
+) -> None:
+    """没有会话级选择时保持旧行为:仍由 IAC_CODE_PIPELINE_NAME/selling 决定。"""
+    loaded = _pipeline_name_passed_to_create_pipeline(
+        monkeypatch,
+        tmp_path,
+        pipeline_name=pipeline_name,
+    )
+
+    assert loaded == "test-pipeline"
 
 
 def test_active_sidecar_mismatch_error_serializes_raw_jsonrpc_data() -> None:
@@ -3096,6 +3233,169 @@ async def test_pipeline_executor_runs_critical_backup_before_input_required_publ
         "backup_committed",
     ]
     assert _status_events(queue)[-1]["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_candidate_selection_submitted_during_input_backup_resumes_active_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    backup_started = threading.Event()
+    release_backup = threading.Event()
+
+    class CandidatePipeline(FakePipeline):
+        async def run(self, prompt: str):
+            self.run_prompts.append(_display_text(prompt))
+            yield PipelineEvent(
+                type=PipelineEventType.USER_INPUT_REQUIRED,
+                step_id="selection",
+                timestamp=1717821601.0,
+                data={
+                    "kind": "candidate_selection",
+                    "prompt": "请选择方案",
+                    "options": [{"candidate_index": 0, "name": "方案 A"}],
+                },
+            )
+
+        async def resume(self, prompt: str):
+            self.resume_prompts.append(_display_text(prompt))
+            yield PipelineEvent(
+                type=PipelineEventType.USER_INPUT_RECEIVED,
+                step_id="selection",
+                timestamp=1717821602.0,
+                data={"kind": "candidate_selection", "selected_index": 0},
+            )
+            yield PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=1717821603.0,
+                data={"total_steps": 1},
+            )
+
+    class BlockingBackupService(RecordingBackupService):
+        def backup_session(self, *args, reason: BackupReason, **kwargs) -> None:
+            if reason == BackupReason.INPUT_REQUIRED:
+                backup_started.set()
+                if not release_backup.wait(timeout=_A2A_ASYNC_TEST_TIMEOUT):
+                    raise TimeoutError("test backup gate was not released")
+            super().backup_session(*args, reason=reason, **kwargs)
+
+    pipeline = CandidatePipeline([], session_dir=tmp_path / "sidecar")
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        backup_service=BlockingBackupService(),
+    )
+    initial_queue = FakeEventQueue()
+    response_queue = FakeEventQueue()
+    initial = asyncio.create_task(
+        executor.execute(
+            FakeRequestContext(
+                task_id="task-1",
+                context_id="ctx-1",
+                metadata={"iac_code": {"cwd": str(tmp_path)}},
+            ),
+            initial_queue,
+        )
+    )
+    assert await asyncio.to_thread(backup_started.wait, _A2A_ASYNC_TEST_TIMEOUT)
+
+    response = asyncio.create_task(
+        executor.execute(
+            FakeRequestContext(
+                task_id="task-1",
+                context_id="ctx-1",
+                text='{"selected_candidate_index": 0}',
+                metadata={"iac_code": {"cwd": str(tmp_path)}},
+            ),
+            response_queue,
+        )
+    )
+    for _ in range(_A2A_ASYNC_TEST_TIMEOUT * 100):
+        runtime = store._contexts["ctx-1"].runtime
+        if getattr(runtime, "pending_resume_input", None) is not None:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        raise AssertionError("Candidate selection was not routed while the INPUT_REQUIRED backup was blocked")
+    assert response.done() is False
+
+    release_backup.set()
+    await asyncio.wait_for(asyncio.gather(initial, response), timeout=_A2A_ASYNC_TEST_TIMEOUT)
+
+    task_record = store._tasks["task-1"]
+    context_record = store._contexts["ctx-1"]
+    runtime = context_record.runtime
+    assert pipeline.resume_prompts == ['{"selected_candidate_index": 0}'], {
+        "initial_event_types": [event["eventType"] for event in _pipeline_status_events(initial_queue)],
+        "response_event_types": [event["eventType"] for event in _pipeline_status_events(response_queue)],
+        "task_state": task_record.state,
+        "task_has_active_owner": task_record.active_task is not None,
+        "task_active_owner_done": task_record.active_task.done() if task_record.active_task is not None else None,
+        "context_active_task_id": context_record.active_task_id,
+        "runtime_type": type(runtime).__name__,
+        "pending_resume_envelope": getattr(runtime, "pending_resume_envelope", None),
+        "pending_resume_input": getattr(runtime, "pending_resume_input", None),
+    }
+    assert "input_received" in [event["eventType"] for event in _pipeline_status_events(initial_queue)]
+    assert not {
+        "interrupt_received",
+        "interrupt_classified",
+    }.intersection(event["eventType"] for event in _pipeline_status_events(initial_queue))
+
+
+@pytest.mark.asyncio
+async def test_exhausted_waiting_stream_restarts_when_pipeline_input_was_staged() -> None:
+    from iac_code.a2a.pipeline_executor import A2APipelineRuntime
+
+    async def exhausted_stream():
+        if False:
+            yield None
+
+    runtime = A2APipelineRuntime(agent_runtime=_fake_runtime())
+    runtime.pending_resume_input = normalize_pipeline_user_input('{"selected_candidate_index": 0}')
+    runtime.restart_after_interrupt = True
+
+    result = await _pipeline_executor()._consume_stream_until_restart(
+        stream=exhausted_stream(),
+        runtime=runtime,
+        publisher=SimpleNamespace(extreme_performance=False),
+        task=SimpleNamespace(active_task=None),
+    )
+
+    assert result.restart_requested is True
+    assert runtime.restart_after_interrupt is False
+    assert runtime.pending_resume_input is not None
+
+
+def test_original_resume_boundary_does_not_reject_input_staged_during_its_backup() -> None:
+    from iac_code.a2a.pipeline_executor import A2APipelineRuntime, IacCodeA2APipelineExecutor
+
+    runtime = A2APipelineRuntime(agent_runtime=_fake_runtime())
+    runtime.pending_resume_input = normalize_pipeline_user_input('{"selected_candidate_index": 0}')
+    runtime.pending_resume_boundary_in_flight = True
+    boundary = PipelineEvent(
+        type=PipelineEventType.USER_INPUT_REQUIRED,
+        step_id="selection",
+        timestamp=1717821601.0,
+        data={"kind": "candidate_selection"},
+    )
+
+    IacCodeA2APipelineExecutor._settle_pending_pipeline_resume_input(runtime, boundary)
+
+    assert runtime.pending_resume_boundary_in_flight is False
+    assert runtime.pending_resume_input is not None
+    assert runtime.pending_resume_error is None
+
+    IacCodeA2APipelineExecutor._settle_pending_pipeline_resume_input(runtime, boundary)
+
+    assert runtime.pending_resume_input is None
+    assert isinstance(runtime.pending_resume_error, RuntimeError)
+    assert runtime.pending_resume_settled.is_set()
 
 
 @pytest.mark.asyncio
@@ -7751,6 +8051,176 @@ async def test_pipeline_executor_does_not_resolve_pending_question_when_input_re
 
 
 @pytest.mark.asyncio
+async def test_prepared_pending_question_is_activated_before_input_required_backup() -> None:
+    from iac_code.a2a.pipeline_executor import A2APipelineRuntime, IacCodeA2APipelineExecutor
+
+    future: asyncio.Future[dict[str, str] | None] = asyncio.get_running_loop().create_future()
+    question = AskUserQuestionEvent(
+        tool_use_id="ask-during-backup",
+        question="请选择地域",
+        options=[{"id": "cn-hangzhou", "label": "杭州"}],
+        response_future=future,
+    )
+    runtime = A2APipelineRuntime(agent_runtime=_fake_runtime())
+    executor = IacCodeA2APipelineExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+    executor._prepare_pending_question(runtime, question)
+
+    executor._activate_prepared_pending_question(
+        runtime,
+        {
+            "eventType": "input_required",
+            "scope": "step",
+            "step": {"id": "materialize_selected_candidate"},
+            "data": {"kind": "ask_user_question", "toolUseId": "ask-during-backup"},
+        },
+    )
+
+    assert runtime.preparing_question is None
+    assert runtime.pending_question is not None
+    assert runtime.pending_question.event is question
+    assert runtime.pending_question.envelope["step"]["id"] == "materialize_selected_candidate"
+
+
+@pytest.mark.asyncio
+async def test_active_candidate_selection_is_staged_until_pipeline_consumes_it(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
+    from iac_code.a2a.pipeline_executor import A2APipelineRuntime, IacCodeA2APipelineExecutor
+    from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher
+
+    pipeline_dir = tmp_path / "pipeline"
+    pending = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-selection",
+        "sequence": 1,
+        "createdAt": "2026-08-28T00:00:00Z",
+        "eventType": "input_required",
+        "scope": "step",
+        "pipelineRunId": "ctx-1",
+        "taskId": "task-1",
+        "contextId": "ctx-1",
+        "pipelineName": "selling_solution_first",
+        "status": "input_required",
+        "step": {"runId": "step-selection-1", "id": "selection", "attempt": 1},
+        "data": {"kind": "candidate_selection", "options": [{"candidate_index": 0}]},
+    }
+    journal = A2APipelineJournal(pipeline_dir)
+    snapshot_store = A2APipelineSnapshotStore(pipeline_dir)
+    publisher = PipelineA2AEventPublisher(
+        event_queue=FakeEventQueue(),
+        translator=PipelineEventTranslator(
+            PipelineA2AContext(
+                pipeline_run_id="ctx-1",
+                task_id="task-1",
+                context_id="ctx-1",
+                pipeline_name="selling_solution_first",
+            )
+        ),
+        journal=journal,
+        snapshot_store=snapshot_store,
+    )
+    resumed_inputs: list[str] = []
+
+    class ResumePipeline:
+        async def resume(self, value):
+            resumed_inputs.append(value)
+            yield PipelineEvent(
+                type=PipelineEventType.USER_INPUT_RECEIVED,
+                step_id="selection",
+                timestamp=1.0,
+                data={"kind": "candidate_selection"},
+            )
+
+    pipeline = ResumePipeline()
+    runtime = A2APipelineRuntime(agent_runtime=_fake_runtime(), pipeline=pipeline, publisher=publisher)
+    executor = IacCodeA2APipelineExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+    executor._activate_pending_pipeline_resume_input(runtime, pending)
+
+    routed = asyncio.create_task(
+        executor._route_pending_pipeline_resume_input(
+            runtime,
+            publisher,
+            task_id="task-1",
+            context_id="ctx-1",
+            pipeline_input=normalize_pipeline_user_input('{"selected_candidate_index": 0}'),
+        )
+    )
+    await asyncio.sleep(0)
+
+    assert runtime.pending_resume_envelope == pending
+    assert runtime.pending_resume_input is not None
+    assert runtime.restart_after_interrupt is True
+    assert runtime.restart_requested.is_set()
+    assert routed.done() is False
+
+    with pytest.raises(InvalidParamsError, match="already being processed"):
+        await executor._route_pending_pipeline_resume_input(
+            runtime,
+            publisher,
+            task_id="task-1",
+            context_id="ctx-1",
+            pipeline_input=normalize_pipeline_user_input('{"selected_candidate_index": 1}'),
+        )
+    assert runtime.pending_resume_input.display_text == '{"selected_candidate_index": 0}'
+
+    stream = executor._continue_after_interrupt_stream(
+        pipeline,
+        normalize_pipeline_user_input("original request"),
+        runtime,
+    )
+    consumed = await anext(stream)
+    executor._settle_pending_pipeline_resume_input(runtime, consumed)
+
+    assert await routed is True
+    assert resumed_inputs == ['{"selected_candidate_index": 0}']
+    assert runtime.pending_resume_input is None
+
+
+@pytest.mark.asyncio
+async def test_stream_waits_for_answer_already_in_flight_during_question_publication() -> None:
+    from iac_code.a2a.pipeline_executor import A2APipelineRuntime, IacCodeA2APipelineExecutor
+
+    future: asyncio.Future[dict[str, str] | None] = asyncio.get_running_loop().create_future()
+    question = AskUserQuestionEvent(
+        tool_use_id="ask-during-backup",
+        question="请选择地域",
+        options=[{"id": "cn-hangzhou", "label": "杭州"}],
+        response_future=future,
+    )
+    runtime = A2APipelineRuntime(agent_runtime=_fake_runtime())
+    runtime.question_answer_in_flight.set()
+
+    async def settle_answer() -> None:
+        await asyncio.sleep(0)
+        future.set_result({"selected_id": "cn-hangzhou", "selected_label": "杭州", "free_text": ""})
+        runtime.question_answer_in_flight.clear()
+        runtime.question_answer_settled.set()
+
+    settle_task = asyncio.create_task(settle_answer())
+
+    assert await IacCodeA2APipelineExecutor._wait_for_prepublication_question_answer(runtime, question) is True
+    await settle_task
+
+
+@pytest.mark.asyncio
 async def test_active_task_route_does_not_treat_finished_pending_question_as_interrupt(
     tmp_path: Path,
 ) -> None:
@@ -10644,6 +11114,57 @@ async def test_active_pending_question_answer_preserves_image_input(tmp_path: Pa
 
 
 @pytest.mark.asyncio
+async def test_concurrent_pending_question_answers_publish_and_deliver_only_once() -> None:
+    from iac_code.a2a.pipeline_executor import A2APipelineRuntime, IacCodeA2APipelineExecutor, _PendingAskUserQuestion
+
+    future = asyncio.get_running_loop().create_future()
+    publish_started = asyncio.Event()
+    release_publish = asyncio.Event()
+    publish_calls = 0
+
+    async def publish_manual(*_args, **_kwargs):
+        nonlocal publish_calls
+        publish_calls += 1
+        publish_started.set()
+        await release_publish.wait()
+        return object()
+
+    runtime = A2APipelineRuntime(
+        agent_runtime=_fake_runtime(),
+        publisher=SimpleNamespace(publish_manual=publish_manual),
+    )
+    runtime.pending_question = _PendingAskUserQuestion(
+        event=AskUserQuestionEvent(
+            tool_use_id="toolu-1",
+            question="选择地域",
+            options=[{"id": "hangzhou", "label": "杭州"}, {"id": "shanghai", "label": "上海"}],
+            response_future=future,
+        ),
+        envelope={"scope": "pipeline", "inputId": "ask-toolu-1"},
+    )
+    executor = IacCodeA2APipelineExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    first = asyncio.create_task(executor._route_pending_question_answer(runtime, "杭州"))
+    await publish_started.wait()
+    second = asyncio.create_task(executor._route_pending_question_answer(runtime, "上海"))
+    await asyncio.sleep(0)
+    release_publish.set()
+
+    assert await asyncio.gather(first, second) == ["answered", "stale_finished"]
+    assert publish_calls == 1
+    assert future.result()["selected_label"] == "杭州"
+
+
+@pytest.mark.asyncio
 async def test_active_pending_question_answer_echoes_question_into_input_received(tmp_path: Path) -> None:
     # Regression (session 54411…): the input_received envelope must echo the
     # question/options/allowFreeText from the input_required it answers so the
@@ -10698,6 +11219,64 @@ async def test_active_pending_question_answer_echoes_question_into_input_receive
     assert data["allowFreeText"] is True
     # The chosen option's label still drives the card's result body.
     assert data["selectedLabel"] == "华东1(杭州)"
+    # Structured pick → no free text; the field is present so consumers that
+    # rebuild the form (the console's ask card on session restore) can backfill
+    # both inputs from this one envelope.
+    assert data["freeText"] == ""
+
+
+@pytest.mark.asyncio
+async def test_active_pending_question_free_text_answer_is_echoed_for_card_restore(tmp_path: Path) -> None:
+    # The console's ask card renders only the selected option's label and the
+    # free-text value, so a free-text answer has to travel on the envelope —
+    # answerTextLength/freeTextLength alone cannot restore what the user typed.
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor, _PendingAskUserQuestion
+
+    future = asyncio.get_running_loop().create_future()
+    publish_manual = AsyncMock(return_value=object())
+    options = [{"id": "cn-hangzhou", "label": "华东1(杭州)"}]
+    runtime = SimpleNamespace(
+        pending_question=_PendingAskUserQuestion(
+            event=AskUserQuestionEvent(
+                tool_use_id="toolu_1",
+                question="选择部署地域",
+                options=options,
+                allow_free_text=True,
+                response_future=future,
+            ),
+            envelope={
+                "scope": "step",
+                "inputId": "ask-toolu_1",
+                "data": {
+                    "kind": "ask_user_question",
+                    "question": "选择部署地域",
+                    "options": options,
+                    "allowFreeText": True,
+                },
+            },
+        ),
+        pipeline=SimpleNamespace(),
+        publisher=SimpleNamespace(publish_manual=publish_manual),
+    )
+    executor = IacCodeA2APipelineExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    result = await executor._route_pending_question_answer(runtime, "就近部署，别管地域名")
+
+    assert result == "answered"
+    data = publish_manual.await_args.kwargs["data"]
+    assert data["selectedId"] == ""
+    assert data["selectedLabel"] == ""
+    assert data["freeText"] == "就近部署，别管地域名"
+    assert data["freeTextLength"] == len("就近部署，别管地域名")
 
 
 @pytest.mark.asyncio
@@ -10984,6 +11563,15 @@ async def test_pipeline_permission_checkpoint_uses_dedicated_resume_stream(
     checkpoint = {
         "boundaryId": "pwb_boundary1",
         "permissionClass": "pipeline",
+        "inputId": "permission-1",
+        "taskId": "task-1",
+        "contextId": "ctx-1",
+        "toolUseId": "tool-1",
+        "toolName": "read_file",
+        "decision": {"status": "claimed", "value": "deny"},
+        "pipelineCoordinates": {
+            "step": {"id": "solution_planning_and_selection", "runId": "step-plan-1", "attempt": 1}
+        },
         "continuationFrame": {"currentIndex": 0},
     }
 
@@ -11002,6 +11590,15 @@ async def test_pipeline_permission_checkpoint_uses_dedicated_resume_stream(
     assert pipeline.run_prompts == []
     assert pipeline.resume_prompts == []
     assert "permission resumed" in task.output_text
+    pipeline_events = [
+        event.get("metadata", {}).get("iac_code", {}).get("pipeline", {})
+        for event in (dump(item) for item in queue.events)
+    ]
+    resolution = next(event for event in pipeline_events if event.get("eventType") == "permission_resolved")
+    assert resolution["data"]["inputId"] == "permission-1"
+    assert resolution["data"]["decision"] == "deny"
+    assert resolution["data"]["pending"] is False
+    assert resolution["step"]["id"] == "solution_planning_and_selection"
 
 
 @pytest.mark.asyncio
@@ -11042,6 +11639,12 @@ async def test_top_pipeline_permission_suspension_stays_input_required_without_f
     checkpoint = {
         "boundaryId": "pwb_boundary1",
         "permissionClass": "pipeline",
+        "inputId": "permission-1",
+        "taskId": "task-1",
+        "contextId": "ctx-1",
+        "toolUseId": "tool-1",
+        "toolName": "ros_deploy",
+        "decision": {"status": "claimed", "value": "allow_once"},
         "pipelineCoordinates": {"step": {"id": "deploy", "runId": "step-deploy-1", "attempt": 1}},
     }
 

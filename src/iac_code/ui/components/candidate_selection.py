@@ -400,11 +400,11 @@ class CandidateSelectionRenderer:
             active_view = self._active_diagram_view(tab)
             parts.append(self._render_diagram(active_view.mermaid_source))
             if tab.diagram_stage == "draft":
-                parts.append(Text(_("架构图优化中..."), style="dim italic"))
+                parts.append(Text(_("Optimizing architecture diagram..."), style="dim italic"))
         elif tab.mermaid_source:
             parts.append(self._render_diagram(tab.mermaid_source))
             if tab.diagram_stage == "draft":
-                parts.append(Text(_("架构图优化中..."), style="dim italic"))
+                parts.append(Text(_("Optimizing architecture diagram..."), style="dim italic"))
         else:
             parts.append(Text(_("Loading architecture diagram..."), style="dim italic"))
 

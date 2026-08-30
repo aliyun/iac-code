@@ -150,6 +150,8 @@ Callback URL は保存前と配送前に検証されます。デフォルトの�
 | `parts` | array | Yes | テキスト風、JSON データ、生テキスト、ローカルファイル URL、または制限付きマルチモーダルパーツ |
 | `metadata.iac_code.cwd` | string | Recommended | 絶対ワークスペースパス。省略時はサーバープロセスディレクトリがデフォルト |
 | `metadata.iac_code.channel` | string | 任意 | この `contextId` に紐づくテレメトリチャネル。`IAC_CODE_CHANNEL` より優先される |
+| `metadata.iac_code.run_mode` | string | 任意 | このメッセージで `normal` または `pipeline` を選択。省略時はサーバーモードを使用 |
+| `metadata.iac_code.pipeline_name` | string | 任意 | 有効なモードが `pipeline` の場合に `selling` または `selling_solution_first` を選択 |
 | `metadata.iac_code.preferredLanguage` | string | 任意 | 呼び出し側が本タスクに期待する表示言語。ユーザーに表示されるテキストがリクエスト単位でローカライズされる |
 | `metadata.iac_code.candidatePresentation` | string | 任意 | `rich-v1` を指定すると、Pipeline の候補確認ステップが構造化されたリッチ表示ペイロードを返す |
 
@@ -157,9 +159,11 @@ Callback URL は保存前と配送前に検証されます。デフォルトの�
 
 `metadata.iac_code.channel` は `iac_code.channel` を A2A の `contextId` に紐づけます。値は前後の空白が除去され、128 文字に制限され、`IAC_CODE_CHANNEL` より優先されます。空値または文字列以外の値は無視されます。同じ `contextId` を使う normal ターン、pipeline ターン、input-required の後続ターン、および pipeline handoff 後の normal chat は、サーバー再起動と context 復元後もこの設定を引き継ぎます。後続ターンで別の有効値を送ると紐づけが更新されます。紐づけがない場合は `IAC_CODE_CHANNEL`、それも未設定なら `unknown` を使用します。
 
+`metadata.iac_code.run_mode` はメッセージごとに `normal` または `pipeline` を選択します。Pipeline モードでは `metadata.iac_code.pipeline_name` で `selling` または `selling_solution_first` を選択でき、未対応の空でない値は拒否されます。続行や復旧では、既存タスクとコンテキストに保存された Pipeline ID が優先されます。
+
 `metadata.iac_code.preferredLanguage` はユーザーに表示されるテキスト（進捗、質問、権限プロンプト、候補表示、結果の説明など）にのみ影響します。プロトコルフィールド名、列挙値、ID、コマンド形式は翻訳されません。指定できる値はサポートされている言語 `en`、`zh`、`es`、`fr`、`de`、`ja`、`pt` です。値は空白の除去、小文字化、地域サフィックスの除去（例: `zh-CN` は `zh` に解決）によって正規化され、認識できない値は無視されてサーバーの既定の言語に戻ります。このフィールドは現在のメッセージターンのみに適用されます。同じ `contextId` を再利用する後続ターンで再び指定しない場合、既定の言語に戻ります。
 
-`metadata.iac_code.candidatePresentation` に `rich-v1` を指定すると、selling pipeline の候補確認ステップがリッチレンダリングに適した構造化ペイロード（候補名、サマリー、アーキテクチャ図、月額総コスト、コスト内訳）を返します。指定しない場合、従来のテキスト表示の挙動は変わりません。
+`metadata.iac_code.candidatePresentation` に `rich-v1` を指定すると、selling 系 Pipeline の候補確認ステップがリッチレンダリングに適した構造化ペイロード（候補名、サマリー、アーキテクチャ図、月額総コスト、コスト内訳）を返します。指定しない場合、従来のテキスト表示の挙動は変わりません。
 
 サポートされる入力カテゴリ:
 
@@ -402,7 +406,7 @@ Pipeline モードでは、`metadata.iac_code.pipeline.eventType == "mcp_status"
 
 - `metadata.iac_code.input` — 権限エンベロープ（`schemaVersion` は 1）。フィールドは次のとおり:
   - 相関フィールド: `kind: "permission"`、`requestTaskId`、`contextId`、`inputId`、`toolUseId`、`toolName`
-  - 表示フィールド: `title`、`purpose`、`effect`、`target`、`isReadOnly`、`safeSummary`。デプロイリクエストには `deploymentSummary` も含まれる
+  - 表示フィールド: `title`、`purpose`、`effect`、`target`、`isReadOnly`、`safeSummary`。デプロイリクエストには `deploymentSummary`、利用可能な場合は `operation.apiCalls` とマスク済み `displayParameters` も含まれる
   - `prompt` と `options`（`allow_once` / `deny`）。呼び出し側の優先言語にローカライズされる
 - `metadata.iac_code.permission` — `autoApproved: false`、`pending: true`、`toolName`、`toolUseId` を含む
 
@@ -423,7 +427,7 @@ Pipeline モードでは、`metadata.iac_code.pipeline.eventType == "mcp_status"
 - メッセージ外側の `taskId` は `requestTaskId` と等しくなければなりません。`contextId` はメッセージ外側のエンベロープから取得されます。すべての相関フィールドはそのまま保持する必要があり、リクエスト間での再利用や、ある入力への応答を別の入力として解釈し直すことはできません。
 - サーバーは決定を照合すると `permission_ack` DataPart（`schemaVersion: 1`、`kind: "permission_ack"`、`inputId`、`toolUseId`、`decision`、`accepted: true` を含む）を返し、`metadata.iac_code.inputReceived` を含む `TASK_STATE_WORKING` 状態更新を発行して、ターンを再開します。
 
-Pipeline モードでは、権限リクエストは pipeline イベントとして発行されます（エンベロープには `scope` と step/candidate 座標情報が追加されます）。サイドバンド応答の形式は同じです。
+Pipeline モードでは、権限要求が `permission_requested` と `permission_resolved` として発行されます。`scope` と step/candidate 座標によりカードは元の実行位置に保持され、サイドバンド応答の形式は同じです。復旧後の未解決エンベロープは `metadata.iac_code.pendingPermissions` に公開されます。通常チャットとトップレベル Pipeline の待機は永続的に中断・再開でき、候補スコープの Sub Pipeline 待機は設定されたタイムアウト後に自動解決される場合があります。
 
 `auto-approve-permissions` が有効な場合や明示的な権限ルールが構成されている場合、権限リクエストは対話的な入力待ちにならず、自動承認（監査付き）またはルールによる裁定で処理されます。保護された Alibaba Cloud 書き込み API は通常の allow ルールでは解放されず、引き続き API ごとの正確な承認が必要です。権限決定はローカルで監査され、監査レコードを必要とする allow 決定は、そのレコードを永続化できない場合に fail-closed になります。
 

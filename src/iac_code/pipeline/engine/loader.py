@@ -42,7 +42,10 @@ _SUPPORTED_COMPLETION_GUARD_KEYS = {
     "message",
     "message_key",
     "require_conclusion_sha256",
+    "require_context_field_equals",
     "require_context_constraint_coverage",
+    "require_rollback_request",
+    "require_structured_user_input_action",
     "require_tool",
     "require_tool_result",
     "required_conclusion_any_of",
@@ -291,6 +294,7 @@ def _parse_steps(raw_steps: list[dict]) -> list[StepSpec]:
                 inject_tools=raw.get("inject_tools", []),
                 ui_mode=raw.get("ui_mode"),
                 conclusion_schema=raw.get("conclusion_schema"),
+                completion_input_schema=raw.get("completion_input_schema"),
                 max_conclusion_retries=raw.get("max_conclusion_retries", 2),
                 interrupt_judge_failure=_parse_interrupt_judge_failure(
                     raw.get("interrupt_judge_failure", "continue"),
@@ -368,6 +372,7 @@ def _parse_a2a_artifacts(raw: object, step_id: str) -> list[A2AArtifactSpec]:
         item = cast(dict[str, Any], item)
         path = item.get("path") or item.get("source")
         content = item.get("content")
+        content_from_file = item.get("content_from_file")
         media_type = item.get("media_type") or item.get("mediaType") or "auto"
         role = item.get("role", "final")
         supersedes_path = item.get("supersedes_path")
@@ -375,21 +380,34 @@ def _parse_a2a_artifacts(raw: object, step_id: str) -> list[A2AArtifactSpec]:
             supersedes_path = item.get("supersedesPath")
         if not isinstance(path, str) or not path:
             raise ValueError(f"Step '{step_id}': a2a_artifacts[{index}].path must be a non-empty string")
-        if not isinstance(content, str) or not content:
-            raise ValueError(f"Step '{step_id}': a2a_artifacts[{index}].content must be a non-empty string")
+        has_content = isinstance(content, str) and bool(content)
+        has_content_from_file = isinstance(content_from_file, str) and bool(content_from_file)
+        if has_content == has_content_from_file:
+            raise ValueError(
+                f"Step '{step_id}': a2a_artifacts[{index}] must define exactly one of "
+                "content or content_from_file"
+            )
         if not isinstance(media_type, str) or not media_type:
             raise ValueError(f"Step '{step_id}': a2a_artifacts[{index}].media_type must be a non-empty string")
         if role not in {"intermediate", "final"}:
             raise ValueError(f"Step '{step_id}': a2a_artifacts[{index}].role must be one of: final, intermediate")
         if supersedes_path is not None and (not isinstance(supersedes_path, str) or not supersedes_path):
             raise ValueError(f"Step '{step_id}': a2a_artifacts[{index}].supersedes_path must be a non-empty string")
+        raw_when_equals = item.get("when_conclusion_field_equals")
+        when_equals = {} if raw_when_equals is None else raw_when_equals
+        if not isinstance(when_equals, dict) or not all(isinstance(key, str) and key for key in when_equals):
+            raise ValueError(
+                f"Step '{step_id}': a2a_artifacts[{index}].when_conclusion_field_equals must be a mapping"
+            )
         specs.append(
             A2AArtifactSpec(
                 path=path,
-                content=content,
+                content=cast(str | None, content) if has_content else None,
+                content_from_file=cast(str | None, content_from_file) if has_content_from_file else None,
                 media_type=media_type,
                 role=cast(str, role),
                 supersedes_path=cast(str | None, supersedes_path),
+                when_conclusion_field_equals=cast(dict[str, Any], when_equals),
             )
         )
     return specs
@@ -492,10 +510,14 @@ def _bind_hooks(steps: list[StepSpec], pipeline_dir: Path) -> None:
             step.on_enter = module.on_enter
         if hasattr(module, "on_exit"):
             step.on_exit = module.on_exit
+        if hasattr(module, "enrich_completion_input"):
+            step.completion_enricher = module.enrich_completion_input
         if hasattr(module, "on_resource_observed"):
             step.on_resource_observed = module.on_resource_observed
         if hasattr(module, "on_rollback_cleanup_required"):
             step.on_rollback_cleanup_required = module.on_rollback_cleanup_required
+        if hasattr(module, "validate_structured_confirmation"):
+            step.validate_structured_confirmation = module.validate_structured_confirmation
 
 
 def _load_module_from_file(path: Path, module_name: str) -> ModuleType:

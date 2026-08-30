@@ -210,6 +210,14 @@ class TestRenderPrompt:
         result = render_prompt(template, ctx, ["intent"])
         assert result == "Data: {}"
 
+    def test_missing_field_renders_dotted_refs_empty(self):
+        ctx = PipelineContext({"intent": []})
+        template = "Type: {intent.type}; Region: {intent.region}"
+
+        result = render_prompt(template, ctx, ["intent"])
+
+        assert result == "Type: ; Region: "
+
     def test_no_context_fields_returns_template_unchanged(self):
         ctx = PipelineContext({"intent": []})
         template = "No variables here."

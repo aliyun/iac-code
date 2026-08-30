@@ -5,8 +5,10 @@ import contextlib
 import json
 import logging
 import os
+import re
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, TypeAlias
 
@@ -66,6 +68,7 @@ from iac_code.a2a.runtime_overrides import (
     configure_runtime_model,
     credentials_with_metadata_api_key,
     refresh_runtime_cloud_tools,
+    resolve_a2a_preferred_language,
 )
 from iac_code.a2a.task_store import A2ATaskStore, _close_runtime
 from iac_code.a2a.thinking_metadata import A2AThinkingMetadata
@@ -79,7 +82,7 @@ from iac_code.agent.message import ContentBlock
 from iac_code.agent.message import Message as AgentMessage
 from iac_code.commands.registry import PromptCommand
 from iac_code.config import get_active_provider_key, get_provider_config, load_credentials
-from iac_code.i18n import SUPPORTED_LANGUAGES, _
+from iac_code.i18n import _, translate_message
 from iac_code.mcp.errors import MCPConnectionError
 from iac_code.mcp.prompt_dispatch import is_mcp_prompt_file_path
 from iac_code.pipeline.config import RunMode
@@ -88,6 +91,7 @@ from iac_code.pipeline.constants import (
     PIPELINE_EVENT_CLEANUP_FAILED,
     PIPELINE_EVENT_CLEANUP_PROGRESS,
     PIPELINE_EVENT_CLEANUP_STARTED,
+    SELECTABLE_PIPELINE_NAMES,
 )
 from iac_code.pipeline.engine.cleanup import (
     CLEANUP_PROMPT_METADATA_TYPE,
@@ -110,7 +114,7 @@ from iac_code.services.permission_wait import (
     recover_permission_audit_boundary,
 )
 from iac_code.services.permissions.audit import emit_permission_boundary_audit
-from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredential
+from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredential, AliyunCredentials
 from iac_code.services.session_backup import (
     BackupReason,
     SessionBackupBlocked,
@@ -550,6 +554,174 @@ def _a2a_pipeline_sequence_number(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _normal_permission_snapshot_item(snapshot: dict[str, Any], input_id: str) -> dict[str, Any] | None:
+    display = snapshot.get("display")
+    if not isinstance(display, dict):
+        return None
+    permissions = display.get("permissions")
+    if not isinstance(permissions, list):
+        return None
+    for item in permissions:
+        if not isinstance(item, dict):
+            continue
+        item_input_id = item.get("inputId") or item.get("permissionId")
+        if item_input_id == input_id and item.get("scope") == "normal":
+            return item
+    return None
+
+
+async def _persist_normal_permission_snapshot_event(
+    *,
+    cwd: str,
+    session_id: str,
+    input_id: str,
+    event_type: str,
+    permission: dict[str, Any],
+) -> None:
+    """Persist handoff Normal permission state in the existing A2A snapshot.
+
+    A normal-only session has no pipeline snapshot and intentionally remains a no-op.  Once a
+    Pipeline has handed off, however, that snapshot is the public restore artifact used by A2A
+    callers.  Keep the permission request/resolution there instead of making an embedding HTTP
+    proxy infer state from transient SSE frames.
+    """
+
+    state = _a2a_pipeline_state_for_session(cwd=cwd, session_id=session_id)
+    if state is None:
+        return
+    snapshot_store, journal, snapshot, journal_events = state
+    normal_handoff = snapshot.get("normalHandoff")
+    if (
+        not isinstance(normal_handoff, dict)
+        or normal_handoff.get("action") != "switch_to_normal"
+        or normal_handoff.get("targetMode") != "normal"
+        or not _normal_handoff_has_backup_ack(normal_handoff, journal_events)
+    ):
+        return
+    pipeline_run_id = _string_value(snapshot.get("pipelineRunId"))
+    pipeline_task_id = _string_value(snapshot.get("taskId"))
+    context_id = _string_value(snapshot.get("contextId"))
+    pipeline_name = _string_value(snapshot.get("pipelineName"))
+    if not all((pipeline_run_id, pipeline_task_id, context_id, pipeline_name)):
+        raise RuntimeError(_("Normal permission restore snapshot identity is incomplete."))
+
+    existing = _normal_permission_snapshot_item(snapshot, input_id)
+    if event_type == "permission_requested":
+        if existing is not None:
+            if existing.get("pending") is False or existing.get("decision") in {"allow_once", "deny"}:
+                raise RuntimeError(_("Normal permission restore snapshot is already resolved."))
+            return
+    else:
+        decision = permission.get("decision")
+        if existing is None:
+            raise RuntimeError(_("Normal permission restore request is missing from the snapshot."))
+        existing_decision = existing.get("decision")
+        if existing.get("pending") is False or existing_decision in {"allow_once", "deny"}:
+            if existing_decision == decision:
+                return
+            raise RuntimeError(_("Normal permission restore decision conflicts with the snapshot."))
+
+    translator = PipelineEventTranslator(
+        PipelineA2AContext(
+            pipeline_run_id=pipeline_run_id,
+            task_id=pipeline_task_id,
+            context_id=context_id,
+            pipeline_name=pipeline_name,
+            iac_code_session_id=session_id,
+        )
+    )
+    translator.hydrate_from_events(journal_events)
+    envelope = translator.manual_event(
+        event_type,
+        "normal",
+        status="input_required" if event_type == "permission_requested" else "completed",
+        data={
+            "kind": "permission",
+            "inputId": input_id,
+            "toolName": permission.get("toolName"),
+            "toolUseId": permission.get("toolUseId"),
+            **({"decision": permission.get("decision")} if event_type == "permission_resolved" else {}),
+        },
+    )
+    envelope["permission"] = permission
+    publisher = PipelineA2AEventPublisher(
+        None,
+        translator,
+        journal,
+        snapshot_store,
+        extreme_performance=False,
+    )
+    persisted = await publisher.persist_envelope(
+        envelope,
+        require_durable_metadata=True,
+        require_journal_metadata=True,
+    )
+    if persisted is None:
+        raise RuntimeError(_("Normal permission restore snapshot could not be persisted."))
+
+
+async def _persist_normal_permission_snapshot_request(
+    *,
+    cwd: str,
+    session_id: str,
+    pending: Any,
+) -> None:
+    permission = pending.envelope()
+    permission.update(
+        {
+            "permissionId": pending.input_id,
+            "inputId": pending.input_id,
+            "pending": True,
+        }
+    )
+    await _persist_normal_permission_snapshot_event(
+        cwd=cwd,
+        session_id=session_id,
+        input_id=pending.input_id,
+        event_type="permission_requested",
+        permission=permission,
+    )
+
+
+async def _persist_normal_permission_snapshot_resolution(
+    *,
+    cwd: str,
+    session_id: str,
+    response: PermissionResponse,
+    decision: str,
+) -> None:
+    state = _a2a_pipeline_state_for_session(cwd=cwd, session_id=session_id)
+    if state is None:
+        return
+    _snapshot_store, _journal, snapshot, _events = state
+    existing = _normal_permission_snapshot_item(snapshot, response.input_id)
+    if existing is None:
+        raise RuntimeError(_("Normal permission restore request is missing from the snapshot."))
+    permission = {
+        key: copy_value
+        for key, copy_value in existing.items()
+        if key not in {"id", "scope", "runId", "sequence", "createdAt", "eventId"}
+    }
+    permission.update(
+        {
+            "permissionId": response.input_id,
+            "inputId": response.input_id,
+            "requestTaskId": response.request_task_id,
+            "contextId": response.context_id,
+            "toolUseId": response.tool_use_id,
+            "decision": decision,
+            "pending": False,
+        }
+    )
+    await _persist_normal_permission_snapshot_event(
+        cwd=cwd,
+        session_id=session_id,
+        input_id=response.input_id,
+        event_type="permission_resolved",
+        permission=permission,
+    )
 
 
 def _prune_completed_cleanup_prompt_from_runtime(runtime: Any, ledger: CleanupLedger | None) -> None:
@@ -1073,10 +1245,13 @@ class IacCodeA2AExecutor(AgentExecutor):
         task_id = requested_task_id or "task-" + uuid.uuid4().hex[:12]
         permission_response = parse_permission_response(getattr(context, "message", None))
         if permission_response is not None:
+            pending = None
             try:
                 pending = await self._permission_input_registry.pending_for_response(permission_response)
                 approved = await self._permission_input_registry.answer(permission_response)
             except InvalidParamsError:
+                if pending is not None:
+                    await self._permission_input_registry.complete(pending)
                 if await self._resume_persisted_permission(
                     context,
                     event_queue,
@@ -1221,6 +1396,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             preferred_language = self._resolve_preferred_language(metadata)
             candidate_presentation = self._resolve_candidate_presentation(metadata)
             cleanup_only = self._resolve_cleanup_only(metadata)
+            requested_pipeline_name = self._resolve_pipeline_name(metadata) if pipeline_mode else None
             metadata_model = self._resolve_model(metadata)
             metadata_api_key = self._resolve_api_key(metadata)
             request_policy_override = self._resolve_request_policy(metadata)
@@ -1338,6 +1514,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 metadata_api_key=metadata_api_key,
                 request_policy_override=request_policy_override,
                 backup_service=self._backup_service,
+                pipeline_name=requested_pipeline_name,
             )
             try:
                 pipeline_result = await pipeline_executor.execute(
@@ -1755,6 +1932,37 @@ class IacCodeA2AExecutor(AgentExecutor):
                                 and not self._auto_approve_permissions
                             )
                             if interactive_permission:
+                                async def persist_request_before_backup(pending_permission: Any) -> None:
+                                    await _persist_normal_permission_snapshot_request(
+                                        cwd=cwd,
+                                        session_id=ctx.session_id,
+                                        pending=pending_permission,
+                                    )
+
+                                async def persist_resolution_before_backup(
+                                    pending_permission: Any,
+                                    checkpoint: dict[str, Any],
+                                ) -> None:
+                                    decision = checkpoint.get("decision")
+                                    value = decision.get("value") if isinstance(decision, dict) else None
+                                    if value not in {"allow_once", "deny"}:
+                                        raise RuntimeError(
+                                            _("Normal permission decision is unavailable before backup.")
+                                        )
+                                    await _persist_normal_permission_snapshot_resolution(
+                                        cwd=cwd,
+                                        session_id=ctx.session_id,
+                                        response=PermissionResponse(
+                                            task_id=pending_permission.task_id,
+                                            context_id=pending_permission.context_id,
+                                            request_task_id=pending_permission.task_id,
+                                            input_id=pending_permission.input_id,
+                                            tool_use_id=pending_permission.request.tool_use_id,
+                                            decision=value,
+                                        ),
+                                        decision=value,
+                                    )
+
                                 pending = await publish_interactive_permission_boundary(
                                     target_queue,
                                     permission_event=event,
@@ -1765,6 +1973,8 @@ class IacCodeA2AExecutor(AgentExecutor):
                                     permission_wait_cwd=cwd,
                                     permission_wait_backup_service=self._backup_service,
                                     permission_wait_metrics=self._metrics,
+                                    before_permission_backup=persist_request_before_backup,
+                                    before_permission_claim_backup=persist_resolution_before_backup,
                                     wait_for_response=False,
                                 )
                                 detached_permission = pending
@@ -2088,6 +2298,13 @@ class IacCodeA2AExecutor(AgentExecutor):
             )
             expected_value = str(record["decision"]["value"])
         decision = record.get("decision")
+        if record.get("permissionClass") == "normal":
+            await _persist_normal_permission_snapshot_resolution(
+                cwd=context_record.cwd,
+                session_id=context_record.session_id,
+                response=response,
+                decision=expected_value,
+            )
         if isinstance(decision, dict) and decision.get("backupStatus") != "committed":
             claim_id = str(decision.get("claimId") or "")
             await backup_permission_wait_checkpoint(
@@ -2127,6 +2344,13 @@ class IacCodeA2AExecutor(AgentExecutor):
                     }
                 }
             },
+            session_id=context_record.session_id,
+        )
+        await self._publish_permission_recovery_ack(
+            event_queue,
+            response=response,
+            decision=expected_value,
+            duplicate=False,
             session_id=context_record.session_id,
         )
         normal_final_assistant_text: str | None = None
@@ -2255,13 +2479,6 @@ class IacCodeA2AExecutor(AgentExecutor):
         )
         task.state = TASK_STATE_INPUT_REQUIRED
         self._task_store.mirror_task(task)
-        await self._publish_permission_recovery_ack(
-            event_queue,
-            response=response,
-            decision=expected_value,
-            duplicate=False,
-            session_id=context_record.session_id,
-        )
         if normal_final_assistant_text is not None:
             await self._publish_status(
                 event_queue,
@@ -2453,7 +2670,14 @@ class IacCodeA2AExecutor(AgentExecutor):
             return None
         return normalize_telemetry_channel(raw_iac_meta.get("channel"))
 
-    def _resolve_preferred_language(self, metadata: Any | None) -> str | None:
+    def _resolve_pipeline_name(self, metadata: Any | None) -> str | None:
+        """Request-level pipeline selection from ``metadata.iac_code.pipeline_name``.
+
+        A missing field, ``null`` or an empty string means "no request-level
+        override" so normal chat and legacy callers keep their current behavior.
+        Only a non-empty value outside the selectable set is a parameter error —
+        silently falling back would run a different pipeline than POP asked for.
+        """
         if metadata is not None and hasattr(metadata, "DESCRIPTOR"):
             metadata = MessageToDict(metadata, preserving_proto_field_name=False)
         if not isinstance(metadata, Mapping):
@@ -2461,11 +2685,21 @@ class IacCodeA2AExecutor(AgentExecutor):
         raw_iac_meta = metadata.get("iac_code")
         if not isinstance(raw_iac_meta, Mapping):
             return None
-        raw_language = raw_iac_meta.get("preferredLanguage") or raw_iac_meta.get("preferred_language")
-        if not isinstance(raw_language, str):
+        raw_pipeline_name = raw_iac_meta.get("pipeline_name")
+        if raw_pipeline_name is None:
             return None
-        language = raw_language.strip().lower().split("-", 1)[0].split("_", 1)[0]
-        return language if language in SUPPORTED_LANGUAGES else None
+        language = self._resolve_preferred_language(metadata) or "en"
+        if not isinstance(raw_pipeline_name, str):
+            raise InvalidParamsError(translate_message("Unsupported pipeline name.", language=language))
+        pipeline_name = raw_pipeline_name.strip()
+        if not pipeline_name:
+            return None
+        if pipeline_name not in SELECTABLE_PIPELINE_NAMES:
+            raise InvalidParamsError(translate_message("Unsupported pipeline name.", language=language))
+        return pipeline_name
+
+    def _resolve_preferred_language(self, metadata: Any | None) -> str | None:
+        return resolve_a2a_preferred_language(metadata)
 
     def _resolve_candidate_presentation(self, metadata: Any | None) -> str | None:
         if metadata is not None and hasattr(metadata, "DESCRIPTOR"):
@@ -2535,14 +2769,27 @@ class IacCodeA2AExecutor(AgentExecutor):
 
         access_key_id = _read("alibaba_cloud_access_key_id")
         access_key_secret = _read("alibaba_cloud_access_key_secret")
-        if not access_key_id or not access_key_secret:
+        region_id = _read("alibaba_cloud_region_id")
+        if bool(access_key_id) != bool(access_key_secret):
             return None
+        if not access_key_id or not access_key_secret:
+            if region_id is None:
+                return None
+            if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", region_id) is None:
+                language = self._resolve_preferred_language(metadata) or "en"
+                raise InvalidParamsError(
+                    translate_message("Unsupported Alibaba Cloud region ID.", language=language)
+                )
+            configured = AliyunCredentials.load()
+            if configured is None:
+                return None
+            return replace(configured, region_id=region_id)
         sts_token = _read("alibaba_cloud_security_token") or ""
         return AliyunCredential(
             mode="StsToken" if sts_token else "AK",
             access_key_id=access_key_id,
             access_key_secret=access_key_secret,
-            region_id=_read("alibaba_cloud_region_id") or DEFAULT_REGION,
+            region_id=region_id or DEFAULT_REGION,
             sts_token=sts_token,
         )
 

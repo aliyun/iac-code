@@ -1625,6 +1625,232 @@ class TestProviderManagerStreaming:
         assert events[0].is_retryable is False
         assert events[0].error_id
 
+    async def test_stream_retries_streaming_before_downgrading_on_transient_error(self, monkeypatch):
+        from iac_code.providers.retry import RetryConfig
+
+        class Status429Error(Exception):
+            status_code = 429
+
+        class FlakyStreamProvider:
+            def __init__(self):
+                self.stream_calls = 0
+                self.complete_calls = 0
+
+            def get_model_name(self) -> str:
+                return "claude-sonnet-4-6"
+
+            async def stream(self, messages, system, tools=None, max_tokens=8192):
+                self.stream_calls += 1
+                if self.stream_calls == 1:
+                    raise Status429Error("insufficient_quota")
+                yield MessageStartEvent(message_id="retried-stream")
+                yield TextDeltaEvent(text="streamed")
+                yield MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=1, output_tokens=2))
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                self.complete_calls += 1
+                raise AssertionError("a retryable streaming failure must retry streaming, not downgrade")
+
+        telemetry_events = []
+        monkeypatch.setattr(
+            "iac_code.providers.manager.log_event",
+            lambda name, attrs: telemetry_events.append((name, attrs)),
+        )
+
+        provider = FlakyStreamProvider()
+        mgr = ProviderManager(
+            model="claude-sonnet-4-6",
+            credentials={"anthropic": "k"},
+            retry_config=RetryConfig(max_retries=3, base_delay=0, max_delay=0, jitter_factor=0),
+        )
+        mgr._provider = provider
+
+        events = await _collect_stream_events(mgr.stream(messages=[Message.user("hi")], system="sys"))
+
+        assert [event.type for event in events] == ["message_start", "text_delta", "message_end"]
+        assert events[0].message_id == "retried-stream"
+        assert provider.stream_calls == 2
+        assert provider.complete_calls == 0
+        retried = [attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_RETRIED]
+        assert len(retried) == 1
+        assert retried[0]["attempt"] == 1
+        assert retried[0]["error_type"] == "Status429Error"
+        assert retried[0]["streaming"] is True
+
+    async def test_stream_does_not_retry_streaming_once_events_reached_caller(self):
+        from iac_code.providers.retry import RetryConfig
+
+        class Status429Error(Exception):
+            status_code = 429
+
+        class PartialStreamProvider:
+            def __init__(self):
+                self.stream_calls = 0
+                self.complete_calls = 0
+
+            def get_model_name(self) -> str:
+                return "claude-sonnet-4-6"
+
+            async def stream(self, messages, system, tools=None, max_tokens=8192):
+                self.stream_calls += 1
+                yield MessageStartEvent(message_id="partial-stream")
+                raise Status429Error("insufficient_quota")
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                self.complete_calls += 1
+                return NonStreamingResponse(
+                    message_id="downgraded-after-partial",
+                    text="recovered",
+                    tool_uses=[],
+                    stop_reason="end_turn",
+                    usage=Usage(input_tokens=1, output_tokens=1),
+                )
+
+        provider = PartialStreamProvider()
+        mgr = ProviderManager(
+            model="claude-sonnet-4-6",
+            credentials={"anthropic": "k"},
+            retry_config=RetryConfig(max_retries=3, base_delay=0, max_delay=0, jitter_factor=0),
+        )
+        mgr._provider = provider
+
+        events = await _collect_stream_events(mgr.stream(messages=[Message.user("hi")], system="sys"))
+
+        assert [event.type for event in events] == [
+            "message_start",
+            "tombstone",
+            "message_start",
+            "text_delta",
+            "message_end",
+        ]
+        assert provider.stream_calls == 1
+        assert provider.complete_calls == 1
+
+    async def test_stream_falls_back_to_non_streaming_after_streaming_retries_exhausted(self):
+        from iac_code.providers.retry import RetryConfig
+
+        class Status429Error(Exception):
+            status_code = 429
+
+        class AlwaysFailingStreamProvider:
+            def __init__(self):
+                self.stream_calls = 0
+                self.complete_calls = 0
+
+            def get_model_name(self) -> str:
+                return "claude-sonnet-4-6"
+
+            async def stream(self, messages, system, tools=None, max_tokens=8192):
+                self.stream_calls += 1
+                raise Status429Error("insufficient_quota")
+                yield MessageEndEvent(stop_reason="never", usage=Usage())
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                self.complete_calls += 1
+                return NonStreamingResponse(
+                    message_id="downgraded-after-retries",
+                    text="recovered",
+                    tool_uses=[],
+                    stop_reason="end_turn",
+                    usage=Usage(input_tokens=1, output_tokens=1),
+                )
+
+        provider = AlwaysFailingStreamProvider()
+        mgr = ProviderManager(
+            model="claude-sonnet-4-6",
+            credentials={"anthropic": "k"},
+            retry_config=RetryConfig(max_retries=2, base_delay=0, max_delay=0, jitter_factor=0),
+        )
+        mgr._provider = provider
+
+        events = await _collect_stream_events(mgr.stream(messages=[Message.user("hi")], system="sys"))
+
+        assert [event.type for event in events] == ["message_start", "text_delta", "message_end"]
+        assert events[0].message_id == "downgraded-after-retries"
+        assert provider.stream_calls == 3
+        assert provider.complete_calls == 1
+
+    async def test_stream_does_not_retry_streaming_on_non_retryable_error(self):
+        from iac_code.providers.retry import RetryConfig
+
+        class BrokenStreamProvider:
+            def __init__(self):
+                self.stream_calls = 0
+                self.complete_calls = 0
+
+            def get_model_name(self) -> str:
+                return "claude-sonnet-4-6"
+
+            async def stream(self, messages, system, tools=None, max_tokens=8192):
+                self.stream_calls += 1
+                raise ValueError("this model does not support streaming")
+                yield MessageEndEvent(stop_reason="never", usage=Usage())
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                self.complete_calls += 1
+                return NonStreamingResponse(
+                    message_id="downgraded-immediately",
+                    text="recovered",
+                    tool_uses=[],
+                    stop_reason="end_turn",
+                    usage=Usage(input_tokens=1, output_tokens=1),
+                )
+
+        provider = BrokenStreamProvider()
+        mgr = ProviderManager(
+            model="claude-sonnet-4-6",
+            credentials={"anthropic": "k"},
+            retry_config=RetryConfig(max_retries=3, base_delay=0, max_delay=0, jitter_factor=0),
+        )
+        mgr._provider = provider
+
+        events = await _collect_stream_events(mgr.stream(messages=[Message.user("hi")], system="sys"))
+
+        assert events[0].message_id == "downgraded-immediately"
+        assert provider.stream_calls == 1
+        assert provider.complete_calls == 1
+
+    async def test_stream_idle_timeout_does_not_retry_streaming(self):
+        from iac_code.providers.retry import RetryConfig
+
+        class HangingStreamProvider:
+            def __init__(self):
+                self.stream_calls = 0
+
+            def get_model_name(self) -> str:
+                return "claude-sonnet-4-6"
+
+            async def stream(self, messages, system, tools=None, max_tokens=8192):
+                self.stream_calls += 1
+                await asyncio.sleep(999)
+                yield MessageEndEvent(stop_reason="never", usage=Usage())
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                return NonStreamingResponse(
+                    message_id="fallback-after-timeout",
+                    text="recovered",
+                    tool_uses=[],
+                    stop_reason="end_turn",
+                    usage=Usage(input_tokens=3, output_tokens=4),
+                )
+
+        provider = HangingStreamProvider()
+        mgr = ProviderManager(
+            model="claude-sonnet-4-6",
+            credentials={"anthropic": "k"},
+            stream_idle_timeout=STREAM_IDLE_TEST_TIMEOUT,
+            retry_config=RetryConfig(max_retries=3, base_delay=0, max_delay=0, jitter_factor=0),
+        )
+        mgr._provider = provider
+
+        events = await asyncio.wait_for(
+            _collect_stream_events(mgr.stream(messages=[Message.user("hi")], system="sys")),
+            timeout=2.0,
+        )
+
+        assert events[0].message_id == "fallback-after-timeout"
+        assert provider.stream_calls == 1
+
 
 @pytest.mark.asyncio
 class TestProviderManagerCompleteRetry:

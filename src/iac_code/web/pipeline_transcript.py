@@ -166,6 +166,10 @@ class PipelineTranscriptTranslator:
         # computes options, marks itself done, then asks the user to pick), so the
         # restore target must survive completion.
         self._group_markers: dict[str, dict[str, Any]] = {}
+        # A parent step can finish one processing segment, wait for user input,
+        # then resume under the same run id. Keep active processing time additive
+        # so the short resume segment does not replace the original duration.
+        self._step_completed_duration_s: dict[str, float] = {}
         # Ordered content message ids of every ``input_required`` prompt bubble
         # (confirm_and_select / ask_user_question ...). The reload path uses this
         # to weave the user's mid-pipeline answer *right after* the prompt it
@@ -173,6 +177,11 @@ class PipelineTranscriptTranslator:
         # ``source=pipeline`` web messages) get appended after the whole replay
         # and appear misordered at the very end (Issue 2).
         self.input_prompt_message_ids: list[str] = []
+        # Rich coordinates for matching persisted free-text replies to the exact
+        # prompt they answered.  A candidate selection may be submitted through a
+        # button and therefore have no Web user-message row; FIFO-only matching
+        # would then place the next deployment-confirmation reply under Step 1.
+        self.input_prompt_anchors: list[dict[str, str]] = []
         # request_id -> {question, options, allowFreeText, toolUseId, messageId}
         # captured at an ask_user_question ``input_required``. The run's journal
         # never emits tool_started/tool_result for ask_user_question (only
@@ -521,6 +530,9 @@ class PipelineTranscriptTranslator:
         # its true duration instead of nothing.
         if duration_s is None or duration_s <= 0:
             duration_s = self._duration_for(f"step:{run_id}", env)
+        if duration_s is not None:
+            duration_s += self._step_completed_duration_s.get(run_id, 0.0)
+            self._step_completed_duration_s[run_id] = duration_s
         self._complete_active_marker(f"step:{run_id}")
         events = self._end_content_scope(f"pl-{run_id}")
         marker = self._marker_event(
@@ -923,20 +935,22 @@ class PipelineTranscriptTranslator:
                         "payload": {"toolUseId": tool_use_id, "messageId": message_id, "delta": input_text},
                     }
                 )
-        events.append(
-            {
-                "type": "tool.result",
-                "payload": {
-                    "toolUseId": tool_use_id,
-                    "messageId": message_id,
-                    "content": result_text,
-                    "summary": summary,
-                    "resultKind": "text",
-                    "isError": is_error,
-                    "artifacts": [],
-                },
-            }
-        )
+        result_payload: dict[str, Any] = {
+            "toolUseId": tool_use_id,
+            "messageId": message_id,
+            "content": result_text,
+            "summary": summary,
+            "resultKind": "text",
+            "isError": is_error,
+            "artifacts": [],
+        }
+        submitted_delta = data.get("submittedDelta")
+        normalized_conclusion = data.get("normalizedConclusion")
+        if isinstance(submitted_delta, Mapping):
+            result_payload["submittedDelta"] = dict(submitted_delta)
+        if isinstance(normalized_conclusion, Mapping):
+            result_payload["normalizedConclusion"] = dict(normalized_conclusion)
+        events.append({"type": "tool.result", "payload": result_payload})
         events.append(
             {
                 "type": "tool.finished",
@@ -978,6 +992,9 @@ class PipelineTranscriptTranslator:
         if kind == "stack.progress":
             payload["stackName"] = data.get("stackName")
             payload["stackId"] = data.get("stackId")
+            # The live overlay keys in-progress stacks by ``region::stackName``;
+            # dropping the region here would split one stack into a second row.
+            payload["regionId"] = data.get("regionId")
             payload["resources"] = data.get("resources")
         else:
             payload["stackGroupName"] = data.get("stackGroupName")
@@ -1004,6 +1021,16 @@ class PipelineTranscriptTranslator:
                 # Record this prompt bubble as an anchor so the reload path can
                 # slot the user's answer directly after it (Issue 2).
                 self.input_prompt_message_ids.append(message_id)
+                step = _as_mapping(env.get("step"))
+                self.input_prompt_anchors.append(
+                    {
+                        "messageId": message_id,
+                        "kind": str(data.get("kind") or ""),
+                        "stepId": str(step.get("id") or data.get("stepId") or ""),
+                        "received": "0",
+                        "expectsVisibleAnswer": "1",
+                    }
+                )
         # ask_user_question additionally surfaces an interactive question panel
         # (options + free text) via the existing question.request → blocking-panel
         # path. confirm_and_select keeps its own inline candidate selector, so this
@@ -1029,6 +1056,7 @@ class PipelineTranscriptTranslator:
         # completed run does not leave a step stuck showing "等待输入").
         events: list[dict[str, Any]] = []
         data = _as_mapping(env.get("data"))
+        self._record_input_anchor_answer_visibility(data)
         if str(data.get("kind") or "") == "ask_user_question":
             request_id = self._ask_user_question_request_id(data)
             if request_id:
@@ -1036,8 +1064,63 @@ class PipelineTranscriptTranslator:
             # Render the answered question as a completed tool card so the tool
             # call stays visible once the interactive panel is resolved away.
             events.extend(self._ask_user_question_card_events(env, data, request_id))
-        events.extend(self._input_marker_events(env, ""))
+        marker_status = "working" if str(data.get("kind") or "") == "deployment_confirmation" else ""
+        marker_events = self._input_marker_events(env, marker_status)
+        if marker_status and marker_events:
+            self._record_group_marker(self._group_id_for(env), marker_events[-1])
+        events.extend(marker_events)
+        # ``input_required`` 的提示和用户答复后的新一轮 agent loop 属于两个
+        # 不同的转录回合。若继续复用当前 segment，恢复时二者会被拼成同一条
+        # assistant 消息，用户气泡只能织入整条消息之后，结果变成“新一轮推理在
+        # 用户输入上方”。在答复边界直接推进 segment，使后续 text/tool 都落入
+        # 新消息；实时续跑的 translator 已用完整历史预热，因此 segment id 与
+        # reload 路径保持一致。
+        base = self._content_base_id(env)
+        if base:
+            self._advance_segment(base)
         return events
+
+    def _record_input_anchor_answer_visibility(self, data: Mapping[str, Any]) -> None:
+        """Mark button-only candidate selections as having no Web user row.
+
+        The candidate button endpoint resumes A2A directly, unlike a typed Web
+        message.  Its JSON ``selectedValue`` therefore must not consume the next
+        persisted free-text reply when a historical transcript is woven.
+        """
+        kind = str(data.get("kind") or "")
+        for anchor in self.input_prompt_anchors:
+            if anchor.get("received") == "1" or anchor.get("kind") != kind:
+                continue
+            anchor["received"] = "1"
+            if kind == "candidate_selection":
+                selected_value = data.get("selectedValue")
+                try:
+                    selection = json.loads(selected_value) if isinstance(selected_value, str) else None
+                except json.JSONDecodeError:
+                    selection = None
+                if isinstance(selection, dict) and (
+                    "selected_candidate_index" in selection or "selected_candidate_name" in selection
+                ):
+                    anchor["expectsVisibleAnswer"] = "0"
+            break
+
+    def _on_diagram_shown(self, env: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """Expose journaled pipeline diagrams to the live Web reducer.
+
+        Step 1 of ``selling_solution_first`` emits planning diagrams before any
+        template exists.  They were already present in the A2A snapshot but the
+        transcript translator ignored the event, so only recovery knew about
+        them.  Forward the public payload with its owning step coordinate.
+        """
+        data = dict(_as_mapping(env.get("data")))
+        step = _as_mapping(env.get("step"))
+        architecture_context = _as_mapping(data.get("architectureContext"))
+        if architecture_context.get("source") == "architecture_plan":
+            data.setdefault("diagramId", str(env.get("eventId") or ""))
+        if step:
+            data.setdefault("stepId", step.get("id"))
+        data.setdefault("runId", _as_mapping(env.get("step")).get("runId"))
+        return [{"type": "diagram.render", "payload": data}]
 
     @staticmethod
     def _ask_user_question_request_id(data: Mapping[str, Any]) -> str:
@@ -1068,9 +1151,10 @@ class PipelineTranscriptTranslator:
     @staticmethod
     def _ask_answer_text(data: Mapping[str, Any]) -> str:
         """Result body for the ask card: the chosen option's label when a
-        structured option was picked. Free-text answers record only a length in
-        the journal (the text itself is woven in as the answer bubble), so the
-        card's result stays empty rather than echoing a redacted placeholder."""
+        structured option was picked. A free-text answer is woven in as the
+        answer bubble instead, so the card's result stays empty rather than
+        repeating that text (``freeText`` on the envelope exists for consumers
+        that rebuild the form itself, such as the console's ask card)."""
         return str(data.get("selectedLabel") or "")
 
     def _ask_user_question_card_events(
@@ -1294,6 +1378,32 @@ def build_pipeline_transcript_rows(envelopes: Iterable[Mapping[str, Any]]) -> li
             }
             specs.append(spec)
             by_id[marker_id] = spec
+        elif event_type == "diagram.render":
+            architecture_context = _as_mapping(payload.get("architectureContext"))
+            diagram_id = str(payload.get("diagramId") or "")
+            # selling_solution_first Step 1 的 template-less 规划图必须在转录里占据
+            # 自己的事件位置；否则前端只能把“当前最新图”挂到整个 Step 尾部，历史图会
+            # 被后续重新规划覆盖。仅处理 show_architecture_plan 的显式 source 标记，
+            # 不改变旧 selling 的模板架构图转录。
+            if architecture_context.get("source") != "architecture_plan" or not diagram_id:
+                continue
+            message_id = f"pldiag-{diagram_id}"
+            existing = by_id.get(message_id)
+            if existing is not None:
+                existing["pipelineDiagram"] = dict(payload)
+                continue
+            spec = {
+                "id": message_id,
+                "role": "assistant",
+                "content": "",
+                "kind": "pipeline_diagram",
+                "pipelineStep": None,
+                "pipelineDiagram": dict(payload),
+                "toolUseIds": [],
+                "tools": {},
+            }
+            specs.append(spec)
+            by_id[message_id] = spec
         elif event_type == "assistant.message.start":
             message_id = str(payload.get("messageId") or "")
             if message_id in by_id:
@@ -1411,9 +1521,17 @@ def build_pipeline_transcript_rows(envelopes: Iterable[Mapping[str, Any]]) -> li
     # (normally 1). The reload path (``load_visible_transcript``) reads this to
     # weave persisted ``source=pipeline`` replies right after their prompt rather
     # than appending them after the whole replay (Issue 2 misordering).
-    for anchor_id in translator.input_prompt_message_ids:
-        spec = by_id.get(anchor_id)
+    anchors = translator.input_prompt_anchors or [
+        {"messageId": message_id, "kind": "", "stepId": ""}
+        for message_id in translator.input_prompt_message_ids
+    ]
+    for anchor in anchors:
+        if anchor.get("expectsVisibleAnswer") == "0":
+            continue
+        spec = by_id.get(anchor["messageId"])
         if spec is not None:
             spec["inputAnswerSlots"] = int(spec.get("inputAnswerSlots") or 0) + 1
+            spec["inputAnswerKind"] = anchor.get("kind") or ""
+            spec["inputAnswerStepId"] = anchor.get("stepId") or ""
 
     return specs

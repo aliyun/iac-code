@@ -23,6 +23,16 @@ from iac_code.types.permissions import (
 
 _MAX_SUBCOMMANDS = 10
 
+_BASH_BLANKET_ALLOW_RULE = "bash(**)"
+_BASH_BLANKET_ALLOW_SOURCES = frozenset(
+    {
+        "user_settings",
+        "project_settings",
+        "local_settings",
+        "cli_arg",
+    }
+)
+
 _BEHAVIOR_ORDER = {"deny": 0, "ask": 1, "passthrough": 2, "allow": 3}
 
 
@@ -71,11 +81,49 @@ def _command_text_is_readonly(command: str) -> bool:
     return all(is_command_readonly(cmd) for cmd in parsed.commands)
 
 
-def _collect_all_rules(rules_by_source: dict[str, list[str]]) -> list[str]:
-    out: list[str] = []
-    for _source, rules in rules_by_source.items():
-        out.extend(rules)
-    return out
+def _configured_bash_blanket_allow(
+    rules_by_source: dict[str, list[str]],
+) -> tuple[str, str] | None:
+    """Return an explicitly configured ``bash(**)`` rule.
+
+    ``bash(**)`` is deliberately recognized by exact spelling instead of the
+    wildcard matcher.  Runtime-created session rules therefore cannot turn a
+    normal per-command allow suggestion into blanket Bash permission.
+    """
+
+    for source, rules in rules_by_source.items():
+        if source not in _BASH_BLANKET_ALLOW_SOURCES:
+            continue
+        for rule in rules:
+            if rule.strip() == _BASH_BLANKET_ALLOW_RULE:
+                return source, rule
+    return None
+
+
+def _safe_mode_path_policy_active(context: ToolPermissionContext) -> bool:
+    """Whether the permission context carries fail-closed safe-mode roots."""
+
+    return bool(context.strict_read_directories) or context.read_path_violation_behavior == "deny"
+
+
+def _blanket_allow_result(rule_match: tuple[str, str]) -> PermissionResult:
+    source, rule = rule_match
+    detail = _("matched allow rule(s): {}").format(rule)
+    return PermissionResult(
+        behavior="allow",
+        message=detail,
+        reason=PermissionDecisionReason(type="rule", detail=detail),
+        audit=PermissionAuditMetadata(
+            scope=scope_for_rule_source(source),
+            source="permission_pipeline",
+            rule_source=source,
+            rule=rule,
+            reason_type="rule",
+            reason_detail=detail,
+            is_read_only=False,
+            operation={"is_read_only": False, "blanket_bash_allow": True},
+        ),
+    )
 
 
 def _generate_suggestions(
@@ -179,8 +227,18 @@ def bash_tool_check_permission(
     cmd: SimpleCommand,
     context: ToolPermissionContext,
     compound_has_cd: bool = False,
+    blanket_allow: tuple[str, str] | None = None,
 ) -> PermissionResult:
     if not cmd.argv:
+        if blanket_allow is not None and not _safe_mode_path_policy_active(context):
+            return _blanket_allow_result(blanket_allow)
+        if cmd.is_complex:
+            detail = _("complex command requires confirmation")
+            return PermissionResult(
+                behavior="ask",
+                message=detail,
+                reason=PermissionDecisionReason(type="complex_command", detail=detail),
+            )
         return PermissionResult(behavior="passthrough")
 
     matched_by_source = {
@@ -208,16 +266,20 @@ def bash_tool_check_permission(
 
     path_res = check_path_constraints(cmd, context.cwd, context.additional_directories)
     if path_res.behavior != "passthrough":
-        return path_res
+        if blanket_allow is None or path_res.behavior == "deny" or _safe_mode_path_policy_active(context):
+            return path_res
 
     dangerous_arg = dangerous_readonly_argument(cmd.argv)
     if dangerous_arg is not None:
-        detail = _("dangerous readonly argument requires confirmation: {}").format(_dangerous_arg_label(dangerous_arg))
-        return PermissionResult(
-            behavior="ask",
-            message=detail,
-            reason=PermissionDecisionReason(type="dangerous_readonly_argument", detail=detail),
-        )
+        if blanket_allow is None or _safe_mode_path_policy_active(context):
+            detail = _("dangerous readonly argument requires confirmation: {}").format(
+                _dangerous_arg_label(dangerous_arg)
+            )
+            return PermissionResult(
+                behavior="ask",
+                message=detail,
+                reason=PermissionDecisionReason(type="dangerous_readonly_argument", detail=detail),
+            )
 
     read_path_res = check_read_path_constraints(
         cmd,
@@ -229,15 +291,19 @@ def bash_tool_check_permission(
         compound_has_cd=compound_has_cd,
     )
     if read_path_res.behavior != "passthrough":
-        return read_path_res
+        if blanket_allow is None or read_path_res.behavior == "deny" or _safe_mode_path_policy_active(context):
+            return read_path_res
 
-    if cmd.is_complex:
+    if cmd.is_complex and (blanket_allow is None or _safe_mode_path_policy_active(context)):
         detail = _("complex command requires confirmation")
         return PermissionResult(
             behavior="ask",
             message=detail,
             reason=PermissionDecisionReason(type="complex_command", detail=detail),
         )
+
+    if blanket_allow is not None:
+        return _blanket_allow_result(blanket_allow)
 
     if matched["allow"]:
         detail = _("matched allow rule(s): {}").format(", ".join(matched["allow"]))
@@ -274,14 +340,13 @@ async def bash_tool_has_permission(command: str, context: ToolPermissionContext)
             command,
         )
 
-    allow_flat = _collect_all_rules(context.allow_rules)
-    ask_flat = _collect_all_rules(context.ask_rules)
+    blanket_allow = _configured_bash_blanket_allow(context.allow_rules)
 
     full_deny_matches = _matching_rules_with_sources(command, context.deny_rules, "deny")
+    full_ask_matches = _matching_rules_with_sources(command, context.ask_rules, "ask")
     full_matches = {
-        "allow": find_matching_rules(command, allow_flat, [], [])["allow"],
         "deny": [rule for _source, rule in full_deny_matches],
-        "ask": find_matching_rules(command, [], [], ask_flat)["ask"],
+        "ask": [rule for _source, rule in full_ask_matches],
     }
     if full_matches["deny"]:
         detail = _("matched deny rule(s) on full command: {}").format(", ".join(full_matches["deny"]))
@@ -292,8 +357,19 @@ async def bash_tool_has_permission(command: str, context: ToolPermissionContext)
             audit=_rule_audit(full_deny_matches, reason_detail=detail, is_read_only=_command_text_is_readonly(command)),
         )
 
+    if blanket_allow is not None and full_matches["ask"]:
+        detail = _("matched ask rule(s): {}").format(", ".join(full_matches["ask"]))
+        return PermissionResult(
+            behavior="ask",
+            message=detail,
+            reason=PermissionDecisionReason(type="rule", detail=detail),
+            audit=_rule_audit(full_ask_matches, reason_detail=detail, is_read_only=_command_text_is_readonly(command)),
+        )
+
     parsed: ParseResult = parse_command(command)
     if parsed.kind in ("too_complex", "parse_error"):
+        if blanket_allow is not None and not _safe_mode_path_policy_active(context):
+            return _blanket_allow_result(blanket_allow)
         if parsed.kind == "too_complex":
             kind_label = _("command too complex to analyze")
         else:
@@ -310,9 +386,11 @@ async def bash_tool_has_permission(command: str, context: ToolPermissionContext)
 
     subcommands = parsed.commands
     if not subcommands:
+        if blanket_allow is not None and not _safe_mode_path_policy_active(context):
+            return _blanket_allow_result(blanket_allow)
         return _with_suggestions_if_needed(PermissionResult(behavior="passthrough"), command)
 
-    if len(subcommands) > _MAX_SUBCOMMANDS:
+    if len(subcommands) > _MAX_SUBCOMMANDS and (blanket_allow is None or _safe_mode_path_policy_active(context)):
         detail = _("too many subcommands (>{})").format(_MAX_SUBCOMMANDS)
         return _with_suggestions_if_needed(
             PermissionResult(
@@ -325,7 +403,7 @@ async def bash_tool_has_permission(command: str, context: ToolPermissionContext)
         )
 
     cd_bases = [c for c in subcommands if _command_base(c) == "cd"]
-    if len(cd_bases) > 1:
+    if len(cd_bases) > 1 and (blanket_allow is None or _safe_mode_path_policy_active(context)):
         detail = _("multiple cd commands in compound command")
         return _with_suggestions_if_needed(
             PermissionResult(
@@ -338,7 +416,7 @@ async def bash_tool_has_permission(command: str, context: ToolPermissionContext)
         )
 
     has_git = any(_command_base(c) == "git" for c in subcommands)
-    if cd_bases and has_git:
+    if cd_bases and has_git and (blanket_allow is None or _safe_mode_path_policy_active(context)):
         detail = _("cd combined with git in compound command")
         return _with_suggestions_if_needed(
             PermissionResult(
@@ -351,6 +429,14 @@ async def bash_tool_has_permission(command: str, context: ToolPermissionContext)
         )
 
     compound_has_cd = bool(cd_bases)
-    sub_results = [bash_tool_check_permission(sc, context, compound_has_cd=compound_has_cd) for sc in subcommands]
+    sub_results = [
+        bash_tool_check_permission(
+            sc,
+            context,
+            compound_has_cd=compound_has_cd,
+            blanket_allow=blanket_allow,
+        )
+        for sc in subcommands
+    ]
     merged = _merge_results(sub_results)
     return _with_suggestions_if_needed(merged, command, commands=subcommands, sub_results=sub_results)

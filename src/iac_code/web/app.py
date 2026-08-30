@@ -53,6 +53,18 @@ def _pipeline_snapshot_switched_to_normal(snapshot: dict[str, Any] | None) -> bo
     return handoff.get("action") == "switch_to_normal" and handoff.get("targetMode") == "normal"
 
 
+def _pipeline_pending_input_coordinates(snapshot: dict[str, Any] | None) -> tuple[str, str]:
+    """Return ``(kind, step_id)`` for the prompt a Web message is answering."""
+    if not isinstance(snapshot, dict):
+        return "", ""
+    pending = snapshot.get("pendingInput")
+    if not isinstance(pending, dict):
+        return "", ""
+    step = pending.get("step")
+    step = step if isinstance(step, dict) else {}
+    return str(pending.get("kind") or ""), str(step.get("id") or pending.get("stepId") or "")
+
+
 if TYPE_CHECKING:
     from iac_code.web.pipeline_actions import PipelineActionRunner
     from iac_code.web.runtime import WebTurnRequest
@@ -223,6 +235,7 @@ def create_app(
         WebMode,
         WebSessionManager,
         compute_replay_sequence,
+        solution_first_pipeline_user_display_text,
     )
     from iac_code.web.settings import (
         AliyunOAuthManualFlowStore,
@@ -1054,16 +1067,22 @@ def create_app(
                 # 让恢复路径(load_resume_messages)能读回并渲染成用户气泡，与普通回合对齐。
                 # 若流水线已交接给普通对话(snapshot 里有 normalHandoff)，本回合属于交接后的普通
                 # 对话，打上 normalChat 标记，恢复时才能把「↪ 普通对话」分隔准确插在首条普通消息前。
-                normal_chat_turn = _pipeline_snapshot_switched_to_normal(
-                    await load_pipeline_snapshot(context_id=session.context_id, task_id=session.task_id)
+                pre_turn_snapshot = await load_pipeline_snapshot(
+                    context_id=session.context_id,
+                    task_id=session.task_id,
                 )
+                normal_chat_turn = _pipeline_snapshot_switched_to_normal(pre_turn_snapshot)
+                pipeline_input_kind, pipeline_input_step_id = _pipeline_pending_input_coordinates(pre_turn_snapshot)
+                display_text = solution_first_pipeline_user_display_text(session.pipeline_name, text)
                 manager.persist_pipeline_user_prompt(
                     session,
-                    text,
+                    display_text,
                     normal_chat=normal_chat_turn,
                     turn_id=turn_id,
                     image_ids=image_ids,
                     file_refs=file_refs,
+                    pipeline_input_kind=pipeline_input_kind,
+                    pipeline_input_step_id=pipeline_input_step_id,
                 )
                 input_consumed = True
                 # 流水线回合此前只发 pipeline.event，从不发 user.message，导致输入 prompt 后
@@ -1074,10 +1093,12 @@ def create_app(
                     "user.message",
                     {
                         "turnId": turn_id,
-                        "text": text,
+                        "text": display_text,
                         "imageIds": list(image_ids),
                         "fileRefs": list(file_refs),
                         "source": "pipeline",
+                        "pipelineInputKind": pipeline_input_kind,
+                        "pipelineInputStepId": pipeline_input_step_id,
                     },
                 )
                 await session.events.publish(

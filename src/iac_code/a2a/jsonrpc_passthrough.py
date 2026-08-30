@@ -8,7 +8,7 @@ from typing import Any, AsyncIterable, AsyncIterator
 from a2a.server.context import ServerCallContext
 from jsonrpc.jsonrpc2 import JSONRPC20Response
 from sse_starlette.sse import EventSourceResponse
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from iac_code.utils.public_errors import sanitize_strict_text
 
@@ -51,9 +51,37 @@ def install_v03_jsonrpc_error_data_passthrough(jsonrpc_endpoint: Callable[..., A
 
     try:
         from a2a.compat.v0_3 import types as types_v03
+        from a2a.utils.errors import InvalidParamsError
     except Exception:
         logger.debug("A2A v0.3 compatibility types are unavailable", exc_info=True)
         return
+
+    def invalid_params_error(exc: Exception) -> Any | None:
+        if isinstance(exc, InvalidParamsError) or getattr(exc, "jsonrpc_error_data_passthrough", False):
+            return types_v03.InvalidParamsError(message=str(exc), data=getattr(exc, "data", None))
+        return None
+
+    original_non_streaming = adapter._process_non_streaming_request
+
+    async def _process_non_streaming_request_with_passthrough(
+        self: Any,
+        request_id: str | int | None,
+        request_obj: Any,
+        context: ServerCallContext,
+    ) -> JSONResponse:
+        try:
+            return await original_non_streaming(request_id, request_obj, context)
+        except Exception as exc:
+            error = invalid_params_error(exc)
+            if error is None:
+                raise
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": error.model_dump(by_alias=True, exclude_none=True),
+                }
+            )
 
     async def _process_streaming_request_with_passthrough(
         self: Any,
@@ -78,10 +106,7 @@ def install_v03_jsonrpc_error_data_passthrough(jsonrpc_endpoint: Callable[..., A
                     "Error during stream generation in v0.3 JSONRPCAdapter: %s",
                     sanitize_strict_text(str(exc)),
                 )
-                if getattr(exc, "jsonrpc_error_data_passthrough", False):
-                    error = types_v03.InvalidParamsError(message=str(exc), data=getattr(exc, "data", None))
-                else:
-                    error = types_v03.InternalError(message=str(exc))
+                error = invalid_params_error(exc) or types_v03.InternalError(message=str(exc))
                 err_resp = types_v03.SendStreamingMessageResponse(
                     root=types_v03.JSONRPCErrorResponse(id=request_id, error=error)
                 )
@@ -89,5 +114,6 @@ def install_v03_jsonrpc_error_data_passthrough(jsonrpc_endpoint: Callable[..., A
 
         return EventSourceResponse(event_generator(stream_gen))
 
+    adapter._process_non_streaming_request = MethodType(_process_non_streaming_request_with_passthrough, adapter)
     adapter._process_streaming_request = MethodType(_process_streaming_request_with_passthrough, adapter)
     adapter._iac_code_recoverable_error_passthrough = True

@@ -3,7 +3,7 @@
 import pytest
 
 from iac_code.agent.system_prompt import DYNAMIC_BOUNDARY
-from iac_code.providers.base import Message, ToolDefinition
+from iac_code.providers.base import ContentBlock, Message, ToolDefinition
 from iac_code.providers.dashscope_provider import (
     _EXPLICIT_CACHE_MODEL_PREFIXES,
     _PRESERVE_THINKING_MODEL_PREFIXES,
@@ -33,6 +33,19 @@ class TestDashScopeProvider:
         api = p._convert_messages(msgs)
         assert api[0]["role"] == "user"
         assert api[0]["content"] == "Hello"
+
+    def test_thinking_only_assistant_uses_required_string_content(self):
+        p = DashScopeProvider(model="deepseek-v4-flash-0731", api_key="test")
+
+        api = p._convert_content_blocks("assistant", [ContentBlock(type="thinking", text="still reasoning")])
+
+        assert api == [
+            {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "still reasoning",
+            }
+        ]
 
     def test_tool_conversion_inherited(self):
         p = DashScopeProvider(model="qwen3.6-plus", api_key="test")

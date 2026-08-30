@@ -476,6 +476,92 @@ def test_permission_envelope_exposes_deterministic_human_readable_semantics() ->
     assert envelope["target"] == "vpc DescribeVpcs in cn-hangzhou"
     assert envelope["isReadOnly"] is True
     assert envelope["toolName"] == "aliyun_api"
+    assert envelope["operation"] == {
+        "product": "vpc",
+        "action": "DescribeVpcs",
+        "region": "cn-hangzhou",
+        "apiCalls": [{"product": "VPC", "action": "DescribeVpcs", "effect": "read"}],
+    }
+
+
+def test_aliyun_api_change_exposes_original_safe_parameters_and_redacts_secrets() -> None:
+    request = PermissionRequestEvent(
+        tool_name="aliyun_api",
+        tool_input={
+            "product": "ecs",
+            "action": "RunInstances",
+            "region_id": "cn-hangzhou",
+            "params": {
+                "InstanceType": "ecs.g7.large",
+                "Amount": 2,
+                "SystemDisk": {"Size": 40, "Encrypted": True},
+                "Password": "must-not-leak",
+                "Tags": [{"Key": "team", "Value": "platform"}, {"Token": "hidden"}],
+            },
+            "headers": {"Authorization": "must-not-leak-either"},
+        },
+        tool_use_id="tool-change",
+        permission_result=PermissionResult(
+            behavior="ask",
+            audit=PermissionAuditMetadata(
+                scope="once",
+                source="permission_pipeline",
+                is_read_only=False,
+                operation={"product": "ecs", "action": "RunInstances", "region": "cn-hangzhou"},
+            ),
+        ),
+    )
+
+    envelope = permission_input_envelope(request, task_id="task-1", context_id="ctx-1")
+
+    assert envelope["operation"]["apiCalls"] == [{"product": "ECS", "action": "RunInstances", "effect": "change"}]
+    assert envelope["displayParameters"] == {
+        "format": "json",
+        "value": {
+            "InstanceType": "ecs.g7.large",
+            "Amount": 2,
+            "SystemDisk": {"Size": 40, "Encrypted": True},
+            "Password": {"redacted": True},
+            "Tags": [{"Key": "team", "Value": "platform"}, {"Token": {"redacted": True}}],
+        },
+    }
+    rendered = json.dumps(envelope, ensure_ascii=False)
+    assert "must-not-leak" not in rendered
+    assert "Authorization" not in rendered
+
+
+def test_aliyun_api_roa_parameters_keep_request_layers_but_never_headers() -> None:
+    request = PermissionRequestEvent(
+        tool_name="aliyun_api",
+        tool_input={
+            "product": "example",
+            "action": "UpdateThing",
+            "region_id": "cn-shanghai",
+            "pathname": "/things/thing-1",
+            "query": {"DryRun": False},
+            "body": {"Name": "demo", "access_token": "hidden"},
+            "headers": {"Cookie": "hidden"},
+        },
+        tool_use_id="tool-roa",
+        permission_result=PermissionResult(
+            behavior="ask",
+            audit=PermissionAuditMetadata(
+                scope="once",
+                source="permission_pipeline",
+                is_read_only=False,
+                operation={"product": "example", "action": "UpdateThing", "region": "cn-shanghai"},
+            ),
+        ),
+    )
+
+    envelope = permission_input_envelope(request, task_id="task-1", context_id="ctx-1")
+
+    assert envelope["displayParameters"]["value"] == {
+        "pathname": "/things/thing-1",
+        "query": {"DryRun": False},
+        "body": {"Name": "demo", "access_token": {"redacted": True}},
+    }
+    assert "headers" not in envelope["displayParameters"]["value"]
 
 
 def test_ros_stack_permission_names_action_and_target_stack() -> None:
@@ -507,8 +593,230 @@ def test_ros_stack_permission_names_action_and_target_stack() -> None:
 
     assert envelope["title"] == "Create ROS stack"
     assert envelope["effect"] == "cloud_change"
-    assert envelope["target"] == "ros CreateStack in cn-hangzhou; stack demo-vswitch-stack"
+    assert envelope["target"] == "demo-vswitch-stack · cn-hangzhou"
     assert envelope["isReadOnly"] is False
+    assert envelope["operation"]["apiCalls"] == [{"product": "ROS", "action": "CreateStack", "effect": "change"}]
+    assert envelope["displayParameters"]["value"] == {"StackName": "demo-vswitch-stack"}
+
+
+def test_ros_tool_operation_infers_ros_product_without_audit_metadata() -> None:
+    request = PermissionRequestEvent(
+        tool_name="ros_stack",
+        tool_input={
+            "action": "UpdateStack",
+            "region_id": "cn-hangzhou",
+            "stack_name": "permission-handoff-stack",
+            "params": {"Password": "secret"},
+        },
+        tool_use_id="tool-stack",
+    )
+
+    envelope = permission_input_envelope(request, task_id="task-1", context_id="ctx-1")
+
+    assert envelope["operation"] == {
+        "product": "ros",
+        "action": "UpdateStack",
+        "region": "cn-hangzhou",
+        "target": {"type": "resource", "name": "permission-handoff-stack"},
+        "apiCalls": [{"product": "ROS", "action": "UpdateStack", "effect": "change"}],
+    }
+    assert envelope["displayParameters"]["value"] == {"Password": {"redacted": True}}
+    assert envelope["target"] == "permission-handoff-stack · cn-hangzhou"
+
+
+@pytest.mark.parametrize(
+    ("deploy_action", "audit_action", "expected_calls"),
+    [
+        ("create", "CreateStack", [{"product": "ROS", "action": "CreateStack", "effect": "change"}]),
+        (
+            "continue_create",
+            "ContinueCreateStack",
+            [{"product": "ROS", "action": "ContinueCreateStack", "effect": "change"}],
+        ),
+        (
+            "delete_and_create",
+            "CreateStack",
+            [
+                {"product": "ROS", "action": "DeleteStack", "effect": "change"},
+                {"product": "ROS", "action": "CreateStack", "effect": "change"},
+            ],
+        ),
+        (
+            "wait",
+            "GetStackStatus",
+            [{"product": "ROS", "action": "GetStack", "effect": "read", "repeat": "polling"}],
+        ),
+    ],
+)
+def test_ros_deploy_projects_the_real_api_sequence(
+    deploy_action: str,
+    audit_action: str,
+    expected_calls: list[dict[str, str]],
+) -> None:
+    request = PermissionRequestEvent(
+        tool_name="ros_deploy",
+        tool_input={
+            "action": deploy_action,
+            "stack_id": "old-stack-id",
+            "stack_name": "new-stack",
+            "region_id": "cn-hangzhou",
+            "parameters": {"Environment": "production"},
+        },
+        tool_use_id="tool-deploy",
+        permission_result=PermissionResult(
+            behavior="ask",
+            audit=PermissionAuditMetadata(
+                scope="once",
+                source="permission_pipeline",
+                is_read_only=deploy_action == "wait",
+                operation={
+                    "product": "ros",
+                    "action": audit_action,
+                    "deployAction": deploy_action,
+                    "region": "cn-hangzhou",
+                    "stackId": "old-stack-id",
+                    "stackName": "new-stack",
+                },
+            ),
+        ),
+    )
+
+    envelope = permission_input_envelope(request, task_id="task-1", context_id="ctx-1")
+
+    assert envelope["operation"]["action"] == deploy_action
+    assert envelope["operation"]["apiCalls"] == expected_calls
+    if deploy_action == "wait":
+        assert not any(call["effect"] == "change" for call in expected_calls)
+
+
+def test_every_ros_lifecycle_action_projects_its_canonical_effect() -> None:
+    tool_actions = {
+        "ros_stack": ({"CreateStack", "UpdateStack", "ContinueCreateStack", "DeleteStack"}, set()),
+        "ros_stack_instances": (
+            {"CreateStackInstances", "UpdateStackInstances", "DeleteStackInstances"},
+            set(),
+        ),
+        "ros_stack_group": (
+            {
+                "CreateStackGroup",
+                "UpdateStackGroup",
+                "DeleteStackGroup",
+                "DetectStackGroupDrift",
+                "StopStackGroupOperation",
+                "ImportStacksToStackGroup",
+            },
+            {
+                "GetStackGroup",
+                "ListStackGroups",
+                "GetStackGroupOperation",
+                "ListStackGroupOperations",
+                "ListStackGroupOperationResults",
+            },
+        ),
+        "ros_template": (
+            {"CreateTemplate", "UpdateTemplate", "DeleteTemplate", "SetTemplatePermission"},
+            {"GetTemplate", "ListTemplates", "ListTemplateVersions"},
+        ),
+        "ros_template_scratch": (
+            {"CreateTemplateScratch", "UpdateTemplateScratch", "DeleteTemplateScratch", "GenerateTemplateByScratch"},
+            {"GetTemplateScratch", "ListTemplateScratches"},
+        ),
+        "ros_diagnostic": ({"CreateDiagnostic", "DeleteDiagnostic"}, {"GetDiagnostic", "ListDiagnostics"}),
+        "ros_resource_type_registration": (
+            {"RegisterResourceType", "DeregisterResourceType", "SetResourceType"},
+            {
+                "GetResourceType",
+                "GetResourceTypeTemplate",
+                "ListResourceTypes",
+                "ListResourceTypeRegistrations",
+                "ListResourceTypeVersions",
+            },
+        ),
+        "ros_tag": ({"TagResources", "UntagResources"}, {"ListTagKeys", "ListTagValues", "ListTagResources"}),
+    }
+
+    projected_actions: set[str] = set()
+    for tool_name, (write_actions, read_actions) in tool_actions.items():
+        for action in sorted(write_actions | read_actions):
+            is_read_only = action in read_actions
+            request = PermissionRequestEvent(
+                tool_name=tool_name,
+                tool_input={"action": action, "params": {}, "region_id": "cn-hangzhou"},
+                tool_use_id="{}-{}".format(tool_name, action),
+                permission_result=PermissionResult(
+                    behavior="ask",
+                    audit=PermissionAuditMetadata(
+                        scope="once",
+                        source="permission_pipeline",
+                        is_read_only=is_read_only,
+                        operation={"product": "ros", "action": action, "region": "cn-hangzhou"},
+                    ),
+                ),
+            )
+            envelope = permission_input_envelope(request, task_id="task-1", context_id="ctx-1")
+            assert envelope["operation"]["apiCalls"] == [
+                {"product": "ROS", "action": action, "effect": "read" if is_read_only else "change"}
+            ]
+            assert "displayParameters" not in envelope
+            projected_actions.add(action)
+
+    assert len(projected_actions) == 48
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "tool_input", "expected_target"),
+    [
+        ("read_file", {"path": "templates/main.yml"}, "templates/main.yml"),
+        ("write_file", {"file_path": "templates/main.yml"}, "templates/main.yml"),
+        ("edit_file", {"path": "templates/main.yml"}, "templates/main.yml"),
+        ("list_files", {"path": "templates"}, "templates"),
+        ("glob", {"path": "templates", "pattern": "**/*.yml"}, "templates"),
+        ("grep", {"path": "templates", "pattern": "ALIYUN::ECS"}, "ALIYUN::ECS"),
+        ("bash", {"cwd": "/workspace", "command": "make test"}, "make test"),
+        ("web_fetch", {"url": "https://example.com/docs"}, "https://example.com/docs"),
+        ("read_memory", {"name": "deployment"}, "deployment"),
+        ("write_memory", {"memory_name": "deployment"}, "deployment"),
+        ("task_get", {"task_id": "task-42"}, "task-42"),
+        ("task_stop", {"task_id": "task-42"}, "task-42"),
+        ("agent", {"subagent_type": "general", "description": "inspect templates"}, "general"),
+        ("skill", {"name": "iac-aliyun", "source": "bundled"}, "iac-aliyun"),
+        ("aliyun_doc_search", {"query": "ROS CreateStack"}, "ROS CreateStack"),
+        ("aliyun_api_doc", {"product": "ros", "action": "CreateStack"}, "CreateStack"),
+        ("ask_user_question", {"question": "Which region?"}, "Which region?"),
+        ("complete_step", {"step_id": "intent_analysis"}, "intent_analysis"),
+        ("show_architecture_diagram", {"template_path": "templates/main.yml"}, "templates/main.yml"),
+        ("show_architecture_plan", {"candidate_name": "low-cost"}, "low-cost"),
+        ("show_candidate_detail", {"candidate_index": 2}, "2"),
+        ("infraguard_scan", {"template_path": "templates/main.yml"}, "templates/main.yml"),
+        ("list_mcp_resources", {"server": "github"}, "github"),
+        ("read_mcp_resource", {"server": "github", "uri": "repo://demo"}, "repo://demo"),
+        ("mcp__github__create_issue", {"title": "bug"}, "github:create_issue"),
+        ("mcp__github__authenticate", {}, "github:authenticate"),
+    ],
+)
+def test_known_non_cloud_tools_have_decision_relevant_targets(
+    tool_name: str,
+    tool_input: dict[str, object],
+    expected_target: str,
+) -> None:
+    request = PermissionRequestEvent(
+        tool_name=tool_name,
+        tool_input=tool_input,
+        tool_use_id="tool-target",
+        permission_result=PermissionResult(
+            behavior="ask",
+            audit=PermissionAuditMetadata(
+                scope="once",
+                source="permission_pipeline",
+                is_read_only=tool_name.startswith(("read_", "list_")),
+                operation={},
+            ),
+        ),
+    )
+
+    envelope = permission_input_envelope(request, task_id="task-1", context_id="ctx-1")
+
+    assert expected_target in envelope["target"]
 
 
 def test_ros_deployment_permission_is_localized_and_preserves_safe_plan_summary() -> None:
@@ -976,6 +1284,42 @@ def test_candidate_permission_projection_preserves_sideband_coordinates() -> Non
     assert projected is not None
     assert projected["scope"] == "candidate"
     assert projected["subPipelineId"] == "candidate-a"
+
+
+def test_pending_pipeline_permission_projection_preserves_safe_operation_details() -> None:
+    envelope = {
+        "eventId": "evt-1",
+        "eventType": "permission_requested",
+        "taskId": "task-1",
+        "contextId": "ctx-1",
+        "status": "input_required",
+        "permission": {
+            "pending": True,
+            "inputId": "permission-task-1-tool-1",
+            "toolUseId": "tool-1",
+            "toolName": "aliyun_api",
+            "safeSummary": "aliyun_api: safe",
+            "operation": {
+                "product": "vpc",
+                "action": "CreateVSwitch",
+                "region": "cn-hangzhou",
+                "apiCalls": [{"product": "VPC", "action": "CreateVSwitch", "effect": "change"}],
+            },
+            "displayParameters": {
+                "format": "json",
+                "value": {"VpcId": "vpc-safe", "Password": {"redacted": True}},
+            },
+        },
+    }
+
+    projected = _unified_input_projection(envelope)
+
+    assert projected is not None
+    assert projected["operation"]["apiCalls"] == [{"product": "VPC", "action": "CreateVSwitch", "effect": "change"}]
+    assert projected["displayParameters"] == {
+        "format": "json",
+        "value": {"VpcId": "vpc-safe", "Password": {"redacted": True}},
+    }
 
 
 def test_candidate_selection_projection_can_use_runtime_step_ui_mode_without_mutating_envelope() -> None:

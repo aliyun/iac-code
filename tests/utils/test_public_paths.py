@@ -138,3 +138,24 @@ def test_redact_known_public_paths_uses_exact_placeholder_for_windows_and_unc() 
 
     assert redact_known_public_paths(r"C:\\iac-code\\workspace\\a.txt", roots) == "[PATH]"
     assert redact_known_public_paths(r"\\\\server\\share\\a.txt", roots) == "[PATH]"
+
+
+def test_public_path_redactor_reuses_normalized_roots(monkeypatch) -> None:
+    from iac_code.utils import public_paths
+
+    original = public_paths._normalize_public_path_roots
+    calls: list[int] = []
+
+    def counting_normalize(public_path_roots):
+        calls.append(1)
+        return original(public_path_roots)
+
+    monkeypatch.setattr(public_paths, "_normalize_public_path_roots", counting_normalize)
+
+    roots = [{"path": "/srv/iac-code", "label": "."}]
+    redactor = public_paths.PublicPathRedactor(roots)
+    values = ["/srv/iac-code/private/result.json", "evt-1", "/home/other/keep.txt"]
+
+    assert [redactor.redact(value) for value in values] == ["[PATH]", "evt-1", "/home/other/keep.txt"]
+    assert len(calls) == 1
+    assert [redact_known_public_paths(value, roots) for value in values] == [redactor.redact(v) for v in values]

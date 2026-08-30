@@ -84,6 +84,36 @@ msgstr ""
 "session et les ressources cloud."
 
 #: src/iac_code/a2a/executor.py
+msgid "Normal permission restore snapshot identity is incomplete."
+msgstr ""
+"L’identité de l’instantané de restauration d’autorisation du chat normal "
+"est incomplète."
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal permission restore snapshot is already resolved."
+msgstr ""
+"L’instantané de restauration d’autorisation du chat normal est déjà "
+"résolu."
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal permission restore request is missing from the snapshot."
+msgstr ""
+"La demande de restauration d’autorisation du chat normal est absente de "
+"l’instantané."
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal permission restore decision conflicts with the snapshot."
+msgstr ""
+"La décision de restauration d’autorisation du chat normal est en conflit "
+"avec l’instantané."
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal permission restore snapshot could not be persisted."
+msgstr ""
+"L’instantané de restauration d’autorisation du chat normal n’a pas pu "
+"être enregistré."
+
+#: src/iac_code/a2a/executor.py
 msgid ""
 "Rollback cleanup deferred prompt state is unavailable. Please repair it "
 "before continuing."
@@ -121,6 +151,20 @@ msgstr ""
 #: src/iac_code/a2a/transports/dispatcher.py
 msgid "Task canceled."
 msgstr "Tâche annulée."
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal permission decision is unavailable before backup."
+msgstr ""
+"La décision d’autorisation du chat normal est indisponible avant la "
+"sauvegarde."
+
+#: src/iac_code/a2a/executor.py
+msgid "Unsupported pipeline name."
+msgstr "Nom de pipeline non pris en charge."
+
+#: src/iac_code/a2a/executor.py
+msgid "Unsupported Alibaba Cloud region ID."
+msgstr "ID de région Alibaba Cloud non pris en charge."
 
 #: src/iac_code/a2a/executor.py
 #, python-brace-format
@@ -297,6 +341,37 @@ msgstr "Lire des données Alibaba Cloud avec {operation}"
 msgid "Run {operation}"
 msgstr "Exécuter {operation}"
 
+#: src/iac_code/a2a/pipeline_events.py
+msgid "The finalized template path is missing."
+msgstr "Le chemin du modèle finalisé est absent."
+
+#: src/iac_code/a2a/pipeline_events.py
+msgid "The trusted workspace root is unavailable."
+msgstr "La racine de l’espace de travail approuvé est indisponible."
+
+#: src/iac_code/a2a/pipeline_events.py
+msgid "The finalized template file is unavailable."
+msgstr "Le fichier de modèle finalisé est indisponible."
+
+#: src/iac_code/a2a/pipeline_events.py
+msgid "The finalized template file is outside the trusted workspace."
+msgstr ""
+"Le fichier de modèle finalisé se trouve hors de l’espace de travail "
+"approuvé."
+
+#: src/iac_code/a2a/pipeline_events.py
+msgid "The finalized template file could not be read."
+msgstr "Le fichier de modèle finalisé n’a pas pu être lu."
+
+#: src/iac_code/a2a/pipeline_executor.py
+#, python-brace-format
+msgid ""
+"This session already runs pipeline {durable}; it cannot switch to "
+"{requested}."
+msgstr ""
+"Cette session exécute déjà le pipeline {durable} ; elle ne peut pas "
+"basculer vers {requested}."
+
 #: src/iac_code/a2a/pipeline_executor.py
 #, python-brace-format
 msgid "Pipeline already running. Resume task {task_id}."
@@ -312,6 +387,46 @@ msgid "A2A pipeline sidecar restore failed: status={status}, reason={reason}"
 msgstr ""
 "Échec de la restauration du sidecar du pipeline A2A : status={status}, "
 "reason={reason}"
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "Pipeline ended before pending input was consumed."
+msgstr "Le pipeline s’est terminé avant que l’entrée en attente soit consommée."
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "permission_resume_invalid: recovered Pipeline decision is incomplete"
+msgstr ""
+"permission_resume_invalid : la décision de pipeline restaurée est "
+"incomplète"
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid ""
+"permission_resume_invalid: recovered Pipeline decision could not be "
+"published"
+msgstr ""
+"permission_resume_invalid : la décision de pipeline restaurée n’a pas pu "
+"être publiée"
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "A2A ask_user_question image supplement could not be delivered."
+msgstr "Le complément d’image A2A ask_user_question n’a pas pu être livré."
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "A2A pipeline cannot accept ask_user_question image supplement."
+msgstr ""
+"Le pipeline A2A ne peut pas accepter le complément d’image "
+"ask_user_question."
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "Pending Pipeline input is already being processed."
+msgstr "L’entrée de pipeline en attente est déjà en cours de traitement."
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "Pending Pipeline input could not be consumed."
+msgstr "L’entrée de pipeline en attente n’a pas pu être consommée."
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "Pipeline rejected the pending input."
+msgstr "Le pipeline a rejeté l’entrée en attente."
 
 #: src/iac_code/a2a/pipeline_executor.py
 msgid "Failed to persist A2A pipeline snapshot"
@@ -341,6 +456,10 @@ msgstr "Saisie requise"
 #: src/iac_code/utils/public_errors.py
 msgid "Stack trace omitted from public event; see error_id."
 msgstr "Trace de pile omise de l’événement public ; consultez error_id."
+
+#: src/iac_code/a2a/request_mode.py
+msgid "Unsupported run mode."
+msgstr "Mode d’exécution non pris en charge."
 
 #: src/iac_code/a2a/task_store.py
 msgid "A2A task expired"
@@ -586,6 +705,17 @@ msgstr "Commande terminée par le signal : {signal}"
 msgid "Command failed with exit code {exit_code}"
 msgstr "La commande a échoué avec le code de sortie {exit_code}"
 
+#: src/iac_code/agent/agent_loop.py
+msgid ""
+"The user explicitly denied this tool operation. This is not a cloud API "
+"or IAM permission error. Do not retry this operation or perform the same "
+"action with another tool unless the user asks again."
+msgstr ""
+"L’utilisateur a explicitement refusé cette opération de l’outil. Il ne "
+"s’agit pas d’une erreur d’autorisation de l’API cloud ou d’IAM. Ne "
+"réessayez pas cette opération et n’effectuez pas la même action avec un "
+"autre outil, sauf si l’utilisateur le demande à nouveau."
+
 #: src/iac_code/agent/agent_loop.py src/iac_code/ui/repl.py
 msgid "Permission denied."
 msgstr "Permission refusée."
@@ -806,7 +936,6 @@ msgid "The A2A context identity changed unexpectedly."
 msgstr "L’identité du contexte A2A a changé de manière inattendue."
 
 #: src/iac_code/agui/errors.py
-#, python-brace-format
 msgid "The A2A execution failed."
 msgstr "L’exécution A2A a échoué."
 
@@ -948,7 +1077,9 @@ msgstr "La reprise contient des identifiants d’interruption en double."
 
 #: src/iac_code/agui/errors.py
 msgid "The resume must resolve every pending interrupt exactly once."
-msgstr "La reprise doit résoudre chaque interruption en attente exactement une fois."
+msgstr ""
+"La reprise doit résoudre chaque interruption en attente exactement une "
+"fois."
 
 #: src/iac_code/agui/errors.py
 msgid "The resume references an unknown interrupt."
@@ -981,7 +1112,9 @@ msgstr "Le processus A2A local n’a pas été prêt à temps."
 
 #: src/iac_code/agui/server.py
 msgid "The AG-UI adapter may connect only to a loopback A2A HTTP(S) URL."
-msgstr "L’adaptateur AG-UI ne peut se connecter qu’à une URL HTTP(S) A2A en boucle locale."
+msgstr ""
+"L’adaptateur AG-UI ne peut se connecter qu’à une URL HTTP(S) A2A en "
+"boucle locale."
 
 #: src/iac_code/cli/headless.py
 #, python-brace-format
@@ -1334,7 +1467,6 @@ msgstr ""
 "arrêt"
 
 #: src/iac_code/cli/main.py
-#, python-brace-format
 msgid "--port must be between 1 and 65535."
 msgstr "--port doit être compris entre 1 et 65535."
 
@@ -3991,6 +4123,10 @@ msgid "Selling"
 msgstr "Vente"
 
 #: src/iac_code/pipeline/display_names.py
+msgid "Selling (solution first)"
+msgstr "Vente (solution d'abord)"
+
+#: src/iac_code/pipeline/display_names.py
 msgid "Intent parsing"
 msgstr "Analyse de l’intention"
 
@@ -4005,6 +4141,14 @@ msgstr "Évaluer les candidats"
 #: src/iac_code/pipeline/display_names.py
 msgid "Confirm and select"
 msgstr "Confirmer et sélectionner"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Solution planning and selection"
+msgstr "Planification et sélection de la solution"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Implement selected solution"
+msgstr "Mettre en œuvre la solution sélectionnée"
 
 #: src/iac_code/pipeline/display_names.py
 msgid "Deploying"
@@ -4041,6 +4185,10 @@ msgstr "Poser une question à l’utilisateur"
 #: src/iac_code/pipeline/display_names.py
 msgid "Show architecture diagram"
 msgstr "Afficher le diagramme d’architecture"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Show architecture plan"
+msgstr "Afficher le plan d'architecture"
 
 #: src/iac_code/pipeline/display_names.py
 msgid "Show candidate details"
@@ -4414,6 +4562,58 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"A confirmed plan must point at the template file that "
+"ros_validate_template validated last."
+msgstr ""
+"Un plan confirmé doit pointer vers le fichier de modèle validé en dernier"
+" par ros_validate_template."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"A confirmed plan must carry the latest ask_user_question deployment "
+"confirmation answer, and that answer must still be valid for the current "
+"template and parameters."
+msgstr ""
+"Un plan confirmé doit inclure la dernière réponse de confirmation de "
+"déploiement d'ask_user_question, et cette réponse doit rester valide pour"
+" le modèle et les paramètres actuels."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"A structured deployment confirmation input must be handled exactly as "
+"submitted; parameter changes must be repriced and shown for confirmation "
+"before deployment."
+msgstr ""
+"Une confirmation de déploiement structurée doit être traitée exactement "
+"comme elle a été envoyée ; les changements de paramètres doivent être "
+"rechiffrés et présentés pour confirmation avant le déploiement."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"Deployment can be confirmed only after the current plan was shown in the "
+"dedicated confirmation state."
+msgstr ""
+"Le déploiement ne peut être confirmé qu'après l'affichage du plan actuel "
+"dans l'état de confirmation dédié."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"Requesting a different solution must roll back to the solution planning "
+"and selection step."
+msgstr ""
+"Demander une autre solution doit revenir à l'étape de planification et de"
+" sélection de la solution."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"The confirmed template was rewritten after ros_validate_template; rerun "
+"ros_validate_template for the same template path."
+msgstr ""
+"Le modèle confirmé a été réécrit après ros_validate_template ; relancez "
+"ros_validate_template pour le même chemin de modèle."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -4436,6 +4636,58 @@ msgstr "Raison du retour arrière"
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "Structured conclusion for the current step. Required and non-empty."
 msgstr "Conclusion structurée pour l’étape actuelle. Obligatoire et non vide."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"Submit the full first conclusion. On a resumed user-interaction branch, "
+"submit only changed fields; the pipeline merges them with the saved "
+"conclusion before full validation."
+msgstr ""
+"Envoyez la conclusion complète la première fois. Dans une branche "
+"d’interaction reprise, envoyez uniquement les champs modifiés ; le "
+"pipeline les fusionne avec la conclusion enregistrée avant la validation "
+"complète."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"complete_step arguments must be {\"conclusion\": {...}}; keep all "
+"conclusion fields, including candidates, inside conclusion and do not "
+"submit them at the tool input top level."
+msgstr ""
+"Les arguments de complete_step doivent être {\"conclusion\": {...}} ; "
+"conservez tous les champs de la conclusion, y compris candidates, à "
+"l’intérieur de conclusion et ne les envoyez pas au niveau supérieur de "
+"l’entrée de l’outil."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "Schema validation failed after {attempts} attempts: {error}"
+msgstr "La validation du schéma a échoué après {attempts} tentatives : {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"conclusion validation failed after exceeding the maximum retry count "
+"({max_retries}): {error}"
+msgstr ""
+"La validation de conclusion a échoué après dépassement du nombre maximal "
+"de tentatives ({max_retries}) : {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{error}\n"
+"Current step: {step_id}\n"
+"{schema_hint}\n"
+"Do not repeat unchanged saved fields on a resumed interaction; submit "
+"only the corrected fields."
+msgstr ""
+"{error}\n"
+"Étape actuelle : {step_id}\n"
+"{schema_hint}\n"
+"Lors d’une interaction reprise, ne répétez pas les champs enregistrés "
+"inchangés ; envoyez uniquement les champs corrigés."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -4464,6 +4716,23 @@ msgid ""
 msgstr ""
 "conclusion doit être un objet non vide ; renseignez la conclusion "
 "structurée requise par cette étape."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "complete_step arguments must use the outer form {\"conclusion\": {...}}."
+msgstr ""
+"Les arguments de complete_step doivent utiliser la forme externe "
+"{\"conclusion\": {...}}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "Allowed status values: {statuses}."
+msgstr "Valeurs de statut autorisées : {statuses}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "Allowed conclusion fields: {fields}."
+msgstr "Champs de conclusion autorisés : {fields}."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "conclusion must match this schema summary:\n"
@@ -4514,6 +4783,81 @@ msgid ""
 msgstr ""
 "{message} complete_step.conclusion doit inclure l’un de ces champs : "
 "{fields}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "The saved pipeline context does not allow this conclusion yet."
+msgstr "Le contexte de pipeline enregistré n'autorise pas encore cette conclusion."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "{message} Context field {field} must equal {expected}."
+msgstr "{message} Le champ de contexte {field} doit être égal à {expected}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A structured user input must be handled exactly as submitted."
+msgstr ""
+"Une entrée utilisateur structurée doit être traitée exactement comme elle"
+" a été envoyée."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} The submitted action was {actual}; this conclusion requires "
+"{expected}."
+msgstr ""
+"{message} L'action envoyée était {actual} ; cette conclusion exige "
+"{expected}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} complete_step.conclusion.{field} must record the exact "
+"structured input."
+msgstr ""
+"{message} complete_step.conclusion.{field} doit enregistrer exactement "
+"l'entrée structurée."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} Recalculate PreviewStack, ROS pricing, and the solution "
+"summary, then return to awaiting_confirmation."
+msgstr ""
+"{message} Recalculez PreviewStack, les tarifs ROS et le résumé de la "
+"solution, puis revenez à awaiting_confirmation."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A rollback request is required before completing the current step."
+msgstr ""
+"Une demande de retour en arrière est requise avant de terminer l'étape "
+"actuelle."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} Set complete_step.rollback_request with target_step "
+"{target_step} and a reason."
+msgstr ""
+"{message} Définissez complete_step.rollback_request avec target_step "
+"{target_step} et un motif."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} Set complete_step.rollback_request with a target_step and a "
+"reason."
+msgstr ""
+"{message} Définissez complete_step.rollback_request avec un target_step "
+"et un motif."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} complete_step.rollback_request.target_step must be "
+"{target_step}."
+msgstr ""
+"{message} complete_step.rollback_request.target_step doit être "
+"{target_step}."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A completion guard is misconfigured."
@@ -4663,6 +5007,14 @@ msgid "<missing>"
 msgstr "<manquant>"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "completion enricher must return the outer tool input"
+msgstr "L’enrichisseur de conclusion doit renvoyer l’entrée externe de l’outil"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "complete_step.conclusion must be an object"
+msgstr "complete_step.conclusion doit être un objet"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
 msgid ""
 "Rollback count cannot exceed {max_rollbacks}. Complete the current step "
@@ -4691,20 +5043,6 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
-msgid "Schema validation failed after {attempts} attempts: {error}"
-msgstr "La validation du schéma a échoué après {attempts} tentatives : {error}"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid ""
-"conclusion validation failed after exceeding the maximum retry count "
-"({max_retries}): {error}"
-msgstr ""
-"La validation de conclusion a échoué après dépassement du nombre maximal "
-"de tentatives ({max_retries}) : {error}"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
 msgid "conclusion validation failed; fix it and call complete_step again: {error}"
 msgstr ""
 "La validation de conclusion a échoué ; corrigez-la puis appelez de "
@@ -4717,7 +5055,7 @@ msgstr "Étape {step_id} terminée. Conclusion soumise."
 
 #: src/iac_code/pipeline/engine/pipeline_runner.py
 #, python-brace-format
-msgid "用户反馈：{}"
+msgid "User feedback: {}"
 msgstr "Retour de l’utilisateur : {}"
 
 #: src/iac_code/pipeline/engine/pipeline_runner.py
@@ -4919,6 +5257,10 @@ msgstr "Le chemin du fichier de modèle doit être relatif au répertoire de tra
 #: src/iac_code/pipeline/engine/show_diagram_tool.py
 msgid "Template file path cannot escape the working directory"
 msgstr "Le chemin du fichier de modèle ne peut pas sortir du répertoire de travail"
+
+#: src/iac_code/pipeline/engine/step_executor.py
+msgid "complete_step is unavailable"
+msgstr "complete_step est indisponible"
 
 #: src/iac_code/pipeline/engine/user_input.py
 msgid "[Image input]"
@@ -5188,6 +5530,766 @@ msgstr "Coût mensuel total, par exemple 1 234 CNY/mois"
 #, python-brace-format
 msgid "Displayed details for \"{candidate_name}\"."
 msgstr "Détails affichés pour « {candidate_name} »."
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/deploying.py
+msgid "Step 3 completion conclusion must be an object"
+msgstr "La conclusion de l’étape 3 doit être un objet"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/deploying.py
+msgid "success requires a real ros_deploy CREATE_COMPLETE result"
+msgstr "success exige un véritable résultat ros_deploy CREATE_COMPLETE"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/deploying.py
+msgid "failed requires a real failing ros_deploy result"
+msgstr "failed exige un véritable résultat ros_deploy en échec"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/deploying.py
+msgid "the failing ros_deploy record has no recoverable error"
+msgstr "L’enregistrement ros_deploy en échec ne contient aucune erreur récupérable"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/deploying.py
+msgid "Step 3 status must be success, failed, or cancelled"
+msgstr "L’état de l’étape 3 doit être success, failed ou cancelled"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "solution_selection is missing"
+msgstr "solution_selection est absent"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "solution_selection.status must be 'selected'"
+msgstr "solution_selection.status doit être selected"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "solution_selection.continue_pipeline is not true"
+msgstr "solution_selection.continue_pipeline n’est pas true"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "solution_selection.candidates is empty or invalid"
+msgstr "solution_selection.candidates est vide ou invalide"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "selected_candidate_index is out of range"
+msgstr "selected_candidate_index est hors plage"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "selected candidate name mismatch"
+msgstr "Le nom du candidat sélectionné ne correspond pas"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "neither selected_candidate_index nor selected_candidate_name is present"
+msgstr "Ni selected_candidate_index ni selected_candidate_name n’est présent"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "selected candidate cannot be mapped uniquely"
+msgstr "Le candidat sélectionné ne peut pas être associé de manière unique"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "Step 2 completion conclusion must be an object"
+msgstr "La conclusion de l’étape 2 doit être un objet"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "invalid Step 2 completion status"
+msgstr "L’état de fin de l’étape 2 est invalide"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "reselect_requested requires a non-empty reselect_reason"
+msgstr "reselect_requested exige un reselect_reason non vide"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "authoritative candidate is unavailable: {error}"
+msgstr "Le candidat faisant autorité est indisponible : {error}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "authoritative candidate output_path is missing"
+msgstr "Le output_path du candidat faisant autorité est absent"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "validate the authoritative candidate output_path after its latest write"
+msgstr ""
+"Validez le output_path du candidat faisant autorité après sa dernière "
+"écriture"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid ""
+"ParameterSetAnchor is missing (quote_status=not_run): run "
+"ros_estimate_template_cost for output_path"
+msgstr ""
+"ParameterSetAnchor est absent (quote_status=not_run) : exécutez "
+"ros_estimate_template_cost pour output_path"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "ParameterSetAnchor input.parameters must be an object"
+msgstr "ParameterSetAnchor input.parameters doit être un objet"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid ""
+"ParameterSetAnchor effective region is unavailable; pass region_id "
+"explicitly"
+msgstr ""
+"La région effective de ParameterSetAnchor est indisponible ; transmettez "
+"explicitement region_id"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "parameter_overrides must be an object"
+msgstr "parameter_overrides doit être un objet"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "awaiting_confirmation requires a new non-empty solution_summary"
+msgstr "awaiting_confirmation exige un nouveau solution_summary non vide"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "missing_deployment_parameters must be an array of objects"
+msgstr "missing_deployment_parameters doit être un tableau d’objets"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#: src/iac_code/ui/repl.py
+msgid "Choose the next action"
+msgstr "Choisissez l’action suivante"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "confirmed completion cannot contain user-required parameter gaps"
+msgstr ""
+"Une conclusion confirmée ne peut pas contenir de paramètres manquants "
+"nécessitant l’utilisateur"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "Parameter names must be non-empty strings"
+msgstr "Les noms de paramètres doivent être des chaînes non vides"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Parameter {name} is not declared in template Parameters"
+msgstr "Le paramètre {name} n’est pas déclaré dans les Parameters du modèle"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Parameter {name} must match the declared template type {declared_type}"
+msgstr ""
+"Le paramètre {name} doit correspondre au type de modèle déclaré "
+"{declared_type}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Parameter {name} is outside the template AllowedValues"
+msgstr "Le paramètre {name} ne fait pas partie des AllowedValues du modèle"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Parameter {name} does not match the template AllowedPattern"
+msgstr "Le paramètre {name} ne correspond pas à l’AllowedPattern du modèle"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Parameter {name} is below the template MinValue {minimum}"
+msgstr "Le paramètre {name} est inférieur à la MinValue {minimum} du modèle"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Parameter {name} exceeds the template MaxValue {maximum}"
+msgstr "Le paramètre {name} dépasse la MaxValue {maximum} du modèle"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Parameter {name} is shorter than the template MinLength {min_length}"
+msgstr "Le paramètre {name} est plus court que la MinLength {min_length} du modèle"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Parameter {name} is longer than the template MaxLength {max_length}"
+msgstr "Le paramètre {name} dépasse la MaxLength {max_length} du modèle"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "{message}: {description}"
+msgstr "{message} : {description}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "authoritative template path is outside the workspace"
+msgstr "Le chemin du modèle faisant autorité se trouve hors de l’espace de travail"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "No Preview matches the final template, parameters, and region"
+msgstr "Aucun aperçu ne correspond au modèle, aux paramètres et à la région finaux"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "Preview failed"
+msgstr "Échec de l’aperçu"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "Pricing failed"
+msgstr "Échec de la tarification"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "ROS estimate failed"
+msgstr "Échec de l’estimation ROS"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Unsupported ROS estimate currency: {currency}"
+msgstr "Devise d’estimation ROS non prise en charge : {currency}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Unsupported ROS estimate resource currencies: {currencies}"
+msgstr "Devises de ressources d’estimation ROS non prises en charge : {currencies}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "ROS estimate response contains only one price basis"
+msgstr "La réponse d’estimation ROS ne contient qu’une seule base de prix"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "ROS estimate response normalized from OriginalAmount/TradeAmount"
+msgstr ""
+"La réponse d’estimation ROS a été normalisée à partir de "
+"OriginalAmount/TradeAmount"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "Cloud resource"
+msgstr "Ressource cloud"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "Pricing unavailable"
+msgstr "Tarification indisponible"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "¥0/month"
+msgstr "¥0/mois"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "{original}/month (list price; about {trade}/month after contract discount)"
+msgstr ""
+"{original}/mois (prix catalogue ; environ {trade}/mois après remise "
+"contractuelle)"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "{value}/month"
+msgstr "{value}/mois"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "Price unavailable"
+msgstr "Prix indisponible"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#: src/iac_code/web/session_manager.py
+msgid "Confirm deployment"
+msgstr "Confirmer le déploiement"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "Create cloud resources using the current solution and parameters"
+msgstr "Créer des ressources cloud avec la solution et les paramètres actuels"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#: src/iac_code/web/session_manager.py
+msgid "Choose another solution"
+msgstr "Choisir une autre solution"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "Return to solution planning and choose again"
+msgstr "Revenir à la planification des solutions et choisir à nouveau"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#: src/iac_code/web/session_manager.py
+msgid "Cancel"
+msgstr "Annuler"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "End the workflow without creating cloud resources"
+msgstr "Terminer le workflow sans créer de ressources cloud"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "hard_constraint_checks must cover every authoritative constraint"
+msgstr ""
+"hard_constraint_checks doit couvrir toutes les contraintes faisant "
+"autorité"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "hard_constraint_checks must contain unique constraint_id values"
+msgstr "hard_constraint_checks doit contenir des valeurs constraint_id uniques"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid ""
+"hard_constraint_checks must cover each authoritative constraint exactly "
+"once"
+msgstr ""
+"hard_constraint_checks doit couvrir chaque contrainte faisant autorité "
+"exactement une fois"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "hard constraint {constraint_id} parameter_values must be an object"
+msgstr ""
+"Les parameter_values de la contrainte stricte {constraint_id} doivent "
+"être un objet"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "hard constraint {constraint_id} evidence must be an array"
+msgstr "La evidence de la contrainte stricte {constraint_id} doit être un tableau"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "hard constraint {constraint_id} requires an LLM status"
+msgstr "La contrainte stricte {constraint_id} exige un état LLM"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "hard constraint evidence locator must be an object"
+msgstr "Le localisateur de preuve de contrainte stricte doit être un objet"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "tool evidence must reference a successful stable record_id and result_path"
+msgstr ""
+"La preuve d’outil doit référencer un record_id et un result_path valides "
+"et stables"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "tool evidence tool_name does not match record_id"
+msgstr "Le tool_name de la preuve d’outil ne correspond pas au record_id"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "tool evidence result_path cannot be resolved"
+msgstr "Le result_path de la preuve d’outil ne peut pas être résolu"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "{record_id} field {result_path}"
+msgstr "Champ {result_path} de {record_id}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "context evidence path is outside the configured allowlist"
+msgstr ""
+"Le chemin de preuve de contexte se trouve hors de la liste autorisée "
+"configurée"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "context evidence path cannot be resolved"
+msgstr "Le chemin de preuve de contexte ne peut pas être résolu"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Authoritative context field {path}"
+msgstr "Champ de contexte faisant autorité {path}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "template evidence requires exactly one of template_path or parameter_name"
+msgstr ""
+"La preuve du modèle exige exactement l’un des champs template_path ou "
+"parameter_name"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "template evidence parameter_name is not in anchor parameters"
+msgstr ""
+"Le parameter_name de la preuve du modèle ne figure pas dans les "
+"paramètres d’ancrage"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Final parameter {parameter_name}"
+msgstr "Paramètre final {parameter_name}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "template evidence template_path is invalid"
+msgstr "Le template_path de la preuve du modèle est invalide"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "template evidence template_path cannot be resolved"
+msgstr "Le template_path de la preuve du modèle ne peut pas être résolu"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+#, python-brace-format
+msgid "Final template field {template_field}"
+msgstr "Champ final du modèle {template_field}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "hard constraint evidence type must be context, template, or tool"
+msgstr ""
+"Le type de preuve de contrainte stricte doit être context, template ou "
+"tool"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "the final validated template cannot be parsed"
+msgstr "Le modèle final validé ne peut pas être analysé"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/materialize_selected_candidate.py
+msgid "the final validated template root must be an object"
+msgstr "La racine du modèle final validé doit être un objet"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "Step 1 completion conclusion must be an object"
+msgstr "La conclusion de l’étape 1 doit être un objet"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "Step 1 status must be awaiting_selection, selected, or rejected"
+msgstr "L’état de l’étape 1 doit être awaiting_selection, selected ou rejected"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "rejected completion requires a non-empty rejection_reason"
+msgstr "Une fin rejected exige un rejection_reason non vide"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "awaiting_selection requires a structured intent"
+msgstr "awaiting_selection exige un intent structuré"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "intent.resource_intents must be an array of objects"
+msgstr "intent.resource_intents doit être un tableau d’objets"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "intent.hard_constraints must be an array of objects"
+msgstr "intent.hard_constraints doit être un tableau d’objets"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid ""
+"selected completion is blocked because a new candidate batch was "
+"generated; complete the new batch with status awaiting_selection before "
+"the user selects a candidate"
+msgstr ""
+"La sélection est bloquée car un nouveau lot de candidats a été généré ; "
+"terminez ce lot avec l’état awaiting_selection avant le choix de "
+"l’utilisateur"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "selected completion requires saved authoritative candidates"
+msgstr "La sélection exige des candidats faisant autorité enregistrés"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid ""
+"awaiting_selection requires a successful show_architecture_plan batch and"
+" rich detail for every candidate"
+msgstr ""
+"awaiting_selection exige un lot show_architecture_plan réussi et les "
+"détails complets de chaque candidat"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "candidate names must be unique within one planning batch"
+msgstr ""
+"Les noms des candidats doivent être uniques dans un même lot de "
+"planification"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "Choose the solution to implement and deploy"
+msgstr "Choisir la solution à implémenter et à déployer"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "selected_candidate_index must identify one saved candidate"
+msgstr "selected_candidate_index doit identifier un candidat enregistré"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid "candidate {index} {name!r} is missing show_candidate_detail"
+msgstr "Le candidat {index} {name!r} ne contient pas show_candidate_detail"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid "latest detail call failed"
+msgstr "Le dernier appel de détail a échoué"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid "candidate {index} {name!r} detail failed: {summary}"
+msgstr "Le détail du candidat {index} {name!r} a échoué : {summary}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid ""
+"candidate {index} detail must use candidate_name {name!r} from the active"
+" batch"
+msgstr ""
+"Le détail du candidat {index} doit utiliser le candidate_name {name!r} du"
+" lot actif"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid "candidate {index} detail input is unavailable"
+msgstr "L’entrée de détail du candidat {index} est indisponible"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid ""
+"candidate detail index {index} is outside active batch range "
+"0..{last_index}"
+msgstr ""
+"L’index de détail du candidat {index} est hors de la plage active "
+"0..{last_index}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid "; {count} more error(s) omitted"
+msgstr " ; {count} erreur(s) supplémentaire(s) omise(s)"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid ""
+"complete_step is blocked until the active candidate batch is fully "
+"detailed: {errors}{suffix}"
+msgstr ""
+"complete_step est bloqué tant que tous les candidats du lot actif ne sont"
+" pas détaillés : {errors}{suffix}"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid "candidates[{index}] must be an object"
+msgstr "candidates[{index}] doit être un objet"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid "candidates[{index}].name must be non-empty"
+msgstr "candidates[{index}].name ne doit pas être vide"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid "candidates[{index}].summary must be non-empty"
+msgstr "candidates[{index}].summary ne doit pas être vide"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid ""
+"candidates[{index}].decision_notes.{field} must list at least {minimum} "
+"non-empty entries tied to this candidate's architecture"
+msgstr ""
+"candidates[{index}].decision_notes.{field} doit contenir au moins "
+"{minimum} entrées non vides liées à l’architecture de ce candidat"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid "candidates[{candidate_index}].resource_intents must be an array of objects"
+msgstr ""
+"candidates[{candidate_index}].resource_intents doit être un tableau "
+"d’objets"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid "; {count} more omitted"
+msgstr " ; {count} élément(s) supplémentaire(s) omis"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+#, python-brace-format
+msgid ""
+"candidates[{candidate_index}].resource_intents must preserve "
+"authoritative intent lifecycle: {missing}{suffix}; submit a corrected "
+"candidate batch and details"
+msgstr ""
+"candidates[{candidate_index}].resource_intents doit préserver le cycle de"
+" vie de l’intention faisant autorité : {missing}{suffix} ; envoyez un lot"
+" et des détails corrigés"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/confirmed_ros_deploy_tool.py
+#, python-brace-format
+msgid ""
+"Deployment is not authorized: {reason}\n"
+"Do not call ros_deploy. Use complete_step with a rollback_request to "
+"materialize_selected_candidate to obtain a valid confirmed deployment "
+"hand-off."
+msgstr ""
+"Le déploiement n'est pas autorisé : {reason}\n"
+"N'appelez pas ros_deploy. Utilisez complete_step avec un rollback_request"
+" vers materialize_selected_candidate pour obtenir une confirmation de "
+"déploiement valide."
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid ""
+"Display one complete batch of lightweight candidate outlines before rich "
+"details are generated. Submit every current candidate in order with its "
+"name, summary, monthly estimate and key trade-off. Do not include "
+"topology nodes, resource inventory or detailed cost items."
+msgstr ""
+"Affichez un lot complet de résumés légers des candidats avant de générer "
+"les détails. Soumettez chaque candidat actuel dans l’ordre avec son nom, "
+"son résumé, son estimation mensuelle et son principal compromis. "
+"N’incluez ni nœuds de topologie, ni inventaire de ressources, ni postes "
+"de coût détaillés."
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid ""
+"The complete current candidate batch. Array order defines zero-based "
+"candidate indexes."
+msgstr ""
+"Lot actuel complet de candidats. L’ordre du tableau définit des index de "
+"candidats commençant à zéro."
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid "Unique user-facing candidate name"
+msgstr "Nom de candidat unique affiché à l’utilisateur"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid "Short product combination and architecture summary"
+msgstr "Bref résumé de la combinaison de produits et de l’architecture"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid "Rough monthly range, such as ¥230～¥380/month"
+msgstr "Fourchette mensuelle approximative, par exemple ¥230～¥380/mois"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid "The most important cost, availability or complexity trade-off"
+msgstr ""
+"Le principal compromis en matière de coût, de disponibilité ou de "
+"complexité"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid ""
+"candidates must be a non-empty array of unique outlines with "
+"candidate_name, summary, total_monthly_cost and key_tradeoff"
+msgstr ""
+"candidates doit être un tableau non vide de résumés uniques contenant "
+"candidate_name, summary, total_monthly_cost et key_tradeoff"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid ""
+"This identical candidate outline batch is already active as "
+"candidateSetId={candidate_set_id}. Do not repeat show_architecture_plan; "
+"continue with show_candidate_detail for the first missing candidate."
+msgstr ""
+"Ce lot identique de résumés de candidats est déjà actif sous "
+"candidateSetId={candidate_set_id}. Ne répétez pas show_architecture_plan "
+"; poursuivez avec show_candidate_detail pour le premier candidat sans "
+"détails."
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid ""
+"Displayed {count} candidate outlines; candidateSetId={candidate_set_id}. "
+"Do not repeat show_architecture_plan unless the user changes the "
+"candidate set; continue with show_candidate_detail."
+msgstr ""
+"{count} résumés de candidats ont été affichés ; "
+"candidateSetId={candidate_set_id}. Ne répétez pas show_architecture_plan "
+"sauf si l’utilisateur modifie l’ensemble des candidats ; poursuivez avec "
+"show_candidate_detail."
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid "topology_graph must be an object with nodes and edges"
+msgstr "topology_graph doit être un objet contenant nodes et edges"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid "nodes must be a non-empty array of architecture nodes"
+msgstr "nodes doit être un tableau non vide de nœuds d'architecture"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid "edges must be an array of architecture edges"
+msgstr "edges doit être un tableau d'arêtes d'architecture"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid "Only the first {limit} nodes are rendered; the plan declared {count}."
+msgstr ""
+"Seuls les {limit} premiers nœuds sont affichés ; le plan en déclarait "
+"{count}."
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid "nodes[{index}] must be an object"
+msgstr "nodes[{index}] doit être un objet"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid "nodes[{index}].id must not be empty"
+msgstr "nodes[{index}].id ne doit pas être vide"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid "Duplicate node id: {node_id}"
+msgstr "Id de nœud en doublon : {node_id}"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid "Only the first {limit} edges are rendered."
+msgstr "Seules les {limit} premières arêtes sont affichées."
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid "Skipped edges[{index}]: not an object."
+msgstr "edges[{index}] ignoré : ce n'est pas un objet."
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid ""
+"Skipped edge {source} -> {target}: it references a node id that is not "
+"defined."
+msgstr ""
+"Arête {source} -> {target} ignorée : elle référence un id de nœud non "
+"défini."
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#, python-brace-format
+msgid "Skipped self-referencing edge on node {node_id}."
+msgstr "Arête auto-référencée ignorée sur le nœud {node_id}."
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+#: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
+msgid "Architecture plan"
+msgstr "Plan d'architecture"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
+msgid "Architecture plan unavailable"
+msgstr "Plan d’architecture indisponible"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
+msgid ""
+"Display the rich detail for exactly one candidate from the latest "
+"show_architecture_plan batch. Call once per model turn in candidate index"
+" order. Include resource lifecycle intent, topology graph, resource "
+"inventory, cost assumptions and decision notes; do not repeat summary or "
+"monthly total."
+msgstr ""
+"Affichez les détails complets d’un seul candidat du dernier lot "
+"show_architecture_plan. Effectuez un appel par tour de modèle dans "
+"l’ordre des index de candidats. Incluez l’intention de cycle de vie des "
+"ressources, le graphe de topologie, l’inventaire des ressources, les "
+"hypothèses de coût et les notes de décision ; ne répétez ni le résumé ni "
+"le total mensuel."
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
+msgid "Zero-based index from the latest candidate outline batch"
+msgstr "Index commençant à zéro dans le dernier lot de résumés de candidats"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
+msgid "Exact candidate name at candidate_index in the latest outline batch"
+msgstr "Nom exact du candidat à candidate_index dans le dernier lot de résumés"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
+msgid ""
+"show_candidate_detail is not allowed before a successful "
+"show_architecture_plan outline batch."
+msgstr ""
+"show_candidate_detail n’est pas autorisé avant la réussite d’un lot de "
+"résumés show_architecture_plan."
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
+#, python-brace-format
+msgid ""
+"All candidates in candidateSetId={candidate_set_id} already have rich "
+"details."
+msgstr ""
+"Tous les candidats de candidateSetId={candidate_set_id} disposent déjà de"
+" détails complets."
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
+#, python-brace-format
+msgid ""
+"show_candidate_detail candidate_index={actual_index} is not allowed yet; "
+"expected candidate_index={expected_index}, "
+"candidate_name={expected_name!r} from candidateSetId={candidate_set_id}."
+msgstr ""
+"show_candidate_detail avec candidate_index={actual_index} n’est pas "
+"encore autorisé ; candidate_index={expected_index} et "
+"candidate_name={expected_name!r} étaient attendus dans "
+"candidateSetId={candidate_set_id}."
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
+#, python-brace-format
+msgid "Failed to render the candidate topology: {reason}"
+msgstr "Échec du rendu de la topologie du candidat : {reason}"
+
+#: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
+#, python-brace-format
+msgid ""
+"Displayed rich detail for candidate {candidate_index} "
+"\"{candidate_name}\" in candidateSetId={candidate_set_id}."
+msgstr ""
+"Les détails du candidat {candidate_index} « {candidate_name} » de "
+"candidateSetId={candidate_set_id} ont été affichés."
 
 #: src/iac_code/providers/manager.py
 #, python-brace-format
@@ -5950,6 +7052,11 @@ msgid "read path uses shell expansion: {}"
 msgstr "Le chemin de lecture utilise une expansion du shell : {}"
 
 #: src/iac_code/tools/bash/permissions.py
+#, python-brace-format
+msgid "matched allow rule(s): {}"
+msgstr "Règle(s) d'autorisation correspondante(s) : {}"
+
+#: src/iac_code/tools/bash/permissions.py
 msgid "sed in-place edit"
 msgstr "édition sur place par sed"
 
@@ -5966,6 +7073,10 @@ msgid "sed file write"
 msgstr "écriture de fichier par sed"
 
 #: src/iac_code/tools/bash/permissions.py
+msgid "complex command requires confirmation"
+msgstr "La commande complexe nécessite une confirmation"
+
+#: src/iac_code/tools/bash/permissions.py
 #, python-brace-format
 msgid "matched deny rule(s): {}"
 msgstr "Règle(s) de refus correspondante(s) : {}"
@@ -5974,15 +7085,6 @@ msgstr "Règle(s) de refus correspondante(s) : {}"
 #, python-brace-format
 msgid "dangerous readonly argument requires confirmation: {}"
 msgstr "L'argument dangereux en lecture seule nécessite une confirmation : {}"
-
-#: src/iac_code/tools/bash/permissions.py
-msgid "complex command requires confirmation"
-msgstr "La commande complexe nécessite une confirmation"
-
-#: src/iac_code/tools/bash/permissions.py
-#, python-brace-format
-msgid "matched allow rule(s): {}"
-msgstr "Règle(s) d'autorisation correspondante(s) : {}"
 
 #: src/iac_code/tools/bash/permissions.py
 msgid "command failed basic safety checks"
@@ -6651,6 +7753,25 @@ msgstr ""
 "Les identifiants du rôle RAM de l'instance ECS Alibaba Cloud n'ont pas pu"
 " être renouvelés avant leur expiration, {operation} ne peut donc pas être"
 " signée. Vérifiez la disponibilité des métadonnées ECS."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud OAuth sign-in expired or was revoked, so {operation} cannot"
+" be signed. Sign in again with OAuth and retry."
+msgstr ""
+"La connexion OAuth Alibaba Cloud a expiré ou a été révoquée, {operation} "
+"ne peut donc pas être signée. Reconnectez-vous avec OAuth puis réessayez."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud OAuth credentials could not be refreshed, so {operation} "
+"cannot be signed. Check network access to the sign-in service and retry."
+msgstr ""
+"Les identifiants OAuth Alibaba Cloud n'ont pas pu être renouvelés, "
+"{operation} ne peut donc pas être signée. Vérifiez l'accès réseau au "
+"service de connexion puis réessayez."
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
@@ -10278,7 +11399,7 @@ msgid "  Candidate selection completed"
 msgstr "  Sélection du candidat terminée"
 
 #: src/iac_code/ui/components/candidate_selection.py
-#: src/iac_code/ui/pipeline_display_replay.py
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/repl.py
 msgid "Cost details"
 msgstr "Détails des coûts"
 
@@ -10978,6 +12099,28 @@ msgid "  ✘ {name}: Failed"
 msgstr "  ✘ {name} : échec"
 
 #: src/iac_code/ui/repl.py
+msgid "Solution description"
+msgstr "Description de la solution"
+
+#: src/iac_code/ui/repl.py
+msgid "Pricing overview"
+msgstr "Aperçu des tarifs"
+
+#: src/iac_code/ui/repl.py
+msgid "Enter another response"
+msgstr "Saisir une autre réponse"
+
+#: src/iac_code/ui/repl.py
+msgid "For example: change the ECS instance type and reprice"
+msgstr "Par exemple : modifier le type d’instance ECS et recalculer le prix"
+
+#: src/iac_code/ui/repl.py
+msgid "Use Up/Down to select. Type directly on the last row, then press Enter."
+msgstr ""
+"Utilisez Haut/Bas pour sélectionner. Saisissez directement dans la "
+"dernière ligne, puis appuyez sur Entrée."
+
+#: src/iac_code/ui/repl.py
 #, python-brace-format
 msgid "Pipeline warning: {reason}"
 msgstr "Avertissement du pipeline : {reason}"
@@ -11189,7 +12332,7 @@ msgid "Scroll down to view more"
 msgstr "Faites défiler vers le bas pour voir plus"
 
 #: src/iac_code/ui/components/candidate_selection.py
-msgid "架构图优化中..."
+msgid "Optimizing architecture diagram..."
 msgstr "Optimisation du diagramme d’architecture..."
 
 #: src/iac_code/ui/components/candidate_selection.py
@@ -12645,6 +13788,10 @@ msgid "sessionId is invalid"
 msgstr "sessionId est invalide"
 
 #: src/iac_code/web/session_manager.py
+msgid "Adjust parameters"
+msgstr "Ajuster les paramètres"
+
+#: src/iac_code/web/session_manager.py
 msgid "New image chat"
 msgstr "Nouvelle conversation d'image"
 
@@ -13403,4 +14550,118 @@ msgstr "Autoriser Bash ?"
 #~ msgstr ""
 #~ "Approuver l'appel d'outil : {tool}\n"
 #~ "Résumé de l'entrée : {summary}"
+
+#~ msgid "ROS price: {price}"
+#~ msgstr "Prix ROS : {price}"
+
+#~ msgid "Deployment parameters: {parameters}"
+#~ msgstr "Paramètres de déploiement : {parameters}"
+
+#~ msgid ""
+#~ "Enter an action in natural language, "
+#~ "or submit structured JSON with action"
+#~ " and parameter_overrides:"
+#~ msgstr ""
+#~ "Saisissez une action en langage naturel"
+#~ " ou envoyez un JSON structuré avec"
+#~ " action et parameter_overrides :"
+
+#~ msgid "Enter a number to choose, or describe what you want to change."
+#~ msgstr ""
+#~ "Saisissez un numéro ou décrivez "
+#~ "directement ce que vous souhaitez "
+#~ "modifier."
+
+#~ msgid ""
+#~ "Render a planned architecture from "
+#~ "structured nodes and edges (no ROS "
+#~ "template needed) and display it for "
+#~ "the candidate. Pass the candidate name,"
+#~ " its zero-based index and the "
+#~ "topology_graph nodes/edges. Mermaid source is"
+#~ " generated locally and is not "
+#~ "accepted as input."
+#~ msgstr ""
+#~ "Restitue une architecture planifiée à "
+#~ "partir de nœuds et d'arêtes structurés"
+#~ " (aucun modèle ROS requis) et "
+#~ "l'affiche pour le candidat. Indiquez le"
+#~ " nom du candidat, son index à "
+#~ "base zéro et les nodes/edges de "
+#~ "topology_graph. Le code Mermaid est "
+#~ "généré localement et n'est pas accepté"
+#~ " en entrée."
+
+#~ msgid ""
+#~ "Zero-based candidate index in "
+#~ "candidates; used to distinguish duplicate "
+#~ "names"
+#~ msgstr ""
+#~ "Index à base zéro du candidat dans"
+#~ " candidates ; sert à distinguer les"
+#~ " noms en doublon"
+
+#~ msgid "Node id, unique within this candidate"
+#~ msgstr "Id du nœud, unique au sein de ce candidat"
+
+#~ msgid "Display text, such as Web ECS x 2"
+#~ msgstr "Texte affiché, par exemple Web ECS x 2"
+
+#~ msgid "Alibaba Cloud product identifier, such as ECS"
+#~ msgstr "Identifiant de produit Alibaba Cloud, par exemple ECS"
+
+#~ msgid "Role of the node in the architecture, such as application compute"
+#~ msgstr "Rôle du nœud dans l'architecture, par exemple calcul applicatif"
+
+#~ msgid "Optional network or logical group the node belongs to"
+#~ msgstr "Groupe réseau ou logique facultatif auquel appartient le nœud"
+
+#~ msgid "Architecture edges taken from the candidate topology_graph.edges"
+#~ msgstr "Arêtes d'architecture issues de topology_graph.edges du candidat"
+
+#~ msgid "Source node id; must reference a node defined in nodes"
+#~ msgstr "Id du nœud source ; doit référencer un nœud défini dans nodes"
+
+#~ msgid "Target node id; must reference a node defined in nodes"
+#~ msgstr "Id du nœud cible ; doit référencer un nœud défini dans nodes"
+
+#~ msgid "Optional edge text, such as HTTPS"
+#~ msgstr "Texte facultatif de l'arête, par exemple HTTPS"
+
+#~ msgid "Optional relation kind, such as traffic or depends_on"
+#~ msgstr "Type de relation facultatif, par exemple traffic ou depends_on"
+
+#~ msgid "candidate_name must not be empty"
+#~ msgstr "candidate_name ne doit pas être vide"
+
+#~ msgid ""
+#~ "candidate_index must be an integer "
+#~ "greater than or equal to 0, got:"
+#~ " {value}"
+#~ msgstr ""
+#~ "candidate_index doit être un entier "
+#~ "supérieur ou égal à 0, valeur "
+#~ "reçue : {value}"
+
+#~ msgid "Displayed the architecture plan for \"{candidate_name}\"."
+#~ msgstr "Le plan d'architecture de « {candidate_name} » a été affiché."
+
+#~ msgid ""
+#~ "Failed to render the architecture plan: {reason}\n"
+#~ "Candidate selection is not blocked: keep"
+#~ " the written plan and resource "
+#~ "inventory, and continue with "
+#~ "show_candidate_detail."
+#~ msgstr ""
+#~ "Échec du rendu du plan d'architecture : {reason}\n"
+#~ "La sélection des candidats n'est pas "
+#~ "bloquée : conservez le plan rédigé "
+#~ "et l'inventaire des ressources, puis "
+#~ "continuez avec show_candidate_detail."
+
+#~ msgid "用户反馈：{}"
+#~ msgstr "Retour de l’utilisateur : {}"
+
+#~ msgid "架构图优化中..."
+#~ msgstr "Optimisation du diagramme d’architecture..."
 

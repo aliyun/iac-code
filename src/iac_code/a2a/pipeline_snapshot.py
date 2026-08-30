@@ -21,7 +21,7 @@ from iac_code.pipeline.constants import (
 from iac_code.utils.public_errors import sanitize_strict_text
 from iac_code.utils.state_io import atomic_write_json, atomic_write_text
 
-SNAPSHOT_SCHEMA_VERSION = "1.1"
+SNAPSHOT_SCHEMA_VERSION = "1.2"
 logger = logging.getLogger(__name__)
 
 _TERMINAL_STATUS_BY_EVENT_TYPE = {
@@ -39,6 +39,10 @@ _KNOWN_CLEANUP_STATUSES = {"pending", "started", "in_progress", "completed", "fa
 _PENDING_BACKUP_VISIBILITY = "pending_backup"
 _COMMITTED_BACKUP_VISIBILITY = "committed"
 _BACKUP_COMMITTED_EVENT_TYPE = "backup_committed"
+# Persist an explicit, Markdown-invisible model-turn delimiter.  Blank lines cannot carry this
+# meaning because ordinary Markdown paragraphs use the same syntax; the frontend recognizes this
+# marker when reconstructing the non-expandable historical run placeholders.
+_MESSAGE_TURN_BOUNDARY = "<!-- iac-code:model-run -->"
 
 
 class A2APipelineSnapshotStore:
@@ -163,7 +167,8 @@ class _PipelineSnapshotReducer:
         self._candidates_by_run_id: dict[str, dict[str, Any]] = {}
         self._candidate_parent_step_run_ids: dict[str, str] = {}
         self._candidate_steps_by_run_id: dict[str, dict[str, Any]] = {}
-        self._messages_by_scope_run_id: dict[tuple[str, str], dict[str, Any]] = {}
+        self._messages_by_round_key: dict[tuple[str, str, int], dict[str, Any]] = {}
+        self._message_rounds: dict[str, int] = {}
         self._candidate_detail_indexes: dict[str, int] = {}
         self._diagram_indexes: dict[str, int] = {}
         self._artifact_indexes: dict[str, int] = {}
@@ -215,6 +220,7 @@ class _PipelineSnapshotReducer:
             self._skip_sequences_through = _sequence_number(self._snapshot.get("lastSequence"))
 
         self._hydrate_steps()
+        self._hydrate_message_rounds()
         self._hydrate_messages()
         self._hydrate_display_indexes("candidateDetails", self._candidate_detail_indexes, ("detailId", "id"))
         self._hydrate_display_indexes("diagrams", self._diagram_indexes, ("diagramId", "id"))
@@ -270,9 +276,31 @@ class _PipelineSnapshotReducer:
         self._snapshot["steps"] = valid_steps
         self._sanitize_active_candidate_run_ids()
 
+    def _hydrate_message_rounds(self) -> None:
+        """Recover each run's current narration round from the recorded user inputs.
+
+        ``inputHistory`` is never trimmed, so the number of ``input_received``
+        entries on a run is exactly how many narration rounds already closed on it.
+        A snapshot written before rounds existed therefore still resumes into the
+        right round instead of appending new text to the first one.
+        """
+        history = self._snapshot["control"].get("inputHistory")
+        if not isinstance(history, list):
+            return
+        closed_rounds: dict[str, int] = {}
+        for entry in history:
+            if not isinstance(entry, dict) or entry.get("eventType") != "input_received":
+                continue
+            run_id = _string_or_none(entry.get("runId"))
+            if run_id is None:
+                continue
+            closed_rounds[run_id] = closed_rounds.get(run_id, 0) + 1
+        for run_id, closed in closed_rounds.items():
+            self._message_rounds[run_id] = max(self._message_rounds.get(run_id, 1), closed + 1)
+
     def _hydrate_messages(self) -> None:
         valid_messages: list[dict[str, Any]] = []
-        seen_message_keys: set[tuple[str, str]] = set()
+        seen_message_keys: set[tuple[str, str, int]] = set()
         for message in self._snapshot["display"]["messages"]:
             if not isinstance(message, dict):
                 continue
@@ -282,15 +310,25 @@ class _PipelineSnapshotReducer:
             scope = _string_or_none(message.get("scope")) or "pipeline"
             run_id = _string_or_none(message.get("runId"))
             if run_id is not None:
-                key = (scope, run_id)
+                round_index = _message_round(message.get("round"))
+                key = (scope, run_id, round_index)
                 if key in seen_message_keys:
                     continue
                 seen_message_keys.add(key)
                 message["scope"] = scope
                 message["runId"] = run_id
+                message["round"] = round_index
                 if not isinstance(message.get("text"), str):
                     message["text"] = ""
-                self._messages_by_scope_run_id[key] = message
+                if "segments" in message:
+                    segments = message.get("segments")
+                    if isinstance(segments, list):
+                        message["segments"] = _sanitize_public_narrative_segments(segments)
+                    else:
+                        # Invalid/missing projections must use the established legacy fallback.
+                        message.pop("segments", None)
+                self._messages_by_round_key[key] = message
+                self._message_rounds[run_id] = max(self._message_rounds.get(run_id, 1), round_index)
                 valid_messages.append(message)
         self._snapshot["display"]["messages"] = valid_messages
 
@@ -485,6 +523,10 @@ class _PipelineSnapshotReducer:
 
         if event_type == "text_delta":
             self._apply_text_delta(event)
+        elif event_type == "thinking_delta":
+            self._apply_thinking_delta(event)
+        elif event_type == "message_started":
+            self._apply_message_started(event)
         elif event_type == "candidate_detail_shown":
             self._upsert_display_item("candidateDetails", self._candidate_detail_indexes, event, "detailId")
         elif event_type == "diagram_shown":
@@ -513,7 +555,10 @@ class _PipelineSnapshotReducer:
         elif event_type == "input_received":
             self._snapshot["pendingInput"] = None
             self._snapshot["status"] = "working"
+            self._advance_message_round(event)
             self._apply_candidate_selection(data)
+        elif event_type == "interrupt_received":
+            self._advance_active_message_round()
         elif event_type == "backup_blocked":
             self._snapshot["normalHandoff"] = None
             self._snapshot["pendingNormalHandoff"] = None
@@ -556,6 +601,11 @@ class _PipelineSnapshotReducer:
             control["stepIds"] = copy.deepcopy(data["stepIds"])
         if isinstance(data.get("stepNames"), list):
             control["stepNames"] = copy.deepcopy(data["stepNames"])
+        # 首句用户 prompt(会话恢复据此还原第一条用户消息)。空串不覆盖已有值,
+        # 旧快照没有该字段时保持缺省,由前端退回今天的行为。
+        user_request = _string_or_none(data.get("userRequest") or data.get("user_request"))
+        if user_request is not None:
+            control["userRequest"] = user_request
 
     def _apply_event_status(self, event: dict[str, Any]) -> None:
         event_status = _normalized_status(event.get("status"))
@@ -619,8 +669,15 @@ class _PipelineSnapshotReducer:
             step["status"] = "waiting_input"
         elif event_type == "input_received" and step.get("status") == "waiting_input":
             step["inputReceived"] = copy.deepcopy(_dict_or_empty(event.get("data")))
-            if _event_kind(event) in {"ask_user_question", "pipeline_pause_confirmation"}:
+            event_kind = _event_kind(event)
+            if event_kind in {
+                "ask_user_question",
+                "deployment_confirmation",
+                "pipeline_pause_confirmation",
+            }:
                 step["status"] = "working"
+                if event_kind == "deployment_confirmation":
+                    step.pop("completedAt", None)
             else:
                 step["status"] = "completed"
                 _set_time(step, "completedAt", created_at)
@@ -750,31 +807,155 @@ class _PipelineSnapshotReducer:
             _set_time(candidate_step, "failedAt", created_at)
             _merge_completion_data(candidate_step, event)
 
+    def _advance_message_round(self, event: dict[str, Any]) -> None:
+        """Open a new narration round on the run that just received user input.
+
+        Answering a question inside a running step resumes the *same* step attempt
+        (same transcript, same agent loop), so a re-plan produces one step entry
+        whose narration keeps growing. Replay then cannot tell which text preceded
+        the user's answer and which followed it. The round counter records that cut
+        for display only — step identity, attempts and rollbacks are untouched.
+        """
+        run_id = _scope_run_id(event)
+        self._message_rounds[run_id] = self._message_rounds.get(run_id, 1) + 1
+
+    def _advance_active_message_round(self) -> None:
+        """Keep narration after an in-flight supplement separate on recovery.
+
+        Active-session guidance uses interrupt-scoped control events, so the
+        ``interrupt_received`` envelope has the pipeline run id rather than the
+        currently executing step/candidate run id.  The live UI already closes
+        that run when the user supplements the request.  Record the same cut on
+        the latest active narration run so snapshot replay can place the new text
+        below the supplement card instead of merging it into the earlier step.
+        """
+        active_run_ids: set[str] = set()
+        for step in self._snapshot["steps"]:
+            if not isinstance(step, dict):
+                continue
+            if step.get("status") == "working":
+                run_id = _string_or_none(step.get("runId"))
+                if run_id is not None:
+                    active_run_ids.add(run_id)
+            for candidate in step.get("candidates", []):
+                if not isinstance(candidate, dict):
+                    continue
+                if candidate.get("status") == "working":
+                    run_id = _string_or_none(candidate.get("runId"))
+                    if run_id is not None:
+                        active_run_ids.add(run_id)
+                for candidate_step in candidate.get("steps", []):
+                    if not isinstance(candidate_step, dict) or candidate_step.get("status") != "working":
+                        continue
+                    run_id = _string_or_none(candidate_step.get("runId"))
+                    if run_id is not None:
+                        active_run_ids.add(run_id)
+
+        for message in reversed(self._snapshot["display"]["messages"]):
+            if not isinstance(message, dict):
+                continue
+            run_id = _string_or_none(message.get("runId"))
+            if run_id is None or run_id not in active_run_ids:
+                continue
+            self._message_rounds[run_id] = self._message_rounds.get(run_id, 1) + 1
+            return
+
+    def _apply_message_started(self, event: dict[str, Any]) -> None:
+        """Close the current paragraph when the next LLM turn opens.
+
+        One step attempt runs many LLM turns; live, the tool run between two turns
+        renders its own block, so the next narration starts a fresh paragraph.
+        Replay has no tool blocks, so the boundary has to survive inside the text
+        itself — reduction resumes from the stored snapshot, so a pending-break
+        flag held on the reducer would be lost between calls.
+        """
+        scope = _string_or_none(event.get("scope")) or "pipeline"
+        run_id = _scope_run_id(event)
+        message = self._messages_by_round_key.get((scope, run_id, self._message_rounds.get(run_id, 1)))
+        if not isinstance(message, dict):
+            return
+        segments = message.get("segments")
+        if isinstance(segments, list) and segments:
+            last = segments[-1] if isinstance(segments[-1], dict) else None
+            if last is None or last.get("kind") != "turn":
+                segments.append({"kind": "turn"})
+        text = message.get("text")
+        if not isinstance(text, str) or not text.strip() or text.rstrip().endswith(_MESSAGE_TURN_BOUNDARY):
+            return
+        message["text"] = text.rstrip("\n") + "\n\n" + _MESSAGE_TURN_BOUNDARY + "\n\n"
+
     def _apply_text_delta(self, event: dict[str, Any]) -> None:
         text = _dict_or_empty(event.get("data")).get("text")
         if not isinstance(text, str):
             return
 
-        scope = _string_or_none(event.get("scope")) or "pipeline"
-        run_id = _scope_run_id(event)
-        key = (scope, run_id)
-        message = self._messages_by_scope_run_id.get(key)
+        message = self._message_for_narrative_event(event)
         if message is None:
-            message = {
-                "id": f"message-{scope}-{run_id}",
-                "scope": scope,
-                "runId": run_id,
-                "text": "",
-                "createdAt": _string_or_none(event.get("createdAt")),
-            }
-            _merge_event_coordinates(message, event)
-            self._messages_by_scope_run_id[key] = message
-            self._snapshot["display"]["messages"].append(message)
-
+            return
+        self._append_public_narrative_segment(message, "text", text)
         if not isinstance(message.get("text"), str):
             message["text"] = ""
         message["text"] += text
         message["updatedAt"] = _string_or_none(event.get("createdAt"))
+
+    def _apply_thinking_delta(self, event: dict[str, Any]) -> None:
+        """Persist only that a visible thinking segment existed, never its contents.
+
+        The live frontend groups consecutive ``thinking_delta`` events into one run-log card.
+        Retaining that safe shape lets history replay rebuild the same number and ordering of
+        cards instead of guessing from model text turns.  Snapshots created before this projection
+        intentionally keep their marker-based fallback when resumed.
+        """
+        text = _dict_or_empty(event.get("data")).get("text")
+        if not isinstance(text, str) or not text:
+            return
+
+        message = self._message_for_narrative_event(event)
+        if message is None:
+            return
+        self._append_public_narrative_segment(message, "thinking")
+        message["updatedAt"] = _string_or_none(event.get("createdAt"))
+
+    def _message_for_narrative_event(self, event: dict[str, Any]) -> dict[str, Any] | None:
+        scope = _string_or_none(event.get("scope")) or "pipeline"
+        run_id = _scope_run_id(event)
+        round_index = self._message_rounds.get(run_id, 1)
+        key = (scope, run_id, round_index)
+        message = self._messages_by_round_key.get(key)
+        if message is None:
+            message = {
+                "id": _message_id(scope, run_id, round_index),
+                "scope": scope,
+                "runId": run_id,
+                "round": round_index,
+                "text": "",
+                # Public replay projection: thinking content is deliberately omitted.  Presence of
+                # this key distinguishes exact new snapshots from legacy marker-only snapshots.
+                "segments": [],
+                "createdAt": _string_or_none(event.get("createdAt")),
+            }
+            _merge_event_coordinates(message, event)
+            self._messages_by_round_key[key] = message
+            self._snapshot["display"]["messages"].append(message)
+        return message
+
+    @staticmethod
+    def _append_public_narrative_segment(message: dict[str, Any], kind: str, text: str = "") -> None:
+        segments = message.get("segments")
+        # A message restored from a pre-projection snapshot has no exact historical shape.  Keep
+        # it on the established marker fallback instead of presenting a partial projection as
+        # authoritative after the session resumes.
+        if not isinstance(segments, list):
+            return
+        last = segments[-1] if segments and isinstance(segments[-1], dict) else None
+        if last is not None and last.get("kind") == kind:
+            if kind == "text":
+                last["text"] = (_string_or_none(last.get("text")) or "") + text
+            return
+        segment: dict[str, Any] = {"kind": kind}
+        if kind == "text":
+            segment["text"] = text
+        segments.append(segment)
 
     def _upsert_display_item(
         self,
@@ -1264,8 +1445,10 @@ def _interaction_history_entry(event: dict[str, Any]) -> dict[str, Any]:
         "selectedLabel",
         "answerTextLength",
         "userInputLength",
+        "freeText",
         "freeTextLength",
         "messageLength",
+        "userInput",
         "action",
         "targetStepId",
         "candidateScope",
@@ -1441,6 +1624,34 @@ def _snapshot_from_existing(existing_snapshot: dict[str, Any] | None) -> dict[st
     return snapshot
 
 
+def _sanitize_public_narrative_segments(value: list[Any]) -> list[dict[str, Any]]:
+    """Normalize the public segment projection and make thinking leakage impossible."""
+    segments: list[dict[str, Any]] = []
+    for raw_segment in value:
+        if not isinstance(raw_segment, dict):
+            continue
+        kind = raw_segment.get("kind")
+        if kind not in {"thinking", "text", "turn"}:
+            continue
+        if kind == "turn":
+            if segments and segments[-1]["kind"] != "turn":
+                segments.append({"kind": "turn"})
+            continue
+        text = raw_segment.get("text") if kind == "text" else None
+        if kind == "text" and not isinstance(text, str):
+            continue
+        last = segments[-1] if segments else None
+        if last is not None and last["kind"] == kind:
+            if kind == "text":
+                last["text"] += text
+            continue
+        segment: dict[str, Any] = {"kind": kind}
+        if kind == "text":
+            segment["text"] = text
+        segments.append(segment)
+    return segments
+
+
 def _sanitize_public_snapshot_private_cleanup_fields(value: dict[str, Any]) -> dict[str, Any]:
     sanitized = copy.deepcopy(value)
     normal_handoff = sanitized.get("normalHandoff")
@@ -1504,6 +1715,20 @@ def _event_kind(event: dict[str, Any]) -> str | None:
         return _string_or_none(input_value.get("kind"))
     data = _dict_or_empty(event.get("data"))
     return _string_or_none(data.get("kind"))
+
+
+def _message_round(value: Any) -> int:
+    round_index = _int_or_none(value)
+    if round_index is None or round_index < 1:
+        return 1
+    return round_index
+
+
+def _message_id(scope: str, run_id: str, round_index: int) -> str:
+    """Round 1 keeps the pre-round id so existing snapshots keep their message ids."""
+    if round_index <= 1:
+        return f"message-{scope}-{run_id}"
+    return f"message-{scope}-{run_id}-round-{round_index}"
 
 
 def _display_item_id(data: dict[str, Any], event: dict[str, Any], preferred_id_key: str) -> str:
@@ -1755,7 +1980,17 @@ def _merge_completion_data(target: dict[str, Any], event: dict[str, Any]) -> Non
         "errorDetails",
     ):
         if key in data:
-            target[key] = copy.deepcopy(data[key])
+            value = data[key]
+            if key == "durationS" and str(event.get("eventType") or "").endswith("_completed"):
+                previous = target.get(key)
+                if (
+                    isinstance(previous, (int, float))
+                    and not isinstance(previous, bool)
+                    and isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                ):
+                    value = previous + value
+            target[key] = copy.deepcopy(value)
 
 
 def _append_unique(values: list[Any], value: Any) -> None:

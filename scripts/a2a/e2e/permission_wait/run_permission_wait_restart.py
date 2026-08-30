@@ -18,6 +18,11 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 PERMISSION_QUERY_PREFIX = "IAC_CODE_PERMISSION:"
+SELLING_STAGE_IDS = (
+    "solution_planning_and_selection",
+    "materialize_selected_candidate",
+    "deploying",
+)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -27,6 +32,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument("--mode", choices=("normal", "pipeline"), default="normal")
     parser.add_argument("--candidate-first", action="store_true")
+    parser.add_argument("--pipeline-step-id", choices=SELLING_STAGE_IDS)
+    parser.add_argument("--handoff-first", action="store_true")
     return parser.parse_args()
 
 
@@ -180,6 +187,69 @@ def _iac_code_values(events: list[dict[str, Any]], key: str) -> list[Any]:
     return values
 
 
+def _unique_permissions(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    unique: dict[str, dict[str, Any]] = {}
+    for value in _iac_code_values(events, "input"):
+        if not isinstance(value, dict) or value.get("kind") != "permission":
+            continue
+        input_id = value.get("inputId")
+        if isinstance(input_id, str) and input_id:
+            unique[input_id] = value
+    return list(unique.values())
+
+
+def _first_identifier(events: list[dict[str, Any]], key: str) -> str | None:
+    for event in events:
+        for item in _walk_dicts(event):
+            value = item.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return None
+
+
+def _validate_structured_permission(permission: dict[str, Any], *, scenario: str) -> None:
+    serialized = json.dumps(permission, ensure_ascii=False)
+    if "never-publish-this" in serialized:
+        raise AssertionError("permission projection exposed a fixture secret")
+    if not isinstance(permission.get("target"), str) or not permission["target"]:
+        raise AssertionError("permission projection lost its target")
+    options = permission.get("options")
+    option_ids = (
+        {value.get("id") for value in options if isinstance(value, dict)} if isinstance(options, list) else set()
+    )
+    if option_ids != {"allow_once", "deny"}:
+        raise AssertionError("permission projection lost its stable decision options")
+    if scenario == "solution_planning_and_selection":
+        operation = permission.get("operation")
+        if not isinstance(operation, dict) or operation.get("action") != "CreateVSwitch":
+            raise AssertionError("Step 1 permission lost its Aliyun operation")
+        calls = operation.get("apiCalls")
+        if not isinstance(calls, list) or [value.get("action") for value in calls] != ["CreateVSwitch"]:
+            raise AssertionError("Step 1 permission lost its API sequence")
+        parameters = permission.get("displayParameters")
+        if not isinstance(parameters, dict) or "Password" not in json.dumps(parameters, ensure_ascii=False):
+            raise AssertionError("Step 1 permission lost the redacted parameter shape")
+        if "permission-step1-vswitch" not in permission["target"]:
+            raise AssertionError("Step 1 permission lost its resource target")
+    elif scenario == "materialize_selected_candidate":
+        if permission.get("toolName") != "write_file" or "permission-step2.yml" not in permission["target"]:
+            raise AssertionError("Step 2 permission lost its template target")
+    elif scenario == "deploying":
+        operation = permission.get("operation")
+        calls = operation.get("apiCalls") if isinstance(operation, dict) else None
+        if permission.get("toolName") != "ros_deploy" or not isinstance(calls, list):
+            raise AssertionError("Step 3 permission lost its deploy operation")
+        if [value.get("action") for value in calls] != ["CreateStack"]:
+            raise AssertionError("Step 3 permission lost its CreateStack sequence")
+    elif scenario == "handoff":
+        operation = permission.get("operation")
+        calls = operation.get("apiCalls") if isinstance(operation, dict) else None
+        if permission.get("toolName") != "ros_stack" or not isinstance(calls, list):
+            raise AssertionError("normal handoff permission lost its ROS operation")
+        if [value.get("action") for value in calls] != ["UpdateStack"]:
+            raise AssertionError("normal handoff permission lost its UpdateStack sequence")
+
+
 def _event_text(events: list[dict[str, Any]]) -> str:
     return "\n".join(
         str(item["text"]) for event in events for item in _walk_dicts(event) if isinstance(item.get("text"), str)
@@ -212,12 +282,24 @@ def _read_checkpoint(path: Path) -> dict[str, Any]:
 
 
 class _FixtureServer:
-    def __init__(self, *, run_dir: Path, port: int, repo_root: Path, mode: str, candidate_first: bool) -> None:
+    def __init__(
+        self,
+        *,
+        run_dir: Path,
+        port: int,
+        repo_root: Path,
+        mode: str,
+        candidate_first: bool,
+        pipeline_step_id: str | None,
+        handoff_first: bool,
+    ) -> None:
         self.run_dir = run_dir
         self.port = port
         self.repo_root = repo_root
         self.mode = mode
         self.candidate_first = candidate_first
+        self.pipeline_step_id = pipeline_step_id
+        self.handoff_first = handoff_first
         self.process: subprocess.Popen[str] | None = None
         self._stdout = None
         self._stderr = None
@@ -253,6 +335,10 @@ class _FixtureServer:
         ]
         if self.candidate_first:
             command.append("--candidate-first")
+        if self.pipeline_step_id:
+            command.extend(("--pipeline-step-id", self.pipeline_step_id))
+        if self.handoff_first:
+            command.append("--handoff-first")
         self.process = subprocess.Popen(
             command,
             cwd=self.repo_root,
@@ -302,6 +388,24 @@ def _pipeline_journal_events(config_dir: Path) -> list[dict[str, Any]]:
     return events
 
 
+def _pipeline_snapshot_permission(config_dir: Path, input_id: str) -> dict[str, Any]:
+    matches = sorted(config_dir.rglob("a2a/pipeline/a2a-snapshot.json"))
+    if len(matches) != 1:
+        raise AssertionError("expected exactly one Pipeline snapshot, found {}".format(len(matches)))
+    snapshot = json.loads(matches[0].read_text(encoding="utf-8"))
+    display = snapshot.get("display") if isinstance(snapshot, dict) else None
+    permissions = display.get("permissions") if isinstance(display, dict) else None
+    if not isinstance(permissions, list):
+        raise AssertionError("Pipeline snapshot does not contain permission display state")
+    permission = next(
+        (value for value in permissions if isinstance(value, dict) and value.get("inputId") == input_id),
+        None,
+    )
+    if permission is None:
+        raise AssertionError("Pipeline snapshot lost the waiting permission")
+    return permission
+
+
 def run_scenario(
     *,
     run_dir: Path,
@@ -309,6 +413,8 @@ def run_scenario(
     timeout: float,
     mode: str,
     candidate_first: bool = False,
+    pipeline_step_id: str | None = None,
+    handoff_first: bool = False,
 ) -> dict[str, Any]:
     run_dir = run_dir.expanduser().resolve()
     run_dir.mkdir(parents=True, exist_ok=False)
@@ -317,19 +423,50 @@ def run_scenario(
     repo_root = Path(__file__).resolve().parents[4]
     if candidate_first and mode != "pipeline":
         raise ValueError("candidate_first requires pipeline mode")
+    if pipeline_step_id and mode != "pipeline":
+        raise ValueError("pipeline_step_id requires pipeline mode")
+    if handoff_first and mode != "pipeline":
+        raise ValueError("handoff_first requires pipeline mode")
+    if candidate_first and (pipeline_step_id or handoff_first):
+        raise ValueError("candidate_first cannot be combined with selling stage or handoff fixtures")
+    if pipeline_step_id and handoff_first:
+        raise ValueError("pipeline_step_id cannot be combined with handoff_first")
     server = _FixtureServer(
         run_dir=run_dir,
         port=_free_port(),
         repo_root=repo_root,
         mode=mode,
         candidate_first=candidate_first,
+        pipeline_step_id=pipeline_step_id,
+        handoff_first=handoff_first,
     )
     checkpoint_path: Path | None = None
     background: _BackgroundStream | None = None
     try:
         server.start(1)
         initial_payload = _message_payload(workspace=workspace, prompt="request deterministic write")
-        if mode == "pipeline" and candidate_first:
+        if handoff_first:
+            handoff_events = _stream_request(server.url, initial_payload, timeout=timeout)
+            if "pipeline_handoff_ready" not in json.dumps(handoff_events, ensure_ascii=False):
+                raise AssertionError("Pipeline did not publish the normal-chat handoff")
+            handoff_context_id = _first_identifier(handoff_events, "contextId")
+            if handoff_context_id is None:
+                raise AssertionError("Pipeline handoff lost its context correlation")
+            permission_events = _stream_request(
+                server.url,
+                _message_payload(
+                    workspace=workspace,
+                    prompt="change the deployed stack in normal chat",
+                    context_id=handoff_context_id,
+                ),
+                timeout=timeout,
+            )
+            initial_events = handoff_events + permission_events
+            permissions = _unique_permissions(permission_events)
+            if len(permissions) != 1:
+                raise AssertionError("normal handoff did not expose exactly one permission boundary")
+            permission = permissions[0]
+        elif mode == "pipeline" and candidate_first:
             candidate_events = _stream_request(server.url, initial_payload, timeout=timeout)
             inputs = [value for value in _iac_code_values(candidate_events, "input") if isinstance(value, dict)]
             candidate = next((value for value in inputs if value.get("kind") == "candidate_selection"), None)
@@ -361,23 +498,30 @@ def run_scenario(
                 raise RuntimeError("top-level Pipeline stream failed at the permission boundary") from background.error
         else:
             initial_events = _stream_request(server.url, initial_payload, timeout=timeout)
-            inputs = [value for value in _iac_code_values(initial_events, "input") if isinstance(value, dict)]
-            permission = next((value for value in inputs if value.get("kind") == "permission"), None)
-            if permission is None:
-                raise AssertionError("initial stream did not expose a permission boundary")
+            permissions = _unique_permissions(initial_events)
+            if len(permissions) != 1:
+                raise AssertionError("initial stream did not expose exactly one permission boundary")
+            permission = permissions[0]
+        if len(_unique_permissions(initial_events)) != 1:
+            raise AssertionError("scenario emitted more than one permission boundary")
+        scenario = "handoff" if handoff_first else pipeline_step_id or mode
+        if scenario in {*SELLING_STAGE_IDS, "handoff"}:
+            _validate_structured_permission(permission, scenario=scenario)
         checkpoint_path = _checkpoint_path(run_dir / "config")
         checkpoint_before = _read_checkpoint(checkpoint_path)
         if checkpoint_before.get("phase") != "WAITING":
             raise AssertionError("initial checkpoint phase is not WAITING")
         if checkpoint_before.get("taskId") != permission.get("requestTaskId"):
             raise AssertionError("permission task correlation differs from checkpoint")
-        expected_class = "pipeline" if mode == "pipeline" else "normal"
+        expected_class = "pipeline" if mode == "pipeline" and not handoff_first else "normal"
         if checkpoint_before.get("permissionClass") != expected_class:
             raise AssertionError("permission checkpoint class is incorrect")
-        if mode == "pipeline":
+        if expected_class == "pipeline":
             coordinates = checkpoint_before.get("pipelineCoordinates")
             if not isinstance(coordinates, dict) or not coordinates.get("step"):
                 raise AssertionError("Pipeline permission checkpoint lost its step coordinates")
+            if pipeline_step_id and coordinates["step"].get("id") != pipeline_step_id:
+                raise AssertionError("Pipeline permission checkpoint points at the wrong selling stage")
 
         server.stop()
         if background is not None:
@@ -387,6 +531,18 @@ def run_scenario(
             raise AssertionError("server lifecycle shutdown consumed the permission boundary")
 
         server.start(2)
+        checkpoint_after_restart = _read_checkpoint(checkpoint_path)
+        if checkpoint_after_restart.get("phase") != "WAITING":
+            raise AssertionError("restarted server did not retain the waiting permission checkpoint")
+        projection_preserved = expected_class == "pipeline"
+        if projection_preserved:
+            restored_permission = _pipeline_snapshot_permission(
+                run_dir / "config",
+                str(permission["inputId"]),
+            )
+            for field in ("toolName", "target", "operation", "displayParameters", "options"):
+                if restored_permission.get(field) != permission.get(field):
+                    raise AssertionError("Pipeline snapshot changed restored permission field {!r}".format(field))
         response_data = {
             "schemaVersion": 1,
             "kind": "permission",
@@ -417,7 +573,7 @@ def run_scenario(
             if expected_output not in _event_text(recovered_events):
                 raise AssertionError("recovered continuation output is missing")
         normal_recovery_checks: dict[str, Any] = {}
-        if mode == "normal":
+        if expected_class == "normal":
             assistant_final = [
                 value for value in _iac_code_values(recovered_events, "assistantFinal") if isinstance(value, dict)
             ]
@@ -477,7 +633,7 @@ def run_scenario(
             raise AssertionError("recovered output did not remain on the original task")
 
         pipeline_checks: dict[str, Any] = {}
-        if mode == "pipeline":
+        if expected_class == "pipeline":
             journal = _pipeline_journal_events(run_dir / "config")
             event_types = [str(event.get("eventType")) for event in journal]
             if "permission_requested" not in event_types:
@@ -486,13 +642,32 @@ def run_scenario(
                 raise AssertionError("Pipeline journal did not continue after permission recovery")
             if any(event_type.startswith("rollback_") for event_type in event_types):
                 raise AssertionError("Pipeline permission recovery triggered rollback")
-            if event_types.index("permission_requested") > event_types.index("step_completed"):
+            permission_index = event_types.index("permission_requested")
+            completed_target_indexes = [
+                index
+                for index, event in enumerate(journal)
+                if event.get("eventType") == "step_completed"
+                and isinstance(event.get("step"), dict)
+                and event["step"].get("id") == (pipeline_step_id or "fixture_step")
+            ]
+            if not completed_target_indexes or permission_index > completed_target_indexes[0]:
                 raise AssertionError("Pipeline journal ordering is invalid")
             pipeline_checks = {
                 "pipelineCoordinatesPreserved": True,
                 "pipelineJournalOrdered": True,
                 "pipelineRollbackAbsent": True,
                 "parentStreamEndedAtPermissionBoundary": True,
+            }
+
+        handoff_checks: dict[str, Any] = {}
+        if handoff_first:
+            journal = _pipeline_journal_events(run_dir / "config")
+            event_types = [str(event.get("eventType")) for event in journal]
+            if "pipeline_handoff_ready" not in event_types:
+                raise AssertionError("normal-chat permission was not preceded by a durable handoff")
+            handoff_checks = {
+                "normalHandoffPublished": True,
+                "normalPermissionAfterHandoff": True,
             }
 
         return {
@@ -505,9 +680,14 @@ def run_scenario(
             "toolExecutions": executions_final,
             "duplicateAcknowledged": True,
             "conflictRejected": True,
+            "restoredPermissionProjectionPreserved": projection_preserved,
+            "durableWaitingPermissionRestored": True,
             "candidateSelectionBeforePermission": candidate_first,
+            "pipelineStepId": pipeline_step_id,
+            "handoffFirst": handoff_first,
             **normal_recovery_checks,
             **pipeline_checks,
+            **handoff_checks,
         }
     finally:
         server.stop()
@@ -521,6 +701,8 @@ def main() -> int:
         timeout=args.timeout,
         mode=args.mode,
         candidate_first=args.candidate_first,
+        pipeline_step_id=args.pipeline_step_id,
+        handoff_first=args.handoff_first,
     )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0

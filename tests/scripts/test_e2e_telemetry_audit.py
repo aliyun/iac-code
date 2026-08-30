@@ -32,8 +32,8 @@ def _attempt(span_id: str, *, status: str = "ok", terminal_count: int = 1) -> li
     return records
 
 
-def _metrics(*, count: int = 1, timestamp: int = 1) -> list[dict]:
-    return [
+def _metrics(*, count: int = 1, timestamp: int = 1, resource_id: str | None = None) -> list[dict]:
+    records = [
         new_record(
             "metric",
             name="iac.api.request.count",
@@ -49,6 +49,10 @@ def _metrics(*, count: int = 1, timestamp: int = 1) -> list[dict]:
             value=10,
         ),
     ]
+    if resource_id is not None:
+        for record in records:
+            record["resource"] = {"service.instance.id": resource_id}
+    return records
 
 
 def test_audit_provider_attempts_accepts_one_closed_attempt() -> None:
@@ -79,6 +83,21 @@ def test_audit_provider_attempts_uses_latest_cumulative_metric_snapshot() -> Non
     records = [*_attempt("aa"), *_metrics(count=7, timestamp=1), *_metrics(count=1, timestamp=2)]
 
     result = audit_provider_attempts(records, expected_attempts=1)
+
+    assert result["passed"] is True
+
+
+def test_audit_provider_attempts_sums_latest_counters_from_restarted_processes() -> None:
+    records = [
+        *_attempt("aa"),
+        *_attempt("bb"),
+        *_attempt("cc"),
+        *_metrics(count=7, timestamp=1, resource_id="before-restart"),
+        *_metrics(count=1, timestamp=2, resource_id="before-restart"),
+        *_metrics(count=2, timestamp=3, resource_id="after-restart"),
+    ]
+
+    result = audit_provider_attempts(records, expected_attempts=3)
 
     assert result["passed"] is True
 

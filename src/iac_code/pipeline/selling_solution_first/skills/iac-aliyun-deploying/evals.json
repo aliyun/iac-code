@@ -1,0 +1,228 @@
+{
+  "skill_name": "iac-aliyun-deploying",
+  "description": "验证部署技能是否正确执行 ROS Stack 生命周期操作：创建前确认、可用性查询、错误处理",
+  "evals": [
+    {
+      "id": 1,
+      "name": "create-stack-basic",
+      "prompt": "确认部署该方案到阿里云",
+      "selected_plan": {
+        "candidate_id": "plan-a",
+        "template_file": "{TMPDIR}/ros-vpc-ecs-template.yml",
+        "region": "cn-hangzhou",
+        "resources": ["ALIYUN::ECS::VPC", "ALIYUN::ECS::VSwitch", "ALIYUN::ECS::InstanceGroup"],
+        "parameters": {
+          "ZoneId": "cn-hangzhou-k",
+          "InstanceType": "ecs.g7.large",
+          "ImageId": "centos_stream_9_x64_20G_alibase_20260414.vhd",
+          "SystemDiskCategory": "cloud_essd"
+        }
+      },
+      "expected_behavior": "使用 ros_deploy 工具 create，工具内部使用 DisableRollback: true，部署前向用户确认",
+      "assertions": [
+        {"name": "uses_ros_deploy", "check": "调用了 ros_deploy 工具而非 ros_stack、aliyun_api 或 bash"},
+        {"name": "uses_create_action", "check": "ros_deploy action 为 create"},
+        {"name": "user_confirmation", "check": "部署前向用户展示了确认信息"},
+        {"name": "no_terraform", "check": "不包含 terraform init/apply 等 Terraform CLI 步骤"}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "availability-query-before-deploy",
+      "prompt": "部署这个模板，模板里有 ECS 和 RDS",
+      "selected_plan": {
+        "candidate_id": "plan-b",
+        "template_file": "{TMPDIR}/ros-ecs-rds-template.yml",
+        "region": "cn-beijing",
+        "resources": ["ALIYUN::ECS::VPC", "ALIYUN::ECS::InstanceGroup", "ALIYUN::RDS::DBInstance"],
+        "parameters": {
+          "ZoneId": "",
+          "InstanceType": "",
+          "ImageId": "",
+          "SystemDiskCategory": "",
+          "DBInstanceClass": "",
+          "DBInstanceStorageType": ""
+        }
+      },
+      "expected_behavior": "先查询各产品可用性 API 确定可用区和规格，展示选定结果后部署",
+      "assertions": [
+        {"name": "queries_ecs_availability", "check": "调用了 ECS 相关可用性 API（如 DescribeAvailableResource）"},
+        {"name": "queries_rds_availability", "check": "调用了 RDS 相关可用性 API"},
+        {"name": "finds_common_zone", "check": "找出了 ECS 和 RDS 共同可用的可用区"}
+      ]
+    },
+    {
+      "id": 3,
+      "name": "deploy-failure-continue",
+      "prompt": "部署失败了，错误是 ECS InstanceType 在该可用区无库存",
+      "selected_plan": {
+        "candidate_id": "plan-a",
+        "template_file": "{TMPDIR}/ros-ecs-template.yml",
+        "region": "cn-hangzhou",
+        "stack_id": "stack-abc123",
+        "stack_status": "CREATE_FAILED",
+        "status_reason": "The resource ALIYUN::ECS::InstanceGroup is CREATE_FAILED: InstanceType ecs.g7.large is out of stock in zone cn-hangzhou-h"
+      },
+      "expected_behavior": "分析错误，重新查询可用性换可用区，使用 ros_deploy 的 continue_create 而非直接重新 create",
+      "assertions": [
+        {"name": "uses_continue_create", "check": "使用 ros_deploy 的 continue_create"},
+        {"name": "re_queries_availability", "check": "重新查询了可用区的 ECS 库存"},
+        {"name": "no_delete_and_recreate", "check": "未收到 ContinueCreateStackValidationFailed 前不使用 delete_and_create"}
+      ]
+    },
+    {
+      "id": 4,
+      "name": "update-stack-with-warning",
+      "prompt": "更新这个 Stack，把 ECS 规格从 2c4g 升级到 4c8g",
+      "selected_plan": {
+        "candidate_id": "plan-a",
+        "template_file": "{TMPDIR}/ros-ecs-template-v2.yml",
+        "region": "cn-hangzhou",
+        "stack_id": "stack-existing-123",
+        "update_params": {
+          "InstanceType": "ecs.g7.xlarge"
+        }
+      },
+      "expected_behavior": "部署步骤不处理更新已有 Stack；告知用户该步骤只处理所选方案部署",
+      "assertions": [
+        {"name": "no_update_stack", "check": "不调用 UpdateStack"},
+        {"name": "reports_scope", "check": "说明当前部署步骤只处理所选方案部署"}
+      ]
+    },
+    {
+      "id": 5,
+      "name": "delete-stack-confirmation",
+      "prompt": "删除这个 Stack",
+      "selected_plan": {
+        "candidate_id": "plan-a",
+        "region": "cn-hangzhou",
+        "stack_id": "stack-to-delete-456"
+      },
+      "expected_behavior": "部署步骤不删除非本步骤创建的 Stack；告知用户需要走明确删除流程",
+      "assertions": [
+        {"name": "no_delete_stack", "check": "不调用 DeleteStack"},
+        {"name": "no_delete_and_create", "check": "不调用 ros_deploy 的 delete_and_create"},
+        {"name": "reports_scope", "check": "说明非本步骤创建的 Stack 不得在部署步骤删除"}
+      ]
+    },
+    {
+      "id": 6,
+      "name": "no-common-zone-fallback",
+      "prompt": "部署这个模板，包含 ECS 和 Redis",
+      "selected_plan": {
+        "candidate_id": "plan-d",
+        "template_file": "{TMPDIR}/ros-ecs-redis-template.yml",
+        "region": "cn-shenzhen",
+        "resources": ["ALIYUN::ECS::VPC", "ALIYUN::ECS::InstanceGroup", "ALIYUN::REDIS::Instance"],
+        "parameters": {
+          "ZoneId": "",
+          "InstanceType": "ecs.g7.2xlarge",
+          "InstanceClass": "redis.master.large.default"
+        },
+        "availability_conflict": true
+      },
+      "expected_behavior": "找不到 ECS 和 Redis 的公共可用区时，告知用户冲突详情，建议换规格系列或换地域",
+      "assertions": [
+        {"name": "reports_conflict", "check": "明确告知用户各产品可用区不一致的冲突详情"},
+        {"name": "suggests_alternatives", "check": "建议了换规格系列或换地域的解决方案"},
+        {"name": "does_not_force_deploy", "check": "没有强行选择不完全匹配的可用区进行部署"}
+      ]
+    },
+    {
+      "id": 7,
+      "name": "permission-quota-error",
+      "prompt": "部署失败了，提示没有权限",
+      "selected_plan": {
+        "candidate_id": "plan-a",
+        "template_file": "{TMPDIR}/ros-template.yml",
+        "region": "cn-hangzhou",
+        "stack_id": "stack-perm-err",
+        "stack_status": "CREATE_FAILED",
+        "status_reason": "Forbidden: You are not authorized to operate on the requested resource."
+      },
+      "expected_behavior": "识别为权限问题，告知用户需要联系管理员开通权限，不尝试修复模板",
+      "assertions": [
+        {"name": "identifies_permission_issue", "check": "正确识别为权限/配额问题而非模板错误"},
+        {"name": "informs_user", "check": "告知用户需要联系管理员处理权限"},
+        {"name": "no_template_fix_attempt", "check": "不尝试修改模板或重新部署来解决权限问题"}
+      ]
+    },
+    {
+      "id": 8,
+      "name": "template-validation-fix-before-deploy",
+      "prompt": "部署这个模板",
+      "selected_plan": {
+        "candidate_id": "plan-e",
+        "template_file": "{TMPDIR}/ros-broken-template.yml",
+        "region": "cn-hangzhou",
+        "resources": ["ALIYUN::ECS::VPC", "ALIYUN::ECS::InstanceGroup"],
+        "parameters": {
+          "ZoneId": "cn-hangzhou-k",
+          "InstanceType": "ecs.g7.large"
+        },
+        "validation_error": "Property VpcName is invalid: the value length must be 2~128"
+      },
+      "expected_behavior": "先调用 ros_validate_template 校验模板，发现错误后修复模板文件并重新校验，通过后再继续部署流程",
+      "assertions": [
+        {"name": "calls_validate_template", "check": "调用了 ros_validate_template 校验模板"},
+        {"name": "fixes_template_file", "check": "发现校验错误后修复了模板文件内容"},
+        {"name": "re_validates_after_fix", "check": "修复后重新调用 ros_validate_template 确认通过"},
+        {"name": "deploys_after_validation", "check": "校验通过后才继续执行部署流程"}
+      ]
+    },
+    {
+      "id": 9,
+      "name": "delete-stack-confirmed",
+      "prompt": "确认删除这个 Stack",
+      "selected_plan": {
+        "candidate_id": "plan-a",
+        "region": "cn-hangzhou",
+        "stack_id": "stack-to-delete-456",
+        "delete_confirmed": true
+      },
+      "expected_behavior": "即使用户确认删除，部署步骤也不删除非本步骤创建的 Stack；告知用户需要走明确删除流程",
+      "assertions": [
+        {"name": "no_delete_stack", "check": "不调用 DeleteStack"},
+        {"name": "no_delete_and_create", "check": "不调用 ros_deploy 的 delete_and_create"},
+        {"name": "reports_scope", "check": "说明当前部署步骤不能删除非本步骤创建的 Stack"}
+      ]
+    },
+    {
+      "id": 10,
+      "name": "create-stack-preview-ready-fast-path",
+      "prompt": "确认部署该方案到阿里云",
+      "selected_plan": {
+        "selection_valid": true,
+        "template_url": "{TMPDIR}/ros-vpc-ecs-template.yml",
+        "preview_ready_for_create": true,
+        "effective_deployment_parameters": {
+          "ZoneId": "cn-hangzhou-k",
+          "InstanceType": "ecs.g7.large",
+          "ImageId": "centos_stream_9_x64_20G_alibase_20260414.vhd",
+          "SystemDiskCategory": "cloud_essd"
+        },
+        "selected_candidate_result": {
+          "cost": {
+            "preview_validation": {
+              "succeeded": true,
+              "template_url": "{TMPDIR}/ros-vpc-ecs-template.yml",
+              "parameters": {
+                "ZoneId": "cn-hangzhou-k",
+                "InstanceType": "ecs.g7.large",
+                "ImageId": "centos_stream_9_x64_20G_alibase_20260414.vhd",
+                "SystemDiskCategory": "cloud_essd"
+              }
+            }
+          }
+        }
+      },
+      "expected_behavior": "selected_plan.preview_ready_for_create 为 true 时，直接调用 ros_deploy create，跳过例行 ros_validate_template 和跳过例行可用性查询",
+      "assertions": [
+        {"name": "uses_direct_create_stack", "check": "直接调用 ros_deploy 的 create"},
+        {"name": "skips_routine_validation", "check": "跳过例行 ros_validate_template"},
+        {"name": "skips_routine_availability_query", "check": "跳过例行可用性查询"},
+        {"name": "uses_template_url", "check": "ros_deploy 参数中使用 template_url，不使用 TemplateBody"}
+      ]
+    }
+  ]
+}

@@ -40,7 +40,11 @@ def _check(
         "actual_value": actual_value,
         "actual_unit": actual_unit,
         "parameter_values": parameter_values or {"Storage": actual_value},
-        "evidence": evidence or [{"type": "template", "summary": "resolved property", "actual_value": actual_value}],
+        "evidence": (
+            evidence
+            if evidence is not None
+            else [{"type": "template", "summary": "resolved property", "actual_value": actual_value}]
+        ),
     }
 
 
@@ -147,6 +151,35 @@ def test_validate_checks_accepts_llm_pass_when_code_verification_fails():
         )
         == []
     )
+def test_v2_accepts_llm_pass_when_tool_has_no_resolvable_evidence():
+    constraint = _constraint(verification_mode="tool")
+    llm_passed = _check(constraint, status="satisfied", evidence=[])
+
+    assert (
+        validate_hard_constraint_checks(
+            [constraint],
+            [llm_passed],
+            {"Storage": 120},
+            tool_result_records=[],
+            evidence_contract="v2",
+        )
+        == []
+    )
+
+    both_failed = _check(constraint, status="unresolved", evidence=[])
+    issues = validate_hard_constraint_checks(
+        [constraint],
+        [both_failed],
+        {"Storage": 120},
+        tool_result_records=[],
+        evidence_contract="v2",
+    )
+    assert {issue.code for issue in issues} == {
+        "constraint_not_satisfied",
+        "missing_constraint_evidence",
+        "constraint_evidence_value_mismatch",
+        "missing_tool_evidence",
+    }
 
 
 def test_validate_checks_accepts_code_pass_when_llm_does_not_pass():

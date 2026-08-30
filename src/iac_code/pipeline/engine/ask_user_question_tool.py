@@ -9,6 +9,7 @@ from collections.abc import Callable
 from typing import Any
 
 from iac_code.i18n import _
+from iac_code.pipeline.engine.completion_guard_state import record_completion_guard_tool_result
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.types.stream_events import AskUserQuestionEvent
 
@@ -132,9 +133,15 @@ class AskUserQuestionTool(Tool):
             "selected_label": answer.get("selected_label", ""),
             "free_text": answer.get("free_text", ""),
         }
+        content = json.dumps(payload, ensure_ascii=False)
         if self._completion_guard_state is not None:
-            successful_tools = self._completion_guard_state.setdefault("successful_tools", set())
-            successful_tools.add(self.name)
-            tool_results = self._completion_guard_state.setdefault("tool_results", {})
-            tool_results[self.name] = payload
-        return ToolResult.success(json.dumps(payload, ensure_ascii=False))
+            # Route through the shared recorder so live answers and transcript
+            # replay produce the same ordered guard records.
+            record_completion_guard_tool_result(
+                self._completion_guard_state,
+                tool_name=self.name,
+                tool_input=tool_input,
+                content=content,
+                is_error=False,
+            )
+        return ToolResult.success(content)

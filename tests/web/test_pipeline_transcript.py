@@ -141,6 +141,40 @@ def test_translator_carries_tool_input_and_step_duration():
     assert completed_marker["payload"]["pipelineStep"]["durationS"] == 4.5
 
 
+def test_complete_step_result_projects_normalized_conclusion_for_the_completion_card():
+    step = {"id": "materialize_selected_candidate", "runId": "step-materialize-1", "index": 2, "total": 3}
+    envelopes = [
+        _envelope("step_started", "step", 1, step=step),
+        _envelope(
+            "tool_result",
+            "step",
+            2,
+            step=step,
+            data={
+                "toolName": "complete_step",
+                "toolUseId": "tool-complete",
+                "result": "completed",
+                "input": {"conclusion": {"status": "confirmed"}},
+                "submittedDelta": {"conclusion": {"status": "confirmed"}},
+                "normalizedConclusion": {
+                    "status": "confirmed",
+                    "template_url": "templates/0-rds.yml",
+                    "selected_candidate_result": {"cost": {"monthly_estimate": "¥100/月"}},
+                },
+            },
+        ),
+    ]
+
+    events = PipelineTranscriptTranslator().translate_all(envelopes)
+    result = next(event for event in events if event["type"] == "tool.result")
+
+    assert result["payload"]["submittedDelta"] == {"conclusion": {"status": "confirmed"}}
+    assert result["payload"]["normalizedConclusion"]["template_url"] == "templates/0-rds.yml"
+    assert result["payload"]["normalizedConclusion"]["selected_candidate_result"]["cost"] == {
+        "monthly_estimate": "¥100/月"
+    }
+
+
 def test_translator_tracks_active_sub_step_for_candidate_scope():
     translator = PipelineTranscriptTranslator()
     events = translator.translate_all(_sample_envelopes())
@@ -353,6 +387,7 @@ def test_translator_folds_stack_progress_into_pipeline_event():
                 "toolUseId": "call_deploy",
                 "stackId": "stk-1",
                 "stackName": "prod-stack",
+                "regionId": "cn-hangzhou",
                 "status": "CREATE_IN_PROGRESS",
                 "progressPercentage": 55.0,
                 "resources": [{"logicalId": "vpc", "status": "CREATE_COMPLETE"}],
@@ -366,6 +401,8 @@ def test_translator_folds_stack_progress_into_pipeline_event():
     assert payload["kind"] == "stack.progress"
     assert payload["toolUseId"] == "call_deploy"
     assert payload["stackName"] == "prod-stack"
+    # Region must survive the fold: the live overlay dedup key is region::stackName.
+    assert payload["regionId"] == "cn-hangzhou"
     assert payload["progressPercentage"] == 55.0
     assert payload["resources"] == [{"logicalId": "vpc", "status": "CREATE_COMPLETE"}]
     # Bound to the tool card's message so reload attaches to the right step.
@@ -443,6 +480,7 @@ def test_build_rows_attaches_stack_progress_to_tool_on_reload():
                 "toolUseId": "call_deploy",
                 "stackId": "stk-1",
                 "stackName": "prod-stack",
+                "regionId": "cn-hangzhou",
                 "status": "CREATE_COMPLETE",
                 "progressPercentage": 100.0,
                 "resources": [{"logicalId": "vpc", "status": "CREATE_COMPLETE"}],
@@ -458,6 +496,7 @@ def test_build_rows_attaches_stack_progress_to_tool_on_reload():
             break
     assert tool is not None
     assert tool["stackProgress"]["stackName"] == "prod-stack"
+    assert tool["stackProgress"]["regionId"] == "cn-hangzhou"
     assert tool["stackProgress"]["progressPercentage"] == 100.0
     assert tool["stackProgress"]["resources"] == [{"logicalId": "vpc", "status": "CREATE_COMPLETE"}]
 
@@ -997,6 +1036,93 @@ def test_input_received_restores_step_marker_status():
     restored = next(e for e in events if e["type"] == PIPELINE_MARKER_EVENT)
     assert restored["payload"]["pipelineStep"]["status"] == "completed"
     assert restored["payload"]["markerId"] == "plmk-r-sel"
+
+
+def test_deployment_confirmation_input_received_marks_step_working():
+    step = {"id": "materialize_selected_candidate", "runId": "r-materialize", "index": 2, "total": 3}
+    translator = PipelineTranscriptTranslator()
+    translator.translate_all(
+        [
+            _envelope("step_started", "step", 1, step=step),
+            _envelope("step_completed", "step", 2, step=step, data={"durationS": 120.0}),
+            _envelope(
+                "input_required",
+                "step",
+                3,
+                step=step,
+                data={"kind": "deployment_confirmation", "prompt": "请选择下一步"},
+            ),
+        ]
+    )
+
+    events = translator.push(
+        _envelope(
+            "input_received",
+            "step",
+            4,
+            step=step,
+            data={"kind": "deployment_confirmation", "userInputLength": 12},
+        )
+    )
+
+    marker = next(e for e in events if e["type"] == PIPELINE_MARKER_EVENT)
+    assert marker["payload"]["pipelineStep"]["status"] == "working"
+    assert marker["payload"]["markerId"] == "plmk-r-materialize"
+
+    translator.push(
+        _envelope(
+            "input_required",
+            "step",
+            5,
+            step=step,
+            data={"kind": "ask_user_question", "prompt": "请选择可用区"},
+        )
+    )
+    answered = translator.push(
+        _envelope(
+            "input_received",
+            "step",
+            6,
+            step=step,
+            data={"kind": "ask_user_question", "answerTextLength": 1},
+        )
+    )
+    restored = next(e for e in answered if e["type"] == PIPELINE_MARKER_EVENT)
+    assert restored["payload"]["pipelineStep"]["status"] == "working"
+
+
+def test_repeated_step_completions_accumulate_processing_duration():
+    step = {"id": "materialize_selected_candidate", "runId": "r-materialize", "index": 2, "total": 3}
+    translator = PipelineTranscriptTranslator()
+    events = translator.translate_all(
+        [
+            _envelope("step_started", "step", 1, step=step),
+            _envelope("step_completed", "step", 2, step=step, data={"durationS": 135.4}),
+            _envelope(
+                "input_required",
+                "step",
+                3,
+                step=step,
+                data={"kind": "deployment_confirmation", "prompt": "请选择下一步"},
+            ),
+            _envelope(
+                "input_received",
+                "step",
+                4,
+                step=step,
+                data={"kind": "deployment_confirmation", "userInputLength": 12},
+            ),
+            _envelope("step_completed", "step", 5, step=step, data={"durationS": 0.04}),
+        ]
+    )
+
+    completed_markers = [
+        event
+        for event in events
+        if event["type"] == PIPELINE_MARKER_EVENT
+        and event["payload"]["pipelineStep"]["status"] == "completed"
+    ]
+    assert completed_markers[-1]["payload"]["pipelineStep"]["durationS"] == 135.44
 
 
 def test_build_rows_paused_at_input_keeps_step_status_input():
@@ -1563,6 +1689,140 @@ def test_translator_ignores_non_ask_input_required():
         )
     )
     assert not any(e["type"] == "question.request" for e in events)
+
+
+def test_input_received_splits_prompt_from_followup_agent_text():
+    step = {"id": "solution_planning_and_selection", "runId": "step-plan-1", "index": 1, "total": 3}
+    envelopes = [
+        _envelope("step_started", "step", 1, step=step),
+        _envelope("text_delta", "step", 2, step=step, data={"text": "请选择要实现并部署的方案"}),
+        _envelope(
+            "input_required",
+            "step",
+            3,
+            step=step,
+            data={"kind": "candidate_selection", "prompt": ""},
+        ),
+        _envelope(
+            "input_received",
+            "step",
+            4,
+            step=step,
+            data={"kind": "candidate_selection", "selectedValue": "我现在想创建 VPC"},
+        ),
+        _envelope(
+            "text_delta",
+            "step",
+            5,
+            step=step,
+            data={"text": "用户已明确更换部署目标，改为创建 VPC。"},
+        ),
+    ]
+
+    rows = build_pipeline_transcript_rows(envelopes)
+    assistant_rows = [row for row in rows if row["id"].startswith("pl-step-plan-1")]
+
+    assert [(row["id"], row["content"]) for row in assistant_rows] == [
+        ("pl-step-plan-1", "请选择要实现并部署的方案"),
+        ("pl-step-plan-1#1", "用户已明确更换部署目标，改为创建 VPC。"),
+    ]
+
+
+def test_translator_forwards_step_planning_diagram_to_live_web_state():
+    step = {"id": "solution_planning_and_selection", "runId": "step-plan-1", "index": 1, "total": 3}
+    events = PipelineTranscriptTranslator().push(
+        _envelope(
+            "diagram_shown",
+            "step",
+            1,
+            step=step,
+            eventId="diagram-plan-a",
+            data={
+                "candidateName": "方案 A",
+                "candidateIndex": 0,
+                "mermaidSource": "flowchart LR\n  A --> B",
+                "diagramStage": "optimized",
+                "architectureContext": {"source": "architecture_plan"},
+            },
+        )
+    )
+
+    assert events == [
+        {
+            "type": "diagram.render",
+            "payload": {
+                "candidateName": "方案 A",
+                "candidateIndex": 0,
+                "mermaidSource": "flowchart LR\n  A --> B",
+                "diagramStage": "optimized",
+                "architectureContext": {"source": "architecture_plan"},
+                "diagramId": "diagram-plan-a",
+                "stepId": "solution_planning_and_selection",
+                "runId": "step-plan-1",
+            },
+        }
+    ]
+
+
+def test_step_planning_diagrams_are_stable_transcript_rows_in_event_order():
+    step = {"id": "solution_planning_and_selection", "runId": "step-plan-1", "index": 1, "total": 3}
+    envelopes = [
+        _envelope("step_started", "step", 1, step=step),
+        _envelope(
+            "text_delta",
+            "step",
+            2,
+            step=step,
+            data={"text": "旧 nginx 方案"},
+        ),
+        _envelope(
+            "diagram_shown",
+            "step",
+            3,
+            step=step,
+            eventId="diagram-nginx",
+            data={
+                "candidateName": "单台 ECS 测试/演示",
+                "candidateIndex": 0,
+                "mermaidSource": "flowchart LR\n  Internet --> ECS",
+                "architectureContext": {"source": "architecture_plan"},
+            },
+        ),
+        _envelope(
+            "text_delta",
+            "step",
+            4,
+            step=step,
+            data={"text": "新的 VPC 方案"},
+        ),
+        _envelope(
+            "diagram_shown",
+            "step",
+            5,
+            step=step,
+            eventId="diagram-vpc",
+            data={
+                "candidateName": "仅创建 VPC",
+                "candidateIndex": 0,
+                "mermaidSource": "flowchart LR\n  VPC",
+                "architectureContext": {"source": "architecture_plan"},
+            },
+        ),
+    ]
+
+    rows = build_pipeline_transcript_rows(envelopes)
+
+    assert [row["id"] for row in rows] == [
+        "plmk-step-plan-1",
+        "pl-step-plan-1",
+        "pldiag-diagram-nginx",
+        "pldiag-diagram-vpc",
+    ]
+    diagrams = [row for row in rows if row["kind"] == "pipeline_diagram"]
+    assert [row["pipelineDiagram"]["candidateName"] for row in diagrams] == [
+        "单台 ECS 测试/演示",
+        "仅创建 VPC",
+    ]
 
 
 def test_context_usage_envelope_emits_step_context_event():

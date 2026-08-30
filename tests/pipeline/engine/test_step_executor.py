@@ -181,6 +181,40 @@ class TestStepExecutorToolSetup:
         tool_reg = executor._build_step_tools(step, ctx)
         assert tool_reg.get("complete_step") is not None
 
+    def test_pipeline_local_compact_schema_is_not_used_before_a_conclusion_is_saved(self, tmp_path):
+        executor = _make_executor(tmp_path)
+        step = _make_step()
+        step.config["compact_completion_schema"] = True
+        step.conclusion_schema = {
+            "type": "object",
+            "required": ["status", "details"],
+            "properties": {"status": {"type": "string"}, "details": {"type": "object"}},
+        }
+
+        complete_step = executor._build_step_tools(step, PipelineContext(SIMPLE_DEPS)).get("complete_step")
+
+        assert complete_step is not None
+        assert complete_step.input_schema["properties"]["conclusion"]["required"] == ["status", "details"]
+
+    def test_pipeline_local_compact_schema_is_used_after_a_conclusion_is_saved(self, tmp_path):
+        executor = _make_executor(tmp_path)
+        step = _make_step()
+        step.config["compact_completion_schema"] = True
+        step.conclusion_schema = {
+            "type": "object",
+            "required": ["status", "details"],
+            "properties": {"status": {"type": "string"}, "details": {"type": "object"}},
+        }
+        ctx = PipelineContext(SIMPLE_DEPS)
+        ctx.set_conclusion("intent", {"status": "waiting", "details": {"saved": True}})
+
+        complete_step = executor._build_step_tools(step, ctx).get("complete_step")
+
+        assert complete_step is not None
+        conclusion_schema = complete_step.input_schema["properties"]["conclusion"]
+        assert conclusion_schema["required"] == ["status"]
+        assert conclusion_schema["minProperties"] == 1
+
     def test_agent_loop_context_marks_pipeline_mode(self, tmp_path):
         executor = _make_executor(tmp_path)
         step = _make_step()
@@ -238,6 +272,65 @@ class TestStepExecutorToolSetup:
         assert agent_context.completion_guard_state["ros_deploy_owned_stack_ids"] == {
             "stack-failed": {"action": "create"}
         }
+
+    def test_pipeline_local_fresh_resume_hides_history_but_preserves_guard_evidence(self, tmp_path):
+        executor = _make_executor(tmp_path)
+        step = _make_step()
+        step.config["fresh_agent_context_on_resume"] = True
+        ctx = PipelineContext(SIMPLE_DEPS)
+        ctx.set_conclusion("intent", {"status": "waiting"})
+        resume_messages = [
+            Message(
+                role="assistant",
+                content=[
+                    ToolUseBlock(
+                        id="validate_1",
+                        name="ros_validate_template",
+                        input={"template_url": "templates/main.yml"},
+                    )
+                ],
+            ),
+            Message(
+                role="user",
+                content=[
+                    ToolResultBlock(
+                        tool_use_id="validate_1",
+                        content='{"success": true}',
+                        is_error=False,
+                    )
+                ],
+            ),
+        ]
+
+        agent_context = executor.build_agent_loop_context(
+            step,
+            ctx,
+            "test_session",
+            user_message="确认",
+            resume_messages=resume_messages,
+        )
+
+        assert agent_context.agent_loop is not None
+        assert agent_context.agent_loop.context_manager.get_context_messages() == []
+        assert "ros_validate_template" in agent_context.completion_guard_state["successful_tools"]
+        assert agent_context.completion_guard_state["tool_result_records"]
+
+    def test_pipeline_local_in_step_question_resume_keeps_history_without_saved_conclusion(self, tmp_path):
+        executor = _make_executor(tmp_path)
+        step = _make_step()
+        step.config["fresh_agent_context_on_resume"] = True
+        resume_messages = [Message(role="assistant", content="请补充一个参数")]
+
+        agent_context = executor.build_agent_loop_context(
+            step,
+            PipelineContext(SIMPLE_DEPS),
+            "test_session",
+            user_message="参数值",
+            resume_messages=resume_messages,
+        )
+
+        assert agent_context.agent_loop is not None
+        assert agent_context.agent_loop.context_manager.get_context_messages() == resume_messages
 
     def test_full_tools_when_step_returns_none(self, tmp_path):
         registry = ToolRegistry()
@@ -518,6 +611,115 @@ class TestStepExecutor:
         results = [event for event in collected if isinstance(event, StepResult)]
         assert len(results) == 1
         assert results[0].status == StepStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_permission_resumed_tool_result_is_recorded_for_completion_guard(self, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "deploying.md").write_text("Deploy.", encoding="utf-8")
+        deploy_input = {
+            "action": "create",
+            "region_id": "cn-hangzhou",
+            "stack_name": "permission-resume",
+        }
+        resume_messages = [
+            Message(
+                role="assistant",
+                content=[ToolUseBlock(id="deploy_1", name="ros_deploy", input=deploy_input)],
+            )
+        ]
+
+        step = StepSpec(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            prompt_file="prompts/deploying.md",
+            conclusion_schema={
+                "type": "object",
+                "required": ["status"],
+                "additionalProperties": False,
+                "properties": {"status": {"type": "string", "enum": ["success", "failed"]}},
+            },
+            completion_guards=[
+                {
+                    "when_conclusion_field_equals": {"status": "success"},
+                    "require_tool_result": {
+                        "tool": "ros_deploy",
+                        "action_in": ["create"],
+                        "is_success": True,
+                        "status_in": ["CREATE_COMPLETE"],
+                    },
+                    "message": "success requires a real ros_deploy CREATE_COMPLETE result",
+                }
+            ],
+        )
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[step],
+            context_dependencies={"deployment": []},
+            max_rollbacks=3,
+            skills={},
+        )
+
+        class FakeAgentLoop:
+            def __init__(self, **kwargs):
+                self.tool_registry = kwargs["tool_registry"]
+
+            async def resume_permission_boundary(self, checkpoint):
+                assert checkpoint["toolUseId"] == "deploy_1"
+                yield ToolResultEvent(
+                    tool_use_id="deploy_1",
+                    tool_name="ros_deploy",
+                    result=json.dumps(
+                        {
+                            "stack_id": "stack-real",
+                            "status": "CREATE_COMPLETE",
+                            "is_success": True,
+                            "outputs": {"VpcId": "vpc-real"},
+                        }
+                    ),
+                )
+
+            async def run_streaming(self, user_input):
+                del user_input
+                complete_input = {"conclusion": {"status": "success"}}
+                yield ToolUseStartEvent(tool_use_id="done_1", name="complete_step")
+                yield ToolUseEndEvent(tool_use_id="done_1", name="complete_step", input=complete_input)
+                complete_tool = self.tool_registry.get("complete_step")
+                assert complete_tool is not None
+                result = await complete_tool.execute(tool_input=complete_input, context=ToolContext())
+                yield ToolResultEvent(
+                    tool_use_id="done_1",
+                    tool_name="complete_step",
+                    result=result.content,
+                    is_error=result.is_error,
+                    metadata=result.metadata,
+                )
+
+        executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+        )
+        checkpoint = {
+            "toolUseId": "deploy_1",
+            "continuationFrame": {"orderedToolUseIds": ["deploy_1"]},
+        }
+
+        collected = []
+        with patch("iac_code.agent.agent_loop.AgentLoop", FakeAgentLoop):
+            async for event in executor.execute(
+                step,
+                PipelineContext({"deployment": []}),
+                "session",
+                resume_messages=resume_messages,
+                permission_checkpoint=checkpoint,
+            ):
+                collected.append(event)
+
+        results = [event for event in collected if isinstance(event, StepResult)]
+        assert results[-1].status == StepStatus.COMPLETED
+        assert results[-1].conclusion == {"status": "success"}
 
     @pytest.mark.asyncio
     async def test_completion_guard_reads_externalized_tool_result_metadata(self, tmp_path):
@@ -942,6 +1144,92 @@ class TestStepExecutor:
         assert "先调用 ask_user_question" in nudge
         assert "收到 ask_user_question 的工具结果后" in nudge
         assert "不要再次直接调用 complete_step" in nudge
+
+    def test_pipeline_local_compact_nudge_does_not_repeat_large_input_or_schema(self):
+        step = _make_step()
+        step.config["compact_completion_errors"] = True
+        step.conclusion_schema = {
+            "type": "object",
+            "required": ["status"],
+            "properties": {
+                "status": {"type": "string", "enum": ["waiting", "done"]},
+                "payload": {"type": "string", "description": "schema-secret" * 1000},
+            },
+        }
+
+        nudge = StepExecutor._build_complete_step_nudge(
+            "unexpected field",
+            {"conclusion": {"status": "done", "payload": "input-secret" * 1000}},
+            step,
+        )
+
+        assert "schema-secret" not in nudge
+        assert "input-secret" not in nudge
+        assert '"fields": ["payload", "status"]' in nudge
+        assert len(nudge) < 1200
+
+    def test_compact_nudge_uses_model_input_schema_not_full_runtime_schema(self):
+        step = _make_step()
+        step.config["compact_completion_errors"] = True
+        step.conclusion_schema = {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["awaiting_selection"]},
+                "candidates": {"type": "array"},
+                "options": {"type": "array"},
+            },
+        }
+        step.completion_input_schema = {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["awaiting_selection"]},
+                "intent": {"type": "object"},
+            },
+        }
+
+        nudge = StepExecutor._build_complete_step_nudge("missing detail", {}, step)
+        recovery = StepExecutor._build_fresh_complete_step_recovery_nudge("missing detail", {}, step)
+
+        for message in (nudge, recovery):
+            assert "允许的 conclusion 顶层字段：intent, status" in message
+            assert "candidates" not in message
+            assert "options" not in message
+
+    @pytest.mark.asyncio
+    async def test_step_result_metadata_supplies_normalized_incremental_conclusion(self, tmp_path):
+        normalized = {"status": "confirmed", "stable": "preserved"}
+        events = [
+            ToolUseStartEvent(tool_use_id="tu_1", name="complete_step"),
+            ToolUseEndEvent(
+                tool_use_id="tu_1",
+                name="complete_step",
+                input={"conclusion": {"status": "confirmed"}},
+            ),
+            ToolResultEvent(
+                tool_use_id="tu_1",
+                tool_name="complete_step",
+                result="ok",
+                metadata={
+                    "step_result": StepResult(
+                        step_id="intent_parsing",
+                        status=StepStatus.COMPLETED,
+                        conclusion=normalized,
+                    )
+                },
+            ),
+        ]
+        executor = _make_executor(tmp_path)
+        ctx = PipelineContext(SIMPLE_DEPS)
+
+        with patch("iac_code.agent.agent_loop.AgentLoop", _make_fake_agent_loop_class(events)):
+            results = [
+                event
+                async for event in executor.execute(_make_step(), ctx, "test_session")
+                if isinstance(event, StepResult)
+            ]
+
+        assert results[-1].conclusion == normalized
+        assert ctx.get_conclusion("intent") == normalized
 
     @pytest.mark.asyncio
     async def test_no_nudge_when_initial_attempt_completes(self, tmp_path, caplog):
@@ -3140,6 +3428,63 @@ async def test_resumed_step_returns_reconstructed_complete_step(monkeypatch, tmp
     assert results[0].status == StepStatus.COMPLETED
     assert results[0].conclusion == {"result": "restored"}
     assert ctx.get_conclusion(step.conclusion_field) == {"result": "restored"}
+
+
+@pytest.mark.asyncio
+async def test_new_user_message_after_completed_resume_is_processed_instead_of_restored(monkeypatch, tmp_path):
+    calls: list[str] = []
+
+    class FakeAgentLoop:
+        def __init__(self, *args, **kwargs):
+            self.resume_messages = kwargs.get("resume_messages")
+
+        async def run_streaming(self, user_input):
+            calls.append(user_input)
+            yield ToolUseStartEvent(tool_use_id="tu_new", name="complete_step")
+            yield ToolUseEndEvent(
+                tool_use_id="tu_new",
+                name="complete_step",
+                input={"conclusion": {"result": "new"}},
+            )
+            yield ToolResultEvent(tool_use_id="tu_new", tool_name="complete_step", result="ok")
+
+        async def continue_streaming(self):
+            raise AssertionError("new user input must start a new model turn")
+            yield
+
+    monkeypatch.setattr("iac_code.agent.agent_loop.AgentLoop", FakeAgentLoop)
+
+    executor = _make_executor(tmp_path)
+    step = _make_step()
+    ctx = PipelineContext(SIMPLE_DEPS)
+    resume_messages = [
+        Message(
+            role="assistant",
+            content=[
+                ToolUseBlock(
+                    id="tu_complete",
+                    name="complete_step",
+                    input={"conclusion": {"result": "old"}},
+                )
+            ],
+        ),
+        Message(role="user", content=[ToolResultBlock(tool_use_id="tu_complete", content="ok", is_error=False)]),
+    ]
+
+    results = []
+    async for event in executor.execute(
+        step,
+        ctx,
+        session_id="root",
+        user_message='{"action":"confirm"}',
+        resume_messages=resume_messages,
+        skip_completed_step_restore=True,
+    ):
+        if isinstance(event, StepResult):
+            results.append(event)
+
+    assert calls == ['{"action":"confirm"}']
+    assert results[-1].conclusion == {"result": "new"}
 
 
 @pytest.mark.asyncio

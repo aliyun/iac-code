@@ -20,7 +20,7 @@ from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_performance import A2A_EXTREME_PERFORMANCE_ENV
-from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
+from iac_code.a2a.pipeline_snapshot import SNAPSHOT_SCHEMA_VERSION, A2APipelineSnapshotStore
 from iac_code.a2a.pipeline_stream import (
     PipelineA2AEventPublisher,
     PipelineA2APersistenceError,
@@ -51,6 +51,7 @@ from iac_code.types.stream_events import (
     CandidateDetailEvent,
     MCPProgressEvent,
     PermissionRequestEvent,
+    PermissionWaitOutcome,
     SubPipelineStreamEvent,
     TextDeltaEvent,
     ThinkingDeltaEvent,
@@ -80,7 +81,8 @@ def _publisher(
     *,
     artifact_store: A2AArtifactStore | None = None,
     exposure_types: object | None = None,
-    a2a_artifacts_by_step_id: dict[str, list[dict[str, str]]] | None = None,
+    a2a_artifacts_by_step_id: dict[str, list[dict[str, Any]]] | None = None,
+    trusted_workspace_root: str | None = None,
 ) -> tuple[PipelineA2AEventPublisher, FakeEventQueue]:
     queue = FakeEventQueue()
     context = PipelineA2AContext(
@@ -91,6 +93,7 @@ def _publisher(
         parent_step_order=["evaluate_candidates", "confirm_and_select"],
         candidate_step_order=["template_generating"],
         a2a_artifacts_by_step_id=a2a_artifacts_by_step_id or {},
+        trusted_workspace_root=trusted_workspace_root,
     )
     pipeline_dir = tmp_path / "pipeline"
     publisher = PipelineA2AEventPublisher(
@@ -362,7 +365,7 @@ async def test_publish_rebuilds_stale_schema_snapshot_from_journal_history(tmp_p
 
     snapshot = publisher.snapshot_store.load()
     assert snapshot is not None
-    assert snapshot["schemaVersion"] == "1.1"
+    assert snapshot["schemaVersion"] == SNAPSHOT_SCHEMA_VERSION
     assert snapshot["display"]["messages"][0]["text"] == "old new"
 
 
@@ -838,7 +841,7 @@ async def test_two_sub_pipeline_candidates_continue_while_one_permission_times_o
             },
         )
     )
-    permission_result: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+    permission_result: asyncio.Future[bool | PermissionWaitOutcome] = asyncio.get_running_loop().create_future()
 
     await publisher.publish(
         SubPipelineStreamEvent(
@@ -883,7 +886,7 @@ async def test_two_sub_pipeline_candidates_continue_while_one_permission_times_o
     assert permission_result.done() is False
     await asyncio.wait_for(asyncio.shield(permission_result), timeout=0.5)
 
-    assert permission_result.result() is False
+    assert permission_result.result() is PermissionWaitOutcome.AUTOMATIC_DENY
     events = publisher.journal.read_all_repairing_tail()
     b_completed_index = next(
         index
@@ -1799,6 +1802,72 @@ async def test_publish_externalized_conclusion_artifact_preserves_final_metadata
 
 
 @pytest.mark.asyncio
+async def test_publish_file_backed_completion_artifact_keeps_body_only_in_artifact_store(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    template_path = workspace / "templates" / "0-rds.yml"
+    template_path.parent.mkdir(parents=True)
+    template_body = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n"
+    template_path.write_text(template_body, encoding="utf-8")
+    store = A2AArtifactStore(tmp_path / "artifacts")
+    publisher, queue = _publisher(
+        tmp_path,
+        artifact_store=store,
+        exposure_types=[A2AExposureType.TOOL_TRACE],
+        trusted_workspace_root=str(workspace),
+        a2a_artifacts_by_step_id={
+            "materialize_selected_candidate": [
+                {
+                    "path": "conclusion.template_url",
+                    "content_from_file": "conclusion.template_url",
+                    "when_conclusion_field_equals": {"deployment_confirmed": True},
+                    "media_type": "auto",
+                    "role": "final",
+                    "supersedes_path": "conclusion.template_url",
+                }
+            ]
+        },
+    )
+
+    await publisher.publish(
+        PipelineEvent(
+            type=PipelineEventType.STEP_COMPLETED,
+            step_id="materialize_selected_candidate",
+            timestamp=1717821601.0,
+            data={
+                "conclusion_field": "selected_plan",
+                "conclusion": {
+                    "status": "confirmed",
+                    "deployment_confirmed": True,
+                    "template_url": "templates/0-rds.yml",
+                },
+            },
+        )
+    )
+
+    status_events = [
+        dump(event)["metadata"]["iac_code"]["pipeline"]
+        for event in queue.events
+        if dump(event).get("metadata", {}).get("iac_code", {}).get("pipeline", {}).get("eventType")
+    ]
+    artifact_status = next(event for event in status_events if event["eventType"] == "artifact_created")
+    journal_artifact = next(
+        event for event in publisher.journal.read_all() if event["eventType"] == "artifact_created"
+    )
+    snapshot = publisher.snapshot_store.load()
+    assert snapshot is not None
+    snapshot_artifact = snapshot["display"]["artifacts"][0]
+
+    assert artifact_status["artifact"]["uri"].startswith("iac-code-artifact://")
+    assert artifact_status["artifact"]["sha256"]
+    assert artifact_status["artifact"]["dedupeKey"]
+    assert journal_artifact["artifact"]["dedupeKey"] == artifact_status["artifact"]["dedupeKey"]
+    assert snapshot_artifact["dedupeKey"] == artifact_status["artifact"]["dedupeKey"]
+    for persisted in (artifact_status, journal_artifact, snapshot):
+        assert template_body not in str(persisted)
+        assert "\"content\"" not in str(persisted)
+
+
+@pytest.mark.asyncio
 async def test_publish_artifact_created_omits_tool_metadata_when_tool_trace_disabled(tmp_path: Path) -> None:
     store = A2AArtifactStore(tmp_path / "artifacts")
     publisher, queue = _publisher(tmp_path, artifact_store=store, exposure_types=[])
@@ -1917,6 +1986,9 @@ async def test_publish_candidate_restart_has_stable_coordinates_and_snapshot_con
         parent_rollback=False,
     )
 
+    received = publisher.journal.read_all()[-3]
+    assert received["eventType"] == "interrupt_received"
+    assert received["data"]["userInput"] == "make it cheaper"
     restart = publisher.journal.read_all()[-1]
     assert restart["eventType"] == "candidate_restart_requested"
     assert restart["step"]["runId"] == "step-evaluate_candidates-1"
@@ -2434,6 +2506,23 @@ async def test_publish_pipeline_canceled_envelope_maps_to_canceled_state(tmp_pat
     await publisher.publish(object())
 
     assert dump(queue.events[0])["status"]["state"] == "TASK_STATE_CANCELED"
+
+
+@pytest.mark.asyncio
+async def test_publish_interrupt_received_persists_user_input_for_history_restore(tmp_path: Path) -> None:
+    publisher, _queue = _publisher(tmp_path)
+
+    await publisher.publish_interrupt_received(prompt="change the deployment target")
+
+    received = publisher.journal.read_all()[-1]
+    assert received["eventType"] == "interrupt_received"
+    assert received["data"] == {
+        "messageLength": len("change the deployment target"),
+        "userInput": "change the deployment target",
+    }
+    snapshot = publisher.snapshot_store.load()
+    assert snapshot is not None
+    assert snapshot["control"]["interruptHistory"][0]["userInput"] == "change the deployment target"
 
 
 @pytest.mark.asyncio

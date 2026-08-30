@@ -3,7 +3,8 @@ import {
   isTokenMode,
   requestAuthorizationCode,
   tokenFetch,
-} from "./token_transport.js?v=token-transport-v3";
+} from "./token_transport.js?v=token-transport-v4";
+import { t } from "./i18n.js?v=web-repl-ui-277";
 
 export const WEB_EVENT_TYPES = [
   "session.started",
@@ -1061,7 +1062,7 @@ function openEncryptedEventStream(url, sessionId, afterSequence, onEvent) {
         if (!response.ok) throw new Error(`Request failed with ${response.status}`);
         dispatchEvent({ type: "stream.connected", sequence: 0, sessionId, payload: {} }, { synthetic: true });
         const reader = response.body?.getReader();
-        if (!reader) throw new Error("Event stream has no response body");
+        if (!reader) throw new Error(t("Event stream has no response body."));
         const streamDecoder = new TextDecoder();
         let buffer = "";
         for (;;) {
