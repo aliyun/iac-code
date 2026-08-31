@@ -4720,13 +4720,18 @@ async def test_identity_lookup_failure_keeps_live_permission_pending(monkeypatch
     monkeypatch.setattr(executor, "_publish_status", publish)
 
     await executor._execute(
-        FakeRequestContext(task_id="task-1", context_id="ctx-1"),
+        FakeRequestContext(
+            task_id="task-1",
+            context_id="ctx-1",
+            metadata={"iac_code": {"preferredLanguage": "zh-CN"}},
+        ),
         FakeEventQueue(),
         context_id="ctx-1",
     )
 
     assert len(published) == 1
     assert published[0]["state"] == TaskState.TASK_STATE_INPUT_REQUIRED
+    assert published[0]["text"] == "发生临时错误，请重试。"
     error = published[0]["metadata"]["iac_code"]["permissionIdentityError"]
     assert error == {
         "code": "InternalError",
