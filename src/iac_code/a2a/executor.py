@@ -1262,6 +1262,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     response=permission_response,
                     code=exc.code,
                     retryable=exc.retryable,
+                    language=self._resolve_preferred_language(response_metadata),
                 )
                 return
             except InvalidParamsError:
@@ -2273,6 +2274,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                         response=response,
                         code="legacy_permission_identity",
                         retryable=False,
+                        language=preferred_language,
                         session_id=context_record.session_id,
                     )
                     return True
@@ -2290,6 +2292,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                         response=response,
                         code=exc.reason,
                         retryable=exc.retryable,
+                        language=preferred_language,
                         session_id=context_record.session_id,
                     )
                     return True
@@ -2303,6 +2306,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                         response=response,
                         code="cloud_execution_identity_changed",
                         retryable=False,
+                        language=preferred_language,
                         session_id=context_record.session_id,
                     )
                     return True
@@ -2648,6 +2652,7 @@ class IacCodeA2AExecutor(AgentExecutor):
         response: PermissionResponse,
         code: str,
         retryable: bool,
+        language: str | None = None,
         session_id: str | None = None,
     ) -> None:
         await self._publish_status(
@@ -2655,7 +2660,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             task_id=response.task_id,
             context_id=response.context_id,
             state=TaskState.TASK_STATE_INPUT_REQUIRED,
-            text=_("A temporary error occurred. Please retry."),
+            text=translate_message("A temporary error occurred. Please retry.", language=language or "en"),
             metadata={
                 "iac_code": {
                     "permissionIdentityError": {
