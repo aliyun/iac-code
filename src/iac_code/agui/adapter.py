@@ -99,6 +99,7 @@ class RunTicket:
     request_digest: str
     is_resume: bool
     preferred_language: str
+    is_guidance: bool = False
     local_task: asyncio.Task[Any] | None = None
     completed: bool = False
     paused: bool = False
@@ -161,6 +162,7 @@ class AguiA2AAdapter:
         await self.start()
         async with self._lock:
             props = parse_forwarded_props(run_input.forwarded_props).iac_code
+            is_guidance = props.active_guidance
             cwd = resolve_cwd(props.cwd)
             validate_tools(run_input)
             try:
@@ -174,7 +176,7 @@ class AguiA2AAdapter:
             created = binding is None
             previous_execution: tuple[str, str | None, str, int, set[str], set[str], bool, bool] | None = None
             if binding is None:
-                if run_input.resume is not None:
+                if run_input.resume is not None or is_guidance:
                     raise AdmissionError("EXECUTION_LOST", "The execution to resume is no longer available.")
                 binding = ThreadBinding(
                     thread_id=run_input.thread_id,
@@ -189,14 +191,19 @@ class AguiA2AAdapter:
             if previous_digest is not None:
                 code = "DUPLICATE_RUN_ID" if previous_digest == request_digest else "RUN_ID_CONFLICT"
                 raise AdmissionError(code, "The AG-UI run id has already been used.")
-            if binding.active_run_id is not None:
+            if binding.active_run_id is not None and not is_guidance:
                 raise AdmissionError("THREAD_BUSY", "The AG-UI thread already has an active run.")
             if binding.cwd != cwd or binding.user_id != props.user_id:
                 raise AdmissionError(
                     "THREAD_BINDING_CONFLICT",
                     "The AG-UI thread is already bound to another workspace or caller.",
                 )
-            if run_input.resume is not None:
+            if is_guidance:
+                if run_input.resume is not None or props.run_mode != "pipeline" or binding.task_id is None:
+                    raise AdmissionError("EXECUTION_LOST", "The execution to resume is no longer available.")
+                if binding.pending:
+                    raise AdmissionError("RESUME_REQUIRED", "The AG-UI thread is waiting for interrupt responses.")
+            elif run_input.resume is not None:
                 if props.ros_invocation_id != binding.ros_invocation_id:
                     raise AdmissionError("EXECUTION_LOST", "The resume request does not match the interrupted run.")
             elif binding.pending:
@@ -214,13 +221,15 @@ class AguiA2AAdapter:
                 )
                 self._rotate_execution(binding, ros_invocation_id=props.ros_invocation_id)
 
-            binding.active_run_id = run_input.run_id
+            if not is_guidance:
+                binding.active_run_id = run_input.run_id
             binding.run_digests[run_input.run_id] = request_digest
             try:
                 self._persist_thread(binding)
             except AguiStateStoreError as exc:
                 binding.run_digests.pop(run_input.run_id, None)
-                binding.active_run_id = None
+                if not is_guidance:
+                    binding.active_run_id = None
                 if created:
                     self._threads.pop(binding.thread_id, None)
                     self._executions.pop(binding.execution_id, None)
@@ -259,6 +268,7 @@ class AguiA2AAdapter:
                 binding=binding,
                 request_digest=request_digest,
                 is_resume=run_input.resume is not None,
+                is_guidance=is_guidance,
                 preferred_language=normalize_agui_language(
                     props.preferred_language,
                     fallback=normalize_agui_language(preferred_language),
@@ -288,11 +298,21 @@ class AguiA2AAdapter:
             input=None,
             timestamp=timestamp_ms(),
         )
-        for reopened in mapper.reopen_pipeline_steps():
-            yield reopened
         ticket.local_task = asyncio.current_task()
         try:
             props = parse_forwarded_props(run_input.forwarded_props)
+            if ticket.is_guidance:
+                await self._consume_guidance(ticket, props.iac_code)
+                ticket.completed = True
+                yield RunFinishedEvent(
+                    thread_id=run_input.thread_id,
+                    run_id=run_input.run_id,
+                    outcome=RunFinishedSuccessOutcome(),
+                    timestamp=timestamp_ms(),
+                )
+                return
+            for reopened in mapper.reopen_pipeline_steps():
+                yield reopened
             session_emitted = False
             terminal_state = ""
             resolved_tools: list[tuple[str, str]] = []
@@ -470,7 +490,8 @@ class AguiA2AAdapter:
             raise
         except Exception:
             logger.exception("AG-UI A2A adapter run failed", extra={"run_id": run_input.run_id})
-            await self._cancel_unrecoverable(ticket)
+            if not ticket.is_guidance:
+                await self._cancel_unrecoverable(ticket)
             ticket.completed = True
             yield _run_error(
                 run_input,
@@ -480,10 +501,54 @@ class AguiA2AAdapter:
                 usage=aggregate_usage(mapper.usage),
             )
         finally:
-            if ticket.completed and not ticket.binding.pending:
+            if ticket.completed and not ticket.is_guidance and not ticket.binding.pending:
                 self._mark_execution_terminal(ticket.binding)
                 self._persist_thread_best_effort(ticket.binding)
             await self._release_run(ticket)
+
+    async def _consume_guidance(
+        self,
+        ticket: RunTicket,
+        props: IacCodeForwardedProps,
+    ) -> None:
+        binding = ticket.binding
+        if binding.task_id is None:
+            raise AguiError("EXECUTION_LOST", "The A2A task to resume is unavailable.")
+        user_message = latest_user_message(ticket.run_input)
+        if user_message is None:
+            raise AguiError("INVALID_INPUT", "A new run requires a user message.")
+        message_id, parts = user_message
+        stream = self.client.stream_message_parts(
+            self.a2a_url,
+            parts,
+            cwd=binding.cwd,
+            context_id=binding.context_id,
+            task_id=binding.task_id,
+            message_id=message_id,
+            **_a2a_request_options(props, preferred_language=ticket.preferred_language),
+        )
+        try:
+            async for event in stream:
+                self._validate_guidance_event(binding, event)
+        finally:
+            close_stream = getattr(stream, "aclose", None)
+            if close_stream is not None:
+                await close_stream()
+
+    @staticmethod
+    def _validate_guidance_event(binding: ThreadBinding, event: Any) -> None:
+        _raise_for_a2a_error(event)
+        task_id = a2a_task_id(event)
+        if task_id and task_id != binding.task_id:
+            raise AguiError("A2A_PROTOCOL_ERROR", "The A2A task identity changed unexpectedly.")
+        context_id = a2a_context_id(event)
+        if context_id and context_id != binding.context_id:
+            raise AguiError("A2A_PROTOCOL_ERROR", "The A2A context identity changed unexpectedly.")
+        state = a2a_state(event)
+        if state in _FAILED_STATES:
+            raise AguiError("A2A_EXECUTION_FAILED", "The A2A execution failed.")
+        if state == "canceled":
+            raise AguiError("CANCELLED", "The execution was cancelled.")
 
     def _new_a2a_stream(self, ticket: RunTicket, props: IacCodeForwardedProps) -> Any:
         user_message = latest_user_message(ticket.run_input)
@@ -1038,6 +1103,10 @@ class AguiA2AAdapter:
 
     async def disconnect(self, ticket: RunTicket) -> None:
         if ticket.completed or ticket.paused or ticket.binding.pending:
+            return
+        if ticket.is_guidance:
+            ticket.completed = True
+            await self._release_run(ticket)
             return
         await self._cancel_unrecoverable(ticket)
         ticket.completed = True
