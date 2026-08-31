@@ -21,7 +21,7 @@ from iac_code.services.permission_wait import (
     PermissionWaitPolicy,
     build_permission_checkpoint,
     canonicalize_permission_continuation_frame,
-    permission_execution_identity,
+    resolve_permission_execution_identity,
 )
 from iac_code.services.permissions.audit import (
     build_display_tool_input,
@@ -29,6 +29,7 @@ from iac_code.services.permissions.audit import (
     emit_permission_boundary_audit,
     sanitize_prompt_text,
 )
+from iac_code.services.providers.aliyun_identity import AliyunCallerIdentityUnavailableError
 from iac_code.types.stream_events import PermissionRequestEvent
 
 PERMISSION_SCHEMA_VERSION = 1
@@ -36,6 +37,16 @@ PERMISSION_DECISIONS = frozenset({"allow_once", "deny"})
 PERMISSION_QUERY_PREFIX = "IAC_CODE_PERMISSION:"
 _SAFE_SUMMARY_MAX_CHARS = 1200
 _DISPLAY_FIELD_MAX_CHARS = 500
+
+
+class PermissionIdentityValidationError(InvalidParamsError):
+    """A permission decision could not safely use the current cloud identity."""
+
+    def __init__(self, code: str, *, retryable: bool) -> None:
+        super().__init__(f"permission_resume_invalid: {code}")
+        self.code = code
+        self.retryable = retryable
+
 
 _ROS_TEMPLATE_API_ACTIONS = {
     "ros_validate_template": "ValidateTemplate",
@@ -878,8 +889,12 @@ async def backup_permission_wait_checkpoint(
         )
     except ValueError as exc:
         raise SessionBackupBlocked("Permission checkpoint changed during critical backup.") from exc
-    if getattr(result, "enabled", False) and not getattr(result, "shared_committed", False):
-        raise SessionBackupBlocked("Critical permission backup did not reach the shared target.")
+    if (
+        getattr(result, "enabled", False)
+        and not getattr(result, "shared_committed", False)
+        and not getattr(result, "staged_committed", False)
+    ):
+        raise SessionBackupBlocked("Critical permission backup did not reach a durable target.")
     return result
 
 
@@ -932,8 +947,17 @@ class PermissionInputRegistry:
             frame = canonicalize_permission_continuation_frame(source_frame, audit_context=audit_context)
         except ValueError as exc:
             raise RuntimeError(f"permission_resume_invalid: {exc}") from exc
-        principal_ref = audit_context.get("principal_ref")
-        region = audit_context.get("region")
+        permission_audit = getattr(pending.request.permission_result, "audit", None)
+        execution_identity = await resolve_permission_execution_identity(
+            tool_name=pending.request.tool_name,
+            tool_input=pending.request.tool_input,
+            permission_audit=permission_audit,
+        )
+        audit_context.update(
+            principal_ref=execution_identity.principal_ref,
+            principal_kind=execution_identity.principal_kind,
+            region=execution_identity.region,
+        )
         record = build_permission_checkpoint(
             session_id=session_id,
             task_id=pending.task_id,
@@ -945,8 +969,9 @@ class PermissionInputRegistry:
             permission_class="pipeline" if permission_class == "pipeline" else "normal",
             continuation_frame=frame,
             policy=coordinator.policy,
-            principal_ref=principal_ref if isinstance(principal_ref, str) else None,
-            region=region if isinstance(region, str) else None,
+            principal_ref=execution_identity.principal_ref,
+            principal_kind=execution_identity.principal_kind,
+            region=execution_identity.region,
             pipeline_coordinates=pipeline_coordinates,
         )
         previous_boundary_id = frame.get("previousBoundaryId")
@@ -1112,7 +1137,8 @@ class PermissionInputRegistry:
 
         coordinator = self._permission_wait_coordinator
         if coordinator is not None and pending.boundary_id is not None:
-            self._validate_live_execution_identity(pending)
+            if response.decision == "allow_once":
+                await self._validate_live_execution_identity(pending)
 
             def audit_new_claim(value: str) -> bool:
                 return emit_permission_boundary_audit(
@@ -1160,7 +1186,7 @@ class PermissionInputRegistry:
             return approved
 
     @staticmethod
-    def _validate_live_execution_identity(pending: PendingPermission) -> None:
+    async def _validate_live_execution_identity(pending: PendingPermission) -> None:
         store = pending.checkpoint_store
         boundary_id = pending.boundary_id
         if store is None or boundary_id is None:
@@ -1169,13 +1195,22 @@ class PermissionInputRegistry:
         if record is None:
             raise InvalidParamsError("permission_resume_invalid: permission checkpoint is unavailable.")
         permission_audit = getattr(pending.request.permission_result, "audit", None)
-        principal_ref, region = permission_execution_identity(
-            tool_name=pending.request.tool_name,
-            tool_input=pending.request.tool_input,
-            permission_audit=permission_audit,
-        )
-        if principal_ref != record.get("principalRef") or region != record.get("region"):
-            raise InvalidParamsError("permission_resume_invalid: cloud execution identity changed.")
+        if record.get("identitySchemaVersion") != 1:
+            raise PermissionIdentityValidationError("legacy_permission_identity", retryable=False)
+        try:
+            identity = await resolve_permission_execution_identity(
+                tool_name=pending.request.tool_name,
+                tool_input=pending.request.tool_input,
+                permission_audit=permission_audit,
+            )
+        except AliyunCallerIdentityUnavailableError as exc:
+            raise PermissionIdentityValidationError(exc.reason, retryable=exc.retryable) from exc
+        if (
+            identity.principal_ref != record.get("principalRef")
+            or identity.principal_kind != record.get("principalKind")
+            or identity.region != record.get("region")
+        ):
+            raise PermissionIdentityValidationError("cloud_execution_identity_changed", retryable=False)
 
     async def _backup_claim_before_delivery(self, pending: PendingPermission, record: dict[str, Any]) -> None:
         if pending.before_claim_backup is not None:
@@ -1413,6 +1448,7 @@ def _permission_input_id() -> str:
 __all__ = [
     "PERMISSION_QUERY_PREFIX",
     "PendingPermission",
+    "PermissionIdentityValidationError",
     "PermissionInputRegistry",
     "PermissionResolutionOwner",
     "PermissionResponse",

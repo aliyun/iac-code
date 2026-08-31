@@ -9,6 +9,7 @@ from google.protobuf.json_format import MessageToDict
 
 from iac_code.i18n import SUPPORTED_LANGUAGES, use_request_language
 from iac_code.providers.request_policy import ProviderRequestPolicy
+from iac_code.services.permission_wait import permission_execution_identity_cache_scope
 from iac_code.services.providers.aliyun import AliyunCredential, use_aliyun_credential
 from iac_code.services.telemetry import use_session_id, use_telemetry_channel, use_user_id
 
@@ -52,6 +53,7 @@ def a2a_request_context(
     telemetry_channel: str | None = None,
 ) -> Iterator[None]:
     with contextlib.ExitStack() as stack:
+        stack.enter_context(permission_execution_identity_cache_scope())
         if telemetry_channel:
             stack.enter_context(use_telemetry_channel(telemetry_channel))
         if preferred_language:

@@ -27,6 +27,7 @@ from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher, _unified_inp
 from iac_code.a2a.runtime_overrides import a2a_request_context
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.services.permission_wait import (
+    PermissionExecutionIdentity,
     PermissionWaitCheckpointStore,
     PermissionWaitCoordinator,
     PermissionWaitPolicy,
@@ -37,6 +38,14 @@ from iac_code.types.permissions import PermissionAuditMetadata, PermissionResult
 from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent
 
 from .fakes import FakeEventQueue, pending_future
+
+
+@pytest.fixture(autouse=True)
+def _stable_permission_identity(monkeypatch):
+    async def resolve(**_kwargs):
+        return PermissionExecutionIdentity(None, None, None)
+
+    monkeypatch.setattr("iac_code.a2a.input_required.resolve_permission_execution_identity", resolve)
 
 
 def _permission_message(

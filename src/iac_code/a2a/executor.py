@@ -31,6 +31,7 @@ from iac_code.a2a.events import (
 )
 from iac_code.a2a.exposure import normalize_a2a_exposure_types
 from iac_code.a2a.input_required import (
+    PermissionIdentityValidationError,
     PermissionInputRegistry,
     PermissionResponse,
     backup_permission_wait_checkpoint,
@@ -110,11 +111,12 @@ from iac_code.services.permission_wait import (
     PermissionWaitCheckpointStore,
     RecoveredPermissionAuditBoundary,
     canonical_digest,
-    permission_execution_identity,
     recover_permission_audit_boundary,
+    resolve_permission_execution_identity,
 )
 from iac_code.services.permissions.audit import emit_permission_boundary_audit
 from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredential, AliyunCredentials
+from iac_code.services.providers.aliyun_identity import AliyunCallerIdentityUnavailableError
 from iac_code.services.session_backup import (
     BackupReason,
     SessionBackupBlocked,
@@ -1245,10 +1247,23 @@ class IacCodeA2AExecutor(AgentExecutor):
         task_id = requested_task_id or "task-" + uuid.uuid4().hex[:12]
         permission_response = parse_permission_response(getattr(context, "message", None))
         if permission_response is not None:
+            response_metadata = getattr(context, "metadata", None) or getattr(
+                getattr(context, "message", None), "metadata", None
+            )
+            response_credential = self._resolve_aliyun_credential(response_metadata)
             pending = None
             try:
                 pending = await self._permission_input_registry.pending_for_response(permission_response)
-                approved = await self._permission_input_registry.answer(permission_response)
+                with a2a_request_context(aliyun_credential=response_credential):
+                    approved = await self._permission_input_registry.answer(permission_response)
+            except PermissionIdentityValidationError as exc:
+                await self._publish_permission_identity_error(
+                    event_queue,
+                    response=permission_response,
+                    code=exc.code,
+                    retryable=exc.retryable,
+                )
+                return
             except InvalidParamsError:
                 if pending is not None:
                     await self._permission_input_registry.complete(pending)
@@ -2251,15 +2266,46 @@ class IacCodeA2AExecutor(AgentExecutor):
             except (OSError, RuntimeError, TypeError, ValueError) as exc:
                 raise InvalidParamsError(f"permission_resume_invalid: {exc}") from exc
 
-            permission_audit = getattr(audit_event.permission_result, "audit", None)
-            with a2a_request_context(aliyun_credential=aliyun_credential):
-                principal_ref, region = permission_execution_identity(
-                    tool_name=audit_event.tool_name,
-                    tool_input=audit_event.tool_input,
-                    permission_audit=permission_audit,
-                )
-            if principal_ref != record.get("principalRef") or region != record.get("region"):
-                raise InvalidParamsError("permission_resume_invalid: cloud execution identity changed.")
+            if expected_value == "allow_once":
+                if record.get("identitySchemaVersion") != 1:
+                    await self._publish_permission_identity_error(
+                        event_queue,
+                        response=response,
+                        code="legacy_permission_identity",
+                        retryable=False,
+                        session_id=context_record.session_id,
+                    )
+                    return True
+                permission_audit = getattr(audit_event.permission_result, "audit", None)
+                try:
+                    with a2a_request_context(aliyun_credential=aliyun_credential):
+                        identity = await resolve_permission_execution_identity(
+                            tool_name=audit_event.tool_name,
+                            tool_input=audit_event.tool_input,
+                            permission_audit=permission_audit,
+                        )
+                except AliyunCallerIdentityUnavailableError as exc:
+                    await self._publish_permission_identity_error(
+                        event_queue,
+                        response=response,
+                        code=exc.reason,
+                        retryable=exc.retryable,
+                        session_id=context_record.session_id,
+                    )
+                    return True
+                if (
+                    identity.principal_ref != record.get("principalRef")
+                    or identity.principal_kind != record.get("principalKind")
+                    or identity.region != record.get("region")
+                ):
+                    await self._publish_permission_identity_error(
+                        event_queue,
+                        response=response,
+                        code="cloud_execution_identity_changed",
+                        retryable=False,
+                        session_id=context_record.session_id,
+                    )
+                    return True
 
         record = store.reconcile_deadline(
             boundary_id,
@@ -2589,6 +2635,34 @@ class IacCodeA2AExecutor(AgentExecutor):
                         "decision": decision,
                         "recovered": True,
                         "duplicate": duplicate,
+                    }
+                }
+            },
+            session_id=session_id,
+        )
+
+    async def _publish_permission_identity_error(
+        self,
+        event_queue: EventQueue,
+        *,
+        response: PermissionResponse,
+        code: str,
+        retryable: bool,
+        session_id: str | None = None,
+    ) -> None:
+        await self._publish_status(
+            event_queue,
+            task_id=response.task_id,
+            context_id=response.context_id,
+            state=TaskState.TASK_STATE_INPUT_REQUIRED,
+            text=_("A temporary error occurred. Please retry."),
+            metadata={
+                "iac_code": {
+                    "permissionIdentityError": {
+                        "code": code,
+                        "retryable": retryable,
+                        "inputId": response.input_id,
+                        "toolUseId": response.tool_use_id,
                     }
                 }
             },
@@ -3354,6 +3428,8 @@ def _is_normal_handoff(handoff: dict[str, Any]) -> bool:
 
 
 def _is_retryable_executor_error(exc: Exception) -> bool:
+    if isinstance(exc, AliyunCallerIdentityUnavailableError):
+        return exc.retryable
     return isinstance(
         exc,
         (
