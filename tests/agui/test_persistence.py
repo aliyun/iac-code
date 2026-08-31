@@ -197,6 +197,80 @@ async def test_disconnect_before_interrupt_is_durable_cancels_the_a2a_task(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_pipeline_guidance_preserves_active_execution_across_adapter_restart(
+    tmp_path,
+) -> None:
+    state_dir = tmp_path / "state"
+    fake = FakeA2AClient()
+    adapter = AguiA2AAdapter(
+        a2a_url="http://a2a/",
+        client=fake,
+        state_dir=state_dir,
+    )
+    initial_payload = _payload(tmp_path)
+    initial_payload["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+    initial_ticket = await adapter.admit(parse_run_input(initial_payload), canonical_digest(initial_payload))
+    initial_ticket.binding.task_id = "task-1"
+    initial_ticket.binding.iac_code_session_id = "session-1"
+    adapter._persist_thread(initial_ticket.binding)
+
+    guidance_payload = _payload(tmp_path, run_id="run-guidance-1")
+    guidance_props = guidance_payload["forwardedProps"]["iacCode"]
+    guidance_props.update(
+        {
+            "rosInvocationId": "invocation-guidance-1",
+            "runMode": "pipeline",
+            "activeGuidance": True,
+        }
+    )
+    guidance_ticket = await adapter.admit(parse_run_input(guidance_payload), canonical_digest(guidance_payload))
+    guidance_events = [event async for event in adapter.stream(guidance_ticket)]
+
+    assert [event.type for event in guidance_events] == [
+        EventType.RUN_STARTED,
+        EventType.RUN_FINISHED,
+    ]
+    assert guidance_ticket.is_guidance is True
+    assert initial_ticket.binding.active_run_id == "run-1"
+    assert initial_ticket.binding.task_id == "task-1"
+    assert fake.stream_options[-1]["task_id"] == "task-1"
+    assert fake.stream_options[-1]["iac_code_metadata"]["rosInvocationId"] == ("invocation-guidance-1")
+    assert fake.sent_parts == [{"text": "hello"}]
+    assert fake.cancelled == []
+    await adapter.aclose()
+
+    restarted = AguiA2AAdapter(
+        a2a_url="http://a2a/",
+        client=fake,
+        state_dir=state_dir,
+    )
+    guidance_after_restart = _payload(tmp_path, run_id="run-guidance-2")
+    restarted_props = guidance_after_restart["forwardedProps"]["iacCode"]
+    restarted_props.update(
+        {
+            "rosInvocationId": "invocation-guidance-2",
+            "runMode": "pipeline",
+            "activeGuidance": True,
+        }
+    )
+    restarted_ticket = await restarted.admit(
+        parse_run_input(guidance_after_restart),
+        canonical_digest(guidance_after_restart),
+    )
+
+    assert restarted_ticket.binding.active_run_id is None
+    assert restarted_ticket.binding.task_id == "task-1"
+    restarted_events = [event async for event in restarted.stream(restarted_ticket)]
+    assert [event.type for event in restarted_events] == [
+        EventType.RUN_STARTED,
+        EventType.RUN_FINISHED,
+    ]
+    assert restarted_ticket.binding.task_id == "task-1"
+    assert fake.cancelled == []
+    await restarted.aclose()
+
+
+@pytest.mark.asyncio
 async def test_restart_restores_interrupt_resume_and_cancel_identity(tmp_path) -> None:
     state_dir = tmp_path / "state"
     fake = FakeA2AClient(interrupt=True)

@@ -57,6 +57,7 @@ class IacCodeForwardedProps(StrictModel):
     run_mode: Literal["normal", "pipeline"] | None = Field(default=None, alias="runMode")
     pipeline_name: str | None = Field(default=None, alias="pipelineName")
     cleanup_only: bool = Field(default=False, alias="cleanupOnly")
+    active_guidance: bool = Field(default=False, alias="activeGuidance")
     alibaba_cloud: AlibabaCloudOptions | None = Field(default=None, alias="alibabaCloud", repr=False)
 
 
