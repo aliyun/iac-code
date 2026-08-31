@@ -163,5 +163,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras
 
-      - name: Run tests
-        run: uv run pytest tests/ -v --no-header -n auto
+      - name: Run A2A app lifecycle tests serially
+        # These async lifecycle tests can terminate an xdist worker without a
+        # Python traceback on Windows. Keep the coverage, but run the module in
+        # the pytest coordinator process so worker loss cannot mask the result.
+        run: uv run pytest tests/a2a/test_app.py -v --no-header
+
+      - name: Run remaining tests
+        run: uv run pytest tests/ -v --no-header -n auto --ignore=tests/a2a/test_app.py
