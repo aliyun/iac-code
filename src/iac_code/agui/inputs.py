@@ -8,12 +8,14 @@ import hashlib
 import json
 import os
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
 from ag_ui.core import RunAgentInput
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from iac_code.a2a.artifacts import UnsafeArtifactNameError, safe_artifact_filename
 from iac_code.agui.errors import AguiError
 from iac_code.utils.image.resizer import maybe_resize_and_downsample
 
@@ -21,6 +23,7 @@ MAX_REQUEST_BYTES = 12 * 1024 * 1024
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_TOTAL_IMAGE_BYTES = 10 * 1024 * 1024
 SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+MAX_IMAGE_FILENAME_BYTES = 255
 
 
 class StrictModel(BaseModel):
@@ -173,7 +176,7 @@ def latest_user_message(run_input: RunAgentInput) -> tuple[str, list[dict[str, A
             parts.append(
                 {
                     "data": {
-                        "filename": f"agui-image-{len(parts) + 1}",
+                        "filename": _image_filename(part, fallback=f"agui-image-{len(parts) + 1}"),
                         "bytes": base64.b64encode(resized.data).decode("ascii"),
                     },
                     "mediaType": resized.media_type,
@@ -181,6 +184,22 @@ def latest_user_message(run_input: RunAgentInput) -> tuple[str, list[dict[str, A
             )
         return message_id, parts
     return None
+
+
+def _image_filename(part: Any, *, fallback: str) -> str:
+    metadata = getattr(part, "metadata", None)
+    if not isinstance(metadata, Mapping):
+        return fallback
+    filename = metadata.get("filename")
+    if not isinstance(filename, str):
+        return fallback
+    try:
+        if len(filename.encode("utf-8")) > MAX_IMAGE_FILENAME_BYTES:
+            return fallback
+        safe_filename = safe_artifact_filename(filename)
+    except (UnicodeError, UnsafeArtifactNameError):
+        return fallback
+    return filename if safe_filename == filename else fallback
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
