@@ -134,6 +134,8 @@ class IacCodeAttr:
 
     CHANNEL = "iac_code.channel"
     MODE = "iac_code.mode"
+    PROVIDER_ADAPTER = "iac_code.provider_adapter"
+    OFFICIAL_ENDPOINT = "iac_code.official_endpoint"
 
 
 class PipelineAttr:

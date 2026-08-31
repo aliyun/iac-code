@@ -153,6 +153,35 @@ PIPELINE_USER_VISIBLE_MSGIDS = {
     'Displayed details for "{candidate_name}".',
 }
 
+QWEN_PROVIDER_USER_VISIBLE_MSGIDS = {
+    "Provider request lease cannot be consumed from state {state}.",
+    "Provider request lease was already released.",
+    "Provider request lease belongs to a different manager.",
+    "Explicit request lease system prompt does not match the streamed prompt.",
+    "Explicit request lease system prompt does not match the completion prompt.",
+    "Qwen replay ended before message completion.",
+    "Qwen tool arguments must be a non-empty JSON object.",
+    "Qwen tool arguments are malformed JSON.",
+    "Qwen tool arguments must decode to an object.",
+    "Qwen native tool call is missing its ID or name.",
+    "Invalid Qwen tool-call index.",
+    "Conflicting Qwen tool-call identity.",
+    "Conflicting Qwen tool-call name.",
+    "Qwen tool-call arguments must be a string.",
+    "Duplicate Qwen tool-call identity.",
+    "Ambiguous anonymous Qwen tool-call identity.",
+    "Ambiguous anonymous Qwen tool-call fragment.",
+    "Invalid Qwen tool-call JSON structure.",
+    "Qwen response ended with tool_calls but no complete tool call.",
+    "Qwen tool call is anonymous or nameless.",
+    "Duplicate Qwen tool-call ID.",
+    "Qwen tool-call arguments ended before JSON was complete.",
+    "Qwen thinking-tag candidate exceeded the safety limit.",
+    "Qwen emitted an unsafe or conflicting thinking-tag block.",
+    "Qwen emitted a stray thinking closing tag.",
+    "Qwen emitted a closing thinking tag without a valid native tool call.",
+}
+
 MCP_HOST_ENHANCE_USER_VISIBLE_MSGIDS = {
     "Manage MCP servers",
     "[enable|disable|reconnect [server-name] [--scope scope] [--source-path path]]",
@@ -1144,6 +1173,31 @@ def test_a2a_permission_display_translations_are_complete():
             msgstr = translations.get(msgid, "").strip()
             if not msgstr:
                 errors.append(f"{lang_dir.name}: missing translation for {msgid!r}")
+            elif _format_fields(msgstr) != _format_fields(msgid):
+                errors.append(
+                    f"{lang_dir.name}: format fields changed for {msgid!r}: "
+                    f"expected {sorted(_format_fields(msgid))}, got {sorted(_format_fields(msgstr))}"
+                )
+
+    assert not errors, "\n".join(errors)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
+def test_qwen_provider_user_visible_translations_are_complete():
+    """Qwen protocol failures can reach ErrorEvent and must be localized everywhere."""
+    pot_msgids = _get_all_msgids_from_pot(POT_FILE)
+    missing_from_pot = sorted(QWEN_PROVIDER_USER_VISIBLE_MSGIDS - pot_msgids)
+    assert not missing_from_pot, "Qwen Provider msgids missing from messages.pot: {}".format(missing_from_pot)
+
+    errors = []
+    for lang_dir in _discover_language_dirs():
+        translations = _get_all_translations_from_po(lang_dir / "LC_MESSAGES" / "messages.po")
+        for msgid in sorted(QWEN_PROVIDER_USER_VISIBLE_MSGIDS):
+            msgstr = translations.get(msgid, "").strip()
+            if not msgstr:
+                errors.append(f"{lang_dir.name}: missing translation for {msgid!r}")
+            elif msgstr == msgid:
+                errors.append(f"{lang_dir.name}: untranslated placeholder for {msgid!r}")
             elif _format_fields(msgstr) != _format_fields(msgid):
                 errors.append(
                     f"{lang_dir.name}: format fields changed for {msgid!r}: "

@@ -35,6 +35,7 @@ from iac_code.types.stream_events import (
     ToolUseStartEvent,
     Usage,
 )
+from iac_code.types.usage_attribution import UsageAttribution
 
 # ---------------------------------------------------------------------------
 # TestTextWriter
@@ -229,6 +230,35 @@ class TestJsonWriter:
 
 
 class TestStreamJsonWriter:
+    def test_terminal_usage_attribution_is_internal_for_direct_and_subpipeline_events(self) -> None:
+        attribution = UsageAttribution(
+            logical_provider_key="openai_compatible",
+            wire_provider_key="dashscope_token_plan",
+            telemetry_provider_name="dashscope",
+            adapter_name="qwen",
+            requested_model="qwen3.8-max",
+            actual_model="qwen3.7-plus",
+        )
+        terminal = MessageEndEvent(
+            stop_reason="end_turn",
+            usage=Usage(input_tokens=1, output_tokens=2),
+            usage_attribution=attribution,
+        )
+        stream = io.StringIO()
+        writer = StreamJsonWriter(stream)
+        writer.handle(terminal)
+        writer.handle(
+            SubPipelineStreamEvent(
+                sub_pipeline_id="sub-1",
+                candidate_index=0,
+                inner=terminal,
+            )
+        )
+        direct, nested = [json.loads(line) for line in stream.getvalue().splitlines()]
+        assert "usage_attribution" not in direct
+        assert "usage_attribution" not in nested["inner"]
+        assert "qwen3.7-plus" not in stream.getvalue()
+
     def test_text_delta_emitted(self) -> None:
         stream = io.StringIO()
         writer = StreamJsonWriter(stream)
@@ -668,11 +698,21 @@ class TestStreamJsonWriter:
     def test_error_event_preserves_error_id(self) -> None:
         stream = io.StringIO()
         writer = StreamJsonWriter(stream)
-        writer.handle(ErrorEvent(error="boom", is_retryable=False, error_id="err-abc123"))
+        writer.handle(
+            ErrorEvent(
+                error="boom",
+                is_retryable=False,
+                error_id="err-abc123",
+                i18n_message_id="internal message id",
+                i18n_message_args={"state": "internal argument"},
+            )
+        )
 
         data = json.loads(stream.getvalue())
         assert data["type"] == "error"
         assert data["error_id"] == "err-abc123"
+        assert "i18n_message_id" not in data
+        assert "i18n_message_args" not in data
 
     def test_permission_request_omits_internal_audit_context(self) -> None:
         stream = io.StringIO()

@@ -76,6 +76,7 @@ from iac_code.types.stream_events import (
     ToolUseStartEvent,
     Usage,
 )
+from iac_code.types.usage_attribution import UsageAttribution
 from iac_code.utils.public_paths import build_public_path_roots
 
 
@@ -371,7 +372,11 @@ class AgentLoop:
         self._memory_recall_generation = 0
         self._memory_recall_active_turns = 0
         self._last_provider_request_snapshot: dict[str, Any] | None = None
+        self._last_effective_system_prompt = system_prompt
         self._system_prompt_refresher = system_prompt_refresher
+        self._active_streaming_runs = 0
+        self._provider_requests_in_flight = 0
+        self._pending_provider_context_sync = False
 
         model_name = ""
         if hasattr(provider_manager, "get_model_name"):
@@ -463,17 +468,36 @@ class AgentLoop:
     def set_provider(self, provider_manager: Any, system_prompt: str | None = None) -> None:
         """Swap the provider manager in place, preserving conversation history.
 
-        Updates the tokenizer/context-window config when the model name changes.
-        Optionally refreshes the system prompt — useful when memory or skill
-        listing has changed since the loop was constructed.
+        Idle loops update context accounting immediately.  An active turn keeps
+        the model, effective prompt, and tools bound by its existing request
+        lease; the new provider is synchronized at the next safe boundary.
         """
         self._provider_manager = provider_manager
-        new_model = provider_manager.get_model_name() if hasattr(provider_manager, "get_model_name") else ""
-        self.context_manager.set_model(new_model)
         if system_prompt is not None:
             self.system_prompt = system_prompt
-            self.context_manager.set_system_prompt(system_prompt)
-        self._sync_tool_definitions(system_prompt=self.system_prompt if system_prompt is not None else None)
+        if self._active_streaming_runs or self._provider_requests_in_flight:
+            self._pending_provider_context_sync = True
+            return
+        self._sync_current_provider_context()
+
+    def _sync_current_provider_context(self) -> None:
+        """Synchronize idle ContextManager accounting with the selected provider."""
+        get_model_name = getattr(self._provider_manager, "get_model_name", None)
+        model_name = get_model_name() if callable(get_model_name) else None
+        if isinstance(model_name, str) and model_name:
+            self.context_manager.set_model(model_name)
+        self.context_manager.set_system_prompt(self.system_prompt)
+        self._sync_tool_definitions(system_prompt=self.system_prompt)
+        self._last_effective_system_prompt = self.system_prompt
+        self._pending_provider_context_sync = False
+
+    def _sync_pending_provider_context_if_idle(self) -> None:
+        if (
+            self._pending_provider_context_sync
+            and self._active_streaming_runs == 0
+            and self._provider_requests_in_flight == 0
+        ):
+            self._sync_current_provider_context()
 
     def set_auto_trigger_skills(self, skill_commands: list[Any] | None) -> None:
         """Refresh skills considered for automatic trigger injection."""
@@ -977,6 +1001,7 @@ class AgentLoop:
             memory_prefetch = None
             turn_cancelled = False
             self._memory_recall_active_turns += 1
+            self._active_streaming_runs += 1
             try:
                 # Refresh the git branch once per turn — branch may change
                 # between turns (user runs git checkout via Bash tool), but
@@ -1009,7 +1034,7 @@ class AgentLoop:
                             final_text_chunks.append(event.text)
                         if isinstance(event, MessageEndEvent):
                             final_stop_reason = event.stop_reason
-                            self._record_session_usage(event.usage)
+                            self._record_session_usage(event.usage, event.usage_attribution)
                         yield event
                 except asyncio.CancelledError:
                     turn_cancelled = True
@@ -1023,7 +1048,9 @@ class AgentLoop:
                     # Recall prefetches are turn-scoped: ready results are consumed only at in-turn poll points.
                     self._discard_memory_prefetch_for_turn(memory_prefetch)
                 self._memory_recall_active_turns = max(0, self._memory_recall_active_turns - 1)
-                self.context_manager.set_system_prompt(self.system_prompt)
+                self.context_manager.set_system_prompt(self._last_effective_system_prompt)
+                self._active_streaming_runs = max(0, self._active_streaming_runs - 1)
+                self._sync_pending_provider_context_if_idle()
                 elapsed = time.monotonic() - interaction_started
                 add_metric(Metrics.ACTIVE_TIME_TOTAL, int(elapsed), {})
                 if should_capture_content_on_span() and final_text_chunks:
@@ -1066,6 +1093,7 @@ class AgentLoop:
             first_token_received = False
             final_text_chunks: list[str] = []
             final_stop_reason = "stop"
+            self._active_streaming_runs += 1
             try:
                 self._refresh_git_branch()
                 try:
@@ -1079,7 +1107,7 @@ class AgentLoop:
                             final_text_chunks.append(event.text)
                         if isinstance(event, MessageEndEvent):
                             final_stop_reason = event.stop_reason
-                            self._record_session_usage(event.usage)
+                            self._record_session_usage(event.usage, event.usage_attribution)
                         yield event
                 except asyncio.CancelledError:
                     log_event(Events.SESSION_CANCELLED, {"stage": "in_query"})
@@ -1087,7 +1115,9 @@ class AgentLoop:
             finally:
                 self._accepting_injected_user_messages = False
                 self._cancel_owned_contract_snapshots()
-                self.context_manager.set_system_prompt(self.system_prompt)
+                self.context_manager.set_system_prompt(self._last_effective_system_prompt)
+                self._active_streaming_runs = max(0, self._active_streaming_runs - 1)
+                self._sync_pending_provider_context_if_idle()
                 elapsed = time.monotonic() - interaction_started
                 add_metric(Metrics.ACTIVE_TIME_TOTAL, int(elapsed), {})
                 if should_capture_content_on_span() and final_text_chunks:
@@ -1699,23 +1729,33 @@ class AgentLoop:
     async def _stream_provider(
         self,
         *,
+        request_manager: Any = None,
+        lease: Any = None,
         messages: list[Any],
         system: str,
         tools: list[Any] | None,
         telemetry_messages: list[Any] | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
-        with use_span_attributes(self._telemetry_attributes):
-            stream_method = self._provider_manager.stream
-            stream_parameters = inspect.signature(stream_method).parameters.values()
-            supports_telemetry_sidecar = any(
-                parameter.name == "telemetry_messages" or parameter.kind is inspect.Parameter.VAR_KEYWORD
-                for parameter in stream_parameters
-            )
-            stream_kwargs = {"messages": messages, "system": system, "tools": tools}
-            if supports_telemetry_sidecar:
-                stream_kwargs["telemetry_messages"] = telemetry_messages
-            provider_stream = stream_method(**stream_kwargs)
+        request_manager = request_manager or self._provider_manager
+        self._provider_requests_in_flight += 1
         try:
+            with use_span_attributes(self._telemetry_attributes):
+                stream_method = request_manager.stream
+                stream_parameters = inspect.signature(stream_method).parameters.values()
+                supports_telemetry_sidecar = any(
+                    parameter.name == "telemetry_messages" or parameter.kind is inspect.Parameter.VAR_KEYWORD
+                    for parameter in stream_parameters
+                )
+                stream_kwargs = {"messages": messages, "system": system, "tools": tools}
+                if supports_telemetry_sidecar:
+                    stream_kwargs["telemetry_messages"] = telemetry_messages
+                supports_lease = any(
+                    parameter.name == "lease" or parameter.kind is inspect.Parameter.VAR_KEYWORD
+                    for parameter in stream_parameters
+                )
+                if lease is not None and supports_lease:
+                    stream_kwargs["lease"] = lease
+                provider_stream = stream_method(**stream_kwargs)
             while True:
                 with use_span_attributes(self._telemetry_attributes):
                     try:
@@ -1724,8 +1764,63 @@ class AgentLoop:
                         return
                 yield event
         finally:
-            with use_span_attributes(self._telemetry_attributes):
-                await provider_stream.aclose()
+            try:
+                if "provider_stream" in locals():
+                    with use_span_attributes(self._telemetry_attributes):
+                        await provider_stream.aclose()
+            finally:
+                try:
+                    self._release_request_lease(request_manager, lease)
+                finally:
+                    self._provider_requests_in_flight = max(0, self._provider_requests_in_flight - 1)
+                    self._sync_pending_provider_context_if_idle()
+
+    def _prepare_request_lease(
+        self,
+        request_manager: Any,
+        *,
+        base_system_prompt: str | None = None,
+    ) -> tuple[Any, str, list[Any]]:
+        if base_system_prompt is None:
+            self._refresh_system_prompt()
+            base_system_prompt = self._system_prompt_for_current_turn()
+        tools = list(self.tool_registry.list_tools())
+        tool_definitions = self._get_tool_definitions(tools)
+        begin_request = (
+            getattr(request_manager, "begin_request", None)
+            if hasattr(type(request_manager), "begin_request")
+            else None
+        )
+        lease = begin_request(base_system_prompt, tool_definitions or None) if callable(begin_request) else None
+        try:
+            effective_system = getattr(lease, "system_prompt", base_system_prompt)
+            effective_model = getattr(lease, "context_window_model", None)
+            if not isinstance(effective_model, str) or not effective_model:
+                get_model_name = getattr(request_manager, "get_model_name", None)
+                effective_model = get_model_name() if callable(get_model_name) else None
+            if isinstance(effective_model, str) and effective_model:
+                self.context_manager.set_model(effective_model)
+            self.context_manager.set_system_prompt(effective_system)
+            self.context_manager.set_tool_definitions(tool_definitions)
+            self._sync_tool_system_prompt(effective_system, tools=tools)
+            self._last_effective_system_prompt = effective_system
+            if request_manager is self._provider_manager:
+                self._pending_provider_context_sync = False
+            return lease, effective_system, tool_definitions
+        except BaseException:
+            self._release_request_lease(request_manager, lease)
+            raise
+
+    @staticmethod
+    def _release_request_lease(request_manager: Any, lease: Any) -> None:
+        if lease is None:
+            return
+        token = getattr(lease, "_lease_token", None)
+        if getattr(token, "state", None) == "released":
+            return
+        release = getattr(request_manager, "release_request", None)
+        if callable(release):
+            release(lease)
 
     async def _run_streaming_inner(
         self,
@@ -1752,21 +1847,37 @@ class AgentLoop:
             self._drain_pending_injections()
             self._current_turn_text = ""
 
-            system_prompt = self._prepare_provider_system_prompt()
-            tool_definitions = self._sync_tool_definitions(system_prompt=system_prompt)
+            request_manager = self._provider_manager
             await self._consume_ready_memory_prefetches(memory_prefetch)
+            self._refresh_system_prompt()
+            request_base_system_prompt = self._system_prompt_for_current_turn()
+            lease, system_prompt, tool_definitions = self._prepare_request_lease(
+                request_manager,
+                base_system_prompt=request_base_system_prompt,
+            )
 
             # Auto-compact if needed
-            if self.context_manager.needs_compaction():
+            try:
+                needs_compaction = self.context_manager.needs_compaction()
+            except BaseException:
+                self._release_request_lease(request_manager, lease)
+                raise
+            if needs_compaction:
                 # Emit a "started" marker first so the web UI can render the
                 # "正在自动压缩上下文" running indicator while the (blocking)
                 # summarization LLM call is in flight, then always emit a
                 # terminal event so the indicator never sticks. A no-op or
                 # failure is explicit instead of looking like a successful
                 # 0 -> 0 compaction.
+                self._release_request_lease(request_manager, lease)
+                lease = None
                 yield CompactionEvent(phase="started")
-                compact_event = await self._auto_compact()
+                compact_event = await self._auto_compact(request_manager)
                 yield compact_event if compact_event else CompactionEvent(phase="failed", reason="no_result")
+                lease, system_prompt, tool_definitions = self._prepare_request_lease(
+                    request_manager,
+                    base_system_prompt=request_base_system_prompt,
+                )
 
             step_attrs = {
                 GenAiAttr.SPAN_KIND: GenAiSpanKind.STEP,
@@ -1783,7 +1894,11 @@ class AgentLoop:
                 message_ended = False
                 turn_stop_reason = "stop"
 
-                provider_messages, telemetry_messages = self._get_provider_messages_with_telemetry()
+                try:
+                    provider_messages, telemetry_messages = self._get_provider_messages_with_telemetry()
+                except BaseException:
+                    self._release_request_lease(request_manager, lease)
+                    raise
                 provider_tools = tool_definitions or None
                 self._last_provider_request_snapshot = {
                     "system_prompt": system_prompt,
@@ -1793,6 +1908,8 @@ class AgentLoop:
 
                 # Stream from provider
                 async for event in self._stream_provider(
+                    request_manager=request_manager,
+                    lease=lease,
                     messages=provider_messages,
                     system=system_prompt,
                     tools=provider_tools,
@@ -2692,7 +2809,44 @@ class AgentLoop:
             ),
         )
 
-    async def _auto_compact(self) -> CompactionEvent | None:
+    async def _complete_provider_with_lease(
+        self,
+        request_manager: Any,
+        *,
+        messages: list[Any],
+        system: str,
+        tools: list[Any] | None = None,
+        max_tokens: int | None = None,
+        cache_policy: str | None = None,
+    ) -> Any:
+        begin_request = (
+            getattr(request_manager, "begin_request", None)
+            if hasattr(type(request_manager), "begin_request")
+            else None
+        )
+        lease = begin_request(system, tools) if callable(begin_request) else None
+        effective_system = getattr(lease, "system_prompt", system)
+        self._provider_requests_in_flight += 1
+        try:
+            complete_method = request_manager.complete
+            kwargs: dict[str, Any] = {"messages": messages, "system": effective_system}
+            if tools is not None:
+                kwargs["tools"] = tools
+            if max_tokens is not None:
+                kwargs["max_tokens"] = max_tokens
+            if cache_policy is not None:
+                kwargs["cache_policy"] = cache_policy
+            if lease is not None:
+                kwargs["lease"] = lease
+            return await complete_method(**kwargs)
+        finally:
+            try:
+                self._release_request_lease(request_manager, lease)
+            finally:
+                self._provider_requests_in_flight = max(0, self._provider_requests_in_flight - 1)
+                self._sync_pending_provider_context_if_idle()
+
+    async def _auto_compact(self, request_manager: Any | None = None) -> CompactionEvent | None:
         """Perform automatic context compaction via provider."""
         from iac_code.services.telemetry import log_event
         from iac_code.services.telemetry.names import Events
@@ -2701,10 +2855,12 @@ class AgentLoop:
         if not compaction_prompt:
             return None
         started = time.monotonic()
+        request_manager = request_manager or self._provider_manager
         try:
             from iac_code.providers.base import Message as ProviderMessage
 
-            response = await self._provider_manager.complete(
+            response = await self._complete_provider_with_lease(
+                request_manager,
                 messages=[ProviderMessage.user(compaction_prompt)],
                 system="You are a helpful assistant that summarizes conversations concisely.",
             )
@@ -2748,7 +2904,9 @@ class AgentLoop:
         try:
             from iac_code.providers.base import Message as ProviderMessage
 
-            response = await self._provider_manager.complete(
+            request_manager = self._provider_manager
+            response = await self._complete_provider_with_lease(
+                request_manager,
                 messages=[ProviderMessage.user(compaction_prompt)],
                 system="You are a helpful assistant that summarizes conversations concisely.",
             )
@@ -2883,12 +3041,31 @@ class AgentLoop:
     def refresh_session_usage(self) -> None:
         self._session_usage_totals = self._session_usage_store.load(self._cwd, self._session_id)
 
-    def _record_session_usage(self, usage: Usage) -> None:
+    def _record_session_usage(
+        self,
+        usage: Usage,
+        attribution: UsageAttribution | None = None,
+    ) -> None:
         if not self._session_usage_totals.add(usage):
             return
 
-        provider = self._get_runtime_provider_key()
-        model = self._provider_manager.get_model_name() if hasattr(self._provider_manager, "get_model_name") else ""
+        if attribution is not None:
+            provider = attribution.logical_provider_key
+            model = attribution.actual_model
+        else:
+            from iac_code.providers.manager import ProviderManager
+
+            if isinstance(self._provider_manager, ProviderManager):
+                logger.warning("Provider usage was reported without terminal attribution; persistence skipped")
+                return
+            # Compatibility for lightweight third-party/test managers that do
+            # not implement ProviderManager's internal attribution contract.
+            provider = self._get_runtime_provider_key()
+            model = (
+                self._provider_manager.get_model_name()
+                if hasattr(self._provider_manager, "get_model_name")
+                else ""
+            )
         try:
             self._session_usage_store.append(
                 self._cwd,
@@ -2903,7 +3080,11 @@ class AgentLoop:
     def _record_response_usage(self, response: Any) -> None:
         usage = getattr(response, "usage", None)
         if isinstance(usage, Usage):
-            self._record_session_usage(usage)
+            attribution = getattr(response, "usage_attribution", None)
+            self._record_session_usage(
+                usage,
+                attribution if isinstance(attribution, UsageAttribution) else None,
+            )
 
     def _get_runtime_provider_key(self) -> str:
         if hasattr(self._provider_manager, "get_provider_key"):

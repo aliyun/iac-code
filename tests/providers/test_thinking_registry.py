@@ -120,13 +120,23 @@ class TestGetThinkingSpec:
     def test_qwen38_formal_and_preview_have_distinct_thinking_modes(self):
         for provider_key in ("dashscope", "dashscope_token_plan"):
             formal = get_thinking_spec(provider_key, "qwen3.8-max")
-            assert formal.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.XHIGH)
+            assert formal.allowed_efforts == (
+                EffortLevel.LOW,
+                EffortLevel.MEDIUM,
+                EffortLevel.HIGH,
+                EffortLevel.XHIGH,
+            )
             assert formal.default_effort is EffortLevel.XHIGH
             assert formal.supports_disable is True
             assert formal.thinking_enabled_by_default is True
 
         preview = get_thinking_spec("dashscope_token_plan", "qwen3.8-max-preview")
-        assert preview.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.XHIGH)
+        assert preview.allowed_efforts == (
+            EffortLevel.LOW,
+            EffortLevel.MEDIUM,
+            EffortLevel.HIGH,
+            EffortLevel.XHIGH,
+        )
         assert preview.default_effort is EffortLevel.XHIGH
         assert preview.supports_disable is False
         assert preview.thinking_enabled_by_default is True

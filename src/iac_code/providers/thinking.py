@@ -244,7 +244,7 @@ _DASHSCOPE_GLM51_SPEC = ThinkingSpec(
 
 _DASHSCOPE_QWEN38_SPEC = ThinkingSpec(
     ThinkingFamily.DASHSCOPE,
-    (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.XHIGH),
+    (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH, EffortLevel.XHIGH),
     EffortLevel.XHIGH,
     uses_reasoning_effort_param=True,
     thinking_enabled_by_default=True,
@@ -258,7 +258,7 @@ _DASHSCOPE_QWEN_HYBRID_SPEC = ThinkingSpec(
 
 _DASHSCOPE_QWEN38_PREVIEW_SPEC = ThinkingSpec(
     ThinkingFamily.DASHSCOPE,
-    (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.XHIGH),
+    (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH, EffortLevel.XHIGH),
     EffortLevel.XHIGH,
     uses_reasoning_effort_param=True,
     supports_disable=False,
@@ -598,6 +598,11 @@ def get_thinking_spec(provider_key: str, model: str) -> ThinkingSpec:
         spec = MODEL_THINKING.get(current_key, {}).get(model)
         if spec is not None:
             return spec
+        normalized_model = model.strip().lower().rsplit("/", 1)[-1]
+        if current_key in {"dashscope", "dashscope_token_plan"} and normalized_model.startswith("qwen3.8-max"):
+            if current_key == "dashscope_token_plan" and "preview" in normalized_model:
+                return _DASHSCOPE_QWEN38_PREVIEW_SPEC
+            return _DASHSCOPE_QWEN38_SPEC
         current_key = _THINKING_FALLBACK.get(current_key)
     return _NONE_SPEC
 

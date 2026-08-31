@@ -75,6 +75,7 @@ class DashScopeProvider(OpenAIProvider):
         thinking_enabled: bool | None = None,
         thinking_budget: int | None = None,
         max_completion_tokens: int | None = None,
+        client: Any = None,
         **kwargs,
     ) -> None:
         super().__init__(
@@ -86,6 +87,7 @@ class DashScopeProvider(OpenAIProvider):
             thinking_budget=thinking_budget,
             max_completion_tokens=max_completion_tokens,
             provider_key=provider_key,
+            client=client,
         )
 
     # -- Explicit context cache ------------------------------------------------

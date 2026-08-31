@@ -45,7 +45,8 @@ msgstr "afterSequence deve ser um inteiro não negativo"
 msgid "Unsafe artifact filename"
 msgstr "Nome de arquivo de artefato inseguro"
 
-#: src/iac_code/a2a/artifacts.py src/iac_code/pipeline/engine/public_errors.py
+#: src/iac_code/a2a/artifacts.py src/iac_code/a2a/events.py
+#: src/iac_code/pipeline/engine/public_errors.py
 #: src/iac_code/utils/public_errors.py
 msgid "Unknown error"
 msgstr "Erro desconhecido"
@@ -6250,6 +6251,37 @@ msgstr ""
 "Nenhuma chave API configurada para o provedor '{provider}' (modelo: "
 "{model}). Execute /auth para configurar."
 
+#: src/iac_code/providers/manager.py
+#, python-brace-format
+msgid "Provider request lease cannot be consumed from state {state}."
+msgstr ""
+"A reserva da solicitação ao provedor não pode ser consumida a partir do "
+"estado {state}."
+
+#: src/iac_code/providers/manager.py
+msgid "Provider request lease was already released."
+msgstr "A reserva da solicitação ao provedor já foi liberada."
+
+#: src/iac_code/providers/manager.py
+msgid "Provider request lease belongs to a different manager."
+msgstr "A reserva da solicitação ao provedor pertence a outro gerenciador."
+
+#: src/iac_code/providers/manager.py
+msgid "Explicit request lease system prompt does not match the streamed prompt."
+msgstr ""
+"O prompt de sistema da reserva de solicitação explícita não corresponde "
+"ao prompt de streaming."
+
+#: src/iac_code/providers/manager.py
+msgid "Qwen replay ended before message completion."
+msgstr "A repetição do Qwen terminou antes da conclusão da mensagem."
+
+#: src/iac_code/providers/manager.py
+msgid "Explicit request lease system prompt does not match the completion prompt."
+msgstr ""
+"O prompt de sistema da reserva de solicitação explícita não corresponde "
+"ao prompt de conclusão."
+
 #: src/iac_code/providers/openai_provider.py
 #, python-brace-format
 msgid ""
@@ -6271,6 +6303,76 @@ msgstr ""
 "A API retornou uma resposta inválida. Verifique se a API Base URL está "
 "correta (atual: {base_url}). Muitos endpoints compatíveis com OpenAI "
 "exigem o sufixo /v1 (por exemplo, {base_url}/v1)."
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Qwen tool arguments must be a non-empty JSON object."
+msgstr "Os argumentos da ferramenta do Qwen devem ser um objeto JSON não vazio."
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Qwen tool arguments are malformed JSON."
+msgstr "Os argumentos da ferramenta do Qwen contêm JSON malformado."
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Qwen tool arguments must decode to an object."
+msgstr ""
+"Os argumentos da ferramenta do Qwen devem ser decodificados como um "
+"objeto."
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Qwen native tool call is missing its ID or name."
+msgstr "A chamada de ferramenta nativa do Qwen não tem ID ou nome."
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Invalid Qwen tool-call index."
+msgstr "O índice da chamada de ferramenta do Qwen é inválido."
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Conflicting Qwen tool-call identity."
+msgstr "A identidade da chamada de ferramenta do Qwen está em conflito."
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Conflicting Qwen tool-call name."
+msgstr "O nome da chamada de ferramenta do Qwen está em conflito."
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Qwen tool-call arguments must be a string."
+msgstr "Os argumentos da chamada de ferramenta do Qwen devem ser uma string."
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Duplicate Qwen tool-call identity."
+msgstr "A identidade da chamada de ferramenta do Qwen está duplicada."
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Ambiguous anonymous Qwen tool-call identity."
+msgstr "A identidade de uma chamada de ferramenta anônima do Qwen é ambígua."
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Ambiguous anonymous Qwen tool-call fragment."
+msgstr "O fragmento de uma chamada de ferramenta anônima do Qwen é ambíguo."
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Invalid Qwen tool-call JSON structure."
+msgstr "A estrutura JSON da chamada de ferramenta do Qwen é inválida."
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Qwen response ended with tool_calls but no complete tool call."
+msgstr ""
+"A resposta do Qwen terminou com tool_calls, mas sem uma chamada de "
+"ferramenta completa."
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Qwen tool call is anonymous or nameless."
+msgstr "A chamada de ferramenta do Qwen é anônima ou não tem nome."
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Duplicate Qwen tool-call ID."
+msgstr "O ID da chamada de ferramenta do Qwen está duplicado."
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Qwen tool-call arguments ended before JSON was complete."
+msgstr ""
+"Os argumentos da chamada de ferramenta do Qwen terminaram antes da "
+"conclusão do JSON."
 
 #: src/iac_code/providers/registry.py
 msgid "Alibaba Cloud Bailian"
@@ -6347,6 +6449,24 @@ msgstr "Volcengine CodingPlan"
 #: src/iac_code/providers/registry.py
 msgid "Anthropic Compatible"
 msgstr "Compatível com Anthropic"
+
+#: src/iac_code/providers/streaming.py
+msgid "Qwen thinking-tag candidate exceeded the safety limit."
+msgstr "O candidato à tag thinking do Qwen excedeu o limite de segurança."
+
+#: src/iac_code/providers/streaming.py
+msgid "Qwen emitted an unsafe or conflicting thinking-tag block."
+msgstr "O Qwen emitiu um bloco de tags thinking inseguro ou conflitante."
+
+#: src/iac_code/providers/streaming.py
+msgid "Qwen emitted a stray thinking closing tag."
+msgstr "O Qwen emitiu uma tag de fechamento thinking isolada."
+
+#: src/iac_code/providers/streaming.py
+msgid "Qwen emitted a closing thinking tag without a valid native tool call."
+msgstr ""
+"O Qwen emitiu uma tag de fechamento thinking sem uma chamada de "
+"ferramenta nativa válida."
 
 #: src/iac_code/services/agent_factory.py
 #, python-brace-format
