@@ -7,14 +7,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from a2a.types import Task, TaskStatusUpdateEvent
+from a2a.types import Task, TaskState, TaskStatusUpdateEvent
 from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.backup import backup_session_async
 from iac_code.a2a.executor import IacCodeA2AExecutor, _normal_handoff_has_backup_ack
 from iac_code.a2a.exposure import A2AExposureType
-from iac_code.a2a.input_required import PermissionResponse
+from iac_code.a2a.input_required import PermissionIdentityValidationError, PermissionResponse
 from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2ATaskSnapshot
 from iac_code.a2a.pipeline_executor import recoverable_task_id_from_sidecar
@@ -34,7 +34,7 @@ from iac_code.mcp.types import (
     ScopedMCPServerConfig,
 )
 from iac_code.pipeline.engine.user_input import PipelineUserInput
-from iac_code.services.permission_wait import RecoveredPermissionAuditBoundary
+from iac_code.services.permission_wait import PermissionExecutionIdentity, RecoveredPermissionAuditBoundary
 from iac_code.services.session_backup import (
     BACKUP_STATE_FILENAME,
     BackupReason,
@@ -4691,6 +4691,52 @@ async def test_failed_live_permission_answer_releases_stale_pending_before_recov
 
 
 @pytest.mark.asyncio
+async def test_identity_lookup_failure_keeps_live_permission_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id="input-1",
+        tool_use_id="tool-1",
+        decision="allow_once",
+    )
+    pending = SimpleNamespace()
+    published: list[dict] = []
+
+    async def pending_for_response(_response):
+        return pending
+
+    async def answer(_response):
+        raise PermissionIdentityValidationError("InternalError", retryable=True)
+
+    async def publish(_queue, **kwargs):
+        published.append(kwargs)
+
+    monkeypatch.setattr("iac_code.a2a.executor.parse_permission_response", lambda _message: response)
+    monkeypatch.setattr(executor._permission_input_registry, "pending_for_response", pending_for_response)
+    monkeypatch.setattr(executor._permission_input_registry, "answer", answer)
+    monkeypatch.setattr(executor, "_publish_status", publish)
+
+    await executor._execute(
+        FakeRequestContext(task_id="task-1", context_id="ctx-1"),
+        FakeEventQueue(),
+        context_id="ctx-1",
+    )
+
+    assert len(published) == 1
+    assert published[0]["state"] == TaskState.TASK_STATE_INPUT_REQUIRED
+    error = published[0]["metadata"]["iac_code"]["permissionIdentityError"]
+    assert error == {
+        "code": "InternalError",
+        "retryable": True,
+        "inputId": "input-1",
+        "toolUseId": "tool-1",
+    }
+
+
+@pytest.mark.asyncio
 async def test_normal_persisted_permission_recovery_publishes_final_and_terminal_state(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -4902,7 +4948,9 @@ async def test_restart_identity_validation_uses_resume_request_cloud_credential(
         "phase": "SUSPENDED",
         "permissionClass": "normal",
         "decision": {"status": "none", "value": None},
+        "identitySchemaVersion": 1,
         "principalRef": "client-principal",
+        "principalKind": "ram_role",
         "region": "cn-beijing",
     }
 
@@ -4936,15 +4984,15 @@ async def test_restart_identity_validation_uses_resume_request_cloud_credential(
 
     seen_access_key_ids: list[str | None] = []
 
-    def identity(**_kwargs):
+    async def identity(**_kwargs):
         from iac_code.services.providers.aliyun import AliyunCredentials
 
         credential = AliyunCredentials.load()
         seen_access_key_ids.append(credential.access_key_id if credential is not None else None)
-        return "client-principal", "cn-beijing"
+        return PermissionExecutionIdentity("client-principal", "ram_role", "cn-beijing")
 
     monkeypatch.setattr(executor, "_rebuild_normal_permission_audit_event", rebuild)
-    monkeypatch.setattr("iac_code.a2a.executor.permission_execution_identity", identity)
+    monkeypatch.setattr("iac_code.a2a.executor.resolve_permission_execution_identity", identity)
     monkeypatch.setattr(
         "iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config",
         lambda: None,
@@ -4955,7 +5003,7 @@ async def test_restart_identity_validation_uses_resume_request_cloud_credential(
         request_task_id="task-1",
         input_id="input-1",
         tool_use_id="tool-1",
-        decision="deny",
+        decision="allow_once",
     )
     context = FakeRequestContext(
         task_id="task-1",

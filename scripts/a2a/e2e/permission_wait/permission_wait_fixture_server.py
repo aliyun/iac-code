@@ -491,12 +491,30 @@ def main() -> int:
     os.environ["IAC_CODE_CONFIG_DIR"] = str(config_dir)
     os.environ["IAC_CODE_MODE"] = args.mode
     os.environ["IACCODE_A2A_ALLOWED_CWDS"] = str(workspace)
+    # Cloud-shaped permission fixtures must exercise the durable identity
+    # contract without making a real STS request.  Keep one stable caller
+    # across both fixture-server generations while using explicitly fake
+    # credentials for the request-local credential plumbing.
+    os.environ["ALIBABA_CLOUD_ACCESS_KEY_ID"] = "permission-wait-fixture-ak"
+    os.environ["ALIBABA_CLOUD_ACCESS_KEY_SECRET"] = "permission-wait-fixture-secret"
+    os.environ["ALIBABA_CLOUD_REGION_ID"] = "cn-hangzhou"
 
     import uvicorn
 
     from iac_code.a2a import executor as executor_module
     from iac_code.a2a import pipeline_executor as pipeline_executor_module
     from iac_code.a2a.app import create_app
+    from iac_code.services.providers.aliyun_identity import AliyunCallerIdentity, AliyunCallerIdentityResolver
+
+    async def resolve_fixture_identity(
+        self: AliyunCallerIdentityResolver,
+        credential: Any,
+        region_id: str,
+    ) -> AliyunCallerIdentity:
+        del self, credential, region_id
+        return AliyunCallerIdentity(kind="ram_role", account_id="1000000000000001", subject_id="fixture-role-id")
+
+    AliyunCallerIdentityResolver.resolve = resolve_fixture_identity
 
     executor_module.create_agent_runtime = lambda options: _create_fixture_runtime(
         options,

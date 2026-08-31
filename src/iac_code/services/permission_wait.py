@@ -3,18 +3,26 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import hashlib
 import json
 import logging
 import math
 import re
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from iac_code.services.providers.aliyun_identity import (
+    AliyunCallerIdentity,
+    AliyunCallerIdentityResolver,
+    AliyunCallerIdentityUnavailableError,
+    CallerIdentityKind,
+)
 from iac_code.services.session_layout import SessionPaths, ensure_session_owned_dir
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import PermissionWaitOutcome
@@ -22,6 +30,7 @@ from iac_code.utils.file_security import ensure_private_file
 from iac_code.utils.state_io import atomic_write_json, cross_process_file_lock
 
 PermissionClass = Literal["normal", "pipeline"]
+PermissionPrincipalKind = CallerIdentityKind
 PermissionPhase = Literal[
     "WAITING",
     "TIMEOUT_GRACE",
@@ -38,6 +47,17 @@ _ROOT_MESSAGE_REF = re.compile(r"^session\.jsonl:(0|[1-9][0-9]*)$")
 _PIPELINE_MESSAGE_REF = re.compile(r"^pipeline/transcripts/([A-Za-z0-9_.-]+)/session\.jsonl:(0|[1-9][0-9]*)$")
 _ACTIVE_PHASES = {"WAITING", "TIMEOUT_GRACE", "SUSPENDING", "SUSPENDED", "RESTORING"}
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _PermissionIdentityCache:
+    identity: AliyunCallerIdentity | None = None
+
+
+_permission_identity_cache: contextvars.ContextVar[_PermissionIdentityCache | None] = contextvars.ContextVar(
+    "iac_code_permission_identity_cache",
+    default=None,
+)
 
 
 def _parse_timeout(value: object, *, name: str, allow_zero: bool) -> float | None:
@@ -127,6 +147,27 @@ def parse_utc(value: object) -> datetime | None:
 def canonical_digest(value: object) -> str:
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+@contextmanager
+def permission_execution_identity_cache_scope() -> Iterator[None]:
+    """Install one request-local caller-identity cache, preserving nested scopes."""
+
+    if _permission_identity_cache.get() is not None:
+        yield
+        return
+    token = _permission_identity_cache.set(_PermissionIdentityCache())
+    try:
+        yield
+    finally:
+        _permission_identity_cache.reset(token)
+
+
+@dataclass(frozen=True)
+class PermissionExecutionIdentity:
+    principal_ref: str | None
+    principal_kind: PermissionPrincipalKind | None
+    region: str | None
 
 
 @dataclass(frozen=True)
@@ -257,25 +298,17 @@ def recover_permission_audit_boundary(
         return None
 
 
-def permission_execution_identity(
+def _permission_operation_scope(
     *,
     tool_name: str,
     tool_input: Mapping[str, Any],
     permission_audit: object | None = None,
-) -> tuple[str | None, str | None]:
-    """Return a non-secret Alibaba Cloud principal fingerprint and effective Region.
-
-    Local permissions are deliberately not coupled to Alibaba Cloud credentials.
-    For a cloud operation, an unavailable stable credential anchor remains
-    ``None`` so durable recovery can fail closed instead of treating an
-    unknown principal as an approval for the current process identity.
-    """
-
+) -> tuple[bool, str | None]:
     operation = getattr(permission_audit, "operation", None)
     operation = operation if isinstance(operation, Mapping) else {}
     cloud_operation = bool(operation.get("product")) or tool_name == "aliyun_api" or tool_name.startswith("ros_")
     if not cloud_operation:
-        return None, None
+        return False, None
 
     from iac_code.services.providers.aliyun import AliyunCredentials
 
@@ -290,6 +323,75 @@ def permission_execution_identity(
     if (not isinstance(region, str) or not region) and credential is not None:
         region = credential.region_id
     effective_region = region if isinstance(region, str) and region else None
+    return True, effective_region
+
+
+def _cached_caller_identity() -> AliyunCallerIdentity | None:
+    cache = _permission_identity_cache.get()
+    return cache.identity if cache is not None else None
+
+
+def _principal_ref(identity: AliyunCallerIdentity) -> str:
+    return "aliyun:" + canonical_digest(identity.canonical_value())
+
+
+async def resolve_permission_execution_identity(
+    *,
+    tool_name: str,
+    tool_input: Mapping[str, Any],
+    permission_audit: object | None = None,
+    resolver: AliyunCallerIdentityResolver | None = None,
+) -> PermissionExecutionIdentity:
+    """Resolve and request-cache a stable caller through STS GetCallerIdentity."""
+
+    cloud_operation, effective_region = _permission_operation_scope(
+        tool_name=tool_name,
+        tool_input=tool_input,
+        permission_audit=permission_audit,
+    )
+    if not cloud_operation:
+        return PermissionExecutionIdentity(None, None, None)
+
+    from iac_code.services.providers.aliyun import AliyunCredentials
+
+    credential = AliyunCredentials.load()
+    if credential is None:
+        raise AliyunCallerIdentityUnavailableError("cloud_credentials_unavailable", retryable=False)
+    identity = _cached_caller_identity()
+    if identity is None:
+        identity = await (resolver or AliyunCallerIdentityResolver()).resolve(
+            credential,
+            effective_region or credential.region_id,
+        )
+        cache = _permission_identity_cache.get()
+        if cache is not None:
+            cache.identity = identity
+    return PermissionExecutionIdentity(_principal_ref(identity), identity.kind, effective_region)
+
+
+def permission_execution_identity(
+    *,
+    tool_name: str,
+    tool_input: Mapping[str, Any],
+    permission_audit: object | None = None,
+) -> tuple[str | None, str | None]:
+    """Return the cached stable caller, with a legacy fallback outside A2A waits."""
+
+    cloud_operation, effective_region = _permission_operation_scope(
+        tool_name=tool_name,
+        tool_input=tool_input,
+        permission_audit=permission_audit,
+    )
+    if not cloud_operation:
+        return None, None
+
+    from iac_code.services.providers.aliyun import AliyunCredentials
+
+    credential = AliyunCredentials.load()
+    if credential is not None:
+        identity = _cached_caller_identity()
+        if identity is not None:
+            return _principal_ref(identity), effective_region
 
     if credential is None:
         return None, effective_region
@@ -740,6 +842,12 @@ class PermissionWaitCheckpointStore:
             raise ValueError("invalid permission checkpoint generation")
         if not isinstance(record.get("payloadDigest"), str) or not _SHA256.fullmatch(record["payloadDigest"]):
             raise ValueError("invalid permission payload digest")
+        identity_schema = record.get("identitySchemaVersion")
+        if identity_schema not in {None, 1}:
+            raise ValueError("invalid permission identity schema")
+        principal_kind = record.get("principalKind")
+        if principal_kind not in {None, "account", "ram_user", "ram_role"}:
+            raise ValueError("invalid permission principal kind")
         if record.get("phase") in _ACTIVE_PHASES:
             permission_class = record.get("permissionClass")
             mode = record.get("mode")
@@ -1224,6 +1332,7 @@ def build_permission_checkpoint(
     continuation_frame: Mapping[str, Any],
     policy: PermissionWaitPolicy,
     principal_ref: str | None = None,
+    principal_kind: PermissionPrincipalKind | None = None,
     region: str | None = None,
     pipeline_coordinates: Mapping[str, Any] | None = None,
     now: datetime | None = None,
@@ -1246,7 +1355,9 @@ def build_permission_checkpoint(
         "taskId": task_id,
         "contextId": context_id,
         "sessionId": session_id,
+        "identitySchemaVersion": 1,
         "principalRef": principal_ref,
+        "principalKind": principal_kind,
         "region": region,
         "mode": "normal" if permission_class == "normal" else "pipeline",
         "permissionClass": permission_class,
@@ -1266,6 +1377,7 @@ def build_permission_checkpoint(
 
 
 __all__ = [
+    "PermissionExecutionIdentity",
     "PermissionWaitCheckpointStore",
     "PermissionWaitCoordinator",
     "PermissionWaitPolicy",
@@ -1276,5 +1388,7 @@ __all__ = [
     "format_utc",
     "parse_utc",
     "permission_execution_identity",
+    "permission_execution_identity_cache_scope",
     "recover_permission_audit_boundary",
+    "resolve_permission_execution_identity",
 ]

@@ -18,10 +18,13 @@ from iac_code.services.permission_wait import (
     canonicalize_permission_continuation_frame,
     format_utc,
     permission_execution_identity,
+    permission_execution_identity_cache_scope,
     recover_permission_audit_boundary,
+    resolve_permission_execution_identity,
     utc_now,
 )
 from iac_code.services.providers.aliyun import AliyunCredential, AliyunCredentials
+from iac_code.services.providers.aliyun_identity import AliyunCallerIdentityResolver
 from iac_code.services.session_layout import SessionPaths
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import PermissionWaitOutcome
@@ -480,6 +483,95 @@ def test_local_execution_identity_does_not_depend_on_cloud_credentials(monkeypat
     )
 
     assert permission_execution_identity(tool_name="bash", tool_input={"cmd": "pwd"}) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_stable_execution_identity_ignores_rotating_sts_session_fields(monkeypatch) -> None:
+    current = AliyunCredential(
+        mode="StsToken",
+        access_key_id="sts-first",
+        access_key_secret="secret-first",
+        sts_token="token-first",
+        region_id="cn-hangzhou",
+    )
+    monkeypatch.setattr(AliyunCredentials, "load", staticmethod(lambda: current))
+    calls = 0
+
+    async def request(_credential, _region_id):
+        nonlocal calls
+        calls += 1
+        return {
+            "IdentityType": "AssumedRoleUser",
+            "AccountId": "1001",
+            "RoleId": "3003",
+            "PrincipalId": "3003:session-{}".format(calls),
+        }
+
+    resolver = AliyunCallerIdentityResolver(request=request)
+    first = await resolve_permission_execution_identity(
+        tool_name="aliyun_api",
+        tool_input={"region_id": "cn-hangzhou"},
+        resolver=resolver,
+    )
+    current = AliyunCredential(
+        mode="StsToken",
+        access_key_id="sts-second",
+        access_key_secret="secret-second",
+        sts_token="token-second",
+        region_id="cn-hangzhou",
+    )
+    second = await resolve_permission_execution_identity(
+        tool_name="aliyun_api",
+        tool_input={"region_id": "cn-hangzhou"},
+        resolver=resolver,
+    )
+
+    assert first == second
+    assert first.principal_kind == "ram_role"
+    assert "session-" not in str(first)
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_execution_identity_is_cached_once_per_a2a_request(monkeypatch) -> None:
+    credential_loads = 0
+
+    def load_credential():
+        nonlocal credential_loads
+        credential_loads += 1
+        return AliyunCredential(
+            mode="StsToken",
+            access_key_id="sts-{}".format(credential_loads),
+            sts_token="token-{}".format(credential_loads),
+        )
+
+    monkeypatch.setattr(AliyunCredentials, "load", staticmethod(load_credential))
+    calls = 0
+
+    async def request(_credential, _region_id):
+        nonlocal calls
+        calls += 1
+        return {"IdentityType": "RAMUser", "AccountId": "1001", "UserId": "2002"}
+
+    resolver = AliyunCallerIdentityResolver(request=request)
+    with permission_execution_identity_cache_scope():
+        first = await resolve_permission_execution_identity(
+            tool_name="aliyun_api",
+            tool_input={"region_id": "cn-hangzhou"},
+            resolver=resolver,
+        )
+        second = await resolve_permission_execution_identity(
+            tool_name="ros_stack",
+            tool_input={"region_id": "cn-hangzhou"},
+            resolver=resolver,
+        )
+        assert permission_execution_identity(
+            tool_name="aliyun_api",
+            tool_input={"region_id": "cn-hangzhou"},
+        ) == (first.principal_ref, first.region)
+
+    assert first == second
+    assert calls == 1
 
 
 def test_checkpoint_normalizes_orphan_and_compacts_receipt(tmp_path) -> None:

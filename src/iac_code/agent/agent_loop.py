@@ -1257,15 +1257,18 @@ class AgentLoop:
             if request_index == current_index:
                 if permission is None:
                     raise ValueError("permission_resume_invalid: current tool is unavailable")
-                principal_ref, region = permission_execution_identity(
-                    tool_name=request.name,
-                    tool_input=request.input,
-                    permission_audit=getattr(permission, "audit", None),
-                )
-                if principal_ref != checkpoint.get("principalRef") or region != checkpoint.get("region"):
-                    raise ValueError("permission_resume_invalid: cloud execution identity changed")
                 state = "allow" if decision["value"] == "allow_once" else "deny"
                 source = "user"
+                principal_ref = None
+                region = None
+                if state == "allow":
+                    principal_ref, region = permission_execution_identity(
+                        tool_name=request.name,
+                        tool_input=request.input,
+                        permission_audit=getattr(permission, "audit", None),
+                    )
+                    if principal_ref != checkpoint.get("principalRef") or region != checkpoint.get("region"):
+                        raise ValueError("permission_resume_invalid: cloud execution identity changed")
                 if state == "deny":
                     recorded["deniedResult"] = _user_denied_tool_result()
                 if permission.behavior != "deny":
@@ -2198,6 +2201,15 @@ class AgentLoop:
                         approved = False
                         denial_source = "audit_failure"
                     if approved:
+                        # A2A durable permission publication may have resolved a
+                        # stable STS caller while this generator was suspended.
+                        # Re-read the request-local identity so continuation
+                        # decisions never retain a rotating temporary AccessKeyId.
+                        principal_ref, region = permission_execution_identity(
+                            tool_name=request.name,
+                            tool_input=request.input,
+                            permission_audit=permission.audit,
+                        )
                         allowed_requests.append(request)
                         continuation_decisions[request_index].update(
                             state="allow",
