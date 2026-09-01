@@ -120,6 +120,7 @@ from iac_code.services.providers.aliyun_identity import AliyunCallerIdentityUnav
 from iac_code.services.session_backup import (
     BackupReason,
     SessionBackupBlocked,
+    SessionBackupError,
     SessionBackupService,
     SessionReconcileResult,
 )
@@ -2157,6 +2158,20 @@ class IacCodeA2AExecutor(AgentExecutor):
             return False
         if task_record.context_id != response.context_id:
             raise InvalidParamsError("input_response_mismatch: permission task context changed.")
+        try:
+            reconcile_result = await self._reconcile_session_before_route(
+                context_id=response.context_id,
+                cwd=context_record.cwd,
+            )
+        except SessionBackupError:
+            logger.warning("Failed to restore the A2A session before resuming a persisted permission", exc_info=True)
+            return False
+        if (
+            isinstance(reconcile_result, SessionReconcileResult)
+            and reconcile_result.enabled
+            and not SessionStorage().exists(context_record.cwd, context_record.session_id)
+        ):
+            return False
         store = PermissionWaitCheckpointStore(context_record.cwd, context_record.session_id)
         record = store.find(
             task_id=response.task_id,
