@@ -43,7 +43,7 @@ from iac_code.services.session_backup import (
     SessionBackupService,
     SessionReconcileResult,
 )
-from iac_code.services.session_backup_staging import StagedSessionBackupService
+from iac_code.services.session_backup_staging import SessionBackupStagingWorker, StagedSessionBackupService
 from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
 from iac_code.services.session_storage import SessionStorage
 from iac_code.skills.frontmatter import SkillFrontmatter
@@ -229,7 +229,7 @@ async def test_handoff_normal_permission_is_restored_from_pipeline_snapshot(
 
 
 @pytest.mark.asyncio
-async def test_normal_permission_does_not_modify_snapshot_without_committed_normal_handoff(
+async def test_normal_permission_is_blocked_without_committed_normal_handoff(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -270,7 +270,8 @@ async def test_normal_permission_does_not_modify_snapshot_without_committed_norm
             "toolName": "write_memory",
         },
     )
-    await _persist_normal_permission_snapshot_request(cwd=str(cwd), session_id=session_id, pending=pending)
+    with pytest.raises(RuntimeError, match="Normal permission restore snapshot could not be persisted"):
+        await _persist_normal_permission_snapshot_request(cwd=str(cwd), session_id=session_id, pending=pending)
 
     snapshot = snapshot_store.load()
     assert snapshot is not None
@@ -573,6 +574,111 @@ async def test_stale_sandbox_reconciles_committed_handoff_before_routing(monkeyp
     assert restored_snapshot["pendingNormalHandoff"]["eventId"] == pending_handoff["eventId"]
     assert executor._normal_handoff_has_state_proof(cwd=str(cwd), session_id=session_id, state=result.state) is True
     assert await executor._should_route_pipeline_handoff_to_normal(context_id=context_id, cwd=str(cwd)) is True
+
+    from iac_code.a2a.executor import _persist_normal_permission_snapshot_request
+
+    staging_root = tmp_path / "permission-staging"
+    staged_service = StagedSessionBackupService(staging_root, storage_1, retry_delays=())
+    staged_executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        backup_service=staged_service,
+    )
+    pending = SimpleNamespace(
+        input_id="permission-cross-sandbox",
+        envelope=lambda: {
+            "schemaVersion": 1,
+            "kind": "permission",
+            "requestTaskId": "task-normal",
+            "contextId": context_id,
+            "inputId": "permission-cross-sandbox",
+            "toolUseId": "tool-cross-sandbox",
+            "toolName": "ros_stack",
+            "title": "Delete ROS stack",
+            "target": "stack-1",
+            "isReadOnly": False,
+            "options": [
+                {"id": "allow_once", "label": "Allow once"},
+                {"id": "deny", "label": "Deny"},
+            ],
+        },
+    )
+    await _persist_normal_permission_snapshot_request(
+        cwd=str(cwd),
+        session_id=session_id,
+        pending=pending,
+        handoff_proven=staged_executor._normal_handoff_has_state_proof(
+            cwd=str(cwd),
+            session_id=session_id,
+        ),
+    )
+    staged = staged_service.backup_session(
+        str(cwd),
+        session_id,
+        reason=BackupReason.INPUT_REQUIRED,
+        critical=True,
+    )
+
+    assert staged.staged_committed is True
+    assert staged.shared_committed is False
+    staged_snapshot = A2APipelineSnapshotStore(staged.destination / "a2a" / "pipeline").load()
+    assert staged_snapshot is not None
+    assert staged_snapshot["display"]["permissions"][0]["inputId"] == "permission-cross-sandbox"
+
+    assert SessionBackupStagingWorker(staging_root, backup_root).run_once() == 1
+    sandbox_3_config = tmp_path / "sandbox-3"
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(sandbox_3_config))
+    storage_3 = SessionStorage(projects_dir=sandbox_3_config / "projects")
+    service_3 = SessionBackupService(storage_3, retry_delays=())
+    restored = service_3.restore_session(str(cwd), session_id)
+    restored_snapshot = A2APipelineSnapshotStore(
+        a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    ).load()
+
+    assert restored.restored is True
+    assert restored_snapshot is not None
+    assert restored_snapshot["display"]["permissions"][0]["inputId"] == "permission-cross-sandbox"
+
+    from iac_code.a2a.executor import _persist_normal_permission_snapshot_resolution
+
+    response = PermissionResponse(
+        task_id="task-normal",
+        context_id=context_id,
+        request_task_id="task-normal",
+        input_id="permission-cross-sandbox",
+        tool_use_id="tool-cross-sandbox",
+        decision="allow_once",
+    )
+    restored_executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+        backup_service=service_3,
+    )
+    await _persist_normal_permission_snapshot_resolution(
+        cwd=str(cwd),
+        session_id=session_id,
+        response=response,
+        decision="allow_once",
+        handoff_proven=restored_executor._normal_handoff_has_state_proof(
+            cwd=str(cwd),
+            session_id=session_id,
+        ),
+    )
+    resolved_snapshot = A2APipelineSnapshotStore(
+        a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    ).load()
+
+    assert resolved_snapshot is not None
+    resolved_permission = resolved_snapshot["display"]["permissions"][0]
+    assert resolved_permission["pending"] is False
+    assert resolved_permission["decision"] == "allow_once"
+    resolved_backup = service_3.backup_session(
+        str(cwd),
+        session_id,
+        reason=BackupReason.INPUT_REQUIRED,
+        critical=True,
+    )
+    assert resolved_backup.shared_committed is True
 
 
 @pytest.mark.asyncio
@@ -4579,6 +4685,86 @@ async def test_executor_refreshes_cloud_tools_with_aliyun_metadata_for_reused_co
 
 
 @pytest.mark.asyncio
+async def test_restart_audit_runtime_refreshes_cloud_tools_with_resume_request_credential(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.services.providers.aliyun import AliyunCredential, AliyunCredentials
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    session_id = "session-rebuild-credential"
+    SessionStorage().append(str(cwd), session_id, Message(role="user", content="delete the stack"))
+    seen: list[tuple[str, str | None]] = []
+    rebuilt = PermissionRequestEvent(
+        tool_name="ros_stack",
+        tool_input={"action": "DeleteStack", "StackId": "stack-1"},
+        tool_use_id="tool-1",
+        response_future=pending_future(),
+    )
+
+    class AuditLoop:
+        async def rebuild_permission_audit_event(self, **_kwargs):
+            credential = AliyunCredentials.load()
+            seen.append(("audit", credential.access_key_id if credential else None))
+            return rebuilt
+
+    def factory(options):
+        credential = AliyunCredentials.load()
+        seen.append(("factory", credential.access_key_id if credential else None))
+        return FakeRuntime(
+            agent_loop=AuditLoop(),
+            session_id=options.session_id,
+            tool_registry=object(),
+            aliyun_services=object(),
+        )
+
+    def register_cloud_tools(_registry, credentials, _services):
+        credential = credentials.get_provider("aliyun")
+        seen.append(("refresh", credential.access_key_id if credential else None))
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", factory)
+    monkeypatch.setattr("iac_code.tools.cloud.registry.register_cloud_tools", register_cloud_tools)
+    monkeypatch.setattr("iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config", lambda: None)
+    executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
+
+    result = await executor._rebuild_normal_permission_audit_event(
+        recovered=RecoveredPermissionAuditBoundary(
+            tool_name="ros_stack",
+            tool_input={"action": "DeleteStack", "StackId": "stack-1"},
+            tool_use_id="tool-1",
+            audit_context={"session_id": session_id, "cwd": str(cwd)},
+        ),
+        cwd=str(cwd),
+        session_id=session_id,
+        model="qwen3.6-plus",
+        model_from_metadata=False,
+        metadata_api_key=None,
+        request_policy_override=None,
+        user_id="user-1",
+        aliyun_credential=AliyunCredential(
+            mode="StsToken",
+            access_key_id="request-sts-id",
+            access_key_secret="request-sts-secret",
+            sts_token="request-sts-token",
+            sts_expiration=4102444800,
+            region_id="cn-beijing",
+        ),
+        preferred_language="zh",
+    )
+
+    assert result is rebuilt
+    assert seen == [
+        ("factory", "request-sts-id"),
+        ("refresh", "request-sts-id"),
+        ("audit", "request-sts-id"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_suspending_permission_answer_waits_for_owner_then_resumes_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -4921,9 +5107,22 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
     task_record = await task_store.get_or_create_task(task_id="task-1", context_id="ctx-1")
     task_record.state = "input-required"
     task_store.mirror_task(task_record)
-    runtime = FakeRuntime(agent_loop=RecoveryLoop(), session_id=context_record.session_id)
+    runtime = FakeRuntime(
+        agent_loop=RecoveryLoop(),
+        session_id=context_record.session_id,
+        tool_registry=object(),
+        aliyun_services=object(),
+    )
+    seen_access_key_ids: list[str | None] = []
+
+    def register_cloud_tools(_registry, credentials, _services):
+        credential = credentials.get_provider("aliyun")
+        seen_access_key_ids.append(credential.access_key_id if credential else None)
+
     monkeypatch.setattr("iac_code.a2a.executor.PermissionWaitCheckpointStore", lambda *_args: CheckpointStore())
     monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda _options: runtime)
+    monkeypatch.setattr("iac_code.tools.cloud.registry.register_cloud_tools", register_cloud_tools)
+    monkeypatch.setattr("iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config", lambda: None)
 
     executor = IacCodeA2AExecutor(
         task_store=task_store,
@@ -4941,7 +5140,18 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
     queue = FakeEventQueue()
 
     assert await executor._resume_persisted_permission(
-        FakeRequestContext(task_id="task-1", context_id="ctx-1"),
+        FakeRequestContext(
+            task_id="task-1",
+            context_id="ctx-1",
+            metadata={
+                "iac_code": {
+                    "alibaba_cloud_access_key_id": "resume-sts-id",
+                    "alibaba_cloud_access_key_secret": "resume-sts-secret",
+                    "alibaba_cloud_security_token": "resume-sts-token",
+                    "alibaba_cloud_region_id": "cn-beijing",
+                }
+            },
+        ),
         queue,
         response=response,
     )
@@ -4974,6 +5184,7 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
     assert task_record.state == "input-required"
     assert checkpoint["phase"] == "RESOLVED"
     assert len(resolved) == 1
+    assert seen_access_key_ids == ["resume-sts-id"]
     assert backup_service.calls == [(str(tmp_path), context_record.session_id, BackupReason.NORMAL_TURN_END, False)]
 
 
