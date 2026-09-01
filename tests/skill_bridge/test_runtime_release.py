@@ -245,6 +245,9 @@ def test_skill_profiles_render_three_strict_product_shapes(tmp_path: Path) -> No
         "alibabacloud-ros-agent": [
             "SKILL.md",
             "references/ram-policies.md",
+            "scripts/_ros_agent_core.py",
+            "scripts/_ros_agent_projection.py",
+            "scripts/_ros_agent_runtime.py",
             "scripts/requirements.txt",
             "scripts/ros_agent.py",
         ],
@@ -272,7 +275,12 @@ def test_skill_profiles_render_three_strict_product_shapes(tmp_path: Path) -> No
                 assert "`scripts/requirements.txt`" in skill
                 assert "requirements-code.txt" not in skill
                 assert 'REQUIREMENTS_FILE = "scripts/requirements.txt"' in bridge
-                assert NON_ENGLISH_SOURCE_PATTERN.search(bridge) is None
+                ros_sources = "\n".join(
+                    path.read_text(encoding="utf-8") for path in sorted((output / "scripts").glob("*.py"))
+                )
+                assert NON_ENGLISH_SOURCE_PATTERN.search(ros_sources) is None
+                assert all(path.stat().st_size <= 128 * 1024 for path in (output / "scripts").glob("*.py"))
+                subprocess.run([sys.executable, str(output / "scripts/ros_agent.py"), "--help"], check=True)
         else:
             assert "## Observability" not in skill
             assert 'SKILL_DISTRIBUTION = "public"' in bridge
@@ -320,6 +328,9 @@ def test_agenthub_profiles_package_as_independent_products(tmp_path: Path) -> No
         assert archive.namelist() == [
             "alibabacloud-ros-agent/SKILL.md",
             "alibabacloud-ros-agent/references/ram-policies.md",
+            "alibabacloud-ros-agent/scripts/_ros_agent_core.py",
+            "alibabacloud-ros-agent/scripts/_ros_agent_projection.py",
+            "alibabacloud-ros-agent/scripts/_ros_agent_runtime.py",
             "alibabacloud-ros-agent/scripts/requirements.txt",
             "alibabacloud-ros-agent/scripts/ros_agent.py",
         ]
@@ -358,6 +369,9 @@ def test_publisher_contracts_are_explicit() -> None:
     assert skill_contract["profiles"]["alibabacloud-ros-agent"]["files"] == [
         "SKILL.md",
         "references/ram-policies.md",
+        "scripts/_ros_agent_core.py",
+        "scripts/_ros_agent_projection.py",
+        "scripts/_ros_agent_runtime.py",
         "scripts/requirements.txt",
         "scripts/ros_agent.py",
     ]

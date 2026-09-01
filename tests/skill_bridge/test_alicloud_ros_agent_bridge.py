@@ -8,7 +8,9 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,6 +18,12 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 BRIDGE_PATH = ROOT / "skills/alicloud-ros-agent/scripts/ros_agent.py"
+BRIDGE_SOURCE_PATHS = (
+    BRIDGE_PATH,
+    BRIDGE_PATH.with_name("_ros_agent_core.py"),
+    BRIDGE_PATH.with_name("_ros_agent_projection.py"),
+    BRIDGE_PATH.with_name("_ros_agent_runtime.py"),
+)
 
 
 def _load_bridge():
@@ -102,13 +110,23 @@ def _status_event(*, state="TASK_STATE_WORKING", text="", metadata=None):
 
 
 def test_bridge_parses_as_python_38_and_uses_only_standard_library_imports() -> None:
-    source = BRIDGE_PATH.read_text(encoding="utf-8")
-    tree = ast.parse(source, feature_version=(3, 8))
+    sources = [path.read_text(encoding="utf-8") for path in BRIDGE_SOURCE_PATHS]
+    trees = [
+        ast.parse(source, filename=str(path), feature_version=(3, 8))
+        for path, source in zip(BRIDGE_SOURCE_PATHS, sources)
+    ]
     imported_modules = {
-        alias.name.split(".", 1)[0] for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names
+        alias.name.split(".", 1)[0]
+        for tree in trees
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
     }
     imported_modules.update(
-        node.module.split(".", 1)[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module
+        node.module.split(".", 1)[0]
+        for tree in trees
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
     )
     assert imported_modules <= {
         "argparse",
@@ -136,8 +154,10 @@ def test_bridge_parses_as_python_38_and_uses_only_standard_library_imports() -> 
         "urllib",
         "uuid",
     }
-    assert "access-key-id" not in source.lower()
-    assert "access-key-secret" not in source.lower()
+    combined_source = "\n".join(sources).lower()
+    assert "access-key-id" not in combined_source
+    assert "access-key-secret" not in combined_source
+    assert all(path.stat().st_size <= 128 * 1024 for path in BRIDGE_SOURCE_PATHS)
 
 
 def test_build_command_uses_ros_plugin_without_explicit_credentials(monkeypatch) -> None:
@@ -297,6 +317,37 @@ def test_optional_skill_config_defaults_and_applies_endpoint_and_mode_policy(tmp
         bridge.apply_skill_config(conflicting, config)
 
 
+def test_remote_cli_config_accepts_a_non_secret_environment_allowlist(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "transport": "aliyun_cli",
+                "aliyunCLIExecutionMode": "remote",
+                "aliyunCLIForwardEnv": ["STAROPS_HIL", "REMOTE_ROUTE"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = bridge.load_skill_config(config_path)
+    args = argparse.Namespace(command="check", aliyun_path="aliyun")
+    bridge.apply_skill_config(args, config)
+
+    assert args.aliyun_cli_forward_env == ["STAROPS_HIL", "REMOTE_ROUTE"]
+
+
+def test_remote_cli_environment_allowlist_defaults_to_empty() -> None:
+    args = argparse.Namespace(command="check", aliyun_path="aliyun")
+
+    bridge.apply_skill_config(
+        args,
+        {"transport": "aliyun_cli", "aliyunCLIExecutionMode": "remote"},
+    )
+
+    assert args.aliyun_cli_forward_env == []
+
+
 def test_transport_cannot_be_overridden_by_a_bridge_command() -> None:
     parser = bridge.build_parser()
 
@@ -340,6 +391,14 @@ def test_profile_and_thinking_fixed_by_config_reject_conflicting_start_flags() -
         {"transport": True},
         {"aliyunCLIExecutionMode": "unsupported"},
         {"aliyunCLIExecutionMode": "remote"},
+        {"aliyunCLIForwardEnv": ["STAROPS_HIL"]},
+        {"transport": "aliyun_cli", "aliyunCLIExecutionMode": "local", "aliyunCLIForwardEnv": ["STAROPS_HIL"]},
+        {"transport": "aliyun_cli", "aliyunCLIExecutionMode": "remote", "aliyunCLIForwardEnv": ["BAD-NAME"]},
+        {
+            "transport": "aliyun_cli",
+            "aliyunCLIExecutionMode": "remote",
+            "aliyunCLIForwardEnv": ["ACCESS_KEY_SECRET"],
+        },
         {"transport": "aliyun_cli", "aliyunCLIExecutionMode": "remote", "aliyunCLIProfile": "profile"},
         {"transport": "aliyun_cli", "aliyunCLIExecutionMode": "remote", "endpoint": "127.0.0.1:56124"},
         {"endpoint": "https://127.0.0.1:56124"},
@@ -555,7 +614,7 @@ def test_code_check_delegates_identity_resolution_to_default_credential_chain(mo
 
 
 def test_bridge_does_not_parse_credential_environment_variables() -> None:
-    source = BRIDGE_PATH.read_text(encoding="utf-8")
+    source = "\n".join(path.read_text(encoding="utf-8") for path in BRIDGE_SOURCE_PATHS)
     for name in (
         "ALIBABA_CLOUD_ACCESS_KEY_ID",
         "ALIBABACLOUD_ACCESS_KEY_ID",
@@ -717,6 +776,7 @@ def test_local_cli_check_reports_when_skill_must_install_ros_plugin(
 
 
 def test_remote_aliyun_cli_check_does_not_run_cli_or_read_local_configuration(monkeypatch) -> None:
+    monkeypatch.setenv("STAROPS_HIL", "http://route.example/hil")
     monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/remote/bin/aliyun")
     monkeypatch.setattr(
         bridge,
@@ -739,6 +799,7 @@ def test_remote_aliyun_cli_check_does_not_run_cli_or_read_local_configuration(mo
         {
             "transport": "aliyun_cli",
             "aliyunCLIExecutionMode": "remote",
+            "aliyunCLIForwardEnv": ["STAROPS_HIL"],
             "endpoint": "ros-pre.aliyuncs.com",
         },
     )
@@ -750,6 +811,8 @@ def test_remote_aliyun_cli_check_does_not_run_cli_or_read_local_configuration(mo
     assert result["version"] is None
     assert result["aliyunCLIExecutionMode"] == "remote"
     assert result["currentProfile"] == {"configured": True, "mode": "RemoteSandbox"}
+    assert result["aliyunCLIForwardEnv"] == ["STAROPS_HIL"]
+    assert result["aliyunCLIForwardEnvPresent"] == ["STAROPS_HIL"]
     assert "rosPluginReady" not in result
     assert "pluginInstallRequired" not in result
 
@@ -1079,6 +1142,25 @@ def test_cli_plugin_parser_streams_and_unwraps_each_json_line() -> None:
     )
 
     assert events == [(first, json.dumps({"data": first})), (second, json.dumps({"data": second}))]
+
+
+def test_cli_plugin_parser_accepts_pretty_printed_objects_and_arrays() -> None:
+    first = {"result": {"statusUpdate": {"status": {"state": "TASK_STATE_WORKING"}}}}
+    second = {"result": {"statusUpdate": {"status": {"state": "TASK_STATE_COMPLETED"}}}}
+    pretty_object = json.dumps({"data": first}, indent=2).splitlines(keepends=True)
+    pretty_array = json.dumps([{"data": first}, {"data": second}], indent=2).splitlines(keepends=True)
+
+    object_events = list(bridge.iter_cli_plugin_payloads(pretty_object))
+    array_events = list(bridge.iter_cli_plugin_payloads(pretty_array))
+
+    assert [value for value, _raw in object_events] == [first]
+    assert [value for value, _raw in array_events] == [first, second]
+
+
+def test_cli_plugin_parser_reports_an_unterminated_buffer_as_malformed() -> None:
+    events = list(bridge.iter_cli_plugin_payloads(['{\n', '  "data": {\n']))
+
+    assert events == [(None, '{\n  "data": {')]
 
 
 def test_sse_parser_rejects_an_unterminated_event_as_soon_as_its_cumulative_limit_is_exceeded(
@@ -3561,6 +3643,22 @@ def test_request_from_legacy_job_uses_current_stream_read_timeout_default() -> N
     assert request["aliyunCLIExecutionMode"] == "local"
 
 
+def test_request_from_legacy_remote_job_has_no_transient_environment_allowlist() -> None:
+    request = bridge._request_from_job(
+        {
+            "activeRequestSeq": 2,
+            "workspace": "/workspace",
+            "mode": "normal",
+            "endpoint": "ros.aliyuncs.com",
+            "transport": "aliyun_cli",
+            "aliyunCLIExecutionMode": "remote",
+        },
+        "continue",
+    )
+
+    assert request["aliyunCLIForwardEnv"] == []
+
+
 def test_remote_cli_job_persists_execution_mode_without_local_identity(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
     workspace = tmp_path / "workspace"
@@ -3582,21 +3680,185 @@ def test_remote_cli_job_persists_execution_mode_without_local_identity(monkeypat
             "mode": "normal",
             "transport": "aliyun_cli",
             "aliyunCLIExecutionMode": "remote",
+            "aliyunCLIForwardEnv": ["STAROPS_HIL"],
             "endpoint": "ros-pre.aliyuncs.com",
             "regionId": None,
             "profile": None,
             "credentialSource": "remote",
             "aliyunPath": "aliyun",
+            "transientEnvironment": {"STAROPS_HIL": "http://fresh.example/hil"},
         }
     )
 
     _root, job_path, _spool = bridge._job_paths(started["jobId"])
     job = bridge._load_state_json(job_path)
     assert job["aliyunCLIExecutionMode"] == "remote"
+    assert job["aliyunCLIForwardEnv"] == ["STAROPS_HIL"]
+    assert "fresh.example" not in json.dumps(job)
     assert job["profile"] is None
     assert job["regionId"] is None
     assert captured["request"]["aliyunCLIExecutionMode"] == "remote"
     assert captured["request"]["credentialSource"] == "remote"
+    assert captured["request"]["_transientEnvironment"] == {"STAROPS_HIL": "http://fresh.example/hil"}
+
+
+def test_remote_cli_refreshes_starops_hil_across_manager_proxy_and_buffered_pop_cli(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    pop_dir = tmp_path / "pop-cli"
+    front_dir = tmp_path / "front-cli"
+    workspace = tmp_path / "workspace"
+    pop_dir.mkdir()
+    front_dir.mkdir()
+    workspace.mkdir()
+    prompt = workspace / "prompt.txt"
+    prompt.write_text("create a test VPC", encoding="utf-8")
+
+    working = _status_event(state="TASK_STATE_WORKING", text="working")
+    completed = _status_event(
+        state="TASK_STATE_COMPLETED",
+        text="remote route refreshed",
+        metadata={"assistantFinal": {"complete": True}},
+    )
+    pop_cli = _write_fake_aliyun(
+        pop_dir,
+        """import json
+import sys
+
+if sys.argv[1:3] != ["ros", "start-chat"]:
+    print("unexpected POP CLI command", file=sys.stderr)
+    raise SystemExit(2)
+print(json.dumps(json.loads(%r), ensure_ascii=False, indent=2))
+"""
+        % json.dumps([{"data": working}, {"data": completed}], ensure_ascii=False),
+    )
+    front_cli = _write_fake_aliyun(
+        front_dir,
+        """import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+route = os.environ.get("STAROPS_HIL", "")
+request = urllib.request.Request(
+    route,
+    data=json.dumps({"args": sys.argv[1:]}).encode("utf-8"),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(request, timeout=10) as response:
+        sys.stdout.buffer.write(response.read())
+except (OSError, urllib.error.URLError) as exc:
+    print("STAROPS_HIL proxy failed: {}".format(exc), file=sys.stderr)
+    raise SystemExit(1)
+""",
+    )
+    calls = []
+
+    class ProxyHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            calls.append(payload)
+            result = subprocess.run(
+                [str(pop_cli), *payload["args"]],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=10,
+                check=False,
+            )
+            self.send_response(200 if result.returncode == 0 else 502)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(result.stdout)))
+            self.end_headers()
+            self.wfile.write(result.stdout)
+
+        def log_message(self, _format: str, *_args) -> None:
+            return
+
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), ProxyHandler)
+    proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+    proxy_thread.start()
+    try:
+        monkeypatch.setenv("STAROPS_HIL", "http://127.0.0.1:1/stale")
+        bridge.ensure_manager(2)
+        fresh_route = "http://127.0.0.1:{}/invoke".format(proxy.server_address[1])
+        monkeypatch.setenv("STAROPS_HIL", fresh_route)
+        monkeypatch.chdir(workspace)
+        args = bridge.build_parser().parse_args(
+            ["start", "--prompt-file", str(prompt), "--aliyun-path", str(front_cli)]
+        )
+        bridge.apply_skill_config(
+            args,
+            {
+                "transport": "aliyun_cli",
+                "aliyunCLIExecutionMode": "remote",
+                "aliyunCLIForwardEnv": ["STAROPS_HIL"],
+                "endpoint": "ros.aliyuncs.com",
+                "managerIdleSeconds": 2,
+            },
+        )
+
+        started = bridge.run_start_job(args)
+        result = bridge.run_follow_job(
+            argparse.Namespace(job_id=started["jobId"], cursor=0, wait_seconds=10, manager_idle_seconds=2)
+        )
+
+        assert result["state"] == "turn-completed"
+        assert result["finalText"] == "remote route refreshed"
+        assert len(calls) == 1
+        assert calls[0]["args"][:3] == ["ros", "start-chat", "--endpoint"]
+        endpoint_index = calls[0]["args"].index("--endpoint")
+        assert calls[0]["args"][endpoint_index + 1] == "ros.aliyuncs.com"
+        job_root, job_path, _spool = bridge._job_paths(started["jobId"])
+        assert fresh_route not in job_path.read_text(encoding="utf-8")
+        assert all(fresh_route not in path.read_text(encoding="utf-8", errors="replace") for path in job_root.iterdir())
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        proxy_thread.join(timeout=2)
+
+
+def test_spawn_worker_replaces_stale_remote_cli_environment_without_persisting_values(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    monkeypatch.setenv("STAROPS_HIL", "http://stale.example/hil")
+    job_id = "7" * 32
+    root, job_path, _spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    bridge._atomic_json(
+        job_path,
+        {"schemaVersion": 1, "jobId": job_id, "state": "submitted", "activeRequestSeq": 1, "artifacts": []},
+    )
+    captured = {}
+
+    class Process:
+        pid = 4321
+
+    def popen(command, **kwargs):
+        captured["command"] = command
+        captured["env"] = kwargs["env"]
+        return Process()
+
+    monkeypatch.setattr(bridge.subprocess, "Popen", popen)
+    request = {
+        "requestSeq": 1,
+        "prompt": "hello",
+        "aliyunCLIForwardEnv": ["STAROPS_HIL"],
+        "_transientEnvironment": {"STAROPS_HIL": "http://fresh.example/hil"},
+    }
+
+    bridge._spawn_worker(job_id, request)
+
+    assert captured["env"]["STAROPS_HIL"] == "http://fresh.example/hil"
+    persisted_request = next(root.glob("request-*.json")).read_text(encoding="utf-8")
+    assert "fresh.example" not in persisted_request
+    assert "stale.example" not in persisted_request
 
 
 @pytest.mark.parametrize(

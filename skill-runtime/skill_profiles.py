@@ -75,6 +75,9 @@ PROFILES = {
         files=(
             ("SKILL.md.template", "SKILL.md"),
             ("references/ram-policies.md", "references/ram-policies.md"),
+            ("scripts/_ros_agent_core.py", "scripts/_ros_agent_core.py"),
+            ("scripts/_ros_agent_projection.py", "scripts/_ros_agent_projection.py"),
+            ("scripts/_ros_agent_runtime.py", "scripts/_ros_agent_runtime.py"),
             ("requirements-code.txt", "scripts/requirements.txt"),
             ("scripts/ros_agent.py", "scripts/ros_agent.py"),
         ),
