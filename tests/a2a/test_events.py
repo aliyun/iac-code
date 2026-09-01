@@ -20,6 +20,7 @@ from iac_code.a2a.input_required import (
     PermissionResponse,
 )
 from iac_code.a2a.projection import project_a2a_data
+from iac_code.a2a.runtime_overrides import a2a_request_context
 from iac_code.services.permission_wait import (
     PermissionExecutionIdentity,
     PermissionWaitCheckpointStore,
@@ -1048,6 +1049,53 @@ async def test_error_event_passes_through_error_field() -> None:
     assert dumped["status"]["state"] == "TASK_STATE_FAILED"
     assert dumped["status"]["message"]["parts"][0]["text"] == "boom with /secret/path"
     assert dumped["metadata"]["iac_code"]["error"] == {"retryable": False, "errorId": "err-123"}
+
+
+@pytest.mark.asyncio
+async def test_error_event_uses_request_language_for_localizable_message(monkeypatch) -> None:
+    queue = FakeEventQueue()
+    monkeypatch.setattr(
+        "iac_code.a2a.events.translate_message",
+        lambda message, *, language: f"{language}:{message}",
+    )
+
+    with a2a_request_context(preferred_language="fr"):
+        await publish_stream_event(
+            queue,
+            task_id="task-1",
+            context_id="ctx-1",
+            event=ErrorEvent(
+                error="process-locale text must not win",
+                is_retryable=False,
+                i18n_message_id="Provider request lease cannot be consumed from state {state}.",
+                i18n_message_args={"state": "'released'"},
+            ),
+        )
+
+    dumped = dump(queue.events[0])
+    assert dumped["status"]["message"]["parts"][0]["text"] == (
+        "fr:Provider request lease cannot be consumed from state 'released'."
+    )
+
+
+@pytest.mark.asyncio
+async def test_empty_error_event_localizes_unknown_error_for_request(monkeypatch) -> None:
+    queue = FakeEventQueue()
+    monkeypatch.setattr(
+        "iac_code.a2a.events.translate_message",
+        lambda message, *, language: f"{language}:{message}",
+    )
+
+    with a2a_request_context(preferred_language="ja"):
+        await publish_stream_event(
+            queue,
+            task_id="task-1",
+            context_id="ctx-1",
+            event=ErrorEvent(error="", is_retryable=False),
+        )
+
+    dumped = dump(queue.events[0])
+    assert dumped["status"]["message"]["parts"][0]["text"] == "ja:Unknown error"
 
 
 @pytest.mark.asyncio

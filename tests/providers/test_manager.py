@@ -14,7 +14,9 @@ from iac_code.providers.manager import (
     _PROVIDER_MODEL_FALLBACK_MAP,
     MODEL_FALLBACK_MAP,
     ProviderManager,
+    ProviderRequestLeaseError,
     _detect_provider_name,
+    _error_event_from_exception,
     _is_bailian_compatible_endpoint,
     _telemetry_provider_name,
     create_provider,
@@ -37,6 +39,19 @@ STREAM_IDLE_TEST_TIMEOUT = 0.2
 
 async def _collect_stream_events(stream):
     return [event async for event in stream]
+
+
+def test_localizable_provider_error_metadata_reaches_error_event() -> None:
+    event = _error_event_from_exception(
+        ProviderRequestLeaseError(
+            "Provider request lease cannot be consumed from state {state}.",
+            state="'released'",
+        )
+    )
+
+    assert event.i18n_message_id == "Provider request lease cannot be consumed from state {state}."
+    assert event.i18n_message_args == {"state": "'released'"}
+    assert "'released'" in event.error
 
 
 class TestCreateProvider:
@@ -1040,6 +1055,7 @@ class TestProviderManagerStreaming:
             "model": "claude-sonnet-4-6",
             GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN: ttft_calls[0].args[1],
             "first_token_source": "thinking_delta",
+            IacCodeAttr.OFFICIAL_ENDPOINT: False,
             **scope,
         }
 
@@ -1632,6 +1648,11 @@ class TestProviderManagerStreaming:
             status_code = 429
 
         class FlakyStreamProvider:
+            _PROVIDER_KEY = "dashscope_token_plan"
+            _logical_provider_key = "dashscope_token_plan"
+            _ADAPTER_NAME = "qwen"
+            _base_url = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+
             def __init__(self):
                 self.stream_calls = 0
                 self.complete_calls = 0
@@ -1676,6 +1697,8 @@ class TestProviderManagerStreaming:
         assert retried[0]["attempt"] == 1
         assert retried[0]["error_type"] == "Status429Error"
         assert retried[0]["streaming"] is True
+        assert retried[0][IacCodeAttr.PROVIDER_ADAPTER] == "qwen"
+        assert retried[0][IacCodeAttr.OFFICIAL_ENDPOINT] is True
 
     async def test_stream_does_not_retry_streaming_once_events_reached_caller(self):
         from iac_code.providers.retry import RetryConfig
@@ -1900,7 +1923,15 @@ class TestProviderManagerCompleteRetry:
         assert success[0]["status"] == "ok"
         total_metrics = [(value, attrs) for name, value, attrs in metrics if name == Metrics.TOKEN_TOTAL]
         assert total_metrics == [
-            (120, {"provider": "asyncmock", "model": "claude-sonnet-4-6", "iac_code.mode": "normal"})
+            (
+                120,
+                {
+                    "provider": "asyncmock",
+                    "model": "claude-sonnet-4-6",
+                    IacCodeAttr.OFFICIAL_ENDPOINT: False,
+                    "iac_code.mode": "normal",
+                },
+            )
         ]
 
     async def test_complete_attributes_bailian_openai_endpoint_to_dashscope_on_all_signals(self):
@@ -2475,6 +2506,56 @@ class TestProviderManagerCompleteRetry:
         assert created_models == ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"]
         assert mgr.get_model_name() == "claude-sonnet-4-6"
         assert mgr._provider is original_provider
+
+    async def test_cross_family_qwen_fallback_prepares_qwen_prompt(self, monkeypatch):
+        from iac_code.providers.retry import RetryConfig
+
+        class Status503Error(Exception):
+            status_code = 503
+
+        class PrimaryProvider:
+            _PROVIDER_KEY = "dashscope"
+            _logical_provider_key = "dashscope"
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                raise Status503Error("temporary outage")
+
+        class FallbackQwenProvider:
+            _PROVIDER_KEY = "dashscope"
+            _logical_provider_key = "dashscope"
+            _ADAPTER_NAME = "qwen"
+
+            def prepare_system_prompt(self, system, tools):
+                return f"{system}\nqwen-fallback-prompt"
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                assert system == "base\nqwen-fallback-prompt"
+                return NonStreamingResponse(
+                    message_id="fallback-response",
+                    text="fallback ok",
+                    tool_uses=[],
+                    stop_reason="end_turn",
+                    usage=Usage(),
+                )
+
+        def fake_create_provider(model, credentials, **kwargs):
+            if model == "xiaomi/mimo-v2.5-pro":
+                return PrimaryProvider()
+            assert model == "qwen3.8-flash"
+            return FallbackQwenProvider()
+
+        monkeypatch.setattr("iac_code.providers.manager.create_provider", fake_create_provider)
+        manager = ProviderManager(
+            model="xiaomi/mimo-v2.5-pro",
+            credentials={"dashscope": "key"},
+            retry_config=RetryConfig(max_retries=0, base_delay=0, jitter_factor=0),
+        )
+
+        response = await manager.complete(messages=[Message.user("hi")], system="base")
+
+        assert response.text == "fallback ok"
+        assert response.usage_attribution.actual_model == "qwen3.8-flash"
+        assert response.usage_attribution.adapter_name == "qwen"
 
     async def test_fallback_preserves_runtime_provider_identity(self, monkeypatch):
         from iac_code.providers.retry import RetryConfig

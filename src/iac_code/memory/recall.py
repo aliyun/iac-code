@@ -14,6 +14,7 @@ from iac_code.memory.memory_manager import MemoryManager
 from iac_code.memory.project_memory import is_auto_memory_enabled
 from iac_code.providers.base import Message
 from iac_code.types.stream_events import Usage
+from iac_code.types.usage_attribution import UsageAttribution
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,7 @@ class MemoryRecallResult:
     selected_files: list[str] = field(default_factory=list)
     status: str = "skipped"
     usage: Usage | None = None
+    usage_attribution: UsageAttribution | None = None
 
 
 class MemoryRecallPrefetch:
@@ -200,6 +202,7 @@ class MemoryRecallService:
         self._stats.total_side_queries += 1
         self._stats.in_flight_side_queries += 1
         response_usage: Usage | None = None
+        response_attribution: UsageAttribution | None = None
         prompt = self._build_user_prompt(user_input, manifest)
         response_text = ""
         self._stats.last_usage = MemoryRecallUsageStats()
@@ -220,6 +223,9 @@ class MemoryRecallService:
             if isinstance(usage, Usage):
                 response_usage = usage
                 self._stats.record_usage(usage)
+            attribution = getattr(response, "usage_attribution", None)
+            if isinstance(attribution, UsageAttribution):
+                response_attribution = attribution
             response_text = str(getattr(response, "text", ""))
             selected_files = self._parse_selected_files(response_text, manifest)
             selected_files = self._filter_unsuppressed_files(selected_files)
@@ -230,7 +236,11 @@ class MemoryRecallService:
         except Exception:
             self._stats.failed_side_queries += 1
             self._record("failed", started, selected_files=[], prompt=prompt, response=response_text, side_query=True)
-            return MemoryRecallResult(status="failed", usage=response_usage)
+            return MemoryRecallResult(
+                status="failed",
+                usage=response_usage,
+                usage_attribution=response_attribution,
+            )
         finally:
             self._stats.in_flight_side_queries = max(0, self._stats.in_flight_side_queries - 1)
 
@@ -250,6 +260,7 @@ class MemoryRecallService:
             selected_files=selected_files,
             status="success",
             usage=response_usage,
+            usage_attribution=response_attribution,
         )
 
     def get_stats_snapshot(self) -> dict[str, Any]:

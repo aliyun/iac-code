@@ -396,7 +396,12 @@ def test_dashscope_new_model_protocols_are_not_flattened() -> None:
     assert deepseek.uses_reasoning_effort_param is True
 
     qwen = get_thinking_spec("dashscope", "qwen3.8-max")
-    assert qwen.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.XHIGH)
+    assert qwen.allowed_efforts == (
+        EffortLevel.LOW,
+        EffortLevel.MEDIUM,
+        EffortLevel.HIGH,
+        EffortLevel.XHIGH,
+    )
     assert qwen.default_effort is EffortLevel.XHIGH
     assert qwen.supports_disable is True
     assert DashScopeProvider(
@@ -460,7 +465,12 @@ def test_dashscope_new_model_protocols_are_not_flattened() -> None:
     )._build_thinking_kwargs() == {"extra_body": {"enable_thinking": False}}
 
     preview = get_thinking_spec("dashscope_token_plan", "qwen3.8-max-preview")
-    assert preview.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.XHIGH)
+    assert preview.allowed_efforts == (
+        EffortLevel.LOW,
+        EffortLevel.MEDIUM,
+        EffortLevel.HIGH,
+        EffortLevel.XHIGH,
+    )
     assert preview.default_effort is EffortLevel.XHIGH
     assert preview.supports_disable is False
     assert DashScopeProvider(

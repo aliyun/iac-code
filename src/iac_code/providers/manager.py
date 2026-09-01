@@ -6,11 +6,11 @@ import asyncio
 import copy
 import sys
 import time
+import uuid
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
-from urllib.parse import urlsplit
 
 from anthropic import APIConnectionError as AnthropicAPIConnectionError
 from loguru import logger
@@ -19,9 +19,17 @@ from opentelemetry.trace import Status, StatusCode
 
 from iac_code.i18n import _
 from iac_code.providers.base import Message, NonStreamingResponse, Provider, ToolDefinition
+from iac_code.providers.dashscope_endpoints import (
+    DASHSCOPE_WIRE_PROVIDER_KEYS,
+    is_bailian_compatible_endpoint,
+    official_dashscope_wire_provider_key,
+)
+from iac_code.providers.model_family import is_qwen_model
+from iac_code.providers.request_lease import LeaseToken, ProviderRequestLease
 from iac_code.providers.request_policy import ProviderRequestPolicy, bool_or_none, positive_int_or_none
 from iac_code.providers.retry import RetryableError, RetryConfig, with_retry
 from iac_code.providers.stream_watchdog import StreamWatchdog
+from iac_code.providers.streaming import UnsafeStreamProtocolError
 from iac_code.services.session_logging import is_custom_endpoint, sanitize_endpoint_origin
 from iac_code.services.telemetry import (
     add_metric,
@@ -64,6 +72,7 @@ from iac_code.types.stream_events import (
     ToolUseStartEvent,
     Usage,
 )
+from iac_code.types.usage_attribution import UsageAttribution
 from iac_code.utils.public_errors import public_error, public_exception_summary
 
 
@@ -73,6 +82,15 @@ class ProviderNotConfiguredError(ValueError):
 
 class ProviderConfigurationError(RuntimeError):
     """Raised when provider configuration cannot be loaded during a request."""
+
+
+class ProviderRequestLeaseError(ValueError):
+    """A request lease invariant failed with a localizable public message."""
+
+    def __init__(self, message_id: str, **message_args: Any) -> None:
+        self.i18n_message_id = message_id
+        self.i18n_message_args = message_args or None
+        super().__init__(_(message_id).format(**message_args))
 
 
 class _ModelRefusalError(RuntimeError):
@@ -116,34 +134,6 @@ _TOKEN_METRIC_SCOPE_KEYS = frozenset(
         PipelineAttr.CANDIDATE_INDEX,
     }
 )
-
-# Keep these telemetry-only allowlists aligned with the official Model Studio
-# Base URL overview: https://help.aliyun.com/zh/model-studio/base-url
-_BAILIAN_SHARED_HOSTS = frozenset(
-    {
-        "dashscope.aliyuncs.com",
-        "dashscope-intl.aliyuncs.com",
-        "dashscope-us.aliyuncs.com",
-    }
-)
-_BAILIAN_CODING_HOSTS = frozenset(
-    {
-        "coding.dashscope.aliyuncs.com",
-        "coding-intl.dashscope.aliyuncs.com",
-    }
-)
-_BAILIAN_MAAS_REGIONS = frozenset(
-    {
-        "cn-beijing",
-        "ap-southeast-1",
-        "ap-northeast-1",
-        "eu-central-1",
-        "us-east-1",
-    }
-)
-_BAILIAN_COMPATIBLE_PATHS = ("/compatible-mode", "/apps/anthropic")
-_BAILIAN_CODING_PATHS = ("/v1", "/apps/anthropic")
-
 
 class _BestEffortSpan:
     def __init__(self, span: Any | None = None) -> None:
@@ -344,6 +334,7 @@ class _StreamAttemptOutcome:
     refusal_detected: bool = False
     buffer_until_accepted: bool = False
     retryable_stream_error: BaseException | None = None
+    stream_failure_exception: BaseException | None = None
     provider_name: str = ""
     sanitized_model: str = ""
     orphaned_message_ids: list[str] = field(default_factory=list)
@@ -361,7 +352,15 @@ class _CompletionResult:
 def _error_event_from_exception(exc: BaseException) -> ErrorEvent:
     summary = public_exception_summary(exc, max_chars=1000)
     failure = public_error(message=summary, error_type=type(exc).__name__)
-    return ErrorEvent(error=summary, is_retryable=False, error_id=failure.error_id)
+    message_id = getattr(exc, "i18n_message_id", None)
+    message_args = getattr(exc, "i18n_message_args", None)
+    return ErrorEvent(
+        error=summary,
+        is_retryable=False,
+        error_id=failure.error_id,
+        i18n_message_id=message_id if isinstance(message_id, str) else None,
+        i18n_message_args=dict(message_args) if isinstance(message_args, dict) else None,
+    )
 
 
 MODEL_FALLBACK_MAP = {
@@ -512,6 +511,13 @@ def create_provider(
     wire_provider_key = _wire_provider_key_for_openai_compatible_base(
         provider_key,
         effective_base_url,
+        model=model,
+    )
+    thinking_intent = _resolve_thinking_intent(
+        provider_cfg,
+        model,
+        request_policy_override,
+        provider_key=wire_provider_key,
     )
     if _legacy_effort_disables_thinking(effort_override):
         effort = None
@@ -538,6 +544,10 @@ def create_provider(
         if wire_desc is not None:
             provider_class_path = wire_desc.provider_class
     provider_cls = _import_provider_class(provider_class_path)
+    if _should_use_qwen_provider(provider_cls, model):
+        from iac_code.providers.qwen_provider import QwenProvider
+
+        provider_cls = QwenProvider
     request_policy_kwargs: dict[str, Any] = {}
     if thinking_enabled is not None:
         request_policy_kwargs["thinking_enabled"] = thinking_enabled
@@ -548,6 +558,10 @@ def create_provider(
             request_policy_kwargs["thinking_budget"] = thinking_budget
         if max_completion_tokens is not None:
             request_policy_kwargs["max_completion_tokens"] = max_completion_tokens
+        from iac_code.providers.qwen_provider import QwenProvider
+
+        if issubclass(provider_cls, QwenProvider):
+            request_policy_kwargs["thinking_intent"] = thinking_intent
     else:
         from iac_code.providers.anthropic_provider import AnthropicProvider
 
@@ -581,6 +595,13 @@ def _import_provider_class(dotted_path: str):
 
     module = importlib.import_module(module_path)
     return getattr(module, class_name)
+
+
+def _should_use_qwen_provider(provider_cls: type, model: str) -> bool:
+    """Select the Qwen adapter only on an existing DashScope transport."""
+    from iac_code.providers.dashscope_provider import DashScopeProvider
+
+    return issubclass(provider_cls, DashScopeProvider) and is_qwen_model(model)
 
 
 def _get_model_provider_config(provider_cfg: dict[str, Any], model: str) -> dict[str, Any]:
@@ -619,15 +640,83 @@ def _get_bool_provider_config_value(provider_cfg: dict[str, Any], model: str, ke
 def _wire_provider_key_for_openai_compatible_base(
     provider_key: str,
     base_url: str | None,
+    *,
+    model: str = "",
 ) -> str:
     if provider_key != "openai_compatible" or not isinstance(base_url, str):
         return provider_key
-    lower_base_url = base_url.lower()
-    if "token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode" in lower_base_url:
-        return "dashscope_token_plan"
-    if "dashscope.aliyuncs.com/compatible-mode" in lower_base_url:
-        return "dashscope"
+    wire_key = official_dashscope_wire_provider_key(base_url)
+    if wire_key is None:
+        return provider_key
+    # Preserve the feature's pre-existing non-Qwen route set. New regional and
+    # Coding Plan recognition is enabled only for Qwen requests.
+    if wire_key == "dashscope" and _is_legacy_standard_dashscope_url(base_url):
+        return wire_key
+    if wire_key == "dashscope_token_plan" and _is_legacy_token_plan_url(base_url):
+        return wire_key
+    if is_qwen_model(model):
+        return wire_key
     return provider_key
+
+
+def _is_legacy_standard_dashscope_url(base_url: str) -> bool:
+    try:
+        from urllib.parse import urlsplit
+
+        host = (urlsplit(base_url.strip()).hostname or "").lower().rstrip(".")
+    except ValueError:
+        return False
+    return host in {"dashscope.aliyuncs.com", "cn-hongkong.dashscope.aliyuncs.com"}
+
+
+def _is_legacy_token_plan_url(base_url: str) -> bool:
+    try:
+        from urllib.parse import urlsplit
+
+        host = (urlsplit(base_url.strip()).hostname or "").lower().rstrip(".")
+    except ValueError:
+        return False
+    return host == "token-plan.cn-beijing.maas.aliyuncs.com"
+
+
+def _resolve_thinking_intent(
+    provider_cfg: dict[str, Any],
+    model: str,
+    request_policy: ProviderRequestPolicy | None,
+    *,
+    provider_key: str,
+):
+    from iac_code.providers.thinking_intent import ResolvedThinkingIntent, SourcedValue
+
+    model_cfg = _get_model_provider_config(provider_cfg, model)
+
+    def configured(key: str, converter):
+        model_value = converter(model_cfg.get(key)) if key in model_cfg else None
+        if model_value is not None:
+            return SourcedValue(model_value, "model")
+        provider_value = converter(provider_cfg.get(key))
+        if provider_value is not None:
+            return SourcedValue(provider_value, "provider")
+        return SourcedValue()
+
+    def effort_value(value: Any) -> str | None:
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
+    enabled = configured("thinkingEnabled", bool_or_none)
+    effort = configured("effort", effort_value)
+    budget = configured("thinkingBudget", positive_int_or_none)
+    if request_policy is not None:
+        if request_policy.thinking_enabled is not None:
+            enabled = SourcedValue(request_policy.thinking_enabled, "request")
+        if request_policy.effort is not None:
+            effort = SourcedValue(request_policy.effort, "request")
+        if request_policy.thinking_budget is not None:
+            budget = SourcedValue(request_policy.thinking_budget, "request")
+    if _legacy_effort_disables_thinking(effort.value):
+        if enabled.priority <= effort.priority:
+            enabled = SourcedValue(False, effort.source)
+        effort = SourcedValue()
+    return ResolvedThinkingIntent(enabled=enabled, effort=effort, budget=budget)
 
 
 def _positive_int_or_none(value: Any) -> int | None:
@@ -710,50 +799,30 @@ def _provider_endpoint_url(provider: Any) -> str | None:
 
 def _is_bailian_compatible_endpoint(base_url: str | None) -> bool:
     """Return whether a compatible API URL is an official Bailian endpoint."""
-    if not isinstance(base_url, str) or not base_url.strip():
-        return False
-    try:
-        parsed = urlsplit(base_url.strip())
-        hostname = parsed.hostname
-        port = parsed.port
-    except ValueError:
-        return False
-    if parsed.scheme.lower() != "https" or not hostname or port not in (None, 443):
-        return False
-    normalized_host = hostname.lower().rstrip(".")
-    path = parsed.path.rstrip("/")
-    if normalized_host in _BAILIAN_CODING_HOSTS:
-        return _path_matches_any_prefix(path, _BAILIAN_CODING_PATHS)
-    if normalized_host in _BAILIAN_SHARED_HOSTS:
-        return _path_matches_any_prefix(path, _BAILIAN_COMPATIBLE_PATHS)
-    labels = normalized_host.split(".")
-    is_maas_host = (
-        len(labels) == 5
-        and labels[-3:] == ["maas", "aliyuncs", "com"]
-        and _is_dns_label(labels[0])
-        and labels[1] in _BAILIAN_MAAS_REGIONS
-    )
-    return is_maas_host and _path_matches_any_prefix(path, _BAILIAN_COMPATIBLE_PATHS)
-
-
-def _path_matches_any_prefix(path: str, prefixes: tuple[str, ...]) -> bool:
-    return any(path == prefix or path.startswith(f"{prefix}/") for prefix in prefixes)
-
-
-def _is_dns_label(value: str) -> bool:
-    return (
-        1 <= len(value) <= 63
-        and value[0] != "-"
-        and value[-1] != "-"
-        and all(character == "-" or "a" <= character <= "z" or "0" <= character <= "9" for character in value)
-    )
+    return is_bailian_compatible_endpoint(base_url)
 
 
 def _telemetry_provider_name(provider: Any) -> str:
     """Resolve the service provider reported by telemetry without changing the request adapter."""
+    wire_provider_key = _string_provider_attr(provider, "_PROVIDER_KEY")
+    if wire_provider_key in DASHSCOPE_WIRE_PROVIDER_KEYS:
+        return "dashscope"
     if _is_bailian_compatible_endpoint(_provider_endpoint_url(provider)):
         return "dashscope"
     return type(provider).__name__.replace("Provider", "").lower()
+
+
+def _provider_telemetry_attrs(provider: Any) -> dict[str, str | bool]:
+    attrs: dict[str, str | bool] = {
+        IacCodeAttr.OFFICIAL_ENDPOINT: official_dashscope_wire_provider_key(
+            _provider_endpoint_url(provider)
+        )
+        is not None,
+    }
+    adapter_name = _string_provider_attr(provider, "_ADAPTER_NAME")
+    if adapter_name is not None:
+        attrs[IacCodeAttr.PROVIDER_ADAPTER] = adapter_name
+    return attrs
 
 
 class ProviderManager:
@@ -785,6 +854,7 @@ class ProviderManager:
         self._base_url_override = base_url_override
         self._effort_override = effort_override
         self._provider_config_override = copy.deepcopy(provider_config_override)
+        self._lease_owner_identity = object()
         self._request_policy_override = _request_policy_with_effort_override(request_policy_override, effort_override)
         # 会话级显式 provider 覆盖时,忽略全局合作方源 llm_source(当前唯一实现为 QwenPaw)的每轮热切换:
         # 否则每次请求开头的 _check_qwenpaw_config_change 都会因全局 llm_source 仍指向合作方而把本会话
@@ -841,6 +911,71 @@ class ProviderManager:
         if self._pinned_provider is not None and self._pinned_model is not None:
             return self._pinned_provider, self._pinned_model
         return self._ensure_provider(), self._model
+
+    def begin_request(
+        self,
+        system: str,
+        tools: list[ToolDefinition] | None = None,
+    ) -> ProviderRequestLease:
+        """Atomically bind one request to its provider, model, and prompt."""
+        self._check_qwenpaw_config_change()
+        provider, actual_model = self._active_provider_and_model()
+        prompt_preparer = getattr(type(provider), "prepare_system_prompt", None)
+        effective_system = prompt_preparer(provider, system, tools) if callable(prompt_preparer) else system
+        logical_key = _string_provider_attr(provider, "_logical_provider_key") or self.get_provider_key()
+        wire_key = _string_provider_attr(provider, "_PROVIDER_KEY") or logical_key
+        adapter_name = _string_provider_attr(provider, "_ADAPTER_NAME")
+        return ProviderRequestLease(
+            request_id=f"req_{uuid.uuid4().hex}",
+            provider=provider,
+            system_prompt=effective_system,
+            requested_model=self._model,
+            logical_provider_key=logical_key,
+            wire_provider_key=wire_key,
+            telemetry_provider_name=_telemetry_provider_name(provider),
+            adapter_name=adapter_name,
+            context_window_model=actual_model,
+            _owner_identity=self._lease_owner_identity,
+            _lease_token=LeaseToken(),
+        )
+
+    def _consume_request_lease(self, lease: ProviderRequestLease) -> None:
+        self._validate_request_lease(lease)
+        token = lease._lease_token
+        if token.state != "active":
+            raise ProviderRequestLeaseError(
+                "Provider request lease cannot be consumed from state {state}.",
+                state=repr(token.state),
+            )
+        token.state = "consumed"
+
+    def release_request(self, lease: ProviderRequestLease) -> None:
+        self._validate_request_lease(lease)
+        token = lease._lease_token
+        if token.state == "released":
+            raise ProviderRequestLeaseError("Provider request lease was already released.")
+        token.state = "released"
+
+    def _validate_request_lease(self, lease: ProviderRequestLease) -> None:
+        if not isinstance(lease, ProviderRequestLease) or lease._owner_identity is not self._lease_owner_identity:
+            raise ProviderRequestLeaseError("Provider request lease belongs to a different manager.")
+
+    def _usage_attribution(
+        self,
+        lease: ProviderRequestLease,
+        *,
+        provider: Provider,
+        actual_model: str,
+        telemetry_provider_name: str | None = None,
+    ) -> UsageAttribution:
+        return UsageAttribution(
+            logical_provider_key=lease.logical_provider_key,
+            wire_provider_key=_string_provider_attr(provider, "_PROVIDER_KEY") or lease.wire_provider_key,
+            telemetry_provider_name=telemetry_provider_name or _telemetry_provider_name(provider),
+            adapter_name=_string_provider_attr(provider, "_ADAPTER_NAME"),
+            requested_model=lease.requested_model,
+            actual_model=actual_model,
+        )
 
     def _provider_create_kwargs(self) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
@@ -993,18 +1128,69 @@ class ProviderManager:
         tools: list[ToolDefinition] | None = None,
         max_tokens: int = 8192,
         telemetry_messages: list[Any] | None = None,
+        *,
+        lease: ProviderRequestLease | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         captured_scope = _safe_span_scope_attributes()
         captured_parent = _safe_current_context()
-        return self._stream_impl(
+        return self._stream_with_request_lease(
             messages,
             system,
             tools,
             max_tokens,
+            lease=lease,
             telemetry_messages=telemetry_messages,
             captured_scope=captured_scope,
             captured_parent=captured_parent,
         )
+
+    async def _stream_with_request_lease(
+        self,
+        messages: list[Message],
+        system: str,
+        tools: list[ToolDefinition] | None,
+        max_tokens: int,
+        *,
+        lease: ProviderRequestLease | None,
+        telemetry_messages: list[Any] | None,
+        captured_scope: dict[str, str | int],
+        captured_parent: Any,
+    ) -> AsyncGenerator[StreamEvent, None]:
+        implicit_lease = lease is None
+        try:
+            active_lease = lease or self.begin_request(system, tools)
+            self._consume_request_lease(active_lease)
+            if system != active_lease.system_prompt:
+                if implicit_lease:
+                    system = active_lease.system_prompt
+                else:
+                    raise ProviderRequestLeaseError(
+                        "Explicit request lease system prompt does not match the streamed prompt."
+                    )
+            request_stream = self._stream_impl(
+                messages,
+                system,
+                tools,
+                max_tokens,
+                lease=active_lease,
+                telemetry_messages=telemetry_messages,
+                captured_scope=captured_scope,
+                captured_parent=captured_parent,
+            )
+            try:
+                while True:
+                    try:
+                        event = await anext(request_stream)
+                    except StopAsyncIteration:
+                        break
+                    yield event
+            finally:
+                await request_stream.aclose()
+        except ProviderConfigurationError as exc:
+            yield _error_event_from_exception(exc)
+        finally:
+            if implicit_lease and "active_lease" in locals() and active_lease._lease_token.state != "released":
+                self.release_request(active_lease)
 
     async def _stream_attempt(
         self,
@@ -1013,6 +1199,7 @@ class ProviderManager:
         tools: list[ToolDefinition] | None,
         max_tokens: int,
         *,
+        lease: ProviderRequestLease,
         telemetry_messages: list[Any] | None,
         captured_scope: dict[str, str | int],
         captured_parent: Any,
@@ -1024,13 +1211,10 @@ class ProviderManager:
         attempt is retried or downgraded to a non-streaming request belongs to
         ``_stream_impl``.
         """
-        try:
-            self._check_qwenpaw_config_change()
-        except ProviderConfigurationError as exc:
-            yield _error_event_from_exception(exc)
-            return
-        provider, model = self._active_provider_and_model()
+        provider = lease.provider
+        model = lease.context_window_model
         provider_name = _telemetry_provider_name(provider)
+        provider_identity_attrs = _provider_telemetry_attrs(provider)
         sanitized_model = sanitize_model_name(model)
         outcome.provider_name = provider_name
         outcome.sanitized_model = sanitized_model
@@ -1048,6 +1232,7 @@ class ProviderManager:
             GenAiAttr.SESSION_ID: session_id,
             GenAiAttr.CONVERSATION_ID: session_id,
             GenAiAttr.OUTPUT_TYPE: "text",
+            **provider_identity_attrs,
         }
         span_attrs.update(captured_scope)
         _capture_request_content(span_attrs, messages, system, tools, telemetry_messages)
@@ -1058,6 +1243,7 @@ class ProviderManager:
         buffer_until_accepted = model in _MODEL_REFUSAL_FALLBACK_MAP
         buffered_events: list[StreamEvent] = []
         streaming_failed = False
+        stream_failure_exception: BaseException | None = None
         refusal_detected = False
         first_token_received = False
         watchdog: StreamWatchdog | None = None
@@ -1066,7 +1252,6 @@ class ProviderManager:
         close_attempted = False
         close_completed = False
         end_attempted = False
-        stream_exception: BaseException | None = None
         idle_timeout_hit = False
 
         with replace_span_attributes(captured_scope):
@@ -1139,6 +1324,7 @@ class ProviderManager:
                     started,
                     event.usage,
                     status=status,
+                    identity_attrs=provider_identity_attrs,
                 )
             return True
 
@@ -1168,6 +1354,7 @@ class ProviderManager:
                     status=status,
                     record_duration=True,
                     scope_attrs=captured_scope,
+                    identity_attrs=provider_identity_attrs,
                 )
             return True
 
@@ -1179,6 +1366,7 @@ class ProviderManager:
                         "provider": provider_name,
                         "model": sanitized_model,
                         "message_count": len(messages),
+                        **provider_identity_attrs,
                     },
                 )
             watchdog = StreamWatchdog(idle_timeout=self._stream_idle_timeout)
@@ -1213,6 +1401,7 @@ class ProviderManager:
                                     "model": sanitized_model,
                                     GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN: ttft_ns,
                                     "first_token_source": event.type,
+                                    **provider_identity_attrs,
                                     **captured_scope,
                                 },
                             )
@@ -1249,6 +1438,15 @@ class ProviderManager:
                     raise
 
                 if isinstance(event, MessageEndEvent):
+                    event = replace(
+                        event,
+                        usage_attribution=self._usage_attribution(
+                            lease,
+                            provider=provider,
+                            actual_model=model,
+                            telemetry_provider_name=provider_name,
+                        ),
+                    )
                     watchdog.stop()
                     if event.stop_reason == "refusal":
                         commit_success(event, status="refusal")
@@ -1314,6 +1512,7 @@ class ProviderManager:
                 end_span_once()
             raise
         except Exception as exc:
+            stream_failure_exception = exc
             already_terminal = terminal_status is not None
             commit_failure(
                 exc,
@@ -1328,8 +1527,10 @@ class ProviderManager:
             if already_terminal:
                 raise
             streaming_failed = True
-            stream_exception = exc
-            logger.warning(f"Streaming failed: {exc}")
+            if isinstance(exc, UnsafeStreamProtocolError):
+                logger.warning("Unsafe Qwen stream detected; replaying with streaming protocol validation")
+            else:
+                logger.warning(f"Streaming failed, falling back to non-streaming: {exc}")
         except BaseException as exc:
             commit_failure(
                 exc,
@@ -1351,13 +1552,14 @@ class ProviderManager:
         outcome.buffer_until_accepted = buffer_until_accepted
         outcome.orphaned_message_ids = orphaned_message_ids
         outcome.orphaned_tool_use_ids = orphaned_tool_use_ids
+        outcome.stream_failure_exception = stream_failure_exception
         if (
             streaming_failed
-            and stream_exception is not None
+            and stream_failure_exception is not None
             and not idle_timeout_hit
-            and _is_retryable_provider_error(stream_exception)
+            and _is_retryable_provider_error(stream_failure_exception)
         ):
-            outcome.retryable_stream_error = stream_exception
+            outcome.retryable_stream_error = stream_failure_exception
 
     async def _stream_impl(
         self,
@@ -1366,6 +1568,7 @@ class ProviderManager:
         tools: list[ToolDefinition] | None,
         max_tokens: int,
         *,
+        lease: ProviderRequestLease,
         telemetry_messages: list[Any] | None,
         captured_scope: dict[str, str | int],
         captured_parent: Any,
@@ -1382,6 +1585,11 @@ class ProviderManager:
         reached the caller: once events are out, a second attempt would
         duplicate them, so that case still downgrades (behind a tombstone).
         """
+        provider = lease.provider
+        model = lease.context_window_model
+        provider_name = _telemetry_provider_name(provider)
+        provider_identity_attrs = _provider_telemetry_attrs(provider)
+        sanitized_model = sanitize_model_name(model)
         attempt = 0
         # Bound before the loop as well so the post-loop read is unambiguous.
         outcome = _StreamAttemptOutcome()
@@ -1393,6 +1601,7 @@ class ProviderManager:
                 system,
                 tools,
                 max_tokens,
+                lease=lease,
                 telemetry_messages=telemetry_messages,
                 captured_scope=captured_scope,
                 captured_parent=captured_parent,
@@ -1425,10 +1634,12 @@ class ProviderManager:
                     "attempt": attempt,
                     "error_type": type(retryable_error).__name__,
                     "streaming": True,
+                    **provider_identity_attrs,
                 },
             )
             await asyncio.sleep(delay)
 
+        stream_failure_exception = outcome.stream_failure_exception
         if outcome.streaming_failed:
             logger.warning("Falling back to non-streaming after the stream failed")
             if not outcome.buffer_until_accepted:
@@ -1437,6 +1648,196 @@ class ProviderManager:
                         message_id=msg_id,
                         affected_tool_use_ids=outcome.orphaned_tool_use_ids.get(msg_id, []),
                     )
+            if isinstance(stream_failure_exception, UnsafeStreamProtocolError):
+                span_name = f"{Spans.LLM_CHAT} {model}"
+                session_id = _safe_session_id()
+                span_attrs = {
+                    GenAiAttr.SPAN_KIND: GenAiSpanKind.LLM,
+                    GenAiAttr.OPERATION_NAME: GenAiOperationName.CHAT,
+                    GenAiAttr.PROVIDER_NAME: provider_name,
+                    GenAiAttr.REQUEST_MODEL: model,
+                    GenAiAttr.REQUEST_MAX_TOKENS: max_tokens,
+                    GenAiAttr.SESSION_ID: session_id,
+                    GenAiAttr.CONVERSATION_ID: session_id,
+                    GenAiAttr.OUTPUT_TYPE: "text",
+                    **provider_identity_attrs,
+                    **captured_scope,
+                }
+                _capture_request_content(span_attrs, messages, system, tools, telemetry_messages)
+                last_unsafe_error: BaseException = stream_failure_exception
+                for _replay_attempt in range(2):
+                    replay_message_ids: list[str] = []
+                    replay_tool_ids: dict[str, list[str]] = {}
+                    replay_current_message: str | None = None
+                    replay_iter: AsyncGenerator[StreamEvent, None] | None = None
+                    replay_started = time.monotonic()
+                    replay_span = _safe_start_detached_span(span_name, span_attrs, captured_parent)
+                    replay_span_ended = False
+
+                    @contextmanager
+                    def activate_replay_span() -> Iterator[None]:
+                        with replace_span_attributes(captured_scope), _safe_use_span(replay_span):
+                            yield
+
+                    def end_replay_span_once() -> None:
+                        nonlocal replay_span_ended
+                        if replay_span_ended:
+                            return
+                        replay_span_ended = True
+                        try:
+                            with replace_span_attributes(captured_scope):
+                                replay_span.end()
+                        except Exception:
+                            logger.opt(exception=True).warning(
+                                "Provider replay telemetry span failed to end: span={}", span_name
+                            )
+
+                    def commit_replay_failure(
+                        exc: BaseException,
+                        *,
+                        status: str = "error",
+                        mark_span_error: bool = True,
+                        record_exception: bool = True,
+                    ) -> None:
+                        with activate_replay_span():
+                            description = public_exception_summary(exc, max_chars=1000)
+                            if record_exception:
+                                replay_span.record_exception_once(exc)
+                            if mark_span_error:
+                                replay_span.set_error_status_once(description)
+                            self._emit_failure_telemetry(
+                                provider_name,
+                                sanitized_model,
+                                replay_started,
+                                exc,
+                                status=status,
+                                record_duration=True,
+                                scope_attrs=captured_scope,
+                                identity_attrs=provider_identity_attrs,
+                            )
+                        end_replay_span_once()
+
+                    with activate_replay_span():
+                        _safe_log_event(
+                            Events.API_REQUEST_STARTED,
+                            {
+                                "provider": provider_name,
+                                "model": sanitized_model,
+                                "message_count": len(messages),
+                                "replay_attempt": _replay_attempt + 1,
+                                **provider_identity_attrs,
+                            },
+                        )
+                    replay_first_token_received = False
+                    try:
+                        replay_iter = provider.stream(messages, system, tools, max_tokens)
+                        async for replay_event in replay_iter:
+                            if isinstance(replay_event, MessageStartEvent):
+                                replay_message_ids.append(replay_event.message_id)
+                                replay_current_message = replay_event.message_id
+                                replay_tool_ids.setdefault(replay_event.message_id, [])
+                                replay_span.set_attribute(GenAiAttr.RESPONSE_ID, replay_event.message_id)
+                            elif (
+                                isinstance(replay_event, (ToolUseStartEvent, ToolUseEndEvent))
+                                and replay_current_message is not None
+                            ):
+                                ids = replay_tool_ids.setdefault(replay_current_message, [])
+                                if replay_event.tool_use_id not in ids:
+                                    ids.append(replay_event.tool_use_id)
+                            elif (
+                                isinstance(replay_event, (TextDeltaEvent, ThinkingDeltaEvent))
+                                and replay_event.text
+                                and not replay_first_token_received
+                            ):
+                                replay_first_token_received = True
+                                ttft_ns = int((time.monotonic() - replay_started) * 1_000_000_000)
+                                replay_span.set_attribute(GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN, ttft_ns)
+                                with activate_replay_span():
+                                    _safe_log_event(
+                                        Events.API_RESPONSE_FIRST_TOKEN,
+                                        {
+                                            "provider": provider_name,
+                                            "model": sanitized_model,
+                                            GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN: ttft_ns,
+                                            "first_token_source": replay_event.type,
+                                            "replay_attempt": _replay_attempt + 1,
+                                            **provider_identity_attrs,
+                                            **captured_scope,
+                                        },
+                                    )
+                            if isinstance(replay_event, MessageEndEvent):
+                                replay_event.usage.provider = provider_name
+                                replay_event.usage.model = sanitized_model
+                                terminal_event = replace(
+                                    replay_event,
+                                    usage_attribution=self._usage_attribution(
+                                        lease,
+                                        provider=provider,
+                                        actual_model=model,
+                                        telemetry_provider_name=provider_name,
+                                    ),
+                                )
+                                with activate_replay_span():
+                                    self._set_llm_response_span_attrs(replay_span, terminal_event, model)
+                                    self._emit_success_telemetry(
+                                        provider_name,
+                                        sanitized_model,
+                                        replay_started,
+                                        terminal_event.usage,
+                                        identity_attrs=provider_identity_attrs,
+                                    )
+                                end_replay_span_once()
+                                yield terminal_event
+                                return
+                            yield replay_event
+                        raise UnsafeStreamProtocolError(
+                            "Qwen replay ended before message completion."
+                        )
+                    except UnsafeStreamProtocolError as exc:
+                        last_unsafe_error = exc
+                        commit_replay_failure(exc)
+                    except asyncio.CancelledError as exc:
+                        commit_replay_failure(
+                            exc,
+                            status="cancelled",
+                            mark_span_error=False,
+                            record_exception=False,
+                        )
+                        raise
+                    except GeneratorExit as exc:
+                        commit_replay_failure(
+                            exc,
+                            status="cancelled",
+                            mark_span_error=False,
+                            record_exception=False,
+                        )
+                        raise
+                    except Exception as exc:
+                        commit_replay_failure(exc)
+                        for msg_id in replay_message_ids:
+                            yield TombstoneEvent(
+                                message_id=msg_id,
+                                affected_tool_use_ids=replay_tool_ids.get(msg_id, []),
+                            )
+                        yield _error_event_from_exception(exc)
+                        return
+                    except BaseException as exc:
+                        commit_replay_failure(exc)
+                        raise
+                    finally:
+                        if replay_iter is not None:
+                            try:
+                                await replay_iter.aclose()
+                            except Exception:
+                                logger.opt(exception=True).warning("Qwen replay stream close failed")
+                        end_replay_span_once()
+                    for msg_id in replay_message_ids:
+                        yield TombstoneEvent(
+                            message_id=msg_id,
+                            affected_tool_use_ids=replay_tool_ids.get(msg_id, []),
+                        )
+                yield _error_event_from_exception(last_unsafe_error)
+                return
             try:
                 with replace_span_attributes(captured_scope), _safe_attach_parent_context(captured_parent):
                     completion = await self._complete_with_retry_result(
@@ -1444,6 +1845,8 @@ class ProviderManager:
                         system,
                         tools,
                         max_tokens,
+                        provider_override=provider,
+                        model_override=model,
                         telemetry_messages=telemetry_messages,
                         refusal_detected=outcome.refusal_detected,
                     )
@@ -1453,6 +1856,16 @@ class ProviderManager:
             response = completion.response
             response.usage.provider = completion.provider_name
             response.usage.model = sanitize_model_name(completion.model)
+            completion_provider = getattr(completion, "provider", provider)
+            completion_model = getattr(completion, "model", model)
+            completion_provider_name = getattr(completion, "provider_name", provider_name)
+            attribution = self._usage_attribution(
+                lease,
+                provider=completion_provider,
+                actual_model=completion_model,
+                telemetry_provider_name=completion_provider_name,
+            )
+            response = replace(response, usage_attribution=attribution)
             yield MessageStartEvent(message_id=response.message_id)
             if response.thinking_blocks:
                 for block_index, block in enumerate(response.thinking_blocks):
@@ -1484,7 +1897,11 @@ class ProviderManager:
                     provider_metadata=provider_metadata,
                     input_error=tu.get("input_error"),
                 )
-            yield MessageEndEvent(stop_reason=response.stop_reason, usage=response.usage)
+            yield MessageEndEvent(
+                stop_reason=response.stop_reason,
+                usage=response.usage,
+                usage_attribution=attribution,
+            )
 
     @staticmethod
     def _set_llm_response_span_attrs(span, end_event: MessageEndEvent, model: str) -> None:
@@ -1522,6 +1939,7 @@ class ProviderManager:
         usage: Usage,
         *,
         status: str = "ok",
+        identity_attrs: dict[str, str | bool] | None = None,
     ) -> None:
         duration_ms = int((time.monotonic() - started) * 1000)
         scope_attrs = _safe_span_scope_attributes()
@@ -1547,10 +1965,15 @@ class ProviderManager:
                 "status": status,
                 "duration_ms": duration_ms,
                 **usage_attrs,
+                **(identity_attrs or {}),
                 **scope_attrs,
             },
         )
-        request_metric_attrs = {"provider": provider_name, "model": model}
+        request_metric_attrs = {
+            "provider": provider_name,
+            "model": model,
+            **(identity_attrs or {}),
+        }
         _safe_add_metric(
             Metrics.API_REQUEST_COUNT,
             1,
@@ -1589,6 +2012,7 @@ class ProviderManager:
         status: str = "error",
         record_duration: bool = False,
         scope_attrs: dict[str, str | int] | None = None,
+        identity_attrs: dict[str, str | bool] | None = None,
     ) -> None:
         duration_ms = int((time.monotonic() - started) * 1000)
         summary = public_exception_summary(exc, max_chars=1000)
@@ -1601,13 +2025,18 @@ class ProviderManager:
             "error_message": sanitize_error_message(failure.summary),
             "error_id": failure.error_id,
             "status": status,
+            **(identity_attrs or {}),
             **(scope_attrs or {}),
         }
         _safe_log_event(
             Events.API_REQUEST_FAILED,
             event_attrs,
         )
-        request_metric_attrs = {"provider": provider_name, "model": model}
+        request_metric_attrs = {
+            "provider": provider_name,
+            "model": model,
+            **(identity_attrs or {}),
+        }
         _safe_add_metric(
             Metrics.API_REQUEST_COUNT,
             1,
@@ -1624,15 +2053,40 @@ class ProviderManager:
         max_tokens: int = 8192,
         cache_policy: str = "default",
         telemetry_messages: list[Any] | None = None,
+        *,
+        lease: ProviderRequestLease | None = None,
     ) -> NonStreamingResponse:
-        return await self._complete_with_retry(
-            messages,
-            system,
-            tools,
-            max_tokens,
-            cache_policy=cache_policy,
-            telemetry_messages=telemetry_messages,
-        )
+        implicit_lease = lease is None
+        try:
+            active_lease = lease or self.begin_request(system, tools)
+            self._consume_request_lease(active_lease)
+            if system != active_lease.system_prompt:
+                if implicit_lease:
+                    system = active_lease.system_prompt
+                else:
+                    raise ProviderRequestLeaseError(
+                        "Explicit request lease system prompt does not match the completion prompt."
+                    )
+            result = await self._complete_with_retry_result(
+                messages,
+                system,
+                tools,
+                max_tokens,
+                provider_override=active_lease.provider,
+                model_override=active_lease.context_window_model,
+                cache_policy=cache_policy,
+                telemetry_messages=telemetry_messages,
+            )
+            attribution = self._usage_attribution(
+                active_lease,
+                provider=result.provider,
+                actual_model=result.model,
+                telemetry_provider_name=result.provider_name,
+            )
+            return replace(result.response, usage_attribution=attribution)
+        finally:
+            if implicit_lease and "active_lease" in locals() and active_lease._lease_token.state != "released":
+                self.release_request(active_lease)
 
     async def _complete_with_retry(
         self,
@@ -1679,6 +2133,7 @@ class ProviderManager:
         visited = set(fallback_visited or ())
         visited.add(model)
         provider_name = _telemetry_provider_name(provider)
+        provider_identity_attrs = _provider_telemetry_attrs(provider)
         sanitized_model = sanitize_model_name(model)
 
         async def _on_retry(attempt, exc, delay):
@@ -1689,6 +2144,7 @@ class ProviderManager:
                     "model": sanitized_model,
                     "attempt": attempt,
                     "error_type": type(exc).__name__,
+                    **provider_identity_attrs,
                 },
             )
 
@@ -1706,6 +2162,7 @@ class ProviderManager:
                 GenAiAttr.SESSION_ID: session_id,
                 GenAiAttr.CONVERSATION_ID: session_id,
                 GenAiAttr.OUTPUT_TYPE: "text",
+                **provider_identity_attrs,
                 **_safe_span_scope_attributes(),
             }
             _capture_request_content(span_attrs, messages, system, tools, telemetry_messages)
@@ -1721,6 +2178,7 @@ class ProviderManager:
                                 "provider": provider_name,
                                 "model": sanitized_model,
                                 "message_count": len(messages),
+                                **provider_identity_attrs,
                             },
                         )
                         request_started = time.monotonic()
@@ -1733,10 +2191,17 @@ class ProviderManager:
                             exc,
                             status="cancelled",
                             record_duration=True,
+                            identity_attrs=provider_identity_attrs,
                         )
                         raise
                     except Exception as exc:
-                        self._emit_failure_telemetry(provider_name, sanitized_model, request_started, exc)
+                        self._emit_failure_telemetry(
+                            provider_name,
+                            sanitized_model,
+                            request_started,
+                            exc,
+                            identity_attrs=provider_identity_attrs,
+                        )
                         raise
                     except BaseException as exc:
                         self._emit_failure_telemetry(
@@ -1747,6 +2212,7 @@ class ProviderManager:
                             status="error",
                             record_duration=True,
                             scope_attrs=_safe_span_scope_attributes(),
+                            identity_attrs=provider_identity_attrs,
                         )
                         raise
 
@@ -1759,6 +2225,7 @@ class ProviderManager:
                         request_started,
                         response.usage,
                         status=response_status,
+                        identity_attrs=provider_identity_attrs,
                     )
 
                 if response.stop_reason == "refusal":
@@ -1812,6 +2279,7 @@ class ProviderManager:
                         "from_model": sanitized_model,
                         "to_model": sanitize_model_name(fallback),
                         "reason": fallback_reason,
+                        **provider_identity_attrs,
                     },
                 )
                 try:
@@ -1828,9 +2296,15 @@ class ProviderManager:
                         self._credentials,
                         **fallback_kwargs,
                     )
+                    fallback_prompt_preparer = getattr(type(fallback_provider), "prepare_system_prompt", None)
+                    fallback_system = (
+                        fallback_prompt_preparer(fallback_provider, system, tools)
+                        if callable(fallback_prompt_preparer)
+                        else system
+                    )
                     result = await self._complete_with_retry_result(
                         messages,
-                        system,
+                        fallback_system,
                         tools,
                         max_tokens,
                         provider_override=fallback_provider,

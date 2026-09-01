@@ -9,6 +9,7 @@ import pytest
 
 from iac_code.memory.memory_manager import MemoryManager
 from iac_code.types.stream_events import Usage
+from iac_code.types.usage_attribution import UsageAttribution
 
 
 class FakeRecallProvider:
@@ -19,11 +20,13 @@ class FakeRecallProvider:
         delay: float = 0.0,
         error: Exception | None = None,
         usage: Usage | None = None,
+        usage_attribution: UsageAttribution | None = None,
     ):
         self.text = text
         self.delay = delay
         self.error = error
         self.usage = usage
+        self.usage_attribution = usage_attribution
         self.calls: list[dict[str, object]] = []
 
     async def complete(
@@ -47,7 +50,11 @@ class FakeRecallProvider:
             await asyncio.sleep(self.delay)
         if self.error is not None:
             raise self.error
-        return SimpleNamespace(text=self.text, usage=self.usage)
+        return SimpleNamespace(
+            text=self.text,
+            usage=self.usage,
+            usage_attribution=self.usage_attribution,
+        )
 
 
 class FailingMemoryManager:
@@ -205,6 +212,30 @@ async def test_recall_stats_record_side_call_token_usage(memory_manager):
         "recorded_events": 1,
         "has_recorded_usage": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_recall_result_preserves_terminal_usage_attribution(memory_manager):
+    from iac_code.memory.recall import MemoryRecallService
+
+    attribution = UsageAttribution(
+        logical_provider_key="openai_compatible",
+        wire_provider_key="dashscope",
+        telemetry_provider_name="dashscope",
+        adapter_name="qwen",
+        requested_model="qwen3.8-max",
+        actual_model="qwen3.7-plus",
+    )
+    service = MemoryRecallService(
+        memory_manager=memory_manager,
+        provider_manager=FakeRecallProvider(
+            json.dumps({"files": ["project-deadline.md"]}),
+            usage=Usage(input_tokens=3, output_tokens=1),
+            usage_attribution=attribution,
+        ),
+    )
+    result = await service.recall("deadline")
+    assert result.usage_attribution is attribution
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from iac_code.types.stream_events import StreamEvent, Usage
+from iac_code.types.usage_attribution import UsageAttribution
 
 
 @dataclass
@@ -90,6 +91,7 @@ class NonStreamingResponse:
     usage: Usage
     thinking: str = ""
     thinking_blocks: list[dict[str, Any]] = field(default_factory=list)
+    usage_attribution: UsageAttribution | None = field(default=None, kw_only=True, compare=False)
 
 
 class Provider(ABC):

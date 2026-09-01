@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Literal, Union
 
+from iac_code.types.usage_attribution import UsageAttribution
+
 TOOL_RENDER_METADATA_KEY = "_iac_code_tool_render"
 TOOL_RENDER_DISPLAY_NAME_KEY = "display_name"
 TOOL_RENDER_RESULT_COMPACT_KEY = "result_compact"
@@ -149,6 +151,7 @@ class MessageEndEvent:
     stop_reason: str
     usage: Usage
     type: Literal["message_end"] = "message_end"
+    usage_attribution: UsageAttribution | None = field(default=None, kw_only=True, compare=False)
 
 
 @dataclass
@@ -179,6 +182,8 @@ class ErrorEvent:
     is_retryable: bool
     error_id: str | None = None
     type: Literal["error"] = "error"
+    i18n_message_id: str | None = field(default=None, kw_only=True, compare=False)
+    i18n_message_args: dict[str, Any] | None = field(default=None, kw_only=True, compare=False)
 
 
 # -- AgentLoop-originated events (consumed by Renderer) ------------------------

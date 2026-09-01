@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 import uuid
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -20,16 +22,13 @@ from iac_code.providers.base import (
 )
 from iac_code.providers.request_logging import log_provider_request_policy
 from iac_code.providers.request_policy import bool_or_none, positive_int_or_none
+from iac_code.providers.streaming import OpenAIStreamResponseAdapter
 from iac_code.providers.thinking import ThinkingFamily, get_thinking_spec, normalize_effort
 from iac_code.types.stream_events import (
     MessageEndEvent,
     MessageStartEvent,
     StreamEvent,
-    TextDeltaEvent,
-    ThinkingDeltaEvent,
-    ToolInputDeltaEvent,
     ToolUseEndEvent,
-    ToolUseStartEvent,
     Usage,
 )
 from iac_code.utils.tool_input_parser import parse_tool_input_events
@@ -46,6 +45,15 @@ def _plain_mapping(value: Any) -> dict[str, Any]:
             if isinstance(dumped, dict):
                 return dumped
     return {}
+
+
+@dataclass
+class ChatRequestContext:
+    streaming: bool
+    cache_policy: str = "default"
+    mandatory_thinking_retry: bool = False
+    retry_attempted: bool = False
+    mandatory_thinking: bool | None = None
 
 
 class OpenAIProvider(Provider):
@@ -181,6 +189,19 @@ class OpenAIProvider(Provider):
     def get_model_name(self) -> str:
         return self._model
 
+    def prepare_system_prompt(self, system: str, tools: list[ToolDefinition] | None) -> str:
+        """Prepare the request-local system prompt without mutating provider state."""
+        return system
+
+    def _extract_reasoning_text(self, message_or_delta: Any) -> str:
+        reasoning = getattr(message_or_delta, "reasoning_content", None)
+        return reasoning if isinstance(reasoning, str) else ""
+
+    def _create_stream_response_adapter(
+        self, tools: list[ToolDefinition] | None
+    ) -> OpenAIStreamResponseAdapter:
+        return OpenAIStreamResponseAdapter(self, tools)
+
     # -- Message conversion ----------------------------------------------------
 
     def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
@@ -290,6 +311,113 @@ class OpenAIProvider(Provider):
             for t in tools
         ]
 
+    def _prepare_tool_schema_for_wire(self, schema: dict[str, Any]) -> dict[str, Any]:
+        return schema
+
+    def _build_api_tools(
+        self,
+        tools: list[ToolDefinition],
+        *,
+        streaming: bool,
+        cache_policy: str = "default",
+    ) -> list[dict[str, Any]]:
+        prepared = [
+            ToolDefinition(
+                name=tool.name,
+                description=tool.description,
+                input_schema=self._prepare_tool_schema_for_wire(tool.input_schema),
+            )
+            for tool in tools
+        ]
+        return self._convert_tools(prepared)
+
+    def _request_headers(self, *, cache_policy: str = "default") -> dict[str, str]:
+        return {}
+
+    def _thinking_kwargs_for_context(self, context: ChatRequestContext) -> dict[str, Any]:
+        return self._effort_request_kwargs()
+
+    def _create_chat_request_context(
+        self,
+        *,
+        streaming: bool,
+        cache_policy: str = "default",
+    ) -> ChatRequestContext:
+        return ChatRequestContext(streaming=streaming, cache_policy=cache_policy)
+
+    def _build_chat_completion_kwargs(
+        self,
+        messages: list[Message],
+        system: str,
+        tools: list[ToolDefinition] | None,
+        max_tokens: int,
+        context: ChatRequestContext,
+    ) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": self._build_api_messages(messages, system, cache_policy=context.cache_policy),
+        }
+        if context.streaming:
+            kwargs["stream"] = True
+        kwargs.update(self._token_limit_kwargs(max_tokens))
+        if context.streaming and self.supports_stream_options:
+            kwargs["stream_options"] = {"include_usage": True}
+        if tools:
+            kwargs["tools"] = self._build_api_tools(
+                tools,
+                streaming=context.streaming,
+                cache_policy=context.cache_policy,
+            )
+        headers = self._request_headers(cache_policy=context.cache_policy)
+        if headers:
+            kwargs["extra_headers"] = headers
+        kwargs.update(self._thinking_kwargs_for_context(context))
+        kwargs.update(self._extra_request_kwargs)
+        return kwargs
+
+    async def _create_chat_completion(
+        self,
+        build_kwargs: Any,
+        context: ChatRequestContext,
+        operation_name: str,
+    ) -> Any:
+        kwargs = build_kwargs()
+        log_provider_request_policy(self._PROVIDER_KEY, self._model, operation_name, kwargs)
+        request_started = time.monotonic()
+        try:
+            return await self._client.chat.completions.create(**kwargs)
+        except Exception as error:
+            if context.retry_attempted or not self._retry_request_context_after_error(error, kwargs, context):
+                raise
+            context.retry_attempted = True
+            self._record_request_compatibility_retry(
+                error,
+                context,
+                operation_name=operation_name,
+                duration_ms=int((time.monotonic() - request_started) * 1000),
+            )
+            retry_kwargs = build_kwargs()
+            log_provider_request_policy(self._PROVIDER_KEY, self._model, operation_name, retry_kwargs)
+            return await self._client.chat.completions.create(**retry_kwargs)
+
+    def _record_request_compatibility_retry(
+        self,
+        error: Exception,
+        context: ChatRequestContext,
+        *,
+        operation_name: str,
+        duration_ms: int,
+    ) -> None:
+        """Let provider adapters observe a consumed compatibility attempt."""
+
+    def _retry_request_context_after_error(
+        self,
+        error: Exception,
+        sent_kwargs: dict[str, Any],
+        context: ChatRequestContext,
+    ) -> bool:
+        return False
+
     # -- API message assembly ---------------------------------------------------
 
     def _build_api_messages(
@@ -318,40 +446,21 @@ class OpenAIProvider(Provider):
         tools: list[ToolDefinition] | None = None,
         max_tokens: int = 8192,
     ) -> AsyncGenerator[StreamEvent, None]:
-        api_messages = self._build_api_messages(messages, system)
+        context = self._create_chat_request_context(streaming=True)
 
-        kwargs: dict[str, Any] = {
-            "model": self._model,
-            "messages": api_messages,
-            "stream": True,
-        }
-        kwargs.update(self._token_limit_kwargs(max_tokens))
-        if self.supports_stream_options:
-            kwargs["stream_options"] = {"include_usage": True}
-        if tools:
-            kwargs["tools"] = self._convert_tools(tools)
-        for k, v in self._effort_request_kwargs().items():
-            kwargs[k] = v
-        for k, v in self._extra_request_kwargs.items():
-            kwargs[k] = v
+        def build_kwargs() -> dict[str, Any]:
+            return self._build_chat_completion_kwargs(messages, system, tools, max_tokens, context)
 
         message_id = f"msg_{uuid.uuid4().hex[:24]}"
         yield MessageStartEvent(message_id=message_id)
 
-        # Accumulators for tool calls (index-based)
-        tool_calls_acc: dict[int, dict[str, Any]] = {}
+        adapter = self._create_stream_response_adapter(tools)
         stop_reason = "end_turn"
+        raw_finish_reason: str | None = None
         usage = Usage()
         has_content = False
-        message_provider_metadata: dict[str, Any] = {}
 
-        log_provider_request_policy(
-            self._PROVIDER_KEY,
-            self._model,
-            "chat.completions.stream",
-            kwargs,
-        )
-        response = await self._client.chat.completions.create(**kwargs)
+        response = await self._create_chat_completion(build_kwargs, context, "chat.completions.stream")
         async for chunk in response:
             has_content = True
             # Usage info (final chunk)
@@ -377,6 +486,7 @@ class OpenAIProvider(Provider):
 
             # Finish reason
             if choice.finish_reason:
+                raw_finish_reason = choice.finish_reason
                 if choice.finish_reason == "tool_calls":
                     stop_reason = "tool_use"
                 elif choice.finish_reason == "length":
@@ -388,87 +498,8 @@ class OpenAIProvider(Provider):
             if delta is None:
                 continue
 
-            provider_metadata = self._message_provider_metadata(delta)
-            if provider_metadata and provider_metadata != message_provider_metadata:
-                message_provider_metadata = provider_metadata
-                yield ThinkingDeltaEvent(text="", provider_metadata=provider_metadata)
-
-            # Reasoning content (DeepSeek V4, Qwen thinking mode via OpenAI-compat)
-            reasoning = getattr(delta, "reasoning_content", None)
-            if reasoning:
-                yield ThinkingDeltaEvent(text=reasoning)
-
-            # Text content
-            if delta.content:
-                yield TextDeltaEvent(text=delta.content)
-
-            # Tool calls (streamed with index-based accumulation)
-            if delta.tool_calls:
-                for tc_delta in delta.tool_calls:
-                    idx = tc_delta.index
-                    if idx not in tool_calls_acc:
-                        tool_calls_acc[idx] = {
-                            "id": tc_delta.id or "",
-                            "name": "",
-                            "arguments": "",
-                            "argument_deltas": [],
-                            "arguments_waited_for_id": False,
-                            "ready_to_start": False,
-                            "started": False,
-                            "provider_metadata": {},
-                        }
-                    current = tool_calls_acc[idx]
-                    if tc_delta.id and not current["id"]:
-                        current["id"] = tc_delta.id
-                    provider_metadata = self._tool_provider_metadata(tc_delta)
-                    if provider_metadata:
-                        current["provider_metadata"].update(provider_metadata)
-                    has_name_delta = bool(tc_delta.function and tc_delta.function.name)
-                    if has_name_delta:
-                        current["name"] += tc_delta.function.name
-                    if tc_delta.function and tc_delta.function.arguments:
-                        if not current["id"]:
-                            current["arguments_waited_for_id"] = True
-                        current["arguments"] += tc_delta.function.arguments
-                        current["argument_deltas"].append(tc_delta.function.arguments)
-                    if (
-                        current["id"]
-                        and current["name"]
-                        and current["arguments"]
-                        and not current["started"]
-                        and not has_name_delta
-                    ):
-                        current["ready_to_start"] = True
-
-                # Tool arguments may arrive out of order. Start calls in API index
-                # order so downstream execution remains deterministic.
-                for start_idx in sorted(tool_calls_acc):
-                    pending_start = tool_calls_acc[start_idx]
-                    if pending_start["started"]:
-                        continue
-                    if not pending_start["ready_to_start"]:
-                        break
-                    pending_start["started"] = True
-                    yield ToolUseStartEvent(
-                        tool_use_id=pending_start["id"],
-                        name=pending_start["name"],
-                        provider_metadata=pending_start["provider_metadata"] or None,
-                    )
-
-                for flush_idx in sorted(tool_calls_acc):
-                    pending_flush = tool_calls_acc[flush_idx]
-                    if not pending_flush["started"]:
-                        continue
-                    pending_argument_deltas = pending_flush["argument_deltas"]
-                    pending_flush["argument_deltas"] = []
-                    if pending_flush["arguments_waited_for_id"]:
-                        pending_argument_deltas = ["".join(pending_argument_deltas)]
-                        pending_flush["arguments_waited_for_id"] = False
-                    for pending_arguments in pending_argument_deltas:
-                        yield ToolInputDeltaEvent(
-                            tool_use_id=pending_flush["id"],
-                            partial_json=pending_arguments,
-                        )
+            for event in adapter.feed(delta, raw_finish_reason):
+                yield event
 
         if not has_content:
             base_url = str(self._base_url or self._client.base_url).rstrip("/")
@@ -479,30 +510,10 @@ class OpenAIProvider(Provider):
                 ).format(base_url=base_url)
             )
 
-        # Emit ToolUseEndEvent for each accumulated tool call
-        for idx in sorted(tool_calls_acc):
-            tc = tool_calls_acc[idx]
-            if not tc["id"]:
-                tc["id"] = f"call_{uuid.uuid4().hex[:24]}"
-            if not tc["started"]:
-                tc["started"] = True
-                yield ToolUseStartEvent(
-                    tool_use_id=tc["id"],
-                    name=tc["name"],
-                    provider_metadata=tc["provider_metadata"] or None,
-                )
-            pending_argument_deltas = tc["argument_deltas"]
-            if tc["arguments_waited_for_id"]:
-                pending_argument_deltas = ["".join(pending_argument_deltas)]
-            for pending_arguments in pending_argument_deltas:
-                yield ToolInputDeltaEvent(
-                    tool_use_id=tc["id"],
-                    partial_json=pending_arguments,
-                )
-            for ev in parse_tool_input_events(tc["id"], tc["name"], tc["arguments"]):
-                if isinstance(ev, ToolUseEndEvent) and ev.tool_use_id == tc["id"]:
-                    ev.provider_metadata = tc["provider_metadata"] or None
-                yield ev
+        for event in adapter.finalize(raw_finish_reason):
+            yield event
+        if adapter.terminal_stop_reason_override is not None:
+            stop_reason = adapter.terminal_stop_reason_override
 
         yield MessageEndEvent(stop_reason=stop_reason, usage=usage)
 
@@ -516,27 +527,12 @@ class OpenAIProvider(Provider):
         max_tokens: int = 8192,
         cache_policy: str = "default",
     ) -> NonStreamingResponse:
-        api_messages = self._build_api_messages(messages, system, cache_policy=cache_policy)
+        context = self._create_chat_request_context(streaming=False, cache_policy=cache_policy)
 
-        kwargs: dict[str, Any] = {
-            "model": self._model,
-            "messages": api_messages,
-        }
-        kwargs.update(self._token_limit_kwargs(max_tokens))
-        if tools:
-            kwargs["tools"] = self._convert_tools(tools)
-        for k, v in self._effort_request_kwargs().items():
-            kwargs[k] = v
-        for k, v in self._extra_request_kwargs.items():
-            kwargs[k] = v
+        def build_kwargs() -> dict[str, Any]:
+            return self._build_chat_completion_kwargs(messages, system, tools, max_tokens, context)
 
-        log_provider_request_policy(
-            self._PROVIDER_KEY,
-            self._model,
-            "chat.completions.create",
-            kwargs,
-        )
-        response = await self._client.chat.completions.create(**kwargs)
+        response = await self._create_chat_completion(build_kwargs, context, "chat.completions.create")
         if not hasattr(response, "choices"):
             base_url = str(self._base_url or self._client.base_url).rstrip("/")
             raise RuntimeError(
@@ -560,7 +556,7 @@ class OpenAIProvider(Provider):
         message = choice.message
 
         text = message.content or ""
-        thinking = getattr(message, "reasoning_content", None) or ""
+        thinking = self._extract_reasoning_text(message)
         message_provider_metadata = self._message_provider_metadata(message)
         thinking_blocks: list[dict[str, Any]] = []
         if message_provider_metadata:
@@ -571,22 +567,7 @@ class OpenAIProvider(Provider):
                     "provider_metadata": message_provider_metadata,
                 }
             )
-        tool_uses: list[dict[str, Any]] = []
-        if message.tool_calls:
-            for tc in message.tool_calls:
-                raw_args = tc.function.arguments or ""
-                provider_metadata = self._tool_provider_metadata(tc)
-                for ev in parse_tool_input_events(tc.id, tc.function.name, raw_args):
-                    if isinstance(ev, ToolUseEndEvent):
-                        tool_use = {"id": ev.tool_use_id, "name": tc.function.name, "input": ev.input}
-                        if ev.input_error:
-                            # Non-streaming path: the agent loop still has to see the parse
-                            # failure, otherwise the tool runs on {} and answers with a schema
-                            # error about arguments the model did send.
-                            tool_use["input_error"] = ev.input_error
-                        if ev.tool_use_id == tc.id and provider_metadata:
-                            tool_use["provider_metadata"] = provider_metadata
-                        tool_uses.append(tool_use)
+        tool_uses = self._parse_non_streaming_tool_calls(message.tool_calls)
 
         stop_reason = "end_turn"
         if choice.finish_reason == "tool_calls":
@@ -609,7 +590,7 @@ class OpenAIProvider(Provider):
             reported=response.usage is not None,
         )
 
-        return NonStreamingResponse(
+        unified_response = NonStreamingResponse(
             message_id=response.id,
             text=text,
             tool_uses=tool_uses,
@@ -618,6 +599,32 @@ class OpenAIProvider(Provider):
             thinking=thinking,
             thinking_blocks=thinking_blocks,
         )
+        return self._postprocess_non_streaming_response(message, unified_response, tools)
+
+    def _parse_non_streaming_tool_calls(self, tool_calls: Any) -> list[dict[str, Any]]:
+        tool_uses: list[dict[str, Any]] = []
+        for tc in tool_calls or []:
+            raw_args = tc.function.arguments or ""
+            provider_metadata = self._tool_provider_metadata(tc)
+            for event in parse_tool_input_events(tc.id, tc.function.name, raw_args):
+                if isinstance(event, ToolUseEndEvent):
+                    tool_use = {"id": event.tool_use_id, "name": tc.function.name, "input": event.input}
+                    if event.input_error:
+                        # Preserve malformed-input diagnostics so the agent loop does not
+                        # execute an accidental empty object on the non-streaming path.
+                        tool_use["input_error"] = event.input_error
+                    if event.tool_use_id == tc.id and provider_metadata:
+                        tool_use["provider_metadata"] = provider_metadata
+                    tool_uses.append(tool_use)
+        return tool_uses
+
+    def _postprocess_non_streaming_response(
+        self,
+        raw_message: Any,
+        response: NonStreamingResponse,
+        tools: list[ToolDefinition] | None,
+    ) -> NonStreamingResponse:
+        return response
 
     def _message_provider_metadata(self, message: Any) -> dict[str, Any]:
         """Extract opaque metadata attached to an assistant message or delta."""

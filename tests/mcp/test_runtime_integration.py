@@ -6,6 +6,7 @@ import sys
 import threading
 from collections.abc import Mapping
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -253,7 +254,21 @@ async def test_runtime_starts_failed_mcp_reconnect_on_agent_loop(monkeypatch, tm
     async def fake_stream(*args, **kwargs):
         yield MessageEndEvent(stop_reason="stop", usage=Usage())
 
-    runtime.agent_loop._provider_manager.stream = fake_stream
+    provider_manager = runtime.agent_loop._provider_manager
+
+    def fake_begin_request(system, tools=None):
+        return SimpleNamespace(
+            system_prompt=system,
+            context_window_model="qwen3.7-max",
+            _lease_token=SimpleNamespace(state="active"),
+        )
+
+    def fake_release_request(lease):
+        lease._lease_token.state = "released"
+
+    provider_manager.stream = fake_stream
+    provider_manager.begin_request = fake_begin_request
+    provider_manager.release_request = fake_release_request
 
     async for _event in runtime.agent_loop.run_streaming("hello"):
         pass

@@ -2932,6 +2932,21 @@ class TestAgentLoopCompaction:
         assert call_kwargs["messages"][0].content == "compact me"
         assert "telemetry_messages" not in call_kwargs
 
+    async def test_compact_does_not_inspect_complete_without_request_lease(self, mock_provider, mock_registry):
+        mock_provider.complete = AsyncMock(return_value=SimpleNamespace(text="summary"))
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        loop.context_manager = MagicMock()
+        loop.context_manager.get_messages.return_value = [object()]
+        loop.context_manager.build_compaction_prompt.return_value = "compact me"
+        loop.context_manager.apply_compaction.return_value = (900, 300)
+
+        with patch("iac_code.agent.agent_loop.inspect.signature") as signature_mock:
+            result = await loop.compact()
+
+        assert result.status == "success"
+        signature_mock.assert_not_called()
+        mock_provider.complete.assert_awaited_once()
+
     async def test_compact_persists_compacted_session(self, mock_provider, mock_registry):
         from iac_code.agent.message import Message
 
@@ -3093,6 +3108,113 @@ class TestAgentLoopHelpers:
 
 
 class TestAgentLoopSetProvider:
+    @pytest.mark.asyncio
+    async def test_auto_compact_keeps_captured_manager_and_base_prompt(self, mock_registry):
+        class LeaseManager:
+            def __init__(self, model, effective_prefix):
+                self.model = model
+                self.effective_prefix = effective_prefix
+                self.begin_systems = []
+                self.stream_systems = []
+
+            def get_model_name(self):
+                return self.model
+
+            def begin_request(self, system, tools=None):
+                self.begin_systems.append(system)
+                return SimpleNamespace(
+                    system_prompt=f"{self.effective_prefix}:{system}",
+                    context_window_model=self.model,
+                    _lease_token=SimpleNamespace(state="active"),
+                )
+
+            def release_request(self, lease):
+                lease._lease_token.state = "released"
+
+            def stream(self, messages, system, tools=None, lease=None):
+                self.stream_systems.append(system)
+
+                async def events():
+                    yield MessageStartEvent(message_id="m1")
+                    yield TextDeltaEvent(text="ok")
+                    yield MessageEndEvent(stop_reason="stop", usage=Usage())
+
+                return events()
+
+        old_manager = LeaseManager("qwen3.8-max", "old-effective")
+        next_manager = LeaseManager("claude-opus-4-7", "new-effective")
+        loop = AgentLoop(provider_manager=old_manager, system_prompt="old-base", tool_registry=mock_registry)
+        loop.context_manager.needs_compaction = MagicMock(return_value=True)
+
+        async def compact_with_switch(request_manager):
+            assert request_manager is old_manager
+            loop.set_provider(next_manager, system_prompt="new-base")
+            return CompactionEvent(original_tokens=1200, compacted_tokens=400)
+
+        loop._auto_compact = compact_with_switch
+        await loop.run("hello")
+
+        assert old_manager.begin_systems == ["old-base", "old-base"]
+        assert old_manager.stream_systems == ["old-effective:old-base"]
+        assert next_manager.begin_systems == []
+        assert loop.context_manager._model == "claude-opus-4-7"
+        assert loop.context_manager.system_prompt == "new-base"
+
+        loop._prepare_request_lease(next_manager)
+        assert next_manager.begin_systems == ["new-base"]
+        assert loop.context_manager._model == "claude-opus-4-7"
+        assert loop.context_manager.system_prompt == "new-effective:new-base"
+
+    @pytest.mark.asyncio
+    async def test_in_flight_request_keeps_old_manager_model_and_prompt(self, mock_registry):
+        loop_ref = None
+
+        class NextManager:
+            def get_model_name(self):
+                return "claude-opus-4-7"
+
+        next_manager = NextManager()
+
+        class OldManager:
+            def __init__(self):
+                self.released = False
+
+            def get_model_name(self):
+                return "qwen3.8-max"
+
+            def begin_request(self, system, tools=None):
+                return SimpleNamespace(
+                    system_prompt="old effective prompt",
+                    context_window_model="qwen3.8-max",
+                    _lease_token=SimpleNamespace(state="active"),
+                )
+
+            def release_request(self, lease):
+                lease._lease_token.state = "released"
+                self.released = True
+
+            def stream(self, messages, system, tools=None, lease=None):
+                assert system == "old effective prompt"
+                assert lease.context_window_model == "qwen3.8-max"
+                loop_ref.set_provider(next_manager, system_prompt="new base prompt")
+
+                async def events():
+                    yield MessageStartEvent(message_id="m1")
+                    yield TextDeltaEvent(text="ok")
+                    yield MessageEndEvent(stop_reason="stop", usage=Usage())
+
+                return events()
+
+        old_manager = OldManager()
+        loop_ref = AgentLoop(provider_manager=old_manager, system_prompt="old base prompt", tool_registry=mock_registry)
+
+        await loop_ref.run("hello")
+
+        assert loop_ref._provider_manager is next_manager
+        assert loop_ref.context_manager._model == "claude-opus-4-7"
+        assert loop_ref.context_manager.system_prompt == "new base prompt"
+        assert old_manager.released is True
+
     def test_set_provider_preserves_messages(self, mock_provider, mock_registry):
         loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
         loop.context_manager.add_user_message("Hello")
@@ -3108,7 +3230,7 @@ class TestAgentLoopSetProvider:
         assert messages[0].get_text() == "Hello"
         assert messages[1].get_text() == "World"
 
-    def test_set_provider_updates_context_window_for_new_model(self, mock_provider, mock_registry):
+    def test_set_provider_updates_context_window_immediately_when_idle(self, mock_provider, mock_registry):
         loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
         # mock_provider returns "test-model" → falls back to default config (128_000)
         assert loop.context_manager._config.context_window == 128_000

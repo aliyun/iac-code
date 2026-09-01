@@ -22,7 +22,8 @@ from google.protobuf.json_format import ParseDict
 
 from iac_code.a2a.artifacts import sanitize_public_artifact_text
 from iac_code.a2a.exposure import A2AExposureType, normalize_a2a_exposure_types
-from iac_code.i18n import _
+from iac_code.a2a.runtime_overrides import get_a2a_preferred_language
+from iac_code.i18n import _, translate_message
 from iac_code.mcp.progress import mcp_progress_metadata, mcp_progress_public_name
 from iac_code.services.permissions.audit import (
     build_input_summary,
@@ -528,11 +529,17 @@ async def publish_stream_event(
         error_metadata: dict[str, Any] = {"retryable": event.is_retryable}
         if event.error_id:
             error_metadata["errorId"] = event.error_id
+        language = get_a2a_preferred_language() or "en"
         if event.is_retryable:
-            text = _("A temporary error occurred. Please retry.")
+            text = translate_message("A temporary error occurred. Please retry.", language=language)
             state = TaskState.TASK_STATE_INPUT_REQUIRED
         else:
-            raw = event.error or "Unknown error"
+            if event.i18n_message_id:
+                raw = translate_message(event.i18n_message_id, language=language).format(
+                    **(event.i18n_message_args or {})
+                )
+            else:
+                raw = event.error or translate_message("Unknown error", language=language)
             # Provider ErrorEvent is an explicitly retained compatibility
             # exception; ordinary A2A payloads are projected at the wire edge.
             text = sanitize_public_artifact_text(raw)[:_ERROR_TEXT_MAX_CHARS]

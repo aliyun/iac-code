@@ -41,7 +41,8 @@ msgstr "afterSequence 必须是非负整数"
 msgid "Unsafe artifact filename"
 msgstr "不安全的工件文件名"
 
-#: src/iac_code/a2a/artifacts.py src/iac_code/pipeline/engine/public_errors.py
+#: src/iac_code/a2a/artifacts.py src/iac_code/a2a/events.py
+#: src/iac_code/pipeline/engine/public_errors.py
 #: src/iac_code/utils/public_errors.py
 msgid "Unknown error"
 msgstr "未知错误"
@@ -5851,6 +5852,31 @@ msgid ""
 "/auth to configure."
 msgstr "提供商 '{provider}' 未配置 API 密钥（模型: {model}）。请运行 /auth 进行配置。"
 
+#: src/iac_code/providers/manager.py
+#, python-brace-format
+msgid "Provider request lease cannot be consumed from state {state}."
+msgstr "无法使用状态为 {state} 的 Provider 请求租约。"
+
+#: src/iac_code/providers/manager.py
+msgid "Provider request lease was already released."
+msgstr "Provider 请求租约已被释放。"
+
+#: src/iac_code/providers/manager.py
+msgid "Provider request lease belongs to a different manager."
+msgstr "Provider 请求租约属于其他管理器。"
+
+#: src/iac_code/providers/manager.py
+msgid "Explicit request lease system prompt does not match the streamed prompt."
+msgstr "显式请求租约的系统提示词与流式请求提示词不匹配。"
+
+#: src/iac_code/providers/manager.py
+msgid "Qwen replay ended before message completion."
+msgstr "Qwen 重放在消息完成前结束。"
+
+#: src/iac_code/providers/manager.py
+msgid "Explicit request lease system prompt does not match the completion prompt."
+msgstr "显式请求租约的系统提示词与补全请求提示词不匹配。"
+
 #: src/iac_code/providers/openai_provider.py
 #, python-brace-format
 msgid ""
@@ -5870,6 +5896,70 @@ msgid ""
 msgstr ""
 "API 返回了无效响应。请检查您的 API Base URL 是否正确（当前：{base_url}）。许多 OpenAI 兼容端点需要 /v1 "
 "后缀（如 {base_url}/v1）。"
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Qwen tool arguments must be a non-empty JSON object."
+msgstr "Qwen 工具参数必须是非空 JSON 对象。"
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Qwen tool arguments are malformed JSON."
+msgstr "Qwen 工具参数包含格式错误的 JSON。"
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Qwen tool arguments must decode to an object."
+msgstr "Qwen 工具参数解析后必须是对象。"
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Qwen native tool call is missing its ID or name."
+msgstr "Qwen 原生工具调用缺少 ID 或名称。"
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Invalid Qwen tool-call index."
+msgstr "Qwen 工具调用索引无效。"
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Conflicting Qwen tool-call identity."
+msgstr "Qwen 工具调用标识冲突。"
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Conflicting Qwen tool-call name."
+msgstr "Qwen 工具调用名称冲突。"
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Qwen tool-call arguments must be a string."
+msgstr "Qwen 工具调用参数必须是字符串。"
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Duplicate Qwen tool-call identity."
+msgstr "Qwen 工具调用标识重复。"
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Ambiguous anonymous Qwen tool-call identity."
+msgstr "匿名 Qwen 工具调用标识存在歧义。"
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Ambiguous anonymous Qwen tool-call fragment."
+msgstr "匿名 Qwen 工具调用片段存在歧义。"
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Invalid Qwen tool-call JSON structure."
+msgstr "Qwen 工具调用 JSON 结构无效。"
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Qwen response ended with tool_calls but no complete tool call."
+msgstr "Qwen 响应以 tool_calls 结束，但没有完整的工具调用。"
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Qwen tool call is anonymous or nameless."
+msgstr "Qwen 工具调用缺少标识或名称。"
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Duplicate Qwen tool-call ID."
+msgstr "Qwen 工具调用 ID 重复。"
+
+#: src/iac_code/providers/qwen_tool_call_parser.py
+msgid "Qwen tool-call arguments ended before JSON was complete."
+msgstr "Qwen 工具调用参数在 JSON 完成前结束。"
 
 #: src/iac_code/providers/registry.py
 msgid "Alibaba Cloud Bailian"
@@ -5946,6 +6036,22 @@ msgstr "火山引擎编程计划"
 #: src/iac_code/providers/registry.py
 msgid "Anthropic Compatible"
 msgstr "Anthropic 兼容"
+
+#: src/iac_code/providers/streaming.py
+msgid "Qwen thinking-tag candidate exceeded the safety limit."
+msgstr "Qwen thinking 标签候选内容超过安全限制。"
+
+#: src/iac_code/providers/streaming.py
+msgid "Qwen emitted an unsafe or conflicting thinking-tag block."
+msgstr "Qwen 输出了不安全或相互冲突的 thinking 标签块。"
+
+#: src/iac_code/providers/streaming.py
+msgid "Qwen emitted a stray thinking closing tag."
+msgstr "Qwen 输出了多余的 thinking 结束标签。"
+
+#: src/iac_code/providers/streaming.py
+msgid "Qwen emitted a closing thinking tag without a valid native tool call."
+msgstr "Qwen 输出了 thinking 结束标签，但没有有效的原生工具调用。"
 
 #: src/iac_code/services/agent_factory.py
 #, python-brace-format

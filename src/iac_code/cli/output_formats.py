@@ -128,6 +128,11 @@ def stream_json_event_data(event: StreamEvent) -> dict[str, Any]:
         return data
 
     data = dataclasses.asdict(event)
+    if isinstance(event, MessageEndEvent):
+        data.pop("usage_attribution", None)
+    if isinstance(event, ErrorEvent):
+        data.pop("i18n_message_id", None)
+        data.pop("i18n_message_args", None)
     if isinstance(event, ToolResultEvent):
         data.pop("public_path_roots", None)
         if data.get("metadata") is None:
