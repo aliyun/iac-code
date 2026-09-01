@@ -55,7 +55,7 @@ jobs:
         run: |
           python -m py_compile skills/iac-code/scripts/iac_code.py
           python skills/iac-code/scripts/iac_code.py --help
-          python -m py_compile skills/alicloud-ros-agent/scripts/ros_agent.py
+          python -m py_compile skills/alicloud-ros-agent/scripts/*.py
           python skills/alicloud-ros-agent/scripts/ros_agent.py --help
 
   lint:
