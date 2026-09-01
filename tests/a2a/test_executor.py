@@ -4691,6 +4691,124 @@ async def test_failed_live_permission_answer_releases_stale_pending_before_recov
 
 
 @pytest.mark.asyncio
+async def test_persisted_permission_restores_backup_before_checkpoint_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    backup_root = tmp_path / "backup"
+    origin_config = tmp_path / "origin-config"
+    restored_config = tmp_path / "restored-config"
+    persistence = A2APersistenceStore(tmp_path / "a2a-persistence")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cwd = str(workspace)
+    session_id = "session-restore-permission"
+    context_id = "ctx-restore-permission"
+    task_id = "task-restore-permission"
+    boundary_id = "pwb_restore_order"
+    input_id = "input-restore-permission"
+    tool_use_id = "tool-restore-permission"
+    context_snapshot = A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=cwd)
+    task_snapshot = A2ATaskSnapshot(task_id=task_id, context_id=context_id, state="input-required")
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(origin_config))
+    origin_storage = SessionStorage()
+    session_dir = origin_storage.ensure_v2_session_dir_for_new_session(cwd, session_id)
+    assert session_dir is not None
+    a2a_dir = session_dir / "a2a"
+    a2a_dir.mkdir()
+    (a2a_dir / "context.json").write_text(json.dumps(context_snapshot.__dict__), encoding="utf-8")
+    (a2a_dir / "task.json").write_text(json.dumps(task_snapshot.__dict__), encoding="utf-8")
+    permission_waits_dir = session_dir / "permission-waits"
+    permission_waits_dir.mkdir()
+    checkpoint = {
+        "boundaryId": boundary_id,
+        "taskId": task_id,
+        "contextId": context_id,
+        "inputId": input_id,
+        "toolUseId": tool_use_id,
+        "phase": "RESOLVED",
+        "decision": {"value": "deny"},
+    }
+    (permission_waits_dir / f"{boundary_id}.json").write_text(json.dumps(checkpoint), encoding="utf-8")
+    backup_service = SessionBackupService(origin_storage, retry_delays=())
+    backup_service.initialize_session(cwd, session_id)
+    result = backup_service.backup_session(cwd, session_id, reason=BackupReason.INPUT_REQUIRED, critical=True)
+    assert result.succeeded is True
+
+    persistence.save_context(context_snapshot)
+    persistence.save_task(task_snapshot)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(restored_config))
+    restored_storage = SessionStorage()
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence),
+        model="qwen3.6-plus",
+        backup_service=SessionBackupService(restored_storage, retry_delays=()),
+    )
+    response = PermissionResponse(
+        task_id=task_id,
+        context_id=context_id,
+        request_task_id=task_id,
+        input_id=input_id,
+        tool_use_id=tool_use_id,
+        decision="deny",
+    )
+
+    assert not restored_storage.exists(cwd, session_id)
+    assert await executor._resume_persisted_permission(
+        FakeRequestContext(task_id=task_id, context_id=context_id),
+        FakeEventQueue(),
+        response=response,
+    )
+    assert restored_storage.exists(cwd, session_id)
+    assert (
+        restored_storage.session_dir(cwd, session_id) / "permission-waits" / f"{boundary_id}.json"
+    ).is_file()
+
+
+@pytest.mark.asyncio
+async def test_persisted_permission_without_backup_does_not_create_empty_session(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    backup_root = tmp_path / "backup"
+    config_dir = tmp_path / "config"
+    persistence = A2APersistenceStore(tmp_path / "a2a-persistence")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cwd = str(workspace)
+    session_id = "session-without-backup"
+    context_id = "ctx-without-backup"
+    task_id = "task-without-backup"
+    persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=cwd))
+    persistence.save_task(A2ATaskSnapshot(task_id=task_id, context_id=context_id, state="input-required"))
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    storage = SessionStorage()
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence),
+        model="qwen3.6-plus",
+        backup_service=SessionBackupService(storage, retry_delays=()),
+    )
+    response = PermissionResponse(
+        task_id=task_id,
+        context_id=context_id,
+        request_task_id=task_id,
+        input_id="input-without-backup",
+        tool_use_id="tool-without-backup",
+        decision="deny",
+    )
+
+    assert not await executor._resume_persisted_permission(
+        FakeRequestContext(task_id=task_id, context_id=context_id),
+        FakeEventQueue(),
+        response=response,
+    )
+    assert not storage.exists(cwd, session_id)
+
+
+@pytest.mark.asyncio
 async def test_identity_lookup_failure_keeps_live_permission_pending(monkeypatch: pytest.MonkeyPatch) -> None:
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
     executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
