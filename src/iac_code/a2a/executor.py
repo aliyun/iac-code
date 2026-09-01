@@ -582,6 +582,7 @@ async def _persist_normal_permission_snapshot_event(
     input_id: str,
     event_type: str,
     permission: dict[str, Any],
+    handoff_proven: bool = False,
 ) -> None:
     """Persist handoff Normal permission state in the existing A2A snapshot.
 
@@ -602,7 +603,8 @@ async def _persist_normal_permission_snapshot_event(
         or normal_handoff.get("targetMode") != "normal"
         or not _normal_handoff_has_backup_ack(normal_handoff, journal_events)
     ):
-        return
+        if not handoff_proven:
+            raise RuntimeError(_("Normal permission restore snapshot could not be persisted."))
     pipeline_run_id = _string_value(snapshot.get("pipelineRunId"))
     pipeline_task_id = _string_value(snapshot.get("taskId"))
     context_id = _string_value(snapshot.get("contextId"))
@@ -670,6 +672,7 @@ async def _persist_normal_permission_snapshot_request(
     cwd: str,
     session_id: str,
     pending: Any,
+    handoff_proven: bool = False,
 ) -> None:
     permission = pending.envelope()
     permission.update(
@@ -685,6 +688,7 @@ async def _persist_normal_permission_snapshot_request(
         input_id=pending.input_id,
         event_type="permission_requested",
         permission=permission,
+        handoff_proven=handoff_proven,
     )
 
 
@@ -694,6 +698,7 @@ async def _persist_normal_permission_snapshot_resolution(
     session_id: str,
     response: PermissionResponse,
     decision: str,
+    handoff_proven: bool = False,
 ) -> None:
     state = _a2a_pipeline_state_for_session(cwd=cwd, session_id=session_id)
     if state is None:
@@ -724,6 +729,7 @@ async def _persist_normal_permission_snapshot_resolution(
         input_id=response.input_id,
         event_type="permission_resolved",
         permission=permission,
+        handoff_proven=handoff_proven,
     )
 
 
@@ -1949,11 +1955,16 @@ class IacCodeA2AExecutor(AgentExecutor):
                                 and not self._auto_approve_permissions
                             )
                             if interactive_permission:
+
                                 async def persist_request_before_backup(pending_permission: Any) -> None:
                                     await _persist_normal_permission_snapshot_request(
                                         cwd=cwd,
                                         session_id=ctx.session_id,
                                         pending=pending_permission,
+                                        handoff_proven=self._normal_handoff_has_state_proof(
+                                            cwd=cwd,
+                                            session_id=ctx.session_id,
+                                        ),
                                     )
 
                                 async def persist_resolution_before_backup(
@@ -1978,6 +1989,10 @@ class IacCodeA2AExecutor(AgentExecutor):
                                             decision=value,
                                         ),
                                         decision=value,
+                                        handoff_proven=self._normal_handoff_has_state_proof(
+                                            cwd=cwd,
+                                            session_id=ctx.session_id,
+                                        ),
                                     )
 
                                 pending = await publish_interactive_permission_boundary(
@@ -2369,6 +2384,10 @@ class IacCodeA2AExecutor(AgentExecutor):
                 session_id=context_record.session_id,
                 response=response,
                 decision=expected_value,
+                handoff_proven=self._normal_handoff_has_state_proof(
+                    cwd=context_record.cwd,
+                    session_id=context_record.session_id,
+                ),
             )
         if isinstance(decision, dict) and decision.get("backupStatus") != "committed":
             claim_id = str(decision.get("claimId") or "")
@@ -2443,30 +2462,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 messages = storage.load(context_record.cwd, context_record.session_id)
                 if not messages:
                     raise InvalidParamsError("permission_resume_invalid: session transcript is unavailable.")
-                runtime = create_agent_runtime(
-                    AgentFactoryOptions(
-                        model=model,
-                        session_id=context_record.session_id,
-                        cwd=context_record.cwd,
-                        resume_messages=messages,
-                        a2a_safe_mode=_a2a_safe_mode_enabled(),
-                        source="a2a",
-                    )
-                )
-                configure_runtime_model(
-                    runtime,
-                    model,
-                    from_metadata=self._resolve_model(metadata) is not None,
-                    metadata_api_key=metadata_api_key,
-                    request_policy_override=request_policy_override,
-                )
-                refresh_runtime_cloud_tools(runtime)
-                task = await self._task_store.get_or_create_task(
-                    task_id=response.task_id,
-                    context_id=response.context_id,
-                )
-                current_assistant_text: list[str] = []
-                normal_final_assistant_text = ""
+                runtime = None
                 try:
                     with a2a_request_context(
                         session_id=context_record.session_id,
@@ -2474,6 +2470,30 @@ class IacCodeA2AExecutor(AgentExecutor):
                         aliyun_credential=aliyun_credential,
                         preferred_language=preferred_language,
                     ):
+                        runtime = create_agent_runtime(
+                            AgentFactoryOptions(
+                                model=model,
+                                session_id=context_record.session_id,
+                                cwd=context_record.cwd,
+                                resume_messages=messages,
+                                a2a_safe_mode=_a2a_safe_mode_enabled(),
+                                source="a2a",
+                            )
+                        )
+                        configure_runtime_model(
+                            runtime,
+                            model,
+                            from_metadata=self._resolve_model(metadata) is not None,
+                            metadata_api_key=metadata_api_key,
+                            request_policy_override=request_policy_override,
+                        )
+                        refresh_runtime_cloud_tools(runtime)
+                        task = await self._task_store.get_or_create_task(
+                            task_id=response.task_id,
+                            context_id=response.context_id,
+                        )
+                        current_assistant_text: list[str] = []
+                        normal_final_assistant_text = ""
                         async for event in runtime.agent_loop.resume_permission_boundary(record):
                             if isinstance(event, MessageStartEvent):
                                 current_assistant_text = []
@@ -2503,7 +2523,8 @@ class IacCodeA2AExecutor(AgentExecutor):
                         if current_assistant_text:
                             normal_final_assistant_text = "".join(current_assistant_text)
                 finally:
-                    await _close_runtime(runtime)
+                    if runtime is not None:
+                        await _close_runtime(runtime)
         except PermissionWaitSuspended:
             store.mark_suspended(boundary_id)
             await self._publish_status(
@@ -2597,31 +2618,32 @@ class IacCodeA2AExecutor(AgentExecutor):
         messages = storage.load(cwd, session_id)
         if not messages:
             raise ValueError("permission_resume_invalid: session transcript is unavailable")
-        runtime = create_agent_runtime(
-            AgentFactoryOptions(
-                model=model,
-                session_id=session_id,
-                cwd=cwd,
-                resume_messages=messages,
-                a2a_safe_mode=_a2a_safe_mode_enabled(),
-                source="a2a",
-            )
-        )
+        runtime = None
         try:
-            configure_runtime_model(
-                runtime,
-                model,
-                from_metadata=model_from_metadata,
-                metadata_api_key=metadata_api_key,
-                request_policy_override=request_policy_override,
-            )
-            refresh_runtime_cloud_tools(runtime)
             with a2a_request_context(
                 session_id=session_id,
                 user_id=user_id,
                 aliyun_credential=aliyun_credential,
                 preferred_language=preferred_language,
             ):
+                runtime = create_agent_runtime(
+                    AgentFactoryOptions(
+                        model=model,
+                        session_id=session_id,
+                        cwd=cwd,
+                        resume_messages=messages,
+                        a2a_safe_mode=_a2a_safe_mode_enabled(),
+                        source="a2a",
+                    )
+                )
+                configure_runtime_model(
+                    runtime,
+                    model,
+                    from_metadata=model_from_metadata,
+                    metadata_api_key=metadata_api_key,
+                    request_policy_override=request_policy_override,
+                )
+                refresh_runtime_cloud_tools(runtime)
                 return await runtime.agent_loop.rebuild_permission_audit_event(
                     tool_name=recovered.tool_name,
                     tool_input=recovered.tool_input,
@@ -2629,7 +2651,8 @@ class IacCodeA2AExecutor(AgentExecutor):
                     audit_context=recovered.audit_context,
                 )
         finally:
-            await _close_runtime(runtime)
+            if runtime is not None:
+                await _close_runtime(runtime)
 
     async def _publish_permission_recovery_ack(
         self,
