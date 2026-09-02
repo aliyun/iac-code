@@ -412,6 +412,7 @@ class IacCodeA2APipelineExecutor:
         backup_service: Any | None = None,
         aliyun_delegated_executor_factory: Any | None = None,
         pipeline_name: str | None = None,
+        permission_context_getter: Callable[[], Any] | None = None,
     ) -> None:
         self._task_store = task_store
         self._model = model
@@ -438,6 +439,7 @@ class IacCodeA2APipelineExecutor:
         self._backup_service = backup_service or SessionBackupService()
         self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
         self._pipeline_name_override = pipeline_name or None
+        self._permission_context_getter = permission_context_getter
 
     def _resolve_pipeline_name(self) -> str:
         """Pipeline this executor must run.
@@ -1678,7 +1680,9 @@ class IacCodeA2APipelineExecutor:
             services = getattr(runtime, "aliyun_services", None)
             delegated_factory = getattr(services, "delegated_executor_factory", None)
         agent_loop = getattr(runtime, "agent_loop", None)
-        permission_context_getter = getattr(agent_loop, "_permission_context_getter", None)
+        permission_context_getter = self._permission_context_getter
+        if not callable(permission_context_getter):
+            permission_context_getter = getattr(agent_loop, "_permission_context_getter", None)
         if not callable(permission_context_getter) and agent_loop is not None:
 
             def permission_context_getter() -> Any:

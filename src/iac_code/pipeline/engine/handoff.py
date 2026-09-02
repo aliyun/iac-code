@@ -24,6 +24,7 @@ def build_handoff_summary(
     outcome: TerminalOutcome,
     context_snapshot: dict,
     include_fields: list[str],
+    release_tools_any_allowed: bool | None = None,
 ) -> str:
     """Build deterministic text for continuing in normal chat after a pipeline."""
     included = {
@@ -43,18 +44,28 @@ def build_handoff_summary(
     if missing:
         lines.extend(["", "Missing context fields:"])
         lines.extend(f"- {field_name}" for field_name in missing)
-    lines.extend(
-        [
-            "",
-            "Safety requirements for normal chat:",
-            (
-                "- Before performing any operation that releases, deletes, or otherwise destroys a resource, "
-                "obtain a fresh, explicit confirmation from the user in normal chat. Any confirmation given "
-                "during the pipeline does not count."
-            ),
-            ("- Exception: pipeline-managed automatic cleanup may proceed without this additional confirmation."),
-            "",
-            "Use this context when answering follow-up questions after the pipeline handoff.",
-        ]
-    )
+    lines.extend(["", "Safety requirements for normal chat:"])
+    if release_tools_any_allowed is False:
+        lines.extend(
+            [
+                (
+                    "- For operations that release, delete, or otherwise destroy a resource, rely on the tool "
+                    "permission confirmation as the sole confirmation. Do not ask for a separate confirmation "
+                    "in normal chat, and do not proceed unless the permission request is approved."
+                ),
+                ("- Exception: pipeline-managed automatic cleanup may proceed without an additional confirmation."),
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                (
+                    "- Before performing any operation that releases, deletes, or otherwise destroys a resource, "
+                    "obtain a fresh, explicit confirmation from the user in normal chat. Any confirmation given "
+                    "during the pipeline does not count."
+                ),
+                ("- Exception: pipeline-managed automatic cleanup may proceed without this additional confirmation."),
+            ]
+        )
+    lines.extend(["", "Use this context when answering follow-up questions after the pipeline handoff."])
     return "\n".join(lines)

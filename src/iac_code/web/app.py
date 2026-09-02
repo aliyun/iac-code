@@ -298,8 +298,8 @@ def create_app(
         )
     )
     make_shell_runner: WebShellRunnerFactory = shell_runner_factory or (lambda: WebShellEscapeRunner(manager))
-    make_pipeline_action_runner: WebPipelineActionRunnerFactory = (
-        pipeline_action_runner_factory or create_pipeline_action_runner
+    make_pipeline_action_runner: WebPipelineActionRunnerFactory = pipeline_action_runner_factory or (
+        lambda: create_pipeline_action_runner(manager.ensure_permission_context)
     )
     command_dispatcher = WebCommandDispatcher(manager)
     shell_runner = make_shell_runner()
