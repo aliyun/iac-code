@@ -818,9 +818,20 @@ class StreamSummary:
         if not isinstance(raw_error, dict):
             raw_error = result.get("error") if isinstance(result.get("error"), dict) else None
         if isinstance(raw_error, dict):
-            code = raw_error.get("code") or raw_error.get("Code") or "StartChatFailed"
-            message = raw_error.get("message") or raw_error.get("Message") or "StartChat returned an error."
-            self.error = {"code": sanitize_text(str(code), 160), "message": sanitize_text(str(message), 2000)}
+            backup_not_ready = _session_backup_not_ready_error(raw_error)
+            if backup_not_ready is not None:
+                self.error = {
+                    "code": backup_not_ready.code,
+                    "message": backup_not_ready.message,
+                    "retryable": True,
+                }
+            else:
+                code = raw_error.get("code") or raw_error.get("Code") or "StartChatFailed"
+                message = raw_error.get("message") or raw_error.get("Message") or "StartChat returned an error."
+                self.error = {
+                    "code": sanitize_text(str(code), 160),
+                    "message": sanitize_text(str(message), 2000),
+                }
         if str(payload.get("object", "")).lower() == "response" and str(payload.get("status", "")).lower() == "failed":
             self.state = "failed"
 
@@ -1071,12 +1082,22 @@ def _project_stream_event(
     if isinstance(raw_error, dict):
         projection["type"] = "failed"
         projection["state"] = "failed"
-        projection["error"] = {
-            "code": sanitize_text(str(raw_error.get("code") or raw_error.get("Code") or "StartChatFailed"), 160),
-            "message": sanitize_text(
-                str(raw_error.get("message") or raw_error.get("Message") or "StartChat failed."), 2000
-            ),
-        }
+        backup_not_ready = _session_backup_not_ready_error(raw_error)
+        if backup_not_ready is not None:
+            projection["error"] = {
+                "code": backup_not_ready.code,
+                "message": backup_not_ready.message,
+                "retryable": True,
+            }
+        else:
+            projection["error"] = {
+                "code": sanitize_text(
+                    str(raw_error.get("code") or raw_error.get("Code") or "StartChatFailed"), 160
+                ),
+                "message": sanitize_text(
+                    str(raw_error.get("message") or raw_error.get("Message") or "StartChat failed."), 2000
+                ),
+            }
     elif state in TERMINAL_STATES:
         projection["type"] = "terminal"
 
@@ -1119,6 +1140,17 @@ def _append_projection(job_id: str, projection: Dict[str, Any]) -> None:
         worker_token = projection.get("workerToken")
         if worker_role == "sideband" and worker_token != job.get("sidebandWorkerToken"):
             return
+        projection_error = projection.get("error")
+        if (
+            worker_role != "sideband"
+            and isinstance(job.get("permissionResponseInput"), dict)
+            and isinstance(projection_error, dict)
+            and projection_error.get("code") == SESSION_BACKUP_NOT_READY_CODE
+            and projection_error.get("retryable") is True
+        ):
+            projection["type"] = "input-required"
+            projection["state"] = "input-required"
+            projection["inputRequired"] = job["permissionResponseInput"]
         primary_terminal = job.get("primaryStreamTerminalSeen") is True or job.get("state") in TERMINAL_STATES
         if primary_terminal:
             projection = _without_wait_boundaries(projection)
@@ -1326,7 +1358,17 @@ def _finish_job(
             if isinstance(value, str) and value:
                 job[key] = value
         state = result.get("state") if isinstance(result.get("state"), str) else "stream-ended"
-        if state == "input-required":
+        error = result.get("error")
+        retry_permission = (
+            isinstance(job.get("permissionResponseInput"), dict)
+            and isinstance(error, dict)
+            and error.get("code") == SESSION_BACKUP_NOT_READY_CODE
+            and error.get("retryable") is True
+        )
+        if retry_permission:
+            state = "input-required"
+            job["inputRequired"] = job["permissionResponseInput"]
+        elif state == "input-required":
             input_required = result.get("inputRequired")
             acknowledged_input_ids = {
                 value for value in job.get("acknowledgedPermissionIds", []) if isinstance(value, str)
@@ -1366,6 +1408,8 @@ def _finish_job(
         elif state in TERMINAL_STATES:
             job.pop("inputRequired", None)
             job.pop("pendingPermissions", None)
+        if not retry_permission:
+            job.pop("permissionResponseInput", None)
         if isinstance(result.get("pipelineResult"), dict):
             job["pipelineResult"] = result["pipelineResult"]
         if result.get("normalHandoffReady") is True and job.get("mode") == "pipeline":

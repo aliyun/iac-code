@@ -10,6 +10,20 @@ class BridgeError(Exception):
         self.retryable = retryable
 
 
+def _session_backup_not_ready_error(value: Any) -> Optional[BridgeError]:
+    if not isinstance(value, dict):
+        return None
+    raw_error = value.get("error") if isinstance(value.get("error"), dict) else value
+    data = raw_error.get("data") if isinstance(raw_error.get("data"), dict) else {}
+    code = data.get("code") or raw_error.get("code") or raw_error.get("Code")
+    if code != SESSION_BACKUP_NOT_READY_CODE:
+        return None
+    message = raw_error.get("message") or raw_error.get("Message")
+    if not isinstance(message, str) or not message:
+        message = "Session backup is still synchronizing. Retry after 3 seconds."
+    return BridgeError(SESSION_BACKUP_NOT_READY_CODE, sanitize_text(message, 2000), True)
+
+
 def _json_bytes(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
@@ -1061,6 +1075,9 @@ def _open_code_request(
             with contextlib.suppress(UnicodeError, ValueError):
                 value = json.loads(raw.decode("utf-8"))
                 if isinstance(value, dict):
+                    backup_not_ready = _session_backup_not_ready_error(value)
+                    if backup_not_ready is not None:
+                        raise backup_not_ready
                     code = value.get("Code", value.get("code"))
                     detail = value.get("Message", value.get("message"))
                     if isinstance(code, str) or isinstance(detail, str):

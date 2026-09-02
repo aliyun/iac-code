@@ -13,10 +13,15 @@ from iac_code.a2a.signing import AgentCardSignature, agent_card_signature_jwks_u
 from iac_code.a2a.transport import A2AAuthConfig, A2ATransportBinding, UnsupportedA2ATransportError, headers_for_auth
 from iac_code.a2a.transports.base import A2ATransportClient, TransportClientOptions, binding_from_url
 from iac_code.a2a.transports.http import HttpA2AClient
+from iac_code.services.session_backup import SESSION_BACKUP_NOT_READY_CODE
 
 
 class A2ACardVerificationError(ValueError):
     """Raised when a discovered Agent Card fails configured verification."""
+
+
+class A2ASessionBackupNotReadyError(RuntimeError):
+    """The internal A2A restore endpoint has not reached the required backup generation."""
 
 
 TransportClientFactory = Callable[[TransportClientOptions], A2ATransportClient]
@@ -315,17 +320,38 @@ class A2AClient:
             raise ValueError("A2A pipeline state response must be a JSON object")
         return data
 
-    async def ensure_session_restored(self, url: str, *, cwd: str, session_id: str) -> bool:
+    async def ensure_session_restored(
+        self,
+        url: str,
+        *,
+        cwd: str,
+        session_id: str,
+        task_id: str | None = None,
+    ) -> bool:
         """Ensure the A2A session payload is locally available before a cold resume."""
 
         endpoint = url.rstrip("/") + "/iac-code/session/ensure-restored"
         response = await self._http_client.post(
             endpoint,
-            json={"cwd": cwd, "sessionId": session_id},
+            json=_without_none({"cwd": cwd, "sessionId": session_id, "taskId": task_id}),
             headers=self._jsonrpc_headers(),
         )
         if response.status_code == 404:
             return False
+        if response.status_code == 409:
+            payload = response.json()
+            error = payload.get("error") if isinstance(payload, dict) else None
+            if (
+                isinstance(error, dict)
+                and error.get("code") == SESSION_BACKUP_NOT_READY_CODE
+                and error.get("retryable") is True
+            ):
+                message = error.get("message")
+                raise A2ASessionBackupNotReadyError(
+                    message
+                    if isinstance(message, str) and message
+                    else "Session backup is still synchronizing. Retry after 3 seconds."
+                )
         response.raise_for_status()
         data = response.json()
         if not isinstance(data, dict) or data.get("status") not in {"current", "restored"}:

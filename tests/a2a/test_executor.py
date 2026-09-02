@@ -40,6 +40,7 @@ from iac_code.services.session_backup import (
     BackupReason,
     BackupResult,
     SessionBackupBlocked,
+    SessionBackupNotReadyError,
     SessionBackupService,
     SessionReconcileResult,
 )
@@ -75,6 +76,39 @@ def _image_only_pipeline_input() -> PipelineUserInput:
 
 def _ensure_v2_session(cwd: str, session_id: str) -> Path:
     return SessionStorage().ensure_v2_session_dir_for_new_session(cwd, session_id)
+
+
+@pytest.mark.asyncio
+async def test_ensure_session_restored_uses_task_permission_generation_floor(tmp_path: Path) -> None:
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(cwd)))
+    persistence.save_task(
+        A2ATaskSnapshot(
+            task_id="task-1",
+            context_id="ctx-1",
+            state="input-required",
+            expected_permission_backup_generation=7,
+        )
+    )
+    calls: list[tuple[str, str, int | None]] = []
+
+    class RecordingBackupService:
+        def reconcile_session(self, restore_cwd, session_id, *, minimum_generation=None, **_kwargs):
+            calls.append((restore_cwd, session_id, minimum_generation))
+            return SessionReconcileResult(enabled=False, action="disabled")
+
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence),
+        model="qwen3.6-plus",
+        backup_service=RecordingBackupService(),
+    )
+
+    result = await executor.ensure_session_restored(cwd=str(cwd), session_id="session-1", task_id="task-1")
+
+    assert result == SessionReconcileResult(enabled=False, action="disabled")
+    assert calls == [(str(cwd), "session-1", 7)]
 
 
 def _committed_normal_handoff_events(
@@ -4992,6 +5026,111 @@ async def test_persisted_permission_without_backup_does_not_create_empty_session
         response=response,
     )
     assert not storage.exists(cwd, session_id)
+
+
+@pytest.mark.asyncio
+async def test_persisted_permission_reports_retryable_error_when_checkpoint_backup_is_still_syncing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_dir = tmp_path / "config"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cwd = str(workspace)
+    session_id = "session-syncing"
+    context_id = "ctx-syncing"
+    task_id = "task-syncing"
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    SessionStorage().ensure_v2_session_dir_for_new_session(cwd, session_id)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    task_record = SimpleNamespace(context_id=context_id, expected_permission_backup_generation=9)
+    context_record = SimpleNamespace(cwd=cwd, session_id=session_id)
+
+    async def get_task_record(_task_id):
+        return task_record
+
+    async def get_context_record(_context_id):
+        return context_record
+
+    async def reconcile(**kwargs):
+        assert kwargs["minimum_generation"] == 9
+        raise SessionBackupNotReadyError(
+            minimum_generation=9,
+            local_generation=8,
+            shared_generation=8,
+        )
+
+    monkeypatch.setattr(store, "get_task_record", get_task_record)
+    monkeypatch.setattr(store, "get_context_record", get_context_record)
+    monkeypatch.setattr(executor, "_reconcile_session_before_route", reconcile)
+    response = PermissionResponse(
+        task_id=task_id,
+        context_id=context_id,
+        request_task_id=task_id,
+        input_id="input-syncing",
+        tool_use_id="tool-syncing",
+        decision="allow_once",
+    )
+
+    with pytest.raises(
+        InvalidParamsError,
+        match=r"Session backup is still synchronizing\. Retry after 3 seconds\.",
+    ) as exc:
+        await executor._resume_persisted_permission(
+            FakeRequestContext(task_id=task_id, context_id=context_id),
+            FakeEventQueue(),
+            response=response,
+        )
+    assert exc.value.data == {"code": "SESSION_BACKUP_NOT_READY", "retryable": True}
+
+
+@pytest.mark.asyncio
+async def test_persisted_permission_missing_after_generation_is_current_keeps_existing_invalid_result(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_dir = tmp_path / "config"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cwd = str(workspace)
+    session_id = "session-current-without-permission"
+    context_id = "ctx-current-without-permission"
+    task_id = "task-current-without-permission"
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    session_dir = SessionStorage().ensure_v2_session_dir_for_new_session(cwd, session_id)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    async def get_task_record(_task_id):
+        return SimpleNamespace(context_id=context_id, expected_permission_backup_generation=9)
+
+    async def get_context_record(_context_id):
+        return SimpleNamespace(cwd=cwd, session_id=session_id)
+
+    async def reconcile(**kwargs):
+        assert kwargs["minimum_generation"] == 9
+        return SessionReconcileResult(enabled=True, action="current", source=session_dir)
+
+    monkeypatch.setattr(store, "get_task_record", get_task_record)
+    monkeypatch.setattr(store, "get_context_record", get_context_record)
+    monkeypatch.setattr(executor, "_reconcile_session_before_route", reconcile)
+    response = PermissionResponse(
+        task_id=task_id,
+        context_id=context_id,
+        request_task_id=task_id,
+        input_id="missing-input",
+        tool_use_id="missing-tool",
+        decision="allow_once",
+    )
+
+    assert not await executor._resume_persisted_permission(
+        FakeRequestContext(task_id=task_id, context_id=context_id),
+        FakeEventQueue(),
+        response=response,
+    )
 
 
 @pytest.mark.asyncio

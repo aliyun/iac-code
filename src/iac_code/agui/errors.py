@@ -20,6 +20,10 @@ _PUBLIC_AGUI_ERROR_MESSAGES = frozenset(
         translate_message("Invalid iac-code forwarded properties.", language="en"),
         translate_message("Only text and inline data images are supported.", language="en"),
         translate_message("Remote media URLs are not supported.", language="en"),
+        translate_message(
+            "Session backup is still synchronizing. Retry after 3 seconds.",
+            language="en",
+        ),
         translate_message("The A2A context identity changed unexpectedly.", language="en"),
         translate_message("The A2A execution failed.", language="en"),
         translate_message("The A2A interrupt response was not accepted.", language="en"),

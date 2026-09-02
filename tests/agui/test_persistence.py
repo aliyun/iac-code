@@ -305,7 +305,7 @@ async def test_restart_restores_interrupt_resume_and_cancel_identity(tmp_path) -
             ),
         )
     assert _events(resumed)[-1]["outcome"] == {"type": "success"}
-    assert fake.restored_sessions[-1] == (str(tmp_path), "session-1")
+    assert fake.restored_sessions[-1] == (str(tmp_path), "session-1", "task-1")
     assert fake.resume_preflight_calls[:3] == [
         "ensure_session_restored",
         "get_task",
@@ -420,7 +420,7 @@ async def test_a2a_restart_summary_without_input_projection_preserves_durable_in
 
 
 @pytest.mark.asyncio
-async def test_explicit_empty_input_projection_remains_authoritative_after_restart(tmp_path) -> None:
+async def test_explicit_empty_input_projection_preserves_durable_resume_after_restart(tmp_path) -> None:
     state_dir = tmp_path / "state"
     first_fake = FakeA2AClient(interrupt=True)
     first_adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=first_fake, state_dir=state_dir)
@@ -452,9 +452,113 @@ async def test_explicit_empty_input_projection_remains_authoritative_after_resta
             ),
         )
 
-    assert _events(resumed)[-1]["code"] == "UNKNOWN_INTERRUPT"
-    assert snapshot.sent_parts == []
+    assert _events(resumed)[-1]["outcome"] == {"type": "success"}
+    assert snapshot.sent_parts == [
+        {
+            "data": {
+                "schemaVersion": 1,
+                "kind": "permission",
+                "requestTaskId": "task-1",
+                "inputId": "permission-1",
+                "toolUseId": "tool-1",
+                "decision": "allow_once",
+            },
+            "mediaType": "application/json",
+        }
+    ]
     await second_adapter.aclose()
+
+
+@pytest.mark.asyncio
+async def test_second_permission_resume_survives_stale_a2a_projection(tmp_path) -> None:
+    class SequentialPermissionClient(FakeA2AClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.get_task_calls = 0
+            self.resume_stream_calls = 0
+
+        def stream_message_parts(self, _url, parts, *, context_id, **kwargs):
+            self.context_id = context_id
+
+            async def events():
+                if kwargs.get("task_id") is None:
+                    yield _event(context_id=context_id)
+                    event = _event(context_id=context_id, state="TASK_STATE_INPUT_REQUIRED")
+                    event["result"]["metadata"] = {
+                        "iac_code": {"input": _permission(context_id, "permission-1", "tool-1")}
+                    }
+                    yield event
+                    return
+                self.resume_stream_calls += 1
+                self.sent_parts.extend(parts)
+                if self.resume_stream_calls == 1:
+                    event = _event(context_id=context_id, state="TASK_STATE_INPUT_REQUIRED")
+                    event["result"]["metadata"] = {
+                        "iac_code": {"input": _permission(context_id, "permission-2", "tool-2")}
+                    }
+                    yield event
+                    return
+                yield _event(context_id=context_id, state="TASK_STATE_COMPLETED")
+
+            return events()
+
+        async def get_task(self, _url, _task_id, *, history_length=None):
+            del history_length
+            self.get_task_calls += 1
+            if self.get_task_calls == 1:
+                event = _event(context_id=self.context_id, state="TASK_STATE_INPUT_REQUIRED")
+                event["result"]["metadata"] = {
+                    "iac_code": {"input": _permission(self.context_id, "permission-1", "tool-1")}
+                }
+                return event
+            event = _event(context_id=self.context_id, state="TASK_STATE_INPUT_REQUIRED")
+            event["result"]["metadata"] = {
+                "iac_code": {
+                    "iacCodeSessionId": "session-1",
+                    "input": _permission(self.context_id, "permission-1", "tool-1"),
+                }
+            }
+            return event
+
+        def subscribe_task(self, _url, _task_id):
+            async def events():
+                if False:
+                    yield {}
+
+            return events()
+
+    def permission_resume(input_id: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "interruptId": input_id,
+                "status": "resolved",
+                "payload": {"decision": "allow_once"},
+            }
+        ]
+
+    state_dir = tmp_path / "state"
+    fake = SequentialPermissionClient()
+    adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake, state_dir=state_dir)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=adapter)), base_url="http://test"
+    ) as client:
+        first = await client.post("/", json=_payload(tmp_path))
+        first_resume = await client.post(
+            "/",
+            json=_payload(tmp_path, run_id="run-2", resume=permission_resume("permission-1")),
+        )
+        persisted = json.loads(_thread_state_path(state_dir).read_text(encoding="utf-8"))
+        second_resume = await client.post(
+            "/",
+            json=_payload(tmp_path, run_id="run-3", resume=permission_resume("permission-2")),
+        )
+
+    assert _events(first)[-1]["outcome"]["interrupts"][0]["id"] == "permission-1"
+    assert _events(first_resume)[-1]["outcome"]["interrupts"][0]["id"] == "permission-2"
+    assert set(persisted["execution"]["pending"]) == {"permission-2"}
+    assert _events(second_resume)[-1]["outcome"] == {"type": "success"}
+    assert [part["data"]["inputId"] for part in fake.sent_parts] == ["permission-1", "permission-2"]
+    await adapter.aclose()
 
 
 @pytest.mark.asyncio

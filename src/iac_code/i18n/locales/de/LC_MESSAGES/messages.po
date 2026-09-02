@@ -84,6 +84,12 @@ msgstr ""
 "Cloud-Ressourcen manuell."
 
 #: src/iac_code/a2a/executor.py
+msgid "Normal permission restore snapshot could not be persisted."
+msgstr ""
+"Der Wiederherstellungs-Snapshot für die Berechtigung des normalen Chats "
+"konnte nicht gespeichert werden."
+
+#: src/iac_code/a2a/executor.py
 msgid "Normal permission restore snapshot identity is incomplete."
 msgstr ""
 "Die Identität des Wiederherstellungs-Snapshots für die Berechtigung des "
@@ -106,12 +112,6 @@ msgid "Normal permission restore decision conflicts with the snapshot."
 msgstr ""
 "Die Wiederherstellungsentscheidung für die Berechtigung des normalen "
 "Chats steht im Konflikt mit dem Snapshot."
-
-#: src/iac_code/a2a/executor.py
-msgid "Normal permission restore snapshot could not be persisted."
-msgstr ""
-"Der Wiederherstellungs-Snapshot für die Berechtigung des normalen Chats "
-"konnte nicht gespeichert werden."
 
 #: src/iac_code/a2a/executor.py
 msgid ""
@@ -157,6 +157,12 @@ msgid "Normal permission decision is unavailable before backup."
 msgstr ""
 "Die Berechtigungsentscheidung des normalen Chats ist vor der Sicherung "
 "nicht verfügbar."
+
+#: src/iac_code/a2a/executor.py src/iac_code/agui/errors.py
+msgid "Session backup is still synchronizing. Retry after 3 seconds."
+msgstr ""
+"Die Sitzungssicherung wird noch synchronisiert. Versuchen Sie es in 3 "
+"Sekunden erneut."
 
 #: src/iac_code/a2a/executor.py
 msgid "Unsupported pipeline name."

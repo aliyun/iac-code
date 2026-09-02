@@ -51,7 +51,12 @@ from iac_code.services.permission_wait import (
     PermissionWaitPolicy,
     build_permission_checkpoint,
 )
-from iac_code.services.session_backup import BackupReason, SessionBackupBlocked, SessionBackupService
+from iac_code.services.session_backup import (
+    BackupReason,
+    SessionBackupBlocked,
+    SessionBackupNotReadyError,
+    SessionBackupService,
+)
 from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
 from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
 from iac_code.services.session_storage import SessionStorage
@@ -204,6 +209,43 @@ def test_ensure_session_restored_is_authenticated_idempotent_and_restores_backup
     assert missing.json() == {"status": "not_found"}
     assert (restored_pipeline_dir / "a2a-events.jsonl").read_text(encoding="utf-8") == '{"sequence":1}\n'
     assert (restored_pipeline_dir / "a2a-snapshot.json").read_text(encoding="utf-8") == '{"lastSequence":1}\n'
+
+
+def test_ensure_session_restored_for_task_returns_retryable_generation_error(monkeypatch, tmp_path) -> None:
+    workspace_root = tmp_path / "workspace"
+    cwd = workspace_root / "session"
+    cwd.mkdir(parents=True)
+    monkeypatch.setenv("IACCODE_A2A_ALLOWED_CWDS", str(workspace_root))
+    calls: list[tuple[str, str, str | None]] = []
+
+    async def not_ready(self, *, cwd, session_id, task_id=None):
+        del self
+        calls.append((cwd, session_id, task_id))
+        raise SessionBackupNotReadyError(
+            minimum_generation=2,
+            local_generation=1,
+            shared_generation=1,
+        )
+
+    monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2AExecutor.ensure_session_restored", not_ready)
+    app = create_app(host="127.0.0.1", port=41242, token="runtime-token", model="qwen3.6-plus")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/iac-code/session/ensure-restored",
+            json={"cwd": str(cwd), "sessionId": "session-1", "taskId": "task-1"},
+            headers={"Authorization": "Bearer runtime-token"},
+        )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "error": {
+            "code": "SESSION_BACKUP_NOT_READY",
+            "message": "Session backup is still synchronizing. Retry after 3 seconds.",
+            "retryable": True,
+        }
+    }
+    assert calls == [(str(cwd), "session-1", "task-1")]
 
 
 @pytest.mark.asyncio

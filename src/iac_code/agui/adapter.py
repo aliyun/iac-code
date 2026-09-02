@@ -28,7 +28,7 @@ from ag_ui.core import (
 from jsonschema import ValidationError as JsonSchemaValidationError
 from jsonschema import validate as validate_json_schema
 
-from iac_code.a2a.client import A2AClient
+from iac_code.a2a.client import A2AClient, A2ASessionBackupNotReadyError
 from iac_code.agui.errors import AdmissionError, AguiError, normalize_agui_language, translate_agui_error
 from iac_code.agui.events import (
     A2AEventMapper,
@@ -58,6 +58,7 @@ from iac_code.agui.state import (
     AguiStateStoreError,
     FileAguiThreadStateStore,
 )
+from iac_code.services.session_backup import SESSION_BACKUP_NOT_READY_CODE
 
 logger = logging.getLogger(__name__)
 _FAILED_STATES = frozenset({"auth-required", "failed", "rejected"})
@@ -872,11 +873,15 @@ class AguiA2AAdapter:
 
         ensure_session_restored = getattr(self.client, "ensure_session_restored", None)
         if binding.iac_code_session_id is not None and callable(ensure_session_restored):
-            session_ready = await ensure_session_restored(
-                self.a2a_url,
-                cwd=binding.cwd,
-                session_id=binding.iac_code_session_id,
-            )
+            try:
+                session_ready = await ensure_session_restored(
+                    self.a2a_url,
+                    cwd=binding.cwd,
+                    session_id=binding.iac_code_session_id,
+                    task_id=binding.task_id,
+                )
+            except A2ASessionBackupNotReadyError as exc:
+                raise AguiError(SESSION_BACKUP_NOT_READY_CODE, str(exc)) from exc
             if not session_ready:
                 raise AguiError("EXECUTION_LOST", "The iac-code session to resume is unavailable.")
 
@@ -910,18 +915,22 @@ class AguiA2AAdapter:
         binding.pipeline_open_steps = set(mapper.open_pipeline_steps)
 
         known_pending_ids = set(binding.pending)
+        resumed_pending_ids = known_pending_ids.intersection(
+            entry.interrupt_id for entry in ticket.run_input.resume or []
+        )
         current_inputs = a2a_inputs(task)
         task_metadata = a2a_iac_code_metadata(task)
         # A task restored after an A2A process restart is only a durable
         # summary and does not contain the original input metadata.  Absence of
         # that projection is not evidence that the adapter's durable interrupt
         # disappeared: the following permission response is what lets A2A load
-        # its permission checkpoint.  Explicit projections (including an empty
-        # one) remain authoritative, as do terminal task states.
-        replace_pending = (
-            "input" in task_metadata
-            or "pendingPermissions" in task_metadata
-            or a2a_state(task) in _FAILED_STATES | {"canceled", "completed"}
+        # its permission checkpoint.  A non-terminal projection must not erase
+        # an interrupt this Resume is answering; A2A remains authoritative when
+        # it accepts or rejects the response.  Terminal task states always win.
+        task_is_terminal = a2a_state(task) in _FAILED_STATES | {"canceled", "completed"}
+        replace_pending = task_is_terminal or (
+            not resumed_pending_ids
+            and ("input" in task_metadata or "pendingPermissions" in task_metadata)
         )
         self._merge_pending(
             binding,
@@ -1446,7 +1455,18 @@ def _pending_expires_at(binding: ThreadBinding) -> datetime | None:
 
 def _raise_for_a2a_error(response: Any) -> None:
     payload = getattr(response, "payload", response)
-    if isinstance(payload, Mapping) and isinstance(payload.get("error"), Mapping):
+    error = payload.get("error") if isinstance(payload, Mapping) else None
+    if isinstance(error, Mapping):
+        data = error.get("data")
+        if (
+            isinstance(data, Mapping)
+            and data.get("code") == SESSION_BACKUP_NOT_READY_CODE
+            and data.get("retryable") is True
+        ):
+            raise AguiError(
+                SESSION_BACKUP_NOT_READY_CODE,
+                "Session backup is still synchronizing. Retry after 3 seconds.",
+            )
         raise AguiError("A2A_UNAVAILABLE", "The local A2A execution service rejected the interrupt response.")
 
 

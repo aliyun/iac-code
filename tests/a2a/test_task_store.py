@@ -130,6 +130,25 @@ async def test_context_reuses_runtime_until_evicted() -> None:
 
 
 @pytest.mark.asyncio
+async def test_permission_backup_generation_uses_next_existing_task_save(tmp_path) -> None:
+    persistence = CountingTaskPersistence(tmp_path / "a2a")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    saves_before_generation = persistence.task_save_count
+
+    await store.record_expected_permission_backup_generation("task-1", 7)
+    await store.record_expected_permission_backup_generation("task-1", 5)
+
+    assert persistence.task_save_count == saves_before_generation
+    await store.save(sdk_task("task-1", state=TaskState.TASK_STATE_INPUT_REQUIRED))
+    assert persistence.task_save_count == saves_before_generation + 1
+    snapshot = persistence.load_task("task-1")
+    assert snapshot is not None
+    assert snapshot.expected_permission_backup_generation == 7
+    assert "expected_permission_backup_generation" not in str(await store.get("task-1"))
+
+
+@pytest.mark.asyncio
 async def test_context_telemetry_channel_binding_persists_and_can_be_updated(monkeypatch, tmp_path) -> None:
     config_dir = tmp_path / "config"
     cwd = tmp_path / "workspace"

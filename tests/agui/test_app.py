@@ -9,7 +9,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from iac_code.a2a.app import create_app as create_a2a_app
-from iac_code.a2a.client import A2AClientResponse
+from iac_code.a2a.client import A2AClientResponse, A2ASessionBackupNotReadyError
 from iac_code.agui.adapter import AguiA2AAdapter, ThreadBinding
 from iac_code.agui.app import create_app
 from iac_code.agui.events import A2AEventMapper, a2a_state
@@ -26,7 +26,7 @@ class FakeA2AClient:
         self.stream_contexts: list[str] = []
         self.stream_options: list[dict[str, Any]] = []
         self.cancelled: list[str] = []
-        self.restored_sessions: list[tuple[str, str]] = []
+        self.restored_sessions: list[tuple[str, str, str | None]] = []
         self.resume_preflight_calls: list[str] = []
         self.session_available = True
         self.closed = False
@@ -114,8 +114,8 @@ class FakeA2AClient:
         self.resume_preflight_calls.append("get_pipeline_state")
         return None
 
-    async def ensure_session_restored(self, _url, *, cwd, session_id):
-        self.restored_sessions.append((cwd, session_id))
+    async def ensure_session_restored(self, _url, *, cwd, session_id, task_id=None):
+        self.restored_sessions.append((cwd, session_id, task_id))
         self.resume_preflight_calls.append("ensure_session_restored")
         return self.session_available
 
@@ -592,6 +592,103 @@ async def test_permission_resume_jsonrpc_error_is_not_accepted(tmp_path, monkeyp
     events = _events(failed)
     assert [event["type"] for event in events] == ["RUN_STARTED", "RUN_ERROR"]
     assert events[-1]["code"] == "A2A_UNAVAILABLE"
+    assert set(adapter._threads["thread-1"].pending) == {"permission-1"}
+
+
+@pytest.mark.asyncio
+async def test_permission_resume_maps_backup_sync_error_to_retryable_agui_error(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IAC_CODE_AGUI_ALLOWED_CWDS", str(tmp_path))
+
+    class SyncingPermissionClient(FakeA2AClient):
+        def stream_message_parts(self, url, parts, *, context_id, **kwargs):
+            if kwargs.get("task_id") is None:
+                return super().stream_message_parts(url, parts, context_id=context_id, **kwargs)
+
+            async def events():
+                yield {
+                    "jsonrpc": "2.0",
+                    "id": "resume",
+                    "error": {
+                        "code": -32602,
+                        "message": "Session backup is still synchronizing. Retry after 3 seconds.",
+                        "data": {"code": "SESSION_BACKUP_NOT_READY", "retryable": True},
+                    },
+                }
+
+            return events()
+
+    fake = SyncingPermissionClient(interrupt=True)
+    adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake)
+    app = create_app(adapter=adapter)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        await client.post("/", json=_payload(tmp_path))
+        fake.context_id = adapter._threads["thread-1"].context_id
+        response = await client.post(
+            "/",
+            json=_payload(
+                tmp_path,
+                run_id="run-syncing",
+                resume=[
+                    {
+                        "interruptId": "permission-1",
+                        "status": "resolved",
+                        "payload": {"decision": "allow_once"},
+                    }
+                ],
+            ),
+        )
+
+    terminal = _events(response)[-1]
+    assert terminal["type"] == "RUN_ERROR"
+    assert terminal["code"] == "SESSION_BACKUP_NOT_READY"
+    assert terminal["message"] == "Session backup is still synchronizing. Retry after 3 seconds."
+    assert set(adapter._threads["thread-1"].pending) == {"permission-1"}
+
+
+@pytest.mark.asyncio
+async def test_permission_resume_maps_preflight_backup_sync_error_without_sending_response(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_AGUI_ALLOWED_CWDS", str(tmp_path))
+
+    class SyncingPreflightClient(FakeA2AClient):
+        async def ensure_session_restored(self, _url, *, cwd, session_id, task_id=None):
+            self.restored_sessions.append((cwd, session_id, task_id))
+            self.resume_preflight_calls.append("ensure_session_restored")
+            raise A2ASessionBackupNotReadyError(
+                "Session backup is still synchronizing. Retry after 3 seconds."
+            )
+
+    fake = SyncingPreflightClient(interrupt=True)
+    adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake)
+    app = create_app(adapter=adapter)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        await client.post("/", json=_payload(tmp_path))
+        fake.context_id = adapter._threads["thread-1"].context_id
+        response = await client.post(
+            "/",
+            json=_payload(
+                tmp_path,
+                run_id="run-syncing-preflight",
+                resume=[
+                    {
+                        "interruptId": "permission-1",
+                        "status": "resolved",
+                        "payload": {"decision": "allow_once"},
+                    }
+                ],
+            ),
+        )
+
+    terminal = _events(response)[-1]
+    assert terminal["type"] == "RUN_ERROR"
+    assert terminal["code"] == "SESSION_BACKUP_NOT_READY"
+    assert terminal["message"] == "Session backup is still synchronizing. Retry after 3 seconds."
+    assert fake.restored_sessions[-1] == (str(tmp_path), "session-1", "task-1")
+    assert fake.sent_parts == []
     assert set(adapter._threads["thread-1"].pending) == {"permission-1"}
 
 

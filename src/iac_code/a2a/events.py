@@ -572,6 +572,7 @@ async def publish_interactive_permission_boundary(
     permission_wait_metrics: Any | None = None,
     before_permission_backup: Callable[[Any], Awaitable[None]] | None = None,
     before_permission_claim_backup: Callable[[Any, dict[str, Any]], Awaitable[None]] | None = None,
+    record_expected_backup_generation: Callable[[str, int], Awaitable[None]] | None = None,
     wait_for_response: bool,
 ) -> Any:
     """Publish one real external permission wait, optionally detaching Normal SSE."""
@@ -598,6 +599,9 @@ async def publish_interactive_permission_boundary(
                 before_backup=before_permission_backup,
                 before_claim_backup=before_permission_claim_backup,
             )
+            generation = pending.expected_backup_generation
+            if generation is not None and record_expected_backup_generation is not None:
+                await record_expected_backup_generation(task_id, generation)
         await _enqueue_status(
             event_queue,
             task_id=task_id,

@@ -31,6 +31,7 @@ class A2ATaskRecord:
     state: str = TASK_STATE_SUBMITTED
     owner: str = ""
     output_text: list[str] = field(default_factory=list)
+    expected_permission_backup_generation: int | None = None
     active_task: asyncio.Task[Any] | None = None
     expired: bool = False
     updated_at: float = field(default_factory=time.time)

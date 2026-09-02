@@ -118,9 +118,11 @@ from iac_code.services.permissions.audit import emit_permission_boundary_audit
 from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredential, AliyunCredentials
 from iac_code.services.providers.aliyun_identity import AliyunCallerIdentityUnavailableError
 from iac_code.services.session_backup import (
+    SESSION_BACKUP_NOT_READY_CODE,
     BackupReason,
     SessionBackupBlocked,
     SessionBackupError,
+    SessionBackupNotReadyError,
     SessionBackupService,
     SessionReconcileResult,
 )
@@ -148,6 +150,11 @@ _CANCEL_ACTIVE_TASK_DRAIN_TIMEOUT_SECONDS = 30
 _ERROR_TEXT_MAX_CHARS = 1000
 _DEFERRED_CLEANUP_PROMPTS_FILENAME = "cleanup-deferred-prompts.json"
 _CLEANUP_ONLY_METADATA_KEY = "cleanupOnly"
+
+
+class SessionBackupNotReadyInvalidParamsError(InvalidParamsError):
+    code = -32602
+    jsonrpc_error_data_passthrough = True
 
 
 def _format_exception(exc: BaseException) -> str:
@@ -2007,6 +2014,9 @@ class IacCodeA2AExecutor(AgentExecutor):
                                     permission_wait_metrics=self._metrics,
                                     before_permission_backup=persist_request_before_backup,
                                     before_permission_claim_backup=persist_resolution_before_backup,
+                                    record_expected_backup_generation=(
+                                        self._task_store.record_expected_permission_backup_generation
+                                    ),
                                     wait_for_response=False,
                                 )
                                 detached_permission = pending
@@ -2166,6 +2176,11 @@ class IacCodeA2AExecutor(AgentExecutor):
     ) -> bool:
         """Claim and resume a permission whose process-local registry was lost."""
 
+        response_metadata = getattr(context, "metadata", None) or getattr(
+            getattr(context, "message", None), "metadata", None
+        )
+        preferred_language = self._resolve_preferred_language(response_metadata)
+
         try:
             task_record = await self._task_store.get_task_record(response.task_id)
             context_record = await self._task_store.get_context_record(response.context_id)
@@ -2173,11 +2188,25 @@ class IacCodeA2AExecutor(AgentExecutor):
             return False
         if task_record.context_id != response.context_id:
             raise InvalidParamsError("input_response_mismatch: permission task context changed.")
+        minimum_generation = getattr(task_record, "expected_permission_backup_generation", None)
         try:
             reconcile_result = await self._reconcile_session_before_route(
                 context_id=response.context_id,
                 cwd=context_record.cwd,
+                minimum_generation=minimum_generation,
             )
+        except SessionBackupNotReadyError as exc:
+            message = translate_message(
+                "Session backup is still synchronizing. Retry after 3 seconds.",
+                language=preferred_language or "en",
+            )
+            raise SessionBackupNotReadyInvalidParamsError(
+                message,
+                data={
+                    "code": SESSION_BACKUP_NOT_READY_CODE,
+                    "retryable": True,
+                },
+            ) from exc
         except SessionBackupError:
             logger.warning("Failed to restore the A2A session before resuming a persisted permission", exc_info=True)
             return False
@@ -2225,7 +2254,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             )
             return True
 
-        metadata = getattr(context, "metadata", None) or getattr(getattr(context, "message", None), "metadata", None)
+        metadata = response_metadata
         model = self._resolve_model(metadata) or self._model
         metadata_api_key = self._resolve_api_key(metadata)
         request_policy_override = self._resolve_request_policy(metadata)
@@ -3041,19 +3070,25 @@ class IacCodeA2AExecutor(AgentExecutor):
         *,
         context_id: str,
         cwd: str,
+        minimum_generation: int | None = None,
     ) -> SessionReconcileResult | None:
         reconcile = getattr(self._backup_service, "reconcile_session", None)
         if not callable(reconcile):
             return None
         async with self._task_store.reconciliation_lock(context_id):
             await self._task_store.ensure_context_reconciliation_safe(context_id)
-            return await self._reconcile_session_before_route_locked(context_id=context_id, cwd=cwd)
+            return await self._reconcile_session_before_route_locked(
+                context_id=context_id,
+                cwd=cwd,
+                minimum_generation=minimum_generation,
+            )
 
     async def _reconcile_session_before_route_locked(
         self,
         *,
         context_id: str,
         cwd: str,
+        minimum_generation: int | None = None,
     ) -> SessionReconcileResult | None:
         reconcile = getattr(self._backup_service, "reconcile_session", None)
         if not callable(reconcile):
@@ -3064,17 +3099,17 @@ class IacCodeA2AExecutor(AgentExecutor):
             return None
         if context.cwd != cwd:
             return None
-        result = await run_sync_fenced(
-            reconcile,
-            cwd,
-            context.session_id,
-            attempted_proof_validator=lambda key, proof: self._validate_attempted_publication_proof(
+        reconcile_kwargs: dict[str, Any] = {
+            "attempted_proof_validator": lambda key, proof: self._validate_attempted_publication_proof(
                 cwd=cwd,
                 session_id=context.session_id,
                 key=key,
                 proof=proof,
-            ),
-        )
+            )
+        }
+        if minimum_generation is not None:
+            reconcile_kwargs["minimum_generation"] = minimum_generation
+        result = await run_sync_fenced(reconcile, cwd, context.session_id, **reconcile_kwargs)
         if not isinstance(result, SessionReconcileResult):
             raise TypeError("session backup reconciliation returned an invalid result")
         proven_handoff = self._normal_handoff_has_state_proof(
@@ -3089,6 +3124,60 @@ class IacCodeA2AExecutor(AgentExecutor):
                 session_id=context.session_id,
                 clear_active_task_for_proven_handoff=proven_handoff,
             )
+        return result
+
+    async def ensure_session_restored(
+        self,
+        *,
+        cwd: str,
+        session_id: str,
+        task_id: str | None = None,
+    ) -> SessionReconcileResult | None:
+        """Restore one internal A2A session, applying a Task's permission generation fence when present."""
+
+        if task_id is None:
+            return await self._reconcile_session_direct(cwd=cwd, session_id=session_id)
+
+        task_record = await self._task_store.get_task_record(task_id)
+        context_record = await self._task_store.get_context_record(task_record.context_id)
+        if context_record.cwd != cwd or context_record.session_id != session_id:
+            raise ValueError("A2A task session binding changed")
+        minimum_generation = task_record.expected_permission_backup_generation
+        if minimum_generation is None:
+            return await self._reconcile_session_direct(cwd=cwd, session_id=session_id)
+
+        read_local_state = getattr(self._backup_service, "read_local_state", None)
+        if callable(read_local_state):
+            local_state = await run_sync_fenced(read_local_state, cwd, session_id)
+            if (
+                isinstance(local_state, SessionBackupState)
+                and local_state.status == "succeeded"
+                and local_state.generation >= minimum_generation
+            ):
+                return SessionReconcileResult(
+                    enabled=True,
+                    action="current",
+                    source=Path(SessionStorage().session_dir(cwd, session_id)),
+                    state=local_state,
+                )
+        return await self._reconcile_session_before_route(
+            context_id=context_record.context_id,
+            cwd=cwd,
+            minimum_generation=minimum_generation,
+        )
+
+    async def _reconcile_session_direct(
+        self,
+        *,
+        cwd: str,
+        session_id: str,
+    ) -> SessionReconcileResult | None:
+        reconcile = getattr(self._backup_service, "reconcile_session", None)
+        if not callable(reconcile):
+            return None
+        result = await run_sync_fenced(reconcile, cwd, session_id)
+        if not isinstance(result, SessionReconcileResult):
+            raise TypeError("session backup reconciliation returned an invalid result")
         return result
 
     def _validate_attempted_publication_proof(

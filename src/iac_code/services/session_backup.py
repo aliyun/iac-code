@@ -36,6 +36,7 @@ from iac_code.utils.state_io import atomic_write_json, fsync_parent_dir, safe_re
 BACKUP_ENV_VAR = "IAC_CODE_CONFIG_BACKUP_DIR"
 BACKUP_STATE_FILENAME = ".backup-state.json"
 BACKUP_LOCK_FILENAME = ".backup-lock"
+SESSION_BACKUP_NOT_READY_CODE = "SESSION_BACKUP_NOT_READY"
 _PREPARED_DIR_CACHE_LIMIT = 4096
 logger = logging.getLogger(__name__)
 _SAFE_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -166,6 +167,22 @@ class SessionReconcileResult:
 
 class SessionBackupError(Exception):
     """Base session backup error."""
+
+
+class SessionBackupNotReadyError(SessionBackupError):
+    """The shared backup has not reached a required staged generation yet."""
+
+    def __init__(
+        self,
+        *,
+        minimum_generation: int,
+        local_generation: int | None,
+        shared_generation: int | None,
+    ) -> None:
+        super().__init__("Session backup is still synchronizing. Retry after 3 seconds.")
+        self.minimum_generation = minimum_generation
+        self.local_generation = local_generation
+        self.shared_generation = shared_generation
 
 
 class SessionBackupConflict(SessionBackupError):  # noqa: N818 - protocol conflict is a public domain name.
@@ -403,7 +420,14 @@ class SessionBackupService:
         session_id: str,
         *,
         attempted_proof_validator: Callable[[str, BackupPublicationProof], bool] | None = None,
+        minimum_generation: int | None = None,
     ) -> SessionReconcileResult:
+        if minimum_generation is not None and (
+            isinstance(minimum_generation, bool)
+            or not isinstance(minimum_generation, int)
+            or minimum_generation <= 0
+        ):
+            raise ValueError("minimum_generation must be a positive integer")
         if not self._backup_enabled():
             return SessionReconcileResult(enabled=False, action="disabled")
         self._validate_session_id(session_id)
@@ -416,7 +440,25 @@ class SessionBackupService:
             local = self._source_for_backup(cwd, session_id)
             local_state = self._read_state(local, session_id=session_id, missing_ok=True) if local is not None else None
             shared = self._source_for_restore(cwd, session_id, backup_root)
-            shared_state = self._read_state(shared, session_id=session_id, shared=True) if shared is not None else None
+            shared_state = (
+                self._read_state(
+                    shared,
+                    session_id=session_id,
+                    shared=True,
+                    missing_ok=minimum_generation is not None,
+                )
+                if shared is not None
+                else None
+            )
+            if minimum_generation is not None and (
+                local_state is None or local_state.generation < minimum_generation
+            ):
+                if shared_state is None or shared_state.generation < minimum_generation:
+                    raise SessionBackupNotReadyError(
+                        minimum_generation=minimum_generation,
+                        local_generation=local_state.generation if local_state is not None else None,
+                        shared_generation=shared_state.generation if shared_state is not None else None,
+                    )
 
             if local is None:
                 if shared is None or shared_state is None:
