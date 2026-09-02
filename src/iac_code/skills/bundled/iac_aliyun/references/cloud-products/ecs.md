@@ -83,18 +83,21 @@
 
 ## 镜像选择
 
-- **Alibaba Cloud Linux 4**：推荐，针对阿里云优化，内核定制
-- **Ubuntu 24.04**：社区支持好，生态丰富
+- **Ubuntu 24.04**：默认首选，社区支持好，生态丰富，优先使用 x86_64 镜像
+- **Alibaba Cloud Linux 4**：仅在用户明确要求或存在兼容性约束时使用
 - **CentOS Stream 9**：兼容 RHEL，适合企业场景
 - **Windows Server 2025**：Windows 工作负载
 
-调用 DescribeImages 可指定 ImageName 进行模糊搜索。比如 ImageName="aliyun_4_*
+调用 DescribeImages 可指定 ImageName 进行模糊搜索。默认优先搜索 Ubuntu 24.04，
+例如 `ImageName="ubuntu_24_04_x64_*"`；不要直接复用过期的固定日期镜像 ID，
+应使用查询结果中当前地域和实例规格可用的镜像。
 
 ## 网络带宽
 
 - 默认按流量计费：适合流量不稳定的业务
 - 按带宽计费：适合流量持续稳定、高带宽场景
 - 公网 IP 可选按量购买 EIP，支持弹性绑定/解绑
+- ECS 绑定 EIP 时，必须显式设置 `AllocatePublicIP: false`，公网入口只保留 EIP；该约束由模板校验硬门禁强制执行。
 
 ## 安全组最佳实践
 

@@ -11415,6 +11415,28 @@ msgstr "{} nécessite un tableau"
 msgid "the condition is invalid"
 msgstr "la condition est invalide"
 
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+#, python-brace-format
+msgid ""
+"ECS resource {} is associated with an EIP but does not explicitly disable"
+" public IP allocation."
+msgstr ""
+"La ressource ECS {} est associée à une EIP, mais ne désactive pas "
+"explicitement l’allocation d’une adresse IP publique."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+#, python-brace-format
+msgid ""
+"EIPAssociation {} provides the public entry point; the associated ECS "
+"resource must set AllocatePublicIP to false."
+msgstr ""
+"EIPAssociation {} fournit le point d’entrée public ; la ressource ECS "
+"associée doit définir AllocatePublicIP sur false."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+msgid "Set AllocatePublicIP: false on the associated ECS resource."
+msgstr "Définissez AllocatePublicIP: false sur la ressource ECS associée."
+
 #: src/iac_code/ui/banner.py
 #, python-brace-format
 msgid "Update available! {} -> {}"
@@ -14787,4 +14809,3 @@ msgstr "Autoriser Bash ?"
 
 #~ msgid "--interrupt-ttl must be a positive integer."
 #~ msgstr "--interrupt-ttl doit être un entier positif."
-

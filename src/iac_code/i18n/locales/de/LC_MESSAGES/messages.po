@@ -11454,6 +11454,28 @@ msgstr "{} benötigt ein Array"
 msgid "the condition is invalid"
 msgstr "die Bedingung ist ungültig"
 
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+#, python-brace-format
+msgid ""
+"ECS resource {} is associated with an EIP but does not explicitly disable"
+" public IP allocation."
+msgstr ""
+"Die ECS-Ressource {} ist mit einer EIP verknüpft, deaktiviert die "
+"Zuweisung einer öffentlichen IP jedoch nicht ausdrücklich."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+#, python-brace-format
+msgid ""
+"EIPAssociation {} provides the public entry point; the associated ECS "
+"resource must set AllocatePublicIP to false."
+msgstr ""
+"EIPAssociation {} stellt den öffentlichen Zugangspunkt bereit; die "
+"verknüpfte ECS-Ressource muss AllocatePublicIP auf false setzen."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+msgid "Set AllocatePublicIP: false on the associated ECS resource."
+msgstr "Setzen Sie AllocatePublicIP: false für die verknüpfte ECS-Ressource."
+
 #: src/iac_code/ui/banner.py
 #, python-brace-format
 msgid "Update available! {} -> {}"
@@ -14836,4 +14858,3 @@ msgstr "Bash zulassen?"
 
 #~ msgid "--interrupt-ttl must be a positive integer."
 #~ msgstr "--interrupt-ttl muss eine positive Ganzzahl sein."
-

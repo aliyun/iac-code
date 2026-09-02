@@ -238,6 +238,10 @@ class TestSkillContentRosOnly:
     def test_contains_validate_template(self, body):
         assert "ros_validate_template" in body
 
+    def test_prefers_ubuntu_24_04_image_example(self, body):
+        assert "ubuntu_24_04_x64_20G_alibase_20260720.vhd" in body
+        assert "centos_stream_9_x64_20G_alibase_20260414.vhd" not in body
+
     def test_template_path_examples_use_the_working_directory(self, body):
         assert "`./template.yml`" in body
         assert 'template_url="./ros-template.yml"' in body
@@ -469,6 +473,7 @@ class TestReferencesExist:
         assert "CpuCoreCount" in content
         assert "MemorySize" in content
         assert "用户已明确 vCPU/内存时，不得选择最接近值" in content
+        assert "ECS 绑定 EIP 时，必须显式设置 `AllocatePublicIP: false`" in content
 
 
 class TestSkillDiscovery:

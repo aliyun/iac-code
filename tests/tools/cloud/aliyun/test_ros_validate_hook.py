@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from iac_code.tools.cloud.aliyun.hooks.ros_validate import (
     _format_json_error,
     _format_yaml_error,
@@ -376,3 +378,83 @@ class TestCheckTemplate:
 
         assert result is not None and result.blocking_result is None
         assert params == {"TemplateBody": body}
+
+    @pytest.mark.parametrize("allocate_public_ip", [None, True, "false", {"Ref": "AllocatePublicIp"}])
+    def test_eip_bound_ecs_requires_explicitly_disabled_public_ip(self, allocate_public_ip) -> None:
+        instance_properties = {}
+        if allocate_public_ip is not None:
+            instance_properties["AllocatePublicIP"] = allocate_public_ip
+        body = {
+            "ROSTemplateFormatVersion": "2015-09-01",
+            "Resources": {
+                "Instance": {
+                    "Type": "ALIYUN::ECS::Instance",
+                    "Properties": instance_properties,
+                },
+                "Eip": {"Type": "ALIYUN::VPC::EIP"},
+                "EipAssociation": {
+                    "Type": "ALIYUN::VPC::EIPAssociation",
+                    "Properties": {
+                        "AllocationId": {"Ref": "Eip"},
+                        "InstanceId": {"Ref": "Instance"},
+                    },
+                },
+            },
+        }
+
+        result = check_template("ros", "ValidateTemplate", {"TemplateBody": body})
+
+        assert result is not None and result.blocking_result is not None
+        assert "ROS5103" in result.blocking_result.content
+        assert result.report.counts_by_code["ROS5103"] == 1
+
+    @pytest.mark.parametrize("allocate_public_ip", [False])
+    def test_eip_bound_ecs_accepts_explicitly_disabled_public_ip(self, allocate_public_ip) -> None:
+        body = {
+            "ROSTemplateFormatVersion": "2015-09-01",
+            "Resources": {
+                "Instance": {
+                    "Type": "ALIYUN::ECS::Instance",
+                    "Properties": {"AllocatePublicIP": allocate_public_ip},
+                },
+                "Eip": {"Type": "ALIYUN::VPC::EIP"},
+                "EipAssociation": {
+                    "Type": "ALIYUN::VPC::EIPAssociation",
+                    "Properties": {
+                        "AllocationId": {"Ref": "Eip"},
+                        "InstanceId": {"Ref": "Instance"},
+                    },
+                },
+            },
+        }
+
+        result = check_template("ros", "ValidateTemplate", {"TemplateBody": body})
+
+        assert result is not None and result.blocking_result is None
+        assert "ROS5103" not in result.report.counts_by_code
+
+    def test_eip_bound_instance_group_detects_select_getatt_reference(self) -> None:
+        body = {
+            "ROSTemplateFormatVersion": "2015-09-01",
+            "Resources": {
+                "InstanceGroup": {
+                    "Type": "ALIYUN::ECS::InstanceGroup",
+                    "Properties": {"AllocatePublicIP": True},
+                },
+                "Eip": {"Type": "ALIYUN::VPC::EIP"},
+                "EipAssociation": {
+                    "Type": "ALIYUN::VPC::EIPAssociation",
+                    "Properties": {
+                        "AllocationId": {"Ref": "Eip"},
+                        "InstanceId": {
+                            "Fn::Select": [0, {"Fn::GetAtt": ["InstanceGroup", "InstanceIds"]}]
+                        },
+                    },
+                },
+            },
+        }
+
+        result = check_template("ros", "ValidateTemplate", {"TemplateBody": body})
+
+        assert result is not None and result.blocking_result is not None
+        assert result.report.counts_by_code["ROS5103"] == 1

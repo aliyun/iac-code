@@ -33,6 +33,7 @@ from iac_code.tools.cloud.aliyun.ros_validation.rules.association_property impor
     AssociationPropertyRule,
     AssociationPropertySpecsProvider,
 )
+from iac_code.tools.cloud.aliyun.ros_validation.rules.eip_association import ResourceRelationshipRule
 from iac_code.tools.cloud.aliyun.ros_validation.rules.registry import create_validation_registry
 from iac_code.tools.cloud.aliyun.ros_validation.symbols import collect_symbols
 
@@ -250,7 +251,7 @@ _VALIDATION_REGISTRY = create_validation_registry(
         _LocalsPrecompileProvider(),
         _CountPrecompileProvider(),
     ),
-    rules=(AssociationPropertyRule(), _StructureRule(), _ConditionRule(), _ResourceRule()),
+    rules=(AssociationPropertyRule(), _StructureRule(), _ConditionRule(), _ResourceRule(), ResourceRelationshipRule()),
 )
 
 
