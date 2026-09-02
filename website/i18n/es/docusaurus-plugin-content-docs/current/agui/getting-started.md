@@ -74,7 +74,6 @@ iac-code agui --port 41243 --a2a-url http://127.0.0.1:41242
 host: 0.0.0.0
 port: 41243
 a2a-url: http://127.0.0.1:41242
-interrupt-ttl: 540
 state-dir: /var/lib/iac-code/agui
 idle-shutdown: 0
 debug: false
@@ -92,7 +91,6 @@ Los argumentos CLI explícitos prevalecen sobre YAML. Inyecte los tokens mediant
 | `--host` / `host` | `127.0.0.1` | Dirección HTTP |
 | `--port` / `port` | `8000` | Puerto AG-UI; los ejemplos usan `41243` |
 | `--a2a-url` / `a2a-url` | vacío | URL A2A local; vacío inicia un hijo |
-| `--interrupt-ttl` / `interrupt-ttl` | `540` | Segundos durante los que puede reanudarse un Interrupt |
 | `--state-dir` / `state-dir` | `<config-dir>/agui` | Estado por thread |
 | `--idle-shutdown` / `idle-shutdown` | `0` | Cierre por inactividad; `0` lo desactiva |
 | `--debug` / `debug` | `false` | Logs de depuración |
@@ -104,7 +102,6 @@ Los argumentos CLI explícitos prevalecen sobre YAML. Inyecte los tokens mediant
 | `IAC_CODE_AGUI_A2A_URL` | URL upstream A2A local |
 | `IAC_CODE_AGUI_A2A_TOKEN` | Bearer token de A2A |
 | `IAC_CODE_AGUI_AUTH_TOKEN` | Bearer token del endpoint AG-UI |
-| `IAC_CODE_AGUI_INTERRUPT_TTL` | Vigencia de Interrupt |
 | `IAC_CODE_AGUI_STATE_DIR` | Directorio de estado |
 | `IAC_CODE_AGUI_ALLOWED_CWDS` | Raíces permitidas separadas con el separador de rutas del SO |
 | `IAC_CODE_CONFIG_DIR` | Raíz de configuración de iac-code |

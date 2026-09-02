@@ -770,12 +770,6 @@ def agui(
         "--log-stdout/--no-log-stdout",
         help=_("Mirror adapter logs to stdout"),
     ),
-    interrupt_ttl: int = typer.Option(
-        540,
-        "--interrupt-ttl",
-        envvar="IAC_CODE_AGUI_INTERRUPT_TTL",
-        help=_("Seconds an AG-UI interrupt remains resumable"),
-    ),
     state_dir: str = typer.Option(
         "",
         "--state-dir",
@@ -799,14 +793,10 @@ def agui(
     a2a_url = _a2a_config_value(ctx, config, "a2a_url", a2a_url)
     debug = _a2a_config_value(ctx, config, "debug", debug)
     log_stdout = _a2a_config_value(ctx, config, "log_stdout", log_stdout)
-    interrupt_ttl = _a2a_config_value(ctx, config, "interrupt_ttl", interrupt_ttl)
     state_dir = _a2a_config_value(ctx, config, "state_dir", state_dir)
     idle_shutdown = _a2a_config_value(ctx, config, "idle_shutdown", idle_shutdown)
     if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
         typer.echo(_("--port must be between 1 and 65535."), err=True)
-        raise typer.Exit(1)
-    if not isinstance(interrupt_ttl, int) or isinstance(interrupt_ttl, bool) or interrupt_ttl <= 0:
-        typer.echo(_("--interrupt-ttl must be a positive integer."), err=True)
         raise typer.Exit(1)
     if state_dir and not isinstance(state_dir, str):
         typer.echo(_("--state-dir must be a string."), err=True)
@@ -837,7 +827,6 @@ def agui(
             port=port,
             a2a_url=a2a_url or None,
             a2a_token=a2a_token,
-            interrupt_ttl=interrupt_ttl,
             state_dir=state_dir or None,
             debug=bool(debug),
             auth_token=auth_token,

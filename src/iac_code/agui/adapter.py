@@ -11,7 +11,6 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -90,7 +89,6 @@ class ThreadBinding:
     applied_resume_digests: dict[tuple[str, str], str] = field(default_factory=dict)
     terminal_execution_ids: set[str] = field(default_factory=set)
     active_run_id: str | None = None
-    expiry_task: asyncio.Task[None] | None = None
 
 
 @dataclass
@@ -133,7 +131,6 @@ class AguiA2AAdapter:
         *,
         a2a_url: str,
         client: Any | None = None,
-        interrupt_ttl: int = 540,
         state_store: AguiStateStore | None = None,
         state_dir: str | Path | None = None,
     ) -> None:
@@ -141,7 +138,6 @@ class AguiA2AAdapter:
             raise ValueError("state_store and state_dir are mutually exclusive")
         self.a2a_url = a2a_url
         self.client = client or A2AClient()
-        self.interrupt_ttl = max(1, interrupt_ttl)
         self._state_store = state_store or FileAguiThreadStateStore(state_dir)
         self._lock = asyncio.Lock()
         self._threads: dict[str, ThreadBinding] = {}
@@ -574,10 +570,6 @@ class AguiA2AAdapter:
         if binding.task_id is None or not binding.pending:
             raise AguiError("EXECUTION_LOST", "The A2A task to resume is unavailable.")
         resolutions = self._validate_resume(ticket)
-        if binding.expiry_task is not None:
-            binding.expiry_task.cancel()
-            binding.expiry_task = None
-
         prompt: str | None = None
         resolved_tools: list[tuple[str, str]] = []
         permission_responses: list[tuple[PendingInput, dict[str, Any], str]] = []
@@ -615,8 +607,6 @@ class AguiA2AAdapter:
                         resolved_tools.append((tool_use_id, prompt))
                     prompt_responses.append((pending, digest))
         except BaseException:
-            if binding.pending:
-                self._schedule_expiry(binding)
             raise
 
         acceptance = ResumeAcceptance()
@@ -679,16 +669,12 @@ class AguiA2AAdapter:
                     accepted = True
                 yield event
         except BaseException:
-            if binding.pending:
-                self._schedule_expiry(binding)
             raise
         finally:
             close_stream = getattr(stream, "aclose", None)
             if close_stream is not None:
                 await close_stream()
         if not accepted:
-            if binding.pending:
-                self._schedule_expiry(binding)
             raise AguiError("A2A_UNAVAILABLE", "The A2A interrupt response was not accepted.")
 
     async def _commit_accepted_inputs(
@@ -761,8 +747,6 @@ class AguiA2AAdapter:
                 _raise_for_a2a_error(response)
                 await self._commit_accepted_inputs(binding, [(pending, digest)])
         except BaseException:
-            if binding.pending:
-                self._schedule_expiry(binding)
             raise
 
     async def _stream_permission_responses(
@@ -814,8 +798,6 @@ class AguiA2AAdapter:
                     if close_stream is not None:
                         await close_stream()
         except BaseException:
-            if binding.pending:
-                self._schedule_expiry(binding)
             raise
 
     async def _stream_after_sideband(self, binding: ThreadBinding) -> AsyncIterator[dict[str, Any]]:
@@ -955,9 +937,6 @@ class AguiA2AAdapter:
             # A successful A2A SendMessage is authoritative for adapter
             # idempotency even if GetTask briefly returns a stale permission.
             binding.pending.pop(interrupt_id, None)
-        if binding.pending and self._pending_expired(binding):
-            await self._expire(binding, binding.execution_id)
-            raise AguiError("EXECUTION_EXPIRED", "The interrupted execution has expired.")
         try:
             self._persist_thread(binding)
         except AguiStateStoreError as exc:
@@ -1034,7 +1013,6 @@ class AguiA2AAdapter:
                 "STATE_PERSISTENCE_FAILED",
                 "The interrupted execution state could not be committed.",
             ) from exc
-        self._schedule_expiry(binding)
         # This durable/paused marker must precede yielding any terminal event.  The
         # ASGI response may be closed immediately after the client reads it.
         ticket.paused = True
@@ -1074,7 +1052,7 @@ class AguiA2AAdapter:
                 continue
             pending = PendingInput(
                 value=_persistent_input(value),
-                interrupt=interrupt_from_a2a(_persistent_input(value), ttl_seconds=self.interrupt_ttl),
+                interrupt=interrupt_from_a2a(_persistent_input(value)),
                 sideband=input_id in sideband_ids,
             )
             merged[pending.interrupt.id] = pending
@@ -1136,18 +1114,11 @@ class AguiA2AAdapter:
         if binding.task_id:
             await self.client.cancel_task(self.a2a_url, binding.task_id)
         binding.pending.clear()
-        if binding.expiry_task is not None:
-            binding.expiry_task.cancel()
-            binding.expiry_task = None
         self._mark_execution_terminal(binding)
         self._persist_thread(binding)
         return "cancelled"
 
     async def aclose(self) -> None:
-        for binding in self._threads.values():
-            if binding.expiry_task is not None:
-                binding.expiry_task.cancel()
-                binding.expiry_task = None
         close = getattr(self.client, "aclose", None)
         if close is not None:
             await close()
@@ -1177,37 +1148,6 @@ class AguiA2AAdapter:
         binding.terminal_execution_ids.add(binding.execution_id)
         binding.task_id = None
 
-    def _schedule_expiry(self, binding: ThreadBinding) -> None:
-        if not binding.pending:
-            return
-        if binding.expiry_task is not None:
-            binding.expiry_task.cancel()
-        binding.expiry_task = asyncio.create_task(
-            self._expire(binding, binding.execution_id),
-            name=f"agui-a2a-expiry-{binding.execution_id}",
-        )
-
-    async def _expire(self, binding: ThreadBinding, execution_id: str) -> None:
-        try:
-            expires_at = _pending_expires_at(binding)
-            if expires_at is None:
-                return
-            delay = max(0.0, (expires_at - datetime.now(timezone.utc)).total_seconds())
-            await asyncio.sleep(delay)
-            if binding.execution_id != execution_id or not binding.pending:
-                return
-            if binding.task_id:
-                with contextlib.suppress(Exception):
-                    await self.client.cancel_task(self.a2a_url, binding.task_id)
-            binding.pending.clear()
-            self._mark_execution_terminal(binding)
-            self._persist_thread_best_effort(binding)
-        except asyncio.CancelledError:
-            return
-        finally:
-            if binding.expiry_task is asyncio.current_task():
-                binding.expiry_task = None
-
     async def _cancel_unrecoverable(self, ticket: RunTicket) -> None:
         binding = ticket.binding
         if binding.pending:
@@ -1223,15 +1163,8 @@ class AguiA2AAdapter:
             with contextlib.suppress(Exception):
                 await self.client.cancel_task(self.a2a_url, binding.task_id)
         binding.pending.clear()
-        if binding.expiry_task is not None:
-            binding.expiry_task.cancel()
-            binding.expiry_task = None
         self._mark_execution_terminal(binding)
         self._persist_thread_best_effort(binding)
-
-    def _pending_expired(self, binding: ThreadBinding) -> bool:
-        expires_at = _pending_expires_at(binding)
-        return expires_at is not None and expires_at <= datetime.now(timezone.utc)
 
     def _persist_thread(self, binding: ThreadBinding) -> None:
         self._state_store.save_thread(binding.thread_id, self._thread_state_document(binding))
@@ -1246,7 +1179,6 @@ class AguiA2AAdapter:
         pending = {
             input_id: {
                 "value": _persistent_input(item.value),
-                "expiresAt": item.interrupt.expires_at,
                 "sideband": item.sideband,
             }
             for input_id, item in binding.pending.items()
@@ -1286,8 +1218,6 @@ class AguiA2AAdapter:
         self._threads[thread_id] = binding
         if binding.execution_id not in binding.terminal_execution_ids and binding.task_id:
             self._executions[binding.execution_id] = binding
-        if binding.pending:
-            self._schedule_expiry(binding)
         return binding
 
     def _restore_thread_state(
@@ -1344,21 +1274,13 @@ class AguiA2AAdapter:
                 if not isinstance(input_id, str) or not isinstance(raw_pending, Mapping):
                     raise ValueError("pending entry is invalid")
                 value = raw_pending.get("value")
-                expires_at = raw_pending.get("expiresAt")
                 sideband = raw_pending.get("sideband", False)
-                if (
-                    not isinstance(value, Mapping)
-                    or not isinstance(expires_at, str)
-                    or not isinstance(sideband, bool)
-                ):
+                if not isinstance(value, Mapping) or not isinstance(sideband, bool):
                     raise ValueError("pending entry is invalid")
                 safe_value = _persistent_input(value)
                 if safe_value.get("inputId") != input_id:
                     raise ValueError("pending input identity mismatch")
-                _parse_expires_at(expires_at)
-                interrupt = interrupt_from_a2a(safe_value, ttl_seconds=1).model_copy(
-                    update={"expires_at": expires_at}
-                )
+                interrupt = interrupt_from_a2a(safe_value)
                 pending[input_id] = PendingInput(value=safe_value, interrupt=interrupt, sideband=sideband)
             restored_run_digests = {
                 key: value
@@ -1435,22 +1357,6 @@ def _required_state_string(value: Mapping[str, Any], key: str) -> str:
     if not isinstance(result, str) or not result:
         raise ValueError(f"{key} is required")
     return result
-
-
-def _parse_expires_at(value: str) -> datetime:
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def _pending_expires_at(binding: ThreadBinding) -> datetime | None:
-    values = [
-        _parse_expires_at(item.interrupt.expires_at)
-        for item in binding.pending.values()
-        if isinstance(item.interrupt.expires_at, str) and item.interrupt.expires_at
-    ]
-    return min(values) if values else None
 
 
 def _raise_for_a2a_error(response: Any) -> None:

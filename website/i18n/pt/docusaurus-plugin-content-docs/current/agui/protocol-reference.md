@@ -169,8 +169,9 @@ Uma execução que requer entrada termina com `RUN_FINISHED.outcome.type = "inte
 - uma `message` para o usuário;
 - um `toolCallId` opcional;
 - um `responseSchema` JSON;
-- `expiresAt`;
 - metadados como `title`, `purpose`, `safeSummary`, `options` e `toolName`.
+
+O adaptador não impõe prazo ao Interrupt. Um Interrupt pendente continua retomável até que o A2A resolva, cancele ou encerre a tarefa; somente o A2A controla o ciclo de vida da execução e da recuperação.
 
 Para uma solicitação de permissão, o esquema normalmente aceita:
 
@@ -251,8 +252,6 @@ Cada arquivo contém o vínculo entre thread, contexto e workspace, identidades 
 
 Chaves de LLM, segredos AccessKey e tokens STS nunca são armazenados. Esse é um diretório de mapeamentos do adaptador, não de conversas ou artefatos de execução. O A2A gerencia sua própria persistência de sessões e tarefas; consulte a [documentação do A2A](../a2a/overview.md).
 
-Uma interrupção expirada é rejeitada no próximo acesso, seu estado pendente é removido e o adaptador tenta cancelar a tarefa A2A correspondente.
-
 ## Desconexões
 
 - Uma execução concluída com segurança por uma interrupção deixa de depender da conexão SSE.
@@ -276,7 +275,6 @@ Erros anteriores ao início do SSE usam um envelope JSON HTTP. Erros durante a e
 | `UNKNOWN_INTERRUPT` | A retomada referencia uma interrupção desconhecida |
 | `RESUME_PAYLOAD_INVALID` | Payload ausente ou incompatível com o esquema |
 | `RESUME_ALREADY_APPLIED` | A resposta já foi aplicada ou conflita com ela |
-| `EXECUTION_EXPIRED` | A interrupção expirou |
 | `EXECUTION_LOST` | Não foi possível recuperar o adaptador, a tarefa A2A ou a sessão do iac-code |
 | `STATE_PERSISTENCE_FAILED` | O estado crítico para recuperação não pôde ser persistido |
 | `A2A_UNAVAILABLE` | O serviço local de execução A2A está indisponível |

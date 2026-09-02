@@ -80,7 +80,6 @@ iac-code agui --port 41243 --a2a-url http://127.0.0.1:41242
 host: 0.0.0.0
 port: 41243
 a2a-url: http://127.0.0.1:41242
-interrupt-ttl: 540
 state-dir: /var/lib/iac-code/agui
 idle-shutdown: 0
 debug: false
@@ -102,7 +101,6 @@ iac-code agui --config agui-server.yml
 | `--host` / `host` | `127.0.0.1` | AG-UI HTTP 监听地址 |
 | `--port` / `port` | `8000` | AG-UI HTTP 端口；部署示例使用 `41243` |
 | `--a2a-url` / `a2a-url` | 空 | 本地 A2A URL；为空时启动受管子进程 |
-| `--interrupt-ttl` / `interrupt-ttl` | `540` | Interrupt 可恢复秒数 |
 | `--state-dir` / `state-dir` | `<config-dir>/agui` | AG-UI thread 状态目录 |
 | `--idle-shutdown` / `idle-shutdown` | `0` | 空闲自动退出秒数；`0` 表示关闭 |
 | `--debug` / `debug` | `false` | 调试日志 |
@@ -117,7 +115,6 @@ iac-code agui --config agui-server.yml
 | `IAC_CODE_AGUI_A2A_URL` | 本地 A2A upstream URL |
 | `IAC_CODE_AGUI_A2A_TOKEN` | A2A upstream Bearer token |
 | `IAC_CODE_AGUI_AUTH_TOKEN` | 保护 AG-UI endpoint 的 Bearer token |
-| `IAC_CODE_AGUI_INTERRUPT_TTL` | Interrupt 有效期 |
 | `IAC_CODE_AGUI_STATE_DIR` | AG-UI thread 状态目录 |
 | `IAC_CODE_AGUI_ALLOWED_CWDS` | 允许的工作区根目录，使用操作系统路径分隔符分隔 |
 | `IAC_CODE_CONFIG_DIR` | iac-code 配置根目录，也决定默认 AG-UI 状态目录 |

@@ -424,6 +424,10 @@ msgid "Unsupported run mode."
 msgstr "サポートされていない実行モードです。"
 
 #: src/iac_code/a2a/task_store.py
+msgid "A2A task not found"
+msgstr "A2A タスクが見つかりません"
+
+#: src/iac_code/a2a/task_store.py
 msgid "A2A task expired"
 msgstr "A2A タスクの有効期限が切れました"
 
@@ -446,10 +450,6 @@ msgstr "A2A コンテキストは別のワークスペースに属していま�
 #: src/iac_code/a2a/task_store.py
 msgid "A2A context not found"
 msgstr "A2A コンテキストが見つかりません"
-
-#: src/iac_code/a2a/task_store.py
-msgid "A2A task not found"
-msgstr "A2A タスクが見つかりません"
 
 #: src/iac_code/a2a/transports/base.py
 msgid ""
@@ -1003,10 +1003,6 @@ msgid "The interrupt response payload is invalid."
 msgstr "割り込み応答のペイロードが無効です。"
 
 #: src/iac_code/agui/errors.py
-msgid "The interrupted execution has expired."
-msgstr "中断された実行は期限切れです。"
-
-#: src/iac_code/agui/errors.py
 msgid "The interrupted execution state could not be committed."
 msgstr "中断された実行状態を保存できませんでした。"
 
@@ -1373,10 +1369,6 @@ msgid "Mirror adapter logs to stdout"
 msgstr "アダプターのログを標準出力にも出力します"
 
 #: src/iac_code/cli/main.py
-msgid "Seconds an AG-UI interrupt remains resumable"
-msgstr "AG-UI 割り込みを再開可能な状態で保持する秒数"
-
-#: src/iac_code/cli/main.py
 msgid "Durable AG-UI adapter state directory"
 msgstr "AG-UI アダプターの永続状態ディレクトリ"
 
@@ -1387,10 +1379,6 @@ msgstr "指定秒数アイドル状態が続くと終了します。0 でアイ�
 #: src/iac_code/cli/main.py
 msgid "--port must be between 1 and 65535."
 msgstr "--port は 1 から 65535 の範囲で指定してください。"
-
-#: src/iac_code/cli/main.py
-msgid "--interrupt-ttl must be a positive integer."
-msgstr "--interrupt-ttl は正の整数で指定してください。"
 
 #: src/iac_code/cli/main.py
 msgid "--state-dir must be a string."
@@ -13636,4 +13624,13 @@ msgstr "Bash を許可しますか？"
 
 #~ msgid "架构图优化中..."
 #~ msgstr "アーキテクチャ図を最適化中..."
+
+#~ msgid "The interrupted execution has expired."
+#~ msgstr "中断された実行は期限切れです。"
+
+#~ msgid "Seconds an AG-UI interrupt remains resumable"
+#~ msgstr "AG-UI 割り込みを再開可能な状態で保持する秒数"
+
+#~ msgid "--interrupt-ttl must be a positive integer."
+#~ msgstr "--interrupt-ttl は正の整数で指定してください。"
 

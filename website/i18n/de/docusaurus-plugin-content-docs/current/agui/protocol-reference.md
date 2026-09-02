@@ -169,8 +169,9 @@ Ein Lauf mit erforderlicher Eingabe endet mit `RUN_FINISHED.outcome.type = "inte
 - eine benutzerorientierte `message`;
 - eine optionale `toolCallId`;
 - ein JSON-`responseSchema`;
-- `expiresAt`;
 - Metadaten wie `title`, `purpose`, `safeSummary`, `options` und `toolName`.
+
+Der Adapter legt keine Frist für Unterbrechungen fest. Eine ausstehende Unterbrechung bleibt wiederaufnehmbar, bis A2A den Task auflöst, abbricht oder beendet; nur A2A verwaltet den Ausführungs- und Wiederherstellungslebenszyklus.
 
 Für eine Berechtigungsanfrage akzeptiert das Schema normalerweise:
 
@@ -251,8 +252,6 @@ Jede Datei enthält Thread-/Kontext-/Arbeitsbereichsbindung, Sitzungs-, Task- un
 
 LLM-Schlüssel, AccessKey-Secrets und STS-Tokens werden nie gespeichert. Das Verzeichnis enthält Adapterzuordnungen, keine Gespräche oder Ausführungsartefakte. A2A verwaltet seine eigene Sitzungs- und Taskpersistenz; siehe [A2A-Dokumentation](../a2a/overview.md).
 
-Eine abgelaufene Unterbrechung wird beim nächsten Zugriff abgelehnt, ihr Pending-Status gelöscht und der passende A2A-Task nach Möglichkeit abgebrochen.
-
 ## Verbindungsabbrüche
 
 - Ein Lauf, der sicher mit einer Unterbrechung endete, hängt nicht mehr von seiner SSE-Verbindung ab.
@@ -276,7 +275,6 @@ Fehler vor Beginn von SSE verwenden einen HTTP-JSON-Umschlag. Fehler während de
 | `UNKNOWN_INTERRUPT` | Unbekannte Unterbrechung in der Wiederaufnahme |
 | `RESUME_PAYLOAD_INVALID` | Fehlender Payload oder Schemaverstoß |
 | `RESUME_ALREADY_APPLIED` | Antwort wurde bereits angewendet oder steht im Konflikt |
-| `EXECUTION_EXPIRED` | Unterbrechung ist abgelaufen |
 | `EXECUTION_LOST` | Adapter, A2A-Task oder iac-code-Sitzung konnte nicht wiederhergestellt werden |
 | `STATE_PERSISTENCE_FAILED` | Wiederherstellungskritischer Status konnte nicht gespeichert werden |
 | `A2A_UNAVAILABLE` | Lokaler A2A-Ausführungsdienst ist nicht verfügbar |

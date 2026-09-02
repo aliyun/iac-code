@@ -121,7 +121,9 @@ Tipos de Pipeline admitidos:
 
 ## Interrupt y Resume
 
-Cada Interrupt contiene `id`, `reason`, `message`, `responseSchema`, `expiresAt`, un `toolCallId` opcional y metadata descriptiva. La autorización suele aceptar `{"decision":"allow_once"}` o `{"decision":"deny"}`. La UI debe respetar el schema en vez de deducir la respuesta solo a partir de `reason`.
+Cada Interrupt contiene `id`, `reason`, `message`, `responseSchema`, un `toolCallId` opcional y metadata descriptiva. La autorización suele aceptar `{"decision":"allow_once"}` o `{"decision":"deny"}`. La UI debe respetar el schema en vez de deducir la respuesta solo a partir de `reason`.
+
+El adaptador no impone un plazo al Interrupt. Un Interrupt pendiente puede reanudarse hasta que A2A resuelva, cancele o termine la tarea; A2A es el único responsable del ciclo de vida de ejecución y recuperación.
 
 Resume es otra solicitud con el mismo `threadId`, un `runId` nuevo y el mismo `rosInvocationId`:
 
@@ -154,8 +156,8 @@ Responde `cancelled`, `already_terminal` o `EXECUTION_NOT_FOUND`. La cancelació
 
 El estado se guarda en `<config-dir>/agui/threads/<thread-key>.json`. Contiene relaciones, identidades, posiciones del Pipeline, Interrupt e idempotencia; carga solo el thread solicitado y sustituye atómicamente un archivo pequeño. No almacena claves LLM, secretos de AccessKey, STS token, texto de conversación ni artifacts. A2A gestiona su propia persistencia; consulte su [documentación](../a2a/overview.md).
 
-Un Interrupt expirado se rechaza y se limpia. Un run terminado con Interrupt ya no depende de su SSE; desconectar un run normal activo cancela la tarea A2A.
+Un run terminado con Interrupt ya no depende de su SSE; desconectar un run normal activo cancela la tarea A2A.
 
-Antes de SSE, los errores usan JSON HTTP; durante la ejecución usan `RUN_ERROR`. Los códigos principales son `INVALID_INPUT`, `DUPLICATE_RUN_ID`, `RUN_ID_CONFLICT`, `THREAD_BUSY`, `THREAD_BINDING_CONFLICT`, `RESUME_REQUIRED`, `INCOMPLETE_RESUME`, `UNKNOWN_INTERRUPT`, `RESUME_PAYLOAD_INVALID`, `RESUME_ALREADY_APPLIED`, `EXECUTION_EXPIRED`, `EXECUTION_LOST`, `STATE_PERSISTENCE_FAILED`, `A2A_UNAVAILABLE`, `A2A_PROTOCOL_ERROR`, `A2A_EXECUTION_FAILED` y `CANCELLED`.
+Antes de SSE, los errores usan JSON HTTP; durante la ejecución usan `RUN_ERROR`. Los códigos principales son `INVALID_INPUT`, `DUPLICATE_RUN_ID`, `RUN_ID_CONFLICT`, `THREAD_BUSY`, `THREAD_BINDING_CONFLICT`, `RESUME_REQUIRED`, `INCOMPLETE_RESUME`, `UNKNOWN_INTERRUPT`, `RESUME_PAYLOAD_INVALID`, `RESUME_ALREADY_APPLIED`, `EXECUTION_LOST`, `STATE_PERSISTENCE_FAILED`, `A2A_UNAVAILABLE`, `A2A_PROTOCOL_ERROR`, `A2A_EXECUTION_FAILED` y `CANCELLED`.
 
 Las escrituras necesarias para la recuperación fallan de forma cerrada: el adaptador no anuncia un estado recuperable antes de guardarlo y cancela la tarea A2A cuando sea necesario.

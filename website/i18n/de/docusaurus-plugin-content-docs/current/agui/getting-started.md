@@ -80,7 +80,6 @@ Statische Starteinstellungen können in YAML gespeichert werden:
 host: 0.0.0.0
 port: 41243
 a2a-url: http://127.0.0.1:41242
-interrupt-ttl: 540
 state-dir: /var/lib/iac-code/agui
 idle-shutdown: 0
 debug: false
@@ -100,7 +99,6 @@ Explizite CLI-Argumente überschreiben YAML. Übergeben Sie sensible Werte wie T
 | `--host` / `host` | `127.0.0.1` | HTTP-Bindeadresse von AG-UI |
 | `--port` / `port` | `8000` | AG-UI-HTTP-Port; Bereitstellungsbeispiele verwenden `41243` |
 | `--a2a-url` / `a2a-url` | leer | Lokale A2A-URL; leer startet einen verwalteten Kindprozess |
-| `--interrupt-ttl` / `interrupt-ttl` | `540` | Sekunden, in denen eine Unterbrechung wiederaufgenommen werden kann |
 | `--state-dir` / `state-dir` | `<config-dir>/agui` | Verzeichnis für AG-UI-Threadstatus |
 | `--idle-shutdown` / `idle-shutdown` | `0` | Leerlaufabschaltung; `0` deaktiviert sie |
 | `--debug` / `debug` | `false` | Debug-Protokollierung |
@@ -115,7 +113,6 @@ Zugehörige Umgebungsvariablen:
 | `IAC_CODE_AGUI_A2A_URL` | Lokale A2A-Upstream-URL |
 | `IAC_CODE_AGUI_A2A_TOKEN` | Bearer-Token für den A2A-Upstream |
 | `IAC_CODE_AGUI_AUTH_TOKEN` | Bearer-Token zum Schutz des AG-UI-Endpunkts |
-| `IAC_CODE_AGUI_INTERRUPT_TTL` | Lebensdauer einer Unterbrechung |
 | `IAC_CODE_AGUI_STATE_DIR` | Verzeichnis für AG-UI-Threadstatus |
 | `IAC_CODE_AGUI_ALLOWED_CWDS` | Erlaubte Arbeitsbereichswurzeln, getrennt mit dem Pfadtrenner des Betriebssystems |
 | `IAC_CODE_CONFIG_DIR` | iac-code-Konfigurationswurzel und übergeordnetes Standardverzeichnis für AG-UI-Status |

@@ -11,7 +11,6 @@ _AGUI_CLI_MESSAGES = frozenset(
         "Unable to load the AG-UI config file.",
         "AG-UI config file must contain a YAML mapping.",
         "--port must be between 1 and 65535.",
-        "--interrupt-ttl must be a positive integer.",
         "--state-dir must be a string.",
         "--idle-shutdown must be a non-negative number.",
         "--a2a-url must be a string.",

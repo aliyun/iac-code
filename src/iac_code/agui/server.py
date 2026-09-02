@@ -21,7 +21,6 @@ def run_server(
     port: int = 8000,
     a2a_url: str | None = None,
     a2a_token: str | None = None,
-    interrupt_ttl: int = 540,
     state_dir: str | Path | None = None,
     debug: bool = False,
     auth_token: str | None = None,
@@ -45,7 +44,6 @@ def run_server(
         app = create_app(
             a2a_url=endpoint[0],
             a2a_client=client,
-            interrupt_ttl=interrupt_ttl,
             state_dir=state_dir,
             auth_token=auth_token,
             idle_shutdown=idle_shutdown,

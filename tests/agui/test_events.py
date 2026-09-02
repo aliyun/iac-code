@@ -217,7 +217,6 @@ def test_permission_metadata_becomes_self_describing_standard_interrupt() -> Non
             "options": [{"id": "allow_once", "label": "Allow once"}, {"id": "deny", "label": "Deny"}],
             "required": True,
         },
-        ttl_seconds=60,
     )
 
     assert interrupt.id == "permission-1"
@@ -234,11 +233,9 @@ def test_interrupt_fallback_messages_use_projection_language(monkeypatch) -> Non
 
     permission = interrupt_from_a2a(
         {"kind": "permission", "inputId": "permission-1", "language": "zh-CN"},
-        ttl_seconds=60,
     )
     question = interrupt_from_a2a(
         {"kind": "ask_user_question", "inputId": "question-1", "language": "ja-JP"},
-        ttl_seconds=60,
     )
 
     assert permission.message == "zh:Permission required"
