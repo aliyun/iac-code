@@ -347,6 +347,13 @@ class A2APipelineActionRunner:
 
         auto_approve = self._resolve_auto_approve(session)
         resolver = None if auto_approve else (permission_resolver or self._owner.permission_resolver)
+        permission_context_getter = None
+        session_permission_context_getter = getattr(self, "_permission_context_getter", None)
+        if callable(session_permission_context_getter):
+
+            def permission_context_getter() -> Any:
+                return session_permission_context_getter(session)
+
         return IacCodeA2APipelineExecutor(
             task_store=self._task_store,
             model=session_model,
@@ -366,11 +373,7 @@ class A2APipelineActionRunner:
             # without this the executor would always fall back to the process-wide
             # IAC_CODE_PIPELINE_NAME default and silently run `selling`.
             pipeline_name=_session_pipeline_name(session),
-            permission_context_getter=(
-                (lambda: self._permission_context_getter(session))
-                if callable(getattr(self, "_permission_context_getter", None))
-                else None
-            ),
+            permission_context_getter=permission_context_getter,
         )
 
     async def rebuild_permission_audit_event(
