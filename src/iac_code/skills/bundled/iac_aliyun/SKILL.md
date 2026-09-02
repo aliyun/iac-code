@@ -128,7 +128,7 @@ auto_trigger:
            "Parameters": {
                "zone_id": "cn-hangzhou-k",
                "instance_type": "ecs.g7.large",
-               "image_id": "centos_stream_9_x64_20G_alibase_20260414.vhd",
+               "image_id": "ubuntu_24_04_x64_20G_alibase_20260720.vhd",
                "system_disk_category": "cloud_essd",
            },
        },

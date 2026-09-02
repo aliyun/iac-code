@@ -10304,6 +10304,24 @@ msgstr "{} 需要一个数组"
 msgid "the condition is invalid"
 msgstr "条件无效"
 
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+#, python-brace-format
+msgid ""
+"ECS resource {} is associated with an EIP but does not explicitly disable"
+" public IP allocation."
+msgstr "ECS 资源 {} 已与 EIP 关联，但未明确禁用公网 IP 分配。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+#, python-brace-format
+msgid ""
+"EIPAssociation {} provides the public entry point; the associated ECS "
+"resource must set AllocatePublicIP to false."
+msgstr "EIPAssociation {} 提供公网入口；关联的 ECS 资源必须将 AllocatePublicIP 设置为 false。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+msgid "Set AllocatePublicIP: false on the associated ECS resource."
+msgstr "请在关联的 ECS 资源上设置 AllocatePublicIP: false。"
+
 #: src/iac_code/ui/banner.py
 #, python-brace-format
 msgid "Update available! {} -> {}"
@@ -13384,4 +13402,3 @@ msgstr "允许 Bash?"
 
 #~ msgid "架构图优化中..."
 #~ msgstr "架构图优化中..."
-

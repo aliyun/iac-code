@@ -169,7 +169,7 @@ ros_estimate_template_cost(
     parameters={
         "ZoneId": "cn-hangzhou-k",
         "InstanceType": "ecs.g7.large",
-        "ImageId": "centos_stream_9_x64_20G_alibase_20260414.vhd",
+        "ImageId": "ubuntu_24_04_x64_20G_alibase_20260720.vhd",
         "SystemDiskCategory": "cloud_essd",
     },
     region_id="cn-hangzhou",

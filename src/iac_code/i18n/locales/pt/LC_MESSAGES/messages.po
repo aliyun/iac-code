@@ -11268,6 +11268,24 @@ msgstr "{} requer uma matriz"
 msgid "the condition is invalid"
 msgstr "a condição é inválida"
 
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+#, python-brace-format
+msgid ""
+"ECS resource {} is associated with an EIP but does not explicitly disable"
+" public IP allocation."
+msgstr "O recurso ECS {} está associado a uma EIP, mas não desativa explicitamente a alocação de IP público."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+#, python-brace-format
+msgid ""
+"EIPAssociation {} provides the public entry point; the associated ECS "
+"resource must set AllocatePublicIP to false."
+msgstr "A EIPAssociation {} fornece o ponto de entrada público; o recurso ECS associado deve definir AllocatePublicIP como false."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+msgid "Set AllocatePublicIP: false on the associated ECS resource."
+msgstr "Defina AllocatePublicIP: false no recurso ECS associado."
+
 #: src/iac_code/ui/banner.py
 #, python-brace-format
 msgid "Update available! {} -> {}"
@@ -14596,4 +14614,3 @@ msgstr "Permitir Bash?"
 
 #~ msgid "架构图优化中..."
 #~ msgstr "Otimizando diagrama de arquitetura..."
-
