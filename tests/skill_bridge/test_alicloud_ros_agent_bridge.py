@@ -1907,6 +1907,52 @@ def test_cli_failure_redacts_secrets_from_error() -> None:
     assert message.count("[REDACTED]") == 3
 
 
+def test_stream_summary_preserves_retryable_session_backup_error() -> None:
+    summary = bridge.StreamSummary("session-1")
+    summary.apply(
+        {
+            "object": "response",
+            "status": "failed",
+            "error": {
+                "code": -32602,
+                "message": "Session backup is still synchronizing. Retry after 3 seconds.",
+                "data": {"code": bridge.SESSION_BACKUP_NOT_READY_CODE, "retryable": True},
+            },
+        }
+    )
+
+    result = summary.to_result(0, "")
+
+    assert result["state"] == "failed"
+    assert result["error"] == {
+        "code": bridge.SESSION_BACKUP_NOT_READY_CODE,
+        "message": "Session backup is still synchronizing. Retry after 3 seconds.",
+        "retryable": True,
+    }
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "code": -32602,
+            "message": "Session backup is still synchronizing. Retry after 3 seconds.",
+            "data": {"code": "SESSION_BACKUP_NOT_READY", "retryable": True},
+        },
+        {
+            "Code": "SESSION_BACKUP_NOT_READY",
+            "Message": "Session backup is still synchronizing. Retry after 3 seconds.",
+        },
+    ],
+)
+def test_session_backup_not_ready_error_accepts_sse_and_http_shapes(payload) -> None:
+    error = bridge._session_backup_not_ready_error(payload)
+
+    assert error is not None
+    assert error.code == bridge.SESSION_BACKUP_NOT_READY_CODE
+    assert error.retryable is True
+
+
 def test_run_chat_consumes_fake_cli_stream_without_network(monkeypatch, tmp_path: Path) -> None:
     prompt = tmp_path / "prompt.txt"
     prompt.write_text("hello", encoding="utf-8")
@@ -3923,6 +3969,117 @@ def test_managed_respond_preserves_serial_permission_correlation(
     assert query["inputId"] == pending["inputId"]
     assert query["toolUseId"] == pending["toolUseId"]
     assert query["decision"] == decision
+
+
+@pytest.mark.parametrize(
+    ("mode", "permission_class"),
+    [("normal", "normal"), ("pipeline", "pipeline")],
+)
+def test_managed_permission_backup_not_ready_remains_retryable(
+    monkeypatch, tmp_path: Path, mode: str, permission_class: str
+) -> None:
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    job_id = ("1" if mode == "normal" else "2") * 32
+    workspace = tmp_path / mode
+    workspace.mkdir()
+    root, job_path, spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    spool.touch()
+    pending = {
+        "schemaVersion": 1,
+        "kind": "permission",
+        "requestTaskId": "task-1",
+        "contextId": "session-1",
+        "inputId": "permission-1",
+        "toolUseId": "tool-1",
+        "permissionClass": permission_class,
+    }
+    response = {
+        "requestTaskId": "task-1",
+        "contextId": "session-1",
+        "inputId": "permission-1",
+        "toolUseId": "tool-1",
+        "decision": "allow_once",
+    }
+    bridge._atomic_json(
+        job_path,
+        {
+            "schemaVersion": 1,
+            "jobId": job_id,
+            "workspace": str(workspace),
+            "state": "submitted",
+            "mode": mode,
+            "endpoint": "ros.aliyuncs.com",
+            "sessionId": "session-1",
+            "preferredLanguage": "en",
+            "activeRequestSeq": 2,
+            "workerPid": 12345,
+            "turn": 1,
+            "lastPermissionResponse": response,
+            "permissionResponseInput": pending,
+            "artifacts": [],
+        },
+    )
+    error = {
+        "code": bridge.SESSION_BACKUP_NOT_READY_CODE,
+        "message": "Session backup is still synchronizing. Retry after 3 seconds.",
+        "retryable": True,
+    }
+    payload = {
+        "object": "response",
+        "status": "failed",
+        "error": {
+            "code": -32602,
+            "message": error["message"],
+            "data": {"code": bridge.SESSION_BACKUP_NOT_READY_CODE, "retryable": True},
+        },
+    }
+    summary = bridge.StreamSummary("session-1", mode=mode)
+    summary.apply(payload)
+    bridge._append_projection(
+        job_id,
+        bridge._project_managed_stream_event(payload, summary, mode, 2, "primary", None),
+    )
+    projected = bridge._load_state_json(job_path)
+    assert projected["state"] == "input-required"
+    assert projected["inputRequired"] == pending
+    assert bridge._read_spool(spool)[-1]["type"] == "input-required"
+
+    assert bridge._finish_job(
+        job_id,
+        2,
+        summary.to_result(0, ""),
+        12345,
+    )
+    waiting = bridge._load_state_json(job_path)
+    assert waiting["state"] == "input-required"
+    assert waiting["inputRequired"] == pending
+    assert waiting["error"] == error
+    assert waiting["permissionResponseInput"] == pending
+    assert "workerPid" not in waiting
+
+    captured = {}
+
+    def spawn(captured_job_id, request):
+        captured["jobId"] = captured_job_id
+        captured["request"] = request
+        return 23456
+
+    monkeypatch.setattr(bridge, "_spawn_worker", spawn)
+    retried = bridge._respond_job_local(
+        {
+            "jobId": job_id,
+            "decision": "allow_once",
+            "transientEnvironment": {},
+        }
+    )
+
+    assert retried["workerPid"] == 23456
+    assert captured["jobId"] == job_id
+    assert captured["request"]["permissionResponse"] == response
+    retried_job = bridge._load_state_json(job_path)
+    assert retried_job["state"] == "submitted"
+    assert retried_job["permissionResponseInput"] == pending
 
 
 def test_managed_respond_requires_short_ref_for_multiple_permissions(monkeypatch, tmp_path: Path) -> None:

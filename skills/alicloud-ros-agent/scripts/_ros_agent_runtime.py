@@ -530,6 +530,7 @@ def _respond_job_local(payload: Dict[str, Any]) -> Dict[str, Any]:
                 raise BridgeError("job_busy", "The current StartChat request is still running.", True)
             job["activeRequestSeq"] = int(job.get("activeRequestSeq") or 0) + 1
             job["state"] = "submitted"
+            job["permissionResponseInput"] = pending
         job["lastPermissionResponse"] = response
         remaining = [
             value

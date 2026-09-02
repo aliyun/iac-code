@@ -98,6 +98,7 @@ SKILL_CONFIG_PATH = pathlib.Path(__file__).resolve().parent.parent / "config.jso
 SUPPORTED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 PERMISSION_DECISIONS = {"allow_once", "deny"}
 PERMISSION_QUERY_PREFIX = "IAC_CODE_PERMISSION:"
+SESSION_BACKUP_NOT_READY_CODE = "SESSION_BACKUP_NOT_READY"
 TERMINAL_STATES = {"completed", "failed", "canceled", "rejected"}
 PIPELINE_EVENT_TYPES = {
     "pipeline_started",
