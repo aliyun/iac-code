@@ -84,6 +84,12 @@ msgstr ""
 "sessão e os recursos de nuvem."
 
 #: src/iac_code/a2a/executor.py
+msgid "Normal permission restore snapshot could not be persisted."
+msgstr ""
+"Não foi possível persistir o snapshot de restauração da permissão do chat"
+" normal."
+
+#: src/iac_code/a2a/executor.py
 msgid "Normal permission restore snapshot identity is incomplete."
 msgstr ""
 "A identidade do snapshot de restauração da permissão do chat normal está "
@@ -104,12 +110,6 @@ msgid "Normal permission restore decision conflicts with the snapshot."
 msgstr ""
 "A decisão de restauração da permissão do chat normal entra em conflito "
 "com o snapshot."
-
-#: src/iac_code/a2a/executor.py
-msgid "Normal permission restore snapshot could not be persisted."
-msgstr ""
-"Não foi possível persistir o snapshot de restauração da permissão do chat"
-" normal."
 
 #: src/iac_code/a2a/executor.py
 msgid ""
@@ -153,6 +153,12 @@ msgstr "Tarefa cancelada."
 #: src/iac_code/a2a/executor.py
 msgid "Normal permission decision is unavailable before backup."
 msgstr "A decisão de permissão do chat normal não está disponível antes do backup."
+
+#: src/iac_code/a2a/executor.py src/iac_code/agui/errors.py
+msgid "Session backup is still synchronizing. Retry after 3 seconds."
+msgstr ""
+"O backup da sessão ainda está sendo sincronizado. Tente novamente em 3 "
+"segundos."
 
 #: src/iac_code/a2a/executor.py
 msgid "Unsupported pipeline name."

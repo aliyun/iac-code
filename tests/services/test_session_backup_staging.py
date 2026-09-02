@@ -9,6 +9,7 @@ from iac_code.services.session_backup import (
     BACKUP_STATE_FILENAME,
     BackupReason,
     SessionBackupError,
+    SessionBackupNotReadyError,
     SessionBackupService,
 )
 from iac_code.services.session_backup_staging import (
@@ -51,6 +52,20 @@ def _create_staged_service(
 def _read_state(path: Path, *, shared: bool = False) -> SessionBackupState:
     payload = json.loads((path / BACKUP_STATE_FILENAME).read_text(encoding="utf-8"))
     return SessionBackupState.from_dict(payload, shared=shared)
+
+
+def test_staged_reconcile_generation_fence_keeps_backup_disabled_behavior(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("IAC_CODE_CONFIG_BACKUP_DIR", raising=False)
+    storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
+    service = StagedSessionBackupService(tmp_path / "staging", storage, retry_delays=())
+
+    result = service.reconcile_session("/repo", "s1", minimum_generation=2)
+
+    assert result.enabled is False
+    assert result.action == "disabled"
 
 
 def test_staged_backup_creates_immutable_versions_without_writing_final_root(
@@ -368,6 +383,73 @@ def test_terminal_publication_restores_in_another_sandbox(
         "metadata.json",
         "session.jsonl",
     ]
+
+
+def test_staged_reconcile_refreshes_old_sandbox_after_async_publication(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service, session_dir, staging_root, backup_root = _create_staged_service(monkeypatch, tmp_path)
+    project = session_dir.parent.name
+    shared_dir = backup_root / "projects" / project / "s1"
+    (session_dir / "session.jsonl").write_text("generation-1\n", encoding="utf-8")
+    service.backup_session("/repo", "s1", reason=BackupReason.INPUT_REQUIRED, critical=True)
+    worker = SessionBackupStagingWorker(staging_root, backup_root)
+    assert worker.run_once() == 1
+
+    sandbox_storage = SessionStorage(projects_dir=tmp_path / "sandbox-a-config" / "projects")
+    sandbox_service = StagedSessionBackupService(
+        tmp_path / "sandbox-a-staging",
+        sandbox_storage,
+        retry_delays=(),
+    )
+    first_restore = sandbox_service.reconcile_session("/repo", "s1")
+    sandbox_session = sandbox_storage.session_dir("/repo", "s1")
+    assert first_restore.action == "restored"
+    assert (sandbox_session / "session.jsonl").read_text(encoding="utf-8") == "generation-1\n"
+
+    shared_state_reads = 0
+    original_read_state = sandbox_service._read_state
+
+    def count_shared_state_reads(*args, **kwargs):
+        nonlocal shared_state_reads
+        if kwargs.get("shared") is True:
+            shared_state_reads += 1
+        return original_read_state(*args, **kwargs)
+
+    monkeypatch.setattr(sandbox_service, "_read_state", count_shared_state_reads)
+    local_current = sandbox_service.reconcile_session("/repo", "s1", minimum_generation=1)
+    assert local_current.action == "current"
+    assert shared_state_reads == 0
+
+    (session_dir / "session.jsonl").write_text("generation-2\n", encoding="utf-8")
+    service.backup_session("/repo", "s1", reason=BackupReason.INPUT_REQUIRED, critical=True)
+
+    # Model an OSS-mounted destination while generation 2 is only partly
+    # mirrored: payload changed, but the generation-2 state marker has not
+    # committed yet.  Sandbox A must keep its coherent generation 1 copy.
+    (shared_dir / "session.jsonl").write_text("partial-generation-2\n", encoding="utf-8")
+    with pytest.raises(SessionBackupNotReadyError) as exc_info:
+        sandbox_service.reconcile_session("/repo", "s1", minimum_generation=2)
+    assert exc_info.value.minimum_generation == 2
+    assert exc_info.value.local_generation == 1
+    assert exc_info.value.shared_generation == 1
+    assert shared_state_reads == 1
+    assert (sandbox_session / "session.jsonl").read_text(encoding="utf-8") == "generation-1\n"
+
+    # Local staged generation 2 remains authoritative while OSS is behind.
+    staged_current = service.reconcile_session("/repo", "s1")
+    assert staged_current.action == "staged_current"
+    assert staged_current.state is not None and staged_current.state.generation == 2
+
+    assert worker.run_once() == 1
+    refreshed = sandbox_service.reconcile_session("/repo", "s1", minimum_generation=2)
+
+    assert refreshed.action == "restored"
+    assert refreshed.state is not None and refreshed.state.generation == 2
+    assert refreshed.payload_changed is True
+    assert (sandbox_session / "session.jsonl").read_text(encoding="utf-8") == "generation-2\n"
+    assert shared_state_reads == 2
 
 
 def test_staging_worker_does_not_skip_failed_version_for_same_session(

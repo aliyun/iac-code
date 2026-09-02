@@ -176,6 +176,21 @@ class A2ATaskStore(TaskStore):
                     self._attach_pending_permissions(task)
             self._task_persistence_dirty.add(task_id)
 
+    async def record_expected_permission_backup_generation(self, task_id: str, generation: int) -> None:
+        """Raise the internal restore floor for the next persisted permission Resume."""
+
+        task_id = validate_protocol_id(task_id)
+        if isinstance(generation, bool) or not isinstance(generation, int) or generation <= 0:
+            raise ValueError("Invalid permission backup generation")
+        async with self._mutation_lock:
+            record = self._tasks.get(task_id)
+            if record is None:
+                raise ValueError(_("A2A task not found"))
+            current = record.expected_permission_backup_generation
+            if current is None or generation > current:
+                record.expected_permission_backup_generation = generation
+                self._task_persistence_dirty.add(task_id)
+
     async def delete(self, task_id: str, context: ServerCallContext | None = None) -> None:
         owner = self._owner(context)
         task_id = validate_protocol_id(task_id)
@@ -786,6 +801,7 @@ class A2ATaskStore(TaskStore):
                     state=record.state,
                     owner=record.owner,
                     output_text=list(record.output_text),
+                    expected_permission_backup_generation=record.expected_permission_backup_generation,
                     expired=record.expired,
                     updated_at=record.updated_at,
                     created_at=record.created_at,
@@ -1006,6 +1022,7 @@ class A2ATaskStore(TaskStore):
             owner=record.owner,
             output_text=list(record.output_text),
             updated_at=record.updated_at,
+            expected_permission_backup_generation=record.expected_permission_backup_generation,
         )
         if self._persistence is not None and persist_shared_snapshot:
             try:
@@ -1332,6 +1349,7 @@ def _record_from_snapshot(snapshot: A2ATaskSnapshot) -> A2ATaskRecord:
         state=snapshot.state,
         owner=snapshot.owner,
         output_text=list(snapshot.output_text),
+        expected_permission_backup_generation=snapshot.expected_permission_backup_generation,
         updated_at=snapshot.updated_at,
     )
 

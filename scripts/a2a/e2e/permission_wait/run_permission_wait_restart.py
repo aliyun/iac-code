@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -34,6 +35,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--candidate-first", action="store_true")
     parser.add_argument("--pipeline-step-id", choices=SELLING_STAGE_IDS)
     parser.add_argument("--handoff-first", action="store_true")
+    parser.add_argument("--staged-backup-generation-fence", action="store_true")
     return parser.parse_args()
 
 
@@ -281,6 +283,44 @@ def _read_checkpoint(path: Path) -> dict[str, Any]:
     return value
 
 
+def _permission_response_query(permission: dict[str, Any], decision: str = "allow_once") -> str:
+    response = {
+        "schemaVersion": 1,
+        "kind": "permission",
+        "requestTaskId": permission["requestTaskId"],
+        "contextId": permission["contextId"],
+        "inputId": permission["inputId"],
+        "toolUseId": permission["toolUseId"],
+        "decision": decision,
+    }
+    return PERMISSION_QUERY_PREFIX + " " + json.dumps(response, separators=(",", ":"))
+
+
+def _single_json(path_pattern: str, root: Path) -> tuple[Path, dict[str, Any]]:
+    paths = sorted(root.glob(path_pattern))
+    if len(paths) != 1:
+        raise AssertionError("expected exactly one {!r} under {}, found {}".format(path_pattern, root, len(paths)))
+    value = json.loads(paths[0].read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise AssertionError("{} is not a JSON object".format(paths[0]))
+    return paths[0], value
+
+
+def _permission_checkpoint_for_input(root: Path, input_id: str) -> tuple[Path, dict[str, Any]]:
+    matches: list[tuple[Path, dict[str, Any]]] = []
+    for path in root.rglob("permission-waits/pwb_*.json"):
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(value, dict) and value.get("inputId") == input_id:
+            matches.append((path, value))
+    if not matches:
+        raise AssertionError("permission checkpoint {} was not found under {}".format(input_id, root))
+    return sorted(matches, key=lambda item: str(item[0]))[-1]
+
+
+def _tool_execution_lines(path: Path) -> list[str]:
+    return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+
 class _FixtureServer:
     def __init__(
         self,
@@ -292,6 +332,10 @@ class _FixtureServer:
         candidate_first: bool,
         pipeline_step_id: str | None,
         handoff_first: bool,
+        sequential_permissions: bool = False,
+        defer_staging_publisher: bool = False,
+        staging_dir: Path | None = None,
+        backup_dir: Path | None = None,
     ) -> None:
         self.run_dir = run_dir
         self.port = port
@@ -300,6 +344,10 @@ class _FixtureServer:
         self.candidate_first = candidate_first
         self.pipeline_step_id = pipeline_step_id
         self.handoff_first = handoff_first
+        self.sequential_permissions = sequential_permissions
+        self.defer_staging_publisher = defer_staging_publisher
+        self.staging_dir = staging_dir
+        self.backup_dir = backup_dir
         self.process: subprocess.Popen[str] | None = None
         self._stdout = None
         self._stderr = None
@@ -339,6 +387,12 @@ class _FixtureServer:
             command.extend(("--pipeline-step-id", self.pipeline_step_id))
         if self.handoff_first:
             command.append("--handoff-first")
+        if self.sequential_permissions:
+            command.append("--sequential-permissions")
+        if self.defer_staging_publisher:
+            command.append("--defer-staging-publisher")
+        if self.staging_dir is not None and self.backup_dir is not None:
+            command.extend(("--staging-dir", str(self.staging_dir), "--backup-dir", str(self.backup_dir)))
         self.process = subprocess.Popen(
             command,
             cwd=self.repo_root,
@@ -404,6 +458,266 @@ def _pipeline_snapshot_permission(config_dir: Path, input_id: str) -> dict[str, 
     if permission is None:
         raise AssertionError("Pipeline snapshot lost the waiting permission")
     return permission
+
+
+def run_staged_backup_generation_fence(*, run_dir: Path, timeout: float) -> dict[str, Any]:
+    """Exercise not-ready then retry across a real staged-backup A2A restart."""
+
+    from iac_code.services.session_backup import BACKUP_ENV_VAR, BACKUP_STATE_FILENAME, SessionBackupService
+    from iac_code.services.session_backup_staging import SessionBackupStagingWorker
+    from iac_code.services.session_storage import SessionStorage
+
+    run_dir = run_dir.expanduser().resolve()
+    run_dir.mkdir(parents=True, exist_ok=False)
+    workspace = run_dir / "workspace"
+    workspace.mkdir()
+    config_dir = run_dir / "config"
+    persistence_dir = run_dir / "a2a-state"
+    staging_dir = run_dir / "staging"
+    backup_dir = run_dir / "shared-backup"
+    execution_log = run_dir / "tool-executions.log"
+    repo_root = Path(__file__).resolve().parents[4]
+    server = _FixtureServer(
+        run_dir=run_dir,
+        port=_free_port(),
+        repo_root=repo_root,
+        mode="normal",
+        candidate_first=False,
+        pipeline_step_id=None,
+        handoff_first=False,
+        sequential_permissions=True,
+        defer_staging_publisher=True,
+        staging_dir=staging_dir,
+        backup_dir=backup_dir,
+    )
+    try:
+        server.start(1)
+        first_events = _stream_request(
+            server.url,
+            _message_payload(workspace=workspace, prompt="request two deterministic writes"),
+            timeout=timeout,
+        )
+        first_permissions = _unique_permissions(first_events)
+        if len(first_permissions) != 1:
+            raise AssertionError("first turn did not expose exactly one permission")
+        permission_1 = first_permissions[0]
+        _context_path, context_snapshot = _single_json("contexts/*.json", persistence_dir)
+        session_id = context_snapshot.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            raise AssertionError("A2A context snapshot lost its session id")
+
+        worker = SessionBackupStagingWorker(staging_dir, backup_dir)
+        if worker.run_once() != 1:
+            raise AssertionError("P1 staged backup was not published as the old shared generation")
+        shared_markers = sorted(backup_dir.rglob("{}/{}".format(session_id, BACKUP_STATE_FILENAME)))
+        if len(shared_markers) != 1:
+            raise AssertionError("shared P1 backup marker was not created")
+        shared_marker = shared_markers[0]
+        old_shared_state = json.loads(shared_marker.read_text(encoding="utf-8"))
+        old_shared_generation = int(old_shared_state["generation"])
+
+        # Removing only the shared marker makes any accidental shared-state
+        # read observable while the local generation is already sufficient.
+        hidden_marker = shared_marker.with_name(".backup-state.e2e-hidden.json")
+        os.replace(shared_marker, hidden_marker)
+        try:
+            second_events = _stream_request(
+                server.url,
+                _message_payload(
+                    workspace=workspace,
+                    prompt=_permission_response_query(permission_1),
+                    context_id=str(permission_1["contextId"]),
+                    task_id=str(permission_1["requestTaskId"]),
+                ),
+                timeout=timeout,
+            )
+        finally:
+            os.replace(hidden_marker, shared_marker)
+
+        second_permissions = _unique_permissions(second_events)
+        if len(second_permissions) != 1:
+            raise AssertionError("P1 Resume did not expose exactly one successor permission")
+        permission_2 = second_permissions[0]
+        if permission_2["inputId"] == permission_1["inputId"]:
+            raise AssertionError("successor permission reused the P1 input id")
+        if _tool_execution_lines(execution_log):
+            raise AssertionError("sequential tools executed before both permissions were resolved")
+
+        _task_path, task_snapshot = _single_json("tasks/*.json", persistence_dir)
+        expected_generation = task_snapshot.get("expected_permission_backup_generation")
+        if not isinstance(expected_generation, int) or expected_generation <= old_shared_generation:
+            raise AssertionError("A2A Task snapshot did not advance to the P2 staged generation")
+        public_payload = json.dumps(first_events + second_events, ensure_ascii=False)
+        if "expected_permission_backup_generation" in public_payload or "minimum_generation" in public_payload:
+            raise AssertionError("internal backup generation leaked into the public A2A stream")
+        staged_snapshot = next(
+            (
+                path
+                for path in staging_dir.rglob("{}_v{}".format(session_id, expected_generation))
+                if path.is_dir()
+            ),
+            None,
+        )
+        if staged_snapshot is None:
+            raise AssertionError("P2 staged snapshot is unavailable")
+        _p2_staged_path, p2_staged_checkpoint = _permission_checkpoint_for_input(
+            staged_snapshot,
+            str(permission_2["inputId"]),
+        )
+        if p2_staged_checkpoint.get("phase") != "WAITING":
+            raise AssertionError("P2 staged checkpoint is not waiting")
+
+        server.stop()
+        primary_sessions = [path for path in config_dir.rglob(session_id) if path.is_dir()]
+        if len(primary_sessions) != 1:
+            raise AssertionError("expected exactly one primary session before sandbox replacement")
+        shutil.rmtree(primary_sessions[0])
+
+        # Reproduce a replacement Sandbox after its normal startup restore:
+        # the local session is the old shared P1 generation while the newer P2
+        # generation is still only staged.  Use the production restore service
+        # instead of copying fixture files directly.
+        previous_backup_dir = os.environ.get(BACKUP_ENV_VAR)
+        os.environ[BACKUP_ENV_VAR] = str(backup_dir)
+        try:
+            restore_result = SessionBackupService(
+                session_storage=SessionStorage(config_dir / "projects")
+            ).restore_session(str(workspace), session_id)
+        finally:
+            if previous_backup_dir is None:
+                os.environ.pop(BACKUP_ENV_VAR, None)
+            else:
+                os.environ[BACKUP_ENV_VAR] = previous_backup_dir
+        if not restore_result.restored:
+            raise AssertionError("replacement Sandbox did not restore the old shared P1 backup")
+        restored_old_state = json.loads(
+            (Path(restore_result.destination) / BACKUP_STATE_FILENAME).read_text(encoding="utf-8")
+        )
+        if int(restored_old_state["generation"]) != old_shared_generation:
+            raise AssertionError("replacement Sandbox did not start from the expected old generation")
+
+        # A replacement Sandbox has its own empty local staging area.  Keep
+        # the original worker attached to the first Sandbox's staged snapshots
+        # so only the shared publication can make generation N available.
+        replacement_staging_dir = run_dir / "replacement-staging"
+        server.staging_dir = replacement_staging_dir
+        server.start(2)
+        p2_query = _permission_response_query(permission_2)
+        not_ready_events = _stream_request(
+            server.url,
+            _message_payload(
+                workspace=workspace,
+                prompt=p2_query,
+                context_id=str(permission_2["contextId"]),
+            ),
+            timeout=timeout,
+        )
+        errors = [item["error"] for event in not_ready_events for item in _walk_dicts(event) if "error" in item]
+        error = next(
+            (
+                value
+                for value in errors
+                if isinstance(value, dict)
+                and isinstance(value.get("data"), dict)
+                and value["data"].get("code") == "SESSION_BACKUP_NOT_READY"
+            ),
+            None,
+        )
+        if error is None or error["data"].get("retryable") is not True:
+            raise AssertionError("cold P2 Resume did not return retryable SESSION_BACKUP_NOT_READY")
+        if "Retry after 3 seconds" not in str(error.get("message")):
+            raise AssertionError("not-ready error did not tell the caller when to retry")
+        if _tool_execution_lines(execution_log):
+            raise AssertionError("not-ready P2 Resume executed a tool")
+        _unchanged_path, unchanged_p2 = _permission_checkpoint_for_input(
+            staged_snapshot,
+            str(permission_2["inputId"]),
+        )
+        unchanged_decision = unchanged_p2.get("decision")
+        if (
+            unchanged_p2.get("phase") != "WAITING"
+            or not isinstance(unchanged_decision, dict)
+            or unchanged_decision.get("status") != "none"
+            or unchanged_decision.get("value") is not None
+        ):
+            raise AssertionError("not-ready P2 Resume claimed or consumed the staged checkpoint")
+
+        published = worker.run_once()
+        if published < 1:
+            raise AssertionError("P2 staged backup was not published to shared storage")
+        shared_state = json.loads(shared_marker.read_text(encoding="utf-8"))
+        if int(shared_state["generation"]) < expected_generation:
+            raise AssertionError("shared backup did not reach the P2 generation")
+
+        recovered_events = _stream_request(
+            server.url,
+            _message_payload(
+                workspace=workspace,
+                prompt=p2_query,
+                context_id=str(permission_2["contextId"]),
+            ),
+            timeout=timeout,
+        )
+        if not _iac_code_values(recovered_events, "permissionRecovered"):
+            raise AssertionError("P2 retry did not continue through persisted Permission Wait recovery")
+        if _tool_execution_lines(execution_log) != ["executed", "executed-2"]:
+            raise AssertionError("P2 retry did not execute exactly once")
+
+        primary_sessions = [path for path in config_dir.rglob(session_id) if path.is_dir()]
+        if len(primary_sessions) != 1:
+            raise AssertionError("shared P2 backup was not restored into the new sandbox")
+        local_state = json.loads((primary_sessions[0] / BACKUP_STATE_FILENAME).read_text(encoding="utf-8"))
+        if int(local_state["generation"]) < expected_generation:
+            raise AssertionError("restored local session did not meet the Task generation fence")
+        _p1_path, p1_checkpoint = _permission_checkpoint_for_input(
+            primary_sessions[0],
+            str(permission_1["inputId"]),
+        )
+        _p2_path, p2_checkpoint = _permission_checkpoint_for_input(
+            primary_sessions[0],
+            str(permission_2["inputId"]),
+        )
+        if p1_checkpoint.get("phase") != "RESOLVED" or p1_checkpoint.get("ack", {}).get(
+            "nextBoundaryId"
+        ) != p2_checkpoint.get("boundaryId"):
+            raise AssertionError("restored session lost the P1 receipt to P2 successor link")
+        if p2_checkpoint.get("phase") != "RESOLVED":
+            raise AssertionError("P2 retry did not resolve the restored checkpoint")
+
+        duplicate_events = _stream_request(
+            server.url,
+            _message_payload(
+                workspace=workspace,
+                prompt=p2_query,
+                context_id=str(permission_2["contextId"]),
+            ),
+            timeout=timeout,
+        )
+        duplicate_acks = [
+            value for value in _iac_code_values(duplicate_events, "inputReceived") if isinstance(value, dict)
+        ]
+        if not any(value.get("duplicate") is True for value in duplicate_acks):
+            raise AssertionError("duplicate P2 retry was not acknowledged idempotently")
+        if _tool_execution_lines(execution_log) != ["executed", "executed-2"]:
+            raise AssertionError("duplicate P2 retry executed a tool again")
+
+        return {
+            "passed": True,
+            "scenario": "staged-backup-generation-fence",
+            "taskId": permission_2["requestTaskId"],
+            "contextId": permission_2["contextId"],
+            "oldSharedGeneration": old_shared_generation,
+            "expectedGeneration": expected_generation,
+            "restoredGeneration": int(local_state["generation"]),
+            "notReadyObserved": True,
+            "sameSandboxResumeWithoutSharedMarker": True,
+            "p1ReceiptPreserved": True,
+            "p2ResolvedOnce": True,
+            "toolExecutions": 2,
+            "publicGenerationAbsent": True,
+        }
+    finally:
+        server.stop()
 
 
 def run_scenario(
@@ -695,15 +1009,18 @@ def run_scenario(
 
 def main() -> int:
     args = _parse_args()
-    result = run_scenario(
-        run_dir=args.run_dir,
-        decision=args.decision,
-        timeout=args.timeout,
-        mode=args.mode,
-        candidate_first=args.candidate_first,
-        pipeline_step_id=args.pipeline_step_id,
-        handoff_first=args.handoff_first,
-    )
+    if args.staged_backup_generation_fence:
+        result = run_staged_backup_generation_fence(run_dir=args.run_dir, timeout=args.timeout)
+    else:
+        result = run_scenario(
+            run_dir=args.run_dir,
+            decision=args.decision,
+            timeout=args.timeout,
+            mode=args.mode,
+            candidate_first=args.candidate_first,
+            pipeline_step_id=args.pipeline_step_id,
+            handoff_first=args.handoff_first,
+        )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0
 

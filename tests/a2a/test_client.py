@@ -6,7 +6,13 @@ from a2a.utils.signing import ProtectedHeader, create_agent_card_signer
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from iac_code.a2a.client import A2ACardVerificationError, A2AClient, A2AClientResponse, _BoundHttpA2AClient
+from iac_code.a2a.client import (
+    A2ACardVerificationError,
+    A2AClient,
+    A2AClientResponse,
+    A2ASessionBackupNotReadyError,
+    _BoundHttpA2AClient,
+)
 from iac_code.a2a.signing import (
     ASYMMETRIC_SIGNATURE_ALGORITHM,
     _agent_card_from_dict,
@@ -85,14 +91,15 @@ class PipelineStateHTTPClient(FakeHTTPClient):
 
 
 class SessionRestoreHTTPClient(FakeHTTPClient):
-    def __init__(self, *, status_code: int = 200, status: str = "restored") -> None:
+    def __init__(self, *, status_code: int = 200, status: str = "restored", payload: dict | None = None) -> None:
         super().__init__()
         self.status_code = status_code
         self.status = status
+        self.payload = payload
 
     async def post(self, url: str, json: dict[str, object], headers=None) -> FakeHTTPResponse:
         self.requests.append(("POST", url, json, headers))
-        return FakeHTTPResponse({"status": self.status}, self.status_code)
+        return FakeHTTPResponse(self.payload or {"status": self.status}, self.status_code)
 
 
 class HangingInputRequiredHTTPClient(FakeHTTPClient):
@@ -156,14 +163,19 @@ async def test_ensure_session_restored_uses_internal_http_extension_and_auth() -
     http = SessionRestoreHTTPClient()
     client = A2AClient(http_client=http, auth=A2AAuthConfig(bearer_token="secret"))
 
-    ready = await client.ensure_session_restored("http://remote/", cwd="/workspace/session", session_id="session-1")
+    ready = await client.ensure_session_restored(
+        "http://remote/",
+        cwd="/workspace/session",
+        session_id="session-1",
+        task_id="task-1",
+    )
 
     assert ready is True
     assert http.requests == [
         (
             "POST",
             "http://remote/iac-code/session/ensure-restored",
-            {"cwd": "/workspace/session", "sessionId": "session-1"},
+            {"cwd": "/workspace/session", "sessionId": "session-1", "taskId": "task-1"},
             {"A2A-Version": "1.0", "Authorization": "Bearer secret"},
         )
     ]
@@ -177,6 +189,30 @@ async def test_ensure_session_restored_returns_false_when_backup_is_missing() ->
         await client.ensure_session_restored("http://remote/", cwd="/workspace/session", session_id="session-1")
         is False
     )
+
+
+@pytest.mark.asyncio
+async def test_ensure_session_restored_surfaces_retryable_generation_fence() -> None:
+    client = A2AClient(
+        http_client=SessionRestoreHTTPClient(
+            status_code=409,
+            payload={
+                "error": {
+                    "code": "SESSION_BACKUP_NOT_READY",
+                    "message": "Session backup is still synchronizing. Retry after 3 seconds.",
+                    "retryable": True,
+                }
+            },
+        )
+    )
+
+    with pytest.raises(A2ASessionBackupNotReadyError, match="Retry after 3 seconds"):
+        await client.ensure_session_restored(
+            "http://remote/",
+            cwd="/workspace/session",
+            session_id="session-1",
+            task_id="task-1",
+        )
 
 
 def _base64url_uint(value: int) -> str:

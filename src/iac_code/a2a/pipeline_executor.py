@@ -21,7 +21,7 @@ from google.protobuf.json_format import ParseDict
 from iac_code.a2a.artifacts import artifact_store_for_session
 from iac_code.a2a.backup import backup_session_async
 from iac_code.a2a.events import make_text_part, publish_mcp_warnings
-from iac_code.a2a.input_required import PendingPermission
+from iac_code.a2a.input_required import PendingPermission, staged_permission_backup_generation
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_flow_monitor import (
     PipelineA2AFlowIdentity,
@@ -2574,7 +2574,7 @@ class IacCodeA2APipelineExecutor:
         try:
             pending = publisher.pending_durable_permission if reason == BackupReason.INPUT_REQUIRED else None
             if pending is not None and self._permission_input_registry is not None:
-                await self._permission_input_registry.backup_durable_boundary(
+                backup_result = await self._permission_input_registry.backup_durable_boundary(
                     pending,
                     cwd,
                     session_id,
@@ -2582,7 +2582,7 @@ class IacCodeA2APipelineExecutor:
                     metrics=self._metrics,
                 )
             else:
-                await backup_session_async(
+                backup_result = await backup_session_async(
                     self._backup_service,
                     cwd,
                     session_id,
@@ -2591,6 +2591,10 @@ class IacCodeA2APipelineExecutor:
                     metrics=self._metrics,
                     publication_proofs=publication_proofs,
                 )
+            if pending is not None:
+                generation = staged_permission_backup_generation(backup_result)
+                if generation is not None:
+                    await self._task_store.record_expected_permission_backup_generation(task.task_id, generation)
         except SessionBackupBlocked as exc:
             sidecar_synced = await _sync_pipeline_backup_blocked_sidecar(
                 pipeline,

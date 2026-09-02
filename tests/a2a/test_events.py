@@ -60,12 +60,14 @@ class _ObservedBoundaryBackup:
         fail: bool = False,
         shared_committed: bool = True,
         staged_committed: bool = False,
+        generation: int | None = None,
     ) -> None:
         self.queue = queue
         self.store = store
         self.fail = fail
         self.shared_committed = shared_committed
         self.staged_committed = staged_committed
+        self.generation = generation
         self.calls: list[tuple[BackupReason, bool]] = []
 
     def backup_session(self, _cwd, _session_id, *, reason, critical):
@@ -83,6 +85,7 @@ class _ObservedBoundaryBackup:
             retry_count=0,
             shared_committed=self.shared_committed,
             staged_committed=self.staged_committed,
+            generation=self.generation,
         )
 
 
@@ -889,8 +892,19 @@ async def test_uncommitted_shared_permission_backup_is_not_visible_or_recoverabl
 async def test_staged_permission_backup_is_visible_without_shared_commit(tmp_path, monkeypatch) -> None:
     workspace, session_id, store, registry = _durable_permission_fixture(tmp_path, monkeypatch)
     queue = FakeEventQueue()
-    backup = _ObservedBoundaryBackup(queue, store, shared_committed=False, staged_committed=True)
+    backup = _ObservedBoundaryBackup(
+        queue,
+        store,
+        shared_committed=False,
+        staged_committed=True,
+        generation=4,
+    )
     future = pending_future()
+    recorded: list[tuple[str, int]] = []
+
+    async def record_generation(task_id: str, generation: int) -> None:
+        assert queue.events == []
+        recorded.append((task_id, generation))
 
     pending = await publish_interactive_permission_boundary(
         queue,
@@ -907,10 +921,12 @@ async def test_staged_permission_backup_is_visible_without_shared_commit(tmp_pat
         iac_code_session_id=session_id,
         permission_wait_cwd=str(workspace),
         permission_wait_backup_service=backup,
+        record_expected_backup_generation=record_generation,
         wait_for_response=False,
     )
 
     assert len(queue.events) == 1
+    assert recorded == [("task-1", 4)]
     assert store.load(str(pending.boundary_id))["phase"] == "WAITING"
     await registry.complete(pending)
     future.cancel()

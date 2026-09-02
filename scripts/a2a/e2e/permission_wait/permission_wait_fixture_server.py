@@ -31,10 +31,20 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--candidate-first", action="store_true")
     parser.add_argument("--pipeline-step-id", choices=SELLING_STAGE_IDS)
     parser.add_argument("--handoff-first", action="store_true")
+    parser.add_argument("--sequential-permissions", action="store_true")
+    parser.add_argument("--defer-staging-publisher", action="store_true")
+    parser.add_argument("--staging-dir", type=Path)
+    parser.add_argument("--backup-dir", type=Path)
     return parser.parse_args()
 
 
-def _create_fixture_runtime(options: Any, *, execution_log: Path, handoff_first: bool = False) -> Any:
+def _create_fixture_runtime(
+    options: Any,
+    *,
+    execution_log: Path,
+    handoff_first: bool = False,
+    sequential_permissions: bool = False,
+) -> Any:
     from iac_code.agent.agent_loop import AgentLoop
     from iac_code.providers.base import ToolDefinition
     from iac_code.services.agent_factory import AgentRuntime
@@ -90,7 +100,7 @@ def _create_fixture_runtime(options: Any, *, execution_log: Path, handoff_first:
             del context
             execution_log.parent.mkdir(parents=True, exist_ok=True)
             with execution_log.open("a", encoding="utf-8") as handle:
-                handle.write("executed\n")
+                handle.write("{}\n".format(tool_input.get("value", "executed")))
                 handle.flush()
                 os.fsync(handle.fileno())
             return ToolResult.success("fixture write completed")
@@ -126,6 +136,13 @@ def _create_fixture_runtime(options: Any, *, execution_log: Path, handoff_first:
                 name=tool_name,
                 input=tool_input,
             )
+            if sequential_permissions:
+                yield ToolUseStartEvent(tool_use_id="fixture-tool-2", name=tool_name)
+                yield ToolUseEndEvent(
+                    tool_use_id="fixture-tool-2",
+                    name=tool_name,
+                    input={"value": "executed-2"},
+                )
             yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
 
     provider = FixtureProvider()
@@ -498,12 +515,18 @@ def main() -> int:
     os.environ["ALIBABA_CLOUD_ACCESS_KEY_ID"] = "permission-wait-fixture-ak"
     os.environ["ALIBABA_CLOUD_ACCESS_KEY_SECRET"] = "permission-wait-fixture-secret"
     os.environ["ALIBABA_CLOUD_REGION_ID"] = "cn-hangzhou"
+    if args.staging_dir is not None or args.backup_dir is not None:
+        if args.staging_dir is None or args.backup_dir is None:
+            raise ValueError("--staging-dir and --backup-dir must be provided together")
+        os.environ["IAC_CODE_CONFIG_BACKUP_TMP_DIR"] = str(args.staging_dir.expanduser().resolve())
+        os.environ["IAC_CODE_CONFIG_BACKUP_DIR"] = str(args.backup_dir.expanduser().resolve())
 
     import uvicorn
 
     from iac_code.a2a import executor as executor_module
     from iac_code.a2a import pipeline_executor as pipeline_executor_module
     from iac_code.a2a.app import create_app
+    from iac_code.services import session_backup_staging as backup_staging_module
     from iac_code.services.providers.aliyun_identity import AliyunCallerIdentity, AliyunCallerIdentityResolver
 
     async def resolve_fixture_identity(
@@ -516,10 +539,15 @@ def main() -> int:
 
     AliyunCallerIdentityResolver.resolve = resolve_fixture_identity
 
+    if args.defer_staging_publisher:
+        backup_staging_module.SessionBackupStagingProcess.start = lambda self: None
+        backup_staging_module.SessionBackupStagingProcess.close = lambda self: None
+
     executor_module.create_agent_runtime = lambda options: _create_fixture_runtime(
         options,
         execution_log=execution_log,
         handoff_first=args.handoff_first,
+        sequential_permissions=args.sequential_permissions,
     )
     pipeline_executor_module.create_agent_runtime = executor_module.create_agent_runtime
     fixture_pipelines: dict[str, Any] = {}

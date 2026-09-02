@@ -246,7 +246,14 @@ class StagedSessionBackupService(SessionBackupService):
         session_id: str,
         *,
         attempted_proof_validator: Callable[[str, BackupPublicationProof], bool] | None = None,
+        minimum_generation: int | None = None,
     ) -> SessionReconcileResult:
+        if minimum_generation is not None and (
+            isinstance(minimum_generation, bool)
+            or not isinstance(minimum_generation, int)
+            or minimum_generation <= 0
+        ):
+            raise ValueError("minimum_generation must be a positive integer")
         if not self._backup_enabled():
             return SessionReconcileResult(enabled=False, action="disabled")
         self._validate_session_id(session_id)
@@ -256,6 +263,7 @@ class StagedSessionBackupService(SessionBackupService):
                 cwd,
                 session_id,
                 attempted_proof_validator=attempted_proof_validator,
+                minimum_generation=minimum_generation,
             )
 
         local_state = self._read_state(local, session_id=session_id, missing_ok=True)
@@ -278,7 +286,7 @@ class StagedSessionBackupService(SessionBackupService):
             )
             repaired_state = self._read_state(local, session_id=session_id)
             assert repaired_state is not None
-            return SessionReconcileResult(
+            repaired = SessionReconcileResult(
                 enabled=True,
                 action="repaired",
                 source=result.destination,
@@ -287,10 +295,30 @@ class StagedSessionBackupService(SessionBackupService):
                 deleted_files=result.deleted_files,
                 payload_changed=True,
             )
+            if minimum_generation is None or repaired_state.generation >= minimum_generation:
+                return repaired
+            local_state = repaired_state
+
+        if minimum_generation is not None and local_state.generation >= minimum_generation:
+            action = "staged_current" if self._snapshot_entries(local, session_id) else "current"
+            return SessionReconcileResult(enabled=True, action=action, source=local, state=local_state)
 
         adopted = self._adopt_next_snapshot(local, session_id, local_state)
         if adopted is not None:
-            return adopted
+            if minimum_generation is None or (
+                adopted.state is not None and adopted.state.generation >= minimum_generation
+            ):
+                return adopted
+            assert adopted.state is not None
+            local_state = adopted.state
+
+        if minimum_generation is not None:
+            return super().reconcile_session(
+                cwd,
+                session_id,
+                attempted_proof_validator=attempted_proof_validator,
+                minimum_generation=minimum_generation,
+            )
         action = "staged_current" if self._snapshot_entries(local, session_id) else "current"
         return SessionReconcileResult(enabled=True, action=action, source=local, state=local_state)
 

@@ -76,6 +76,10 @@ msgid ""
 msgstr "クリーンアップ状態を利用できません。セッションファイルとクラウドリソースを手動で確認してください。"
 
 #: src/iac_code/a2a/executor.py
+msgid "Normal permission restore snapshot could not be persisted."
+msgstr "通常チャットの権限復元スナップショットを保存できませんでした。"
+
+#: src/iac_code/a2a/executor.py
 msgid "Normal permission restore snapshot identity is incomplete."
 msgstr "通常チャットの権限復元スナップショットの識別情報が不完全です。"
 
@@ -90,10 +94,6 @@ msgstr "通常チャットの権限復元リクエストがスナップショッ
 #: src/iac_code/a2a/executor.py
 msgid "Normal permission restore decision conflicts with the snapshot."
 msgstr "通常チャットの権限復元判断がスナップショットと競合しています。"
-
-#: src/iac_code/a2a/executor.py
-msgid "Normal permission restore snapshot could not be persisted."
-msgstr "通常チャットの権限復元スナップショットを保存できませんでした。"
 
 #: src/iac_code/a2a/executor.py
 msgid ""
@@ -129,6 +129,10 @@ msgstr "タスクがキャンセルされました。"
 #: src/iac_code/a2a/executor.py
 msgid "Normal permission decision is unavailable before backup."
 msgstr "バックアップ前に通常チャットの権限判断を取得できません。"
+
+#: src/iac_code/a2a/executor.py src/iac_code/agui/errors.py
+msgid "Session backup is still synchronizing. Retry after 3 seconds."
+msgstr "セッションのバックアップはまだ同期中です。3秒後に再試行してください。"
 
 #: src/iac_code/a2a/executor.py
 msgid "Unsupported pipeline name."

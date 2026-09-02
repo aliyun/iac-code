@@ -25,6 +25,33 @@ def test_persistence_round_trips_task_and_context(tmp_path) -> None:
     assert store.load_context("ctx-1").telemetry_channel == "skill"
 
 
+def test_persistence_round_trips_internal_permission_backup_generation(tmp_path) -> None:
+    store = A2APersistenceStore(tmp_path)
+    store.save_task(
+        A2ATaskSnapshot(
+            task_id="task-1",
+            context_id="ctx-1",
+            state="input-required",
+            expected_permission_backup_generation=7,
+        )
+    )
+
+    restored = store.load_task("task-1")
+
+    assert restored is not None
+    assert restored.expected_permission_backup_generation == 7
+
+
+def test_persistence_loads_task_without_permission_backup_generation(tmp_path) -> None:
+    store = A2APersistenceStore(tmp_path)
+    store.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+
+    restored = store.load_task("task-1")
+
+    assert restored is not None
+    assert restored.expected_permission_backup_generation is None
+
+
 def test_persistence_loads_legacy_context_without_telemetry_channel(tmp_path) -> None:
     store = A2APersistenceStore(tmp_path)
     store.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))

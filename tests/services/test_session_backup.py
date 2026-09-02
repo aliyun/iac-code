@@ -12,6 +12,7 @@ from iac_code.services.session_backup import (
     BackupReason,
     SessionBackupBlocked,
     SessionBackupError,
+    SessionBackupNotReadyError,
     SessionBackupService,
     SessionRestoreResult,
 )
@@ -59,6 +60,43 @@ def test_backup_disabled_when_env_unset(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
     assert result.enabled is False
     assert result.copied_files == 0
+
+
+def test_reconcile_backup_disabled_accepts_permission_generation_floor(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("IAC_CODE_CONFIG_BACKUP_DIR", raising=False)
+    service = SessionBackupService(SessionStorage(projects_dir=tmp_path / "projects"))
+
+    result = service.reconcile_session("/repo", "s1", minimum_generation=2)
+
+    assert result.enabled is False
+    assert result.action == "disabled"
+
+
+def test_reconcile_generation_floor_reports_partial_first_shared_backup_as_not_ready(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cwd = "/repo"
+    session_id = "s1"
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    shared_storage = SessionStorage(projects_dir=backup_root / "projects")
+    shared_dir = shared_storage.session_dir(cwd, session_id)
+    write_session_metadata(
+        shared_dir,
+        SessionMetadata(session_id=session_id, cwd=cwd, layout_version=SESSION_LAYOUT_VERSION_V2),
+    )
+    service = SessionBackupService(SessionStorage(projects_dir=tmp_path / "local" / "projects"))
+
+    with pytest.raises(SessionBackupNotReadyError) as exc_info:
+        service.reconcile_session(cwd, session_id, minimum_generation=1)
+
+    assert exc_info.value.minimum_generation == 1
+    assert exc_info.value.local_generation is None
+    assert exc_info.value.shared_generation is None
 
 
 def test_backup_timing_wrapper_preserves_keyword_call_form(

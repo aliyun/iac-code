@@ -9,6 +9,81 @@ import pytest
 
 
 @pytest.mark.integration
+@pytest.mark.timeout(120)
+def test_agui_staged_backup_generation_fence_retries_after_shared_publication(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    runner = repo_root / "scripts" / "a2a" / "e2e" / "permission_wait" / "run_agui_generation_fence.py"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(runner),
+            "--run-dir",
+            str(tmp_path / "agui-staged-backup-generation-fence"),
+            "--timeout",
+            "25",
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=110,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert result["passed"] is True
+    assert result["scenario"] == "agui-staged-backup-generation-fence"
+    assert result["notReadyObserved"] is True
+    assert result["aguiStateRestored"] is True
+    assert result["oldSharedGeneration"] < result["expectedGeneration"]
+    assert result["restoredGeneration"] >= result["expectedGeneration"]
+    assert result["p1ReceiptPreserved"] is True
+    assert result["p2ResolvedOnce"] is True
+    assert result["toolExecutions"] == 2
+    assert result["publicGenerationAbsent"] is True
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(90)
+def test_staged_backup_generation_fence_retries_after_shared_publication(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    runner = repo_root / "scripts" / "a2a" / "e2e" / "permission_wait" / "run_permission_wait_restart.py"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(runner),
+            "--run-dir",
+            str(tmp_path / "staged-backup-generation-fence"),
+            "--decision",
+            "allow_once",
+            "--staged-backup-generation-fence",
+            "--timeout",
+            "20",
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=80,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert result["passed"] is True
+    assert result["scenario"] == "staged-backup-generation-fence"
+    assert result["notReadyObserved"] is True
+    assert result["sameSandboxResumeWithoutSharedMarker"] is True
+    assert result["oldSharedGeneration"] < result["expectedGeneration"]
+    assert result["restoredGeneration"] >= result["expectedGeneration"]
+    assert result["p1ReceiptPreserved"] is True
+    assert result["p2ResolvedOnce"] is True
+    assert result["toolExecutions"] == 2
+    assert result["publicGenerationAbsent"] is True
+
+
+@pytest.mark.integration
 @pytest.mark.timeout(90)
 @pytest.mark.parametrize(
     ("mode", "decision", "expected_executions"),

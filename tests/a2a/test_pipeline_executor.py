@@ -21,6 +21,7 @@ from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.input_required import PermissionResponse
 from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.persistence import A2APersistenceStore
+from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.a2a.pipeline_transport_delivery import (
@@ -227,6 +228,86 @@ def _pipeline_executor(*, aliyun_delegated_executor_factory=None, candidate_pres
         aliyun_delegated_executor_factory=aliyun_delegated_executor_factory,
         candidate_presentation=candidate_presentation,
     )
+
+
+@pytest.mark.asyncio
+async def test_pipeline_permission_backup_records_staged_generation_before_publication() -> None:
+    task_store = MagicMock()
+    task_store.record_expected_permission_backup_generation = AsyncMock()
+    permission_registry = MagicMock()
+    permission_registry.backup_durable_boundary = AsyncMock(
+        return_value=BackupResult(
+            enabled=True,
+            generation=6,
+            staged_committed=True,
+            shared_committed=False,
+        )
+    )
+    pending = object()
+    executor = IacCodeA2APipelineExecutor(
+        task_store=task_store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        permission_input_registry=permission_registry,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    await executor._backup_pipeline_publication(
+        {"eventType": "input_required", "status": "input_required"},
+        publisher=SimpleNamespace(pending_durable_permission=pending),
+        pipeline=object(),
+        cwd="/workspace",
+        session_id="session-1",
+        task=SimpleNamespace(task_id="task-1"),
+        ctx=object(),
+        reason=BackupReason.INPUT_REQUIRED,
+    )
+
+    task_store.record_expected_permission_backup_generation.assert_awaited_once_with("task-1", 6)
+    permission_registry.backup_durable_boundary.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_non_permission_input_does_not_record_permission_backup_generation() -> None:
+    class StagedBackup:
+        def backup_session(self, *_args, **_kwargs) -> BackupResult:
+            return BackupResult(
+                enabled=True,
+                generation=6,
+                staged_committed=True,
+                shared_committed=False,
+            )
+
+    task_store = MagicMock()
+    task_store.record_expected_permission_backup_generation = AsyncMock()
+    executor = IacCodeA2APipelineExecutor(
+        task_store=task_store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+        backup_service=StagedBackup(),
+    )
+
+    await executor._backup_pipeline_publication(
+        {"eventType": "input_required", "status": "input_required"},
+        publisher=SimpleNamespace(pending_durable_permission=None),
+        pipeline=object(),
+        cwd="/workspace",
+        session_id="session-1",
+        task=SimpleNamespace(task_id="task-1"),
+        ctx=object(),
+        reason=BackupReason.INPUT_REQUIRED,
+    )
+
+    task_store.record_expected_permission_backup_generation.assert_not_awaited()
 
 
 def test_active_sidecar_mismatch_error_exposes_jsonrpc_data() -> None:

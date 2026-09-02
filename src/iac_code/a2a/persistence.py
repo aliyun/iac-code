@@ -42,6 +42,7 @@ class A2ATaskSnapshot:
     status_message: str = ""
     updated_at: float = field(default_factory=time.time)
     owner: str = ""
+    expected_permission_backup_generation: int | None = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,7 @@ class A2APersistenceStore:
                 output_text=snapshot.output_text,
                 status_message="Task was interrupted by process exit and cannot be revived automatically.",
                 updated_at=snapshot.updated_at,
+                expected_permission_backup_generation=snapshot.expected_permission_backup_generation,
             )
             self.save_task(interrupted)
             return interrupted
@@ -164,6 +166,14 @@ class A2APersistenceStore:
         owner = data.get("owner")
         status_message = data.get("status_message")
         updated_at = data.get("updated_at")
+        raw_expected_generation = data.get("expected_permission_backup_generation")
+        expected_generation = (
+            raw_expected_generation
+            if isinstance(raw_expected_generation, int)
+            and not isinstance(raw_expected_generation, bool)
+            and raw_expected_generation > 0
+            else None
+        )
         return A2ATaskSnapshot(
             task_id=task_id,
             context_id=context_id,
@@ -172,6 +182,7 @@ class A2APersistenceStore:
             output_text=output_text,
             status_message=status_message if isinstance(status_message, str) else "",
             updated_at=float(updated_at) if isinstance(updated_at, (int, float)) else time.time(),
+            expected_permission_backup_generation=expected_generation,
         )
 
     @staticmethod

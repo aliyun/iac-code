@@ -43,7 +43,11 @@ from iac_code.a2a.types import validate_protocol_id
 from iac_code.i18n import _
 from iac_code.pipeline.config import get_run_mode
 from iac_code.services.configuration_readiness import configuration_readiness
-from iac_code.services.session_backup import SessionBackupError
+from iac_code.services.session_backup import (
+    SESSION_BACKUP_NOT_READY_CODE,
+    SessionBackupError,
+    SessionBackupNotReadyError,
+)
 from iac_code.services.session_storage import SessionStorage
 
 logger = logging.getLogger(__name__)
@@ -489,21 +493,39 @@ def create_app(
             return JSONResponse({"error": "Invalid session restore request."}, status_code=400)
         raw_cwd = payload.get("cwd")
         raw_session_id = payload.get("sessionId")
-        if not isinstance(raw_cwd, str) or not raw_cwd or not isinstance(raw_session_id, str):
+        raw_task_id = payload.get("taskId")
+        if (
+            not isinstance(raw_cwd, str)
+            or not raw_cwd
+            or not isinstance(raw_session_id, str)
+            or (raw_task_id is not None and not isinstance(raw_task_id, str))
+        ):
             return JSONResponse({"error": "Invalid session restore request."}, status_code=400)
 
         executor = getattr(components.handler, "agent_executor", None)
         resolve_cwd = getattr(executor, "_resolve_cwd", None)
-        backup_service = components.backup_service
-        if not callable(resolve_cwd) or backup_service is None:
+        ensure_restored = getattr(executor, "ensure_session_restored", None)
+        if not callable(resolve_cwd) or not callable(ensure_restored):
             return JSONResponse({"error": "Session restore is unavailable."}, status_code=503)
         try:
             session_id = validate_protocol_id(raw_session_id)
+            task_id = validate_protocol_id(raw_task_id) if raw_task_id is not None else None
             cwd = resolve_cwd({"iac_code": {"cwd": raw_cwd}})
-            result = await asyncio.to_thread(backup_service.reconcile_session, cwd, session_id)
+            result = await ensure_restored(cwd=cwd, session_id=session_id, task_id=task_id)
             exists = SessionStorage().exists(cwd, session_id)
         except ValueError:
             return JSONResponse({"error": "Invalid session restore request."}, status_code=400)
+        except SessionBackupNotReadyError as exc:
+            return JSONResponse(
+                {
+                    "error": {
+                        "code": SESSION_BACKUP_NOT_READY_CODE,
+                        "message": str(exc),
+                        "retryable": True,
+                    }
+                },
+                status_code=409,
+            )
         except SessionBackupError as exc:
             logger.warning("A2A session restore failed error_type=%s", type(exc).__name__)
             return JSONResponse({"error": "Unable to restore the A2A session."}, status_code=503)

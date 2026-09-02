@@ -81,6 +81,18 @@ uv run pytest -q tests/a2a_e2e/test_sub_pipeline_permission_timeout.py
 uv run pytest -q tests/a2a_e2e/test_permission_wait_restart.py
 ```
 
+其中 `staged-backup-generation-fence` 场景使用真实 HTTP A2A 进程、生产 staged backup/worker 和两个连续
+权限点：新进程先从共享目录恢复旧 generation；较新的权限 backup 尚未发布时，Resume 必须返回可重试的
+`SESSION_BACKUP_NOT_READY`；worker 发布完成后，同一标准权限响应可恢复最新会话并且两个工具各执行一次。
+可单独运行：
+
+```bash
+uv run python scripts/a2a/e2e/permission_wait/run_permission_wait_restart.py \
+  --run-dir /tmp/iac-pwait-generation-fence \
+  --decision allow_once \
+  --staged-backup-generation-fence
+```
+
 进程重启矩阵覆盖 Normal/Pipeline × allow/deny。Sub Pipeline fixture 断言只生成一次拒绝 ToolResult、
 Agent loop 继续、父 Pipeline 进入 candidate 选择并完成，且全程没有 grace、持久化 permission checkpoint
 或权限关键备份。

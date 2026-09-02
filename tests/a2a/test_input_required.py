@@ -19,6 +19,7 @@ from iac_code.a2a.input_required import (
     parse_permission_response,
     permission_input_envelope,
     permission_safe_summary,
+    staged_permission_backup_generation,
 )
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
@@ -33,6 +34,7 @@ from iac_code.services.permission_wait import (
     PermissionWaitPolicy,
     build_permission_checkpoint,
 )
+from iac_code.services.session_backup import BackupResult
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.permissions import PermissionAuditMetadata, PermissionResult
 from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent
@@ -75,6 +77,22 @@ def _permission_message(
         role=Role.ROLE_USER,
         parts=parts,
     )
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        (BackupResult(enabled=False, generation=4, staged_committed=True, shared_committed=False), None),
+        (BackupResult(enabled=True, generation=4, staged_committed=True, shared_committed=True), None),
+        (BackupResult(enabled=True, generation=0, staged_committed=True, shared_committed=False), None),
+        (BackupResult(enabled=True, generation=4, staged_committed=True, shared_committed=False), 4),
+    ],
+)
+def test_only_unsynchronized_staged_permission_backup_creates_generation_fence(
+    result: BackupResult,
+    expected: int | None,
+) -> None:
+    assert staged_permission_backup_generation(result) == expected
 
 
 def _text_permission_message(

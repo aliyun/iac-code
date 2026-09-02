@@ -76,6 +76,10 @@ msgid ""
 msgstr "清理状态不可用。请手动检查会话文件和云资源。"
 
 #: src/iac_code/a2a/executor.py
+msgid "Normal permission restore snapshot could not be persisted."
+msgstr "无法持久化普通对话权限恢复快照。"
+
+#: src/iac_code/a2a/executor.py
 msgid "Normal permission restore snapshot identity is incomplete."
 msgstr "普通对话权限恢复快照标识不完整。"
 
@@ -90,10 +94,6 @@ msgstr "快照中缺少普通对话权限恢复请求。"
 #: src/iac_code/a2a/executor.py
 msgid "Normal permission restore decision conflicts with the snapshot."
 msgstr "普通对话权限恢复决定与快照冲突。"
-
-#: src/iac_code/a2a/executor.py
-msgid "Normal permission restore snapshot could not be persisted."
-msgstr "无法持久化普通对话权限恢复快照。"
 
 #: src/iac_code/a2a/executor.py
 msgid ""
@@ -129,6 +129,10 @@ msgstr "任务已取消。"
 #: src/iac_code/a2a/executor.py
 msgid "Normal permission decision is unavailable before backup."
 msgstr "备份前无法获取普通对话权限决定。"
+
+#: src/iac_code/a2a/executor.py src/iac_code/agui/errors.py
+msgid "Session backup is still synchronizing. Retry after 3 seconds."
+msgstr "会话备份仍在同步中，请在 3 秒后重试。"
 
 #: src/iac_code/a2a/executor.py
 msgid "Unsupported pipeline name."

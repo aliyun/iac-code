@@ -131,6 +131,7 @@ class PendingPermission:
     backup_session_id: str | None = field(default=None, repr=False)
     backup_service: Any | None = field(default=None, repr=False)
     backup_metrics: Any | None = field(default=None, repr=False)
+    expected_backup_generation: int | None = field(default=None, repr=False)
     before_claim_backup: Callable[[PendingPermission, dict[str, Any]], Awaitable[None]] | None = field(
         default=None,
         repr=False,
@@ -164,6 +165,22 @@ class PermissionTaskClosingToken:
 class _PermissionTaskClosingState:
     permanent: bool = False
     reversible_tokens: set[str] = field(default_factory=set)
+
+
+def staged_permission_backup_generation(result: Any) -> int | None:
+    """Return the internal restore floor for an asynchronously published backup."""
+
+    generation = getattr(result, "generation", None)
+    if (
+        bool(getattr(result, "enabled", False))
+        and bool(getattr(result, "staged_committed", False))
+        and not bool(getattr(result, "shared_committed", False))
+        and isinstance(generation, int)
+        and not isinstance(generation, bool)
+        and generation > 0
+    ):
+        return generation
+    return None
 
 
 def permission_input_envelope(
@@ -1043,7 +1060,7 @@ class PermissionInputRegistry:
         pending.backup_session_id = session_id
         pending.backup_service = backup_service
         pending.backup_metrics = metrics
-        return await backup_permission_wait_checkpoint(
+        result = await backup_permission_wait_checkpoint(
             store=store,
             boundary_id=boundary_id,
             cwd=cwd,
@@ -1051,6 +1068,11 @@ class PermissionInputRegistry:
             backup_service=backup_service,
             metrics=metrics,
         )
+        generation = staged_permission_backup_generation(result)
+        if generation is not None:
+            current = pending.expected_backup_generation
+            pending.expected_backup_generation = generation if current is None else max(current, generation)
+        return result
 
     def activate_durable_boundary(
         self,
