@@ -1,6 +1,5 @@
 from pathlib import Path
 from textwrap import dedent
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import yaml
@@ -9,11 +8,7 @@ from iac_code.pipeline.engine.handoff import build_handoff_summary, terminal_out
 from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
 
 
-def _make_runner(
-    tmp_path: Path,
-    on_complete: dict | None = None,
-    permission_mode: str | None = None,
-) -> PipelineRunner:
+def _make_runner(tmp_path: Path, on_complete: dict | None = None) -> PipelineRunner:
     body = {
         "name": "test",
         "context_dependencies": {
@@ -36,7 +31,6 @@ def _make_runner(
     (tmp_path / "prompts").mkdir()
     (tmp_path / "prompts" / "step.md").write_text("step", encoding="utf-8")
 
-    permission_context_getter = (lambda: SimpleNamespace(mode=permission_mode)) if permission_mode is not None else None
     return PipelineRunner(
         pipeline_dir=tmp_path,
         provider_manager=MagicMock(),
@@ -44,7 +38,6 @@ def _make_runner(
         session_storage=MagicMock(),
         session_id="session",
         cwd=str(tmp_path),
-        permission_context_getter=permission_context_getter,
     )
 
 
@@ -76,7 +69,8 @@ def test_terminal_outcome_failed_wins_over_early_exit():
     assert terminal_outcome_from_completed_event({"failed": True, "early_exit": True}) == "failed"
 
 
-def test_build_handoff_summary_includes_only_configured_fields_and_deterministic_metadata():
+def test_build_handoff_summary_includes_only_configured_fields_and_deterministic_metadata(monkeypatch):
+    monkeypatch.delenv("IAC_CODE_HANDOFF_USE_TOOL_CONFIRMATION", raising=False)
     summary = build_handoff_summary(
         pipeline_name="selling",
         outcome="early_exit",
@@ -127,7 +121,8 @@ def test_build_handoff_summary_includes_only_configured_fields_and_deterministic
     assert "deployment" not in summary
 
 
-def test_build_handoff_summary_requires_new_confirmation_for_resource_release_except_automatic_cleanup():
+def test_build_handoff_summary_requires_new_confirmation_for_resource_release_except_automatic_cleanup(monkeypatch):
+    monkeypatch.delenv("IAC_CODE_HANDOFF_USE_TOOL_CONFIRMATION", raising=False)
     summary = build_handoff_summary(
         pipeline_name="selling",
         outcome="completed",
@@ -140,13 +135,13 @@ def test_build_handoff_summary_requires_new_confirmation_for_resource_release_ex
     assert "pipeline-managed automatic cleanup may proceed without this additional confirmation" in summary
 
 
-def test_build_handoff_summary_uses_permission_confirmation_when_release_tools_are_not_allowed():
+def test_build_handoff_summary_uses_permission_confirmation_when_enabled(monkeypatch):
+    monkeypatch.setenv("IAC_CODE_HANDOFF_USE_TOOL_CONFIRMATION", "true")
     summary = build_handoff_summary(
         pipeline_name="selling",
         outcome="completed",
         context_snapshot={},
         include_fields=[],
-        release_tools_any_allowed=False,
     )
 
     assert "tool permission confirmation as the sole confirmation" in summary
@@ -154,13 +149,13 @@ def test_build_handoff_summary_uses_permission_confirmation_when_release_tools_a
     assert "obtain a fresh, explicit confirmation" not in summary
 
 
-def test_build_handoff_summary_keeps_chat_confirmation_when_a_release_tool_is_allowed():
+def test_build_handoff_summary_keeps_chat_confirmation_when_tool_confirmation_is_disabled(monkeypatch):
+    monkeypatch.setenv("IAC_CODE_HANDOFF_USE_TOOL_CONFIRMATION", "false")
     summary = build_handoff_summary(
         pipeline_name="selling",
         outcome="completed",
         context_snapshot={},
         include_fields=[],
-        release_tools_any_allowed=True,
     )
 
     assert "obtain a fresh, explicit confirmation" in summary
@@ -215,36 +210,3 @@ def test_runner_build_normal_handoff_summary_uses_configured_context_values(tmp_
     assert "Outcome: completed" in summary
     assert '"summary": "deploy nginx"' in summary
     assert "Missing context fields:\n- architecture" in summary
-
-
-def test_runner_build_normal_handoff_summary_uses_current_permission_rules(tmp_path):
-    runner = _make_runner(tmp_path, _switch_policy("completed"), permission_mode="default")
-    runner._permission_context_getter = lambda: SimpleNamespace(
-        mode="default",
-        allow_rules={
-            "user_settings": [
-                "bash(**)",
-                "read_file",
-            ]
-        },
-        ask_rules={"user_settings": ["ros_stack", "aliyun_api"]},
-        deny_rules={},
-    )
-
-    summary = runner.build_normal_handoff_summary({"total_steps": 1})
-
-    assert "tool permission confirmation as the sole confirmation" in summary
-
-
-def test_runner_build_normal_handoff_summary_uses_chat_confirmation_when_a_release_tool_is_allowed(tmp_path):
-    runner = _make_runner(tmp_path, _switch_policy("completed"), permission_mode="default")
-    runner._permission_context_getter = lambda: SimpleNamespace(
-        mode="default",
-        allow_rules={"user_settings": ["aliyun_api"]},
-        ask_rules={"user_settings": ["ros_stack"]},
-        deny_rules={},
-    )
-
-    summary = runner.build_normal_handoff_summary({"total_steps": 1})
-
-    assert "obtain a fresh, explicit confirmation" in summary

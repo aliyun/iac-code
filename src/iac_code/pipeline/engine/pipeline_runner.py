@@ -1093,49 +1093,7 @@ class PipelineRunner:
             outcome=outcome,
             context_snapshot=self.context.snapshot(),
             include_fields=include_fields,
-            release_tools_any_allowed=self._normal_chat_release_tools_any_allowed(),
         )
-
-    def _normal_chat_release_tools_any_allowed(self) -> bool | None:
-        permission_context = self._normal_chat_permission_context()
-        if permission_context is None:
-            return None
-        mode = getattr(permission_context, "mode", None)
-        mode_value = getattr(mode, "value", mode)
-        mode_name = mode_value if isinstance(mode_value, str) else None
-        allow_rules = getattr(permission_context, "allow_rules", {})
-        ask_rules = getattr(permission_context, "ask_rules", {})
-        deny_rules = getattr(permission_context, "deny_rules", {})
-        if not all(isinstance(rules, dict) for rules in (allow_rules, ask_rules, deny_rules)):
-            return None
-
-        for tool_name in ("aliyun_api", "ros_stack"):
-            if self._permission_rules_contain_tool(deny_rules, tool_name):
-                continue
-            if self._permission_rules_contain_tool(ask_rules, tool_name):
-                continue
-            if self._permission_rules_contain_tool(allow_rules, tool_name) or mode_name == "bypass_permissions":
-                return True
-        return False
-
-    @staticmethod
-    def _permission_rules_contain_tool(rules_by_source: dict[str, list[str]], tool_name: str) -> bool:
-        return any(
-            isinstance(rule, str) and rule.split("(", 1)[0].strip() == tool_name
-            for rules in rules_by_source.values()
-            if isinstance(rules, list)
-            for rule in rules
-        )
-
-    def _normal_chat_permission_context(self) -> Any | None:
-        getter = self._permission_context_getter
-        if not callable(getter):
-            return None
-        try:
-            return getter()
-        except Exception:
-            logger.debug("Failed to read permission context for normal chat handoff", exc_info=True)
-            return None
 
     def mark_normal_handoff(self, status: str, failed_reason: str | None = None) -> None:
         """Record terminal pipeline-to-normal handoff metadata without deleting the sidecar."""

@@ -96,11 +96,7 @@ class PipelineActionResult:
 class A2APipelineActionRunner:
     """Route Web pipeline actions through the existing A2A pipeline executor."""
 
-    def __init__(
-        self,
-        runtime_owner: Any | None = None,
-        permission_context_getter: Callable[[Any], Any] | None = None,
-    ) -> None:
+    def __init__(self, runtime_owner: Any | None = None) -> None:
         from iac_code.a2a.exposure import A2AExposureType
         from iac_code.a2a.metrics import NoOpA2AMetrics
         from iac_code.a2a.persistence import A2APersistenceStore
@@ -130,7 +126,6 @@ class A2APipelineActionRunner:
         self._owner = owner
         self._task_store = owner.task_store
         self._uses_web_global_defaults = uses_web_global_defaults
-        self._permission_context_getter = permission_context_getter
 
     async def startup(self) -> None:
         """Start background maintenance for the fallback store owned by Web."""
@@ -347,13 +342,6 @@ class A2APipelineActionRunner:
 
         auto_approve = self._resolve_auto_approve(session)
         resolver = None if auto_approve else (permission_resolver or self._owner.permission_resolver)
-        permission_context_getter = None
-        session_permission_context_getter = getattr(self, "_permission_context_getter", None)
-        if callable(session_permission_context_getter):
-
-            def permission_context_getter() -> Any:
-                return session_permission_context_getter(session)
-
         return IacCodeA2APipelineExecutor(
             task_store=self._task_store,
             model=session_model,
@@ -373,7 +361,6 @@ class A2APipelineActionRunner:
             # without this the executor would always fall back to the process-wide
             # IAC_CODE_PIPELINE_NAME default and silently run `selling`.
             pipeline_name=_session_pipeline_name(session),
-            permission_context_getter=permission_context_getter,
         )
 
     async def rebuild_permission_audit_event(
@@ -578,10 +565,8 @@ class _WebA2AContext:
     metadata: dict[str, Any] = {}
 
 
-def create_pipeline_action_runner(
-    permission_context_getter: Callable[[Any], Any] | None = None,
-) -> PipelineActionRunner:
-    return A2APipelineActionRunner(permission_context_getter=permission_context_getter)
+def create_pipeline_action_runner() -> PipelineActionRunner:
+    return A2APipelineActionRunner()
 
 
 async def load_pipeline_snapshot(*, context_id: str | None, task_id: str | None) -> dict[str, Any] | None:

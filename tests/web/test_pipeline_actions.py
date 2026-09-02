@@ -108,11 +108,7 @@ class _StubTaskStore:
         return SimpleNamespace(state="working")
 
 
-async def _executor_kwargs_for_session(
-    monkeypatch: pytest.MonkeyPatch,
-    session: Any,
-    permission_context_getter: Any = None,
-) -> dict[str, Any]:
+async def _executor_kwargs_for_session(monkeypatch: pytest.MonkeyPatch, session: Any) -> dict[str, Any]:
     import iac_code.a2a.pipeline_executor as pipeline_executor_module
     from iac_code.web import pipeline_actions
 
@@ -126,7 +122,6 @@ async def _executor_kwargs_for_session(
     runner = A2APipelineActionRunner.__new__(A2APipelineActionRunner)
     runner._task_store = _StubTaskStore()
     runner._uses_web_global_defaults = False
-    runner._permission_context_getter = permission_context_getter
     runner._owner = SimpleNamespace(
         model="qwen3.6-plus",
         metrics=None,
@@ -178,22 +173,6 @@ async def test_execute_leaves_the_process_default_when_the_session_has_no_select
     kwargs = await _executor_kwargs_for_session(monkeypatch, session)
 
     assert kwargs["pipeline_name"] is None
-
-
-@pytest.mark.asyncio
-async def test_execute_passes_the_web_session_permission_context_to_pipeline(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    permission_context = object()
-    session = _pipeline_session(permission_context=permission_context)
-
-    kwargs = await _executor_kwargs_for_session(
-        monkeypatch,
-        session,
-        permission_context_getter=lambda current_session: current_session.permission_context,
-    )
-
-    assert kwargs["permission_context_getter"]() is permission_context
 
 
 @pytest.mark.asyncio

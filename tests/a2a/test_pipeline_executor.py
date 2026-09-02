@@ -9,7 +9,6 @@ import shutil
 import threading
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -229,38 +228,6 @@ def _pipeline_executor(*, aliyun_delegated_executor_factory=None, candidate_pres
         aliyun_delegated_executor_factory=aliyun_delegated_executor_factory,
         candidate_presentation=candidate_presentation,
     )
-
-
-def test_create_pipeline_prefers_explicit_permission_context_getter(monkeypatch: pytest.MonkeyPatch) -> None:
-    import iac_code.a2a.pipeline_executor as pipeline_executor_module
-
-    explicit_permission_context = object()
-    runtime_permission_context = object()
-    captured: dict[str, Any] = {}
-
-    def fake_create_pipeline(*_args: Any, **kwargs: Any) -> object:
-        captured.update(kwargs)
-        return object()
-
-    monkeypatch.setattr(pipeline_executor_module, "create_pipeline", fake_create_pipeline)
-    executor = _pipeline_executor()
-    executor._permission_context_getter = lambda: explicit_permission_context
-
-    executor._create_pipeline(
-        session_id="session-1",
-        cwd="/workspace",
-        runtime=SimpleNamespace(
-            provider_manager=object(),
-            tool_registry=object(),
-            agent_loop=SimpleNamespace(_permission_context_getter=lambda: runtime_permission_context),
-            aliyun_services=None,
-        ),
-        session_storage=MagicMock(),
-        prerequisite_metadata={},
-        pipeline_name="selling",
-    )
-
-    assert captured["permission_context_getter"]() is explicit_permission_context
 
 
 @pytest.mark.asyncio
