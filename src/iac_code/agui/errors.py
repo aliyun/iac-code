@@ -58,7 +58,6 @@ _PUBLIC_AGUI_ERROR_MESSAGES = frozenset(
         translate_message("The interrupt response does not contain an answer.", language="en"),
         translate_message("The interrupt response has already been applied.", language="en"),
         translate_message("The interrupt response payload is invalid.", language="en"),
-        translate_message("The interrupted execution has expired.", language="en"),
         translate_message("The interrupted execution state could not be committed.", language="en"),
         translate_message("The local A2A execution service is unavailable.", language="en"),
         translate_message(

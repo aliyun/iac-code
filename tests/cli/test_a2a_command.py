@@ -58,7 +58,6 @@ def test_agui_command_loads_online_adapter_config(monkeypatch, tmp_path) -> None
                 "port: 41243",
                 "a2a_url: http://127.0.0.1:41242",
                 "state_dir: /home/iac_code_config/agui",
-                "interrupt_ttl: 540",
                 "idle_shutdown: 0",
                 "log_stdout: true",
             ]
@@ -89,7 +88,6 @@ def test_agui_command_loads_online_adapter_config(monkeypatch, tmp_path) -> None
         "port": 41243,
         "a2a_url": "http://127.0.0.1:41242",
         "a2a_token": None,
-        "interrupt_ttl": 540,
         "state_dir": "/home/iac_code_config/agui",
         "debug": False,
         "auth_token": None,

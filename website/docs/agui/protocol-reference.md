@@ -169,8 +169,9 @@ An input-required run ends with `RUN_FINISHED.outcome.type = "interrupt"`. Each 
 - a user-facing `message`;
 - an optional `toolCallId`;
 - a JSON `responseSchema`;
-- `expiresAt`;
 - metadata such as `title`, `purpose`, `safeSummary`, `options`, and `toolName`.
+
+The adapter does not impose an Interrupt deadline. A pending Interrupt remains resumable until A2A resolves, cancels, or terminates the task; A2A alone owns execution and recovery lifecycle.
 
 For a permission request, the response schema typically accepts:
 
@@ -251,8 +252,6 @@ Each file contains thread/context/workspace binding, session and task identity, 
 
 It never stores LLM keys, AccessKey secrets, or STS tokens. This is an adapter mapping directory, not a store for conversation text or execution artifacts. A2A manages its own session and task persistence; see the [A2A documentation](../a2a/overview.md).
 
-An expired interrupt is rejected on the next access, its pending state is cleared, and the adapter attempts to cancel the matching A2A task.
-
 ## Disconnections
 
 - A run safely finished with an interrupt no longer depends on its SSE connection.
@@ -276,7 +275,6 @@ Errors before SSE begins use an HTTP JSON envelope. Errors during execution use 
 | `UNKNOWN_INTERRUPT` | Resume references an unknown interrupt |
 | `RESUME_PAYLOAD_INVALID` | Missing payload or schema mismatch |
 | `RESUME_ALREADY_APPLIED` | The response was already applied or conflicts with it |
-| `EXECUTION_EXPIRED` | The interrupt expired |
 | `EXECUTION_LOST` | Adapter, A2A task, or iac-code session could not be recovered |
 | `STATE_PERSISTENCE_FAILED` | Recovery-critical state could not be committed |
 | `A2A_UNAVAILABLE` | The local A2A execution service is unavailable |

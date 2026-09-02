@@ -169,8 +169,9 @@ Une exécution nécessitant une saisie se termine par `RUN_FINISHED.outcome.type
 - un `message` destiné à l’utilisateur ;
 - un `toolCallId` facultatif ;
 - un `responseSchema` JSON ;
-- `expiresAt` ;
 - des métadonnées comme `title`, `purpose`, `safeSummary`, `options` et `toolName`.
+
+L’adaptateur n’impose aucun délai à une interruption. Une interruption en attente reste reprenable jusqu’à ce qu’A2A résolve, annule ou termine la tâche ; A2A est seul responsable du cycle de vie de l’exécution et de la reprise.
 
 Pour une demande d’autorisation, le schéma accepte généralement :
 
@@ -251,8 +252,6 @@ Chaque fichier contient la liaison thread/contexte/espace de travail, les identi
 
 Les clés LLM, secrets AccessKey et jetons STS n’y sont jamais enregistrés. Ce répertoire sert aux associations de l’adaptateur, pas aux conversations ni aux artefacts. A2A gère sa propre persistance de sessions et de tâches ; consultez la [documentation A2A](../a2a/overview.md).
 
-Lors de l’accès suivant, une interruption expirée est refusée, son état en attente est supprimé et l’adaptateur tente d’annuler la tâche A2A correspondante.
-
 ## Déconnexions
 
 - Une exécution terminée proprement par une interruption ne dépend plus de sa connexion SSE.
@@ -276,7 +275,6 @@ Les erreurs antérieures au démarrage de SSE utilisent une enveloppe JSON HTTP.
 | `UNKNOWN_INTERRUPT` | Interruption inconnue dans la reprise |
 | `RESUME_PAYLOAD_INVALID` | Payload absent ou non conforme au schéma |
 | `RESUME_ALREADY_APPLIED` | Réponse déjà appliquée ou en conflit |
-| `EXECUTION_EXPIRED` | Interruption expirée |
 | `EXECUTION_LOST` | Impossible de restaurer l’adaptateur, la tâche A2A ou la session iac-code |
 | `STATE_PERSISTENCE_FAILED` | Impossible de persister un état critique pour la reprise |
 | `A2A_UNAVAILABLE` | Service d’exécution A2A local indisponible |

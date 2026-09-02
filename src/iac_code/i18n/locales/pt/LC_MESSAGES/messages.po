@@ -468,6 +468,10 @@ msgid "Unsupported run mode."
 msgstr "Modo de execução não compatível."
 
 #: src/iac_code/a2a/task_store.py
+msgid "A2A task not found"
+msgstr "Tarefa A2A não encontrada"
+
+#: src/iac_code/a2a/task_store.py
 msgid "A2A task expired"
 msgstr "A tarefa A2A expirou"
 
@@ -490,10 +494,6 @@ msgstr "O contexto A2A pertence a outro workspace"
 #: src/iac_code/a2a/task_store.py
 msgid "A2A context not found"
 msgstr "Contexto A2A não encontrado"
-
-#: src/iac_code/a2a/task_store.py
-msgid "A2A task not found"
-msgstr "Tarefa A2A não encontrada"
 
 #: src/iac_code/a2a/transports/base.py
 msgid ""
@@ -1063,10 +1063,6 @@ msgid "The interrupt response payload is invalid."
 msgstr "Os dados da resposta à interrupção são inválidos."
 
 #: src/iac_code/agui/errors.py
-msgid "The interrupted execution has expired."
-msgstr "A execução interrompida expirou."
-
-#: src/iac_code/agui/errors.py
 msgid "The interrupted execution state could not be committed."
 msgstr "Não foi possível salvar o estado da execução interrompida."
 
@@ -1456,10 +1452,6 @@ msgid "Mirror adapter logs to stdout"
 msgstr "Espelhar os logs do adaptador para stdout"
 
 #: src/iac_code/cli/main.py
-msgid "Seconds an AG-UI interrupt remains resumable"
-msgstr "Segundos durante os quais uma interrupção AG-UI pode ser retomada"
-
-#: src/iac_code/cli/main.py
 msgid "Durable AG-UI adapter state directory"
 msgstr "Diretório de estado persistente do adaptador AG-UI"
 
@@ -1472,10 +1464,6 @@ msgstr ""
 #: src/iac_code/cli/main.py
 msgid "--port must be between 1 and 65535."
 msgstr "--port deve estar entre 1 e 65535."
-
-#: src/iac_code/cli/main.py
-msgid "--interrupt-ttl must be a positive integer."
-msgstr "--interrupt-ttl deve ser um inteiro positivo."
 
 #: src/iac_code/cli/main.py
 msgid "--state-dir must be a string."
@@ -11273,14 +11261,18 @@ msgstr "a condição é inválida"
 msgid ""
 "ECS resource {} is associated with an EIP but does not explicitly disable"
 " public IP allocation."
-msgstr "O recurso ECS {} está associado a uma EIP, mas não desativa explicitamente a alocação de IP público."
+msgstr ""
+"O recurso ECS {} está associado a uma EIP, mas não desativa "
+"explicitamente a alocação de IP público."
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
 #, python-brace-format
 msgid ""
 "EIPAssociation {} provides the public entry point; the associated ECS "
 "resource must set AllocatePublicIP to false."
-msgstr "A EIPAssociation {} fornece o ponto de entrada público; o recurso ECS associado deve definir AllocatePublicIP como false."
+msgstr ""
+"A EIPAssociation {} fornece o ponto de entrada público; o recurso ECS "
+"associado deve definir AllocatePublicIP como false."
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
 msgid "Set AllocatePublicIP: false on the associated ECS resource."
@@ -14614,3 +14606,12 @@ msgstr "Permitir Bash?"
 
 #~ msgid "架构图优化中..."
 #~ msgstr "Otimizando diagrama de arquitetura..."
+
+#~ msgid "The interrupted execution has expired."
+#~ msgstr "A execução interrompida expirou."
+
+#~ msgid "Seconds an AG-UI interrupt remains resumable"
+#~ msgstr "Segundos durante os quais uma interrupção AG-UI pode ser retomada"
+
+#~ msgid "--interrupt-ttl must be a positive integer."
+#~ msgstr "--interrupt-ttl deve ser um inteiro positivo."

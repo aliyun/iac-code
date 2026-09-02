@@ -144,7 +144,9 @@ AG-UI span の整合性を保つため、Interrupt 前に開いている message
 
 ## Interrupt と Resume
 
-入力待ち run は `RUN_FINISHED.outcome.type = "interrupt"` で終了します。Interrupt には `id`、`reason`、ユーザー向け `message`、任意の `toolCallId`、JSON `responseSchema`、`expiresAt`、`title/purpose/safeSummary/options/toolName` などの metadata が含まれます。
+入力待ち run は `RUN_FINISHED.outcome.type = "interrupt"` で終了します。Interrupt には `id`、`reason`、ユーザー向け `message`、任意の `toolCallId`、JSON `responseSchema`、`title/purpose/safeSummary/options/toolName` などの metadata が含まれます。
+
+adapter は Interrupt に期限を設定しません。pending Interrupt は A2A が task を解決、キャンセル、または終了するまで Resume 可能で、実行と復旧のライフサイクルは A2A だけが管理します。
 
 権限確認の例：
 
@@ -205,7 +207,7 @@ Content-Type: application/json
 
 LLM key、AccessKey Secret、STS token、会話本文、実行成果物は保存しません。A2A の session/task 永続化は A2A server が管理します。[A2A ドキュメント](../a2a/overview.md)を参照してください。
 
-期限切れ Interrupt は次回アクセス時に拒否・消去され、対応 A2A task のキャンセルを試みます。Interrupt で安全終了した run は古い SSE を必要としません。通常の実行中に切断すると A2A task をキャンセルします。
+Interrupt で安全終了した run は古い SSE を必要としません。通常の実行中に切断すると A2A task をキャンセルします。
 
 ## エラー
 
@@ -221,7 +223,7 @@ SSE 前のエラーは HTTP JSON、実行中のエラーは `RUN_ERROR` です�
 | `INCOMPLETE_RESUME` / `UNKNOWN_INTERRUPT` | Resume の不足、重複、未知 ID |
 | `RESUME_PAYLOAD_INVALID` | payload が schema と不一致 |
 | `RESUME_ALREADY_APPLIED` | 回答を適用済み |
-| `EXECUTION_EXPIRED` / `EXECUTION_LOST` | execution が期限切れまたは復旧不能 |
+| `EXECUTION_LOST` | execution が復旧不能 |
 | `STATE_PERSISTENCE_FAILED` | 重要状態を書き込めない |
 | `A2A_UNAVAILABLE` / `A2A_PROTOCOL_ERROR` / `A2A_EXECUTION_FAILED` | A2A の接続、ID、実行エラー |
 | `CANCELLED` | execution がキャンセル済み |

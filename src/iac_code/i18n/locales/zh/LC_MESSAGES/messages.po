@@ -424,6 +424,10 @@ msgid "Unsupported run mode."
 msgstr "不支持的运行模式。"
 
 #: src/iac_code/a2a/task_store.py
+msgid "A2A task not found"
+msgstr "未找到 A2A 任务"
+
+#: src/iac_code/a2a/task_store.py
 msgid "A2A task expired"
 msgstr "A2A 任务已过期"
 
@@ -446,10 +450,6 @@ msgstr "A2A 上下文属于另一个工作区"
 #: src/iac_code/a2a/task_store.py
 msgid "A2A context not found"
 msgstr "未找到 A2A 上下文"
-
-#: src/iac_code/a2a/task_store.py
-msgid "A2A task not found"
-msgstr "未找到 A2A 任务"
 
 #: src/iac_code/a2a/transports/base.py
 msgid ""
@@ -997,10 +997,6 @@ msgid "The interrupt response payload is invalid."
 msgstr "中断响应内容无效。"
 
 #: src/iac_code/agui/errors.py
-msgid "The interrupted execution has expired."
-msgstr "被中断的执行已过期。"
-
-#: src/iac_code/agui/errors.py
 msgid "The interrupted execution state could not be committed."
 msgstr "无法持久化被中断的执行状态。"
 
@@ -1363,10 +1359,6 @@ msgid "Mirror adapter logs to stdout"
 msgstr "将适配器日志同步输出到 stdout"
 
 #: src/iac_code/cli/main.py
-msgid "Seconds an AG-UI interrupt remains resumable"
-msgstr "AG-UI 中断可恢复的保留秒数"
-
-#: src/iac_code/cli/main.py
 msgid "Durable AG-UI adapter state directory"
 msgstr "AG-UI 适配器持久化状态目录"
 
@@ -1377,10 +1369,6 @@ msgstr "空闲达到该秒数后退出；设为零禁用空闲退出"
 #: src/iac_code/cli/main.py
 msgid "--port must be between 1 and 65535."
 msgstr "--port 必须在 1 到 65535 之间。"
-
-#: src/iac_code/cli/main.py
-msgid "--interrupt-ttl must be a positive integer."
-msgstr "--interrupt-ttl 必须是正整数。"
 
 #: src/iac_code/cli/main.py
 msgid "--state-dir must be a string."
@@ -13402,3 +13390,12 @@ msgstr "允许 Bash?"
 
 #~ msgid "架构图优化中..."
 #~ msgstr "架构图优化中..."
+
+#~ msgid "The interrupted execution has expired."
+#~ msgstr "被中断的执行已过期。"
+
+#~ msgid "Seconds an AG-UI interrupt remains resumable"
+#~ msgstr "AG-UI 中断可恢复的保留秒数"
+
+#~ msgid "--interrupt-ttl must be a positive integer."
+#~ msgstr "--interrupt-ttl 必须是正整数。"

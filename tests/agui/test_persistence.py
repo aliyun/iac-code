@@ -4,7 +4,6 @@ import asyncio
 import json
 import os
 import stat
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -780,7 +779,7 @@ async def test_restart_retry_does_not_reapply_a_permission_accepted_before_parti
 
 
 @pytest.mark.asyncio
-async def test_cancelled_permission_resume_reschedules_interrupt_expiry(tmp_path) -> None:
+async def test_cancelled_permission_resume_keeps_interrupt_pending(tmp_path) -> None:
     class BlockingResumeClient(FakeA2AClient):
         def stream_message_parts(self, url, parts, **kwargs):
             if kwargs.get("task_id") is None:
@@ -825,8 +824,9 @@ async def test_cancelled_permission_resume_reschedules_interrupt_expiry(tmp_path
         await blocked_read
 
     assert resume_ticket.binding.pending
-    assert resume_ticket.binding.expiry_task is not None
-    assert not resume_ticket.binding.expiry_task.done()
+    assert fake.cancelled == []
+    persisted = json.loads(_thread_state_path(tmp_path / "state").read_text(encoding="utf-8"))
+    assert set(persisted["execution"]["pending"]) == {"permission-1"}
     await stream.aclose()
     await adapter.aclose()
 
@@ -971,24 +971,25 @@ async def test_state_write_failure_cancels_a2a_without_emitting_interrupt(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_restart_keeps_original_absolute_interrupt_expiry(tmp_path) -> None:
+async def test_restart_keeps_interrupt_resumable_without_adapter_expiry(tmp_path) -> None:
     state_dir = tmp_path / "state"
     first_fake = FakeA2AClient(interrupt=True)
-    first_adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=first_fake, state_dir=state_dir, interrupt_ttl=1)
+    first_adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=first_fake, state_dir=state_dir)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=create_app(adapter=first_adapter)), base_url="http://test"
     ) as client:
         response = await client.post("/", json=_payload(tmp_path))
-    expires_at = datetime.fromisoformat(
-        _events(response)[-1]["outcome"]["interrupts"][0]["expiresAt"].replace("Z", "+00:00")
-    )
-    await asyncio.sleep(0.55)
+    interrupt = _events(response)[-1]["outcome"]["interrupts"][0]
+    assert "expiresAt" not in interrupt
+    state_path = _thread_state_path(state_dir)
+    persisted = json.loads(state_path.read_text(encoding="utf-8"))
+    assert "expiresAt" not in persisted["execution"]["pending"]["permission-1"]
+    persisted["execution"]["pending"]["permission-1"]["expiresAt"] = "1970-01-01T00:00:00Z"
+    state_path.write_text(json.dumps(persisted), encoding="utf-8")
     await first_adapter.aclose()
 
     second_fake = FakeA2AClient(interrupt=True)
-    second_adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=second_fake, state_dir=state_dir, interrupt_ttl=20)
-    await second_adapter.start()
-    assert second_adapter._threads == {}
+    second_adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=second_fake, state_dir=state_dir)
     resume_payload = _payload(
         tmp_path,
         run_id="run-2",
@@ -1000,18 +1001,13 @@ async def test_restart_keeps_original_absolute_interrupt_expiry(tmp_path) -> Non
             }
         ],
     )
-    await second_adapter.admit(parse_run_input(resume_payload), canonical_digest(resume_payload))
-    remaining = max(0.0, (expires_at - datetime.now(timezone.utc)).total_seconds())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=second_adapter)), base_url="http://test"
+    ) as client:
+        resumed = await client.post("/", json=resume_payload)
 
-    async def wait_until_cancelled() -> None:
-        while not second_fake.cancelled:
-            await asyncio.sleep(0.02)
-
-    await asyncio.wait_for(wait_until_cancelled(), timeout=remaining + 3.0)
-    assert second_fake.cancelled == ["task-1"]
-    state = json.loads(_thread_state_path(state_dir).read_text(encoding="utf-8"))
-    assert state["execution"]["taskId"] is None
-    assert state["execution"]["pending"] == {}
+    assert _events(resumed)[-1]["outcome"] == {"type": "success"}
+    assert second_fake.cancelled == []
     await second_adapter.aclose()
 
 

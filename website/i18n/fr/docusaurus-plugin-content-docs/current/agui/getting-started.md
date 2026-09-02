@@ -80,7 +80,6 @@ Les paramètres statiques peuvent être enregistrés dans un fichier YAML :
 host: 0.0.0.0
 port: 41243
 a2a-url: http://127.0.0.1:41242
-interrupt-ttl: 540
 state-dir: /var/lib/iac-code/agui
 idle-shutdown: 0
 debug: false
@@ -100,7 +99,6 @@ Les arguments CLI explicites remplacent le YAML. Injectez les valeurs sensibles,
 | `--host` / `host` | `127.0.0.1` | Adresse d’écoute HTTP AG-UI |
 | `--port` / `port` | `8000` | Port HTTP AG-UI ; les exemples de déploiement utilisent `41243` |
 | `--a2a-url` / `a2a-url` | vide | URL A2A locale ; vide démarre un enfant géré |
-| `--interrupt-ttl` / `interrupt-ttl` | `540` | Durée en secondes pendant laquelle une interruption peut être reprise |
 | `--state-dir` / `state-dir` | `<config-dir>/agui` | Répertoire d’état des threads AG-UI |
 | `--idle-shutdown` / `idle-shutdown` | `0` | Arrêt après inactivité ; `0` le désactive |
 | `--debug` / `debug` | `false` | Journalisation de débogage |
@@ -115,7 +113,6 @@ Variables d’environnement associées :
 | `IAC_CODE_AGUI_A2A_URL` | URL locale du service A2A amont |
 | `IAC_CODE_AGUI_A2A_TOKEN` | Jeton bearer du service A2A amont |
 | `IAC_CODE_AGUI_AUTH_TOKEN` | Jeton bearer protégeant le point d’accès AG-UI |
-| `IAC_CODE_AGUI_INTERRUPT_TTL` | Durée de vie des interruptions |
 | `IAC_CODE_AGUI_STATE_DIR` | Répertoire d’état des threads AG-UI |
 | `IAC_CODE_AGUI_ALLOWED_CWDS` | Racines d’espace de travail autorisées, séparées par le séparateur de chemins du système |
 | `IAC_CODE_CONFIG_DIR` | Racine de configuration d’iac-code et parent par défaut de l’état AG-UI |

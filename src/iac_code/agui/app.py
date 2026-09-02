@@ -33,7 +33,6 @@ def create_app(
     a2a_url: str = "http://127.0.0.1:41242/",
     a2a_client: Any | None = None,
     auth_token: str | None = None,
-    interrupt_ttl: int = 540,
     state_dir: str | Path | None = None,
     max_request_bytes: int = MAX_REQUEST_BYTES,
     idle_shutdown: float = 0,
@@ -44,7 +43,6 @@ def create_app(
     run_adapter = adapter or AguiA2AAdapter(
         a2a_url=a2a_url,
         client=a2a_client,
-        interrupt_ttl=interrupt_ttl,
         state_dir=state_dir,
     )
     owns_adapter = adapter is None

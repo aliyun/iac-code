@@ -176,8 +176,6 @@ class _AguiServer:
                 a2a_url,
                 "--state-dir",
                 str(self.state_dir),
-                "--interrupt-ttl",
-                "120",
             ],
             cwd=self.repo_root,
             env=env,
