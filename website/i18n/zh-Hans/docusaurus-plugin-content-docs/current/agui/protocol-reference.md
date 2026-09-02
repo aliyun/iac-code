@@ -238,7 +238,6 @@ data: {"type":"TEXT_MESSAGE_CONTENT",...}
           "required": ["decision"],
           "additionalProperties": false
         },
-        "expiresAt": "2026-08-27T03:00:00Z",
         "metadata": {
           "schemaVersion": 1,
           "kind": "permission",
@@ -360,14 +359,14 @@ AG-UI 状态默认保存在：
 - iac-code session ID；
 - 当前 `executionId`、`rosInvocationId` 和 A2A `taskId`；
 - Pipeline sequence、打开的步骤和文本快照摘要；
-- pending Interrupt 与有效期；
+- pending Interrupt；
 - run、Resume 和终态幂等信息。
 
 adapter 启动时不扫描全部目录。收到 thread 请求后才懒加载对应文件，每次只原子替换当前 thread 的小文件。
 
 AG-UI 状态不保存 LLM key、AccessKey secret 或 STS token。该目录只属于协议 adapter，不是 iac-code 对话正文或执行产物的存储位置。A2A 的会话和任务持久化由 A2A server 自己管理，详见 [A2A 文档](../a2a/overview.md)。
 
-如果 Interrupt 超过 `expiresAt`，下一次访问会拒绝 Resume、清理 pending，并尽力取消对应 A2A task。
+adapter 不为 Interrupt 设置有效期。pending Interrupt 会一直保持可恢复，直到 A2A 完成、取消或终止对应 task；执行和恢复生命周期只由 A2A 管理。
 
 ## 断开连接
 
@@ -403,7 +402,6 @@ AG-UI 状态不保存 LLM key、AccessKey secret 或 STS token。该目录只属
 | `UNKNOWN_INTERRUPT` | Resume 引用了未知 Interrupt |
 | `RESUME_PAYLOAD_INVALID` | payload 缺失或不符合 response schema |
 | `RESUME_ALREADY_APPLIED` | 响应已应用，或重复请求与已应用内容冲突 |
-| `EXECUTION_EXPIRED` | Interrupt 已过期 |
 | `EXECUTION_LOST` | adapter、A2A task 或 iac-code session 无法恢复 |
 | `STATE_PERSISTENCE_FAILED` | 恢复关键状态无法可靠写入 |
 | `A2A_UNAVAILABLE` | 本地 A2A execution service 不可用 |

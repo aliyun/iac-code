@@ -482,6 +482,10 @@ msgid "Unsupported run mode."
 msgstr "Nicht unterstützter Ausführungsmodus."
 
 #: src/iac_code/a2a/task_store.py
+msgid "A2A task not found"
+msgstr "A2A-Aufgabe nicht gefunden"
+
+#: src/iac_code/a2a/task_store.py
 msgid "A2A task expired"
 msgstr "Die A2A-Aufgabe ist abgelaufen"
 
@@ -504,10 +508,6 @@ msgstr "Der A2A-Kontext gehört zu einem anderen Arbeitsbereich"
 #: src/iac_code/a2a/task_store.py
 msgid "A2A context not found"
 msgstr "A2A-Kontext nicht gefunden"
-
-#: src/iac_code/a2a/task_store.py
-msgid "A2A task not found"
-msgstr "A2A-Aufgabe nicht gefunden"
 
 #: src/iac_code/a2a/transports/base.py
 msgid ""
@@ -1085,10 +1085,6 @@ msgid "The interrupt response payload is invalid."
 msgstr "Die Antwortdaten der Unterbrechung sind ungültig."
 
 #: src/iac_code/agui/errors.py
-msgid "The interrupted execution has expired."
-msgstr "Die unterbrochene Ausführung ist abgelaufen."
-
-#: src/iac_code/agui/errors.py
 msgid "The interrupted execution state could not be committed."
 msgstr "Der Zustand der unterbrochenen Ausführung konnte nicht gespeichert werden."
 
@@ -1489,10 +1485,6 @@ msgid "Mirror adapter logs to stdout"
 msgstr "Adapterprotokolle nach stdout spiegeln"
 
 #: src/iac_code/cli/main.py
-msgid "Seconds an AG-UI interrupt remains resumable"
-msgstr "Sekunden, in denen eine AG-UI-Unterbrechung fortgesetzt werden kann"
-
-#: src/iac_code/cli/main.py
 msgid "Durable AG-UI adapter state directory"
 msgstr "Verzeichnis für den persistenten Zustand des AG-UI-Adapters"
 
@@ -1505,10 +1497,6 @@ msgstr ""
 #: src/iac_code/cli/main.py
 msgid "--port must be between 1 and 65535."
 msgstr "--port muss zwischen 1 und 65535 liegen."
-
-#: src/iac_code/cli/main.py
-msgid "--interrupt-ttl must be a positive integer."
-msgstr "--interrupt-ttl muss eine positive Ganzzahl sein."
 
 #: src/iac_code/cli/main.py
 msgid "--state-dir must be a string."
@@ -14839,4 +14827,13 @@ msgstr "Bash zulassen?"
 
 #~ msgid "架构图优化中..."
 #~ msgstr "Architekturdiagramm wird optimiert..."
+
+#~ msgid "The interrupted execution has expired."
+#~ msgstr "Die unterbrochene Ausführung ist abgelaufen."
+
+#~ msgid "Seconds an AG-UI interrupt remains resumable"
+#~ msgstr "Sekunden, in denen eine AG-UI-Unterbrechung fortgesetzt werden kann"
+
+#~ msgid "--interrupt-ttl must be a positive integer."
+#~ msgstr "--interrupt-ttl muss eine positive Ganzzahl sein."
 

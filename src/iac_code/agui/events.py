@@ -8,7 +8,6 @@ import math
 import time
 import uuid
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
 from ag_ui.core import (
@@ -197,7 +196,7 @@ def a2a_sideband_input_ids(payload: Any) -> set[str]:
     return output
 
 
-def interrupt_from_a2a(value: Mapping[str, Any], *, ttl_seconds: int) -> Interrupt:
+def interrupt_from_a2a(value: Mapping[str, Any]) -> Interrupt:
     kind = str(value.get("kind") or "input_required")
     language = normalize_agui_language(value.get("language"))
     input_id = str(value.get("inputId") or f"input-{uuid.uuid4().hex}")
@@ -232,9 +231,6 @@ def interrupt_from_a2a(value: Mapping[str, Any], *, ttl_seconds: int) -> Interru
         message=message,
         tool_call_id=tool_use_id,
         response_schema=schema,
-        expires_at=(datetime.now(timezone.utc) + timedelta(seconds=max(1, ttl_seconds)))
-        .isoformat()
-        .replace("+00:00", "Z"),
         metadata={"schemaVersion": 1, **dict(value), "standardOptions": options},
     )
 

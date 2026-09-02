@@ -78,7 +78,6 @@ iac-code agui --port 41243 --a2a-url http://127.0.0.1:41242
 host: 0.0.0.0
 port: 41243
 a2a-url: http://127.0.0.1:41242
-interrupt-ttl: 540
 state-dir: /var/lib/iac-code/agui
 idle-shutdown: 0
 debug: false
@@ -96,7 +95,6 @@ iac-code agui --config agui-server.yml
 | `--host` / `host` | `127.0.0.1` | AG-UI HTTP バインド先 |
 | `--port` / `port` | `8000` | AG-UI ポート。例では `41243` |
 | `--a2a-url` / `a2a-url` | 空 | ローカル A2A URL。空なら子プロセスを起動 |
-| `--interrupt-ttl` / `interrupt-ttl` | `540` | Interrupt を Resume できる秒数 |
 | `--state-dir` / `state-dir` | `<config-dir>/agui` | thread 状態ディレクトリ |
 | `--idle-shutdown` / `idle-shutdown` | `0` | アイドル終了秒数。`0` は無効 |
 | `--debug` / `debug` | `false` | デバッグログ |
@@ -109,7 +107,6 @@ iac-code agui --config agui-server.yml
 | `IAC_CODE_AGUI_A2A_URL` | ローカル A2A upstream URL |
 | `IAC_CODE_AGUI_A2A_TOKEN` | A2A upstream token |
 | `IAC_CODE_AGUI_AUTH_TOKEN` | AG-UI endpoint を保護する token |
-| `IAC_CODE_AGUI_INTERRUPT_TTL` | Interrupt 有効期間 |
 | `IAC_CODE_AGUI_STATE_DIR` | thread 状態ディレクトリ |
 | `IAC_CODE_AGUI_ALLOWED_CWDS` | OS のパス区切りで列挙した許可ワークスペースルート |
 | `IAC_CODE_CONFIG_DIR` | iac-code 設定ルートと既定状態ディレクトリの親 |

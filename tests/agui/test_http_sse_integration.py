@@ -201,7 +201,7 @@ def test_real_http_sse_sub_pipeline_interrupt_survives_agui_restart_and_snapshot
     )
 
     with _serve(a2a_app) as a2a_url:
-        first_agui = create_agui_app(a2a_url=a2a_url, state_dir=state_dir, interrupt_ttl=30)
+        first_agui = create_agui_app(a2a_url=a2a_url, state_dir=state_dir)
         with _serve(first_agui) as first_agui_url:
             first_events = _read_agui(first_agui_url, _run_payload(workspace, run_id="run-1"))
 
@@ -225,7 +225,7 @@ def test_real_http_sse_sub_pipeline_interrupt_survives_agui_restart_and_snapshot
         )
         assert persisted["execution"]["pending"][interrupt_id]["sideband"] is True
 
-        second_agui = create_agui_app(a2a_url=a2a_url, state_dir=state_dir, interrupt_ttl=30)
+        second_agui = create_agui_app(a2a_url=a2a_url, state_dir=state_dir)
         with _serve(second_agui) as second_agui_url:
             second_events = _read_agui(
                 second_agui_url,
