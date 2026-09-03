@@ -152,6 +152,11 @@ class A2ATaskStore(TaskStore):
         if not isinstance(iac_code, dict):
             iac_code = {}
             metadata["iac_code"] = iac_code
+        # The A2A SDK merges status metadata into the stored Task.  Once an answer moves the
+        # task out of INPUT_REQUIRED, keeping the old unified input would make GetTask replay
+        # an already-consumed permission/question and invite a duplicate response.
+        if task.status.state != TaskState.TASK_STATE_INPUT_REQUIRED:
+            iac_code.pop("input", None)
         pending = self._pending_permissions.get(task.id)
         if pending:
             iac_code["pendingPermissions"] = [dict(envelope) for envelope in pending]

@@ -1,4 +1,4 @@
 interface:
   display_name: "iac-code"
   short_description: "Design and operate Alibaba Cloud infrastructure"
-  default_prompt: "Use $iac-code for this Alibaba Cloud infrastructure task and follow one job through real interaction boundaries. Invoke the packaged bridge before any alternative tool and fail closed if the bridge rejects the host. Default to normal; use selling only when explicitly requested or when candidate architectures, cost comparison, plan confirmation, and deployment are all needed."
+  default_prompt: "Use $iac-code for this Alibaba Cloud infrastructure task and follow one job through real interaction boundaries. Invoke the packaged bridge before any alternative tool and fail closed if the bridge rejects the host. Never answer an iac-code input boundary on the user's behalf. Default to normal; when Pipeline is warranted, use its solution-first default unless the installed configuration explicitly selects legacy selling."

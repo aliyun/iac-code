@@ -533,6 +533,43 @@ async def test_stable_execution_identity_ignores_rotating_sts_session_fields(mon
 
 
 @pytest.mark.asyncio
+async def test_execution_identity_refreshes_oauth_before_caller_lookup(monkeypatch) -> None:
+    stale = AliyunCredential(
+        mode="OAuth",
+        access_key_id="stale-access-key",
+        access_key_secret="stale-secret",
+        sts_token="stale-token",
+        region_id="cn-hangzhou",
+    )
+    refreshed = AliyunCredential(
+        mode="OAuth",
+        access_key_id="refreshed-access-key",
+        access_key_secret="refreshed-secret",
+        sts_token="refreshed-token",
+        region_id="cn-hangzhou",
+    )
+    monkeypatch.setattr(AliyunCredentials, "load", staticmethod(lambda: stale))
+    monkeypatch.setattr(
+        AliyunCredentials,
+        "refresh_oauth_if_needed",
+        staticmethod(lambda credential: refreshed if credential is stale else pytest.fail("unexpected credential")),
+    )
+
+    async def request(credential, region_id):
+        assert credential is refreshed
+        assert region_id == "cn-hangzhou"
+        return {"IdentityType": "RAMUser", "AccountId": "1001", "UserId": "2002"}
+
+    identity = await resolve_permission_execution_identity(
+        tool_name="aliyun_api",
+        tool_input={"region_id": "cn-hangzhou"},
+        resolver=AliyunCallerIdentityResolver(request=request),
+    )
+
+    assert identity.principal_kind == "ram_user"
+
+
+@pytest.mark.asyncio
 async def test_execution_identity_is_cached_once_per_a2a_request(monkeypatch) -> None:
     credential_loads = 0
 

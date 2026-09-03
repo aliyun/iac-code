@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import copy
 import hashlib
 import importlib.util
 import json
@@ -99,6 +100,7 @@ def test_bridge_parses_as_python_38_and_uses_only_standard_library_imports() -> 
     )
     assert imported_modules <= {
         "argparse",
+        "copy",
         "contextlib",
         "ctypes",
         "errno",
@@ -113,6 +115,7 @@ def test_bridge_parses_as_python_38_and_uses_only_standard_library_imports() -> 
         "re",
         "secrets",
         "shutil",
+        "signal",
         "socket",
         "stat",
         "subprocess",
@@ -297,7 +300,10 @@ def test_projection_marks_authoritative_assistant_final_without_intermediate_tex
     assert projected["finalTextComplete"] is True
 
 
-def test_completed_pipeline_projects_deployment_result_and_normal_handoff(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("pipeline_name", ["selling", "selling_solution_first"])
+def test_completed_pipeline_projects_deployment_result_and_normal_handoff(
+    monkeypatch, tmp_path: Path, pipeline_name: str
+) -> None:
     frame = {
         "result": {
             "statusUpdate": {
@@ -312,6 +318,7 @@ def test_completed_pipeline_projects_deployment_result_and_normal_handoff(monkey
                                     "eventType": "step_completed",
                                     "status": "completed",
                                     "sequence": 20,
+                                    "pipelineName": pipeline_name,
                                     "data": {
                                         "conclusionField": "deployment",
                                         "conclusion": {
@@ -371,7 +378,7 @@ def test_completed_pipeline_projects_deployment_result_and_normal_handoff(monkey
             "jobId": job_id,
             "mode": "pipeline",
             "conversationMode": "pipeline",
-            "pipelineName": "selling",
+            "pipelineName": pipeline_name,
             "workspace": str(workspace),
             "state": "working",
             "turn": 1,
@@ -394,6 +401,7 @@ def test_completed_pipeline_projects_deployment_result_and_normal_handoff(monkey
     result = bridge._job_result(job_id, 0, bridge.MAX_POLL_BYTES, preserve_final=False)
     assert result["state"] == "completed"
     assert result["conversationMode"] == "normal"
+    assert result["pipelineName"] == pipeline_name
     assert result["pipelineResult"] == projected["pipelineResult"]
     assert "latestText" not in result
     assert len(bridge._json_bytes(result)) <= bridge.MAX_POLL_BYTES
@@ -850,15 +858,41 @@ def test_job_runtime_identity_rejects_a_replaced_generation(monkeypatch, tmp_pat
     assert caught.value.code == "runtime_identity_mismatch"
 
 
+@pytest.mark.parametrize(
+    ("mode", "pipeline_name"),
+    [
+        ("pipeline", "unknown_pipeline"),
+        ("pipeline", ""),
+        ("normal", "selling_solution_first"),
+    ],
+)
+def test_job_runtime_identity_rejects_invalid_persisted_pipeline(mode: str, pipeline_name: str, tmp_path: Path) -> None:
+    job = {
+        "runtimeRecord": str(tmp_path / "runtime.json"),
+        "runtimeGeneration": "generation-1",
+        "mode": mode,
+        "pipelineName": pipeline_name,
+        "workspace": str(tmp_path),
+        "target": "darwin-arm64-macos-cp312",
+    }
+
+    with pytest.raises(bridge.BridgeError) as caught:
+        bridge._runtime_record_for_job(job)
+
+    assert caught.value.code == "runtime_identity_mismatch"
+
+
 def test_runtime_identity_is_shared_across_workspaces() -> None:
     target = "darwin-arm64-macos-cp312"
 
     normal_record = bridge._runtime_record_path("normal", "", target)
     same_normal_record = bridge._runtime_record_path("normal", "", target)
     pipeline_record = bridge._runtime_record_path("pipeline", "selling", target)
+    solution_first_record = bridge._runtime_record_path("pipeline", "selling_solution_first", target)
 
     assert normal_record == same_normal_record
     assert normal_record != pipeline_record
+    assert pipeline_record != solution_first_record
 
 
 def test_default_permission_wait_policy_preserves_legacy_runtime_identity() -> None:
@@ -897,7 +931,9 @@ def test_ensure_server_uses_stable_root_and_skill_cwd_policy(monkeypatch, tmp_pa
     _command, kwargs = spawned[0]
     assert kwargs["cwd"] == str(bridge._runtime_record_path("normal", "", artifact["target"]).parent)
     assert kwargs["env"]["IAC_CODE_A2A_TRUST_REQUEST_CWD"] == "1"
+    assert kwargs["env"]["IAC_CODE_HANDOFF_USE_TOOL_CONFIRMATION"] == "1"
     assert "IACCODE_A2A_ALLOWED_CWDS" not in kwargs["env"]
+    assert first["handoffToolConfirmation"] is True
     config = bridge._load_json(Path(first["logPath"]).with_name("a2a.json"))
     assert config["idle_shutdown_seconds"] == 1800
 
@@ -942,6 +978,85 @@ def test_ensure_server_projects_permission_wait_policy_only_into_server_config(m
         prompt="Deploy a VPC",
     )
     assert "permissionWaitPolicy" not in payload["params"]["message"]["metadata"]["iac_code"]
+
+
+def test_ensure_server_restarts_legacy_behavior_without_changing_durable_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr(bridge, "_free_port", lambda: 41244)
+    artifact = {"target": "darwin-arm64-macos-cp312"}
+    record_path = bridge._runtime_record_path("normal", "", artifact["target"])
+    durable_marker = record_path.parent / "a2a" / "existing-task.json"
+    bridge._secure_directory(durable_marker.parent)
+    durable_marker.write_text("persisted", encoding="utf-8")
+    legacy_record = {
+        "schemaVersion": 2,
+        "runtimeTag": bridge.RUNTIME_TAG,
+        "skillVersion": bridge.SKILL_VERSION,
+        "iacCodeVersion": bridge.IAC_CODE_VERSION,
+        "target": artifact["target"],
+        "generation": "legacy-generation",
+        "mode": "normal",
+        "pipelineName": "",
+        "permissionWaitPolicy": None,
+        "pid": 11111,
+        "port": 41111,
+        "token": "legacy-token",
+    }
+    bridge._atomic_json(record_path, legacy_record)
+    stopped = []
+    monkeypatch.setattr(bridge, "_stop_recorded_runtime", lambda record: stopped.append(record) or True)
+    monkeypatch.setattr(
+        bridge,
+        "_runtime_matches",
+        lambda record, *_args: record.get("handoffToolConfirmation") is True,
+    )
+
+    class Process:
+        pid = 22222
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(bridge.subprocess, "Popen", lambda *_args, **_kwargs: Process())
+
+    record = bridge.ensure_server(tmp_path / "iac-code", artifact, "normal", "")
+
+    assert stopped == [legacy_record]
+    assert record["handoffToolConfirmation"] is True
+    assert Path(record["logPath"]).parent == record_path.parent
+    assert durable_marker.read_text(encoding="utf-8") == "persisted"
+
+
+def test_ensure_server_rejects_malformed_runtime_record_without_spawning(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    artifact = {"target": "darwin-arm64-macos-cp312"}
+    record_path = bridge._runtime_record_path("normal", "", artifact["target"])
+    bridge._secure_directory(record_path.parent)
+    record_path.write_text("{", encoding="utf-8")
+    monkeypatch.setattr(
+        bridge.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not spawn with an unverified record")),
+    )
+
+    with pytest.raises(bridge.BridgeError) as caught:
+        bridge.ensure_server(tmp_path / "iac-code", artifact, "normal", "")
+
+    assert caught.value.code == "runtime_start_failed"
+    assert caught.value.retryable is True
+    assert record_path.read_text(encoding="utf-8") == "{"
+
+
+def test_stop_recorded_runtime_refuses_to_kill_an_unverified_live_pid(monkeypatch) -> None:
+    monkeypatch.setattr(bridge, "_pid_alive", lambda _pid: True)
+    monkeypatch.setattr(bridge, "_recorded_runtime_is_ours", lambda _record: False)
+    monkeypatch.setattr(
+        bridge.os,
+        "kill",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not kill an unverified process")),
+    )
+
+    assert bridge._stop_recorded_runtime({"pid": 12345}) is False
 
 
 def test_ensure_server_terminates_failed_spawn_and_removes_record(monkeypatch, tmp_path: Path) -> None:
@@ -1209,6 +1324,237 @@ def test_candidate_presentation_survives_bounded_bridge_projection() -> None:
     assert len(bridge._json_bytes(projection)) <= bridge.MAX_INPUT_PROJECTION_BYTES
 
 
+@pytest.mark.parametrize("metadata_kind", ["pipeline", "pipelineBatch"])
+def test_deployment_confirmation_projection_adapts_existing_pipeline_envelope(
+    metadata_kind: str,
+) -> None:
+    secret = "never-leak-deployment-secret"
+    pipeline_event = {
+        "eventId": "evt-deployment-1",
+        "eventType": "input_required",
+        "pipelineName": "selling_solution_first",
+        "taskId": "task-1",
+        "contextId": "ctx-1",
+        "step": {"id": "materialize_selected_candidate"},
+        "data": {
+            "kind": "deployment_confirmation",
+            "prompt": "Confirm deployment " + "p" * 900,
+            "solution_summary": "Safe solution " + "s" * 1800,
+            "template_url": "templates/selected.yaml",
+            "cost": {
+                "quoteStatus": "succeeded",
+                "totalMonthlyCost": "¥88/月",
+                "AccessKeySecret": secret,
+                "resources": [{"name": "ECS", "spec": "x" * 600}] * 20,
+            },
+            "effective_deployment_parameters": {
+                "VpcName": "demo",
+                "DatabasePassword": secret,
+                **{"Parameter{:03d}".format(index): "v" * 100 for index in range(80)},
+            },
+            "parameter_overrides": {"ApiToken": secret},
+            "preview_ready_for_create": True,
+            "options": [
+                {"action": action, "name": action.title()} for action in ("confirm", "adjust", "reselect", "cancel")
+            ]
+            + [{"action": "deploy", "name": "Unsafe"}],
+        },
+    }
+    pipeline_metadata = (
+        {"pipeline": pipeline_event}
+        if metadata_kind == "pipeline"
+        else {
+            "pipelineBatch": {
+                "events": [
+                    {
+                        "eventId": "evt-step",
+                        "eventType": "step_completed",
+                        "pipelineName": "selling_solution_first",
+                    },
+                    pipeline_event,
+                ]
+            }
+        }
+    )
+    frame = {
+        "result": {
+            "id": "task-1",
+            "contextId": "ctx-1",
+            "status": {
+                "state": "TASK_STATE_INPUT_REQUIRED",
+                "metadata": {
+                    "iac_code": pipeline_metadata,
+                },
+            },
+        }
+    }
+
+    original = copy.deepcopy(frame)
+    projection = bridge.project_frame(frame)
+    pending = projection["inputRequired"]
+
+    assert pending["kind"] == "deployment_confirmation"
+    assert pending["requestTaskId"] == "task-1"
+    assert pending["contextId"] == "ctx-1"
+    assert pending["inputId"] == "input-evt-deployment-1"
+    assert [option["action"] for option in pending["options"]] == [
+        "confirm",
+        "adjust",
+        "reselect",
+        "cancel",
+    ]
+    assert projection["trimmed"] is True
+    assert len(bridge._json_bytes(projection)) <= bridge.MAX_INPUT_PROJECTION_BYTES
+    assert secret not in json.dumps(projection, ensure_ascii=False)
+    assert frame == original
+
+
+def test_parameter_only_deployment_confirmation_trim_does_not_mutate_source_and_marks_trimmed() -> None:
+    projection = {
+        "type": "input-required",
+        "inputRequired": {
+            "schemaVersion": 1,
+            "kind": "deployment_confirmation",
+            "requestTaskId": "task-1",
+            "contextId": "ctx-1",
+            "inputId": "deployment-parameters-only",
+            "prompt": "Confirm",
+            "previewReadyForCreate": True,
+            "effectiveDeploymentParameters": {"Parameter{:03d}".format(index): "v" * 100 for index in range(80)},
+            "parameterOverrides": {},
+            "options": [
+                {"id": action, "label": action.title(), "action": action}
+                for action in ("confirm", "adjust", "reselect", "cancel")
+            ],
+        },
+    }
+    original = copy.deepcopy(projection)
+
+    bounded = bridge._bounded_input_projection(projection)
+
+    assert projection == original
+    assert bounded["trimmed"] is True
+    assert len(bridge._json_bytes(bounded)) <= bridge.MAX_INPUT_PROJECTION_BYTES
+    pending = bounded["inputRequired"]
+    assert pending["inputId"] == "deployment-parameters-only"
+    assert [option["action"] for option in pending["options"]] == ["confirm", "adjust", "reselect", "cancel"]
+
+
+def test_pipeline_result_preserves_existing_bounded_scalar_and_key_behavior() -> None:
+    secret = "must-not-leak-output-secret"
+
+    projected = bridge._safe_pipeline_result(
+        {
+            "status": "success",
+            "stack_id": "stack-real",
+            "outputs": {
+                "ConnectionString": "mysql://admin:<redacted>@db.internal",
+                "DatabasePassword": secret,
+            },
+        }
+    )
+
+    assert projected == {
+        "status": "success",
+        "stack_id": "stack-real",
+        "outputs": {
+            "ConnectionString": "mysql://admin:<redacted>@db.internal",
+            "DatabasePassword": secret,
+        },
+    }
+    assert secret in json.dumps(projected)
+
+
+def test_selling_pipeline_result_preserves_legacy_scalar_string_and_key_behavior() -> None:
+    projected = bridge._safe_pipeline_result(
+        {
+            "status": "success",
+            "outputs": {
+                "Port": 80,
+                "Enabled": True,
+                "TokenEndpoint": "https://sts.example",
+            },
+        }
+    )
+
+    assert projected == {
+        "status": "success",
+        "outputs": {
+            "Port": "80",
+            "Enabled": "True",
+            "TokenEndpoint": "https://sts.example",
+        },
+    }
+
+
+@pytest.mark.parametrize("action", ["confirm", "adjust", "reselect", "cancel"])
+def test_deployment_confirmation_worker_payload_sends_only_snake_case_business_answer(action: str) -> None:
+    pending = {
+        "kind": "deployment_confirmation",
+        "requestTaskId": "task-1",
+        "contextId": "ctx-1",
+        "inputId": "deployment-1",
+    }
+    response = {
+        **pending,
+        "action": action,
+        "parameterOverrides": {"InstanceType": "ecs.g8i.large"},
+    }
+
+    payload = bridge._worker_payload(
+        {
+            "workspace": "/tmp/work",
+            "taskId": "task-1",
+            "contextId": "ctx-1",
+            "inputRequired": pending,
+        },
+        response=response,
+    )
+
+    message = payload["params"]["message"]
+    assert message["taskId"] == "task-1"
+    assert message["contextId"] == "ctx-1"
+    assert json.loads(message["parts"][0]["text"]) == {
+        "action": action,
+        "parameter_overrides": {"InstanceType": "ecs.g8i.large"},
+    }
+    rendered = json.dumps(message, ensure_ascii=False)
+    assert "requestTaskId" not in rendered
+    assert "inputId" not in rendered
+
+
+@pytest.mark.parametrize(
+    "response_update",
+    [
+        {"action": "deploy"},
+        {"action": "confirm", "parameterOverrides": []},
+        {"kind": "candidate_selection", "action": "confirm"},
+        {"inputId": "deployment-stale", "action": "confirm"},
+    ],
+)
+def test_deployment_confirmation_worker_payload_rejects_invalid_or_stale_response(response_update) -> None:
+    pending = {
+        "kind": "deployment_confirmation",
+        "requestTaskId": "task-1",
+        "contextId": "ctx-1",
+        "inputId": "deployment-1",
+    }
+    response = {**pending, **response_update}
+
+    with pytest.raises(bridge.BridgeError) as error:
+        bridge._worker_payload(
+            {
+                "workspace": "/tmp/work",
+                "taskId": "task-1",
+                "contextId": "ctx-1",
+                "inputRequired": pending,
+            },
+            response=response,
+        )
+
+    assert error.value.code == "input_response_mismatch"
+
+
 def test_bridge_detects_language_and_sends_durable_controls_in_a2a_metadata() -> None:
     assert bridge._preferred_language("请部署一个 VPC", "auto") == "zh"
     assert bridge._preferred_language("日本語で説明してください", "auto") == "ja"
@@ -1305,6 +1651,179 @@ def test_installed_skill_config_rejects_unknown_top_level_fields(monkeypatch, tm
 
     with pytest.raises(bridge.BridgeError, match="Unknown installed Skill config fields"):
         bridge._skill_config()
+
+
+@pytest.mark.parametrize("value", ["", "unknown", 1, None, [], {}])
+def test_installed_skill_pipeline_config_rejects_invalid_values(monkeypatch, tmp_path: Path, value) -> None:
+    installed_skill = tmp_path / "installed-skill"
+    installed_skill.mkdir()
+    (installed_skill / "config.json").write_text(json.dumps({"pipelineName": value}), encoding="utf-8")
+    monkeypatch.setattr(bridge, "SKILL_ROOT", installed_skill)
+
+    with pytest.raises(bridge.BridgeError) as error:
+        bridge._skill_config()
+
+    assert error.value.code == "skill_configuration_invalid"
+
+
+@pytest.mark.parametrize(
+    ("config", "compatibility_name", "expected"),
+    [
+        (None, "", "selling_solution_first"),
+        ({}, "", "selling_solution_first"),
+        ({"pipelineName": "selling_solution_first"}, "selling_solution_first", "selling_solution_first"),
+        ({"pipelineName": "selling"}, "", "selling"),
+        ({"pipelineName": "selling"}, "selling", "selling"),
+    ],
+)
+def test_pipeline_start_uses_only_installed_config_and_persists_effective_identity(
+    monkeypatch,
+    tmp_path: Path,
+    config,
+    compatibility_name: str,
+    expected: str,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    installed_skill = tmp_path / "installed-skill"
+    installed_skill.mkdir()
+    if config is not None:
+        (installed_skill / "config.json").write_text(json.dumps(config), encoding="utf-8")
+    monkeypatch.setattr(bridge, "SKILL_ROOT", installed_skill)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    prompt = workspace / "prompt.txt"
+    prompt.write_text("Design and deploy a solution", encoding="utf-8")
+    monkeypatch.setattr(
+        bridge,
+        "ensure_runtime",
+        lambda: ({"target": "darwin-arm64-macos-cp312"}, tmp_path / "iac-code", True),
+    )
+    server_calls = []
+
+    def ensure_server(_executable, _artifact, mode, pipeline_name, permission_wait_policy=None):
+        server_calls.append((mode, pipeline_name, permission_wait_policy))
+        return {"port": 41242, "token": "token", "generation": "generation-1"}
+
+    monkeypatch.setattr(bridge, "ensure_server", ensure_server)
+    readiness_calls = []
+    monkeypatch.setattr(
+        bridge,
+        "_runtime_configuration_readiness",
+        lambda _record, require_cloud: readiness_calls.append(require_cloud) or _configuration_readiness(),
+    )
+    spawned = {}
+
+    def spawn(job_id, _payload):
+        spawned["jobId"] = job_id
+        return 12345
+
+    monkeypatch.setattr(bridge, "_spawn_worker", spawn)
+    monkeypatch.setattr(
+        bridge,
+        "_wait_for_task_identity",
+        lambda job_id, _previous, cursor, worker_pid: {
+            "ok": True,
+            "jobId": job_id,
+            "taskId": "task-1",
+            "contextId": "ctx-1",
+            "cursor": cursor,
+            "state": "working",
+            "turn": 1,
+            "workerPid": worker_pid,
+            "preferredLanguage": "en",
+        },
+    )
+
+    bridge.start_job(
+        SimpleNamespace(
+            cwd=str(workspace),
+            prompt_file=str(prompt),
+            language="en",
+            mode="pipeline",
+            pipeline_name=compatibility_name,
+            follow=False,
+            follow_seconds=0,
+        )
+    )
+
+    _root, job_path, _spool = bridge._job_paths(spawned["jobId"])
+    job = bridge._load_json(job_path)
+    assert job["pipelineName"] == expected
+    assert server_calls == [("pipeline", expected, None)]
+    assert readiness_calls == [True]
+
+
+def test_pipeline_compatibility_flag_cannot_override_installed_config(monkeypatch, tmp_path: Path) -> None:
+    installed_skill = tmp_path / "installed-skill"
+    installed_skill.mkdir()
+    (installed_skill / "config.json").write_text('{"pipelineName":"selling"}', encoding="utf-8")
+    monkeypatch.setattr(bridge, "SKILL_ROOT", installed_skill)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    prompt = workspace / "prompt.txt"
+    prompt.write_text("Deploy", encoding="utf-8")
+    monkeypatch.setattr(bridge, "ensure_runtime", lambda: pytest.fail("must fail before Runtime startup"))
+
+    with pytest.raises(bridge.BridgeError) as error:
+        bridge.start_job(
+            SimpleNamespace(
+                cwd=str(workspace),
+                prompt_file=str(prompt),
+                language="en",
+                mode="pipeline",
+                pipeline_name="selling_solution_first",
+                follow=False,
+                follow_seconds=0,
+            )
+        )
+
+    assert error.value.code == "runtime_identity_mismatch"
+
+
+def test_existing_job_recovery_uses_persisted_pipeline_after_config_changes(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    job_id = "9" * 32
+    root, job_path, _spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    bridge._atomic_json(
+        job_path,
+        {
+            "runtimeIdentityVersion": 2,
+            "runtimeTag": bridge.RUNTIME_TAG,
+            "runtimeGeneration": "old-generation",
+            "runtimeRecord": str(tmp_path / "old-runtime.json"),
+            "target": "darwin-arm64-macos-cp312",
+            "mode": "pipeline",
+            "pipelineName": "selling",
+            "workspace": str(workspace),
+        },
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_runtime_record_for_job",
+        lambda _job: (_ for _ in ()).throw(bridge.BridgeError("runtime_identity_mismatch", "stale")),
+    )
+    monkeypatch.setattr(
+        bridge,
+        "ensure_runtime",
+        lambda: ({"target": "darwin-arm64-macos-cp312"}, tmp_path / "iac-code", True),
+    )
+    captured = {}
+
+    def ensure_server(_executable, _artifact, mode, pipeline_name, permission_wait_policy=None):
+        captured.update(mode=mode, pipelineName=pipeline_name, permissionWaitPolicy=permission_wait_policy)
+        return {"port": 41242, "token": "token", "generation": "new-generation"}
+
+    monkeypatch.setattr(bridge, "ensure_server", ensure_server)
+    monkeypatch.setattr(bridge, "_skill_config", lambda: pytest.fail("recovery must not re-read config.json"))
+
+    recovered, _record = bridge._ensure_job_runtime(job_id)
+
+    assert captured == {"mode": "pipeline", "pipelineName": "selling", "permissionWaitPolicy": None}
+    assert recovered["pipelineName"] == "selling"
+    assert recovered["runtimeGeneration"] == "new-generation"
 
 
 def test_job_results_repeat_preferred_language(monkeypatch, tmp_path: Path) -> None:
@@ -1425,7 +1944,7 @@ def test_start_checks_pipeline_readiness_before_creating_a_job(monkeypatch, tmp_
                     prompt_file=str(prompt),
                     language="auto",
                     mode="pipeline",
-                    pipeline_name="selling",
+                    pipeline_name="",
                     follow=False,
                     follow_seconds=0,
                 )
@@ -1441,7 +1960,7 @@ def test_start_persists_installed_skill_channel_and_injects_it_into_a2a_metadata
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     installed_skill = tmp_path / "installed-skill"
     installed_skill.mkdir()
-    (installed_skill / "config.json").write_text('{"channel":" host "}', encoding="utf-8")
+    (installed_skill / "config.json").write_text('{"channel":" host ","pipelineName":"selling"}', encoding="utf-8")
     monkeypatch.setattr(bridge, "SKILL_ROOT", installed_skill)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -1502,6 +2021,7 @@ def test_start_persists_installed_skill_channel_and_injects_it_into_a2a_metadata
     job = bridge._load_json(job_path)
     metadata = captured["payload"]["params"]["message"]["metadata"]["iac_code"]
     assert job["channel"] == "skill/host"
+    assert job["pipelineName"] == ""
     assert metadata["channel"] == "skill/host"
     assert result["contextId"] == "context-1"
 
@@ -1550,6 +2070,40 @@ def test_follow_surfaces_every_parent_and_candidate_step_boundary() -> None:
         "工具已返回结果：ros_validate_template",
     ]
     assert len({signature for signature, _message in messages}) == len(messages)
+
+
+def test_solution_first_step_names_are_localized_for_skill_progress() -> None:
+    try:
+        bridge._set_output_language("zh")
+        assert bridge._step_display_name("solution_planning_and_selection") == "规划并选择架构方案"
+        assert bridge._step_display_name("materialize_selected_candidate") == "生成并确认部署方案"
+        assert bridge._step_display_name("deploying", "selling") == "部署选定方案"
+        assert bridge._step_display_name("deploying", "selling_solution_first") == "部署选定方案"
+        bridge._set_output_language("en")
+        assert bridge._step_display_name("solution_planning_and_selection") == "plan and select a solution"
+        assert bridge._step_display_name("materialize_selected_candidate") == (
+            "materialize and confirm the selected solution"
+        )
+        assert bridge._step_display_name("deploying", "selling") == "deploy the selected plan"
+        assert bridge._step_display_name("deploying", "selling_solution_first") == "deploy the selected solution"
+        assert (
+            bridge._step_progress_detail(
+                {"eventType": "step_started", "pipelineName": "selling", "step": {"id": "deploying"}}
+            )
+            == "deploy the selected plan"
+        )
+        assert (
+            bridge._step_progress_detail(
+                {
+                    "eventType": "step_started",
+                    "pipelineName": "selling_solution_first",
+                    "step": {"id": "deploying"},
+                }
+            )
+            == "deploy the selected solution"
+        )
+    finally:
+        bridge._set_output_language("en")
 
 
 def test_projection_keeps_step_boundaries_and_coordinates_ahead_of_recent_tools() -> None:
@@ -1845,6 +2399,7 @@ def test_inline_permission_response_is_one_command_and_remains_correlated(monkey
         "decision": "allow_once",
     }
     assert result["state"] == "working"
+    assert bridge._load_json(job_path)["permissionResponseInput"] == pending
 
     bridge._atomic_json(job_path, {**bridge._load_json(job_path), "inputRequired": pending, "state": "input-required"})
     with pytest.raises(bridge.BridgeError, match="correlation fields"):
@@ -1943,6 +2498,251 @@ def test_sideband_permission_response_uses_unary_ack_and_keeps_background_worker
     assert job["workerPid"] == 4321
 
 
+def test_worker_restores_permission_when_session_backup_is_not_ready(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    job_id = "8" * 32
+    root, job_path, spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    spool.touch()
+    pending = {
+        "kind": "permission",
+        "requestTaskId": "task-1",
+        "contextId": "ctx-1",
+        "inputId": "permission-1",
+        "toolUseId": "tool-1",
+    }
+    bridge._atomic_json(
+        job_path,
+        {
+            "jobId": job_id,
+            "mode": "normal",
+            "conversationMode": "normal",
+            "workspace": str(workspace),
+            "state": "working",
+            "turn": 1,
+            "taskId": "task-1",
+            "contextId": "ctx-1",
+            "permissionResponseInput": pending,
+            "turnArtifacts": [],
+        },
+    )
+    request_path = root / "request.json"
+    bridge._atomic_json(request_path, {"jsonrpc": "2.0"})
+    monkeypatch.setattr(bridge, "_runtime_record_for_job", lambda _job: {})
+    monkeypatch.setattr(
+        bridge,
+        "_stream_jsonrpc",
+        lambda *_args: iter(
+            [
+                {
+                    "error": {
+                        "code": -32602,
+                        "message": "Session backup is still synchronizing. Retry after 3 seconds.",
+                        "data": {"code": bridge.SESSION_BACKUP_NOT_READY_CODE, "retryable": True},
+                    }
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_subscription_after_stream",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not treat retry as stream completion")),
+    )
+
+    assert bridge.worker(job_id, request_path) == 0
+
+    job = bridge._load_json(job_path)
+    assert job["state"] == "input-required"
+    assert job["inputRequired"] == pending
+    assert job["permissionResponseInput"] == pending
+    [event] = bridge._read_spool(spool)
+    assert event["type"] == "input-required"
+    assert event["inputRequired"] == pending
+    assert event["error"] == {
+        "code": bridge.SESSION_BACKUP_NOT_READY_CODE,
+        "message": "Session backup is still synchronizing. Retry after 3 seconds.",
+        "retryable": True,
+    }
+
+
+def test_worker_clears_permission_retry_marker_after_runtime_accepts_response(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    job_id = "9" * 32
+    root, job_path, spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    spool.touch()
+    pending = {
+        "kind": "permission",
+        "requestTaskId": "task-1",
+        "contextId": "ctx-1",
+        "inputId": "permission-1",
+        "toolUseId": "tool-1",
+    }
+    bridge._atomic_json(
+        job_path,
+        {
+            "jobId": job_id,
+            "mode": "normal",
+            "conversationMode": "normal",
+            "workspace": str(workspace),
+            "state": "working",
+            "turn": 1,
+            "taskId": "task-1",
+            "contextId": "ctx-1",
+            "permissionResponseInput": pending,
+            "turnArtifacts": [],
+        },
+    )
+    request_path = root / "request.json"
+    bridge._atomic_json(request_path, {"jsonrpc": "2.0"})
+    monkeypatch.setattr(bridge, "_runtime_record_for_job", lambda _job: {})
+    monkeypatch.setattr(
+        bridge,
+        "_stream_jsonrpc",
+        lambda *_args: iter(
+            [
+                {
+                    "result": {
+                        "taskId": "task-1",
+                        "contextId": "ctx-1",
+                        "status": {"state": "TASK_STATE_WORKING"},
+                    }
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(bridge, "_subscription_after_stream", lambda *_args: None)
+
+    assert bridge.worker(job_id, request_path) == 0
+    assert "permissionResponseInput" not in bridge._load_json(job_path)
+
+
+@pytest.mark.parametrize("advanced_state", ["completed", "new_input"])
+def test_get_task_fallback_clears_permission_marker_after_task_advances(
+    monkeypatch, tmp_path: Path, advanced_state: str
+) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    job_id = ("a" if advanced_state == "completed" else "b") * 32
+    root, job_path, spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    spool.touch()
+    pending = {
+        "kind": "permission",
+        "requestTaskId": "task-1",
+        "contextId": "ctx-1",
+        "inputId": "permission-1",
+        "toolUseId": "tool-1",
+    }
+    bridge._atomic_json(
+        job_path,
+        {
+            "jobId": job_id,
+            "mode": "normal",
+            "conversationMode": "normal",
+            "workspace": str(workspace),
+            "state": "working",
+            "turn": 1,
+            "taskId": "task-1",
+            "contextId": "ctx-1",
+            "permissionResponseInput": pending,
+            "turnArtifacts": [],
+        },
+    )
+    if advanced_state == "completed":
+        task = {
+            "id": "task-1",
+            "contextId": "ctx-1",
+            "status": {"state": "TASK_STATE_COMPLETED"},
+        }
+        expected_input = None
+    else:
+        expected_input = {
+            "kind": "ask_user_question",
+            "requestTaskId": "task-1",
+            "contextId": "ctx-1",
+            "inputId": "question-2",
+            "prompt": "Choose the next action",
+            "options": [{"id": "continue", "label": "Continue"}],
+        }
+        task = {
+            "id": "task-1",
+            "contextId": "ctx-1",
+            "status": {"state": "TASK_STATE_INPUT_REQUIRED"},
+            "metadata": {"iac_code": {"input": expected_input}},
+        }
+    monkeypatch.setattr(bridge, "_http_json", lambda *_args, **_kwargs: {"result": {"task": task}})
+
+    assert bridge._subscription_after_stream({"port": 1, "token": "token"}, job_id) is None
+
+    job = bridge._load_json(job_path)
+    assert "permissionResponseInput" not in job
+    if expected_input is None:
+        assert job["state"] == "completed"
+        assert "inputRequired" not in job
+    else:
+        assert job["state"] == "input-required"
+        assert job["inputRequired"]["inputId"] == expected_input["inputId"]
+
+
+def test_get_task_fallback_restores_permission_when_input_metadata_is_not_ready(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    job_id = "c" * 32
+    root, job_path, spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    spool.touch()
+    pending = {
+        "kind": "permission",
+        "requestTaskId": "task-1",
+        "contextId": "ctx-1",
+        "inputId": "permission-1",
+        "toolUseId": "tool-1",
+    }
+    bridge._atomic_json(
+        job_path,
+        {
+            "jobId": job_id,
+            "mode": "normal",
+            "conversationMode": "normal",
+            "workspace": str(workspace),
+            "state": "working",
+            "turn": 1,
+            "taskId": "task-1",
+            "contextId": "ctx-1",
+            "permissionResponseInput": pending,
+            "turnArtifacts": [],
+        },
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_http_json",
+        lambda *_args, **_kwargs: {
+            "result": {
+                "task": {
+                    "id": "task-1",
+                    "contextId": "ctx-1",
+                    "status": {"state": "TASK_STATE_INPUT_REQUIRED"},
+                }
+            }
+        },
+    )
+
+    assert bridge._subscription_after_stream({"port": 1, "token": "token"}, job_id) is None
+
+    job = bridge._load_json(job_path)
+    assert job["state"] == "input-required"
+    assert job["inputRequired"] == pending
+    assert job["permissionResponseInput"] == pending
+
+
 def test_normal_turn_aggregates_authoritative_result_without_private_session_files(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     workspace = tmp_path / "workspace"
@@ -1998,7 +2798,7 @@ def test_normal_turn_aggregates_authoritative_result_without_private_session_fil
     assert len(bridge._json_bytes(result)) <= bridge.MAX_FOLLOW_BYTES
 
 
-def test_worker_emits_turn_completed_after_normal_stream_end(monkeypatch, tmp_path: Path) -> None:
+def test_worker_emits_turn_completed_when_stale_input_replays_after_normal_final(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -2058,6 +2858,21 @@ def test_worker_emits_turn_completed_after_normal_stream_end(monkeypatch, tmp_pa
                 "id": "task-1",
                 "contextId": "ctx-1",
                 "status": {"state": "TASK_STATE_INPUT_REQUIRED"},
+                "metadata": {
+                    "iac_code": {
+                        "input": {
+                            "schemaVersion": 1,
+                            "kind": "permission",
+                            "requestTaskId": "task-1",
+                            "contextId": "ctx-1",
+                            "inputId": "permission-consumed",
+                            "toolUseId": "tool-1",
+                            "prompt": "stale permission",
+                            "options": [],
+                            "required": True,
+                        }
+                    }
+                },
             }
         },
     )
@@ -2067,6 +2882,8 @@ def test_worker_emits_turn_completed_after_normal_stream_end(monkeypatch, tmp_pa
     assert job["state"] == "turn_completed"
     assert job["finalText"] == "Hello world"
     assert job["finalTextComplete"] is True
+    assert "inputRequired" not in job
+    assert "assistantFinalReceived" not in job
 
 
 def test_long_normal_result_becomes_public_workspace_artifact(monkeypatch, tmp_path: Path) -> None:
@@ -2627,7 +3444,7 @@ def test_skill_contract_uses_implicit_trigger_normal_default_and_follow() -> Non
     assert "the first operational command must invoke the packaged bridge" in skill
     assert "when the bridge returns `incompatible_host`" in skill
     assert "do not bypass the bridge with direct cloud calls" in skill
-    assert "Normal is the default" in skill
+    assert "Normal is the overall default" in skill
     assert "candidate-architecture, cost-comparison, plan-confirmation" in skill
     assert "start --mode normal" in skill and "--follow" in skill
     assert "python3 scripts/iac_code.py continue" in skill
@@ -2637,9 +3454,18 @@ def test_skill_contract_uses_implicit_trigger_normal_default_and_follow() -> Non
     assert "Pipeline reaches any terminal state" in skill
     assert "treat `pipelineResult` and `artifacts` as its authoritative result" in skill
     assert "bridge enforces a 120-second maximum" in skill
+    assert "`state: input-required` but does not contain `inputRequired`" in skill
+    assert "keep the same job unchanged" in skill
+    assert "Never call `continue`, repeat `respond`, call `cancel`, or start a replacement job" in skill
     assert "never translate Chinese user-visible content into English" in skill
     assert "Never call `start --mode normal` to continue a completed Pipeline" in skill
-    assert "apply the outer Agent's own equivalent permission policy" in skill
+    assert "Treat every `inputRequired` as a hard user-interaction boundary" in skill
+    assert "Do not write an answer file or invoke `respond` before the user's answer arrives" in skill
+    assert "always ask the user" in skill
+    assert "Ask even when there is only one candidate" in skill
+    assert "A request to create or deploy infrastructure is not confirmation" in skill
+    assert "For an automatically decided permission" not in skill
+    assert '"action":"confirm"' not in skill
     assert "`presentationRequired: true`" in skill
     assert "ready-to-display localized strings in `userUpdates`" in skill
     assert "Before invoking another tool, emit every `userUpdates` string" in skill
@@ -2649,6 +3475,12 @@ def test_skill_contract_uses_implicit_trigger_normal_default_and_follow() -> Non
     assert "`llm_not_configured`" in skill
     assert "`cloud_credentials_not_configured`" in skill
     assert "optional `config.json` beside this `SKILL.md`" in skill
+    assert '"pipelineName": "selling_solution_first"' in skill
+    pipeline_default_contract = (
+        "Pipeline mode uses solution-first unless the installed configuration explicitly selects legacy selling"
+    )
+    assert pipeline_default_contract in skill
+    assert "--pipeline-name" not in skill
     assert '"permissionWaitPolicy"' in skill
     assert '"residentTimeoutSeconds"' in skill
     assert "never sends the policy through A2A message metadata" in skill
@@ -2660,8 +3492,11 @@ def test_skill_contract_uses_implicit_trigger_normal_default_and_follow() -> Non
     assert "session.jsonl" not in skill
     assert "`pip install" not in skill
     assert "Default to normal" in agent_metadata
+    assert "Never answer an iac-code input boundary on the user's behalf" in agent_metadata
     assert "fail closed if the bridge rejects the host" in agent_metadata
-    assert "candidate architectures, cost comparison, plan confirmation" in agent_metadata
+    assert "use its solution-first default unless the installed configuration explicitly selects legacy selling" in (
+        agent_metadata
+    )
 
 
 def test_parser_exposes_continue_follow_and_diagnostic_poll() -> None:
@@ -2687,6 +3522,10 @@ def test_parser_exposes_continue_follow_and_diagnostic_poll() -> None:
     )
     cache_list = parser.parse_args(["cache", "list"])
     cache_clean = parser.parse_args(["cache", "clean", "--candidates", "--confirm"])
+    pipeline_start = parser.parse_args(
+        ["start", "--mode", "pipeline", "--cwd", "/workspace", "--prompt-file", "/workspace/prompt.txt"]
+    )
+    subparsers = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
 
     assert continued.follow is True
     assert followed.cursor == 7 and followed.wait_seconds == 60
@@ -2695,6 +3534,8 @@ def test_parser_exposes_continue_follow_and_diagnostic_poll() -> None:
     assert permission.decision == "allow_once"
     assert cache_list.cache_command == "list"
     assert cache_clean.candidates is True and cache_clean.confirm is True
+    assert pipeline_start.pipeline_name == ""
+    assert "--pipeline-name" not in subparsers.choices["start"].format_help()
 
 
 def _cached_runtime(config_root: Path, runtime_tag: str, target: str, content: bytes) -> Path:

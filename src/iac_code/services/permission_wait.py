@@ -357,6 +357,20 @@ async def resolve_permission_execution_identity(
     credential = AliyunCredentials.load()
     if credential is None:
         raise AliyunCallerIdentityUnavailableError("cloud_credentials_unavailable", retryable=False)
+    if credential.mode == "OAuth":
+        from iac_code.services.providers.aliyun_oauth import AliyunOAuthError, AliyunOAuthReloginRequired
+
+        try:
+            credential = AliyunCredentials.refresh_oauth_if_needed(credential)
+        except AliyunOAuthReloginRequired as exc:
+            raise AliyunCallerIdentityUnavailableError("oauth_relogin_required", retryable=False) from exc
+        except AliyunOAuthError as exc:
+            retryable = (
+                exc.status_code is None
+                or exc.status_code == 429
+                or (isinstance(exc.status_code, int) and exc.status_code >= 500)
+            )
+            raise AliyunCallerIdentityUnavailableError("oauth_refresh_failed", retryable=retryable) from exc
     identity = _cached_caller_identity()
     if identity is None:
         identity = await (resolver or AliyunCallerIdentityResolver()).resolve(
