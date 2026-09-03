@@ -446,9 +446,7 @@ class TestCheckTemplate:
                     "Type": "ALIYUN::VPC::EIPAssociation",
                     "Properties": {
                         "AllocationId": {"Ref": "Eip"},
-                        "InstanceId": {
-                            "Fn::Select": [0, {"Fn::GetAtt": ["InstanceGroup", "InstanceIds"]}]
-                        },
+                        "InstanceId": {"Fn::Select": [0, {"Fn::GetAtt": ["InstanceGroup", "InstanceIds"]}]},
                     },
                 },
             },

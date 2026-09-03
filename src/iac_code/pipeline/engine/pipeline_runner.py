@@ -2953,9 +2953,7 @@ class PipelineRunner:
             and step.config.get("confirmation_accepts_parameter_overrides") is True
             and step.validate_structured_confirmation is not None
         ):
-            validation_message = self._structured_confirmation_validation_message(
-                step, current_conclusion, user_text
-            )
+            validation_message = self._structured_confirmation_validation_message(step, current_conclusion, user_text)
             if validation_message:
                 # The submitted parameters are illegal, so the step keeps its waiting input untouched: no
                 # bookkeeping is popped, no state is saved and no model turn is spent.

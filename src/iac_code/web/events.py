@@ -413,9 +413,7 @@ class WebEventTranslator:
                 summary=event.result,
                 artifacts=[public_metadata] if public_metadata else [],
                 submitted_delta=submitted_delta if isinstance(submitted_delta, dict) else None,
-                normalized_conclusion=(
-                    normalized_conclusion if isinstance(normalized_conclusion, dict) else None
-                ),
+                normalized_conclusion=(normalized_conclusion if isinstance(normalized_conclusion, dict) else None),
             )
         if isinstance(event, MCPProgressEvent):
             payload = mcp_progress_metadata(event)

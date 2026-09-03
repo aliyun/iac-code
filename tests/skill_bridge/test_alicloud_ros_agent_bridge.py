@@ -1158,7 +1158,7 @@ def test_cli_plugin_parser_accepts_pretty_printed_objects_and_arrays() -> None:
 
 
 def test_cli_plugin_parser_reports_an_unterminated_buffer_as_malformed() -> None:
-    events = list(bridge.iter_cli_plugin_payloads(['{\n', '  "data": {\n']))
+    events = list(bridge.iter_cli_plugin_payloads(["{\n", '  "data": {\n']))
 
     assert events == [(None, '{\n  "data": {')]
 

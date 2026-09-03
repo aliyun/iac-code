@@ -770,9 +770,7 @@ class TestQwenManagerLeaseAndAttribution:
             provider_key_override="openai_compatible",
         )
         events = [event async for event in manager.stream([Message.user("hi")], "base")]
-        attribution = next(
-            event.usage_attribution for event in events if isinstance(event, MessageEndEvent)
-        )
+        attribution = next(event.usage_attribution for event in events if isinstance(event, MessageEndEvent))
         assert (
             attribution.logical_provider_key,
             attribution.wire_provider_key,
@@ -905,9 +903,7 @@ class TestQwenManagerLeaseAndAttribution:
 @pytest.mark.asyncio
 class TestQwenResponses:
     async def test_streaming_and_non_streaming_cache_marker_scope(self):
-        stream_client = FakeOpenAIClient(
-            stream_chunks=[_chunk(content="ok"), _chunk(finish_reason="stop")]
-        )
+        stream_client = FakeOpenAIClient(stream_chunks=[_chunk(content="ok"), _chunk(finish_reason="stop")])
         stream_provider = QwenProvider(model="qwen3.7-plus", client=stream_client)
         _ = [
             event
@@ -942,14 +938,8 @@ class TestQwenResponses:
 
     @pytest.mark.parametrize("streaming", [False, True])
     async def test_required_thinking_error_rebuilds_once_and_is_learned(self, streaming):
-        error = _RequiredThinkingError(
-            "The value of the enable_thinking parameter is restricted to True."
-        )
-        success = (
-            [_chunk(content="ok"), _chunk(finish_reason="stop")]
-            if streaming
-            else _response(content="ok")
-        )
+        error = _RequiredThinkingError("The value of the enable_thinking parameter is restricted to True.")
+        success = [_chunk(content="ok"), _chunk(finish_reason="stop")] if streaming else _response(content="ok")
         client, completions = _sequential_client(error, success, success)
         provider = QwenProvider(
             model="qwen3.8-max",
@@ -974,9 +964,7 @@ class TestQwenResponses:
         assert completions.calls[2]["extra_body"]["enable_thinking"] is True
 
     async def test_required_thinking_retry_reports_both_real_api_attempts(self, monkeypatch):
-        error = _RequiredThinkingError(
-            "The value of the enable_thinking parameter is restricted to True."
-        )
+        error = _RequiredThinkingError("The value of the enable_thinking parameter is restricted to True.")
         client, completions = _sequential_client(
             error,
             [_chunk(content="ok"), _chunk(finish_reason="stop")],
@@ -1031,9 +1019,7 @@ class TestQwenResponses:
         assert all(attrs[IacCodeAttr.PROVIDER_ADAPTER] == "qwen" for attrs in request_metrics)
 
     async def test_mandatory_learning_does_not_rewrite_an_existing_stream_context(self):
-        error = _RequiredThinkingError(
-            "The value of the enable_thinking parameter is restricted to True."
-        )
+        error = _RequiredThinkingError("The value of the enable_thinking parameter is restricted to True.")
         client, completions = _sequential_client(
             error,
             _response(content="learned"),
@@ -1133,16 +1119,12 @@ class TestQwenResponses:
         client = FakeOpenAIClient(
             create_response=_response(content="answer", reasoning_content="", reasoning="must-not-appear")
         )
-        response = await QwenProvider(model="qwen3.7-plus", client=client).complete(
-            [Message.user("hi")], "sys"
-        )
+        response = await QwenProvider(model="qwen3.7-plus", client=client).complete([Message.user("hi")], "sys")
         assert response.thinking == ""
         assert response.thinking_blocks == []
 
     async def test_unclosed_thinking_tag_is_unsafe(self):
-        client = FakeOpenAIClient(
-            stream_chunks=[_chunk(content="<think>secret"), _chunk(finish_reason="stop")]
-        )
+        client = FakeOpenAIClient(stream_chunks=[_chunk(content="<think>secret"), _chunk(finish_reason="stop")])
         provider = QwenProvider(model="qwen3.7-plus", client=client)
         with pytest.raises(UnsafeStreamProtocolError):
             _ = [event async for event in provider.stream([Message.user("hi")], "sys")]
@@ -1151,9 +1133,7 @@ class TestQwenResponses:
         import iac_code.providers.streaming as streaming
 
         monkeypatch.setattr(streaming, "_", lambda message: f"translated:{message}")
-        client = FakeOpenAIClient(
-            stream_chunks=[_chunk(content="<think>secret"), _chunk(finish_reason="stop")]
-        )
+        client = FakeOpenAIClient(stream_chunks=[_chunk(content="<think>secret"), _chunk(finish_reason="stop")])
         provider = QwenProvider(model="qwen3.7-plus", client=client)
         with pytest.raises(UnsafeStreamProtocolError, match=r"^translated:Qwen emitted"):
             _ = [event async for event in provider.stream([Message.user("hi")], "sys")]
@@ -1164,9 +1144,7 @@ class TestQwenResponses:
         )
         events = [
             event
-            async for event in QwenProvider(model="qwen3.7-plus", client=literal).stream(
-                [Message.user("hi")], "sys"
-            )
+            async for event in QwenProvider(model="qwen3.7-plus", client=literal).stream([Message.user("hi")], "sys")
         ]
         assert "".join(event.text for event in events if isinstance(event, TextDeltaEvent)) == "<text"
 
@@ -1178,9 +1156,7 @@ class TestQwenResponses:
         )
         events = [
             event
-            async for event in QwenProvider(model="qwen3.7-plus", client=balanced).stream(
-                [Message.user("hi")], "sys"
-            )
+            async for event in QwenProvider(model="qwen3.7-plus", client=balanced).stream([Message.user("hi")], "sys")
         ]
         assert "".join(event.text for event in events if isinstance(event, TextDeltaEvent)).endswith(" tail")
 
@@ -1253,9 +1229,7 @@ class TestQwenResponses:
     async def test_strict_native_tool_call_and_xml_fallback(self):
         native = FakeOpenAIClient(
             stream_chunks=[
-                _chunk(
-                    tool_calls=[ns(index=0, id="call_1", function=ns(name="read_file", arguments='{"path":'))]
-                ),
+                _chunk(tool_calls=[ns(index=0, id="call_1", function=ns(name="read_file", arguments='{"path":'))]),
                 _chunk(tool_calls=[ns(index=0, id=None, function=ns(name=None, arguments='"a.py"}'))]),
                 _chunk(finish_reason="tool_calls"),
             ]
@@ -1265,8 +1239,7 @@ class TestQwenResponses:
         assert [event.input for event in events if isinstance(event, ToolUseEndEvent)] == [{"path": "a.py"}]
 
         xml = (
-            '<function_calls><invoke name="read_file"><parameter name="path">a.py</parameter>'
-            "</invoke></function_calls>"
+            '<function_calls><invoke name="read_file"><parameter name="path">a.py</parameter></invoke></function_calls>'
         )
         fallback = FakeOpenAIClient(stream_chunks=[_chunk(content=xml), _chunk(finish_reason="stop")])
         provider = QwenProvider(model="qwen3.7-plus", client=fallback)
@@ -1277,9 +1250,7 @@ class TestQwenResponses:
     async def test_real_dashscope_empty_tool_delimiters_do_not_create_anonymous_call(self):
         client = FakeOpenAIClient(
             stream_chunks=[
-                _chunk(
-                    tool_calls=[ns(index=0, id="call_1", function=ns(name="read_file", arguments=""))]
-                ),
+                _chunk(tool_calls=[ns(index=0, id="call_1", function=ns(name="read_file", arguments=""))]),
                 _chunk(tool_calls=[ns(index=0, id="", function=ns(name=None, arguments=""))]),
                 _chunk(tool_calls=[ns(index=0, id="", function=ns(name=None, arguments='{"path": '))]),
                 _chunk(tool_calls=[ns(index=0, id="", function=ns(name=None, arguments='"a.py"}'))]),
@@ -1293,9 +1264,7 @@ class TestQwenResponses:
                 [Message.user("hi")], "sys", [_tool()]
             )
         ]
-        assert [event.input for event in events if isinstance(event, ToolUseEndEvent)] == [
-            {"path": "a.py"}
-        ]
+        assert [event.input for event in events if isinstance(event, ToolUseEndEvent)] == [{"path": "a.py"}]
         assert next(event for event in events if isinstance(event, MessageEndEvent)).stop_reason == "tool_use"
 
     async def test_malformed_native_call_does_not_fall_through_to_xml(self):
@@ -1332,9 +1301,7 @@ class TestQwenResponses:
         ],
     )
     async def test_markdown_quoted_xml_is_never_executed(self, quoted):
-        stream_client = FakeOpenAIClient(
-            stream_chunks=[_chunk(content=quoted), _chunk(finish_reason="stop")]
-        )
+        stream_client = FakeOpenAIClient(stream_chunks=[_chunk(content=quoted), _chunk(finish_reason="stop")])
         events = [
             event
             async for event in QwenProvider(model="qwen3.7-plus", client=stream_client).stream(
@@ -1391,9 +1358,7 @@ class TestQwenResponses:
             )
         ]
         assert "".join(event.text for event in events if isinstance(event, TextDeltaEvent)) == xml
-        assert [event.input for event in events if isinstance(event, ToolUseEndEvent)] == [
-            {"path": "native.py"}
-        ]
+        assert [event.input for event in events if isinstance(event, ToolUseEndEvent)] == [{"path": "native.py"}]
 
         no_finish = FakeOpenAIClient(stream_chunks=[_chunk(content=xml)])
         events = [

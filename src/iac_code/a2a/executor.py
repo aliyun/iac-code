@@ -2923,9 +2923,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 return None
             if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", region_id) is None:
                 language = self._resolve_preferred_language(metadata) or "en"
-                raise InvalidParamsError(
-                    translate_message("Unsupported Alibaba Cloud region ID.", language=language)
-                )
+                raise InvalidParamsError(translate_message("Unsupported Alibaba Cloud region ID.", language=language))
             configured = AliyunCredentials.load()
             if configured is None:
                 return None

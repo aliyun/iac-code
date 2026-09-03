@@ -177,9 +177,7 @@ class ShowCandidateDetailTool(Tool):
         batch = latest_candidate_outline_batch(records)
         if batch is None:
             return ToolResult.error(
-                _(
-                    "show_candidate_detail is not allowed before a successful show_architecture_plan outline batch."
-                )
+                _("show_candidate_detail is not allowed before a successful show_architecture_plan outline batch.")
             )
 
         expected_index = first_missing_candidate_detail_index(records, batch)
@@ -211,9 +209,7 @@ class ShowCandidateDetailTool(Tool):
             )
 
         try:
-            mermaid_source, architecture_context, warnings = render_architecture_graph(
-                tool_input.get("topology_graph")
-            )
+            mermaid_source, architecture_context, warnings = render_architecture_graph(tool_input.get("topology_graph"))
         except ValueError as exc:
             return ToolResult(
                 content=_("Failed to render the candidate topology: {reason}").format(reason=str(exc)),

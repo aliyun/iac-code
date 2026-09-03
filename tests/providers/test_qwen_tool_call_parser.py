@@ -137,8 +137,7 @@ def test_xml_requires_registered_parameterized_invoke_and_intent_guard():
 
 def test_xml_rejects_duplicate_or_nested_parameters_and_preserves_scalar_strings():
     duplicate = (
-        '<invoke name="read_file"><parameter name="path">a</parameter>'
-        '<parameter name="path">b</parameter></invoke>'
+        '<invoke name="read_file"><parameter name="path">a</parameter><parameter name="path">b</parameter></invoke>'
     )
     nested = '<invoke name="read_file"><parameter name="path"><value>a</value></parameter></invoke>'
     assert recover_xml_tool_calls(duplicate, _tools()) is None
@@ -157,14 +156,13 @@ def test_xml_multiple_calls_wrapper_entities_newlines_and_unicode():
     recovery = recover_xml_tool_calls(text, tools)
     assert recovery.remaining_text == ""
     assert recovery.calls[0]["input"] == {"path": "目录/a.py"}
-    assert recovery.calls[1]["input"] == {"content": '<x>&"\'', "meta": {"ok": True}}
+    assert recovery.calls[1]["input"] == {"content": "<x>&\"'", "meta": {"ok": True}}
 
 
 @pytest.mark.parametrize(
     "text",
     [
-        '<function_calls>text<invoke name="read_file"><parameter name="path">a</parameter></invoke>'
-        "</function_calls>",
+        '<function_calls>text<invoke name="read_file"><parameter name="path">a</parameter></invoke></function_calls>',
         '<function_calls><invoke name="read_file"><parameter name="path">a</parameter></invoke>',
         '<invoke name="read_file"><parameter name="path">a</parameter></invoke></function_calls>',
         '~~~xml\n<invoke name="read_file"><parameter name="path">a</parameter></invoke>\n~~~',

@@ -135,6 +135,7 @@ _TOKEN_METRIC_SCOPE_KEYS = frozenset(
     }
 )
 
+
 class _BestEffortSpan:
     def __init__(self, span: Any | None = None) -> None:
         self._span = span
@@ -814,9 +815,7 @@ def _telemetry_provider_name(provider: Any) -> str:
 
 def _provider_telemetry_attrs(provider: Any) -> dict[str, str | bool]:
     attrs: dict[str, str | bool] = {
-        IacCodeAttr.OFFICIAL_ENDPOINT: official_dashscope_wire_provider_key(
-            _provider_endpoint_url(provider)
-        )
+        IacCodeAttr.OFFICIAL_ENDPOINT: official_dashscope_wire_provider_key(_provider_endpoint_url(provider))
         is not None,
     }
     adapter_name = _string_provider_attr(provider, "_ADAPTER_NAME")
@@ -1790,9 +1789,7 @@ class ProviderManager:
                                 yield terminal_event
                                 return
                             yield replay_event
-                        raise UnsafeStreamProtocolError(
-                            "Qwen replay ended before message completion."
-                        )
+                        raise UnsafeStreamProtocolError("Qwen replay ended before message completion.")
                     except UnsafeStreamProtocolError as exc:
                         last_unsafe_error = exc
                         commit_replay_failure(exc)

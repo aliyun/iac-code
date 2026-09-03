@@ -149,8 +149,7 @@ class StagedSessionBackupService(SessionBackupService):
                         existing = self._read_existing_snapshot_state(destination, session_id)
                         if existing is not None:
                             completed_next = (
-                                base_state.status == "succeeded"
-                                and existing.parent_generation == base_state.generation
+                                base_state.status == "succeeded" and existing.parent_generation == base_state.generation
                             )
                             if not completed_next and not existing.same_lineage(committed_state):
                                 raise SessionBackupConflict(
@@ -249,9 +248,7 @@ class StagedSessionBackupService(SessionBackupService):
         minimum_generation: int | None = None,
     ) -> SessionReconcileResult:
         if minimum_generation is not None and (
-            isinstance(minimum_generation, bool)
-            or not isinstance(minimum_generation, int)
-            or minimum_generation <= 0
+            isinstance(minimum_generation, bool) or not isinstance(minimum_generation, int) or minimum_generation <= 0
         ):
             raise ValueError("minimum_generation must be a positive integer")
         if not self._backup_enabled():

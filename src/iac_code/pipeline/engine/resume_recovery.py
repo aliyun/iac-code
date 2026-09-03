@@ -51,11 +51,7 @@ def _without_overridden_error_results(message: Message, successful_ids: set[str]
     content = [
         block
         for block in message.content
-        if not (
-            isinstance(block, ToolResultBlock)
-            and block.is_error
-            and block.tool_use_id in successful_ids
-        )
+        if not (isinstance(block, ToolResultBlock) and block.is_error and block.tool_use_id in successful_ids)
     ]
     if not content:
         return None

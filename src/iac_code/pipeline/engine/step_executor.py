@@ -526,9 +526,7 @@ class StepExecutor:
         completion_guard_state: dict[str, Any] = ensure_completion_guard_state(
             reconstruct_completion_guard_state(
                 repaired_messages,
-                completion_record_contract=self._optional_config_string(
-                    step.config.get("completion_record_contract")
-                ),
+                completion_record_contract=self._optional_config_string(step.config.get("completion_record_contract")),
             )
         )
         saved_step_conclusion = context.snapshot().get(step.conclusion_field)
@@ -700,9 +698,7 @@ class StepExecutor:
         completion_guard_state = ensure_completion_guard_state(
             reconstruct_completion_guard_state(
                 list(resume_messages),
-                completion_record_contract=self._optional_config_string(
-                    step.config.get("completion_record_contract")
-                ),
+                completion_record_contract=self._optional_config_string(step.config.get("completion_record_contract")),
             )
         )
         if self._cwd:
@@ -1196,9 +1192,7 @@ class StepExecutor:
             authoritative_candidate_targets=self._config_string_tuple(
                 step.config.get("authoritative_candidate_targets")
             ),
-            completion_record_contract=self._optional_config_string(
-                step.config.get("completion_record_contract")
-            ),
+            completion_record_contract=self._optional_config_string(step.config.get("completion_record_contract")),
             hard_constraint_evidence_contract=self._optional_config_string(
                 step.config.get("hard_constraint_evidence_contract")
             ),

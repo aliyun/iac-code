@@ -152,9 +152,7 @@ class ShowArchitecturePlanTool(Tool):
                 "Displayed {count} candidate outlines; candidateSetId={candidate_set_id}. "
                 "Do not repeat show_architecture_plan unless the user changes the candidate set; "
                 "continue with show_candidate_detail."
-            ).format(
-                count=len(candidates), candidate_set_id=candidate_set_id
-            ),
+            ).format(count=len(candidates), candidate_set_id=candidate_set_id),
             metadata={"candidate_set_id": candidate_set_id},
         )
 

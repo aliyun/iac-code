@@ -143,9 +143,9 @@ def prompt_text() -> str:
 
 @pytest.fixture(scope="module")
 def skill_text() -> str:
-    return (
-        _pipeline_dir() / "skills" / "iac-aliyun-materialize-selected-candidate" / "SKILL.md"
-    ).read_text(encoding="utf-8")
+    return (_pipeline_dir() / "skills" / "iac-aliyun-materialize-selected-candidate" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def _conclusion(**overrides):
@@ -293,9 +293,7 @@ class TestConfirmedCompletion:
         assert tool.validate_completion_input(tool_input) is None
         assert "selected_candidate" not in tool_input["conclusion"]
         assert "candidate" not in tool_input["conclusion"]["selected_candidate_result"]
-        assert tool_input["conclusion"]["selected_candidate_result"]["cost"]["monthly_estimate"].startswith(
-            "¥1,280"
-        )
+        assert tool_input["conclusion"]["selected_candidate_result"]["cost"]["monthly_estimate"].startswith("¥1,280")
 
     def test_confirmation_cannot_skip_the_dedicated_waiting_state(self, step, tmp_path):
         state = _happy_guard_state(str(tmp_path))
@@ -419,7 +417,7 @@ class TestConfirmationBinding:
                 "input_type": "structured",
                 "user_input": user_message,
                 "parameter_overrides": {"ZoneId": "cn-hangzhou-h"},
-            }
+            },
         )
         tool = _tool(step, state, user_message=user_message)
 
@@ -826,7 +824,7 @@ class TestPromptContract:
     def test_parameter_adjustment_reprices_and_rewrites_the_solution_summary(self, skill_text):
         assert "重新执行必要的参数约束查询、PreviewStack 和 ROS 精确询价" in skill_text
         assert "重新生成 `solution_summary`" in skill_text
-        assert "再次提交 `status: \"awaiting_confirmation\"`" in skill_text
+        assert '再次提交 `status: "awaiting_confirmation"`' in skill_text
 
     def test_free_text_distinguishes_parameter_architecture_and_new_intent_changes(self, skill_text):
         assert "调整当前参数" in skill_text

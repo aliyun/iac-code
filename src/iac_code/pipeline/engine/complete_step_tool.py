@@ -418,7 +418,7 @@ class CompleteStepTool(Tool):
         schema = copy.deepcopy(self.input_schema)
         schema["description"] = _(
             'complete_step arguments must be {"conclusion": {...}}; keep all conclusion fields, '
-            'including candidates, inside conclusion and do not submit them at the tool input top level.'
+            "including candidates, inside conclusion and do not submit them at the tool input top level."
         )
         properties = schema.get("properties")
         if isinstance(properties, dict) and self._step_config.completion_input_schema:
@@ -454,9 +454,7 @@ class CompleteStepTool(Tool):
             "validator": str(error.validator or ""),
             "message": self._bounded_completion_validation_message(error),
             "expected": self._bounded_completion_expected(error.validator, error.validator_value),
-            "description": self._bounded_description(
-                self._nearest_completion_input_description(absolute_path, error)
-            ),
+            "description": self._bounded_description(self._nearest_completion_input_description(absolute_path, error)),
             "received": self._bounded_received(error.instance),
         }
 
@@ -758,9 +756,7 @@ class CompleteStepTool(Tool):
             "validator": str(error.validator or ""),
             "message": self._bounded_completion_validation_message(error),
             "expected": self._bounded_completion_expected(error.validator, error.validator_value),
-            "description": self._bounded_description(
-                self._nearest_schema_description(schema, path_parts, error)
-            ),
+            "description": self._bounded_description(self._nearest_schema_description(schema, path_parts, error)),
             "received": self._bounded_received(error.instance),
         }
 
@@ -914,22 +910,19 @@ class CompleteStepTool(Tool):
                 "input_type": "structured",
                 "user_input": self._user_message,
                 "parameter_overrides": (
-                    structured.parameter_overrides
-                    if structured.parameter_overrides_provided
-                    else current_overrides
+                    structured.parameter_overrides if structured.parameter_overrides_provided else current_overrides
                 ),
             }
             if confirmation != expected_confirmation:
-                return _(
-                    "{message} complete_step.conclusion.{field} must record the exact structured input."
-                ).format(message=base_message, field=confirmation_field)
+                return _("{message} complete_step.conclusion.{field} must record the exact structured input.").format(
+                    message=base_message, field=confirmation_field
+                )
 
         change_required_actions = self._expected_actions(
             {"actions": requirement.get("require_parameter_changes_for_actions")}
         )
         if structured.action in change_required_actions and (
-            not structured.parameter_overrides_provided
-            or structured.parameter_overrides == current_overrides
+            not structured.parameter_overrides_provided or structured.parameter_overrides == current_overrides
         ):
             return base_message
 
@@ -1549,9 +1542,7 @@ class CompleteStepTool(Tool):
                 enriched = enricher(
                     tool_input=copy.deepcopy(normalized_input),
                     context_snapshot=copy.deepcopy(self._completion_guard_state.get("context_snapshot") or {}),
-                    tool_result_records=copy.deepcopy(
-                        self._completion_guard_state.get("tool_result_records") or []
-                    ),
+                    tool_result_records=copy.deepcopy(self._completion_guard_state.get("tool_result_records") or []),
                     user_message=self._user_message,
                     completion_guard_state=self._completion_guard_state,
                     config=self._step_config,
@@ -1769,9 +1760,7 @@ class CompleteStepTool(Tool):
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
         del context
         submitted_delta = copy.deepcopy(tool_input)
-        projection_metadata = (
-            {"submitted_delta": submitted_delta} if self._step_config.completion_input_schema else {}
-        )
+        projection_metadata = {"submitted_delta": submitted_delta} if self._step_config.completion_input_schema else {}
 
         logger.debug(
             "[complete_step] step=%s input=%s",

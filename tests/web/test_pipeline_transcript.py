@@ -1119,8 +1119,7 @@ def test_repeated_step_completions_accumulate_processing_duration():
     completed_markers = [
         event
         for event in events
-        if event["type"] == PIPELINE_MARKER_EVENT
-        and event["payload"]["pipelineStep"]["status"] == "completed"
+        if event["type"] == PIPELINE_MARKER_EVENT and event["payload"]["pipelineStep"]["status"] == "completed"
     ]
     assert completed_markers[-1]["payload"]["pipelineStep"]["durationS"] == 135.44
 

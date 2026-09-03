@@ -114,9 +114,7 @@ def test_runtime_settings_payload_redacts_only_editable_cloud_credentials(monkey
         ("cancel", "Cancel"),
     ),
 )
-def test_solution_first_pipeline_user_display_text_hides_structured_control_json(
-    action: str, expected: str
-) -> None:
+def test_solution_first_pipeline_user_display_text_hides_structured_control_json(action: str, expected: str) -> None:
     raw = json.dumps({"action": action, "parameter_overrides": {"ZoneId": "cn-hangzhou-i"}})
 
     assert solution_first_pipeline_user_display_text("selling_solution_first", raw) == expected

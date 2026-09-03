@@ -219,9 +219,7 @@ def enrich_completion_input(
         records,
         tool_name="ros_preview_template",
         after=last_mutation,
-        predicate=lambda record: _record_matches_anchor(
-            record, canonical_output, effective_parameters, region, cwd
-        ),
+        predicate=lambda record: _record_matches_anchor(record, canonical_output, effective_parameters, region, cwd),
     )
     preview_validation = _preview_projection(preview, output_path, effective_parameters, region)
     quote = _quote_projection(anchor)
@@ -615,9 +613,7 @@ def _quote_projection(anchor: dict[str, Any]) -> dict[str, Any]:
     }
     currency = result.get("Currency") or (next(iter(resource_currencies)) if len(resource_currencies) == 1 else "CNY")
     if str(currency).upper() != "CNY":
-        return _unavailable_quote(
-            _("Unsupported ROS estimate currency: {currency}").format(currency=currency)
-        )
+        return _unavailable_quote(_("Unsupported ROS estimate currency: {currency}").format(currency=currency))
     if any(item != "CNY" for item in resource_currencies):
         return _unavailable_quote(
             _("Unsupported ROS estimate resource currencies: {currencies}").format(
@@ -811,11 +807,15 @@ def _confirmation_options(selection: Any) -> list[dict[str, str]]:
         },
     }
     raw_candidates = selection.get("candidates") if isinstance(selection, dict) else None
-    actions = ["confirm", "cancel"] if not isinstance(raw_candidates, list) or len(raw_candidates) <= 1 else [
-        "confirm",
-        "reselect",
-        "cancel",
-    ]
+    actions = (
+        ["confirm", "cancel"]
+        if not isinstance(raw_candidates, list) or len(raw_candidates) <= 1
+        else [
+            "confirm",
+            "reselect",
+            "cancel",
+        ]
+    )
     return [copy.deepcopy(defaults[action]) for action in actions]
 
 
@@ -1028,8 +1028,11 @@ def _project_evidence(
 
 
 def _allowed_context_path(path: str, allowed: tuple[str, ...]) -> bool:
-    return bool(path) and ".." not in path and "*" not in path and any(
-        path == prefix or path.startswith(prefix + ".") for prefix in allowed
+    return (
+        bool(path)
+        and ".." not in path
+        and "*" not in path
+        and any(path == prefix or path.startswith(prefix + ".") for prefix in allowed)
     )
 
 

@@ -138,9 +138,7 @@ class TestTopLevelSteps:
         confirmation_options = raw_yaml["steps"][1]["conclusion_schema"]["properties"]["options"]
         assert confirmation_options["minItems"] == 2
         assert confirmation_options["maxItems"] == 4
-        required_actions = {
-            rule["contains"]["properties"]["action"]["const"] for rule in confirmation_options["allOf"]
-        }
+        required_actions = {rule["contains"]["properties"]["action"]["const"] for rule in confirmation_options["allOf"]}
         assert required_actions == {"confirm", "cancel"}
         assert set(confirmation_options["items"]["properties"]["action"]["enum"]) == {
             "confirm",
@@ -161,9 +159,10 @@ class TestTopLevelSteps:
         candidate = planning_schema["properties"]["candidates"]["items"]
         assert "原样取自" in candidate["description"]
         assert "Step 2 唯一允许写入" in candidate["properties"]["output_path"]["description"]
-        assert "0 基下标" in planning_schema["properties"]["options"]["items"]["properties"][
-            "candidate_index"
-        ]["description"]
+        assert (
+            "0 基下标"
+            in planning_schema["properties"]["options"]["items"]["properties"]["candidate_index"]["description"]
+        )
         assert "原样等于" in planning_schema["properties"]["selected_candidate"]["description"]
 
         assert materialize_schema is not None
@@ -173,9 +172,7 @@ class TestTopLevelSteps:
         assert "面向最终用户" in materialized["solution_summary"]["description"]
         assert "ROS 精确询价" in materialized["cost"]["description"]
         assert "同一路径" in materialized["template"]["properties"]["file_path"]["description"]
-        assert "没有覆盖时必须使用空对象" in materialize_schema["properties"]["parameter_overrides"][
-            "description"
-        ]
+        assert "没有覆盖时必须使用空对象" in materialize_schema["properties"]["parameter_overrides"]["description"]
         assert "真实用户确认输入" in materialize_schema["properties"]["confirmation"]["description"]
 
         # Step 3 继续从共享 deploying skill 继承 schema，不在新 pipeline 复制一份。

@@ -255,9 +255,7 @@ def test_outputs_payload_includes_solution_first_step1_plan_and_rough_cost(tmp_p
     assert item["diagramStage"] == "optimized"
     assert item["optimized"] is True
     assert item["totalMonthlyCost"] == "约 ¥300/月（架构粗估）"
-    assert item["costItems"] == [
-        {"name": "ECS", "spec": "2 vCPU / 4 GiB", "monthly_cost": "约 ¥300/月"}
-    ]
+    assert item["costItems"] == [{"name": "ECS", "spec": "2 vCPU / 4 GiB", "monthly_cost": "约 ¥300/月"}]
     assert item["views"] == [
         {
             "id": "overview",
@@ -292,9 +290,7 @@ def test_diagram_items_keeps_latest_step1_plan_and_step2_template(tmp_path):
 
 
 def test_diagram_items_ignores_unmarked_template_less_diagram(tmp_path):
-    manager = _Manager(
-        [_architecture_plan_envelope(0, "非规划图", "flowchart TD\n  A", marked=False)]
-    )
+    manager = _Manager([_architecture_plan_envelope(0, "非规划图", "flowchart TD\n  A", marked=False)])
 
     assert diagram_items(manager, _session(tmp_path)) == []
 
@@ -326,9 +322,7 @@ def test_solution_first_materialized_diagram_uses_exact_quote_and_optimized_cach
     assert item["mermaidSource"] == "graph TD\n  OPT[优化图]"
     assert item["views"][0]["title"] == "优化总览"
     assert item["totalMonthlyCost"] == "¥88/月"
-    assert item["costItems"] == [
-        {"name": "ECS", "spec": "2 vCPU / 4 GiB", "monthly_cost": "¥88/月"}
-    ]
+    assert item["costItems"] == [{"name": "ECS", "spec": "2 vCPU / 4 GiB", "monthly_cost": "¥88/月"}]
 
 
 def test_diagram_items_dedupes_solution_first_absolute_and_relative_template_paths(tmp_path):

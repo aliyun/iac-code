@@ -184,9 +184,9 @@ class Select:
 
         # Optional type-to-edit behavior for selectors whose final row is an inline input.
         focused_option = self._options[self.state.focused_index] if self._options else None
-        direct_text = (
-            len(key_event.char) == 1 and key_event.char.isprintable()
-        ) or (key_event.key == "paste" and bool(key_event.char))
+        direct_text = (len(key_event.char) == 1 and key_event.char.isprintable()) or (
+            key_event.key == "paste" and bool(key_event.char)
+        )
         if (
             self._type_to_edit_input
             and isinstance(focused_option, InputOption)

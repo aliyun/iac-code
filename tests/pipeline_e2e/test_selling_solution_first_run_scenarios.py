@@ -600,9 +600,7 @@ def test_web_idle_waits_for_recovery_to_release_running_turn(runner: ModuleType)
 
 def test_web_confirmation_boundary_accepts_repeated_parameter_questions(runner: ModuleType) -> None:
     for kind in ("ask_user_question", "deployment_confirmation"):
-        assert runner._web_at_confirmation_boundary(
-            {"pipeline": {"snapshot": {"pendingInput": {"kind": kind}}}}
-        )
+        assert runner._web_at_confirmation_boundary({"pipeline": {"snapshot": {"pendingInput": {"kind": kind}}}})
 
     assert not runner._web_at_confirmation_boundary(
         {"pipeline": {"snapshot": {"pendingInput": {"kind": "candidate_selection"}}}}
@@ -611,9 +609,7 @@ def test_web_confirmation_boundary_accepts_repeated_parameter_questions(runner: 
 
 def test_web_materialize_boundary_fails_fast_on_unexpected_rollback(runner: ModuleType) -> None:
     for kind in ("ask_user_question", "deployment_confirmation", "candidate_selection", "candidate_select"):
-        assert runner._web_at_materialize_boundary(
-            {"pipeline": {"snapshot": {"pendingInput": {"kind": kind}}}}
-        )
+        assert runner._web_at_materialize_boundary({"pipeline": {"snapshot": {"pendingInput": {"kind": kind}}}})
 
 
 def test_w02_parameter_answer_preserves_create_goal(runner: ModuleType) -> None:
@@ -805,9 +801,7 @@ def test_web_session_uses_valid_unattended_permission_mode(runner: ModuleType, t
     assert payload["mode"] == "pipeline"
 
 
-def test_browser_dependency_preflight_reports_missing_node(
-    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_browser_dependency_preflight_reports_missing_node(runner: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runner.shutil, "which", lambda _name: None)
 
     result = runner._run_browser_dependency_preflight(timeout=1.0)
@@ -1517,9 +1511,7 @@ def test_desktop_result_requires_the_full_native_contract(runner: ModuleType) ->
     assert not all(runner.validate_desktop_result(result).values())
 
 
-def test_desktop_source_resource_audit_follows_linked_reference_directory(
-    runner: ModuleType, tmp_path: Path
-) -> None:
+def test_desktop_source_resource_audit_follows_linked_reference_directory(runner: ModuleType, tmp_path: Path) -> None:
     source_root = tmp_path / "pipeline"
     shared_references = tmp_path / "shared-references"
     linked_references = source_root / "skills" / "materialize" / "references"
