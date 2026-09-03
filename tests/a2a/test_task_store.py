@@ -11,6 +11,7 @@ from a2a.auth.user import User
 from a2a.server.context import ServerCallContext
 from a2a.types import Artifact, ListTasksRequest, Part, Task, TaskState, TaskStatus
 from a2a.utils.errors import InvalidParamsError
+from google.protobuf.json_format import MessageToDict, ParseDict
 from google.protobuf.timestamp_pb2 import Timestamp
 
 from iac_code.a2a.metrics import NoOpA2AMetrics
@@ -1240,6 +1241,39 @@ async def test_save_persists_sdk_state_transitions_and_explicit_task_mirrors(tmp
     assert snapshot.state == "completed"
     assert snapshot.output_text == ["delivered"]
     assert snapshot.updated_at == 3
+
+
+@pytest.mark.asyncio
+async def test_save_clears_consumed_input_metadata_when_task_leaves_input_required() -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    task = sdk_task("task-1", state=TaskState.TASK_STATE_INPUT_REQUIRED)
+    ParseDict(
+        {
+            "iac_code": {
+                "input": {
+                    "kind": "permission",
+                    "inputId": "permission-1",
+                    "toolUseId": "tool-1",
+                }
+            }
+        },
+        task.metadata,
+    )
+
+    await store.save(task)
+    waiting = await store.get("task-1")
+    assert waiting is not None
+    assert MessageToDict(waiting.metadata, preserving_proto_field_name=False)["iac_code"]["input"]["inputId"] == (
+        "permission-1"
+    )
+
+    task.status.state = TaskState.TASK_STATE_WORKING
+    await store.save(task)
+
+    resumed = await store.get("task-1")
+    assert resumed is not None
+    resumed_metadata = MessageToDict(resumed.metadata, preserving_proto_field_name=False)
+    assert "input" not in resumed_metadata.get("iac_code", {})
 
 
 @pytest.mark.asyncio
