@@ -69,7 +69,8 @@ def test_terminal_outcome_failed_wins_over_early_exit():
     assert terminal_outcome_from_completed_event({"failed": True, "early_exit": True}) == "failed"
 
 
-def test_build_handoff_summary_includes_only_configured_fields_and_deterministic_metadata():
+def test_build_handoff_summary_includes_only_configured_fields_and_deterministic_metadata(monkeypatch):
+    monkeypatch.delenv("IAC_CODE_HANDOFF_USE_TOOL_CONFIRMATION", raising=False)
     summary = build_handoff_summary(
         pipeline_name="selling",
         outcome="early_exit",
@@ -120,7 +121,8 @@ def test_build_handoff_summary_includes_only_configured_fields_and_deterministic
     assert "deployment" not in summary
 
 
-def test_build_handoff_summary_requires_new_confirmation_for_resource_release_except_automatic_cleanup():
+def test_build_handoff_summary_requires_new_confirmation_for_resource_release_except_automatic_cleanup(monkeypatch):
+    monkeypatch.delenv("IAC_CODE_HANDOFF_USE_TOOL_CONFIRMATION", raising=False)
     summary = build_handoff_summary(
         pipeline_name="selling",
         outcome="completed",
@@ -131,6 +133,33 @@ def test_build_handoff_summary_requires_new_confirmation_for_resource_release_ex
     assert "obtain a fresh, explicit confirmation from the user in normal chat" in summary
     assert "Any confirmation given during the pipeline does not count" in summary
     assert "pipeline-managed automatic cleanup may proceed without this additional confirmation" in summary
+
+
+def test_build_handoff_summary_uses_permission_confirmation_when_enabled(monkeypatch):
+    monkeypatch.setenv("IAC_CODE_HANDOFF_USE_TOOL_CONFIRMATION", "true")
+    summary = build_handoff_summary(
+        pipeline_name="selling",
+        outcome="completed",
+        context_snapshot={},
+        include_fields=[],
+    )
+
+    assert "tool permission confirmation as the sole confirmation" in summary
+    assert "Do not ask for a separate confirmation in normal chat" in summary
+    assert "obtain a fresh, explicit confirmation" not in summary
+
+
+def test_build_handoff_summary_keeps_chat_confirmation_when_tool_confirmation_is_disabled(monkeypatch):
+    monkeypatch.setenv("IAC_CODE_HANDOFF_USE_TOOL_CONFIRMATION", "false")
+    summary = build_handoff_summary(
+        pipeline_name="selling",
+        outcome="completed",
+        context_snapshot={},
+        include_fields=[],
+    )
+
+    assert "obtain a fresh, explicit confirmation" in summary
+    assert "tool permission confirmation as the sole confirmation" not in summary
 
 
 def test_runner_should_switch_to_normal_for_completed_policy(tmp_path):
