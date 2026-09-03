@@ -2884,7 +2884,9 @@ async def test_executor_runs_normal_mode_when_iac_code_mode_is_normal(
 
 
 @pytest.mark.asyncio
-async def test_normal_mode_ignores_stale_pipeline_name(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+async def test_normal_mode_ignores_stale_pipeline_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     loop = FakeAgentLoop([TextDeltaEvent(text="normal")])
     runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
@@ -4292,7 +4294,9 @@ class TestResolveAliyunCredential:
         )
         executor = self._make_executor()
 
-        result = executor._resolve_aliyun_credential({"iac_code": {"alibaba_cloud_region_id": "cn-beijing"}})
+        result = executor._resolve_aliyun_credential(
+            {"iac_code": {"alibaba_cloud_region_id": "cn-beijing"}}
+        )
 
         assert result is not None
         assert result is not configured
@@ -4308,7 +4312,9 @@ class TestResolveAliyunCredential:
         monkeypatch.setattr("iac_code.a2a.executor.AliyunCredentials.load", lambda: None)
         executor = self._make_executor()
 
-        result = executor._resolve_aliyun_credential({"iac_code": {"alibaba_cloud_region_id": "cn-beijing"}})
+        result = executor._resolve_aliyun_credential(
+            {"iac_code": {"alibaba_cloud_region_id": "cn-beijing"}}
+        )
 
         assert result is None
 
@@ -4316,7 +4322,9 @@ class TestResolveAliyunCredential:
         executor = self._make_executor()
 
         with pytest.raises(InvalidParamsError, match="Unsupported Alibaba Cloud region ID"):
-            executor._resolve_aliyun_credential({"iac_code": {"alibaba_cloud_region_id": "https://example.com"}})
+            executor._resolve_aliyun_credential(
+                {"iac_code": {"alibaba_cloud_region_id": "https://example.com"}}
+            )
 
 
 @pytest.mark.asyncio
@@ -4974,7 +4982,9 @@ async def test_persisted_permission_restores_backup_before_checkpoint_lookup(
         response=response,
     )
     assert restored_storage.exists(cwd, session_id)
-    assert (restored_storage.session_dir(cwd, session_id) / "permission-waits" / f"{boundary_id}.json").is_file()
+    assert (
+        restored_storage.session_dir(cwd, session_id) / "permission-waits" / f"{boundary_id}.json"
+    ).is_file()
 
 
 @pytest.mark.asyncio
@@ -5296,7 +5306,8 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
         index
         for index, event in enumerate(queue.events)
         if isinstance(event, TaskStatusUpdateEvent)
-        and dump(event).get("metadata", {}).get("iac_code", {}).get("inputReceived", {}).get("decision") == "allow_once"
+        and dump(event).get("metadata", {}).get("iac_code", {}).get("inputReceived", {}).get("decision")
+        == "allow_once"
     ]
     final_indices = [
         index

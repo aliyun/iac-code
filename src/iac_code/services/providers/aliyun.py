@@ -298,7 +298,9 @@ class AliyunCredentials:
 
             owns_client = oauth_client is None
             client = (
-                AliyunOAuthClient(get_oauth_site(credential.oauth_site_type)) if oauth_client is None else oauth_client
+                AliyunOAuthClient(get_oauth_site(credential.oauth_site_type))
+                if oauth_client is None
+                else oauth_client
             )
 
             try:

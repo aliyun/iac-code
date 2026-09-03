@@ -347,7 +347,9 @@ def _parse_surface_overrides(raw: object, step_id: str) -> dict[str, StepSurface
 
         conclusion_schema = override.get("conclusion_schema")
         if conclusion_schema is not None and not isinstance(conclusion_schema, dict):
-            raise ValueError(f"Step '{step_id}': surface_overrides.{surface}.conclusion_schema must be a mapping")
+            raise ValueError(
+                f"Step '{step_id}': surface_overrides.{surface}.conclusion_schema must be a mapping"
+            )
 
         overrides[surface] = StepSurfaceOverride(
             prompt_file=prompt,
@@ -382,7 +384,8 @@ def _parse_a2a_artifacts(raw: object, step_id: str) -> list[A2AArtifactSpec]:
         has_content_from_file = isinstance(content_from_file, str) and bool(content_from_file)
         if has_content == has_content_from_file:
             raise ValueError(
-                f"Step '{step_id}': a2a_artifacts[{index}] must define exactly one of content or content_from_file"
+                f"Step '{step_id}': a2a_artifacts[{index}] must define exactly one of "
+                "content or content_from_file"
             )
         if not isinstance(media_type, str) or not media_type:
             raise ValueError(f"Step '{step_id}': a2a_artifacts[{index}].media_type must be a non-empty string")
@@ -393,7 +396,9 @@ def _parse_a2a_artifacts(raw: object, step_id: str) -> list[A2AArtifactSpec]:
         raw_when_equals = item.get("when_conclusion_field_equals")
         when_equals = {} if raw_when_equals is None else raw_when_equals
         if not isinstance(when_equals, dict) or not all(isinstance(key, str) and key for key in when_equals):
-            raise ValueError(f"Step '{step_id}': a2a_artifacts[{index}].when_conclusion_field_equals must be a mapping")
+            raise ValueError(
+                f"Step '{step_id}': a2a_artifacts[{index}].when_conclusion_field_equals must be a mapping"
+            )
         specs.append(
             A2AArtifactSpec(
                 path=path,

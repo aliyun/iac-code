@@ -1154,16 +1154,13 @@ async def test_shared_state_dir_keeps_interleaved_threads_isolated(tmp_path: Pat
     second_payload["threadId"] = "thread-2"
     second_payload["forwardedProps"]["iacCode"]["rosInvocationId"] = "invocation-2"
 
-    async with (
-        httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=create_app(adapter=first_adapter)),
-            base_url="http://test",
-        ) as first_client,
-        httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=create_app(adapter=second_adapter)),
-            base_url="http://test",
-        ) as second_client,
-    ):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=first_adapter)),
+        base_url="http://test",
+    ) as first_client, httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=second_adapter)),
+        base_url="http://test",
+    ) as second_client:
         first_response = await first_client.post("/", json=first_payload)
         second_response = await second_client.post("/", json=second_payload)
 
@@ -1181,16 +1178,13 @@ async def test_shared_state_dir_keeps_interleaved_threads_isolated(tmp_path: Pat
 
     restarted_first = AguiA2AAdapter(a2a_url="http://a2a/", client=FakeA2AClient(), state_dir=state_dir)
     restarted_second = AguiA2AAdapter(a2a_url="http://a2a/", client=FakeA2AClient(), state_dir=state_dir)
-    async with (
-        httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=create_app(adapter=restarted_first)),
-            base_url="http://test",
-        ) as first_client,
-        httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=create_app(adapter=restarted_second)),
-            base_url="http://test",
-        ) as second_client,
-    ):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=restarted_first)),
+        base_url="http://test",
+    ) as first_client, httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=restarted_second)),
+        base_url="http://test",
+    ) as second_client:
         first_replay = await first_client.post("/", json=first_payload)
         second_replay = await second_client.post("/", json=second_payload)
 
@@ -1209,16 +1203,13 @@ async def test_corrupt_thread_state_does_not_block_another_thread(tmp_path: Path
     second_payload = _payload(tmp_path)
     second_payload["threadId"] = "thread-2"
     second_payload["forwardedProps"]["iacCode"]["rosInvocationId"] = "invocation-2"
-    async with (
-        httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=create_app(adapter=first_adapter)),
-            base_url="http://test",
-        ) as first_client,
-        httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=create_app(adapter=second_adapter)),
-            base_url="http://test",
-        ) as second_client,
-    ):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=first_adapter)),
+        base_url="http://test",
+    ) as first_client, httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=second_adapter)),
+        base_url="http://test",
+    ) as second_client:
         await first_client.post("/", json=first_payload)
         await second_client.post("/", json=second_payload)
 

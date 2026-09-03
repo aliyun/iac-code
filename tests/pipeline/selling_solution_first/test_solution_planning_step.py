@@ -334,7 +334,9 @@ class TestAuthoritativeSelection:
 
         first_resume = await _drain(runner.resume(encode_selected_candidate(CANDIDATES[1]["name"], 1)))
         confirmation_wait = next(
-            event for event in _input_required(first_resume) if event.step_id == "materialize_selected_candidate"
+            event
+            for event in _input_required(first_resume)
+            if event.step_id == "materialize_selected_candidate"
         )
         assert confirmation_wait.data["kind"] == "deployment_confirmation"
         assert confirmation_wait.data["solution_summary"] == "SLB + 双 ECS + RDS 高可用方案"
@@ -377,7 +379,11 @@ class TestAuthoritativeSelection:
 
         events = await _drain(runner.resume('{"action":"confirm","parameter_overrides":{}}'))
 
-        assert not [event for event in _input_required(events) if event.step_id == "materialize_selected_candidate"]
+        assert not [
+            event
+            for event in _input_required(events)
+            if event.step_id == "materialize_selected_candidate"
+        ]
         assert [call["step_id"] for call in executor.calls] == [
             STEP_ID,
             STEP_ID,
@@ -686,7 +692,9 @@ class TestStepOneContract:
 
     @pytest.fixture(scope="class")
     def skill_text(self) -> str:
-        return (_pipeline_dir() / "skills" / "iac-aliyun-solution-first" / "SKILL.md").read_text(encoding="utf-8")
+        return (
+            _pipeline_dir() / "skills" / "iac-aliyun-solution-first" / "SKILL.md"
+        ).read_text(encoding="utf-8")
 
     def test_conclusion_schema_covers_the_three_outcomes(self, raw_step):
         schema = raw_step["conclusion_schema"]
@@ -751,15 +759,9 @@ class TestStepOneContract:
 
         assert set(intent["required"]) == {"resource_intents", "hard_constraints"}
         assert resource_intents["minItems"] == 1
-        assert all(
-            action in resource_intents["description"]
-            for action in (
-                "create",
-                "use_existing",
-                "reference",
-                "forbid",
-            )
-        )
+        assert all(action in resource_intents["description"] for action in (
+            "create", "use_existing", "reference", "forbid",
+        ))
         assert "ECS:forbid" in resource_intents["description"]
 
     def test_options_require_the_candidate_index_coordinate(self, raw_step):

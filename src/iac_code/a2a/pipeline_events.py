@@ -561,7 +561,8 @@ class PipelineEventTranslator:
             if conditions and (
                 not isinstance(conclusion, dict)
                 or not all(
-                    _resolve_artifact_expression(conclusion, field) == value for field, value in conditions.items()
+                    _resolve_artifact_expression(conclusion, field) == value
+                    for field, value in conditions.items()
                 )
             ):
                 continue

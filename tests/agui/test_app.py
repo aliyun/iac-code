@@ -657,7 +657,9 @@ async def test_permission_resume_maps_preflight_backup_sync_error_without_sendin
         async def ensure_session_restored(self, _url, *, cwd, session_id, task_id=None):
             self.restored_sessions.append((cwd, session_id, task_id))
             self.resume_preflight_calls.append("ensure_session_restored")
-            raise A2ASessionBackupNotReadyError("Session backup is still synchronizing. Retry after 3 seconds.")
+            raise A2ASessionBackupNotReadyError(
+                "Session backup is still synchronizing. Retry after 3 seconds."
+            )
 
     fake = SyncingPreflightClient(interrupt=True)
     adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake)
@@ -974,10 +976,10 @@ async def test_question_selection_resume_is_sent_to_same_a2a_task(tmp_path, monk
     assert _events(first)[-1]["outcome"]["type"] == "interrupt"
     assert fake.resumed_prompts == [("Plan B", "task-1")]
     second_events = _events(second)
-    assert (
-        sum(event.get("type") == "TOOL_CALL_RESULT" and event.get("toolCallId") == "ask-1" for event in second_events)
-        == 1
-    )
+    assert sum(
+        event.get("type") == "TOOL_CALL_RESULT" and event.get("toolCallId") == "ask-1"
+        for event in second_events
+    ) == 1
     assert second_events[-1]["outcome"] == {"type": "success"}
 
 
@@ -1173,7 +1175,9 @@ def test_mapper_consumes_real_local_a2a_wire_contract(tmp_path, monkeypatch) -> 
             },
         ) as response:
             raw_events = [
-                json.loads(line.removeprefix("data: ")) for line in response.iter_lines() if line.startswith("data: ")
+                json.loads(line.removeprefix("data: "))
+                for line in response.iter_lines()
+                if line.startswith("data: ")
             ]
 
     mapper = A2AEventMapper(thread_id="thread-1", run_id="run-1")

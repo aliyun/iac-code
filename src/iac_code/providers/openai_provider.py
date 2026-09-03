@@ -197,7 +197,9 @@ class OpenAIProvider(Provider):
         reasoning = getattr(message_or_delta, "reasoning_content", None)
         return reasoning if isinstance(reasoning, str) else ""
 
-    def _create_stream_response_adapter(self, tools: list[ToolDefinition] | None) -> OpenAIStreamResponseAdapter:
+    def _create_stream_response_adapter(
+        self, tools: list[ToolDefinition] | None
+    ) -> OpenAIStreamResponseAdapter:
         return OpenAIStreamResponseAdapter(self, tools)
 
     # -- Message conversion ----------------------------------------------------

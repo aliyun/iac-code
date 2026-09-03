@@ -1787,7 +1787,9 @@ class AgentLoop:
         tools = list(self.tool_registry.list_tools())
         tool_definitions = self._get_tool_definitions(tools)
         begin_request = (
-            getattr(request_manager, "begin_request", None) if hasattr(type(request_manager), "begin_request") else None
+            getattr(request_manager, "begin_request", None)
+            if hasattr(type(request_manager), "begin_request")
+            else None
         )
         lease = begin_request(base_system_prompt, tool_definitions or None) if callable(begin_request) else None
         try:
@@ -2818,7 +2820,9 @@ class AgentLoop:
         cache_policy: str | None = None,
     ) -> Any:
         begin_request = (
-            getattr(request_manager, "begin_request", None) if hasattr(type(request_manager), "begin_request") else None
+            getattr(request_manager, "begin_request", None)
+            if hasattr(type(request_manager), "begin_request")
+            else None
         )
         lease = begin_request(system, tools) if callable(begin_request) else None
         effective_system = getattr(lease, "system_prompt", system)
@@ -3057,7 +3061,11 @@ class AgentLoop:
             # Compatibility for lightweight third-party/test managers that do
             # not implement ProviderManager's internal attribution contract.
             provider = self._get_runtime_provider_key()
-            model = self._provider_manager.get_model_name() if hasattr(self._provider_manager, "get_model_name") else ""
+            model = (
+                self._provider_manager.get_model_name()
+                if hasattr(self._provider_manager, "get_model_name")
+                else ""
+            )
         try:
             self._session_usage_store.append(
                 self._cwd,

@@ -443,7 +443,9 @@ def test_dashscope_new_model_protocols_are_not_flattened() -> None:
         model="kimi-k3",
         api_key="k",
         thinking_enabled=False,
-    )._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True, "preserve_thinking": True}}
+    )._build_thinking_kwargs() == {
+        "extra_body": {"enable_thinking": True, "preserve_thinking": True}
+    }
 
     stepfun = get_thinking_spec("dashscope", "stepfun/step-3.7-flash")
     assert stepfun.allowed_efforts == (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH)

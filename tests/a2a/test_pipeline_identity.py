@@ -436,7 +436,9 @@ class TestDurableIdentityGuard:
         solution_executor = _inner_executor(pipeline_name=SELLING_SOLUTION_FIRST_PIPELINE_NAME)
 
         assert (
-            legacy_executor._resolve_request_pipeline_name(cwd=cwd, session_id=legacy_session, session_storage=storage)
+            legacy_executor._resolve_request_pipeline_name(
+                cwd=cwd, session_id=legacy_session, session_storage=storage
+            )
             == SELLING_PIPELINE_NAME
         )
         assert (
@@ -582,6 +584,7 @@ class TestExecuteIdentityGuard:
         assert snapshot_path.read_bytes() == snapshot_before
         assert not ctx.lock.locked()
 
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize("active_followup_only", [True, False], ids=["followup-probe", "full-request"])
     async def test_a_mismatch_on_an_active_task_never_reaches_the_running_pipeline(
@@ -726,14 +729,11 @@ def test_sidecar_identity_written_by_the_engine_is_readable_by_the_guard(
     raw = yaml.safe_load(meta_path.read_text(encoding="utf-8"))
 
     assert raw["pipeline_name"] == SELLING_SOLUTION_FIRST_PIPELINE_NAME
-    assert (
-        _inner_executor()._peek_durable_pipeline_name(
-            cwd=cwd,
-            session_id=session_id,
-            session_storage=storage,
-        )
-        == SELLING_SOLUTION_FIRST_PIPELINE_NAME
-    )
+    assert _inner_executor()._peek_durable_pipeline_name(
+        cwd=cwd,
+        session_id=session_id,
+        session_storage=storage,
+    ) == SELLING_SOLUTION_FIRST_PIPELINE_NAME
 
 
 def test_concurrent_executors_resolve_independently(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

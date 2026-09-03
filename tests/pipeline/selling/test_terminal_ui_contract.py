@@ -133,7 +133,9 @@ def test_confirm_prompt_tells_model_to_preserve_parameter_overrides():
 def test_confirm_prompts_share_selection_contract_structure():
     repl_prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.md").read_text(encoding="utf-8")
     a2a_prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.a2a.md").read_text(encoding="utf-8")
-    rich_prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.a2a.rich.md").read_text(encoding="utf-8")
+    rich_prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.a2a.rich.md").read_text(
+        encoding="utf-8"
+    )
 
     shared_fragments = [
         "## 首次执行",

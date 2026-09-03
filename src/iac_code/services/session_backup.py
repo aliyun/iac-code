@@ -423,7 +423,9 @@ class SessionBackupService:
         minimum_generation: int | None = None,
     ) -> SessionReconcileResult:
         if minimum_generation is not None and (
-            isinstance(minimum_generation, bool) or not isinstance(minimum_generation, int) or minimum_generation <= 0
+            isinstance(minimum_generation, bool)
+            or not isinstance(minimum_generation, int)
+            or minimum_generation <= 0
         ):
             raise ValueError("minimum_generation must be a positive integer")
         if not self._backup_enabled():
@@ -448,7 +450,9 @@ class SessionBackupService:
                 if shared is not None
                 else None
             )
-            if minimum_generation is not None and (local_state is None or local_state.generation < minimum_generation):
+            if minimum_generation is not None and (
+                local_state is None or local_state.generation < minimum_generation
+            ):
                 if shared_state is None or shared_state.generation < minimum_generation:
                     raise SessionBackupNotReadyError(
                         minimum_generation=minimum_generation,

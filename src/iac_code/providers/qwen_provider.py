@@ -118,11 +118,14 @@ class QwenProvider(DashScopeProvider):
         disabled = (
             not resolved_enabled
             if resolved_enabled is not None
-            else self._thinking_disabled() or effort in {"none", "off", "disable", "disabled", "false", "0"}
+            else self._thinking_disabled()
+            or effort in {"none", "off", "disable", "disabled", "false", "0"}
         )
         effort_is_disable = effort in {"none", "off", "disable", "disabled", "false", "0"}
         concrete_priority = (
-            self._thinking_intent.effort.priority if dominant == "effort" else self._thinking_intent.budget.priority
+            self._thinking_intent.effort.priority
+            if dominant == "effort"
+            else self._thinking_intent.budget.priority
         )
         if (
             dominant in {"effort", "budget"}
@@ -173,11 +176,15 @@ class QwenProvider(DashScopeProvider):
         effort_is_disable = effort in {"none", "off", "disable", "disabled", "false", "0"}
         resolved_enabled = self._thinking_intent.enabled.value
         disabled = (
-            not resolved_enabled if resolved_enabled is not None else self._thinking_disabled() or effort_is_disable
+            not resolved_enabled
+            if resolved_enabled is not None
+            else self._thinking_disabled() or effort_is_disable
         )
         dominant = self._thinking_intent.dominant_concrete_field()
         concrete_priority = (
-            self._thinking_intent.effort.priority if dominant == "effort" else self._thinking_intent.budget.priority
+            self._thinking_intent.effort.priority
+            if dominant == "effort"
+            else self._thinking_intent.budget.priority
         )
         if (
             dominant in {"effort", "budget"}

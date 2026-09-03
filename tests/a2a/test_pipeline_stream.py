@@ -1850,7 +1850,9 @@ async def test_publish_file_backed_completion_artifact_keeps_body_only_in_artifa
         if dump(event).get("metadata", {}).get("iac_code", {}).get("pipeline", {}).get("eventType")
     ]
     artifact_status = next(event for event in status_events if event["eventType"] == "artifact_created")
-    journal_artifact = next(event for event in publisher.journal.read_all() if event["eventType"] == "artifact_created")
+    journal_artifact = next(
+        event for event in publisher.journal.read_all() if event["eventType"] == "artifact_created"
+    )
     snapshot = publisher.snapshot_store.load()
     assert snapshot is not None
     snapshot_artifact = snapshot["display"]["artifacts"][0]
@@ -1862,7 +1864,7 @@ async def test_publish_file_backed_completion_artifact_keeps_body_only_in_artifa
     assert snapshot_artifact["dedupeKey"] == artifact_status["artifact"]["dedupeKey"]
     for persisted in (artifact_status, journal_artifact, snapshot):
         assert template_body not in str(persisted)
-        assert '"content"' not in str(persisted)
+        assert "\"content\"" not in str(persisted)
 
 
 @pytest.mark.asyncio

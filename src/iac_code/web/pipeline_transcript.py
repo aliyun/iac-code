@@ -1522,7 +1522,8 @@ def build_pipeline_transcript_rows(envelopes: Iterable[Mapping[str, Any]]) -> li
     # weave persisted ``source=pipeline`` replies right after their prompt rather
     # than appending them after the whole replay (Issue 2 misordering).
     anchors = translator.input_prompt_anchors or [
-        {"messageId": message_id, "kind": "", "stepId": ""} for message_id in translator.input_prompt_message_ids
+        {"messageId": message_id, "kind": "", "stepId": ""}
+        for message_id in translator.input_prompt_message_ids
     ]
     for anchor in anchors:
         if anchor.get("expectsVisibleAnswer") == "0":

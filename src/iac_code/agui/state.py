@@ -73,7 +73,10 @@ class FileAguiThreadStateStore:
 
     def save_thread(self, thread_id: str, state: Mapping[str, Any]) -> None:
         document = dict(state)
-        if document.get("schemaVersion") != AGUI_STATE_SCHEMA_VERSION or document.get("threadId") != thread_id:
+        if (
+            document.get("schemaVersion") != AGUI_STATE_SCHEMA_VERSION
+            or document.get("threadId") != thread_id
+        ):
             raise AguiStateStoreError("Refusing to save invalid AG-UI thread state.")
         try:
             ensure_private_dir(self.state_dir)

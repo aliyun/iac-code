@@ -52,7 +52,9 @@ def enrich_completion_input(
         tool_input["conclusion"] = {"status": "cancelled"}
         return tool_input
     records = [
-        record for record in tool_result_records if isinstance(record, dict) and record.get("tool_name") == "ros_deploy"
+        record
+        for record in tool_result_records
+        if isinstance(record, dict) and record.get("tool_name") == "ros_deploy"
     ]
     if status == "success":
         record = next(

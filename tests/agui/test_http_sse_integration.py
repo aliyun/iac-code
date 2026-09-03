@@ -220,7 +220,9 @@ def test_real_http_sse_sub_pipeline_interrupt_survives_agui_restart_and_snapshot
             "TASK_STATE_CANCELED",
         }
         assert cancel_calls == []
-        persisted = json.loads((state_dir / "threads" / "thread-http-sse.json").read_text(encoding="utf-8"))
+        persisted = json.loads(
+            (state_dir / "threads" / "thread-http-sse.json").read_text(encoding="utf-8")
+        )
         assert persisted["execution"]["pending"][interrupt_id]["sideband"] is True
 
         second_agui = create_agui_app(a2a_url=a2a_url, state_dir=state_dir)

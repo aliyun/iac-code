@@ -384,7 +384,8 @@ class AguiA2AAdapter:
                     pending_values = [
                         value
                         for value in a2a_inputs(event)
-                        if (binding.execution_id, str(value.get("inputId") or "")) not in binding.applied_resume_digests
+                        if (binding.execution_id, str(value.get("inputId") or ""))
+                        not in binding.applied_resume_digests
                     ]
                     if pending_values:
                         if sideband_recovery_after is not None:
@@ -910,7 +911,8 @@ class AguiA2AAdapter:
         # it accepts or rejects the response.  Terminal task states always win.
         task_is_terminal = a2a_state(task) in _FAILED_STATES | {"canceled", "completed"}
         replace_pending = task_is_terminal or (
-            not resumed_pending_ids and ("input" in task_metadata or "pendingPermissions" in task_metadata)
+            not resumed_pending_ids
+            and ("input" in task_metadata or "pendingPermissions" in task_metadata)
         )
         self._merge_pending(
             binding,

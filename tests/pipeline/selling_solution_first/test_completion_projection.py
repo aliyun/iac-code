@@ -71,7 +71,9 @@ def _step_config(step) -> StepConfig:
         completion_record_contract=step.config.get("completion_record_contract"),
         hard_constraint_evidence_contract=step.config.get("hard_constraint_evidence_contract"),
         completion_context_paths=tuple(step.config.get("completion_context_paths", [])),
-        confirmation_accepts_parameter_overrides=(step.config.get("confirmation_accepts_parameter_overrides") is True),
+        confirmation_accepts_parameter_overrides=(
+            step.config.get("confirmation_accepts_parameter_overrides") is True
+        ),
     )
 
 
@@ -501,7 +503,10 @@ class TestSchemaSeparation:
 
     def test_final_model_tool_schemas_stay_within_measured_token_budgets(self, loaded):
         counter = TokenCounter(model="deepseek-v4-flash-0731")
-        counts = {step.step_id: counter.count_tool_definition(_tool(step)) for step in loaded.steps}
+        counts = {
+            step.step_id: counter.count_tool_definition(_tool(step))
+            for step in loaded.steps
+        }
 
         # Step 1 complete_step 只提交步骤语义；候选详情由展示工具记录承载。
         assert counts["solution_planning_and_selection"] <= 400
@@ -567,7 +572,8 @@ class TestSchemaSeparation:
                     "type": "object",
                     "required": field_names,
                     "properties": {
-                        name: {"type": "string", "description": f"Description for {name}."} for name in field_names
+                        name: {"type": "string", "description": f"Description for {name}."}
+                        for name in field_names
                     },
                     "additionalProperties": False,
                 },
@@ -894,10 +900,9 @@ class TestStepOneProjection:
             {"conclusion": {"status": "awaiting_selection"}},
         )
         assert reopened.conclusion["candidates"][0]["why_recommended"] == ["用户点名要托管数据库"]
-        assert (
-            reopened.conclusion["candidates"][0]["problems_solved"]
-            == awaiting.conclusion["candidates"][0]["problems_solved"]
-        )
+        assert reopened.conclusion["candidates"][0]["problems_solved"] == awaiting.conclusion["candidates"][0][
+            "problems_solved"
+        ]
 
     @pytest.mark.asyncio
     async def test_execute_preserves_submitted_delta_and_returns_normalized_result(self, loaded):
@@ -1443,7 +1448,9 @@ class TestStepTwoProjection:
 
         cost = result.conclusion["selected_candidate_result"]["cost"]
         assert cost["quote_status"] == "succeeded"
-        assert cost["monthly_estimate"] == ("¥360.00/month (list price; about ¥88.80/month after contract discount)")
+        assert cost["monthly_estimate"] == (
+            "¥360.00/month (list price; about ¥88.80/month after contract discount)"
+        )
         assert cost["resources"] == [
             {
                 "type": "Instance",
@@ -1490,7 +1497,9 @@ class TestStepTwoProjection:
 
         cost = result.conclusion["selected_candidate_result"]["cost"]
         assert cost["quote_status"] == "succeeded"
-        assert cost["monthly_estimate"] == ("¥630.00/month (list price; about ¥208.84/month after contract discount)")
+        assert cost["monthly_estimate"] == (
+            "¥630.00/month (list price; about ¥208.84/month after contract discount)"
+        )
         assert cost["resources"] == [
             {
                 "type": "DBInstance",
@@ -1608,7 +1617,9 @@ Resources: {}
         _write_template_with_intrinsic(tmp_path)
         step = _step(loaded, "materialize_selected_candidate")
         check = _check()
-        check["evidence"] = [{"type": "template", "template_path": "Parameters.DBInstanceStorage.Default"}]
+        check["evidence"] = [
+            {"type": "template", "template_path": "Parameters.DBInstanceStorage.Default"}
+        ]
 
         result = _finalize(
             _tool(
@@ -1619,7 +1630,9 @@ Resources: {}
             ),
             _waiting_delta(check=check),
         )
-        evidence = result.conclusion["selected_candidate_result"]["cost"]["hard_constraint_checks"][0]["evidence"][0]
+        evidence = result.conclusion["selected_candidate_result"]["cost"]["hard_constraint_checks"][0][
+            "evidence"
+        ][0]
 
         assert evidence["actual_value"] == 120
         assert evidence["template_path"] == "Parameters.DBInstanceStorage.Default"
@@ -1638,7 +1651,9 @@ Resources: {}
             ),
             _waiting_delta(check=_check(evidence_type="context")),
         )
-        evidence = result.conclusion["selected_candidate_result"]["cost"]["hard_constraint_checks"][0]["evidence"][0]
+        evidence = result.conclusion["selected_candidate_result"]["cost"]["hard_constraint_checks"][0][
+            "evidence"
+        ][0]
 
         assert evidence == {
             "type": "context",

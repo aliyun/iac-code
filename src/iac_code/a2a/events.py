@@ -516,7 +516,11 @@ async def publish_stream_event(
             task_id=task_id,
             context_id=context_id,
             state=TaskState.TASK_STATE_WORKING,
-            metadata={"iac_code": {"usage": usage}},
+            metadata={
+                "iac_code": {
+                    "usage": usage
+                }
+            },
             iac_code_session_id=iac_code_session_id,
         )
         return None

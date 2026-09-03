@@ -332,7 +332,11 @@ class _QwenContentGuard:
         if self._fence_delimiter is None:
             self._fence_delimiter = delimiter
             self._fence_length = length
-        elif self._fence_delimiter == delimiter and length >= self._fence_length and not line[match.end() :].strip():
+        elif (
+            self._fence_delimiter == delimiter
+            and length >= self._fence_length
+            and not line[match.end() :].strip()
+        ):
             self._fence_delimiter = None
             self._fence_length = 0
 
@@ -389,7 +393,10 @@ class _QwenContentGuard:
                 raise UnsafeStreamProtocolError("Qwen emitted an unsafe or conflicting thinking-tag block.")
             closing = self._STANDALONE_CLOSING.fullmatch(literal)
             safe_closing = (
-                finish_reason == "tool_calls" and bool(native_calls) and not reasoning_has_tag and closing is not None
+                finish_reason == "tool_calls"
+                and bool(native_calls)
+                and not reasoning_has_tag
+                and closing is not None
             )
             if safe_closing:
                 return [], True
@@ -442,7 +449,9 @@ class QwenStreamResponseAdapter(OpenAIStreamResponseAdapter):
                 else:
                     last_open = tag_probe.rfind("<")
                     possible = tag_probe[last_open:] if last_open >= 0 else ""
-                    self._reasoning_tag_probe = possible if self._guard._is_possible_tag_prefix(possible) else ""
+                    self._reasoning_tag_probe = (
+                        possible if self._guard._is_possible_tag_prefix(possible) else ""
+                    )
             events.append(ThinkingDeltaEvent(text=normalized_reasoning))
         content = getattr(delta, "content", None)
         normalized_content = self._content_normalizer.feed(content) if isinstance(content, str) and content else ""

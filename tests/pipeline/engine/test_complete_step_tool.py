@@ -335,7 +335,9 @@ class TestIncrementalConclusionNormalization:
                 authoritative_candidate_context_field="solution_selection.selected_candidate",
                 authoritative_candidate_targets=("selected_candidate", "selected_candidate_result.candidate"),
             ),
-            completion_guard_state={"context_snapshot": {"solution_selection": {"selected_candidate": candidate}}},
+            completion_guard_state={
+                "context_snapshot": {"solution_selection": {"selected_candidate": candidate}}
+            },
         )
 
         result = await tool.execute(

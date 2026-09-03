@@ -20,7 +20,9 @@ _CODING_HOST_TO_KEY = {
     "coding.dashscope.aliyuncs.com": "aliyun_codingplan",
     "coding-intl.dashscope.aliyuncs.com": "aliyun_codingplan_intl",
 }
-_TOKEN_PLAN_REGIONS = frozenset({"cn-beijing", "ap-southeast-1", "ap-northeast-1", "eu-central-1", "us-east-1"})
+_TOKEN_PLAN_REGIONS = frozenset(
+    {"cn-beijing", "ap-southeast-1", "ap-northeast-1", "eu-central-1", "us-east-1"}
+)
 
 
 def _parsed_https_endpoint(base_url: str | None) -> tuple[str, str] | None:
@@ -81,7 +83,9 @@ def is_bailian_compatible_endpoint(base_url: str | None) -> bool:
         and _is_dns_label(labels[0])
         and labels[1] in _TOKEN_PLAN_REGIONS
     )
-    return is_maas and (_path_matches(path, "/compatible-mode") or _path_matches(path, "/apps/anthropic"))
+    return is_maas and (
+        _path_matches(path, "/compatible-mode") or _path_matches(path, "/apps/anthropic")
+    )
 
 
 def _is_dns_label(value: str) -> bool:

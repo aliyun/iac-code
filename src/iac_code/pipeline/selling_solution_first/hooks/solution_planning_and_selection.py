@@ -347,7 +347,9 @@ def _validate_candidate_resource_intents(
     if missing:
         shown = missing[:5]
         suffix = (
-            _("; {count} more omitted").format(count=len(missing) - len(shown)) if len(missing) > len(shown) else ""
+            _("; {count} more omitted").format(count=len(missing) - len(shown))
+            if len(missing) > len(shown)
+            else ""
         )
         raise CompletionEnrichmentError(
             _(
@@ -359,7 +361,7 @@ def _validate_candidate_resource_intents(
 
 def _candidate_slug(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", name.casefold()).strip("-")
-    return slug[:48].rstrip("-") or "solution"
+    return (slug[:48].rstrip("-") or "solution")
 
 
 def _candidate_products(candidate: dict[str, Any]) -> list[str]:

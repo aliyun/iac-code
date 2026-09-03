@@ -151,8 +151,6 @@ def test_validate_checks_accepts_llm_pass_when_code_verification_fails():
         )
         == []
     )
-
-
 def test_v2_accepts_llm_pass_when_tool_has_no_resolvable_evidence():
     constraint = _constraint(verification_mode="tool")
     llm_passed = _check(constraint, status="satisfied", evidence=[])
