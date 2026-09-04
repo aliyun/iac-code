@@ -22,7 +22,7 @@ iac-code は A2A 1.0 Server / Agent として実行できます。他の A2A 互
 - **ワークフロー自動化** — 内部ツールは IaC の生成、レビュー、変換タスクを HTTP 経由で送信できます。
 - **サービスディスカバリー** — クライアントは Agent Card を取得し、IaC 生成やテンプレートレビューなどの機能を選択できます。
 - **ストリーミング統合** — chatops やダッシュボードクライアントは、ターンの実行中にモデルテキスト、ツールアクティビティ、使用量メタデータ、最終タスク状態を表示できます。
-- **外部 Skill 統合** — 外部エージェントがパッケージ化された iac-code Skill を使い、標準ライブラリのみで書かれたブリッジスクリプト経由でローカルの認証済み A2A runtime を駆動して、iac-code を Alibaba Cloud インフラ機能として組み込みます。詳細は [Skill 統合](./skill-integration.md) を参照してください。
+- **外部 Skill 統合** — 外部エージェントは公式 IaC Code Skill を利用して、Alibaba Cloud インフラストラクチャ機能をワークフローに追加できます。配布方法は[公式 IaC Code Skills](./skill-overview.md)で選択し、[IaC Code Skill のインストールと使用](./skill-integration.md)または[ホスト統合リファレンス](./skill-host-integration.md)を参照してください。
 
 ## インタラクションモードの比較
 

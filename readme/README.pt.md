@@ -98,6 +98,10 @@ Por padrão, ele abre `http://127.0.0.1:8766` no seu navegador (apenas loopback)
   <img src="../website/static/img/screenshots/iac-code-web-en.jpg" alt="Aplicativo web do IaC Code" width="100%">
 </p>
 
+### Agent Skill
+
+Adicione o IaC Code a um agente compatível para planejar arquiteturas em nuvem, trabalhar com templates ROS ou Terraform, estimar custos, operar stacks e implantar recursos do Alibaba Cloud a partir da conversa. Baixe o [Skill estável mais recente](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill/stable/iac-code-skill.zip) ou compare as distribuições na [visão geral dos Skills oficiais](https://aliyun.github.io/iac-code/pt/docs/a2a/skill-overview).
+
 ## Contribuir
 
 Instale o [uv](https://docs.astral.sh/uv/getting-started/installation/), depois:

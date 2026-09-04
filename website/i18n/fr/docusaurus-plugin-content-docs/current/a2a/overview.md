@@ -22,7 +22,7 @@ Utilisez A2A lorsqu'un autre agent, moteur de workflow ou service doit appeler i
 - **Automatisation de workflows** — Des outils internes peuvent soumettre des tâches de génération, de revue ou de conversion IaC via HTTP.
 - **Découverte de service** — Les clients peuvent récupérer l'Agent Card et choisir des capacités comme la génération IaC ou la revue de modèles.
 - **Intégrations en streaming** — Un client chatops ou tableau de bord peut afficher le texte du modèle, l'activité des outils, les métadonnées d'utilisation et l'état final de la tâche pendant l'exécution du tour.
-- **Intégration Skill externe** — Des agents externes utilisent le Skill empaqueté d'iac-code pour piloter un runtime A2A local authentifié via un script pont utilisant uniquement la bibliothèque standard, en intégrant iac-code comme capacité d'infrastructure Alibaba Cloud. Voir [Intégration Skill](./skill-integration.md).
+- **Intégration Skill externe** — Des agents externes peuvent ajouter les capacités d'infrastructure Alibaba Cloud à leur workflow avec un Skill IaC Code officiel. Consultez [Skills IaC Code officiels](./skill-overview.md) pour choisir une distribution, puis [Installer et utiliser le Skill](./skill-integration.md) ou la [référence d'intégration hôte](./skill-host-integration.md).
 
 ## Comparaison des modes d'interaction
 

@@ -96,6 +96,13 @@ By default it opens `http://127.0.0.1:8766` in your browser (loopback only). See
   <img src="website/static/img/screenshots/iac-code-web-en.jpg" alt="IaC Code Web app" width="100%">
 </p>
 
+### Agent Skill
+
+Add IaC Code to a compatible agent to plan cloud architectures, work with ROS or Terraform templates, estimate costs,
+operate stacks, and deploy Alibaba Cloud resources from the agent conversation. Download the
+[latest stable Skill package](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill/stable/iac-code-skill.zip)
+or compare the distributions in [Official IaC Code Skills](https://aliyun.github.io/iac-code/docs/a2a/skill-overview).
+
 ## Contributing
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then:

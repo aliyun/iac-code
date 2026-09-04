@@ -27,7 +27,15 @@ const sidebars: SidebarsConfig = {
         'cli/sessions',
         'web-app',
         'desktop-app',
-        'a2a/skill-integration',
+        {
+          type: 'category',
+          label: 'IaC Code Skill',
+          items: [
+            'a2a/skill-overview',
+            'a2a/skill-integration',
+            'a2a/skill-host-integration',
+          ],
+        },
         {
           type: 'category',
           label: 'MCP Integration',
