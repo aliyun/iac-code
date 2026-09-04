@@ -6,7 +6,7 @@ description: Que hace IaC Code y por donde empezar.
 
 # Vision general
 
-IaC Code es un asistente de Infraestructura como Codigo potenciado por IA para infraestructura cloud. Ayuda a los usuarios y operadores de recursos en la nube a generar, desplegar y gestionar plantillas de infraestructura a traves de un flujo de trabajo en terminal. Su arquitectura esta disenada para flujos de trabajo multicloud; la version actual admite flujos de trabajo de Alibaba Cloud ROS y Terraform.
+IaC Code es un asistente de IA para diseñar, generar, desplegar y gestionar infraestructura cloud. Puedes usarlo desde la aplicación Desktop, la aplicación Web local, el terminal interactivo, interfaces de automatización o como Skill de otro agente. Su arquitectura está diseñada para flujos multicloud; la versión actual admite Alibaba Cloud ROS y Terraform.
 
 Capacidades principales:
 
@@ -14,4 +14,11 @@ Capacidades principales:
 - **De la plantilla a produccion** — para Alibaba Cloud ROS, pasa de la plantilla a la infraestructura en ejecucion: crea, actualiza, elimina y monitorea stacks en distintas regiones. El soporte de Terraform cubre la generacion y conversion de plantillas, no el despliegue.
 - **Inteligencia de nube integrada** — consulta documentacion, verifica la disponibilidad de recursos y estima costos antes de desplegar; cada decision respaldada por datos reales de la nube.
 
-La documentacion esta organizada en torno a las tareas del usuario. Comienza con la instalacion y el inicio rapido, luego configura los proveedores y las credenciales, y usa la referencia del CLI cuando necesites detalles sobre los comandos.
+Elige el punto de entrada que corresponda:
+
+- Descarga la [aplicación Desktop](./desktop-app.md) para una interfaz gráfica lista para usar.
+- Sigue la [instalación](./getting-started/installation.md) y el [inicio rápido](./getting-started/quick-start.md) para usar REPL, modo headless o la [aplicación Web](./web-app.md) local.
+- Elige una distribución en la [visión general de los Skills oficiales de IaC Code](./a2a/skill-overview.md) para añadir sus capacidades de Alibaba Cloud a un agente compatible.
+- Usa [ACP](./acp/overview.md), [A2A](./a2a/overview.md) o [AG-UI](./agui/overview.md) para integrarlo en una aplicación o servicio.
+
+Todos los puntos de entrada requieren un modelo configurado. Configura también las [credenciales de Alibaba Cloud](./configuration/alibaba-cloud-credentials.md) para consultar, modificar o desplegar recursos.

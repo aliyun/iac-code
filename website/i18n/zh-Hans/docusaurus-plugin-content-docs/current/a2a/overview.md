@@ -22,7 +22,7 @@ iac-code 可以作为 A2A 1.0 Server / Agent 运行。其他兼容 A2A 的客户
 - **工作流自动化** — 内部工具可以通过 HTTP 提交 IaC 生成、审查或转换任务。
 - **服务发现** — 客户端可以获取 Agent Card，并选择 IaC 生成或模板审查等能力。
 - **流式集成** — chatops 或仪表板客户端可以在轮次运行时显示模型文本、工具活动、用量元数据和最终任务状态。
-- **外部 Skill 集成** — 外部 agent 使用打包好的 iac-code Skill，通过纯标准库桥接脚本驱动本地认证的 A2A runtime，把 iac-code 作为阿里云基础设施能力嵌入自己的工作流。详见 [Skill 集成](./skill-integration.md)。
+- **外部 Skill 集成** — 外部 Agent 可以通过官方 IaC Code Skill，将阿里云基础设施能力接入自己的工作流。请先查看[官方 IaC Code Skills](./skill-overview.md)选择合适的发行方式，再参考[安装和使用 IaC Code Skill](./skill-integration.md)或[宿主集成参考](./skill-host-integration.md)。
 
 ## 交互模式对比
 

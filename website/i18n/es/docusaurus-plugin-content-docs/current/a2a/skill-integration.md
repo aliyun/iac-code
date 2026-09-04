@@ -1,218 +1,127 @@
 ---
-sidebar_position: 7
+sidebar_position: 2
 title: Instalar y usar el Skill de IaC Code
-description: Descarga e instala el Skill de IaC Code para que un agente externo pueda gestionar recursos de Alibaba Cloud.
+description: Añade IaC Code a un agente compatible con Skills para gestionar infraestructura de Alibaba Cloud.
 ---
 
 # Instalar y usar el Skill de IaC Code
 
-El Skill de IaC Code está diseñado para agentes externos compatibles con Skills. Una vez instalado, un agente host
-puede delegar en IaC Code la planificación de arquitecturas cloud, la generación y revisión de plantillas ROS o
-Terraform, la estimación de costes, la selección de recursos, las operaciones con stacks y el despliegue. El Skill
-utiliza un puente escrito únicamente con la biblioteca estándar de Python para iniciar un Runtime A2A local y
-autenticado. No es necesario instalar IaC Code con pip y el host no debe recurrir a comandos headless.
+El Skill de IaC Code permite que un agente compatible delegue en IaC Code el diseño de arquitecturas cloud, la
+generación o revisión de plantillas ROS y Terraform, la estimación de costes, la selección de recursos, las operaciones
+con stacks ROS y los despliegues. El paquete incluye un Runtime de IaC Code verificado, por lo que no necesitas instalar
+IaC Code por separado.
 
-## Descargar el Skill
+## Descargar
 
-### Última versión estable
+[Descargar el último iac-code-skill.zip estable](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill/stable/iac-code-skill.zip)
 
-Descarga directamente la última versión estable:
+Esta URL fija siempre apunta a la versión estable más reciente. Los instaladores automáticos pueden leer
+[latest.json](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill/stable/latest.json)
+para obtener la versión, URL inmutable, tamaño y SHA-256, y verificar `skill.url` con `skill.sha256`.
 
-[Descargar iac-code-skill.zip](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill/stable/iac-code-skill.zip)
+## Instalar
 
-Esta URL fija siempre apunta al paquete del Skill publicado en el canal estable. Es adecuada para descargarlo desde el
-navegador o instalarlo manualmente, y no cambia cuando se publica una nueva versión.
+Comprueba que el agente admite Skills locales definidos por `SKILL.md`, que dispone de CPython 3.8 a 3.14 y que puede
+acceder a la descarga durante el primer uso. Utiliza `python3` en macOS/Linux y `py -3` en Windows. Los Runtimes
+oficiales admiten macOS Apple Silicon, Linux x86_64 y Windows x86_64; el sistema y la ABI se comprueban antes de la
+descarga.
 
-Los instaladores que necesiten conocer la versión, el tamaño del archivo, el resumen SHA-256 y la URL inmutable de la
-versión pueden consultar los metadatos del canal estable:
-
-[Ver latest.json](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill/stable/latest.json)
-
-El documento contiene:
-
-- `skillVersion`: versión estable actual del Skill;
-- `skill.url`: URL inmutable del archivo ZIP de esa versión;
-- `skill.sha256` y `skill.size`: valores para verificar la descarga;
-- `manifest.url`: manifiesto de publicación inmutable de esa versión.
-
-Para realizar una verificación estricta o una instalación automatizada reproducible, lee `latest.json`, descarga
-`skill.url` y verifica `skill.sha256`. No construyas por tu cuenta una URL a partir del número de versión.
-
-## Instalar el Skill
-
-### Requisitos previos
-
-- El agente host admite Skills locales definidos mediante `SKILL.md`.
-- CPython 3.8–3.14 está instalado. Usa `python3` en macOS/Linux y, preferiblemente, `py -3` en Windows.
-- El entorno puede acceder a las URL de OSS anteriores para descargar el ZIP del Skill y el Runtime necesario en el
-  primer uso.
-- La configuración del servicio de modelos está disponible. Para las tareas que consultan o gestionan recursos cloud,
-  también se necesita una identidad de Alibaba Cloud con privilegios mínimos.
-
-Las versiones oficiales del Skill Runtime son compatibles con estas plataformas:
-
-| Sistema operativo | Arquitectura |
-|---|---|
-| macOS | Apple Silicon (arm64) |
-| Linux | x86_64 |
-| Windows | x86_64 |
-
-Las versiones mínimas del sistema operativo y de glibc en Linux se definen en el manifiesto del Runtime fijado por el
-Skill. El puente comprueba la compatibilidad antes de descargar. En una plataforma no compatible, devuelve un error en
-lugar de descargar un artefacto destinado a otra plataforma o ABI.
-
-### Extraer en el directorio de Skills del agente host
-
-Extrae el ZIP directamente en la raíz de Skills del agente host. La ubicación exacta depende de cada producto;
-consulta la documentación del agente host. La estructura final debe ser:
+Extrae el ZIP en el directorio de Skills indicado por el agente. El archivo ya contiene `iac-code/`:
 
 ```text
 <Raíz de Skills del agente>/
 └── iac-code/
     ├── SKILL.md
-    ├── agents/
-    │   └── openai.yaml
-    └── scripts/
-        └── iac_code.py
+    ├── agents/openai.yaml
+    └── scripts/iac_code.py
 ```
 
-El ZIP ya contiene el directorio superior `iac-code/`. No añadas otro directorio con el mismo nombre. Después de
-instalar o actualizar, reinicia el agente host o abre una sesión nueva para que vuelva a detectar el Skill.
+Ubicaciones habituales:
 
-### Verificar la instalación
+- **Codex**: `~/.agents/skills/iac-code/` para todos los proyectos o
+  `<repositorio>/.agents/skills/iac-code/` para uno. Consulta la
+  [documentación de Codex Skills](https://developers.openai.com/codex/skills#where-codex-loads-local-skills).
+- **Claude Code**: `~/.claude/skills/iac-code/` para todos los proyectos o
+  `<repositorio>/.claude/skills/iac-code/` para uno. Consulta la
+  [documentación de Claude Code Skills](https://code.claude.com/docs/en/skills#where-skills-live).
 
-En el directorio `iac-code` extraído, ejecuta este comando en macOS o Linux:
+Reinicia el agente o abre una sesión nueva. Para comprobar el Runtime desde el directorio `iac-code`:
 
 ```bash
 python3 scripts/iac_code.py ensure-runtime
 ```
 
-En Windows PowerShell, ejecuta:
-
-```powershell
-py -3 scripts\iac_code.py ensure-runtime
-```
-
-En la primera ejecución, el comando descarga el Runtime para la plataforma actual, verifica su tamaño y su resumen
-SHA-256, y muestra un objeto JSON con `skillVersion`, `runtimeTag` y la ruta de instalación. Un Runtime verificado que
-ya esté en caché se reutiliza sin volver a descargarlo.
+En Windows PowerShell utiliza `py -3 scripts\iac_code.py ensure-runtime`. La primera ejecución descarga el Runtime
+adecuado y verifica su tamaño y SHA-256; las siguientes tareas reutilizan la copia local verificada.
 
 ## Configurar el modelo y la identidad de Alibaba Cloud
 
-El Skill Runtime utiliza el mismo directorio de configuración que los demás modos de IaC Code: `~/.iac-code/` de forma
-predeterminada. Si ya has configurado IaC Code mediante el REPL, la aplicación web o la aplicación Desktop, el Skill
-puede reutilizar esos ajustes. Define `IAC_CODE_CONFIG_DIR` para usar otro directorio de configuración.
+El Skill usa `~/.iac-code/` de forma predeterminada y reutiliza los ajustes del REPL, la aplicación Web o Desktop.
+Puedes elegir otro directorio con `IAC_CODE_CONFIG_DIR`. En entornos automatizados, inyecta la configuración del modelo
+y las credenciales de Alibaba Cloud desde un gestor de secretos. No las escribas en `SKILL.md`, prompts, archivos del
+proyecto ni el historial del shell. Prefiere credenciales temporales, roles RAM u OAuth con permisos mínimos. Consulta
+[Proveedores LLM](../configuration/llm-providers.md) y
+[Credenciales de Alibaba Cloud](../configuration/alibaba-cloud-credentials.md).
 
-En entornos automatizados, proporciona estas variables mediante una solución de gestión de secretos:
+## Elegir el modo de trabajo
 
-| Categoría | Variable de entorno | Descripción |
-|---|---|---|
-| Modelo | `IAC_CODE_PROVIDER` | Proveedor del modelo |
-| Modelo | `IAC_CODE_MODEL` | Nombre del modelo |
-| Modelo | `IAC_CODE_API_KEY` | Clave de API del servicio de modelos |
-| Modelo | `IAC_CODE_BASE_URL` | Sustitución opcional del endpoint compatible |
-| Alibaba Cloud | `ALIBABA_CLOUD_ACCESS_KEY_ID` | ID de AccessKey |
-| Alibaba Cloud | `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | Secreto de AccessKey |
-| Alibaba Cloud | `ALIBABA_CLOUD_SECURITY_TOKEN` | Token de seguridad para credenciales STS |
-| Alibaba Cloud | `ALIBABA_CLOUD_REGION_ID` | Región predeterminada |
+- El **modo normal** es el predeterminado para consultar o cambiar recursos, trabajar con plantillas, resolver
+  problemas y desplegar un objetivo claro.
+- El **modo Pipeline** se usa cuando lo solicitas o cuando necesitas un flujo guiado con arquitecturas candidatas,
+  comparación de costes, confirmación y despliegue.
 
-No incluyas nunca credenciales reales en `SKILL.md`, los prompts del agente host, los archivos del proyecto ni el
-historial del shell. Da preferencia a credenciales temporales, roles RAM u OAuth, y concede solo los permisos de API
-cloud necesarios para la tarea. Consulta [Proveedores de LLM](../configuration/llm-providers.md) y
-[Credenciales de Alibaba Cloud](../configuration/alibaba-cloud-credentials.md) para ver las instrucciones completas.
+Normalmente basta con describir el resultado. Menciona Pipeline solo si quieres comparar soluciones.
 
 ## Primer uso
 
-Después de instalar y configurar el Skill, abre una sesión nueva en el agente host y describe directamente una tarea
-de infraestructura de Alibaba Cloud. Por ejemplo:
+Abre una sesión nueva en el agente host y escribe, por ejemplo:
 
 ```text
-Usa iac-code para revisar la plantilla ROS de este proyecto. Enumera los riesgos de seguridad y los cambios recomendados sin modificar el archivo.
+Usa iac-code para revisar la plantilla ROS de este proyecto. Enumera los riesgos de seguridad y las mejoras sin modificar el archivo.
 ```
 
-Los hosts compatibles con una sintaxis explícita de Skills pueden seleccionar el Skill mediante `$iac-code`. El
-agente host lee `SKILL.md`, escribe la solicitud completa en un archivo UTF-8 del espacio de trabajo y utiliza el
-puente para crear y seguir una única tarea. El usuario no tiene que iniciar manualmente un servidor A2A.
+Selecciona el Skill explícitamente con `$iac-code` en Codex o `/iac-code` en Claude Code. La comprobación de configuración y el
+inicio del Runtime son automáticos; no necesitas iniciar un A2A Server manualmente. IaC Code puede pausar para pedirte:
 
-Flujo previsto:
+- aprobar o rechazar una operación (`permission`);
+- responder una pregunta (`ask_user_question`);
+- elegir una arquitectura (`candidate_selection`);
+- revisar la solución, precio y parámetros, y confirmar, ajustar, volver a seleccionar o cancelar
+  (`deployment_confirmation`).
 
-1. El puente comprueba si la configuración del modelo y de Alibaba Cloud está lista.
-2. En el primer uso, descarga y verifica el Runtime de IaC Code fijado por el Skill.
-3. El Runtime escucha únicamente en un puerto aleatorio de `127.0.0.1` y genera un token Bearer específico del proceso.
-4. El agente host muestra el progreso, las preguntas, los planes candidatos y las solicitudes de permisos devueltos
-   por IaC Code.
-5. Cuando termina la tarea, el agente host devuelve el resultado final y los archivos generados en el espacio de
-   trabajo.
+Revisa los recursos, región, impacto y precio antes de responder. La petición inicial de desplegar no aprueba por
+adelantado la confirmación posterior. Al terminar, continúa en la misma sesión para conservar el contexto. El progreso
+y las preguntas están disponibles en inglés, chino simplificado, español, francés, alemán, japonés y portugués.
 
 ## Actualizar y desinstalar
 
-Para realizar una actualización manual, vuelve a descargar `skill/stable/iac-code-skill.zip` y sustituye todo el
-directorio `iac-code/` de la raíz de Skills del host. Un actualizador automático puede comparar el valor
-`skillVersion` de `latest.json` y, después, descargar y verificar el paquete nuevo mediante su URL inmutable y su
-resumen SHA-256. Cada Skill oficial está fijado a un Runtime verificado. No sustituyas únicamente
-`scripts/iac_code.py` ni modifiques manualmente la URL o el resumen del Runtime.
-
-Para desinstalarlo, elimina `iac-code/` de la raíz de Skills del agente host. La caché del Runtime no se elimina junto
-con el directorio del Skill. Ejecuta `cache list` y `cache clean` solo si el usuario solicita expresamente eliminarla.
-
-## Caché del Runtime
-
-El Runtime descargado durante el primer uso se almacena en
-`<IAC_CODE_CONFIG_DIR o ~/.iac-code>/skill-runtime/<runtime-tag>/<target>/` y se reutiliza automáticamente. Durante el
-uso normal no es necesario gestionar este directorio. Para consultar el espacio en disco utilizado o eliminar
-versiones antiguas, usa:
-
-- `python3 scripts/iac_code.py cache list` — enumera los Runtimes instalados y los paquetes candidatos;
-- `python3 scripts/iac_code.py cache clean [--runtime-tag <tag>] [--candidates] --confirm` — elimina cachés del Runtime
-  o paquetes candidatos; `--confirm` es obligatorio.
-
-El Runtime actual y cualquier Runtime utilizado por un proceso activo están protegidos frente a la limpieza. El
-formato del paquete y las restricciones del Runtime se definen en `skill-runtime/skill-package-contract.json` dentro
-del repositorio de código fuente; los usuarios no necesitan modificar este archivo.
+Para actualizar, descarga de nuevo el ZIP estable, reemplaza todo `iac-code/` y reinicia el agente. No sustituyas solo
+el puente ni edites la URL o el hash del Runtime. Para desinstalar, elimina `iac-code/`. Los Runtimes quedan en caché;
+si también quieres borrarlos, consulta `cache list` y después ejecuta `cache clean ... --confirm`.
 
 ## Solución de problemas
 
-### La configuración está incompleta
+- `llm_not_configured`: completa la configuración del modelo.
+- `cloud_credentials_not_configured`: configura las credenciales que requiere Pipeline. El modo normal puede continuar
+  tareas sin API cloud mostrando una advertencia.
+- `incompatible_host`: ejecuta `ensure-runtime` y comprueba Python, sistema, arquitectura, red y proxy. Actualiza o
+  cambia el host en vez de omitir la comprobación.
+- Tarea en pausa: está esperando una respuesta, permiso, selección o confirmación. Si la sesión sigue disponible tras
+  una interrupción, pide continuar la misma tarea.
 
-El Skill comprueba la configuración antes de crear una tarea, pero nunca lee ni devuelve valores secretos:
-
-| Situación | Resultado |
-|---|---|
-| El proveedor de LLM o la clave de API están incompletos | Devuelve `llm_not_configured` y no crea la tarea |
-| Las credenciales de Alibaba Cloud están incompletas para el Pipeline de venta | Devuelve `cloud_credentials_not_configured` y no crea la tarea |
-| Las credenciales de Alibaba Cloud están incompletas en el modo normal | Las tareas que no llaman a API cloud pueden continuar con una advertencia previa |
-
-### Por qué se pausa la ejecución
-
-IaC Code se pausa cuando necesita un permiso, información adicional o la selección de un plan. El agente host muestra
-directamente la solicitud:
-
-- una solicitud de permiso para una herramienta o un despliegue (`permission`);
-- una pregunta de opción múltiple o una solicitud de información (`ask_user_question`);
-- la selección de un plan candidato del Pipeline (`candidate_selection`).
-
-Antes de confirmar, revisa el recurso de destino, la región, el impacto previsto y el precio. El agente host no puede
-anular una denegación de IaC Code. En el protocolo, una autorización para una sola vez se representa como `allow_once`.
-
-> **Nota sobre la integración del agente host**
->
-> Cuando un resultado del puente contiene `inputRequired`, el agente host debe mostrar la solicitud actual y esperar
-> una respuesta. `boundaryReached` indica un límite de presentación o interacción, no que la tarea haya finalizado; el
-> host debe mostrar la actualización y continuar siguiendo la misma tarea.
+Usa `python3 scripts/iac_code.py cache list` para consultar la caché,
+`cache clean --runtime-tag <tag> --confirm` para eliminar una versión anterior y
+`cache clean --candidates --confirm` para paquetes candidatos. El Runtime actual o activo está protegido.
 
 ## Seguridad
 
-- El Runtime escucha únicamente en un puerto aleatorio de `127.0.0.1`. Cada inicio genera un token Bearer nuevo y cada
-  solicitud del puente incluye ese token.
-- El puente conserva los artefactos y resultados en el espacio de trabajo de la tarea. Los resultados se escriben en
-  `.iac-code-skill-results/`.
-- Los campos que se muestran durante las comprobaciones previas y las solicitudes de permisos se depuran; no contienen
-  secretos ni credenciales.
+- El Runtime solo escucha en un puerto aleatorio de `127.0.0.1` y usa un Bearer token nuevo por proceso.
+- Los resultados permanecen en el workspace, bajo `.iac-code-skill-results/` cuando corresponde.
+- Los estados de preparación y resúmenes de permisos no contienen valores de credenciales.
 
 ## Documentación relacionada
 
-- [Descripción general del protocolo A2A](./overview.md)
-- [Referencia del protocolo A2A](./protocol-reference.md)
-- [Proveedores de LLM](../configuration/llm-providers.md)
-- [Credenciales de Alibaba Cloud](../configuration/alibaba-cloud-credentials.md)
+- [Visión general de los Skills oficiales de IaC Code](./skill-overview.md)
+- [Referencia de integración del Skill de IaC Code para hosts](./skill-host-integration.md)
+- [Visión general de A2A](./overview.md)
 - [Configuración del Runtime](../configuration/runtime-configuration.md)

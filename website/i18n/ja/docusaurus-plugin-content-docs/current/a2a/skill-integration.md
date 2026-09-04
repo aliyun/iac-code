@@ -1,175 +1,116 @@
 ---
-sidebar_position: 7
+sidebar_position: 2
 title: IaC Code Skill のインストールと使用
-description: IaC Code Skill をダウンロードしてインストールし、外部エージェントから Alibaba Cloud インフラストラクチャを管理します。
+description: Skill 対応エージェントに IaC Code を追加し、Alibaba Cloud インフラを管理します。
 ---
 
 # IaC Code Skill のインストールと使用
 
-IaC Code Skill は、Skill に対応する外部エージェント向けです。インストールすると、ホストエージェントはクラウドアーキテクチャの設計、ROS または Terraform テンプレートの生成とレビュー、コスト見積もり、リソース選択、スタック操作、デプロイを IaC Code に委任できます。Skill は Python 標準ライブラリだけで構成されたブリッジを使い、ローカルで認証された A2A Runtime を起動します。IaC Code を pip でインストールする必要はなく、Headless コマンドにフォールバックすることもありません。
+IaC Code Skill を使うと、対応エージェントからクラウド構成の設計、ROS/Terraform テンプレートの生成・
+レビュー、料金見積もり、既存リソースの選択、ROS スタック操作、デプロイを IaC Code に委任できます。
+検証済み Runtime が含まれるため、IaC Code を別途インストールする必要はありません。
 
-## Skill のダウンロード
+## ダウンロード
 
-### 最新の安定版
+[最新の iac-code-skill.zip をダウンロード](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill/stable/iac-code-skill.zip)
 
-最新の安定版を直接ダウンロードします。
+この固定 URL は常に最新の安定版を指します。自動インストーラーは
+[latest.json](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill/stable/latest.json)
+からバージョン、不変 URL、サイズ、SHA-256 を取得し、`skill.url` と `skill.sha256` を使って検証できます。
 
-[iac-code-skill.zip をダウンロード](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill/stable/iac-code-skill.zip)
+## インストール
 
-この固定 URL は、stable チャンネルに昇格された Skill パッケージを常に指します。ブラウザーからのダウンロードや手動インストールに利用でき、新しいバージョンが公開されても URL は変わりません。
+エージェントが `SKILL.md` 形式のローカル Skill に対応し、CPython 3.8～3.14 が使えることを確認します。
+macOS/Linux は `python3`、Windows は `py -3` を使います。公式 Runtime は Apple Silicon macOS、
+Linux x86_64、Windows x86_64 に対応し、ダウンロード前に OS と ABI を検証します。
 
-バージョン、ファイルサイズ、SHA-256、変更されないバージョン別 URL が必要なインストーラーは、stable チャンネルのメタデータを参照できます。
-
-[latest.json を表示](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill/stable/latest.json)
-
-このファイルには次の情報が含まれます。
-
-- `skillVersion`：現在の安定版 Skill のバージョン。
-- `skill.url`：そのバージョンに固定された ZIP の URL。
-- `skill.sha256` と `skill.size`：ダウンロードの検証に使う値。
-- `manifest.url`：そのバージョンに固定されたリリースマニフェスト。
-
-厳密な検証や再現可能な自動インストールが必要な場合は、`latest.json` を読み取り、`skill.url` からダウンロードして `skill.sha256` を検証してください。バージョン URL を独自に組み立てないでください。
-
-## Skill のインストール
-
-### 前提条件
-
-- ホストエージェントが `SKILL.md` で定義されたローカル Skill に対応していること。
-- CPython 3.8～3.14 がインストールされていること。macOS/Linux では `python3`、Windows では `py -3` の使用を推奨します。
-- 上記 OSS URL にアクセスでき、Skill ZIP と初回実行時に必要な Runtime をダウンロードできること。
-- モデルサービスが設定済みであること。クラウドリソースを照会または管理する場合は、最小権限の Alibaba Cloud ID も必要です。
-
-公式 Skill Runtime は次のプラットフォームをサポートします。
-
-| OS | アーキテクチャ |
-|---|---|
-| macOS | Apple Silicon（arm64） |
-| Linux | x86_64 |
-| Windows | x86_64 |
-
-最低 OS バージョンと Linux の glibc バージョンは、Skill に固定された Runtime manifest で定義されます。ブリッジはダウンロード前に互換性を確認します。未対応の環境では、別のプラットフォームや ABI の成果物をダウンロードせず、エラーを返します。
-
-### ホストエージェントの Skill ディレクトリに展開する
-
-ZIP をホストエージェントの Skill ルートへ直接展開します。Skill ルートは製品ごとに異なるため、ホスト製品のドキュメントを参照してください。最終的な構成は次のようになります。
+ZIP をエージェント指定の Skill ディレクトリに展開します。アーカイブには最上位の `iac-code/` が含まれます。
 
 ```text
-<Agent Skill ルート>/
+<Agent Skill root>/
 └── iac-code/
     ├── SKILL.md
-    ├── agents/
-    │   └── openai.yaml
-    └── scripts/
-        └── iac_code.py
+    ├── agents/openai.yaml
+    └── scripts/iac_code.py
 ```
 
-ZIP には最上位の `iac-code/` ディレクトリがすでに含まれています。同名のディレクトリを重ねて作成しないでください。インストールまたは更新後、ホストエージェントを再起動するか新しいセッションを開き、Skill を再検出させます。
+主なホストの配置先:
 
-### インストールを確認する
+- **Codex**: 全プロジェクトでは `~/.agents/skills/iac-code/`、単一リポジトリでは
+  `<repository>/.agents/skills/iac-code/`。詳細は [Codex Skills ドキュメント](https://developers.openai.com/codex/skills#where-codex-loads-local-skills)を参照してください。
+- **Claude Code**: 全プロジェクトでは `~/.claude/skills/iac-code/`、単一リポジトリでは
+  `<repository>/.claude/skills/iac-code/`。詳細は [Claude Code Skills ドキュメント](https://code.claude.com/docs/en/skills#where-skills-live)を参照してください。
 
-展開した `iac-code` ディレクトリで、macOS または Linux では次を実行します。
+エージェントを再起動するか新しいセッションを開きます。事前確認は展開先で実行します。
 
 ```bash
 python3 scripts/iac_code.py ensure-runtime
 ```
 
-Windows PowerShell では次を実行します。
-
-```powershell
-py -3 scripts\iac_code.py ensure-runtime
-```
-
-初回実行時に現在のプラットフォーム用 Runtime をダウンロードし、サイズと SHA-256 を検証したうえで、`skillVersion`、`runtimeTag`、インストール先を含む JSON を出力します。検証済みの Runtime がキャッシュにあれば再利用し、再ダウンロードしません。
+Windows PowerShell では `py -3 scripts\iac_code.py ensure-runtime` を使います。初回はプラットフォーム向け
+Runtime のサイズと SHA-256 を検証し、以後は検証済みコピーを再利用します。
 
 ## モデルと Alibaba Cloud ID の設定
 
-Skill Runtime は、他の IaC Code 実行モードと同じ設定ディレクトリを使用します。既定は `~/.iac-code/` です。REPL、Web、Desktop のいずれかで IaC Code を設定済みであれば、その設定を再利用できます。別の設定ディレクトリを使う場合は `IAC_CODE_CONFIG_DIR` を指定します。
+Skill は既定で `~/.iac-code/` を使い、REPL、Web、Desktop アプリの既存設定を再利用します。別の場所は
+`IAC_CODE_CONFIG_DIR` で指定できます。自動化では認証情報をシークレット管理から注入し、`SKILL.md`、
+プロンプト、プロジェクト、シェル履歴に書かないでください。一時認証情報、RAM ロール、OAuth と最小権限を
+推奨します。詳細は [LLM プロバイダー](../configuration/llm-providers.md)と
+[Alibaba Cloud 認証情報](../configuration/alibaba-cloud-credentials.md)を参照してください。
 
-自動化環境では、Secret 管理機能を使って次の環境変数を提供します。
+## 動作モード
 
-| 分類 | 環境変数 | 説明 |
-|---|---|---|
-| モデル | `IAC_CODE_PROVIDER` | モデルプロバイダー |
-| モデル | `IAC_CODE_MODEL` | モデル名 |
-| モデル | `IAC_CODE_API_KEY` | モデルサービスの API Key |
-| モデル | `IAC_CODE_BASE_URL` | 任意の互換エンドポイント上書き |
-| Alibaba Cloud | `ALIBABA_CLOUD_ACCESS_KEY_ID` | AccessKey ID |
-| Alibaba Cloud | `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | AccessKey Secret |
-| Alibaba Cloud | `ALIBABA_CLOUD_SECURITY_TOKEN` | STS 認証情報の Security Token |
-| Alibaba Cloud | `ALIBABA_CLOUD_REGION_ID` | 既定のリージョン |
+- **通常モード**は、リソース照会・変更、テンプレート作業、トラブルシューティング、対象が明確なデプロイの既定です。
+- **Pipeline モード**は、明示的に指定した場合、または候補構成、料金比較、確認、デプロイまでの案内が必要な場合に使います。
 
-実際の認証情報を `SKILL.md`、ホストエージェントのプロンプト、プロジェクトファイル、シェル履歴に記録しないでください。一時認証情報、RAM Role、OAuth を優先し、タスクに必要なクラウド API 権限だけを付与します。詳しくは [LLM プロバイダー](../configuration/llm-providers.md) と [Alibaba Cloud 認証情報](../configuration/alibaba-cloud-credentials.md)を参照してください。
+通常は目的をそのまま記述し、比較フローが必要な場合だけ Pipeline を指定します。
 
-## 最初の利用
+## 最初のタスク
 
-インストールと設定が完了したら、ホストエージェントで新しいセッションを開き、Alibaba Cloud インフラストラクチャのタスクをそのまま記述します。例：
+ホストエージェントの新しいセッションで、例えば次のように依頼します。
 
 ```text
-iac-code を使用して、このプロジェクトの ROS テンプレートをレビューしてください。ファイルは変更せず、セキュリティリスクと修正案を一覧にしてください。
+iac-code を使って、このプロジェクトの ROS テンプレートをレビューしてください。ファイルは変更せず、セキュリティリスクと改善案を示してください。
 ```
 
-明示的な Skill 構文に対応するホストでは、`$iac-code` でこの Skill を選択できます。ホストエージェントは `SKILL.md` を読み取り、完全なリクエストをワークスペース内の UTF-8 ファイルに書き込み、ブリッジを使って同じタスクを作成して追跡します。ユーザーが A2A Server を手動で起動する必要はありません。
+Codex では `$iac-code`、Claude Code では `/iac-code` で Skill を明示選択できます。設定確認と Runtime 起動は自動で行われ、A2A Server
+を手動起動する必要はありません。IaC Code は次の入力を待って一時停止することがあります。
 
-想定される流れ：
+- 操作の許可・拒否（`permission`）
+- 質問への回答（`ask_user_question`）
+- 候補構成の選択（`candidate_selection`）
+- 最終案、料金、パラメーターを確認して確定、調整、再選択、キャンセル（`deployment_confirmation`）
 
-1. ブリッジがモデルと Alibaba Cloud の設定状態を確認します。
-2. 初回実行時に、Skill に固定された IaC Code Runtime をダウンロードして検証します。
-3. Runtime は `127.0.0.1` のランダムなポートだけで待ち受け、プロセス固有の Bearer Token を生成します。
-4. ホストエージェントが、IaC Code から返された進捗、質問、候補プラン、権限リクエストを表示します。
-5. タスクが完了すると、ホストエージェントが最終結果とワークスペースで生成されたファイルを返します。
+対象、リージョン、影響、見積額を確認して回答してください。最初のデプロイ依頼は後の確認を事前承認しません。
+完了後は同じセッションで会話を続けられます。進捗と質問は英語、簡体字中国語、スペイン語、フランス語、
+ドイツ語、日本語、ポルトガル語に対応します。
 
 ## 更新とアンインストール
 
-手動で更新する場合は `skill/stable/iac-code-skill.zip` を再度ダウンロードし、ホストの Skill ルートにある `iac-code/` ディレクトリ全体を置き換えます。自動更新では `latest.json` の `skillVersion` を比較し、変更されない URL と SHA-256 を使って新しいパッケージをダウンロード、検証できます。公式 Skill はそれぞれ検証済み Runtime に固定されています。`scripts/iac_code.py` だけを置き換えたり、Runtime URL やダイジェストを手動で変更したりしないでください。
-
-アンインストールするには、ホストエージェントの Skill ルートから `iac-code/` を削除します。Runtime キャッシュは Skill ディレクトリと一緒には削除されません。ユーザーが明示的に削除を求めた場合にだけ `cache list` と `cache clean` を実行してください。
-
-## Runtime キャッシュ
-
-初回利用時にダウンロードされた Runtime は `<IAC_CODE_CONFIG_DIR または ~/.iac-code>/skill-runtime/<runtime-tag>/<target>/` にキャッシュされ、その後は自動的に再利用されます。通常はこのディレクトリを管理する必要はありません。ディスク使用量の確認や過去バージョンの削除には次を使用します。
-
-- `python3 scripts/iac_code.py cache list` — インストール済み Runtime と Candidate パッケージを表示します。
-- `python3 scripts/iac_code.py cache clean [--runtime-tag <tag>] [--candidates] --confirm` — Runtime キャッシュまたは Candidate パッケージを削除します。`--confirm` が必須です。
-
-現在使用中の Runtime と実行中プロセスが使用している Runtime は削除から保護されます。パッケージ形式と Runtime の制約は、ソースリポジトリの `skill-runtime/skill-package-contract.json` で定義されます。通常のユーザーがこのファイルを操作する必要はありません。
+更新では安定版 ZIP を再ダウンロードし、`iac-code/` 全体を置き換えてホストを再起動します。ブリッジだけの
+差し替えや Runtime URL の編集は行わないでください。アンインストールでは `iac-code/` を削除します。
+Runtime も削除する場合は `cache list` を確認してから `cache clean ... --confirm` を実行します。
 
 ## トラブルシューティング
 
-### 設定が不完全と表示される
+- `llm_not_configured`: モデル設定を完了してください。
+- `cloud_credentials_not_configured`: Pipeline に必要な Alibaba Cloud 認証情報を設定してください。通常モードではクラウド API 不要の作業を警告付きで続行できます。
+- `incompatible_host`: `ensure-runtime` で Python、OS、アーキテクチャ、ネットワーク、プロキシを確認し、対応ホストへ更新または移行してください。
+- タスクの一時停止: 質問、権限、候補、デプロイ確認を待つ正常な状態です。中断後もセッションが残る場合は同じタスクを続行します。
 
-Skill はタスク作成前に設定を確認しますが、Secret の値を読み取ったり返したりしません。
-
-| 状況 | 結果 |
-|---|---|
-| LLM プロバイダーまたは API Key が不完全 | `llm_not_configured` を返し、タスクを作成しません |
-| selling Pipeline で Alibaba Cloud 認証情報が不完全 | `cloud_credentials_not_configured` を返し、タスクを作成しません |
-| normal モードで Alibaba Cloud 認証情報が不完全 | クラウド API を呼び出さないタスクは、事前確認の警告付きで続行できる場合があります |
-
-### 実行中に一時停止する理由
-
-IaC Code は権限の確認、追加情報、プラン選択が必要になると一時停止し、ホストエージェントが要求をユーザーに表示します。
-
-- ツールまたはデプロイの権限リクエスト（`permission`）。
-- 選択式の質問または追加情報の要求（`ask_user_question`）。
-- Pipeline の候補プラン選択（`candidate_selection`）。
-
-確認前に、対象リソース、リージョン、想定される影響、価格を確認してください。ホストエージェントは IaC Code の拒否を上書きできません。1 回限りの許可はプロトコル上 `allow_once` として表されます。
-
-> **ホストエージェントの統合に関する注意**
->
-> ブリッジ結果に `inputRequired` が含まれる場合、ホストエージェントは現在の要求を表示し、応答を待つ必要があります。`boundaryReached` は表示または対話の境界に到達したことを示すだけで、タスクの完了を意味しません。ホストは更新を表示して、同じタスクの追跡を続けます。
+Runtime の確認には `python3 scripts/iac_code.py cache list`、過去版の削除には
+`python3 scripts/iac_code.py cache clean --runtime-tag <tag> --confirm`、Candidate の削除には
+`python3 scripts/iac_code.py cache clean --candidates --confirm` を使います。現在・実行中の Runtime は保護されます。
 
 ## セキュリティ
 
-- Runtime は `127.0.0.1` のランダムなポートだけで待ち受けます。起動ごとに新しい Bearer Token を生成し、すべてのブリッジリクエストに付与します。
-- ブリッジは成果物と結果をジョブのワークスペース内に保持します。結果は `.iac-code-skill-results/` に書き込まれます。
-- 事前確認と権限表示のフィールドはサニタイズされ、Secret や認証情報は表示されません。
+- Runtime はランダムな `127.0.0.1` ポートとプロセスごとの Bearer token を使います。
+- 成果物はワークスペース（必要に応じて `.iac-code-skill-results/`）に保存されます。
+- 準備状態と権限の表示には認証情報の値を含みません。
 
 ## 関連ドキュメント
 
+- [IaC Code 公式 Skills の概要](./skill-overview.md)
+- [IaC Code Skill ホスト統合リファレンス](./skill-host-integration.md)
 - [A2A プロトコル概要](./overview.md)
-- [A2A プロトコルリファレンス](./protocol-reference.md)
-- [LLM プロバイダー](../configuration/llm-providers.md)
-- [Alibaba Cloud 認証情報](../configuration/alibaba-cloud-credentials.md)
 - [Runtime 設定](../configuration/runtime-configuration.md)

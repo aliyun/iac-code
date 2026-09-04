@@ -98,6 +98,10 @@ iac-code web
   <img src="../website/static/img/screenshots/iac-code-web-en.jpg" alt="IaC Code Web アプリ" width="100%">
 </p>
 
+### Agent Skill
+
+IaC Code を対応エージェントに追加すると、会話からクラウド構成の設計、ROS/Terraform テンプレート、料金見積もり、スタック操作、Alibaba Cloud リソースのデプロイを行えます。[最新の安定版 Skill](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill/stable/iac-code-skill.zip)をダウンロードするか、[IaC Code 公式 Skills の概要](https://aliyun.github.io/iac-code/ja/docs/a2a/skill-overview)で配布方法を比較してください。
+
 ## コントリビュート
 
 [uv](https://docs.astral.sh/uv/getting-started/installation/) をインストールしてから：

@@ -98,6 +98,10 @@ iac-code web
   <img src="../website/static/img/screenshots/iac-code-web-cn.jpg" alt="IaC Code Web 应用" width="100%">
 </p>
 
+### Agent Skill
+
+将 IaC Code 添加到兼容的 Agent，即可在对话中规划云架构、处理 ROS 或 Terraform 模板、估算费用、操作资源栈并部署阿里云资源。下载[最新稳定版 Skill](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill/stable/iac-code-skill.zip)，或通过 [IaC Code 官方 Skills 概览](https://aliyun.github.io/iac-code/zh-Hans/docs/a2a/skill-overview)对比不同发行版。
+
 ## 贡献
 
 安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)，然后：
