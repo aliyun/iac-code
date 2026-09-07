@@ -91,7 +91,7 @@ Resources:
   Instance:
     Type: ALIYUN::ECS::Instance
     Properties:
-      ImageFamily: acs:alibaba_cloud_linux_3_2104_lts_x64
+      ImageFamily: acs:ubuntu_24_04_x64
       InstanceType:
         Ref: InstanceType
       SecurityGroupId:
@@ -178,16 +178,133 @@ Resources:
             exec 3>&1
             exec >>"$LOG" 2>&1
 
-            dnf install -y python3.11 python3.11-pip
+            if ! command -v curl >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import yaml' >/dev/null 2>&1; then
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get -o Acquire::Retries=3 update
+              apt-get -o Acquire::Retries=3 -o DPkg::Lock::Timeout=120 install -y --no-install-recommends ca-certificates curl jq python3-yaml
+              unset DEBIAN_FRONTEND
+            fi
             install -d -m 0700 -o root -g root /root/.iac-code
-            python3.11 -m venv /opt/iac-code/venv
-            /opt/iac-code/venv/bin/pip install --upgrade --index-url https://mirrors.aliyun.com/pypi/simple/ "iac-code[http]"
+
+            RUNTIME_PUBLIC_ROOT=https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code
+            RUNTIME_CHANNEL_URL="$RUNTIME_PUBLIC_ROOT/skill/stable/latest.json"
+            RUNTIME_TARGET=linux-x86_64-gnu-cp312
+            RUNTIME_ROOT=/opt/iac-code
+            RUNTIME_METADATA_DIR=$(mktemp -d /tmp/iac-code-runtime-metadata.XXXXXX)
+            RUNTIME_ARCHIVE=
+            RUNTIME_STAGING=
+            cleanup_runtime() {
+              [ -z "$RUNTIME_ARCHIVE" ] || rm -f "$RUNTIME_ARCHIVE"
+              [ -z "$RUNTIME_STAGING" ] || rm -rf "$RUNTIME_STAGING"
+              rm -rf "$RUNTIME_METADATA_DIR"
+            }
+            trap cleanup_runtime EXIT
+            download_runtime_file() {
+              curl --fail --location --retry 3 --retry-all-errors --connect-timeout 10 --output "$2" "$1"
+            }
+
+            CHANNEL_FILE="$RUNTIME_METADATA_DIR/channel.json"
+            download_runtime_file "$RUNTIME_CHANNEL_URL" "$CHANNEL_FILE"
+            jq --exit-status '
+              .schemaVersion == 1 and
+              .kind == "iac-code-skill-channel" and
+              .channel == "stable" and
+              (.manifest.url | type == "string") and
+              (.manifest.sha256 | test("^[0-9a-f]{64}$"))
+            ' "$CHANNEL_FILE" >/dev/null
+            SKILL_MANIFEST_URL=$(jq --exit-status --raw-output '.manifest.url' "$CHANNEL_FILE")
+            SKILL_MANIFEST_SHA256=$(jq --exit-status --raw-output '.manifest.sha256' "$CHANNEL_FILE")
+            case "$SKILL_MANIFEST_URL" in
+              "$RUNTIME_PUBLIC_ROOT"/skill/releases/*/skill-release-manifest.json) ;;
+              *) exit 1 ;;
+            esac
+
+            SKILL_MANIFEST_FILE="$RUNTIME_METADATA_DIR/skill-manifest.json"
+            download_runtime_file "$SKILL_MANIFEST_URL" "$SKILL_MANIFEST_FILE"
+            printf '%s  %s\n' "$SKILL_MANIFEST_SHA256" "$SKILL_MANIFEST_FILE" | sha256sum --check --status
+            jq --exit-status '
+              .schemaVersion == 1 and
+              .kind == "iac-code-skill-release" and
+              (.runtimeTag | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) and
+              (.runtimeManifest.url | type == "string") and
+              (.runtimeManifest.sha256 | test("^[0-9a-f]{64}$")) and
+              (.runtimeManifest.size | type == "number" and . > 0 and floor == .)
+            ' "$SKILL_MANIFEST_FILE" >/dev/null
+            RUNTIME_MANIFEST_URL=$(jq --exit-status --raw-output '.runtimeManifest.url' "$SKILL_MANIFEST_FILE")
+            RUNTIME_MANIFEST_SHA256=$(jq --exit-status --raw-output '.runtimeManifest.sha256' "$SKILL_MANIFEST_FILE")
+            RUNTIME_MANIFEST_SIZE=$(jq --exit-status --raw-output '.runtimeManifest.size' "$SKILL_MANIFEST_FILE")
+            SKILL_RUNTIME_VERSION=$(jq --exit-status --raw-output '.runtimeTag' "$SKILL_MANIFEST_FILE")
+            case "$RUNTIME_MANIFEST_URL" in
+              "$RUNTIME_PUBLIC_ROOT"/skill-runtime/releases/v*/runtime-manifest.json) ;;
+              *) exit 1 ;;
+            esac
+
+            RUNTIME_MANIFEST_FILE="$RUNTIME_METADATA_DIR/runtime-manifest.json"
+            download_runtime_file "$RUNTIME_MANIFEST_URL" "$RUNTIME_MANIFEST_FILE"
+            [ "$(stat -c '%s' "$RUNTIME_MANIFEST_FILE")" = "$RUNTIME_MANIFEST_SIZE" ]
+            printf '%s  %s\n' "$RUNTIME_MANIFEST_SHA256" "$RUNTIME_MANIFEST_FILE" | sha256sum --check --status
+            jq --exit-status --arg target "$RUNTIME_TARGET" '
+              .schemaVersion == 1 and
+              .kind == "iac-code-skill-runtime-release" and
+              (.runtimeTag | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) and
+              (.iacCodeVersion | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and
+              ([.artifacts[] | select(.target == $target)] | length == 1) and
+              ([.artifacts[] | select(.target == $target)][0] |
+                .os == "linux" and
+                .arch == "x86_64" and
+                .nativeAbi == "gnu" and
+                .runtimePython == "cp312" and
+                .archive == "tar.gz" and
+                .executable == "iac-code-runtime/iac-code" and
+                .compatibility.libc.name == "glibc" and
+                (.compatibility.libc.minVersion | type == "string") and
+                (.url | type == "string") and
+                (.sha256 | test("^[0-9a-f]{64}$")) and
+                (.size | type == "number" and . > 0 and floor == .))
+            ' "$RUNTIME_MANIFEST_FILE" >/dev/null
+            RUNTIME_VERSION=$(jq --exit-status --raw-output '.runtimeTag' "$RUNTIME_MANIFEST_FILE")
+            IAC_CODE_VERSION=$(jq --exit-status --raw-output '.iacCodeVersion' "$RUNTIME_MANIFEST_FILE")
+            [ "$RUNTIME_VERSION" = "$SKILL_RUNTIME_VERSION" ]
+            [ "$RUNTIME_VERSION" = "v$IAC_CODE_VERSION" ]
+            [ "$RUNTIME_MANIFEST_URL" = "$RUNTIME_PUBLIC_ROOT/skill-runtime/releases/$RUNTIME_VERSION/runtime-manifest.json" ]
+            RUNTIME_URL=$(jq --exit-status --raw-output --arg target "$RUNTIME_TARGET" '.artifacts[] | select(.target == $target) | .url' "$RUNTIME_MANIFEST_FILE")
+            RUNTIME_SHA256=$(jq --exit-status --raw-output --arg target "$RUNTIME_TARGET" '.artifacts[] | select(.target == $target) | .sha256' "$RUNTIME_MANIFEST_FILE")
+            RUNTIME_SIZE=$(jq --exit-status --raw-output --arg target "$RUNTIME_TARGET" '.artifacts[] | select(.target == $target) | .size' "$RUNTIME_MANIFEST_FILE")
+            RUNTIME_MIN_GLIBC=$(jq --exit-status --raw-output --arg target "$RUNTIME_TARGET" '.artifacts[] | select(.target == $target) | .compatibility.libc.minVersion' "$RUNTIME_MANIFEST_FILE")
+            [ "$RUNTIME_URL" = "$RUNTIME_PUBLIC_ROOT/skill-runtime/releases/$RUNTIME_VERSION/$RUNTIME_TARGET.tar.gz" ]
+            HOST_GLIBC=$(ldd --version 2>&1 | head -n 1 | grep --extended-regexp --only-matching '[0-9]+\.[0-9]+' | tail -n 1)
+            dpkg --compare-versions "$HOST_GLIBC" ge "$RUNTIME_MIN_GLIBC"
+
+            RUNTIME_DIR="$RUNTIME_ROOT/releases/$RUNTIME_VERSION"
+            install -d -m 0755 "$RUNTIME_ROOT/releases"
+            if [ ! -x "$RUNTIME_DIR/iac-code" ] || [ "$(cat "$RUNTIME_DIR/.artifact-sha256" 2>/dev/null || true)" != "$RUNTIME_SHA256" ]; then
+              RUNTIME_ARCHIVE=$(mktemp /tmp/iac-code-runtime.XXXXXX.tar.gz)
+              RUNTIME_STAGING=$(mktemp -d "$RUNTIME_ROOT/releases/.runtime.XXXXXX")
+              download_runtime_file "$RUNTIME_URL" "$RUNTIME_ARCHIVE"
+              [ "$(stat -c '%s' "$RUNTIME_ARCHIVE")" = "$RUNTIME_SIZE" ]
+              printf '%s  %s\n' "$RUNTIME_SHA256" "$RUNTIME_ARCHIVE" | sha256sum --check --status
+              tar --extract --gzip --file "$RUNTIME_ARCHIVE" --directory "$RUNTIME_STAGING" --no-same-owner
+              test -x "$RUNTIME_STAGING/iac-code-runtime/iac-code"
+              "$RUNTIME_STAGING/iac-code-runtime/iac-code" --version | grep --fixed-strings --quiet "iac-code $RUNTIME_VERSION"
+              printf '%s\n' "$RUNTIME_SHA256" >"$RUNTIME_STAGING/iac-code-runtime/.artifact-sha256"
+              chmod 0644 "$RUNTIME_STAGING/iac-code-runtime/.artifact-sha256"
+              rm -rf "$RUNTIME_DIR"
+              mv "$RUNTIME_STAGING/iac-code-runtime" "$RUNTIME_DIR"
+              rm -f "$RUNTIME_ARCHIVE"
+              RUNTIME_ARCHIVE=
+              rmdir "$RUNTIME_STAGING"
+              RUNTIME_STAGING=
+            fi
+            ln -sfn "$RUNTIME_DIR" "$RUNTIME_ROOT/current"
+            rm -rf "$RUNTIME_METADATA_DIR"
+            RUNTIME_METADATA_DIR=
+            trap - EXIT
 
             TOKEN_FILE=/root/.iac-code/web-access.token
             if [ -f "$TOKEN_FILE" ]; then
-              TOKEN=$(/opt/iac-code/venv/bin/python -c 'import base64,pathlib; p=pathlib.Path("/root/.iac-code/web-access.token"); t=p.read_text("ascii").strip(); d=base64.urlsafe_b64decode(t+"="*((4-len(t)%4)%4)); assert len(d)>=32 and base64.urlsafe_b64encode(d).decode().rstrip("=")==t; print(t,end="")')
+              TOKEN=$(python3 -c 'import base64,pathlib; p=pathlib.Path("/root/.iac-code/web-access.token"); t=p.read_text("ascii").strip(); d=base64.urlsafe_b64decode(t+"="*((4-len(t)%4)%4)); assert len(d)>=32 and base64.urlsafe_b64encode(d).decode().rstrip("=")==t; print(t,end="")')
             else
-              TOKEN=$(/opt/iac-code/venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(32),end="")')
+              TOKEN=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32),end="")')
               TOKEN_TMP="$TOKEN_FILE.tmp"
               umask 077
               printf '%s' "$TOKEN" >"$TOKEN_TMP"
@@ -198,7 +315,7 @@ Resources:
 
             BAILIAN_API_KEY=$(printf '%s' '${BailianApiKeyB64}' | base64 -d)
             export BAILIAN_API_KEY
-            /opt/iac-code/venv/bin/python <<'PY'
+            python3 <<'PY'
             import os
             import pathlib
             import tempfile
@@ -278,7 +395,7 @@ Resources:
             - 实例 ID：`${LocalInstanceId}`
             - 实例名称：`iac-code-web`
             - 实例规格：`${LocalInstanceType}`
-            - 操作系统：Alibaba Cloud Linux 3
+            - 操作系统：Ubuntu 24.04 LTS
             - 地域：`${StackRegion}`
             - 可用区：`${LocalZoneId}`
             - VPC ID：`${LocalVpcId}`
@@ -292,8 +409,8 @@ Resources:
 
             - “查询/查看 ECS 信息”默认查询上述实例。需要云上控制面属性时，使用地域 `${StackRegion}`
               和实例 ID `${LocalInstanceId}` 精确查询；需要实时操作系统状态时，直接检查本机。
-            - “安装 nginx”或其他未指定目标的系统运维请求默认在本机执行。Alibaba Cloud Linux 3
-              使用 `dnf` 和 `systemctl`，执行后说明实际变更与服务状态。
+            - “安装 nginx”或其他未指定目标的系统运维请求默认在本机执行。Ubuntu 24.04
+              使用 `apt` 和 `systemctl`，执行后说明实际变更与服务状态。
             - “查看机器负载”默认检查本机的 CPU、内存、磁盘和 load average，并报告采集时间。
             - “跳转/打开 ECS 详情页”时，直接返回上面的 ECS 详情页链接，不要返回通用实例列表页。
             - 实例 ID、地域和网络资源 ID 是部署时身份；负载、IP 绑定、运行状态等动态信息应实时核验。
@@ -316,7 +433,7 @@ Resources:
             Group=root
             WorkingDirectory=/root
             Environment=IAC_CODE_CONFIG_DIR=/root/.iac-code
-            ExecStart=/opt/iac-code/venv/bin/iac-code web --host 0.0.0.0 --port 8766 --access-token-file /root/.iac-code/web-access.token --no-open
+            ExecStart=/opt/iac-code/current/iac-code web --host 0.0.0.0 --port 8766 --access-token-file /root/.iac-code/web-access.token --no-open
             Restart=on-failure
 
             [Install]
