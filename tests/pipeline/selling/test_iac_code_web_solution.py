@@ -85,6 +85,7 @@ def test_golden_template_has_only_the_fixed_single_ecs_topology() -> None:
     }
     ingress = resources["SecurityGroup"]["Properties"]["SecurityGroupIngress"]
     assert ingress == [{"IpProtocol": "tcp", "PortRange": "8766/8766", "SourceCidrIp": {"Ref": "AccessCidr"}}]
+    assert resources["Instance"]["Properties"]["ImageFamily"] == "acs:ubuntu_24_04_x64"
     assert resources["Instance"]["Properties"]["AllocatePublicIP"] is False
     assert resources["BailianApiKey"]["Properties"] == {
         "RegionId": "cn-beijing",
@@ -150,8 +151,20 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
         "LocalSecurityGroupId": {"Ref": "SecurityGroup"},
         "LocalEipAddress": {"Fn::GetAtt": ["Eip", "EipAddress"]},
     }
-    assert 'pip install --upgrade --index-url https://mirrors.aliyun.com/pypi/simple/ "iac-code[http]"' in script
-    assert "iac-code[http]==" not in script
+    assert 'RUNTIME_CHANNEL_URL="$RUNTIME_PUBLIC_ROOT/skill/stable/latest.json"' in script
+    assert "RUNTIME_TARGET=linux-x86_64-gnu-cp312" in script
+    assert "RUNTIME_VERSION=$(jq --exit-status --raw-output '.runtimeTag'" in script
+    assert '[ "$RUNTIME_VERSION" = "$SKILL_RUNTIME_VERSION" ]' in script
+    assert "RUNTIME_VERSION=v0.15.0" not in script
+    assert ".runtimeManifest.sha256" in script
+    assert ".artifacts[] | select(.target == $target) | .sha256" in script
+    assert 'dpkg --compare-versions "$HOST_GLIBC" ge "$RUNTIME_MIN_GLIBC"' in script
+    assert "sha256sum --check --status" in script
+    assert 'iac-code-runtime/iac-code" --version' in script
+    assert 'ln -sfn "$RUNTIME_DIR" "$RUNTIME_ROOT/current"' in script
+    assert "pip install" not in script
+    assert "python3.11" not in script
+    assert "jq python3-yaml" in script
     assert "--host 0.0.0.0 --port 8766 --access-token-file" in script
     assert "Restart=on-failure" in script
     assert "secrets.token_urlsafe(32)" in script
@@ -161,6 +174,7 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
     assert "Group=root" in script
     assert "WorkingDirectory=/root" in script
     assert "Environment=IAC_CODE_CONFIG_DIR=/root/.iac-code" in script
+    assert "ExecStart=/opt/iac-code/current/iac-code web" in script
     assert "--access-token-file /root/.iac-code/web-access.token" in script
     assert "useradd" not in script
     assert "/var/lib/iac-code" not in script
@@ -168,6 +182,7 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
     assert "用户提到的“本机”“这台机器”“当前服务器”“当前 ECS”均指此实例" in script
     assert "- 实例 ID：`${LocalInstanceId}`" in script
     assert "- 实例规格：`${LocalInstanceType}`" in script
+    assert "- 操作系统：Ubuntu 24.04 LTS" in script
     assert "- 地域：`${StackRegion}`" in script
     assert "- 可用区：`${LocalZoneId}`" in script
     assert "- VPC ID：`${LocalVpcId}`" in script

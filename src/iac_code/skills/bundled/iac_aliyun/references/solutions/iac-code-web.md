@@ -10,7 +10,7 @@ API Key 参数。
 - 保留模板中的单个 VPC、VSwitch、安全组、ECS、EIP/EIPAssociation、
   `ALIYUN::RAM::Role`、`ALIYUN::ECS::RamRoleAttachment`、`ALIYUN::Bailian::ApiKey`
   和同步 `ALIYUN::ECS::RunCommand`。
-- ECS 使用 Alibaba Cloud Linux 3 x86_64，固定 `AllocatePublicIP: false`，公网入口只使用绑定的
+- ECS 使用 Ubuntu 24.04 LTS x86_64，固定 `AllocatePublicIP: false`，公网入口只使用绑定的
   EIP。
 - 安全组只开放 TCP 8766，来源使用 `AccessCidr`；不要开放 SSH 端口。
 - RAM Role 只信任 `ecs.aliyuncs.com`，附加 `AdministratorAccess` 以支持通用云资源查询和部署，
@@ -19,7 +19,10 @@ API Key 参数。
 
 ## Bootstrap
 
-- 使用 Python 3.11 虚拟环境，并从阿里云 PyPI 镜像安装部署时最新的 `iac-code[http]`。
+- 从稳定 Skill 发布通道依次校验 Channel、Skill Release Manifest 和 Runtime Manifest，动态选择
+  最新稳定的 Linux x86_64 Runtime，校验 glibc、大小和 SHA-256 后，直接运行其中自带 CPython
+  3.12 的 `iac-code web`；不得创建虚拟环境或通过 pip 安装 iac-code。Ubuntu 系统 Python 仅用于
+  生成 Token 和写入 YAML 配置，缺少 Bootstrap 基础工具时才通过 apt 补齐。
 - 生成 Web 访问 Token 并以 0600 权限保存到 ECS；systemd 使用 `--access-token-file`、
   `--host 0.0.0.0 --port 8766 --no-open` 以 root 用户启动 iac-code Web。
 - `IAC_CODE_CONFIG_DIR` 固定为 `/root/.iac-code`。Bootstrap 将百炼 API Key 写入
