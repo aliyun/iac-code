@@ -602,7 +602,13 @@ class _Scenario:
         assert not self._provider_calls(), "bootstrap cancellation must not start an LLM request"
 
     def _terminate_during_turn_backup(self, initial: _BackgroundStream) -> None:
-        assert "ISOLATION_FIXTURE_FINAL" in json.dumps(initial.snapshot())
+        _wait_until(
+            lambda: snapshot
+            if "ISOLATION_FIXTURE_FINAL" in json.dumps(snapshot := initial.snapshot())
+            else None,
+            timeout=self.timeout,
+            description="final stream event before turn backup disconnect",
+        )
         initial.close()
         self._pause(epoch=1, request_id="pause-turn-backup", timeout=5.0)
         state = self._wait_state(lambda value: value["phase"] == "terminating", "timeout during normal turn backup")
