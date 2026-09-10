@@ -191,24 +191,24 @@ jobs:
         # Python traceback on Windows. Execution-control tests also gate real
         # durable writes, backups, timers, and subprocesses, so run both groups
         # in the pytest coordinator process.
-        run: |
-          uv run pytest \
-            tests/a2a/test_app.py \
-            tests/a2a/test_execution_control.py \
-            tests/a2a/test_execution_control_regressions.py \
-            tests/a2a/test_execution_control_review_regressions.py \
-            tests/a2a/test_permission_execution_control.py \
-            -v --no-header
+        run: >-
+          uv run pytest
+          tests/a2a/test_app.py
+          tests/a2a/test_execution_control.py
+          tests/a2a/test_execution_control_regressions.py
+          tests/a2a/test_execution_control_review_regressions.py
+          tests/a2a/test_permission_execution_control.py
+          -v --no-header
 
       - name: Run A2A execution-control process tests serially
         run: uv run pytest tests/a2a_e2e/test_execution_control_scenarios.py -v --no-header
 
       - name: Run remaining tests
-        run: |
-          uv run pytest tests/ -v --no-header -n auto \
-            --ignore=tests/a2a/test_app.py \
-            --ignore=tests/a2a/test_execution_control.py \
-            --ignore=tests/a2a/test_execution_control_regressions.py \
-            --ignore=tests/a2a/test_execution_control_review_regressions.py \
-            --ignore=tests/a2a/test_permission_execution_control.py \
-            --ignore=tests/a2a_e2e/test_execution_control_scenarios.py
+        run: >-
+          uv run pytest tests/ -v --no-header -n auto
+          --ignore=tests/a2a/test_app.py
+          --ignore=tests/a2a/test_execution_control.py
+          --ignore=tests/a2a/test_execution_control_regressions.py
+          --ignore=tests/a2a/test_execution_control_review_regressions.py
+          --ignore=tests/a2a/test_permission_execution_control.py
+          --ignore=tests/a2a_e2e/test_execution_control_scenarios.py
