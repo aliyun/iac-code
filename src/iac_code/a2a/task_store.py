@@ -155,6 +155,14 @@ class A2ATaskStore(TaskStore):
                 assert record is not None
                 task = _copy_task(task)
                 task.status.state = TaskState.Value("TASK_STATE_" + record.state.upper().replace("-", "_"))
+            active_finalization = bool(
+                record is not None
+                and record.state
+                in {TASK_STATE_CANCELED, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_INPUT_REQUIRED}
+                and next_state in {TASK_STATE_SUBMITTED, TASK_STATE_WORKING}
+                and record.active_task is not None
+                and not record.active_task.done()
+            )
             stale_state_projection = bool(
                 record is not None
                 and record.state
@@ -162,10 +170,10 @@ class A2ATaskStore(TaskStore):
                 and next_state in {TASK_STATE_SUBMITTED, TASK_STATE_WORKING}
                 and incoming_updated_at < record.updated_at
             )
-            if stale_state_projection:
+            if active_finalization or stale_state_projection:
                 # The SDK consumes executor events asynchronously. An event
-                # queued before a newer executor mirror must not roll either
-                # the SDK-visible task or its durable record back.
+                # queued before active finalization or an older detached event
+                # must not roll either task projection back.
                 return
             self._attach_context_metadata(task)
             self._attach_pending_permissions(task)
