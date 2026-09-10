@@ -841,8 +841,7 @@ async def test_task_id_cannot_move_between_contexts() -> None:
 async def test_late_sdk_working_event_does_not_overwrite_active_executor_finalization(tmp_path) -> None:
     persistence = A2APersistenceStore(tmp_path)
     store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
-    await store.save(sdk_task("task-1", state=TaskState.TASK_STATE_WORKING, updated_at=10))
-    record = await store.get_task_record("task-1")
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
     record.state = "input-required"
     record.updated_at = 20
     record.active_task = asyncio.current_task()
@@ -852,6 +851,9 @@ async def test_late_sdk_working_event_does_not_overwrite_active_executor_finaliz
 
     assert record.state == "input-required"
     assert persistence.load_task("task-1").state == "input-required"
+    task = await store.get("task-1")
+    assert task is not None
+    assert task.status.state == TaskState.TASK_STATE_WORKING
 
 
 @pytest.mark.asyncio

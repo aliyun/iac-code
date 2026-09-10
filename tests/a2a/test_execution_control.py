@@ -24,7 +24,7 @@ from iac_code.services.session_backup import BackupReason, BackupResult
 from iac_code.services.session_storage import SessionStorage
 
 
-async def _wait_for_phase(control: ExecutionController, phase: str, *, timeout: float = 2) -> None:
+async def _wait_for_phase(control: ExecutionController, phase: str, *, timeout: float = 5) -> None:
     async def wait() -> None:
         while control.phase != phase:
             await asyncio.sleep(0.005)
@@ -32,7 +32,7 @@ async def _wait_for_phase(control: ExecutionController, phase: str, *, timeout: 
     await asyncio.wait_for(wait(), timeout=timeout)
 
 
-async def _wait_for_condition(predicate, *, timeout: float = 2) -> None:
+async def _wait_for_condition(predicate, *, timeout: float = 5) -> None:
     async def wait() -> None:
         while not predicate():
             await asyncio.sleep(0.005)

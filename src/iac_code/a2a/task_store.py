@@ -168,12 +168,13 @@ class A2ATaskStore(TaskStore):
                 and record.state
                 in {TASK_STATE_CANCELED, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_INPUT_REQUIRED}
                 and next_state in {TASK_STATE_SUBMITTED, TASK_STATE_WORKING}
+                and not active_finalization
                 and incoming_updated_at < record.updated_at
             )
-            if active_finalization or stale_state_projection:
+            if stale_state_projection:
                 # The SDK consumes executor events asynchronously. An event
-                # queued before active finalization or an older detached event
-                # must not roll either task projection back.
+                # older than a detached final state must not roll either task
+                # projection back.
                 return
             self._attach_context_metadata(task)
             self._attach_pending_permissions(task)
@@ -183,7 +184,10 @@ class A2ATaskStore(TaskStore):
                 self._remove_sdk_task_from_index(owner, task_id, previous.context_id)
             owner_tasks[task_id] = _copy_task(task)
             self._sdk_tasks_by_context.setdefault(owner, {}).setdefault(task.context_id, set()).add(task_id)
-            if preserve_terminal:
+            if preserve_terminal or active_finalization:
+                # During active finalization the SDK still needs the delayed
+                # nonterminal frame for stream ordering, but the durable record
+                # already describes the backup boundary and must stay final.
                 return
             # The SDK saves the full Task before yielding every streaming frame. Executors already
             # mirror task records explicitly at output/state durability boundaries, so repeated SDK

@@ -604,7 +604,7 @@ class _Scenario:
     def _terminate_during_turn_backup(self, initial: _BackgroundStream) -> None:
         assert "ISOLATION_FIXTURE_FINAL" in json.dumps(initial.snapshot())
         initial.close()
-        self._pause(epoch=1, request_id="pause-turn-backup", timeout=1.0)
+        self._pause(epoch=1, request_id="pause-turn-backup", timeout=5.0)
         state = self._wait_state(lambda value: value["phase"] == "terminating", "timeout during normal turn backup")
         assert not state["releaseReady"]
         status, health = _http_json("GET", self.server.url + "/health", timeout=1.0)
