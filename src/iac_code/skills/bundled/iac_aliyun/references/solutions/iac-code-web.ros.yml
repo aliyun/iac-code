@@ -96,6 +96,8 @@ Resources:
         Ref: InstanceType
       SecurityGroupId:
         Ref: SecurityGroup
+      VpcId:
+        Ref: Vpc
       VSwitchId:
         Ref: VSwitch
       SystemDiskCategory:
