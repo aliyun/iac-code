@@ -139,10 +139,10 @@ class TestIacSkill:
         assert "DescribeVSwitches" in content
         assert "不要求用户手工查找或输入 `vpc-...`、`vsw-...`" in content
 
-    def test_ecs_reference_requires_vpc_network_properties(self):
+    def test_ecs_reference_requires_vswitch(self):
         content = (IAC_SKILL_ROOT / "references" / "cloud-products" / "ecs.md").read_text(encoding="utf-8")
 
-        assert "必须在 `Properties` 中同时显式设置同一 VPC 下的 `VpcId`、`VSwitchId`" in content
+        assert "必须在 `Properties` 中显式设置 `VSwitchId`" in content
         assert "不得省略后回退到经典网络" in content
         assert "此约束由模板校验硬门禁强制执行" in content
 

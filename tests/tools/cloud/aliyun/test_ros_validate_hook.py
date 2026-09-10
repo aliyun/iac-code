@@ -417,7 +417,6 @@ class TestCheckTemplate:
                     "Type": "ALIYUN::ECS::Instance",
                     "Properties": {
                         "AllocatePublicIP": allocate_public_ip,
-                        "VpcId": "vpc-test",
                         "VSwitchId": "vsw-test",
                     },
                 },
@@ -438,18 +437,15 @@ class TestCheckTemplate:
         assert "ROS5103" not in result.report.counts_by_code
 
     @pytest.mark.parametrize("resource_type", ["ALIYUN::ECS::Instance", "ALIYUN::ECS::InstanceGroup"])
-    @pytest.mark.parametrize(
-        ("properties", "missing"),
-        [
-            ({"VSwitchId": {"Ref": "VSwitch"}}, "VpcId"),
-            ({"VpcId": {"Ref": "Vpc"}}, "VSwitchId"),
-            ({}, "VpcId,VSwitchId"),
-        ],
-    )
-    def test_ecs_requires_vpc_and_vswitch(self, resource_type, properties, missing) -> None:
+    def test_ecs_requires_vswitch(self, resource_type) -> None:
         body = {
             "ROSTemplateFormatVersion": "2015-09-01",
-            "Resources": {"Instance": {"Type": resource_type, "Properties": properties}},
+            "Resources": {
+                "Instance": {
+                    "Type": resource_type,
+                    "Properties": {"VpcId": {"Ref": "Vpc"}},
+                }
+            },
         }
 
         result = check_template("ros", "ValidateTemplate", {"TemplateBody": body})
@@ -458,16 +454,16 @@ class TestCheckTemplate:
         assert "ROS5104" in result.blocking_result.content
         assert result.report.counts_by_code["ROS5104"] == 1
         diagnostic = next(item for item in result.report.diagnostics if item.code == "ROS5104")
-        assert diagnostic.actual == "missing:" + missing
+        assert diagnostic.actual == "missing"
 
     @pytest.mark.parametrize("resource_type", ["ALIYUN::ECS::Instance", "ALIYUN::ECS::InstanceGroup"])
-    def test_ecs_accepts_vpc_and_vswitch(self, resource_type) -> None:
+    def test_ecs_accepts_vswitch_without_vpc_id(self, resource_type) -> None:
         body = {
             "ROSTemplateFormatVersion": "2015-09-01",
             "Resources": {
                 "Instance": {
                     "Type": resource_type,
-                    "Properties": {"VpcId": "vpc-test", "VSwitchId": "vsw-test"},
+                    "Properties": {"VSwitchId": "vsw-test"},
                 }
             },
         }

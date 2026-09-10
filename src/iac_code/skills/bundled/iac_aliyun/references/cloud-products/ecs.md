@@ -98,7 +98,7 @@
 - 按带宽计费：适合流量持续稳定、高带宽场景
 - 公网 IP 可选按量购买 EIP，支持弹性绑定/解绑
 - ECS 公网能力按场景最小化：普通 ECS 无明确公网需求时不创建 EIP，并显式设置 `AllocatePublicIP: false`；网站、公开 API 等场景配置一种必要的公网入口；通过 EIP 或公网负载均衡提供入口时，后端 ECS 同样设置 `AllocatePublicIP: false`，避免重复公网入口。EIP 绑定约束由模板校验硬门禁强制执行。
-- `ALIYUN::ECS::Instance` 和 `ALIYUN::ECS::InstanceGroup` 必须在 `Properties` 中同时显式设置同一 VPC 下的 `VpcId`、`VSwitchId`（引用新建网络资源或已有网络 Parameters），不得省略后回退到经典网络，此约束由模板校验硬门禁强制执行。
+- `ALIYUN::ECS::Instance` 和 `ALIYUN::ECS::InstanceGroup` 必须在 `Properties` 中显式设置 `VSwitchId`（引用新建或已有交换机），不得省略后回退到经典网络，此约束由模板校验硬门禁强制执行。
 
 ## 安全组最佳实践
 

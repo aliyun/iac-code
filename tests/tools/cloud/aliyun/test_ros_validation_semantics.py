@@ -2161,7 +2161,7 @@ def test_mapping_getatt_runtime_iterable_is_accepted_without_count() -> None:
 Resources:
   Target:
     Type: ALIYUN::ECS::Instance
-    Properties: {VpcId: vpc-test, VSwitchId: vsw-test}
+    Properties: {VSwitchId: vsw-test}
   Wait:
     Type: ALIYUN::ROS::Sleep
     Properties:

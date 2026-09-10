@@ -11392,8 +11392,8 @@ msgstr "Establece AllocatePublicIP: false en el recurso ECS asociado."
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
 #, python-brace-format
-msgid "ECS resource {} must explicitly set both VpcId and VSwitchId."
-msgstr "El recurso ECS {} debe establecer explícitamente VpcId y VSwitchId."
+msgid "ECS resource {} must explicitly set VSwitchId."
+msgstr "El recurso ECS {} debe establecer explícitamente VSwitchId."
 
 #: src/iac_code/ui/banner.py
 #, python-brace-format

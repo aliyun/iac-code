@@ -115,8 +115,8 @@ class EipAssociationCheck:
 
 
 @dataclass(frozen=True)
-class EcsVpcNetworkCheck:
-    """Require every ECS instance resource to select a VPC and vSwitch."""
+class EcsVSwitchNetworkCheck:
+    """Require every ECS instance resource to select a vSwitch."""
 
     def check(self, context: Any) -> tuple[Diagnostic, ...]:
         parsed = context.fact_store.get_required(_PARSED_TEMPLATE)
@@ -136,24 +136,21 @@ class EcsVpcNetworkCheck:
             ):
                 continue
             properties = definition.get("Properties")
-            missing = tuple(
-                name for name in ("VpcId", "VSwitchId") if not isinstance(properties, Mapping) or name not in properties
-            )
-            if not missing:
+            if isinstance(properties, Mapping) and "VSwitchId" in properties:
                 continue
             diagnostics.append(
                 make_diagnostic(
                     code="ROS5104",
                     severity=Severity.ERROR,
                     category=Category.COMPATIBILITY,
-                    summary=_("ECS resource {} must explicitly set both VpcId and VSwitchId.").format(resource_name),
+                    summary=_("ECS resource {} must explicitly set VSwitchId.").format(resource_name),
                     detail="",
-                    path=_path("Resources", resource_name, "Properties", missing[0]),
+                    path=_path("Resources", resource_name, "Properties", "VSwitchId"),
                     source_map=parsed.source_map,
                     subject=resource_name,
-                    stable_args=(resource_name, *missing),
-                    expected="VpcId,VSwitchId",
-                    actual="missing:" + ",".join(missing),
+                    stable_args=(resource_name,),
+                    expected="VSwitchId",
+                    actual="missing",
                 )
             )
         return tuple(diagnostics)
@@ -167,7 +164,10 @@ class ResourceRelationshipRule:
     phase: RulePhase = RulePhase.STRUCTURE
     requires: frozenset[str] = frozenset({_PARSED_TEMPLATE})
     optional_requires: frozenset[str] = frozenset()
-    checks: tuple[EipAssociationCheck | EcsVpcNetworkCheck, ...] = (EipAssociationCheck(), EcsVpcNetworkCheck())
+    checks: tuple[EipAssociationCheck | EcsVSwitchNetworkCheck, ...] = (
+        EipAssociationCheck(),
+        EcsVSwitchNetworkCheck(),
+    )
 
     def check(self, context: Any) -> tuple[Diagnostic, ...]:
         diagnostics: list[Diagnostic] = []
