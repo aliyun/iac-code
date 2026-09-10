@@ -32,8 +32,15 @@ CASES = (
     ("recovery-during-normal-rollover", "normal"),
 )
 
+IS_WINDOWS = sys.platform == "win32"
+SCENARIO_TIMEOUT_SECONDS = 40 if IS_WINDOWS else 20
+OVERALL_TIMEOUT_SECONDS = 50 if IS_WINDOWS else 25
+PROCESS_TIMEOUT_SECONDS = 60 if IS_WINDOWS else 35
+TEST_TIMEOUT_SECONDS = 65 if IS_WINDOWS else 30
+
 
 @pytest.mark.integration
+@pytest.mark.timeout(TEST_TIMEOUT_SECONDS)
 @pytest.mark.parametrize(("scenario", "mode"), CASES, ids=["{}-{}".format(*case) for case in CASES])
 def test_execution_control_scenario(tmp_path: Path, scenario: str, mode: str) -> None:
     repo_root = Path(__file__).resolve().parents[2]
@@ -50,14 +57,14 @@ def test_execution_control_scenario(tmp_path: Path, scenario: str, mode: str) ->
             "--mode",
             mode,
             "--timeout",
-            "20",
+            str(SCENARIO_TIMEOUT_SECONDS),
             "--overall-timeout",
-            "25",
+            str(OVERALL_TIMEOUT_SECONDS),
         ],
         cwd=repo_root,
         text=True,
         capture_output=True,
-        timeout=35,
+        timeout=PROCESS_TIMEOUT_SECONDS,
         check=False,
     )
     summary_path = run_dir / "summary.json"
@@ -70,7 +77,7 @@ def test_execution_control_scenario(tmp_path: Path, scenario: str, mode: str) ->
         (run_dir / "runner-error.txt").read_text(encoding="utf-8") if (run_dir / "runner-error.txt").exists() else "",
     )
     assert summary is not None and summary["status"] == "passed"
-    assert 0 < summary["elapsedSeconds"] < 35
+    assert 0 < summary["elapsedSeconds"] < PROCESS_TIMEOUT_SECONDS
     assert summary["server"]["returnCode"] is not None
     assert summary["server"]["forcedKill"] is False
     for artifact in (
