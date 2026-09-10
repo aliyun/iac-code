@@ -147,9 +147,13 @@ jobs:
             tests/a2a/test_execution_control_regressions.py \
             tests/a2a/test_execution_control_review_regressions.py \
             tests/a2a/test_permission_execution_control.py \
-            tests/a2a_e2e/test_execution_control_scenarios.py \
             -v --cov --cov-report= \
             --junitxml=execution-control-testcase.xml
+
+      - name: Run A2A execution-control process tests serially
+        # Coverage instrumentation slows the fixture server enough to exceed
+        # the scenarios' own watchdogs. Unit tests above retain source coverage.
+        run: uv run pytest tests/a2a_e2e/test_execution_control_scenarios.py -v
 
       - name: Run remaining tests with coverage
         run: |
@@ -194,8 +198,10 @@ jobs:
             tests/a2a/test_execution_control_regressions.py \
             tests/a2a/test_execution_control_review_regressions.py \
             tests/a2a/test_permission_execution_control.py \
-            tests/a2a_e2e/test_execution_control_scenarios.py \
             -v --no-header
+
+      - name: Run A2A execution-control process tests serially
+        run: uv run pytest tests/a2a_e2e/test_execution_control_scenarios.py -v --no-header
 
       - name: Run remaining tests
         run: |
