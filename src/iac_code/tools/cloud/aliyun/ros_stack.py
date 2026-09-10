@@ -11,6 +11,12 @@ from typing import Any, Literal
 
 from alibabacloud_ros20190910 import models as ros_models
 
+from iac_code.a2a.backup import await_fenced, run_sync_fenced, run_sync_fenced_with_cancel_completion
+from iac_code.a2a.execution_control import (
+    current_execution_control,
+    current_execution_termination_reason,
+    record_execution_external_operation,
+)
 from iac_code.i18n import _
 from iac_code.services.cloud_credentials import CloudCredentials
 from iac_code.services.telemetry import add_metric, log_event
@@ -33,6 +39,7 @@ from iac_code.tools.cloud.aliyun.template_source import (
 from iac_code.tools.cloud.base_stack import BaseCloudStack
 from iac_code.tools.cloud.types import ResourceStatus, StackStatus
 from iac_code.types.permissions import ToolPermissionContext
+from iac_code.types.stream_events import ResourceObservedEvent
 
 # Telemetry helpers
 _TERRAFORM_TRANSFORM_PREFIXES = ("Aliyun::Terraform-", "Aliyun::OpenTofu-")
@@ -84,6 +91,10 @@ _DELETE_TERMINAL_STATUSES = {
 }
 
 logger = logging.getLogger(__name__)
+
+
+def _deployment_cancellation_reason() -> str:
+    return current_execution_termination_reason() or "user_cancel"
 
 
 def _parse_template(template_body: str) -> dict | None:
@@ -521,7 +532,7 @@ class RosStack(BaseCloudStack):
                 "iac_kind": kind,
                 "region": context["region"],
                 "duration_ms": duration_ms,
-                "reason": "user_cancel",
+                "reason": _deployment_cancellation_reason(),
             },
         )
         self._add_metric_best_effort(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "cancel"})
@@ -654,16 +665,21 @@ class RosStack(BaseCloudStack):
         try:
             client = self._get_client(region)
             if action == "CreateStack":
-                return await self._handle_create_stack(client, params, region)
+                return await self._handle_create_stack(client, params, region, tool_context=tool_context)
             elif action == "UpdateStack":
-                return await self._handle_update_stack(client, params, region)
+                return await self._handle_update_stack(client, params, region, tool_context=tool_context)
             elif action == "ContinueCreateStack":
                 _normalize_stack_parameters_for_sdk(params)
                 request = ros_models.ContinueCreateStackRequest().from_map(params)
-                response = await asyncio.to_thread(client.continue_create_stack, request)
+                response = await run_sync_fenced_with_cancel_completion(
+                    client.continue_create_stack,
+                    self._cancel_completion_recorder("ContinueCreateStack", params, region, tool_context),
+                    request,
+                )
+                await self._record_operation_result("ContinueCreateStack", params, region, tool_context, response, None)
                 return response.body.stack_id
             elif action == "DeleteStack":
-                return await self._handle_delete_stack(client, params, region)
+                return await self._handle_delete_stack(client, params, region, tool_context=tool_context)
         except Exception as error:
             # A dynamic credential is resolved when the client is built (a plain
             # ValueError) and again while the SDK signs the request (the same failure
@@ -673,7 +689,74 @@ class RosStack(BaseCloudStack):
             raise
         raise ValueError(f"Unsupported: {action}")
 
-    async def _handle_create_stack(self, client: Any, params: dict, region: str) -> str:
+    async def _record_operation_result(
+        self,
+        action: str,
+        params: dict[str, Any],
+        region: str,
+        tool_context: ToolContext | None,
+        response: Any | None,
+        error: BaseException | None,
+    ) -> None:
+        if current_execution_control() is None:
+            return
+        stack_id = str(params.get("StackId") or "")
+        if response is not None:
+            stack_id = str(getattr(getattr(response, "body", None), "stack_id", None) or stack_id)
+        await await_fenced(
+            record_execution_external_operation(
+                product="ros",
+                action=action,
+                outcome="accepted" if error is None else "unknown",
+                resource_type="stack",
+                resource_id=stack_id or None,
+                region_id=region or None,
+                tool_use_id=tool_context.tool_use_id if tool_context is not None else None,
+            )
+        )
+
+    def _cancel_completion_recorder(
+        self,
+        action: str,
+        params: dict[str, Any],
+        region: str,
+        tool_context: ToolContext | None,
+    ):
+        async def record(response: Any | None, error: BaseException | None) -> None:
+            await self._record_operation_result(action, params, region, tool_context, response, error)
+            stack_id = str(params.get("StackId") or "")
+            if response is not None:
+                stack_id = str(getattr(getattr(response, "body", None), "stack_id", None) or stack_id)
+            if (
+                error is None
+                and action == "CreateStack"
+                and stack_id
+                and tool_context is not None
+                and tool_context.event_queue is not None
+            ):
+                await tool_context.event_queue.put(
+                    ResourceObservedEvent(
+                        provider=self.provider_name,
+                        resource_type="stack",
+                        resource_id=stack_id,
+                        resource_name=str(params.get("StackName") or params.get("stack_name") or ""),
+                        region_id=region,
+                        action=action,
+                        tool_name=self.name,
+                        tool_use_id=tool_context.tool_use_id,
+                    )
+                )
+
+        return record
+
+    async def _handle_create_stack(
+        self,
+        client: Any,
+        params: dict,
+        region: str,
+        *,
+        tool_context: ToolContext | None = None,
+    ) -> str:
         """CreateStack with telemetry for template generation and deployment."""
         template_body = _template_body_for_telemetry(params)
 
@@ -756,7 +839,12 @@ class RosStack(BaseCloudStack):
         try:
             _normalize_stack_parameters_for_sdk(params)
             request = ros_models.CreateStackRequest().from_map(params)
-            response = await asyncio.to_thread(client.create_stack, request)
+            response = await run_sync_fenced_with_cancel_completion(
+                client.create_stack,
+                self._cancel_completion_recorder("CreateStack", params, region, tool_context),
+                request,
+            )
+            await self._record_operation_result("CreateStack", params, region, tool_context, response, None)
             stack_id = response.body.stack_id
             self._store_deployment_telemetry_context(
                 stack_id,
@@ -778,7 +866,7 @@ class RosStack(BaseCloudStack):
                     "iac_kind": kind,
                     "region": region,
                     "duration_ms": duration_ms,
-                    "reason": "user_cancel",
+                    "reason": _deployment_cancellation_reason(),
                 },
             )
             self._add_metric_best_effort(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "cancel"})
@@ -832,7 +920,14 @@ class RosStack(BaseCloudStack):
             )
             raise
 
-    async def _handle_update_stack(self, client: Any, params: dict, region: str) -> str:
+    async def _handle_update_stack(
+        self,
+        client: Any,
+        params: dict,
+        region: str,
+        *,
+        tool_context: ToolContext | None = None,
+    ) -> str:
         """UpdateStack with telemetry for deployment events."""
         template_body = _template_body_for_telemetry(params)
 
@@ -866,7 +961,12 @@ class RosStack(BaseCloudStack):
         try:
             _normalize_stack_parameters_for_sdk(params)
             request = ros_models.UpdateStackRequest().from_map(params)
-            response = await asyncio.to_thread(client.update_stack, request)
+            response = await run_sync_fenced_with_cancel_completion(
+                client.update_stack,
+                self._cancel_completion_recorder("UpdateStack", params, region, tool_context),
+                request,
+            )
+            await self._record_operation_result("UpdateStack", params, region, tool_context, response, None)
             stack_id = response.body.stack_id
             self._store_deployment_telemetry_context(
                 stack_id,
@@ -888,7 +988,7 @@ class RosStack(BaseCloudStack):
                     "iac_kind": kind,
                     "region": region,
                     "duration_ms": duration_ms,
-                    "reason": "user_cancel",
+                    "reason": _deployment_cancellation_reason(),
                 },
             )
             self._add_metric_best_effort(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "cancel"})
@@ -942,7 +1042,14 @@ class RosStack(BaseCloudStack):
             )
             raise
 
-    async def _handle_delete_stack(self, client: Any, params: dict, region: str) -> str:
+    async def _handle_delete_stack(
+        self,
+        client: Any,
+        params: dict,
+        region: str,
+        *,
+        tool_context: ToolContext | None = None,
+    ) -> str:
         """DeleteStack with request failure/cancellation telemetry, no started or terminal success event."""
         stack_id = params.get("StackId", "")
 
@@ -952,7 +1059,12 @@ class RosStack(BaseCloudStack):
         started = time.monotonic()
         try:
             request = ros_models.DeleteStackRequest().from_map(params)
-            await asyncio.to_thread(client.delete_stack, request)
+            response = await run_sync_fenced_with_cancel_completion(
+                client.delete_stack,
+                self._cancel_completion_recorder("DeleteStack", params, region, tool_context),
+                request,
+            )
+            await self._record_operation_result("DeleteStack", params, region, tool_context, response, None)
             return stack_id
         except (KeyboardInterrupt, asyncio.CancelledError):
             duration_ms = int((time.monotonic() - started) * 1000)
@@ -962,7 +1074,7 @@ class RosStack(BaseCloudStack):
                     "iac_kind": kind,
                     "region": region,
                     "duration_ms": duration_ms,
-                    "reason": "user_cancel",
+                    "reason": _deployment_cancellation_reason(),
                 },
             )
             self._add_metric_best_effort(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "cancel"})
@@ -1021,7 +1133,7 @@ class RosStack(BaseCloudStack):
         )
         try:
             client = self._get_client(region)
-            response = await asyncio.to_thread(client.get_stack, request)
+            response = await run_sync_fenced(client.get_stack, request)
         except Exception as error:
             # Polling re-resolves the credential when the client is built and re-signs on
             # every round, so an IMDS failure can start here long after the stack
@@ -1044,7 +1156,7 @@ class RosStack(BaseCloudStack):
         request = ros_models.ListStackResourcesRequest(stack_id=stack_id, region_id=region)
         try:
             client = self._get_client(region)
-            response = await asyncio.to_thread(client.list_stack_resources, request)
+            response = await run_sync_fenced(client.list_stack_resources, request)
         except Exception as error:
             if message := public_ecs_credential_message(error, action="ListStackResources", region=region):
                 raise ValueError(message) from error

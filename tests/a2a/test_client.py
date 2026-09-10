@@ -102,6 +102,16 @@ class SessionRestoreHTTPClient(FakeHTTPClient):
         return FakeHTTPResponse(self.payload or {"status": self.status}, self.status_code)
 
 
+class ExecutionControlHTTPClient(FakeHTTPClient):
+    async def get(self, url: str, headers=None, params=None) -> FakeHTTPResponse:
+        self.requests.append(("GET", url, params, headers))
+        return FakeHTTPResponse({"phase": "paused", "contextId": "ctx-1"})
+
+    async def post(self, url: str, json: dict[str, object], headers=None) -> FakeHTTPResponse:
+        self.requests.append(("POST", url, json, headers))
+        return FakeHTTPResponse({"phase": "pausing", "contextId": "ctx-1"}, status_code=202)
+
+
 class HangingInputRequiredHTTPClient(FakeHTTPClient):
     def __init__(self) -> None:
         super().__init__()
@@ -149,6 +159,33 @@ async def test_get_pipeline_state_uses_read_only_http_extension_and_auth() -> No
         {"A2A-Version": "1.0", "Authorization": "Bearer secret"},
         {"taskId": "task-1", "afterSequence": 3},
     )
+
+
+@pytest.mark.asyncio
+async def test_get_pipeline_state_can_request_delta_without_snapshot() -> None:
+    http = PipelineStateHTTPClient()
+    client = A2AClient(http_client=http)
+
+    await client.get_pipeline_state(
+        "http://remote/",
+        task_id="task-1",
+        after_sequence=3,
+        include_snapshot=False,
+    )
+
+    assert http.pipeline_request == (
+        "http://remote/iac-code/pipeline/state",
+        {"A2A-Version": "1.0"},
+        {"taskId": "task-1", "afterSequence": 3, "includeSnapshot": "false"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_pipeline_state_requires_cursor_when_snapshot_is_omitted() -> None:
+    client = A2AClient(http_client=PipelineStateHTTPClient())
+
+    with pytest.raises(ValueError, match="after_sequence is required"):
+        await client.get_pipeline_state("http://remote/", task_id="task-1", include_snapshot=False)
 
 
 @pytest.mark.asyncio
@@ -213,6 +250,101 @@ async def test_ensure_session_restored_surfaces_retryable_generation_fence() -> 
             session_id="session-1",
             task_id="task-1",
         )
+
+
+@pytest.mark.asyncio
+async def test_execution_control_client_uses_http_extensions_and_connection_identity() -> None:
+    http = ExecutionControlHTTPClient()
+    client = A2AClient(http_client=http, auth=A2AAuthConfig(bearer_token="secret"))
+
+    await client.pause_execution(
+        "http://remote/",
+        context_id="ctx-1",
+        task_id="task-1",
+        execution_id="exec-1",
+        request_id="pause-1",
+        connection_epoch=7,
+        reconnect_timeout_seconds=45,
+    )
+    await client.get_execution_state(
+        "http://remote/",
+        context_id="ctx-1",
+        execution_id="exec-1",
+        pause_id="pause-token-1",
+    )
+    await client.resume_execution(
+        "http://remote/",
+        context_id="ctx-1",
+        execution_id="exec-1",
+        pause_id="pause-token-1",
+        request_id="resume-1",
+        connection_epoch=8,
+    )
+    await client.terminate_execution(
+        "http://remote/",
+        context_id="ctx-1",
+        execution_id="exec-1",
+        request_id="terminate-1",
+        connection_epoch=9,
+        reason="disconnect_timeout",
+        pause_id="pause-token-1",
+    )
+    await client.get_session_recovery("http://remote/", context_id="ctx-1", execution_id="exec-1")
+
+    headers = {"A2A-Version": "1.0", "Authorization": "Bearer secret"}
+    assert http.requests == [
+        (
+            "POST",
+            "http://remote/iac-code/execution/pause",
+            {
+                "contextId": "ctx-1",
+                "taskId": "task-1",
+                "expectedExecutionId": "exec-1",
+                "requestId": "pause-1",
+                "connectionEpoch": 7,
+                "reason": "client_disconnected",
+                "reconnectTimeoutSeconds": 45,
+            },
+            headers,
+        ),
+        (
+            "GET",
+            "http://remote/iac-code/execution/state",
+            {"contextId": "ctx-1", "executionId": "exec-1", "pauseId": "pause-token-1"},
+            headers,
+        ),
+        (
+            "POST",
+            "http://remote/iac-code/execution/resume",
+            {
+                "contextId": "ctx-1",
+                "executionId": "exec-1",
+                "pauseId": "pause-token-1",
+                "requestId": "resume-1",
+                "connectionEpoch": 8,
+            },
+            headers,
+        ),
+        (
+            "POST",
+            "http://remote/iac-code/execution/terminate",
+            {
+                "contextId": "ctx-1",
+                "expectedExecutionId": "exec-1",
+                "requestId": "terminate-1",
+                "connectionEpoch": 9,
+                "reason": "disconnect_timeout",
+                "pauseId": "pause-token-1",
+            },
+            headers,
+        ),
+        (
+            "GET",
+            "http://remote/iac-code/session/recovery",
+            {"contextId": "ctx-1", "executionId": "exec-1"},
+            headers,
+        ),
+    ]
 
 
 def _base64url_uint(value: int) -> str:

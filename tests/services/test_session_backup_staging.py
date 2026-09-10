@@ -92,6 +92,29 @@ def test_staged_backup_creates_immutable_versions_without_writing_final_root(
     assert not backup_root.exists()
 
 
+def test_wait_until_shared_committed_verifies_exact_staged_commit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service, session_dir, staging_root, backup_root = _create_staged_service(monkeypatch, tmp_path)
+    (session_dir / "session.jsonl").write_text("final\n", encoding="utf-8")
+    staged = service.backup_session("/repo", "s1", reason=BackupReason.DISCONNECT_TIMEOUT, critical=True)
+    assert staged.generation is not None and staged.commit_id is not None
+
+    SessionBackupStagingWorker(staging_root, backup_root).run_once()
+    shared = service.wait_until_shared_committed(
+        "/repo",
+        "s1",
+        generation=staged.generation,
+        commit_id=staged.commit_id,
+        timeout_seconds=0.1,
+    )
+
+    assert shared.shared_committed is True
+    assert shared.generation == staged.generation
+    assert shared.commit_id == staged.commit_id
+
+
 def test_regular_backup_service_ignores_staging_environment(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

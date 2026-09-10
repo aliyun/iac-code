@@ -6,6 +6,7 @@ import asyncio
 import sys
 from typing import TYPE_CHECKING, Any
 
+from iac_code.a2a.backup import run_sync_fenced
 from iac_code.desktop.external_env import (
     create_subprocess_exec,
     create_subprocess_shell,
@@ -61,7 +62,7 @@ class BashTool(Tool):
 
         try:
             if sys.platform == "win32":
-                info = await asyncio.to_thread(PlatformInfo.detect) if is_desktop_runtime() else PlatformInfo.detect()
+                info = await run_sync_fenced(PlatformInfo.detect) if is_desktop_runtime() else PlatformInfo.detect()
                 process = await create_subprocess_exec(
                     info.shell_path,
                     "-c",

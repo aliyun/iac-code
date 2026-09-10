@@ -19,12 +19,13 @@ PipelineStatus = Literal[
     "waiting_input",
     "completed",
     "user_aborted",
+    "canceled",
     "failed",
     "discarded",
     "backup_blocked",
 ]
 RESUMABLE_STATUSES: set[PipelineStatus] = {"running", "waiting_input", "backup_blocked"}
-SKIP_RESTORE_STATUSES: set[PipelineStatus] = {"completed", "user_aborted", "failed", "discarded"}
+SKIP_RESTORE_STATUSES: set[PipelineStatus] = {"completed", "user_aborted", "canceled", "failed", "discarded"}
 
 _ALL_STATUSES = RESUMABLE_STATUSES | SKIP_RESTORE_STATUSES
 _EMPTY_IDENTITY = {
@@ -378,6 +379,32 @@ class PipelineSession:
         prerequisites: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
         self.save_user_aborted_sync(
+            step_id,
+            state_machine_snapshot,
+            context_snapshot,
+            identity,
+            reason=reason,
+            execution=execution,
+            attempts=attempts,
+            normal_handoff=normal_handoff,
+            prerequisites=prerequisites,
+        )
+
+    def save_canceled_sync(
+        self,
+        step_id: str,
+        state_machine_snapshot: dict,
+        context_snapshot: dict,
+        identity: PipelineIdentity | dict,
+        reason: str | None = None,
+        *,
+        execution: _MetadataValue = _PRESERVE_METADATA,
+        attempts: _MetadataValue = _PRESERVE_METADATA,
+        normal_handoff: _MetadataValue = _PRESERVE_METADATA,
+        prerequisites: _MetadataValue = _PRESERVE_METADATA,
+    ) -> None:
+        self._save_snapshot_sync(
+            "canceled",
             step_id,
             state_machine_snapshot,
             context_snapshot,

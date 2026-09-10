@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from iac_code.a2a.execution_control import execution_checkpoint
 from iac_code.agent.message import ContentBlock, Message
 from iac_code.i18n import _
 from iac_code.pipeline.engine.context import PipelineContext
@@ -202,6 +203,7 @@ class SubPipelineExecutor:
 
         try:
             while not state_machine.is_complete:
+                await execution_checkpoint()
                 step = state_machine.current_step
 
                 if event_callback:

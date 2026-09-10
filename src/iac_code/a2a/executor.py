@@ -19,7 +19,7 @@ from a2a.types import Message, Role, Task, TaskState, TaskStatus, TaskStatusUpda
 from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict, ParseDict
 
-from iac_code.a2a.backup import backup_session_async, run_sync_fenced
+from iac_code.a2a.backup import await_fenced, backup_session_async, run_sync_fenced
 from iac_code.a2a.events import (
     iac_code_session_metadata,
     make_text_part,
@@ -28,6 +28,15 @@ from iac_code.a2a.events import (
     publish_permission_input_received,
     publish_stream_event,
     with_iac_code_session_metadata,
+)
+from iac_code.a2a.execution_control import (
+    ExecutionControlService,
+    bind_execution_control,
+    clear_execution_participants,
+    current_execution_control,
+    current_execution_termination_reason,
+    reset_execution_control,
+    reset_execution_participants,
 )
 from iac_code.a2a.exposure import normalize_a2a_exposure_types
 from iac_code.a2a.input_required import (
@@ -52,7 +61,10 @@ from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTransl
 from iac_code.a2a.pipeline_executor import (
     RICH_CANDIDATE_PRESENTATION,
     IacCodeA2APipelineExecutor,
+    WaitingInputCancelResult,
+    cancel_waiting_input_task_from_sidecar,
     recoverable_task_id_from_sidecar,
+    terminal_task_state_from_sidecar,
 )
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_paths import existing_a2a_pipeline_dir_for_session
@@ -845,23 +857,28 @@ async def _observe_cleanup_stream(
     *,
     publisher: PipelineA2AEventPublisher | None = None,
 ) -> AsyncIterator[Any]:
-    if ledger.load_failed():
-        async for event in events:
-            yield event
-        return
-    observer = CleanupObserver(ledger)
-    previous = (
-        _published_cleanup_resource_states(publisher, ledger)
-        if publisher is not None
-        else _cleanup_resource_states(ledger)
-    )
-    if publisher is not None:
-        previous = await _publish_cleanup_resource_changes(publisher, ledger, previous)
-    async for event in events:
-        observer.observe(event)
+    try:
+        if ledger.load_failed():
+            async for event in events:
+                yield event
+            return
+        observer = CleanupObserver(ledger)
+        previous = (
+            _published_cleanup_resource_states(publisher, ledger)
+            if publisher is not None
+            else _cleanup_resource_states(ledger)
+        )
         if publisher is not None:
             previous = await _publish_cleanup_resource_changes(publisher, ledger, previous)
-        yield event
+        async for event in events:
+            observer.observe(event)
+            if publisher is not None:
+                previous = await _publish_cleanup_resource_changes(publisher, ledger, previous)
+            yield event
+    finally:
+        close = getattr(events, "aclose", None)
+        if close is not None:
+            await close()
 
 
 def _cleanup_resource_state(resource: Any) -> tuple[Any, ...]:
@@ -1061,8 +1078,13 @@ async def _stream_a2a_normal_events(
             cleanup_ledger,
             publisher=cleanup_publisher,
         )
-        async for event in cleanup_stream:
-            yield event
+        try:
+            async for event in cleanup_stream:
+                yield event
+        finally:
+            close = getattr(cleanup_stream, "aclose", None)
+            if close is not None:
+                await close()
         if cleanup_ledger.pending_resources():
             if cleanup_only:
                 yield TextDeltaEvent(
@@ -1109,8 +1131,13 @@ async def _stream_a2a_normal_events(
             prompt_stream = runtime.agent_loop.run_streaming(prompt_to_run)
         if cleanup_ledger is not None:
             prompt_stream = _observe_cleanup_stream(prompt_stream, cleanup_ledger, publisher=cleanup_publisher)
-        async for event in prompt_stream:
-            yield event
+        try:
+            async for event in prompt_stream:
+                yield event
+        finally:
+            close = getattr(prompt_stream, "aclose", None)
+            if close is not None:
+                await close()
     if cleanup_ledger is not None and not cleanup_ledger.load_failed() and not cleanup_ledger.pending_resources():
         _mark_completed_cleanup_prompts(runtime=runtime, cwd=cwd, session_id=session_id, ledger=cleanup_ledger)
         _prune_completed_cleanup_prompt_from_runtime(runtime, cleanup_ledger)
@@ -1216,6 +1243,7 @@ class IacCodeA2AExecutor(AgentExecutor):
         permission_wait_policy: Any | None = None,
         thinking_exposure_types: Any = None,
         backup_service: Any | None = None,
+        execution_control_service: ExecutionControlService | None = None,
     ) -> None:
         self._task_store = task_store
         self._model = model
@@ -1234,6 +1262,10 @@ class IacCodeA2AExecutor(AgentExecutor):
         self._thinking_exposure_types = normalize_a2a_exposure_types(thinking_exposure_types)
         self._metadata_echo_redactor = A2AMetadataEchoRedactor()
         self._backup_service = backup_service or SessionBackupService()
+        self._execution_control_service = execution_control_service
+        if execution_control_service is not None:
+            execution_control_service.set_termination_cleanup(self._terminate_detached_execution)
+            execution_control_service.set_resume_callback(self._task_store.touch_context)
 
     async def resolve_sideband_permission(self, response: PermissionResponse) -> Message | None:
         if not await self._permission_input_registry.is_sideband_response(response):
@@ -1242,6 +1274,8 @@ class IacCodeA2AExecutor(AgentExecutor):
         return permission_ack_message(response, approved=approved)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        execution_scope = bind_execution_control(None)
+        participant_scope = clear_execution_participants()
         metadata = getattr(context, "metadata", None) or getattr(getattr(context, "message", None), "metadata", None)
         permission_response = parse_permission_response(getattr(context, "message", None))
         context_id = (
@@ -1253,8 +1287,30 @@ class IacCodeA2AExecutor(AgentExecutor):
             context_id,
             self._resolve_telemetry_channel(metadata),
         )
-        with a2a_request_context(telemetry_channel=telemetry_channel):
-            await self._execute(context, event_queue, context_id=context_id)
+        try:
+            if permission_response is not None and self._execution_control_service is not None:
+                existing = self._execution_control_service.get_for_context(context_id)
+                owner = self._task_store.owner_for_context(getattr(context, "call_context", None))
+                current_task = asyncio.current_task()
+                if existing is not None and existing.owner == owner and current_task is not None:
+                    await existing.attach_task(current_task, mark_working=False)
+                    bind_execution_control(existing)
+            with a2a_request_context(telemetry_channel=telemetry_channel):
+                await self._execute(context, event_queue, context_id=context_id)
+        finally:
+            control = current_execution_control()
+            if control is not None:
+                execution_status = "unknown"
+                try:
+                    record = await self._task_store.get_task_record(control.task_id)
+                    execution_status = record.state
+                except ValueError:
+                    pass
+                current_task = asyncio.current_task()
+                if current_task is not None:
+                    await control.detach_task(current_task, execution_status=execution_status)
+            reset_execution_control(execution_scope)
+            reset_execution_participants(participant_scope)
 
     async def _execute(self, context: RequestContext, event_queue: EventQueue, *, context_id: str) -> None:
         requested_task_id = context.task_id or None
@@ -1466,6 +1522,17 @@ class IacCodeA2AExecutor(AgentExecutor):
                 owner=owner,
                 restore_interrupted=not pipeline_mode,
             )
+            if self._execution_control_service is not None:
+                control = await self._execution_control_service.begin_execution(
+                    context_id=context_id,
+                    task_id=task.task_id,
+                    owner=owner,
+                    cwd=cwd,
+                    continue_input_required=pipeline_mode and not route_pipeline_handoff_to_normal,
+                )
+                bind_execution_control(control)
+                await control.checkpoint()
+                await control.mark_execution_started()
             await publish_initial_task_if_missing()
             await self._task_store.ensure_task_not_expired(task.task_id)
         except InvalidParamsError:
@@ -1636,6 +1703,9 @@ class IacCodeA2AExecutor(AgentExecutor):
                     cwd=cwd,
                     runtime_factory=runtime_factory,
                 )
+                control = current_execution_control()
+                if control is not None:
+                    control.bind_session(ctx.session_id)
                 if not hasattr(ctx.runtime, "agent_loop"):
                     old_runtime = ctx.runtime
                     ctx.runtime = runtime_factory(ctx.session_id)
@@ -1655,6 +1725,10 @@ class IacCodeA2AExecutor(AgentExecutor):
                 )
                 await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
             self._metrics.record_task_canceled()
+            if current_execution_termination_reason() is not None:
+                # Let the SDK enqueue request completion after the canceled status.
+                # Re-raising here can strand its subscriber queue during shutdown.
+                return
             raise
         except Exception as exc:
             self._log_executor_exception("runtime setup", task_id=task_id, context_id=context_id)
@@ -1732,6 +1806,60 @@ class IacCodeA2AExecutor(AgentExecutor):
             task.active_task = asyncio.current_task()
             self._task_store.mirror_task(task)
             self._task_store.mirror_context(ctx)
+            normal_turn_finished = False
+
+            async def cancel_normal_turn(target_queue: EventQueue) -> None:
+                termination_reason = current_execution_termination_reason()
+                if termination_reason is not None and normal_turn_finished:
+                    task.state = TASK_STATE_INPUT_REQUIRED
+                    ctx.active_task_id = None
+                    task.touch()
+                    ctx.touch()
+                    self._task_store.mirror_task(task)
+                    self._task_store.mirror_context(ctx)
+                    control = current_execution_control()
+                    if control is not None:
+                        await control.mark_execution_status(task.state)
+                    await self._publish_status(
+                        target_queue,
+                        task_id=task_id,
+                        context_id=context_id,
+                        state=TaskState.TASK_STATE_INPUT_REQUIRED,
+                        session_id=ctx.session_id,
+                    )
+                    await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
+                    self._metrics.record_turn_completed()
+                    return
+                task.state = TASK_STATE_CANCELED
+                ctx.active_task_id = None
+                task.touch()
+                ctx.touch()
+                self._task_store.mirror_task(task)
+                self._task_store.mirror_context(ctx)
+                await self._task_store.discard_context_runtime(context_id)
+                if termination_reason is None and await self._publish_backup_blocked_after_terminal_backup_failure(
+                    target_queue,
+                    task=task,
+                    ctx=ctx,
+                    cwd=cwd,
+                    task_id=task_id,
+                    context_id=context_id,
+                    reason=BackupReason.TERMINAL,
+                    blocked_terminal_state=TASK_STATE_CANCELED,
+                ):
+                    self._metrics.record_task_canceled()
+                    return
+                await self._publish_status(
+                    target_queue,
+                    task_id=task_id,
+                    context_id=context_id,
+                    state=TaskState.TASK_STATE_CANCELED,
+                    text=_("Task canceled."),
+                    session_id=ctx.session_id,
+                )
+                await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
+                self._metrics.record_task_canceled()
+
             try:
                 runtime = ctx.runtime
                 if runtime is None:
@@ -1807,7 +1935,10 @@ class IacCodeA2AExecutor(AgentExecutor):
                     detached_permission = None
 
                     async def finalize_normal_turn(target_queue: EventQueue) -> None:
-                        nonlocal final_assistant_text
+                        nonlocal final_assistant_text, normal_turn_finished
+                        # The AgentLoop has finished. Cancellation of its backup
+                        # must not reclassify the completed turn as canceled.
+                        normal_turn_finished = True
                         if current_assistant_text:
                             final_assistant_text = "".join(current_assistant_text)
                         await publish_mcp_warnings(
@@ -1842,6 +1973,13 @@ class IacCodeA2AExecutor(AgentExecutor):
                         ctx.touch()
                         self._task_store.mirror_task(task)
                         self._task_store.mirror_context(ctx)
+                        control = (
+                            self._execution_control_service.get_for_context(context_id)
+                            if self._execution_control_service is not None
+                            else current_execution_control()
+                        )
+                        if control is not None:
+                            await control.mark_execution_status(TASK_STATE_INPUT_REQUIRED)
                         await backup_session_async(
                             self._backup_service,
                             cwd,
@@ -1877,6 +2015,13 @@ class IacCodeA2AExecutor(AgentExecutor):
                         ctx.touch()
                         self._task_store.mirror_task(task)
                         self._task_store.mirror_context(ctx)
+                        control = (
+                            self._execution_control_service.get_for_context(context_id)
+                            if self._execution_control_service is not None
+                            else current_execution_control()
+                        )
+                        if control is not None:
+                            await control.mark_execution_status(TASK_STATE_INPUT_REQUIRED)
                         await self._notify_terminal_task(
                             task_id=task.task_id,
                             context_id=task.context_id,
@@ -1910,6 +2055,9 @@ class IacCodeA2AExecutor(AgentExecutor):
                             task.state = TASK_STATE_WORKING
                             self._task_store.mirror_task(task)
                             self._task_store.mirror_context(ctx)
+                            control = current_execution_control()
+                            if control is not None:
+                                await control.mark_execution_started()
                             with a2a_request_context(
                                 session_id=ctx.session_id,
                                 user_id=user_id,
@@ -1922,6 +2070,10 @@ class IacCodeA2AExecutor(AgentExecutor):
                                 await finalize_normal_turn(target_queue)
                             else:
                                 await mark_detached_input_required()
+                        except asyncio.CancelledError:
+                            await cancel_normal_turn(target_queue)
+                            if current_execution_termination_reason() is None:
+                                raise
                         finally:
                             task.active_task = None
                             ctx.active_task_id = None
@@ -1932,6 +2084,15 @@ class IacCodeA2AExecutor(AgentExecutor):
                             ctx.lock.release()
 
                     async def consume_normal_stream(target_queue: EventQueue) -> bool:
+                        try:
+                            return await consume_normal_stream_inner(target_queue)
+                        except BaseException:
+                            close = getattr(stream, "aclose", None)
+                            if close is not None:
+                                await close()
+                            raise
+
+                    async def consume_normal_stream_inner(target_queue: EventQueue) -> bool:
                         nonlocal current_assistant_text, final_assistant_text, detached_permission
                         async for event in stream:
                             if isinstance(event, MessageStartEvent):
@@ -2060,35 +2221,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 else:
                     await mark_detached_input_required()
             except asyncio.CancelledError:
-                task.state = TASK_STATE_CANCELED
-                ctx.active_task_id = None
-                task.touch()
-                ctx.touch()
-                self._task_store.mirror_task(task)
-                self._task_store.mirror_context(ctx)
-                await self._task_store.discard_context_runtime(context_id)
-                if await self._publish_backup_blocked_after_terminal_backup_failure(
-                    event_queue,
-                    task=task,
-                    ctx=ctx,
-                    cwd=cwd,
-                    task_id=task_id,
-                    context_id=context_id,
-                    reason=BackupReason.TERMINAL,
-                    blocked_terminal_state=TASK_STATE_CANCELED,
-                ):
-                    self._metrics.record_task_canceled()
-                    return
-                await self._publish_status(
-                    event_queue,
-                    task_id=task_id,
-                    context_id=context_id,
-                    state=TaskState.TASK_STATE_CANCELED,
-                    text=_("Task canceled."),
-                    session_id=ctx.session_id,
-                )
-                await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
-                self._metrics.record_task_canceled()
+                await cancel_normal_turn(event_queue)
             except Exception as exc:
                 if _is_retryable_executor_error(exc):
                     task.state = TASK_STATE_INPUT_REQUIRED
@@ -2166,6 +2299,110 @@ class IacCodeA2AExecutor(AgentExecutor):
                     logger.debug("flush_telemetry after task failed", exc_info=True)
         finally:
             lock.release()
+
+    async def _terminate_detached_execution(self, context_id: str, task_id: str, reason: str) -> str | None:
+        had_pending_permission = await self._permission_input_registry.has_pending_task(task_id)
+        if had_pending_permission:
+            await self._permission_input_registry.cancel_task(task_id)
+            await self._task_store.set_pending_permissions(task_id, [])
+            await self._task_store.discard_context_runtime(context_id, persist_context=False)
+
+        try:
+            task_record = await self._task_store.get_task_record(task_id)
+            context_record = await self._task_store.get_context_record(context_id)
+        except ValueError:
+            return None
+        control = (
+            self._execution_control_service.get_for_context(context_id)
+            if self._execution_control_service is not None
+            else current_execution_control()
+        )
+        if (control is not None and control.has_managed_work()) or await self._task_store.is_task_active(task_id):
+            return None
+        if task_record.state in {TASK_STATE_CANCELED, TASK_STATE_INPUT_REQUIRED}:
+            await run_sync_fenced(
+                self._finish_terminated_permission_restore,
+                cwd=context_record.cwd,
+                session_id=context_record.session_id,
+                context_id=context_id,
+                task_id=task_id,
+                canceled=task_record.state == TASK_STATE_CANCELED,
+            )
+        if task_record.state not in {TASK_STATE_INPUT_REQUIRED, TASK_STATE_CANCELED}:
+            if not await self._task_store.commit_inactive_execution_task(task_id=task_id, context_id=context_id):
+                raise RuntimeError("Execution task did not reach a terminal state")
+            return task_record.state
+        cancel_result = await run_sync_fenced(
+            cancel_waiting_input_task_from_sidecar,
+            cwd=context_record.cwd,
+            session_id=context_record.session_id,
+            context_id=context_id,
+            task_id=task_id,
+            reason=_("Task canceled while waiting for input."),
+            backup_service=self._backup_service,
+            task_store=self._task_store,
+            task_record=task_record,
+            context_record=context_record,
+            metrics=self._metrics,
+            source=reason,
+            allow_normal_handoff=False,
+        )
+        if cancel_result == WaitingInputCancelResult.NOT_OWNER:
+            terminal_state = await run_sync_fenced(
+                terminal_task_state_from_sidecar,
+                cwd=context_record.cwd,
+                session_id=context_record.session_id,
+                context_id=context_id,
+                task_id=task_id,
+            )
+            if (
+                terminal_state != TASK_STATE_CANCELED
+                and not had_pending_permission
+                and task_record.state != TASK_STATE_CANCELED
+            ):
+                if not await self._task_store.commit_inactive_execution_task(task_id=task_id, context_id=context_id):
+                    raise RuntimeError("Execution task did not reach a terminal state")
+                return task_record.state
+            await self._task_store.discard_context_runtime(context_id, persist_context=False)
+            committed = await self._task_store.cancel_inactive_input_required_task(
+                task_id=task_id,
+                context_id=context_id,
+            )
+            return TASK_STATE_CANCELED if committed else None
+        if cancel_result != WaitingInputCancelResult.CANCELED:
+            raise RuntimeError(f"Pipeline input termination failed: {cancel_result.value}")
+        await self._task_store.discard_context_runtime(context_id, persist_context=False)
+        await self._task_store.cancel_inactive_input_required_task(task_id=task_id, context_id=context_id)
+        return TASK_STATE_CANCELED
+
+    @staticmethod
+    def _finish_terminated_permission_restore(
+        *, cwd: str, session_id: str, context_id: str, task_id: str, canceled: bool
+    ) -> None:
+        """Seal a drained normal recovery before strict snapshots and final backup.
+
+        This also runs on termination retry: a failed OSS checkpoint write must
+        keep releaseReady false until the same recovery can be sealed.
+        """
+        store = PermissionWaitCheckpointStore(cwd, session_id)
+        for record in store.list_active():
+            if (
+                record.get("phase") != "RESTORING"
+                or record.get("permissionClass") != "normal"
+                or record.get("taskId") != task_id
+                or record.get("contextId") != context_id
+            ):
+                continue
+            decision = record["decision"]
+            if canceled:
+                store.cancel_restore(str(record["boundaryId"]), claim_id=str(decision["claimId"]))
+            else:
+                messages = SessionStorage().load(cwd, session_id)
+                store.resolve(
+                    str(record["boundaryId"]),
+                    result_digest=canonical_digest(messages[-1].to_dict()) if messages else "",
+                    ack={"decision": decision["value"], "accepted": True},
+                )
 
     async def _resume_persisted_permission(
         self,
@@ -2429,6 +2666,9 @@ class IacCodeA2AExecutor(AgentExecutor):
                 metrics=self._metrics,
             )
             record = store.mark_claim_backed_up(boundary_id, claim_id=claim_id)
+        task_record = await self._task_store.get_or_create_task(
+            task_id=response.task_id, context_id=response.context_id, restore_interrupted=False
+        )
         if not await self._permission_wait_coordinator.acquire_restore(boundary_id):
             await self._publish_permission_recovery_ack(
                 event_queue,
@@ -2444,30 +2684,42 @@ class IacCodeA2AExecutor(AgentExecutor):
             await self._permission_wait_coordinator.release_restore(boundary_id)
             raise InvalidParamsError(f"permission_resume_invalid: {exc}") from exc
 
-        await self._publish_status(
-            event_queue,
-            task_id=response.task_id,
-            context_id=response.context_id,
-            state=TaskState.TASK_STATE_WORKING,
-            metadata={
-                "iac_code": {
-                    "permissionRecovered": {
-                        "inputId": response.input_id,
-                        "toolUseId": response.tool_use_id,
-                    }
-                }
-            },
-            session_id=context_record.session_id,
-        )
-        await self._publish_permission_recovery_ack(
-            event_queue,
-            response=response,
-            decision=expected_value,
-            duplicate=False,
-            session_id=context_record.session_id,
-        )
+        normal_recovery = record.get("permissionClass") != "pipeline"
+        normal_turn_finished = False
+        normal_recovery_started = False
+        previous_task_state = task_record.state
         normal_final_assistant_text: str | None = None
         try:
+            if normal_recovery:
+                context_record = await self._task_store.activate_restored_task(task_record, context_record)
+                normal_recovery_started = True
+                self._task_store.mirror_task(task_record)
+                self._task_store.mirror_context(context_record)
+                control = current_execution_control()
+                if control is not None:
+                    await control.mark_execution_started()
+            await self._publish_status(
+                event_queue,
+                task_id=response.task_id,
+                context_id=response.context_id,
+                state=TaskState.TASK_STATE_WORKING,
+                metadata={
+                    "iac_code": {
+                        "permissionRecovered": {
+                            "inputId": response.input_id,
+                            "toolUseId": response.tool_use_id,
+                        }
+                    }
+                },
+                session_id=context_record.session_id,
+            )
+            await self._publish_permission_recovery_ack(
+                event_queue,
+                response=response,
+                decision=expected_value,
+                duplicate=False,
+                session_id=context_record.session_id,
+            )
             if record.get("permissionClass") == "pipeline":
                 task = await self._task_store.get_or_create_task(
                     task_id=response.task_id,
@@ -2551,9 +2803,55 @@ class IacCodeA2AExecutor(AgentExecutor):
                                 task.output_text.append(text_chunk)
                         if current_assistant_text:
                             normal_final_assistant_text = "".join(current_assistant_text)
+                        normal_turn_finished = True
                 finally:
                     if runtime is not None:
-                        await _close_runtime(runtime)
+                        await await_fenced(_close_runtime(runtime))
+            storage = SessionStorage()
+            persisted_messages = storage.load(context_record.cwd, context_record.session_id)
+            result_digest = canonical_digest(persisted_messages[-1].to_dict()) if persisted_messages else ""
+            store.resolve(
+                boundary_id,
+                result_digest=result_digest,
+                ack={"decision": expected_value, "accepted": True},
+            )
+            task = await self._task_store.get_or_create_task(
+                task_id=response.task_id,
+                context_id=response.context_id,
+            )
+            task.state = TASK_STATE_INPUT_REQUIRED
+            self._task_store.mirror_task(task)
+            if normal_final_assistant_text is not None:
+                await self._publish_status(
+                    event_queue,
+                    task_id=response.task_id,
+                    context_id=response.context_id,
+                    state=TaskState.TASK_STATE_WORKING,
+                    text=normal_final_assistant_text or None,
+                    metadata={"iac_code": {"assistantFinal": {"complete": True}}},
+                    session_id=context_record.session_id,
+                )
+                await backup_session_async(
+                    self._backup_service,
+                    context_record.cwd,
+                    context_record.session_id,
+                    reason=BackupReason.NORMAL_TURN_END,
+                    critical=False,
+                    metrics=self._metrics,
+                )
+                await self._publish_status(
+                    event_queue,
+                    task_id=response.task_id,
+                    context_id=response.context_id,
+                    state=TaskState.TASK_STATE_INPUT_REQUIRED,
+                    session_id=context_record.session_id,
+                )
+                await self._notify_terminal_task(
+                    task_id=task.task_id,
+                    context_id=task.context_id,
+                    state=task.state,
+                )
+                self._metrics.record_turn_completed()
         except PermissionWaitSuspended:
             store.mark_suspended(boundary_id)
             await self._publish_status(
@@ -2569,6 +2867,41 @@ class IacCodeA2AExecutor(AgentExecutor):
                 session_id=context_record.session_id,
             )
             return True
+        except asyncio.CancelledError:
+            if not normal_recovery or current_execution_termination_reason() is None:
+                with contextlib.suppress(ValueError):
+                    store.reconcile_deadline(
+                        boundary_id,
+                        grace_seconds=self._permission_wait_policy.timeout_grace_seconds,
+                        live_owner=False,
+                    )
+                raise
+            # The controller commits the task/checkpoint and backs it up after
+            # this owner detaches. A completed turn keeps its result even when
+            # termination interrupts runtime close or final backup publication.
+            task_record.state = TASK_STATE_INPUT_REQUIRED if normal_turn_finished else TASK_STATE_CANCELED
+            task_record.touch()
+            self._task_store.mirror_task(task_record)
+            control = current_execution_control()
+            if control is not None:
+                await control.mark_execution_status(task_record.state)
+            await self._publish_status(
+                event_queue,
+                task_id=response.task_id,
+                context_id=response.context_id,
+                state=(
+                    TaskState.TASK_STATE_INPUT_REQUIRED if normal_turn_finished else TaskState.TASK_STATE_CANCELED
+                ),
+                session_id=context_record.session_id,
+            )
+            await self._notify_terminal_task(
+                task_id=response.task_id, context_id=response.context_id, state=task_record.state
+            )
+            if normal_turn_finished:
+                self._metrics.record_turn_completed()
+            else:
+                self._metrics.record_task_canceled()
+            return True
         except BaseException:
             with contextlib.suppress(ValueError):
                 store.reconcile_deadline(
@@ -2578,53 +2911,17 @@ class IacCodeA2AExecutor(AgentExecutor):
                 )
             raise
         finally:
+            if normal_recovery_started:
+                if task_record.state == TASK_STATE_WORKING and current_execution_termination_reason() is None:
+                    # Preserve the previous retryable wait on legacy errors or
+                    # cancellation; explicit execution termination seals it above.
+                    task_record.state = previous_task_state
+                    self._task_store.mirror_task(task_record)
+                task_record.active_task = None
+                context_record.active_task_id = None
+                context_record.touch()
+                self._task_store.mirror_context(context_record)
             await self._permission_wait_coordinator.release_restore(boundary_id)
-
-        storage = SessionStorage()
-        persisted_messages = storage.load(context_record.cwd, context_record.session_id)
-        result_digest = canonical_digest(persisted_messages[-1].to_dict()) if persisted_messages else ""
-        store.resolve(
-            boundary_id,
-            result_digest=result_digest,
-            ack={"decision": expected_value, "accepted": True},
-        )
-        task = await self._task_store.get_or_create_task(
-            task_id=response.task_id,
-            context_id=response.context_id,
-        )
-        task.state = TASK_STATE_INPUT_REQUIRED
-        self._task_store.mirror_task(task)
-        if normal_final_assistant_text is not None:
-            await self._publish_status(
-                event_queue,
-                task_id=response.task_id,
-                context_id=response.context_id,
-                state=TaskState.TASK_STATE_WORKING,
-                text=normal_final_assistant_text or None,
-                metadata={"iac_code": {"assistantFinal": {"complete": True}}},
-                session_id=context_record.session_id,
-            )
-            await backup_session_async(
-                self._backup_service,
-                context_record.cwd,
-                context_record.session_id,
-                reason=BackupReason.NORMAL_TURN_END,
-                critical=False,
-                metrics=self._metrics,
-            )
-            await self._publish_status(
-                event_queue,
-                task_id=response.task_id,
-                context_id=response.context_id,
-                state=TaskState.TASK_STATE_INPUT_REQUIRED,
-                session_id=context_record.session_id,
-            )
-            await self._notify_terminal_task(
-                task_id=task.task_id,
-                context_id=task.context_id,
-                state=task.state,
-            )
-            self._metrics.record_turn_completed()
         return True
 
     async def _rebuild_normal_permission_audit_event(

@@ -60,6 +60,7 @@ class BackupReason(str, Enum):
     WAITING_INPUT = "waiting_input"
     TERMINAL = "terminal"
     HANDOFF_READY = "handoff_ready"
+    DISCONNECT_TIMEOUT = "disconnect_timeout"
 
 
 @dataclass(frozen=True)

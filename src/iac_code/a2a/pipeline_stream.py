@@ -19,6 +19,7 @@ from iac_code.a2a.events import (
     _emit_resolver_permission_audit,
     _extract_artifact_metadata,
 )
+from iac_code.a2a.execution_control import current_execution_control
 from iac_code.a2a.exposure import A2AExposureType, normalize_a2a_exposure_types
 from iac_code.a2a.input_required import PendingPermission, PermissionResponse
 from iac_code.a2a.pipeline_events import (
@@ -32,6 +33,7 @@ from iac_code.a2a.pipeline_outbound import OUTBOUND_HARD_MAX_BATCH_BYTES, OUTBOU
 from iac_code.a2a.pipeline_performance import a2a_extreme_performance_enabled
 from iac_code.a2a.pipeline_snapshot import SNAPSHOT_SCHEMA_VERSION, A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.a2a.pipeline_transport_delivery import (
+    PipelineTransportDeliveryClosedError,
     discard_pipeline_transport_delivery,
     mark_pipeline_transport_delivery_enqueued,
     pipeline_transport_delivery_is_required,
@@ -1451,6 +1453,10 @@ class PipelineA2AEventPublisher:
             await self.event_queue.enqueue_event(event)
             mark_pipeline_transport_delivery_enqueued(event)
             await asyncio.shield(completion)
+        except PipelineTransportDeliveryClosedError:
+            if current_execution_control() is None:
+                raise
+            logger.debug("A2A pipeline event remains committed after its transport closed")
         finally:
             discard_pipeline_transport_delivery(event)
 

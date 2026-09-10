@@ -1,5 +1,66 @@
 # A2A 会话恢复与脱敏 E2E
 
+## 执行暂停、恢复与超时终止矩阵
+
+`execution_control/run_execution_control_scenarios.py` 启动独立的真实 HTTP A2A server 进程，使用确定性
+provider、长工具和同步 SDK 边界验证 Normal/Pipeline 执行的暂停、原地恢复、超时终止、共享备份和安全回收门禁。
+它不使用真实模型、云账号或 ROS 资源。
+
+```bash
+uv run python scripts/a2a/e2e/execution_control/run_execution_control_scenarios.py \
+  --run-dir /tmp/iac-execution-control \
+  --scenario warm-resume-pausing \
+  --mode normal
+
+uv run pytest -q tests/a2a_e2e/test_execution_control_scenarios.py
+```
+
+可以重复传入 `--scenario`，兼容所选 `--mode` 的场景会串行运行到独立子目录。每次场景运行会保存
+`summary.json`、`requests.jsonl`、`*.events.jsonl`、`control-requests.json`、
+`execution-state-timeline.json`、`provider-lifecycle.jsonl`、`tool-lifecycle.jsonl`、
+`backup-audit.json`、恢复快照、Pipeline journal/snapshot/sidecar、共享备份内容、
+`server-lifecycle.json` 和 `server.log`。`--timeout` 限制单个等待步骤，`--overall-timeout` 限制整个场景；
+失败清理会释放全部 marker、关闭流，并在有界等待后终止 server。
+
+兼容性与慢存储回归包含以下进程级用例：
+
+| 用例 | 模式 | 关键断言 |
+| --- | --- | --- |
+| `disconnect-timeout-after-operation-id` | Normal | 真实 `RosStack` 获得 StackId 后进入生产轮询；暂停超时取消轮询，共享备份和状态都保留同一外部操作，SDK 只提交一次。 |
+| `disconnect-timeout-after-operation-id` | Pipeline | 同上，并验证 task 为 canceled，没有进入 Pipeline handoff。 |
+| `slow-termination-storage` | Normal | 待审批任务的终止持久化被阻塞期间，health、状态查询及另一会话完整一轮仍可完成；落盘与共享备份完成前不能回收，未批准的工具不执行。 |
+| `terminate-during-bootstrap` | Normal、Pipeline | 保持 SSE 连接，在初始化中终止；初始化和 runtime 清理都必须排空，任务及备份均为 canceled，SSE 正常结束；共享备份提交前 `releaseReady=false`，不发起 LLM 请求。 |
+| `terminate-during-bootstrap-disconnected` | Normal、Pipeline | 初始化中先断开 SSE 再终止；同样验证任务终态、备份与回收信号一致。 |
+| `disconnect-timeout-during-turn-backup` | Normal | 本轮输出完成后阻塞备份，断线暂停直到超时；health 可用，备份结束前不可回收，最终保留正常 input-required 状态和完整结果，不改成 canceled。 |
+| `legacy-cancel-idle` | Pipeline | 首段文本发布后使用原 `CancelTask`；provider 关闭，server 按空闲策略自行退出，不调用新控制接口。 |
+| `slow-rollover-storage` | Normal | 有后台任务存活时正常换轮，阻塞该会话的状态写入；另一会话仍能完成一轮，原后台任务不被误取消，不调用新控制接口。 |
+| `stack-instances-timeout-after-operation-id` | Normal | 真实 `RosStackInstances` 提交成功并开始轮询后暂停至超时；停止本地工具，状态和共享备份保留同一 operation ID，SDK 只提交一次；共享备份放行前不可回收。 |
+| `stack-instances-terminate-inflight` | Normal | 阻塞 SDK 返回时显式 terminate，health 仍可用且不可回收；SDK 返回后记录真实 operation ID，再等待共享备份提交，最终 task 为 canceled。 |
+| `recovery-during-normal-rollover` | Normal | 保留后台任务，阻塞旧 recovery 历史读取，通过第二轮真实 A2A 请求换轮；旧请求返回 409，新快照返回 200 且身份、输出一致，两轮历史完整，新一轮共享备份可用。 |
+
+这些用例同时启用 backup 与 tmp backup，使用真实 HTTP、SSE、AgentLoop 和备份流程。ROS 用例仅替换
+SDK 响应与云端前置检查，不手工调用外部操作记录接口；慢存储通过生产写入边界的 marker 模拟，
+不依赖真实 OSS。它们验证阻塞期间的行为和提交顺序，不测量真实 OSS 吞吐。
+
+仅运行这些兼容性与慢存储用例：
+
+```bash
+uv run pytest -q tests/a2a_e2e/test_execution_control_scenarios.py \
+  -k 'disconnect-timeout-after-operation-id or slow-termination-storage or terminate-during-bootstrap or disconnect-timeout-during-turn-backup or legacy-cancel-idle or slow-rollover-storage or stack-instances or recovery-during-normal-rollover'
+```
+
+`NaN` 超时参数由 HTTP 层自动化测试覆盖，不额外增加进程级用例。
+
+仅运行 operation ID 与 recovery 换轮的 3 个补充用例：
+
+```bash
+uv run pytest -q tests/a2a_e2e/test_execution_control_scenarios.py \
+  -k 'stack-instances or recovery-during-normal-rollover'
+```
+
+recovery 换轮用例另存 `recovery-conflict.json`、`recovery-after-rollover.json` 和换轮前状态时间线，
+通过 `fixture-lifecycle.jsonl` 确认实际调用了生产换轮逻辑。三个用例均不访问真实云资源。
+
 ## 真实 StartChat 权限等待矩阵
 
 `run_start_chat_permission_wait.py` 是本功能可重复执行、受凭证开关保护的真实链路：Qoder 真实 LLM

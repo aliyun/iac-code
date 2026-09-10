@@ -240,6 +240,50 @@ class StagedSessionBackupService(SessionBackupService):
             ) from None
         return failure_result
 
+    def wait_until_shared_committed(
+        self,
+        cwd: str,
+        session_id: str,
+        *,
+        generation: int,
+        commit_id: str,
+        timeout_seconds: float = 30.0,
+        poll_interval: float = 0.05,
+    ) -> BackupResult:
+        """Wait until the staging publisher exposes the exact commit in shared storage."""
+
+        source = self._source_for_backup(cwd, session_id)
+        backup_root = self._backup_root()
+        if source is None or backup_root is None:
+            return BackupResult(enabled=False)
+        destination = backup_root / "projects" / source.parent.name / session_id
+        deadline = time.monotonic() + max(timeout_seconds, 0.0)
+        while True:
+            state = self._read_state(destination, session_id=session_id, shared=True, missing_ok=True)
+            if state is not None and state.generation == generation and state.commit_id == commit_id:
+                return BackupResult(
+                    enabled=True,
+                    source=source,
+                    destination=destination,
+                    generation=generation,
+                    commit_id=commit_id,
+                    succeeded=True,
+                    shared_committed=True,
+                    staged_committed=True,
+                )
+            if time.monotonic() >= deadline:
+                return BackupResult(
+                    enabled=True,
+                    source=source,
+                    destination=destination,
+                    generation=generation,
+                    commit_id=commit_id,
+                    succeeded=False,
+                    error="Timed out waiting for the staged backup to reach shared storage.",
+                    staged_committed=True,
+                )
+            time.sleep(max(poll_interval, 0.01))
+
     def reconcile_session(
         self,
         cwd: str,

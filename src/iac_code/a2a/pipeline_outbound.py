@@ -10,7 +10,10 @@ from typing import Any
 
 from iac_code.a2a.pipeline_delta_coalescing import coalesce_pipeline_delta_envelopes_by_source
 from iac_code.a2a.pipeline_flow_monitor import PipelineA2AFlowItem
-from iac_code.a2a.pipeline_transport_delivery import pipeline_transport_delivery_required
+from iac_code.a2a.pipeline_transport_delivery import (
+    PipelineTransportDeliveryClosedError,
+    pipeline_transport_delivery_required,
+)
 from iac_code.types.stream_events import (
     PermissionRequestEvent,
     SubPipelineStreamEvent,
@@ -405,11 +408,14 @@ class PipelineA2AOutboundQueue:
             network_envelopes = coalesce_pipeline_delta_envelopes_by_source(persisted)
             if monitor is not None:
                 monitor.phase_started("a2a_internal_queue")
-            frame_count_result = await self._publisher.enqueue_persisted_batch(
-                network_envelopes,
-                wait_for_transport=True,
-                local_envelopes=persisted,
-            )
+            try:
+                frame_count_result = await self._publisher.enqueue_persisted_batch(
+                    network_envelopes,
+                    wait_for_transport=True,
+                    local_envelopes=persisted,
+                )
+            except PipelineTransportDeliveryClosedError:
+                frame_count_result = 0
             network_frames = (
                 int(frame_count_result) if isinstance(frame_count_result, int) else int(bool(network_envelopes))
             )
@@ -454,7 +460,26 @@ class PipelineA2AOutboundQueue:
             )
             if monitor is not None:
                 monitor.phase_started("a2a_internal_queue")
-            delivered = await self._publisher.enqueue_prepared_permission(prepared)
+            try:
+                delivered = await self._publisher.enqueue_prepared_permission(prepared)
+            except PipelineTransportDeliveryClosedError:
+                # The permission decision and its audit metadata are already durable.
+                # Losing the old subscription must not reverse that decision.
+                self._publisher.complete_prepared_permission(prepared, delivered=True)
+                if monitor is not None:
+                    envelope_count = len(prepared.envelopes)
+                    monitor.batch_completed(
+                        persisted_envelopes=envelope_count,
+                        wire_envelopes=envelope_count,
+                        network_frames=0,
+                    )
+                self._run_after_delivery(permission.item)
+                logger.debug(
+                    "A2A pipeline permission persisted after its transport closed approved=%s queued_ms=%.2f",
+                    approved,
+                    max(0.0, (asyncio.get_running_loop().time() - permission.item.enqueued_at) * 1_000),
+                )
+                return
             self._publisher.complete_prepared_permission(prepared, delivered=delivered)
             if monitor is not None:
                 envelope_count = len(prepared.envelopes)

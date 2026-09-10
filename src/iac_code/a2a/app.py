@@ -20,6 +20,7 @@ from a2a.auth.user import User
 from a2a.server.context import ServerCallContext
 from a2a.server.routes import create_jsonrpc_routes, create_rest_routes
 from a2a.utils.constants import AGENT_CARD_WELL_KNOWN_PATH
+from google.protobuf.json_format import MessageToDict
 from starlette.applications import Starlette
 from starlette.authentication import AuthCredentials, SimpleUser
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -29,6 +30,7 @@ from starlette.routing import BaseRoute, Route
 
 from iac_code import __version__
 from iac_code.a2a.agent_card import agent_card_to_client_dict
+from iac_code.a2a.execution_control import ExecutionControlConflictError, ExecutionControlNotFoundError
 from iac_code.a2a.jsonrpc_passthrough import (
     install_jsonrpc_error_data_passthrough,
     install_v03_jsonrpc_error_data_passthrough,
@@ -557,6 +559,9 @@ def create_app(
         if parse_error is not None:
             return JSONResponse({"error": parse_error}, status_code=400)
         lean = _parse_lean(request.query_params.get("lean"))
+        include_snapshot = _parse_include_snapshot(request.query_params.get("includeSnapshot"))
+        if not include_snapshot and after_sequence is None:
+            return JSONResponse({"error": _("afterSequence must be a non-negative integer")}, status_code=400)
 
         call_context = _call_context_from_request(request)
         try:
@@ -580,7 +585,178 @@ def create_app(
             task_id=task_id,
         )
         # 先裁掉不发给客户端的字段，再投影：既少发一大半字节，也少一大半要脱敏的字符串
-        return JSONResponse(project_a2a_data(client_pipeline_state(state, lean=lean), public_path_roots=roots))
+        return JSONResponse(
+            project_a2a_data(
+                client_pipeline_state(
+                    state,
+                    lean=lean,
+                    include_snapshot=include_snapshot,
+                    after_sequence=after_sequence,
+                ),
+                public_path_roots=roots,
+            )
+        )
+
+    def execution_owner(request: Request) -> str:
+        return components.task_store.owner_for_context(_call_context_from_request(request))
+
+    async def execution_control_from_request(request: Request, context_id: str):
+        service = components.execution_control_service
+        if service is None:
+            raise ExecutionControlNotFoundError("Execution control is unavailable")
+        return await service.require(
+            context_id=validate_protocol_id(context_id),
+            owner=execution_owner(request),
+        )
+
+    async def execution_error_response(exc: Exception) -> JSONResponse:
+        if isinstance(exc, ExecutionControlNotFoundError):
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        if isinstance(exc, ExecutionControlConflictError):
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        if isinstance(exc, (TypeError, ValueError)):
+            return JSONResponse({"error": "Invalid execution control request."}, status_code=400)
+        logger.exception("A2A execution control request failed")
+        return JSONResponse({"error": "Execution control is unavailable."}, status_code=503)
+
+    async def read_control_payload(request: Request) -> dict[str, Any]:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("payload must be an object")
+        return payload
+
+    def required_string(payload: dict[str, Any], name: str) -> str:
+        value = payload.get(name)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"{name} is required")
+        return value
+
+    def required_epoch(payload: dict[str, Any]) -> int:
+        value = payload.get("connectionEpoch")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("connectionEpoch is required")
+        return value
+
+    async def pause_execution(request: Request) -> JSONResponse:
+        try:
+            payload = await read_control_payload(request)
+            context_id = required_string(payload, "contextId")
+            control = await execution_control_from_request(request, context_id)
+            timeout = payload.get("reconnectTimeoutSeconds", 300)
+            if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+                raise ValueError("invalid reconnect timeout")
+            state = await control.pause(
+                task_id=validate_protocol_id(required_string(payload, "taskId")),
+                expected_execution_id=validate_protocol_id(required_string(payload, "expectedExecutionId")),
+                request_id=validate_protocol_id(required_string(payload, "requestId")),
+                connection_epoch=required_epoch(payload),
+                reason=required_string(payload, "reason"),
+                reconnect_timeout_seconds=float(timeout),
+            )
+            return JSONResponse(state, status_code=200 if state["phase"] == "paused" else 202)
+        except Exception as exc:
+            return await execution_error_response(exc)
+
+    async def get_execution_state(request: Request) -> JSONResponse:
+        try:
+            context_id = request.query_params.get("contextId")
+            if not context_id:
+                raise ValueError("contextId is required")
+            control = await execution_control_from_request(request, context_id)
+            expected_execution_id = request.query_params.get("executionId")
+            pause_id = request.query_params.get("pauseId")
+            if expected_execution_id is not None and expected_execution_id != control.execution_id:
+                raise ExecutionControlConflictError("executionId does not identify the current execution")
+            if pause_id is not None and pause_id != control.pause_id:
+                raise ExecutionControlConflictError("pauseId does not identify the current pause")
+            return JSONResponse(control.snapshot())
+        except Exception as exc:
+            return await execution_error_response(exc)
+
+    async def resume_execution(request: Request) -> JSONResponse:
+        try:
+            payload = await read_control_payload(request)
+            context_id = required_string(payload, "contextId")
+            control = await execution_control_from_request(request, context_id)
+            state = await control.resume(
+                execution_id=validate_protocol_id(required_string(payload, "executionId")),
+                pause_id=validate_protocol_id(required_string(payload, "pauseId")),
+                request_id=validate_protocol_id(required_string(payload, "requestId")),
+                connection_epoch=required_epoch(payload),
+            )
+            return JSONResponse(state, status_code=200 if state["phase"] == "running" else 202)
+        except Exception as exc:
+            return await execution_error_response(exc)
+
+    async def terminate_execution(request: Request) -> JSONResponse:
+        try:
+            payload = await read_control_payload(request)
+            context_id = required_string(payload, "contextId")
+            control = await execution_control_from_request(request, context_id)
+            reason = payload.get("reason", "explicit_terminate")
+            if not isinstance(reason, str) or not reason:
+                raise ValueError("reason must be a non-empty string")
+            pause_id = payload.get("pauseId")
+            if pause_id is not None:
+                if not isinstance(pause_id, str) or not pause_id:
+                    raise ValueError("pauseId must be a non-empty string")
+                pause_id = validate_protocol_id(pause_id)
+            state = await control.terminate(
+                execution_id=validate_protocol_id(required_string(payload, "expectedExecutionId")),
+                request_id=validate_protocol_id(required_string(payload, "requestId")),
+                connection_epoch=required_epoch(payload),
+                reason=reason,
+                pause_id=pause_id,
+            )
+            return JSONResponse(state, status_code=200 if state["phase"] == "terminated" else 202)
+        except Exception as exc:
+            return await execution_error_response(exc)
+
+    async def get_session_recovery(request: Request) -> JSONResponse:
+        try:
+            context_id = request.query_params.get("contextId")
+            execution_id = request.query_params.get("executionId")
+            if not context_id or not execution_id:
+                raise ValueError("contextId and executionId are required")
+            control = await execution_control_from_request(request, context_id)
+            if execution_id != control.execution_id:
+                raise ExecutionControlConflictError("executionId does not identify the current execution")
+            task_id = control.task_id
+            context_record = await components.task_store.get_context_record(context_id)
+            session_id = context_record.session_id
+            task_record = await components.task_store.get_task_record(task_id)
+            task = await components.task_store.get(task_id, _call_context_from_request(request))
+            if task is None:
+                raise ExecutionControlNotFoundError("Execution was not found")
+            messages = await asyncio.to_thread(SessionStorage().load, context_record.cwd, session_id)
+            roots = await recovery_path_roots(context_id=context_id, task_id=task_id)
+            current_context = await components.task_store.get_context_record(context_id)
+            service = components.execution_control_service
+            current_control = service.get_for_context(context_id) if service is not None else None
+            if (
+                current_control is not control
+                or control.execution_id != execution_id
+                or control.task_id != task_id
+                or current_context.session_id != session_id
+                or current_context.cwd != context_record.cwd
+            ):
+                raise ExecutionControlConflictError("executionId does not identify the current execution")
+            # No awaits after identity validation: rollover must not mix a new
+            # execution's control with the task/messages read above.
+            recovery = {
+                "contextId": context_id,
+                "taskId": task_id,
+                "executionId": execution_id,
+                "revision": control.revision,
+                "executionStatus": task_record.state,
+                "outputText": list(task_record.output_text),
+                "task": MessageToDict(task, preserving_proto_field_name=False),
+                "messages": [message.to_dict() for message in messages],
+                "executionControl": control.snapshot(),
+            }
+            return JSONResponse(project_a2a_data(recovery, public_path_roots=roots))
+        except Exception as exc:
+            return await execution_error_response(exc)
 
     routes: list[BaseRoute] = [
         Route("/health", health, methods=["GET"]),
@@ -588,6 +764,11 @@ def create_app(
         Route("/iac-code/readiness", get_readiness, methods=["GET"]),
         Route("/iac-code/session/ensure-restored", ensure_session_restored, methods=["POST"]),
         Route("/iac-code/pipeline/state", get_pipeline_state, methods=["GET"]),
+        Route("/iac-code/execution/pause", pause_execution, methods=["POST"]),
+        Route("/iac-code/execution/state", get_execution_state, methods=["GET"]),
+        Route("/iac-code/execution/resume", resume_execution, methods=["POST"]),
+        Route("/iac-code/execution/terminate", terminate_execution, methods=["POST"]),
+        Route("/iac-code/session/recovery", get_session_recovery, methods=["GET"]),
     ]
     install_jsonrpc_error_data_passthrough()
     jsonrpc_endpoint = create_jsonrpc_routes(components.handler, rpc_url="/", enable_v0_3_compat=True)[0].endpoint
@@ -600,6 +781,7 @@ def create_app(
     routes.append(Route("/", handle_jsonrpc, methods=["POST"]))
     routes.extend(create_rest_routes(components.handler, enable_v0_3_compat=True))
     app = Starlette(routes=routes, lifespan=lifespan)
+    app.state.a2a_components = components
     app.add_middleware(A2AProjectionMiddleware, task_store=components.task_store)
     app.add_middleware(
         A2AAuthMiddleware,
@@ -641,6 +823,19 @@ def _parse_lean(value: str | None) -> bool:
     if normalized not in {"0", "false"}:
         logger.warning("Ignoring unrecognized pipeline state lean value %r; returning the full snapshot", value)
     return False
+
+
+def _parse_include_snapshot(value: str | None) -> bool:
+    """Default to the compatible full response unless omission is explicit."""
+
+    if value is None or value == "":
+        return True
+    normalized = value.strip().lower()
+    if normalized in {"0", "false"}:
+        return False
+    if normalized not in _LEAN_TRUTHY_VALUES:
+        logger.warning("Ignoring unrecognized pipeline state includeSnapshot value %r", value)
+    return True
 
 
 def _parse_after_sequence(value: str | None) -> tuple[int | None, str | None]:

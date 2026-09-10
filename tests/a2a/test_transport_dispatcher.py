@@ -1414,7 +1414,7 @@ async def _collect_async(iterator):
 
 
 @pytest.mark.asyncio
-async def test_active_message_stream_cancellation_cancels_producer() -> None:
+async def test_active_message_stream_cancellation_detaches_producer() -> None:
     producer_cancelled = asyncio.Event()
 
     class FakeAgentExecutor:
@@ -1480,7 +1480,12 @@ async def test_active_message_stream_cancellation_cancels_producer() -> None:
 
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(stream_task, timeout=_STREAM_TEST_TIMEOUT)
-    assert producer_cancelled.is_set()
+    assert not producer_cancelled.is_set()
+    cleanup_tasks = tuple(handler._detached_message_producers)
+    assert len(cleanup_tasks) == 1
+    cleanup_tasks[0].cancel()
+    await asyncio.wait_for(producer_cancelled.wait(), timeout=_STREAM_TEST_TIMEOUT)
+    await asyncio.gather(*cleanup_tasks, return_exceptions=True)
     assert active_task._reference_count == 0
 
 

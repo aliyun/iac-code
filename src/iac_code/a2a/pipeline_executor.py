@@ -21,6 +21,11 @@ from google.protobuf.json_format import ParseDict
 from iac_code.a2a.artifacts import artifact_store_for_session
 from iac_code.a2a.backup import backup_session_async
 from iac_code.a2a.events import make_text_part, publish_mcp_warnings
+from iac_code.a2a.execution_control import (
+    current_execution_control,
+    current_execution_termination_reason,
+    execution_non_advancing_wait,
+)
 from iac_code.a2a.input_required import PendingPermission, staged_permission_backup_generation
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_flow_monitor import (
@@ -612,6 +617,30 @@ class IacCodeA2APipelineExecutor:
                     cwd=cwd,
                     runtime_factory=runtime_factory,
                 )
+                control = current_execution_control()
+                if control is not None:
+                    control.bind_session(ctx.session_id)
+        except asyncio.CancelledError:
+            # Context creation drains and closes an unfinished runtime before
+            # cancellation reaches here, even if no Pipeline exists yet.
+            task.active_task = None
+            task.state = TASK_STATE_CANCELED
+            self._task_store.mirror_task(task)
+            with contextlib.suppress(Exception):
+                await self._publish_status(
+                    event_queue,
+                    task_id=task_id,
+                    context_id=context_id,
+                    state=TaskState.TASK_STATE_CANCELED,
+                    text=_("Task canceled."),
+                )
+                await self._notify_terminal_task(task_id=task_id, context_id=context_id, state=task.state)
+            self._metrics.record_task_canceled()
+            if current_execution_termination_reason() is not None:
+                # The SDK must enqueue request completion after the canceled
+                # status; propagating cancellation can strand its subscriber.
+                return
+            raise
         except Exception as exc:
             await self._publish_exception_status(
                 event_queue,
@@ -975,12 +1004,27 @@ class IacCodeA2APipelineExecutor:
             except asyncio.CancelledError:
                 try:
                     task.state = TASK_STATE_CANCELED
-                    cancel_data = {"source": "executor", "reason": _("Task canceled.")}
+                    execution_termination_reason = current_execution_termination_reason()
+                    cancel_source = "execution_control" if execution_termination_reason is not None else "executor"
+                    cancel_reason = execution_termination_reason or _("Task canceled.")
+                    cancel_data = {"source": cancel_source, "reason": cancel_reason}
                     cancel_handoff_data = {"canceled": True, "reason": _("Task canceled.")}
 
                     async def publish_cancel_terminal() -> bool:
                         if pipeline is not None:
-                            await self._mark_user_aborted(pipeline)
+                            if execution_termination_reason is not None:
+                                mark_terminated = getattr(pipeline, "mark_execution_terminated", None)
+                                if callable(mark_terminated):
+                                    mark_terminated(execution_termination_reason)
+                            else:
+                                await self._mark_user_aborted(pipeline)
+                        if execution_termination_reason is not None:
+                            return await self._publish_pipeline_terminal_event(
+                                publisher,
+                                event_type="pipeline_canceled",
+                                status="canceled",
+                                data=cancel_data,
+                            )
                         cancel_transaction_result = _TerminalHandoffPublishResult(
                             attempted=False,
                             terminal_available=False,
@@ -1979,10 +2023,11 @@ class IacCodeA2APipelineExecutor:
                 next_event = asyncio.get_running_loop().create_future()
                 stream_requests.put_nowait(next_event)
                 restart_task = asyncio.create_task(restart_event.wait())
-                done, _pending = await asyncio.wait(
-                    {next_event, restart_task},
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
+                async with execution_non_advancing_wait():
+                    done, _pending = await asyncio.wait(
+                        {next_event, restart_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
 
                 if restart_task in done and runtime.restart_after_interrupt:
                     restart_event.clear()
@@ -4309,6 +4354,8 @@ def cancel_waiting_input_task_from_sidecar(
     task_record: Any | None = None,
     context_record: Any | None = None,
     metrics: Any | None = None,
+    source: str = "a2a_cancel",
+    allow_normal_handoff: bool = True,
 ) -> WaitingInputCancelResult:
     if reason is None:
         reason = _("Task canceled.")
@@ -4325,6 +4372,8 @@ def cancel_waiting_input_task_from_sidecar(
             task_record=task_record,
             context_record=context_record,
             metrics=metrics,
+            source=source,
+            allow_normal_handoff=allow_normal_handoff,
         )
 
 
@@ -4340,6 +4389,8 @@ def _cancel_waiting_input_task_from_sidecar_locked(
     task_record: Any | None = None,
     context_record: Any | None = None,
     metrics: Any | None = None,
+    source: str = "a2a_cancel",
+    allow_normal_handoff: bool = True,
 ) -> WaitingInputCancelResult:
     if waiting_input_task_id_from_sidecar(cwd=cwd, session_id=session_id, context_id=context_id) != task_id:
         return WaitingInputCancelResult.NOT_OWNER
@@ -4373,7 +4424,7 @@ def _cancel_waiting_input_task_from_sidecar_locked(
         "pipeline_canceled",
         "pipeline",
         status="canceled",
-        data={"source": "a2a_cancel", "reason": reason},
+        data={"source": source, "reason": reason},
     )
     high_water_sequence = max(
         [int(event.get("sequence") or 0) for event in events if isinstance(event, dict)]
@@ -4381,13 +4432,17 @@ def _cancel_waiting_input_task_from_sidecar_locked(
     )
     if int(envelope.get("sequence") or 0) <= high_water_sequence:
         envelope["sequence"] = high_water_sequence + 1
-    handoff_envelope = _waiting_input_cancel_handoff_event(
-        translator,
-        snapshot=snapshot,
-        cwd=cwd,
-        session_id=session_id,
-        pipeline_name=pipeline_name,
-        reason=reason,
+    handoff_envelope = (
+        _waiting_input_cancel_handoff_event(
+            translator,
+            snapshot=snapshot,
+            cwd=cwd,
+            session_id=session_id,
+            pipeline_name=pipeline_name,
+            reason=reason,
+        )
+        if allow_normal_handoff
+        else None
     )
     if handoff_envelope is not None and int(handoff_envelope.get("sequence") or 0) <= int(
         envelope.get("sequence") or 0

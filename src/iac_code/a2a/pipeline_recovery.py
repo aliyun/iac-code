@@ -215,7 +215,13 @@ _SERVER_ONLY_SNAPSHOT_KEYS = ("seenEventIds",)
 _LEAN_ONLY_DISPLAY_KEYS = ("toolResults",)
 
 
-def client_pipeline_state(state: Mapping[str, Any], *, lean: bool = False) -> dict[str, Any]:
+def client_pipeline_state(
+    state: Mapping[str, Any],
+    *,
+    lean: bool = False,
+    include_snapshot: bool = True,
+    after_sequence: int | None = None,
+) -> dict[str, Any]:
     """去掉只服务端用得上的字段，得到面向客户端的恢复状态。
 
     磁盘快照与进程内状态都不受影响：这里只裁剪要发出去的那一份拷贝。
@@ -223,11 +229,25 @@ def client_pipeline_state(state: Mapping[str, Any], *, lean: bool = False) -> di
 
     ``lean=True`` 再去掉只有调试工具会读的 ``display`` 字段，供恢复界面
     （ROS 控制台经 bridge 拉取）少下载一大截；默认关闭，调试工具无需改动。
+    ``include_snapshot=False`` 只返回指定游标之后的事件和新的服务端高水位。
     """
 
     projected = dict(state)
     snapshot = projected.get("snapshot")
     if not isinstance(snapshot, Mapping):
+        return projected
+    if not include_snapshot:
+        if after_sequence is None:
+            raise ValueError("after_sequence is required when include_snapshot is False")
+        events = projected.get("events")
+        last_sequence = _int_value(snapshot.get("lastSequence"), 0)
+        if isinstance(events, list):
+            for event in events:
+                if isinstance(event, Mapping):
+                    last_sequence = max(last_sequence, _int_value(event.get("sequence"), 0))
+        projected.pop("snapshot", None)
+        projected["fromSequence"] = after_sequence
+        projected["lastSequence"] = last_sequence
         return projected
     trimmed = {key: value for key, value in snapshot.items() if key not in _SERVER_ONLY_SNAPSHOT_KEYS}
     if lean:

@@ -9,6 +9,8 @@ from typing import Any
 
 from alibabacloud_ros20190910 import models as ros_models
 
+from iac_code.a2a.backup import await_fenced, run_sync_fenced, run_sync_fenced_with_cancel_completion
+from iac_code.a2a.execution_control import current_execution_control, record_execution_external_operation
 from iac_code.i18n import _
 from iac_code.services.cloud_credentials import CloudCredentials
 from iac_code.tools.base import Tool, ToolContext, ToolResult
@@ -136,31 +138,55 @@ class RosStackInstances(Tool):
         cred = credentials.get_provider("aliyun")
         return RosClientFactory.create(cred, region_id=region)
 
-    async def _initiate(self, client: Any, action: str, params: dict) -> str:
+    async def _initiate(self, client: Any, action: str, params: dict, *, context: ToolContext | None = None) -> str:
         """Start the stack instances operation and return the operation_id.
 
         Every SDK call is blocking network I/O, and signing a dynamic credential reads
         the instance metadata service on the calling thread, so it stays off the shared
         event loop (web agent turns, SSE, and HTTP handlers run on it).
         """
+
+        async def record_result(response: Any | None, error: BaseException | None) -> None:
+            if current_execution_control() is None:
+                return
+            operation_id = getattr(getattr(response, "body", None), "operation_id", None)
+            await await_fenced(
+                record_execution_external_operation(
+                    product="ros",
+                    action=action,
+                    outcome="accepted" if error is None else "unknown",
+                    resource_type="stack-group-operation",
+                    resource_id=str(operation_id) if operation_id else None,
+                    region_id=params.get("RegionId") or None,
+                    tool_use_id=context.tool_use_id if context is not None else None,
+                )
+            )
+
         if action == "CreateStackInstances":
             request = ros_models.CreateStackInstancesRequest().from_map(params)
-            response = await asyncio.to_thread(client.create_stack_instances, request)
-            return response.body.operation_id
+            response = await run_sync_fenced_with_cancel_completion(
+                client.create_stack_instances, record_result, request
+            )
         elif action == "UpdateStackInstances":
             request = ros_models.UpdateStackInstancesRequest().from_map(params)
-            response = await asyncio.to_thread(client.update_stack_instances, request)
-            return response.body.operation_id
+            response = await run_sync_fenced_with_cancel_completion(
+                client.update_stack_instances, record_result, request
+            )
         elif action == "DeleteStackInstances":
             request = ros_models.DeleteStackInstancesRequest().from_map(params)
-            response = await asyncio.to_thread(client.delete_stack_instances, request)
-            return response.body.operation_id
-        raise ValueError(f"Unsupported action: {action}")
+            response = await run_sync_fenced_with_cancel_completion(
+                client.delete_stack_instances, record_result, request
+            )
+        else:
+            raise ValueError(f"Unsupported action: {action}")
+        assert response is not None
+        await record_result(response, None)
+        return response.body.operation_id
 
     async def _get_operation_status(self, client: Any, operation_id: str, region: str) -> str:
         """Poll the current status of a stack group operation."""
         request = ros_models.GetStackGroupOperationRequest(operation_id=operation_id, region_id=region)
-        response = await asyncio.to_thread(client.get_stack_group_operation, request)
+        response = await run_sync_fenced(client.get_stack_group_operation, request)
         data = response.body.to_map()
         operation = data.get("StackGroupOperation") or {}
         return operation.get("Status") or data.get("Status", "RUNNING")
@@ -168,7 +194,7 @@ class RosStackInstances(Tool):
     async def _get_instances(self, client: Any, stack_group_name: str, region: str) -> list[InstanceStatus]:
         """Get the current list of stack instances for a stack group."""
         request = ros_models.ListStackInstancesRequest(stack_group_name=stack_group_name, region_id=region)
-        response = await asyncio.to_thread(client.list_stack_instances, request)
+        response = await run_sync_fenced(client.list_stack_instances, request)
         data = response.body.to_map()
         instances = []
         for item in data.get("StackInstances", []):
@@ -196,7 +222,7 @@ class RosStackInstances(Tool):
 
         try:
             client = self._get_client(region)
-            operation_id = await self._initiate(client, action, params)
+            operation_id = await self._initiate(client, action, params, context=context)
         except Exception as error:
             # A dynamic credential is resolved when the client is built (a plain
             # ValueError) and again while the SDK signs the request (the same failure

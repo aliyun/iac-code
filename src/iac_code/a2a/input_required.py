@@ -13,6 +13,7 @@ from a2a.types import Message, Part, Role
 from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict
 
+from iac_code.a2a.execution_control import current_execution_control
 from iac_code.a2a.runtime_overrides import get_a2a_preferred_language
 from iac_code.i18n import translate_message
 from iac_code.services.permission_wait import (
@@ -1097,7 +1098,15 @@ class PermissionInputRegistry:
                 if asyncio.iscoroutine(result):
                     await result
 
-        coordinator.register_live(record=current, store=store, future=future, on_suspend=on_suspend)
+        control = current_execution_control()
+        coordinator.register_live(
+            record=current,
+            store=store,
+            future=future,
+            on_suspend=on_suspend,
+            run_suspension=control.run_permission_suspension if control is not None else None,
+            suspension_allowed=control.permission_suspension_allowed if control is not None else None,
+        )
         return current
 
     async def pending_for_response(self, response: PermissionResponse) -> PendingPermission:
@@ -1300,6 +1309,10 @@ class PermissionInputRegistry:
                 and pending.input_id not in excluded
             ]
 
+    async def has_pending_task(self, task_id: str) -> bool:
+        async with self._condition:
+            return any(pending.task_id == task_id for pending in self._pending.values())
+
     async def cancel_task(
         self,
         task_id: str,
@@ -1338,6 +1351,11 @@ class PermissionInputRegistry:
             )
             if not canceled:
                 await self.fail(pending)
+            callback = pending.suspend_callback
+            if callable(callback):
+                result = callback()
+                if asyncio.iscoroutine(result):
+                    await result
             await self.complete(pending)
         return token
 

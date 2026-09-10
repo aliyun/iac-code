@@ -151,7 +151,6 @@ class TestPauseEventEndToEnd:
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
-
     @pytest.mark.asyncio
     async def test_pause_then_resume_releases_existing_loop(self, pipeline_runner):
         """Resuming after pause sets the event and any AgentLoop parked on it wakes up."""
@@ -185,3 +184,63 @@ class TestPauseEventEndToEnd:
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
+
+
+@pytest.mark.asyncio
+async def test_execution_control_blocks_pipeline_before_starting_first_step(pipeline_runner, tmp_path):
+    from iac_code.a2a.execution_control import ExecutionController, bind_execution_control, reset_execution_control
+
+    control = ExecutionController(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="",
+        cwd=str(tmp_path),
+        server_instance_id="instance-1",
+        persistence_path=tmp_path / "control.json",
+        backup_service=None,
+        execution_id="exec-1",
+    )
+    attached = asyncio.Event()
+    start_pipeline = asyncio.Event()
+
+    async def consume_first_event():
+        token = bind_execution_control(control)
+        current = asyncio.current_task()
+        assert current is not None
+        await control.attach_task(current)
+        attached.set()
+        try:
+            await start_pipeline.wait()
+            async for event in pipeline_runner.run("hello"):
+                return event
+        finally:
+            await control.detach_task(current, execution_status="input-required")
+            reset_execution_control(token)
+
+    execution = asyncio.create_task(consume_first_event())
+    await attached.wait()
+    pause = await control.pause(
+        task_id="task-1",
+        expected_execution_id="exec-1",
+        request_id="pause-request",
+        connection_epoch=1,
+        reason="client_disconnected",
+        reconnect_timeout_seconds=30,
+    )
+    start_pipeline.set()
+    async def wait_until_paused():
+        while control.phase != "paused":
+            await asyncio.sleep(0.005)
+
+    await asyncio.wait_for(wait_until_paused(), timeout=2)
+    assert pipeline_runner._session_storage.meta_entries == []
+
+    await control.resume(
+        execution_id="exec-1",
+        pause_id=pause["pauseId"],
+        request_id="resume-request",
+        connection_epoch=2,
+    )
+    event = await asyncio.wait_for(execution, timeout=2)
+    assert event.type.value == "pipeline_started"
+    await control.close()

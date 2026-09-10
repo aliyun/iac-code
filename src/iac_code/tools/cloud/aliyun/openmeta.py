@@ -23,6 +23,7 @@ from urllib.parse import quote
 import httpx
 import yaml
 
+from iac_code.a2a.backup import run_sync_fenced
 from iac_code.tools.cloud.aliyun.api_identifiers import is_safe_api_version
 from iac_code.tools.cloud.aliyun.user_agent import build_user_agent
 from iac_code.utils.async_lifecycle import await_task_to_completion
@@ -1560,7 +1561,7 @@ class OpenMetaClient:
                 return None, "temporarily_unavailable", str(current)
             try:
                 async with self._decode_semaphore:
-                    payload = await asyncio.to_thread(json.loads, b"".join(chunks))
+                    payload = await run_sync_fenced(json.loads, b"".join(chunks))
             except (json.JSONDecodeError, UnicodeDecodeError):
                 return None, "temporarily_unavailable", str(current)
             if not isinstance(payload, Mapping | list):

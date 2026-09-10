@@ -1,6 +1,6 @@
 from a2a.server.routes.agent_card_routes import agent_card_to_dict
 
-from iac_code.a2a.agent_card import build_agent_card
+from iac_code.a2a.agent_card import IAC_CODE_EXECUTION_CONTROL_EXTENSION_URI, build_agent_card
 from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.pipeline_events import PIPELINE_EVENTS_EXTENSION_URI
 
@@ -85,6 +85,32 @@ def test_agent_card_advertises_pipeline_events_extension() -> None:
     extension = _extension_by_uri(data, PIPELINE_EVENTS_EXTENSION_URI)
     assert extension.get("required", False) is False
     assert extension["params"] == PIPELINE_EVENTS_EXTENSION_PARAMS
+
+
+def test_agent_card_advertises_execution_control_extension() -> None:
+    card = build_agent_card(host="127.0.0.1", port=41242, token_enabled=False)
+    data = agent_card_to_dict(card)
+
+    extension = _extension_by_uri(data, IAC_CODE_EXECUTION_CONTROL_EXTENSION_URI)
+    assert extension.get("required", False) is False
+    assert extension["params"]["pauseEndpoint"] == "/iac-code/execution/pause"
+    assert extension["params"]["sessionRecoveryEndpoint"] == "/iac-code/session/recovery"
+    assert extension["params"]["toolBatchDrainOnPause"] is True
+    assert extension["params"]["transportScope"] == "http"
+
+
+def test_agent_card_does_not_advertise_http_execution_control_on_non_http_only_transport() -> None:
+    card = build_agent_card(
+        host="127.0.0.1",
+        port=41242,
+        token_enabled=False,
+        supported_interfaces=[
+            {"url": "unix:///tmp/iac-code.sock", "protocolBinding": "unix", "protocolVersion": "1.0"},
+        ],
+    )
+    data = agent_card_to_dict(card)
+
+    assert _extensions_by_uri(data, IAC_CODE_EXECUTION_CONTROL_EXTENSION_URI) == []
 
 
 def test_agent_card_advertises_pipeline_event_batching_contract() -> None:

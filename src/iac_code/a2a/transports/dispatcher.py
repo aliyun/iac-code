@@ -290,6 +290,7 @@ class A2ARuntimeComponents:
     push_queue: Any | None = None
     runtime_registration: A2ARuntimeRegistration | None = None
     backup_staging_process: SessionBackupStagingProcess | None = None
+    execution_control_service: Any | None = None
 
     def start_background_services(self) -> None:
         if self.backup_staging_process is not None:
@@ -300,6 +301,8 @@ class A2ARuntimeComponents:
             self.runtime_registration.unregister()
             self.runtime_registration = None
         await self.task_store.stop_cleanup_loop()
+        if self.execution_control_service is not None:
+            await self.execution_control_service.close()
         executor = getattr(self.handler, "agent_executor", None)
         if executor is not None:
             artifact_store = getattr(executor, "artifact_store", None)
@@ -307,6 +310,11 @@ class A2ARuntimeComponents:
                 close = getattr(artifact_store, "aclose", None)
                 if close is not None:
                     await close()
+        detached_producers = tuple(getattr(self.handler, "_detached_message_producers", ()))
+        for producer in detached_producers:
+            producer.cancel()
+        if detached_producers:
+            await asyncio.gather(*detached_producers, return_exceptions=True)
         push_sender = getattr(self.handler, "_push_sender", None)
         if push_sender is not None:
             close = getattr(push_sender, "aclose", None)
@@ -379,6 +387,18 @@ def create_runtime_components(
 
         persistence = A2APersistenceStore(get_config_dir() / "a2a")
     task_store = A2ATaskStore(metrics=metrics, persistence=persistence, backup_service=backup_service)
+    from iac_code.a2a.execution_control import ExecutionControlService
+
+    execution_control_service = ExecutionControlService(
+        persistence_root=Path(persistence.root) if persistence is not None else None,
+        backup_service=backup_service,
+    )
+    set_execution_control_provider = getattr(task_store, "set_execution_control_provider", None)
+    if callable(set_execution_control_provider):
+        set_execution_control_provider(
+            execution_control_service.snapshot_for_context,
+            execution_control_service.has_active_work,
+        )
     if push_notifications:
         assert persistence is not None
         push_secret_keyring = A2APushSecretKeyring(Path(persistence.root) / "push_keys.json")
@@ -422,6 +442,7 @@ def create_runtime_components(
         permission_wait_policy=permission_wait_policy,
         thinking_exposure_types=thinking_exposure_types,
         backup_service=backup_service,
+        execution_control_service=execution_control_service,
     )
     card = build_agent_card(
         host=host,
@@ -470,6 +491,7 @@ def create_runtime_components(
         push_queue=push_queue_instance,
         runtime_registration=runtime_registration,
         backup_staging_process=backup_staging_process,
+        execution_control_service=execution_control_service,
     )
 
 
@@ -484,6 +506,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         super().__init__(*args, **kwargs)
         self._backup_service = backup_service or SessionBackupService()
         self._metrics = metrics or NoOpA2AMetrics()
+        self._detached_message_producers: set[asyncio.Task[Any]] = set()
 
     async def on_get_task(self, params: GetTaskRequest, context):
         self._validate_extensions(context)
@@ -628,7 +651,12 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             # The decision may already be committed. Let the same continuation
             # finish exactly once even if the response transport disappears.
             handed_off = True
-            asyncio.create_task(self._drain_inactive_permission_response(queue, producer, completed))
+            drain_task = asyncio.create_task(
+                self._drain_inactive_permission_response(queue, producer, completed),
+                name=f"a2a-detached-permission-producer-{task.id}",
+            )
+            self._detached_message_producers.add(drain_task)
+            drain_task.add_done_callback(self._detached_message_producers.discard)
             raise
         finally:
             if not handed_off and not producer.done():
@@ -648,6 +676,11 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                 if value is completed:
                     break
             await producer
+        except asyncio.CancelledError:
+            if not producer.done():
+                producer.cancel()
+                await asyncio.gather(producer, return_exceptions=True)
+            raise
         except BaseException:
             logger.debug("Detached permission response continuation failed", exc_info=True)
 
@@ -705,7 +738,6 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                         tapped_queue.task_done()
                     acknowledge_pipeline_transport_delivery(event)
             except (asyncio.CancelledError, GeneratorExit):
-                producer_task.cancel()
                 raise
             finally:
                 close_pipeline_transport_delivery_tracker(delivery_tracker)
@@ -713,7 +745,19 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                 async with active_task._lock:
                     active_task._reference_count -= 1
                 await active_task._maybe_cleanup()
-                await self._cleanup_active_message_producer(producer_task, task.id)
+                if producer_task.done():
+                    await self._cleanup_active_message_producer(producer_task, task.id)
+                else:
+                    cleanup_task = asyncio.create_task(
+                        self._cleanup_active_message_producer(producer_task, task.id),
+                        name=f"a2a-detached-message-producer-{task.id}",
+                    )
+                    detached_producers = getattr(self, "_detached_message_producers", None)
+                    if detached_producers is None:
+                        detached_producers = set()
+                        self._detached_message_producers = detached_producers
+                    detached_producers.add(cleanup_task)
+                    cleanup_task.add_done_callback(detached_producers.discard)
 
     async def _hydrate_recoverable_pipeline_task_id(self, params: SendMessageRequest) -> None:
         if resolve_request_run_mode(params.message) is not RunMode.PIPELINE or not isinstance(

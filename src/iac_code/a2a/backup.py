@@ -1,24 +1,64 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
+import inspect
 import logging
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, ParamSpec, TypeVar, cast
 
 from iac_code.i18n import _
 from iac_code.services.session_backup import BackupReason, SessionBackupBlocked
 from iac_code.services.session_backup_state import BackupPublicationProof
 
 logger = logging.getLogger(__name__)
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 
-async def run_sync_fenced(function: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+async def await_fenced(awaitable: Awaitable[_T]) -> _T:
+    """Finish an owned cleanup/commit before propagating cancellation to its caller."""
+    task = asyncio.ensure_future(awaitable)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if not task.cancelled():
+            task.exception()
+        raise
+
+
+async def run_sync_fenced(function: Callable[_P, _T], /, *args: _P.args, **kwargs: _P.kwargs) -> _T:
     """Delay coroutine cancellation until the synchronous mutation has actually stopped."""
+    return await _run_sync_fenced(function, None, args, kwargs)
+
+
+async def run_sync_fenced_with_cancel_completion(
+    function: Callable[_P, _T],
+    on_cancel_completion: Callable[[_T | None, BaseException | None], Awaitable[None] | None],
+    /,
+    *args: _P.args,
+    **kwargs: _P.kwargs,
+) -> _T:
+    """Fence a synchronous mutation and save its late result before propagating cancellation."""
+    return cast(_T, await _run_sync_fenced(function, on_cancel_completion, args, kwargs))
+
+
+async def _run_sync_fenced(
+    function: Callable[..., _T],
+    on_cancel_completion: Callable[[_T | None, BaseException | None], Awaitable[None] | None] | None,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> _T:
     thread_task = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
     try:
         return await asyncio.shield(thread_task)
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as cancellation:
         while not thread_task.done():
             try:
                 await asyncio.shield(thread_task)
@@ -26,10 +66,27 @@ async def run_sync_fenced(function: Callable[..., Any], /, *args: Any, **kwargs:
                 continue
             except Exception:
                 break
+        result: _T | None = None
+        error: BaseException | None = None
         if thread_task.done() and not thread_task.cancelled():
-            with contextlib.suppress(Exception):
-                thread_task.result()
-        raise
+            try:
+                result = thread_task.result()
+            except BaseException as exc:
+                error = exc
+        if on_cancel_completion is not None:
+            try:
+                completion = on_cancel_completion(result, error)
+                if inspect.isawaitable(completion):
+                    completion_task = asyncio.ensure_future(completion)
+                    while not completion_task.done():
+                        try:
+                            await asyncio.shield(completion_task)
+                        except asyncio.CancelledError:
+                            continue
+                    completion_task.result()
+            except BaseException:
+                logger.exception("Failed to record a synchronous mutation result returned during cancellation")
+        raise cancellation
 
 
 async def backup_session_async(

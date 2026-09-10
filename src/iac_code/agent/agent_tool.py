@@ -213,11 +213,14 @@ class AgentTool(Tool):
             return ToolResult.error(_("Unknown agent type: '{agent_type}'").format(agent_type=agent_type))
 
         if run_in_background and self._task_manager:
+            from iac_code.a2a.execution_control import register_execution_task
+
             task_id = self._task_manager.register(
                 description=tool_input.get("description", _("Sub-agent task")),
                 agent_type=agent_type,
             )
             background_task = asyncio.create_task(self._run_background(task_id, prompt, agent_type, context))
+            register_execution_task(background_task, kind="background_agent")
             self._task_manager.attach_task(task_id, background_task)
             background_task.add_done_callback(self._consume_background_task_exception)
             if event_queue is not None:

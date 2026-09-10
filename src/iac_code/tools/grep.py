@@ -11,6 +11,7 @@ import sys
 from functools import lru_cache
 from typing import Any
 
+from iac_code.a2a.backup import run_sync_fenced
 from iac_code.desktop.external_env import create_subprocess_exec, guarded_command, spawn_env_kwargs
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
@@ -358,7 +359,7 @@ class GrepTool(Tool):
             # Pure-Python fallback walks the tree and reads files synchronously;
             # offload it so it never starves the shared event loop.
             output = (
-                await asyncio.to_thread(
+                await run_sync_fenced(
                     _python_grep,
                     pattern,
                     path,

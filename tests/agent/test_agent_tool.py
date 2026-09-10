@@ -253,6 +253,83 @@ class TestAgentToolExecution:
             assert "task_id" in result.content
             assert len(tm.list_all()) == 1
 
+    async def test_background_execution_is_registered_before_first_schedule(self, tmp_path):
+        from iac_code.a2a.execution_control import (
+            ExecutionControlService,
+            bind_execution_control,
+            reset_execution_control,
+        )
+
+        service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+        control = await service.begin_execution(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+            cwd=str(tmp_path),
+        )
+        token = bind_execution_control(control)
+        task_manager = TaskManager()
+        tool = AgentTool(task_manager=task_manager)
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def fake_run_sub_agent(**_kwargs):
+            started.set()
+            await release.wait()
+            return "done", AgentProgress()
+
+        run_patch = patch("iac_code.agent.agent_tool.run_sub_agent", side_effect=fake_run_sub_agent)
+        run_patch.start()
+        try:
+            result = await tool.execute(
+                tool_input={"prompt": "task", "description": "bg", "run_in_background": True},
+                context=ToolContext(cwd=str(tmp_path)),
+            )
+            background = task_manager.list_all()[0].background_task
+            assert result.is_error is False
+            assert background is not None
+            assert started.is_set() is False
+            assert control.has_managed_work() is True
+
+            current = asyncio.current_task()
+            assert current is not None
+            await control.detach_task(current, execution_status="normal-turn-ended")
+            next_turn = await service.begin_execution(
+                context_id="ctx-1",
+                task_id="task-2",
+                owner="owner-1",
+                cwd=str(tmp_path),
+            )
+            assert next_turn is control
+            await next_turn.detach_task(current, execution_status="working")
+            pause = await next_turn.pause(
+                task_id="task-2",
+                expected_execution_id=next_turn.execution_id,
+                request_id="pause-background-before-first-schedule",
+                connection_epoch=1,
+                reason="client_disconnected",
+                reconnect_timeout_seconds=30,
+            )
+            assert pause["phase"] == "pausing"
+            await next_turn.terminate(
+                execution_id=next_turn.execution_id,
+                request_id="terminate-background-before-first-schedule",
+                connection_epoch=2,
+                reason="explicit_terminate",
+            )
+
+            async def wait_until_released():
+                while not next_turn.release_ready:
+                    await asyncio.sleep(0.005)
+
+            await asyncio.wait_for(wait_until_released(), timeout=2)
+            assert background.cancelled()
+        finally:
+            release.set()
+            run_patch.stop()
+            reset_execution_control(token)
+            await service.close()
+
     async def test_background_execution_closes_context_event_queue(self):
         tm = TaskManager()
         tool = AgentTool(task_manager=tm)

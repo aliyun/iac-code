@@ -14,6 +14,7 @@ from google.protobuf.json_format import MessageToDict
 import iac_code.a2a.pipeline_stream as pipeline_stream
 from iac_code.a2a.artifacts import A2AArtifactStore
 from iac_code.a2a.events import _METADATA_MAX_CHARS
+from iac_code.a2a.execution_control import ExecutionController, bind_execution_control, reset_execution_control
 from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.input_required import PermissionInputRegistry
 from iac_code.a2a.metrics import NoOpA2AMetrics
@@ -995,6 +996,33 @@ async def test_inherited_closed_transport_tracker_rejects_later_publication(tmp_
     with pytest.raises(PipelineTransportDeliveryClosedError):
         await publication
     assert queue.events == []
+
+
+@pytest.mark.asyncio
+async def test_controlled_execution_keeps_committed_event_when_inherited_transport_is_closed(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+    tracker = create_pipeline_transport_delivery_tracker()
+    close_pipeline_transport_delivery_tracker(tracker)
+    control = ExecutionController(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+        server_instance_id="instance-1",
+        persistence_path=None,
+        backup_service=None,
+    )
+    token = bind_execution_control(control)
+    try:
+        with bind_pipeline_transport_delivery_tracker(tracker), pipeline_transport_delivery_required():
+            returned = await publisher.publish(TextDeltaEvent(text="persisted-offline"))
+    finally:
+        reset_execution_control(token)
+        await control.close()
+
+    assert returned == "persisted-offline"
+    assert queue.events == []
+    assert publisher.journal.read_all_repairing_tail()[-1]["data"]["text"] == "persisted-offline"
 
 
 @pytest.mark.asyncio
