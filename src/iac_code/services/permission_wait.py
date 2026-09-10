@@ -574,6 +574,7 @@ class PermissionWaitCheckpointStore:
         grace_seconds: float,
         live_owner: bool,
         expected_generation: int | None = None,
+        allow_suspend: bool = True,
     ) -> dict[str, Any]:
         observed_at = now or utc_now()
 
@@ -596,7 +597,7 @@ class PermissionWaitCheckpointStore:
                 # configured request-versus-timeout race window.
                 grace_deadline = observed_at + timedelta(seconds=grace_seconds)
                 record["graceDeadlineAt"] = format_utc(grace_deadline)
-                if decision_status == "none" and grace_seconds == 0:
+                if decision_status == "none" and grace_seconds == 0 and allow_suspend:
                     record["phase"] = "SUSPENDING" if live_owner else "SUSPENDED"
                 else:
                     record["phase"] = "TIMEOUT_GRACE"
@@ -606,6 +607,7 @@ class PermissionWaitCheckpointStore:
             grace_deadline = parse_utc(record.get("graceDeadlineAt"))
             if (
                 phase == "TIMEOUT_GRACE"
+                and allow_suspend
                 and decision_status == "none"
                 and grace_deadline is not None
                 and observed_at >= grace_deadline
@@ -818,6 +820,24 @@ class PermissionWaitCheckpointStore:
 
         return self.transaction(boundary_id, mutate)
 
+    def cancel_restore(self, boundary_id: str, *, claim_id: str) -> dict[str, Any]:
+        """Seal a drained execution's recovery without undoing its permission decision."""
+
+        def mutate(record: dict[str, Any]) -> dict[str, Any] | None:
+            decision = record.get("decision")
+            if not claim_id or not isinstance(decision, dict) or decision.get("claimId") != claim_id:
+                raise ValueError("permission recovery claim changed")
+            if record.get("phase") == "CANCELED":
+                return None
+            if record.get("phase") != "RESTORING":
+                raise ValueError("permission recovery is not restoring")
+            record["phase"] = "CANCELED"
+            record["generation"] = int(record["generation"]) + 1
+            record["updatedAt"] = format_utc(utc_now())
+            return record
+
+        return self.transaction(boundary_id, mutate)
+
     def _record_path(self, boundary_id: str) -> Path:
         if not _BOUNDARY_ID.fullmatch(boundary_id):
             raise ValueError("invalid permission boundary id")
@@ -947,6 +967,8 @@ class _LiveOwner:
     timer: asyncio.Task[None] | None = None
     timer_retry: asyncio.TimerHandle | None = None
     on_suspend: Callable[[], Awaitable[None] | None] | None = None
+    run_suspension: Callable[[Callable[[], Awaitable[bool]]], Awaitable[bool | None]] | None = None
+    suspension_allowed: Callable[[], bool] | None = None
     owner_completed: asyncio.Event = field(default_factory=asyncio.Event)
 
 
@@ -997,6 +1019,8 @@ class PermissionWaitCoordinator:
         store: PermissionWaitCheckpointStore,
         future: asyncio.Future[bool | PermissionWaitOutcome],
         on_suspend: Callable[[], Awaitable[None] | None] | None = None,
+        run_suspension: Callable[[Callable[[], Awaitable[bool]]], Awaitable[bool | None]] | None = None,
+        suspension_allowed: Callable[[], bool] | None = None,
     ) -> None:
         boundary_id = str(record["boundaryId"])
         existing = self._owners.get(boundary_id)
@@ -1020,6 +1044,8 @@ class PermissionWaitCoordinator:
             store=store,
             permission_resolution_lock=asyncio.Lock(),
             on_suspend=on_suspend,
+            run_suspension=run_suspension,
+            suspension_allowed=suspension_allowed,
         )
         self._owners[boundary_id] = owner
         logger.info(
@@ -1174,6 +1200,7 @@ class PermissionWaitCoordinator:
                 grace_seconds=self.policy.timeout_grace_seconds,
                 live_owner=True,
                 expected_generation=owner.generation,
+                allow_suspend=owner.suspension_allowed is None or owner.suspension_allowed(),
             )
             owner.generation = int(reconciled["generation"])
             record, created = owner.store.claim_decision(
@@ -1233,15 +1260,28 @@ class PermissionWaitCoordinator:
         owner = self._owners.get(boundary_id)
         if owner is None:
             return False
+        if owner.run_suspension is not None:
+            return bool(await owner.run_suspension(lambda: self._suspend_owner(owner)))
+        return await self._suspend_owner(owner)
+
+    async def _suspend_owner(self, owner: _LiveOwner) -> bool:
+        boundary_id = owner.boundary_id
         callback = None
         async with owner.permission_resolution_lock:
+            if self._owners.get(boundary_id) is not owner or owner.future.done():
+                return False
             try:
-                record = owner.store.reconcile_deadline(
-                    boundary_id,
-                    grace_seconds=self.policy.timeout_grace_seconds,
-                    live_owner=True,
-                    expected_generation=owner.generation,
-                )
+                def reconcile() -> dict[str, Any]:
+                    return owner.store.reconcile_deadline(
+                        boundary_id,
+                        grace_seconds=self.policy.timeout_grace_seconds,
+                        live_owner=True,
+                        expected_generation=owner.generation,
+                    )
+
+                # A2A's guard fences cancellation until this worker and the
+                # suspension callback finish. Other surfaces retain their path.
+                record = await asyncio.to_thread(reconcile) if owner.run_suspension is not None else reconcile()
             except ValueError:
                 current = owner.store.load(boundary_id)
                 logger.warning(
@@ -1286,40 +1326,38 @@ class PermissionWaitCoordinator:
                 owner.boundary_id,
                 owner.generation,
             )
-            async with owner.permission_resolution_lock:
-                record = owner.store.reconcile_deadline(
-                    owner.boundary_id,
-                    grace_seconds=self.policy.timeout_grace_seconds,
-                    live_owner=True,
-                    expected_generation=owner.generation,
-                )
-                owner.generation = int(record["generation"])
-                if record.get("phase") == "SUSPENDING":
-                    grace_deadline = None
-                elif record.get("phase") != "TIMEOUT_GRACE":
-                    return
-                else:
+            if owner.run_suspension is None:
+                # Preserve the existing deadline/grace scheduling on surfaces
+                # that do not install A2A connection control.
+                async with owner.permission_resolution_lock:
+                    record = owner.store.reconcile_deadline(
+                        owner.boundary_id,
+                        grace_seconds=self.policy.timeout_grace_seconds,
+                        live_owner=True,
+                        expected_generation=owner.generation,
+                    )
+                    owner.generation = int(record["generation"])
+                    if record.get("phase") not in {"SUSPENDING", "TIMEOUT_GRACE"}:
+                        return
                     grace_deadline = parse_utc(record.get("graceDeadlineAt"))
-                logger.info(
-                    "Permission wait resident deadline reconciled boundary_id=%s generation=%s phase=%s",
-                    owner.boundary_id,
-                    owner.generation,
-                    record.get("phase"),
-                )
-            if grace_deadline is not None:
-                await asyncio.sleep(max(0.0, (grace_deadline - utc_now()).total_seconds()))
+                if grace_deadline is not None:
+                    await asyncio.sleep(max(0.0, (grace_deadline - utc_now()).total_seconds()))
             suspended = await self.suspend_now(owner.boundary_id)
             while not suspended:
+                if self._owners.get(owner.boundary_id) is not owner or owner.future.done():
+                    break
                 current = owner.store.load(owner.boundary_id)
                 decision = current.get("decision") if current is not None else None
                 if (
                     current is None
-                    or current.get("phase") != "TIMEOUT_GRACE"
+                    or current.get("phase") not in {"WAITING", "TIMEOUT_GRACE"}
                     or not isinstance(decision, Mapping)
                     or decision.get("status") != "none"
                 ):
                     break
-                grace_deadline = parse_utc(current.get("graceDeadlineAt"))
+                grace_deadline = parse_utc(
+                    current.get("residentDeadlineAt" if current.get("phase") == "WAITING" else "graceDeadlineAt")
+                )
                 if grace_deadline is None:
                     break
                 await asyncio.sleep(max(0.001, (grace_deadline - utc_now()).total_seconds()))

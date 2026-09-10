@@ -8918,9 +8918,11 @@ def test_waiting_input_task_id_from_sidecar_accepts_candidate_selection(tmp_path
     assert waiting_input_task_id_from_sidecar(cwd=str(cwd), session_id=session_id, context_id=context_id) == "task-1"
 
 
+@pytest.mark.parametrize("allow_normal_handoff", [True, False])
 def test_cancel_waiting_input_sidecar_appends_cancel_handoff_as_durable_group(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    allow_normal_handoff: bool,
 ) -> None:
     from iac_code.a2a.pipeline_executor import (
         WaitingInputCancelResult,
@@ -8971,19 +8973,17 @@ def test_cancel_waiting_input_sidecar_appends_cancel_handoff_as_durable_group(
         context_id=context_id,
         task_id="task-1",
         reason="user canceled",
+        allow_normal_handoff=allow_normal_handoff,
     )
 
     assert canceled == WaitingInputCancelResult.CANCELED
-    assert append_many_calls[-2:] == [
-        (["pipeline_canceled", "pipeline_handoff_ready"], True),
-        (["backup_committed", "backup_committed"], True),
-    ]
+    terminal_events = ["pipeline_canceled", "pipeline_handoff_ready"] if allow_normal_handoff else ["pipeline_canceled"]
+    committed_events = ["backup_committed"] * len(terminal_events)
+    assert append_many_calls[-2:] == [(terminal_events, True), (committed_events, True)]
     events = A2APipelineJournal(pipeline_dir).read_all()
-    assert [event["eventType"] for event in events[-4:]] == [
-        "pipeline_canceled",
-        "pipeline_handoff_ready",
-        "backup_committed",
-        "backup_committed",
+    assert [event["eventType"] for event in events[-2 * len(terminal_events) :]] == [
+        *terminal_events,
+        *committed_events,
     ]
     assert (
         terminal_task_state_from_sidecar(

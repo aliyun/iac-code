@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import Mock
 
+from iac_code.a2a.backup import run_sync_fenced
+from iac_code.a2a.execution_control import execution_checkpoint, execution_non_advancing_wait
 from iac_code.agent.message import ContentBlock, Message, ToolResultBlock
 from iac_code.i18n import _
 from iac_code.pipeline.engine.cleanup import (
@@ -2089,7 +2091,7 @@ class PipelineRunner:
         return retry_count if isinstance(retry_count, int) and retry_count >= 0 else 0
 
     async def _backup_critical(self, reason: BackupReason, *, step_id: str | None = None) -> None:
-        result = await asyncio.to_thread(
+        result = await run_sync_fenced(
             self._backup_service.backup_session,
             self._cwd,
             self._session_id,
@@ -2395,6 +2397,35 @@ class PipelineRunner:
             )
 
         self._try_save_sidecar_sync("user_aborted", "save_user_aborted_sync", save, step_id=current_step or None)
+
+    def mark_execution_terminated(self, reason: str) -> None:
+        """Persist infrastructure cancellation without classifying it as a user abort."""
+
+        self._mark_active_attempt_failed_preserve_execution()
+        current_step = ""
+        if not self.state_machine.is_complete:
+            try:
+                current_step = self.state_machine.current_step.step_id
+            except (AttributeError, IndexError):
+                current_step = ""
+        if not self.session:
+            self._sidecar_status = "canceled"
+            return
+        session = self.session
+
+        def save() -> None:
+            session.save_canceled_sync(
+                current_step,
+                self._state_machine_snapshot_for_sidecar(),
+                self.context.to_snapshot(),
+                self._pipeline_identity,
+                reason=reason,
+                execution=dict(self._execution) if self._execution else None,
+                attempts=dict(self._attempts),
+                prerequisites=self._sidecar_prerequisites_metadata(),
+            )
+
+        self._try_save_sidecar_sync("canceled", "save_canceled_sync", save, step_id=current_step or None)
 
     async def _save_rollback(self, from_step: str, to_step: str, reason: str) -> None:
         if not self.session:
@@ -2851,6 +2882,7 @@ class PipelineRunner:
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         """Start the pipeline from the first step."""
         pipeline_started_at = self._observability.now()
+        await execution_checkpoint()
         await self._start_mcp_reconnect_tasks()
         pipeline_input = normalize_pipeline_user_input(user_input)
         self._set_current_step_user_input(pipeline_input)
@@ -4258,6 +4290,7 @@ class PipelineRunner:
             terminal_pipeline_telemetry_emitted = True
 
         while not self.state_machine.is_complete:
+            await execution_checkpoint()
             step = self.state_machine.current_step
             step_user_message = first_step_user_input if is_first_step else None
             step_user_display_text = first_step_user_input_display_text if is_first_step else None
@@ -5454,7 +5487,8 @@ class PipelineRunner:
             done_count = initial_done_count
             total = len(candidates)
             while done_count < total:
-                event = await get_candidate_event()
+                async with execution_non_advancing_wait():
+                    event = await get_candidate_event()
                 if isinstance(event, PipelineStatePersistenceError):
                     yield self._persistence_failure_event(event)
                     return

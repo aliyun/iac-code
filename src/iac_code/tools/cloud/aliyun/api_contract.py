@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import copy
 import hashlib
 import json
@@ -19,6 +18,7 @@ from urllib.parse import quote, urlencode
 import yaml
 from alibabacloud_openapi_util.client import Client as OpenApiUtil
 
+from iac_code.a2a.backup import run_sync_fenced
 from iac_code.tools.cloud.aliyun.api_identifiers import is_safe_api_version
 from iac_code.tools.cloud.aliyun.openmeta import (
     ApiMetadata,
@@ -1052,7 +1052,7 @@ class RequestBuilder:
                     raise ApiContractError("body_file_too_large")
                 body = body_file
             elif isinstance(body_file, str):
-                body = await asyncio.to_thread(_read_body_file, Path(body_file))
+                body = await run_sync_fenced(_read_body_file, Path(body_file))
             else:
                 raise ApiContractError("invalid_body_file")
             _validate_content_type(content_type, "byte", contract.consumes)

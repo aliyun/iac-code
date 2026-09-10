@@ -37,6 +37,7 @@ from iac_code.a2a.app import (
     resolve_token,
     run_server,
 )
+from iac_code.a2a.execution_control import ExecutionController
 from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2ATaskSnapshot
 from iac_code.a2a.pipeline_executor import recoverable_task_id_from_sidecar
@@ -419,6 +420,52 @@ def test_pipeline_state_endpoint_returns_recovery_state(tmp_path) -> None:
     data = response.json()
     assert data["snapshot"]["lastSequence"] == 1
     assert [event["eventId"] for event in data["events"]] == ["evt-2"]
+
+
+def test_pipeline_state_endpoint_can_return_delta_without_snapshot(tmp_path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), "session-1") / "pipeline"
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(_pipeline_event(1, "evt-1"))
+    journal.append(_pipeline_event(2, "evt-2"))
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([_pipeline_event(1, "evt-1")]))
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/iac-code/pipeline/state?contextId=ctx-1&afterSequence=1&includeSnapshot=false"
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert set(data) == {"events", "fromSequence", "lastSequence"}
+    assert data["fromSequence"] == 1
+    assert data["lastSequence"] == 2
+    assert [event["eventId"] for event in data["events"]] == ["evt-2"]
+
+
+def test_pipeline_state_endpoint_requires_cursor_when_snapshot_is_omitted(tmp_path) -> None:
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=tmp_path / "a2a",
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/iac-code/pipeline/state?contextId=ctx-1&includeSnapshot=false")
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "afterSequence must be a non-negative integer"}
 
 
 @pytest.mark.parametrize(("safe_mode", "expected_path"), [("1", "[PATH]"), ("0", "raw")])
@@ -3226,3 +3273,121 @@ def test_pipeline_state_endpoint_drops_tool_results_only_when_lean_is_requested(
     for response in (explicitly_full, unrecognized):
         display = response.json()["snapshot"]["display"]
         assert [item["toolUseId"] for item in display["toolResults"]] == ["call-1"]
+
+
+def test_execution_control_endpoints_pause_query_resume_and_recover(tmp_path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    persistence.save_task(
+        A2ATaskSnapshot(
+            task_id="task-1",
+            context_id="ctx-1",
+            state="input-required",
+            output_text=["finished turn"],
+        )
+    )
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+    components = app.state.a2a_components
+    control = ExecutionController(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="",
+        cwd=str(tmp_path),
+        server_instance_id=components.execution_control_service.server_instance_id,
+        persistence_path=persistence_dir / "execution-control" / "ctx-1.json",
+        backup_service=None,
+        execution_id="exec-1",
+    )
+    control.bind_session("session-1")
+    control.execution_status = "input-required"
+    control.stream_available = False
+    components.execution_control_service._controls["ctx-1"] = control
+
+    pause_payload = {
+        "contextId": "ctx-1",
+        "taskId": "task-1",
+        "expectedExecutionId": "exec-1",
+        "requestId": "pause-request-1",
+        "connectionEpoch": 1,
+        "reason": "client_disconnected",
+        "reconnectTimeoutSeconds": 30,
+    }
+    with TestClient(app) as client:
+        pause = client.post("/iac-code/execution/pause", json=pause_payload)
+        assert pause.status_code == 202
+        pause_id = pause.json()["pauseId"]
+
+        state = client.get("/iac-code/execution/state?contextId=ctx-1&executionId=exec-1")
+        assert state.status_code == 200
+        assert state.json()["phase"] in {"pause_committing", "paused"}
+        assert state.json()["executionStatus"] == "input-required"
+        assert state.json()["streamAvailable"] is False
+
+        recovery = client.get("/iac-code/session/recovery?contextId=ctx-1&executionId=exec-1")
+        assert recovery.status_code == 200
+        assert recovery.json()["outputText"] == ["finished turn"]
+        assert recovery.json()["task"]["id"] == "task-1"
+
+        resumed = client.post(
+            "/iac-code/execution/resume",
+            json={
+                "contextId": "ctx-1",
+                "executionId": "exec-1",
+                "pauseId": pause_id,
+                "requestId": "resume-request-1",
+                "connectionEpoch": 2,
+            },
+        )
+        assert resumed.status_code == 202
+        assert resumed.json()["phase"] == "resuming"
+
+        stale = client.post(
+            "/iac-code/execution/pause",
+            json={**pause_payload, "requestId": "pause-request-2", "connectionEpoch": 1},
+        )
+        assert stale.status_code == 409
+
+        invalid_terminate = client.post(
+            "/iac-code/execution/terminate",
+            json={
+                "contextId": "ctx-1",
+                "expectedExecutionId": "exec-1",
+                "requestId": "terminate-request-invalid",
+                "connectionEpoch": 3,
+                "reason": [],
+            },
+        )
+        assert invalid_terminate.status_code == 400
+
+        late_timeout = client.post(
+            "/iac-code/execution/terminate",
+            json={
+                "contextId": "ctx-1",
+                "expectedExecutionId": "exec-1",
+                "pauseId": pause_id,
+                "requestId": "terminate-request-late-timeout",
+                "connectionEpoch": 3,
+                "reason": "disconnect_timeout",
+            },
+        )
+        assert late_timeout.status_code == 409
+
+        terminated = client.post(
+            "/iac-code/execution/terminate",
+            json={
+                "contextId": "ctx-1",
+                "expectedExecutionId": "exec-1",
+                "requestId": "terminate-request-1",
+                "connectionEpoch": 3,
+                "reason": "explicit_terminate",
+            },
+        )
+        assert terminated.status_code == 202
+        assert terminated.json()["phase"] == "terminating"

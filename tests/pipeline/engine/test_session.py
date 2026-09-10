@@ -327,13 +327,15 @@ class TestRestore:
         assert "status=None" in caplog.text
         assert str(session.session_dir) in caplog.text
 
-    @pytest.mark.parametrize("status", ["completed", "user_aborted", "failed", "discarded"])
+    @pytest.mark.parametrize("status", ["completed", "user_aborted", "canceled", "failed", "discarded"])
     def test_terminal_status_restore_does_not_log_warning(self, session, caplog, status):
         sm_snap = {"current_index": 0, "rollback_count": 0, "interrupt_rollback_count": 0, "step_statuses": {}}
         if status == "completed":
             session.save_completed_sync("intent", sm_snap, {}, _identity(), reason="done")
         elif status == "user_aborted":
             session.save_user_aborted_sync("intent", sm_snap, {}, _identity(), reason="ctrl-c")
+        elif status == "canceled":
+            session.save_canceled_sync("intent", sm_snap, {}, _identity(), reason="disconnect_timeout")
         elif status == "failed":
             session.save_failed_sync("intent", sm_snap, {}, _identity(), reason="step failed")
         else:

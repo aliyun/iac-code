@@ -9,13 +9,18 @@ import time
 import uuid
 from collections import deque
 from collections.abc import AsyncGenerator, Callable, Mapping
-from contextlib import suppress
+from contextlib import aclosing, suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal, cast
 
 from loguru import logger
 
+from iac_code.a2a.execution_control import (
+    execution_activity,
+    execution_checkpoint,
+    execution_non_advancing_wait,
+)
 from iac_code.agent.message import (
     ContentBlock,
     RedactedThinkingBlock,
@@ -1020,22 +1025,25 @@ class AgentLoop:
                     )
                 memory_prefetch = self._start_memory_prefetch_for_turn(user_input)
                 try:
-                    async for event in self._run_streaming_inner(
-                        user_input,
-                        queued_input_provider=queued_input_provider,
-                        memory_prefetch=memory_prefetch,
-                    ):
-                        if _is_first_output_delta(event) and not first_token_received:
-                            first_token_received = True
-                            ttft_ns = int((time.monotonic() - interaction_started) * 1_000_000_000)
-                            entry_span.set_attribute(GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN, ttft_ns)
-                            entry_span.set_attribute(GenAiAttr.USER_TIME_TO_FIRST_TOKEN, ttft_ns)
-                        if isinstance(event, TextDeltaEvent):
-                            final_text_chunks.append(event.text)
-                        if isinstance(event, MessageEndEvent):
-                            final_stop_reason = event.stop_reason
-                            self._record_session_usage(event.usage, event.usage_attribution)
-                        yield event
+                    async with aclosing(
+                        self._run_streaming_inner(
+                            user_input,
+                            queued_input_provider=queued_input_provider,
+                            memory_prefetch=memory_prefetch,
+                        )
+                    ) as inner_stream:
+                        async for event in inner_stream:
+                            if _is_first_output_delta(event) and not first_token_received:
+                                first_token_received = True
+                                ttft_ns = int((time.monotonic() - interaction_started) * 1_000_000_000)
+                                entry_span.set_attribute(GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN, ttft_ns)
+                                entry_span.set_attribute(GenAiAttr.USER_TIME_TO_FIRST_TOKEN, ttft_ns)
+                            if isinstance(event, TextDeltaEvent):
+                                final_text_chunks.append(event.text)
+                            if isinstance(event, MessageEndEvent):
+                                final_stop_reason = event.stop_reason
+                                self._record_session_usage(event.usage, event.usage_attribution)
+                            yield event
                 except asyncio.CancelledError:
                     turn_cancelled = True
                     self._discard_memory_prefetch_for_turn(memory_prefetch)
@@ -1097,18 +1105,19 @@ class AgentLoop:
             try:
                 self._refresh_git_branch()
                 try:
-                    async for event in self._run_streaming_inner("", memory_prefetch=None):
-                        if _is_first_output_delta(event) and not first_token_received:
-                            first_token_received = True
-                            ttft_ns = int((time.monotonic() - interaction_started) * 1_000_000_000)
-                            entry_span.set_attribute(GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN, ttft_ns)
-                            entry_span.set_attribute(GenAiAttr.USER_TIME_TO_FIRST_TOKEN, ttft_ns)
-                        if isinstance(event, TextDeltaEvent):
-                            final_text_chunks.append(event.text)
-                        if isinstance(event, MessageEndEvent):
-                            final_stop_reason = event.stop_reason
-                            self._record_session_usage(event.usage, event.usage_attribution)
-                        yield event
+                    async with aclosing(self._run_streaming_inner("", memory_prefetch=None)) as inner_stream:
+                        async for event in inner_stream:
+                            if _is_first_output_delta(event) and not first_token_received:
+                                first_token_received = True
+                                ttft_ns = int((time.monotonic() - interaction_started) * 1_000_000_000)
+                                entry_span.set_attribute(GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN, ttft_ns)
+                                entry_span.set_attribute(GenAiAttr.USER_TIME_TO_FIRST_TOKEN, ttft_ns)
+                            if isinstance(event, TextDeltaEvent):
+                                final_text_chunks.append(event.text)
+                            if isinstance(event, MessageEndEvent):
+                                final_stop_reason = event.stop_reason
+                                self._record_session_usage(event.usage, event.usage_attribution)
+                            yield event
                 except asyncio.CancelledError:
                     log_event(Events.SESSION_CANCELLED, {"stage": "in_query"})
                     raise
@@ -1411,9 +1420,11 @@ class AgentLoop:
                         },
                     )
                     yield permission_event
-                    outcome = await asyncio.shield(response_future)
+                    async with execution_non_advancing_wait():
+                        outcome = await asyncio.shield(response_future)
                     if outcome is PermissionWaitOutcome.SUSPEND:
                         raise PermissionWaitSuspended(permission_event.boundary_id)
+                    await execution_checkpoint()
                     automatic_deny = outcome is PermissionWaitOutcome.AUTOMATIC_DENY
                     state = "allow" if not automatic_deny and bool(outcome) else "deny"
                     source = "automatic" if automatic_deny else "user"
@@ -1491,7 +1502,8 @@ class AgentLoop:
 
         executed_by_id: dict[str, ToolResult] = {}
         if allowed_requests:
-            exec_task = asyncio.create_task(self._tool_executor.execute_batch(allowed_requests, context))
+            await execution_checkpoint()
+            exec_task = asyncio.create_task(self._execute_tool_batch_with_execution_control(allowed_requests, context))
 
             async def poll_recovered_event_queues() -> AsyncGenerator[StreamEvent, None]:
                 while not exec_task.done():
@@ -1513,9 +1525,10 @@ class AgentLoop:
                             yield cast(StreamEvent, item)
 
             try:
-                async for emitted_event in poll_recovered_event_queues():
-                    yield emitted_event
-                results = await exec_task
+                async with execution_non_advancing_wait():
+                    async for emitted_event in poll_recovered_event_queues():
+                        yield emitted_event
+                    results = await exec_task
             except asyncio.CancelledError:
                 if not exec_task.done():
                     exec_task.cancel()
@@ -1589,6 +1602,7 @@ class AgentLoop:
             if result.context_modifier is not None:
                 self._apply_context_modifier(result.context_modifier)
 
+        await execution_checkpoint()
         async for event in self.continue_streaming():
             yield event
 
@@ -1775,6 +1789,21 @@ class AgentLoop:
                     self._provider_requests_in_flight = max(0, self._provider_requests_in_flight - 1)
                     self._sync_pending_provider_context_if_idle()
 
+    async def _stream_provider_with_execution_control(self, **kwargs: Any) -> AsyncGenerator[StreamEvent, None]:
+        async with execution_activity("llm"):
+            async with aclosing(self._stream_provider(**kwargs)) as provider_stream:
+                async for event in provider_stream:
+                    yield event
+
+    async def _execute_tool_batch_with_execution_control(
+        self,
+        requests: list[ToolCallRequest],
+        context: ToolContext,
+    ) -> list[ToolResult]:
+        async with execution_activity("tool_batch", handoff_to_parent=True):
+            async with execution_non_advancing_wait():
+                return await self._tool_executor.execute_batch(requests, context)
+
     def _prepare_request_lease(
         self,
         request_manager: Any,
@@ -1787,9 +1816,7 @@ class AgentLoop:
         tools = list(self.tool_registry.list_tools())
         tool_definitions = self._get_tool_definitions(tools)
         begin_request = (
-            getattr(request_manager, "begin_request", None)
-            if hasattr(type(request_manager), "begin_request")
-            else None
+            getattr(request_manager, "begin_request", None) if hasattr(type(request_manager), "begin_request") else None
         )
         lease = begin_request(base_system_prompt, tool_definitions or None) if callable(begin_request) else None
         try:
@@ -1842,8 +1869,11 @@ class AgentLoop:
             # flight: an injected message cannot change that request, but it
             # can still be consumed by the next round.
             self._accepting_injected_user_messages = _turn < self._max_turns - 1
+            await execution_checkpoint()
             if self._pause_event is not None:
-                await self._pause_event.wait()
+                async with execution_non_advancing_wait():
+                    await self._pause_event.wait()
+                await execution_checkpoint()
             self._drain_pending_injections()
             self._current_turn_text = ""
 
@@ -1872,7 +1902,8 @@ class AgentLoop:
                 self._release_request_lease(request_manager, lease)
                 lease = None
                 yield CompactionEvent(phase="started")
-                compact_event = await self._auto_compact(request_manager)
+                async with execution_activity("llm"):
+                    compact_event = await self._auto_compact(request_manager)
                 yield compact_event if compact_event else CompactionEvent(phase="failed", reason="no_result")
                 lease, system_prompt, tool_definitions = self._prepare_request_lease(
                     request_manager,
@@ -1907,77 +1938,80 @@ class AgentLoop:
                 }
 
                 # Stream from provider
-                async for event in self._stream_provider(
-                    request_manager=request_manager,
-                    lease=lease,
-                    messages=provider_messages,
-                    system=system_prompt,
-                    tools=provider_tools,
-                    telemetry_messages=telemetry_messages,
-                ):
-                    if isinstance(event, ToolUseStartEvent):
-                        event = replace(
-                            event,
-                            metadata=self._tool_use_start_metadata(
-                                event.metadata,
-                                self.tool_registry.get(event.name),
-                            ),
-                        )
-                    if not (isinstance(event, ThinkingDeltaEvent) and event.is_metadata_only):
-                        yield event
+                async with aclosing(
+                    self._stream_provider_with_execution_control(
+                        request_manager=request_manager,
+                        lease=lease,
+                        messages=provider_messages,
+                        system=system_prompt,
+                        tools=provider_tools,
+                        telemetry_messages=telemetry_messages,
+                    )
+                ) as controlled_stream:
+                    async for event in controlled_stream:
+                        if isinstance(event, ToolUseStartEvent):
+                            event = replace(
+                                event,
+                                metadata=self._tool_use_start_metadata(
+                                    event.metadata,
+                                    self.tool_registry.get(event.name),
+                                ),
+                            )
+                        if not (isinstance(event, ThinkingDeltaEvent) and event.is_metadata_only):
+                            yield event
 
-                    # Collect data from events
-                    if isinstance(event, TextDeltaEvent):
-                        text_chunks.append(event.text)
-                        if self._pause_event is not None:
-                            self._current_turn_text += event.text
-                    elif isinstance(event, ThinkingDeltaEvent):
-                        thinking_block = thinking_blocks_by_index.setdefault(
-                            event.block_index,
-                            {
-                                "type": event.block_type,
-                                "text": "",
-                                "provider_metadata": {},
-                            },
-                        )
-                        thinking_block["type"] = event.block_type
-                        thinking_block["text"] += event.text
-                        if event.provider_metadata:
-                            for key, value in event.provider_metadata.items():
-                                if (
-                                    key == "signature"
-                                    and isinstance(value, str)
-                                    and isinstance(thinking_block["provider_metadata"].get(key), str)
-                                ):
-                                    thinking_block["provider_metadata"][key] += value
-                                else:
-                                    thinking_block["provider_metadata"][key] = value
-                    elif isinstance(event, ToolUseStartEvent):
-                        pending_tool_uses_by_id.setdefault(event.tool_use_id, {})
-                        pending_tool_uses_by_id[event.tool_use_id]["id"] = event.tool_use_id
-                        pending_tool_uses_by_id[event.tool_use_id]["name"] = event.name
-                        if event.provider_metadata:
-                            pending_tool_uses_by_id[event.tool_use_id]["provider_metadata"] = dict(
-                                event.provider_metadata
+                        # Collect data from events
+                        if isinstance(event, TextDeltaEvent):
+                            text_chunks.append(event.text)
+                            if self._pause_event is not None:
+                                self._current_turn_text += event.text
+                        elif isinstance(event, ThinkingDeltaEvent):
+                            thinking_block = thinking_blocks_by_index.setdefault(
+                                event.block_index,
+                                {
+                                    "type": event.block_type,
+                                    "text": "",
+                                    "provider_metadata": {},
+                                },
                             )
-                    elif isinstance(event, ToolUseEndEvent):
-                        pending_tool_uses_by_id.setdefault(event.tool_use_id, {})
-                        pending_tool_uses_by_id[event.tool_use_id]["id"] = event.tool_use_id
-                        pending_tool_uses_by_id[event.tool_use_id]["name"] = event.name
-                        pending_tool_uses_by_id[event.tool_use_id]["input"] = event.input
-                        if event.input_error:
-                            pending_tool_uses_by_id[event.tool_use_id]["input_error"] = event.input_error
-                        if event.provider_metadata:
-                            pending_tool_uses_by_id[event.tool_use_id]["provider_metadata"] = dict(
-                                event.provider_metadata
-                            )
-                    elif isinstance(event, TombstoneEvent):
-                        pending_tool_uses_by_id.clear()
-                        text_chunks.clear()
-                        thinking_blocks_by_index.clear()
-                    elif isinstance(event, MessageEndEvent):
-                        message_ended = True
-                        turn_stop_reason = event.stop_reason
+                            thinking_block["type"] = event.block_type
+                            thinking_block["text"] += event.text
+                            if event.provider_metadata:
+                                for key, value in event.provider_metadata.items():
+                                    if (
+                                        key == "signature"
+                                        and isinstance(value, str)
+                                        and isinstance(thinking_block["provider_metadata"].get(key), str)
+                                    ):
+                                        thinking_block["provider_metadata"][key] += value
+                                    else:
+                                        thinking_block["provider_metadata"][key] = value
+                        elif isinstance(event, ToolUseStartEvent):
+                            pending_tool_uses_by_id.setdefault(event.tool_use_id, {})
+                            pending_tool_uses_by_id[event.tool_use_id]["id"] = event.tool_use_id
+                            pending_tool_uses_by_id[event.tool_use_id]["name"] = event.name
+                            if event.provider_metadata:
+                                pending_tool_uses_by_id[event.tool_use_id]["provider_metadata"] = dict(
+                                    event.provider_metadata
+                                )
+                        elif isinstance(event, ToolUseEndEvent):
+                            pending_tool_uses_by_id.setdefault(event.tool_use_id, {})
+                            pending_tool_uses_by_id[event.tool_use_id]["id"] = event.tool_use_id
+                            pending_tool_uses_by_id[event.tool_use_id]["name"] = event.name
+                            pending_tool_uses_by_id[event.tool_use_id]["input"] = event.input
+                            if event.input_error:
+                                pending_tool_uses_by_id[event.tool_use_id]["input_error"] = event.input_error
+                            if event.provider_metadata:
+                                pending_tool_uses_by_id[event.tool_use_id]["provider_metadata"] = dict(
+                                    event.provider_metadata
+                                )
+                        elif isinstance(event, TombstoneEvent):
+                            pending_tool_uses_by_id.clear()
+                            text_chunks.clear()
+                            thinking_blocks_by_index.clear()
+                        elif isinstance(event, MessageEndEvent):
+                            message_ended = True
+                            turn_stop_reason = event.stop_reason
 
                 if not message_ended:
                     self._accepting_injected_user_messages = False
@@ -2042,12 +2076,14 @@ class AgentLoop:
                 # No tool calls -> end turn
                 if not completed_tools:
                     if self._pending_injections and _turn < self._max_turns - 1:
+                        await execution_checkpoint()
                         step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, "injected_message")
                         continue
                     self._accepting_injected_user_messages = False
                     step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, "stop")
                     break
 
+                await execution_checkpoint()
                 step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, "tool_calls")
 
                 # Execute tools (concurrent read-only, serial writes)
@@ -2294,13 +2330,15 @@ class AgentLoop:
                     )
                     yield permission_event
                     try:
-                        outcome = await asyncio.shield(response_future)
+                        async with execution_non_advancing_wait():
+                            outcome = await asyncio.shield(response_future)
                     except asyncio.CancelledError:
                         if not permission_event.resolution_owner_managed and not response_future.done():
                             response_future.set_result(False)
                         raise
                     if outcome is PermissionWaitOutcome.SUSPEND:
                         raise PermissionWaitSuspended(permission_event.boundary_id)
+                    await execution_checkpoint()
                     previous_permission_boundary_id = permission_event.boundary_id
                     automatic_deny = outcome is PermissionWaitOutcome.AUTOMATIC_DENY
                     approved = not automatic_deny and bool(outcome)
@@ -2385,12 +2423,13 @@ class AgentLoop:
                             )
                         async for event in self._submit_queued_inputs_after_tool_call(queued_input_provider):
                             yield event
+                        await execution_checkpoint()
                     continue
 
                 requests = allowed_requests
 
                 # Start tool execution
-                exec_task = asyncio.create_task(self._tool_executor.execute_batch(requests, context))
+                exec_task = asyncio.create_task(self._execute_tool_batch_with_execution_control(requests, context))
 
                 # Poll event queues while tools execute
                 async def poll_event_queues():
@@ -2431,21 +2470,29 @@ class AgentLoop:
                                     is_error=item.get("is_error", False),
                                 )
 
+                pending_cancellation: asyncio.CancelledError | None = None
                 try:
-                    async for sub_event in poll_event_queues():
-                        yield sub_event
+                    async with execution_non_advancing_wait():
+                        async for sub_event in poll_event_queues():
+                            yield sub_event
 
-                    results = await exec_task
-                    for request in requests:
-                        snapshot_id = request.snapshot_id
-                        if snapshot_id is not None and not PROCESS_RESOLVED_CONTRACT_STORE.is_pending(snapshot_id):
-                            self._owned_contract_snapshot_ids.discard(snapshot_id)
-                except asyncio.CancelledError:
+                        results = await exec_task
+                        for request in requests:
+                            snapshot_id = request.snapshot_id
+                            if snapshot_id is not None and not PROCESS_RESOLVED_CONTRACT_STORE.is_pending(snapshot_id):
+                                self._owned_contract_snapshot_ids.discard(snapshot_id)
+                except asyncio.CancelledError as cancellation:
                     if not exec_task.done():
                         exec_task.cancel()
                     with suppress(asyncio.CancelledError):
                         await exec_task
-                    raise
+                    if exec_task.cancelled():
+                        raise
+                    try:
+                        results = exec_task.result()
+                    except BaseException:
+                        raise cancellation
+                    pending_cancellation = cancellation
 
                 # Process results and yield ToolResultEvents.
                 terminal_step_result = False
@@ -2457,6 +2504,7 @@ class AgentLoop:
                     )
                     for request, result in denied_results
                 ]
+                tool_result_events: list[ToolResultEvent] = []
                 for result_index, (req, result) in enumerate(zip(requests, results)):
                     is_terminal_step_result = bool(
                         result.metadata
@@ -2492,13 +2540,15 @@ class AgentLoop:
                         tool_input=req.input,
                     )
 
-                    yield ToolResultEvent(
-                        tool_use_id=req.id,
-                        tool_name=req.name,
-                        result=processed.content,
-                        is_error=result.is_error,
-                        public_path_roots=public_path_roots,
-                        metadata=result_metadata,
+                    tool_result_events.append(
+                        ToolResultEvent(
+                            tool_use_id=req.id,
+                            tool_name=req.name,
+                            result=processed.content,
+                            is_error=result.is_error,
+                            public_path_roots=public_path_roots,
+                            metadata=result_metadata,
+                        )
                     )
 
                     tool_result_blocks.append(
@@ -2534,6 +2584,14 @@ class AgentLoop:
                             )
                     if result.context_modifier is not None:
                         self._apply_context_modifier(result.context_modifier)
+
+                if pending_cancellation is None:
+                    for tool_result_event in tool_result_events:
+                        yield tool_result_event
+
+                await execution_checkpoint()
+                if pending_cancellation is not None:
+                    raise pending_cancellation
 
                 async for event in self._submit_queued_inputs_after_tool_call(queued_input_provider):
                     yield event
@@ -2820,9 +2878,7 @@ class AgentLoop:
         cache_policy: str | None = None,
     ) -> Any:
         begin_request = (
-            getattr(request_manager, "begin_request", None)
-            if hasattr(type(request_manager), "begin_request")
-            else None
+            getattr(request_manager, "begin_request", None) if hasattr(type(request_manager), "begin_request") else None
         )
         lease = begin_request(system, tools) if callable(begin_request) else None
         effective_system = getattr(lease, "system_prompt", system)
@@ -3061,11 +3117,7 @@ class AgentLoop:
             # Compatibility for lightweight third-party/test managers that do
             # not implement ProviderManager's internal attribution contract.
             provider = self._get_runtime_provider_key()
-            model = (
-                self._provider_manager.get_model_name()
-                if hasattr(self._provider_manager, "get_model_name")
-                else ""
-            )
+            model = self._provider_manager.get_model_name() if hasattr(self._provider_manager, "get_model_name") else ""
         try:
             self._session_usage_store.append(
                 self._cwd,

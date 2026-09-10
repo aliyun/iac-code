@@ -9,6 +9,7 @@ from typing import Any
 
 from loguru import logger
 
+from iac_code.a2a.backup import run_sync_fenced
 from iac_code.i18n import _
 from iac_code.pipeline.engine.architecture_graph import (
     ArchitectureMultiViewRenderResult,
@@ -133,7 +134,7 @@ class ShowArchitectureDiagramTool(Tool):
 
         # Rendering walks the whole template graph (pure CPU); keep it off the
         # shared event loop so web agent turns, SSE, and HTTP handlers stay responsive.
-        base_render_result = await asyncio.to_thread(render_ros_template_architecture_views, template_content)
+        base_render_result = await run_sync_fenced(render_ros_template_architecture_views, template_content)
         if mode == "facts":
             if context.event_queue is not None:
                 await context.event_queue.put(
@@ -168,7 +169,7 @@ class ShowArchitectureDiagramTool(Tool):
                 logger.exception("Failed to optimize architecture diagram with the LLM; keeping draft diagram")
             else:
                 if generated_semantic_plan:
-                    render_result = await asyncio.to_thread(
+                    render_result = await run_sync_fenced(
                         render_ros_template_architecture_views,
                         template_content,
                         semantic_plan=generated_semantic_plan,
@@ -191,10 +192,10 @@ class ShowArchitectureDiagramTool(Tool):
             )
 
         if semantic_plan is not None:
-            semantic_plan = await asyncio.to_thread(
+            semantic_plan = await run_sync_fenced(
                 repair_semantic_plan_locally, base_render_result.architecture_context, semantic_plan
             )
-            render_result = await asyncio.to_thread(
+            render_result = await run_sync_fenced(
                 render_ros_template_architecture_views, template_content, semantic_plan=semantic_plan
             )
         else:

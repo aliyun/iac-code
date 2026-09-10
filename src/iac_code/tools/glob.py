@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import fnmatch
 import os
 from pathlib import Path
 from typing import Any
 
+from iac_code.a2a.backup import run_sync_fenced
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.tools.path_safety import check_read_path, get_iac_code_application_root, resolve_read_path
@@ -237,7 +237,7 @@ class GlobTool(Tool):
 
         try:
             allowed_roots = _effective_allowed_roots(search_root, context)
-            matches = await asyncio.to_thread(_run_glob_execute, search_root, pattern, allowed_roots)
+            matches = await run_sync_fenced(_run_glob_execute, search_root, pattern, allowed_roots)
         except Exception as e:
             return ToolResult.error(f"Error during glob: {e}")
 
@@ -274,7 +274,7 @@ class GlobTool(Tool):
                     relative_read_directories=context.relative_read_directories,
                 )
                 allowed_roots = _effective_allowed_roots(search_root, context)
-                return await asyncio.to_thread(
+                return await run_sync_fenced(
                     _run_glob_permission_check,
                     search_root,
                     pattern,

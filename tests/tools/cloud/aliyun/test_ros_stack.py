@@ -657,6 +657,35 @@ class TestRosStackExecute:
             for name, value, attrs in metrics
         )
 
+    def test_execution_control_timeout_is_not_reported_as_user_cancel(self, tool: RosStack) -> None:
+        tool._store_deployment_telemetry_context(
+            "stack-123",
+            action="CreateStack",
+            iac_kind="ros",
+            region="cn-hangzhou",
+            started_at=0,
+            resource_count_total=1,
+            resource_types=["ALIYUN::ECS::Instance"],
+            resource_type_counts=[1],
+            terraform_providers=[],
+        )
+        events: list[tuple[str, dict]] = []
+
+        with (
+            patch(
+                "iac_code.tools.cloud.aliyun.ros_stack.current_execution_termination_reason",
+                return_value="disconnect_timeout",
+            ),
+            patch(
+                "iac_code.tools.cloud.aliyun.ros_stack.log_event",
+                side_effect=lambda event_name, metadata=None: events.append((event_name, metadata or {})),
+            ),
+        ):
+            tool.on_polling_cancelled("CreateStack", {}, "cn-hangzhou", "stack-123", 5)
+
+        cancelled = [metadata for event_name, metadata in events if event_name == Events.DEPLOYMENT_CANCELLED]
+        assert cancelled[0]["reason"] == "disconnect_timeout"
+
     @pytest.mark.asyncio
     async def test_create_stack_template_generated_telemetry_failure_does_not_prevent_api_call(
         self, tool: RosStack, mock_credentials

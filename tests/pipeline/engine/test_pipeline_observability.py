@@ -1395,6 +1395,15 @@ def test_mark_user_aborted_emits_user_aborted_terminal_telemetry(runner):
     )
 
 
+def test_mark_execution_terminated_is_not_reported_as_user_abort(runner):
+    runner._observability.pipeline_user_aborted = MagicMock()
+
+    runner.mark_execution_terminated("disconnect_timeout")
+
+    assert runner.sidecar_status == "canceled"
+    runner._observability.pipeline_user_aborted.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_runner_does_not_emit_terminal_telemetry_when_pause_stream_closes_after_input_required(runner):
     runner.state_machine.current_step.auto_advance = False

@@ -108,6 +108,14 @@ def _extract_parts_text(message: Any) -> str:
     return "".join(pieces)
 
 
+def _validated_extension_response(response: Any, name: str) -> dict[str, Any]:
+    response.raise_for_status()
+    data = response.json()
+    if not isinstance(data, dict):
+        raise ValueError(f"A2A {name} response must be a JSON object")
+    return data
+
+
 class A2AClient:
     def __init__(
         self,
@@ -306,11 +314,16 @@ class A2AClient:
         *,
         task_id: str,
         after_sequence: int | None = None,
+        include_snapshot: bool = True,
     ) -> dict[str, Any] | None:
-        """Read iac-code's existing A2A pipeline recovery extension over HTTP."""
+        """Read an A2A pipeline snapshot or a cursor-based event delta over HTTP."""
 
+        if not include_snapshot and after_sequence is None:
+            raise ValueError("after_sequence is required when include_snapshot is False")
         endpoint = url.rstrip("/") + "/iac-code/pipeline/state"
         params = _without_none({"taskId": task_id, "afterSequence": after_sequence})
+        if not include_snapshot:
+            params["includeSnapshot"] = "false"
         response = await self._http_client.get(endpoint, params=params, headers=self._jsonrpc_headers())
         if response.status_code == 404:
             return None
@@ -357,6 +370,127 @@ class A2AClient:
         if not isinstance(data, dict) or data.get("status") not in {"current", "restored"}:
             raise ValueError("A2A session restore response must report a ready session")
         return True
+
+    async def pause_execution(
+        self,
+        url: str,
+        *,
+        context_id: str,
+        task_id: str,
+        execution_id: str,
+        request_id: str,
+        connection_epoch: int,
+        reason: str = "client_disconnected",
+        reconnect_timeout_seconds: float = 300,
+    ) -> dict[str, Any]:
+        return await self._execution_control_post(
+            url,
+            "pause",
+            {
+                "contextId": context_id,
+                "taskId": task_id,
+                "expectedExecutionId": execution_id,
+                "requestId": request_id,
+                "connectionEpoch": connection_epoch,
+                "reason": reason,
+                "reconnectTimeoutSeconds": reconnect_timeout_seconds,
+            },
+        )
+
+    async def get_execution_state(
+        self,
+        url: str,
+        *,
+        context_id: str,
+        execution_id: str | None = None,
+        pause_id: str | None = None,
+    ) -> dict[str, Any]:
+        endpoint = url.rstrip("/") + "/iac-code/execution/state"
+        response = await self._http_client.get(
+            endpoint,
+            params=_without_none(
+                {
+                    "contextId": context_id,
+                    "executionId": execution_id,
+                    "pauseId": pause_id,
+                }
+            ),
+            headers=self._jsonrpc_headers(),
+        )
+        return _validated_extension_response(response, "execution state")
+
+    async def resume_execution(
+        self,
+        url: str,
+        *,
+        context_id: str,
+        execution_id: str,
+        pause_id: str,
+        request_id: str,
+        connection_epoch: int,
+    ) -> dict[str, Any]:
+        return await self._execution_control_post(
+            url,
+            "resume",
+            {
+                "contextId": context_id,
+                "executionId": execution_id,
+                "pauseId": pause_id,
+                "requestId": request_id,
+                "connectionEpoch": connection_epoch,
+            },
+        )
+
+    async def terminate_execution(
+        self,
+        url: str,
+        *,
+        context_id: str,
+        execution_id: str,
+        request_id: str,
+        connection_epoch: int,
+        reason: str = "explicit_terminate",
+        pause_id: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._execution_control_post(
+            url,
+            "terminate",
+            _without_none(
+                {
+                    "contextId": context_id,
+                    "expectedExecutionId": execution_id,
+                    "requestId": request_id,
+                    "connectionEpoch": connection_epoch,
+                    "reason": reason,
+                    "pauseId": pause_id,
+                }
+            ),
+        )
+
+    async def get_session_recovery(
+        self,
+        url: str,
+        *,
+        context_id: str,
+        execution_id: str,
+    ) -> dict[str, Any]:
+        endpoint = url.rstrip("/") + "/iac-code/session/recovery"
+        response = await self._http_client.get(
+            endpoint,
+            params={"contextId": context_id, "executionId": execution_id},
+            headers=self._jsonrpc_headers(),
+        )
+        return _validated_extension_response(response, "session recovery")
+
+    async def _execution_control_post(
+        self,
+        url: str,
+        action: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        endpoint = url.rstrip("/") + f"/iac-code/execution/{action}"
+        response = await self._http_client.post(endpoint, json=payload, headers=self._jsonrpc_headers())
+        return _validated_extension_response(response, f"execution {action}")
 
     async def list_tasks(
         self,

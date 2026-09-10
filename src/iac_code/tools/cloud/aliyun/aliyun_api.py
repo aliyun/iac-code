@@ -23,6 +23,7 @@ from alibabacloud_tea_openapi import models as open_api_models
 from alibabacloud_tea_openapi.client import Client as OpenApiClient
 from darabonba.runtime import RuntimeOptions
 
+from iac_code.a2a.backup import run_sync_fenced
 from iac_code.i18n import _
 from iac_code.services.cloud_credentials import CloudCredentials
 from iac_code.services.permissions.audit import fingerprint_text
@@ -2509,7 +2510,7 @@ class AliyunApi(BaseCloudApi):
                     else _authorized_materialization_path("template", authorized_read_paths)
                 )
                 try:
-                    template_bytes = await asyncio.to_thread(_read_body_file, resolved_template)
+                    template_bytes = await run_sync_fenced(_read_body_file, resolved_template)
                     params["TemplateBody"] = template_bytes.decode("utf-8")
                 except (OSError, UnicodeError) as error:
                     from iac_code.tools.cloud.aliyun.hooks.ros_validate import local_template_source_error
@@ -2525,7 +2526,7 @@ class AliyunApi(BaseCloudApi):
                     if trust_path == "internal"
                     else _authorized_materialization_path("body_file", authorized_read_paths)
                 )
-                materialized["body_file"] = await asyncio.to_thread(_read_body_file, resolved_body_file)
+                materialized["body_file"] = await run_sync_fenced(_read_body_file, resolved_body_file)
             region_id = materialized.get("region_id")
             if isinstance(region_id, str) and region_id:
                 for parameter in contract.parameters:
@@ -2835,7 +2836,7 @@ class AliyunApi(BaseCloudApi):
         if not endpoint:
             # Location-service discovery makes a blocking OpenAPI call; keep it off
             # the shared event loop (web agent turns, SSE, and HTTP handlers run on it).
-            endpoint = await asyncio.to_thread(self._discover_endpoint, product, region, credential)
+            endpoint = await run_sync_fenced(self._discover_endpoint, product, region, credential)
         if not endpoint:
             endpoint = self._get_endpoint_fallback(product, region)
         try:
@@ -2891,7 +2892,7 @@ class AliyunApi(BaseCloudApi):
         try:
             # The OpenAPI call is blocking network I/O; offload it so it never
             # starves the shared event loop. Telemetry/event emission stay on-loop.
-            result = await asyncio.to_thread(client.call_api, api_params, request, runtime)
+            result = await run_sync_fenced(client.call_api, api_params, request, runtime)
             body = result.get("body", result)
 
             self._last_action = action

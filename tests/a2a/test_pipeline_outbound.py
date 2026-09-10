@@ -9,6 +9,7 @@ import pytest
 
 import iac_code.a2a.pipeline_outbound as pipeline_outbound_module
 from iac_code.a2a.pipeline_outbound import PipelineA2AOutboundQueue, _estimated_event_size
+from iac_code.a2a.pipeline_transport_delivery import PipelineTransportDeliveryClosedError
 from iac_code.types.stream_events import (
     PermissionRequestEvent,
     SubPipelineStreamEvent,
@@ -167,6 +168,43 @@ async def test_publish_batch_forwards_uncoalesced_envelopes_to_local_web_sink() 
     local_frame = publisher.local_envelope_frames[1]
     assert local_frame is not None
     assert [envelope["data"]["text"] for envelope in local_frame] == ["A1", "B1", "A2"]
+
+
+@pytest.mark.asyncio
+async def test_persisted_batch_survives_transport_closure() -> None:
+    publisher = RecordingPublisher()
+    publisher.send_error = PipelineTransportDeliveryClosedError("subscriber disconnected")
+    outbound = PipelineA2AOutboundQueue(publisher, max_batch_delay_seconds=10)
+
+    await outbound.start()
+    await outbound.submit(TextDeltaEvent(text="persist while offline"))
+    await asyncio.wait_for(publisher.first_send_started.wait(), timeout=0.2)
+    await outbound.close()
+
+    assert [event.text for event in publisher.persisted_events] == ["persist while offline"]
+
+
+@pytest.mark.asyncio
+async def test_persisted_permission_decision_survives_transport_closure() -> None:
+    publisher = RecordingPublisher()
+    publisher.send_error = PipelineTransportDeliveryClosedError("subscriber disconnected")
+    outbound = PipelineA2AOutboundQueue(publisher, max_batch_delay_seconds=10)
+    response = asyncio.get_running_loop().create_future()
+
+    await outbound.start()
+    await outbound.submit(
+        PermissionRequestEvent(
+            tool_name="write_file",
+            tool_input={},
+            tool_use_id="permission-offline",
+            response_future=response,
+        ),
+        auto_approve_permissions=True,
+    )
+    await outbound.close()
+
+    assert response.result() is True
+    assert [event.tool_use_id for event in publisher.persisted_events] == ["permission-offline"]
 
 
 @pytest.mark.asyncio

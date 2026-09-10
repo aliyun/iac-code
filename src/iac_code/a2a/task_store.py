@@ -20,7 +20,9 @@ from a2a.types import ListTasksRequest, ListTasksResponse, Message, Part, Role, 
 from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict, ParseDict
 
+from iac_code.a2a.backup import await_fenced, run_sync_fenced
 from iac_code.a2a.events import with_iac_code_session_metadata
+from iac_code.a2a.execution_control import current_execution_control, current_execution_termination_reason
 from iac_code.a2a.metrics import A2AMetrics, NoOpA2AMetrics
 from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2ATaskSnapshot
 from iac_code.a2a.types import (
@@ -75,14 +77,51 @@ class A2ATaskStore(TaskStore):
         self._discarded_context_runtime_tasks: set[asyncio.Task[Any]] = set()
         self._discarded_context_runtime_task_waiters: dict[asyncio.Task[Any], int] = {}
         self._reconciliation_locks: dict[str, asyncio.Lock] = {}
+        self._termination_commit_locks: dict[str, asyncio.Lock] = {}
         self._context_reconciliation_waiters: dict[str, set[str]] = {}
         self._context_execution_starts: dict[str, dict[str, asyncio.Task[Any]]] = {}
         self._owner_resolver = owner_resolver
         self._backup_service = backup_service or SessionBackupService()
         self._permission_wait_active_probe: Callable[[], bool] | None = None
+        self._execution_control_snapshot_provider: Callable[[str], dict[str, Any] | None] | None = None
+        self._execution_control_active_probe: Callable[[], bool] | None = None
 
     def set_permission_wait_active_probe(self, probe: Callable[[], bool] | None) -> None:
         self._permission_wait_active_probe = probe
+
+    def set_execution_control_provider(
+        self,
+        snapshot_provider: Callable[[str], dict[str, Any] | None] | None,
+        active_probe: Callable[[], bool] | None,
+    ) -> None:
+        self._execution_control_snapshot_provider = snapshot_provider
+        self._execution_control_active_probe = active_probe
+
+    def touch_context(self, context_id: str) -> None:
+        """Restart the idle interval after a connection hold, without storage I/O."""
+        record = self._contexts.get(context_id)
+        if record is not None:
+            record.touch()
+
+    def _execution_snapshot(self, context_id: str) -> dict[str, Any] | None:
+        if self._execution_control_snapshot_provider is not None:
+            return self._execution_control_snapshot_provider(context_id)
+        control = current_execution_control()
+        return control.snapshot() if control is not None and control.context_id == context_id else None
+
+    def _execution_is_terminating(self, context_id: str) -> bool:
+        control = self._execution_snapshot(context_id)
+        return bool(control and control["phase"] in {"terminating", "terminated"})
+
+    def _execution_retains_context(self, context_id: str) -> bool:
+        control = self._execution_snapshot(context_id)
+        return bool(
+            control
+            and (
+                control["phase"] in {"pausing", "pause_committing", "paused", "resuming", "terminating"}
+                or (control["phase"] == "terminated" and not control["releaseReady"])
+            )
+        )
 
     async def get(self, task_id: str, context: ServerCallContext | None = None) -> Task | None:
         owner = self._owner(context)
@@ -101,6 +140,19 @@ class A2ATaskStore(TaskStore):
         owner = self._owner(context)
         task_id = validate_protocol_id(task.id)
         async with self._mutation_lock:
+            record = self._tasks.get(task_id)
+            preserve_terminal = bool(
+                record is not None
+                and record.state
+                in {TASK_STATE_CANCELED, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_INPUT_REQUIRED}
+                and self._execution_is_terminating(task.context_id)
+            )
+            if preserve_terminal:
+                # Queued SDK working events must not undo the executor's final
+                # state while its immutable termination snapshot is committed.
+                assert record is not None
+                task = _copy_task(task)
+                task.status.state = TaskState.Value("TASK_STATE_" + record.state.upper().replace("-", "_"))
             self._attach_context_metadata(task)
             self._attach_pending_permissions(task)
             owner_tasks = self._sdk_tasks.setdefault(owner, {})
@@ -109,7 +161,8 @@ class A2ATaskStore(TaskStore):
                 self._remove_sdk_task_from_index(owner, task_id, previous.context_id)
             owner_tasks[task_id] = _copy_task(task)
             self._sdk_tasks_by_context.setdefault(owner, {}).setdefault(task.context_id, set()).add(task_id)
-            record = self._tasks.get(task_id)
+            if preserve_terminal:
+                return
             next_state = _task_state_from_sdk_task(task)
             # The SDK saves the full Task before yielding every streaming frame. Executors already
             # mirror task records explicitly at output/state durability boundaries, so repeated SDK
@@ -143,8 +196,15 @@ class A2ATaskStore(TaskStore):
             return
         metadata = MessageToDict(task.metadata, preserving_proto_field_name=False) if task.metadata.fields else {}
         metadata = with_iac_code_session_metadata(metadata, context.session_id)
-        if metadata is not None:
-            ParseDict(metadata, task.metadata)
+        if metadata is None:
+            metadata = {}
+        if self._execution_control_snapshot_provider is not None:
+            control = self._execution_control_snapshot_provider(task.context_id)
+            if control is not None:
+                iac_code = metadata.setdefault("iac_code", {})
+                if isinstance(iac_code, dict):
+                    iac_code["executionControl"] = control
+        ParseDict(metadata, task.metadata)
 
     def _attach_pending_permissions(self, task: Task) -> None:
         metadata = MessageToDict(task.metadata, preserving_proto_field_name=False) if task.metadata.fields else {}
@@ -364,6 +424,9 @@ class A2ATaskStore(TaskStore):
                 if create_task is None:
                     create_task = asyncio.create_task(asyncio.to_thread(runtime_factory, session_id))
                     self._context_runtime_tasks[context_id] = create_task
+            control = current_execution_control()
+            if control is not None and control.context_id == context_id:
+                control.bind_session(record.session_id)
             self._context_runtime_waiters[context_id] = self._context_runtime_waiters.get(context_id, 0) + 1
 
         if create_task is None:  # pragma: no cover - defensive guard for inconsistent state.
@@ -376,18 +439,31 @@ class A2ATaskStore(TaskStore):
                 remaining = self._decrement_context_runtime_waiter_locked(context_id)
                 if remaining == 0:
                     record = self._contexts.get(context_id)
-                    if record is not None and record.runtime is None:
+                    if record is not None and record.runtime is None and current_execution_termination_reason() is None:
                         self._contexts.pop(context_id, None)
                     if self._context_runtime_tasks.get(context_id) is create_task:
                         discard_task = self._context_runtime_tasks.pop(context_id, None)
                     if discard_task is not None:
                         self._mark_discarded_context_runtime_task_locked(discard_task, waiters=0)
             if discard_task is not None:
-                _close_runtime_task_when_done(
-                    discard_task,
-                    self._discarded_context_runtime_tasks,
-                    self._discarded_context_runtime_task_waiters,
-                )
+                if current_execution_termination_reason() is not None:
+                    # Keep the executor alive until bootstrap and runtime cleanup
+                    # finish. A canceled to_thread waiter does not stop its thread.
+                    async def drain_runtime() -> None:
+                        try:
+                            runtime = await asyncio.shield(discard_task)
+                            await _close_runtime(runtime)
+                        finally:
+                            self._discarded_context_runtime_tasks.discard(discard_task)
+                            self._discarded_context_runtime_task_waiters.pop(discard_task, None)
+
+                    await await_fenced(drain_runtime())
+                else:
+                    _close_runtime_task_when_done(
+                        discard_task,
+                        self._discarded_context_runtime_tasks,
+                        self._discarded_context_runtime_task_waiters,
+                    )
             raise
         except Exception:
             async with self._mutation_lock:
@@ -501,6 +577,19 @@ class A2ATaskStore(TaskStore):
 
         raise ValueError(_("A2A context not found"))
 
+    async def activate_restored_task(self, task: A2ATaskRecord, context: A2AContextRecord) -> A2AContextRecord:
+        """Attach a permission recovery to live records without creating a cached runtime."""
+        async with self._mutation_lock:
+            record = self._contexts.setdefault(context.context_id, context)
+            if record.lock is None:
+                record.lock = asyncio.Lock()
+            record.active_task_id = task.task_id
+            record.touch()
+            task.state = TASK_STATE_WORKING
+            task.active_task = asyncio.current_task()
+            task.touch()
+            return record
+
     async def get_context_runtime_path_directories(
         self,
         context_id: str,
@@ -513,7 +602,7 @@ class A2ATaskStore(TaskStore):
             runtime = record.runtime if record is not None else None
             return _runtime_path_directories(runtime)
 
-    async def discard_context_runtime(self, context_id: str) -> None:
+    async def discard_context_runtime(self, context_id: str, *, persist_context: bool = True) -> None:
         """Drop a cached runtime so the next turn rebuilds the context cleanly."""
         runtime: Any | None = None
         context_id = validate_protocol_id(context_id)
@@ -524,7 +613,18 @@ class A2ATaskStore(TaskStore):
             runtime = record.runtime
             record.runtime = None
             record.touch()
-            self._mirror_context(record)
+            # Runtime is memory-only. Termination commits the durable task and
+            # context together later, outside the global lock and event loop.
+            # Permission cancellation can also reach here through its suspend
+            # callback before the termination cleanup calls us directly.
+            control = (
+                self._execution_control_snapshot_provider(context_id)
+                if self._execution_control_snapshot_provider is not None
+                else None
+            )
+            terminating = control is not None and control.get("phase") in {"terminating", "terminated"}
+            if persist_context and not terminating:
+                self._mirror_context(record)
         await _close_runtime(runtime)
 
     def reconciliation_lock(self, context_id: str) -> asyncio.Lock:
@@ -856,6 +956,132 @@ class A2ATaskStore(TaskStore):
             record.active_task.cancel()
             return True
 
+    async def cancel_inactive_input_required_task(self, *, task_id: str, context_id: str) -> bool:
+        """Terminalize a detached input wait without overwriting a finished turn."""
+        return await self.commit_inactive_execution_task(task_id=task_id, context_id=context_id, cancel_wait=True)
+
+    async def commit_inactive_execution_task(
+        self, *, task_id: str, context_id: str, cancel_wait: bool = False
+    ) -> bool:
+        """Strictly commit an execution's final task/context snapshots off the event loop."""
+
+        task_id = validate_protocol_id(task_id)
+        context_id = validate_protocol_id(context_id)
+        allowed_states = {TASK_STATE_INPUT_REQUIRED, TASK_STATE_CANCELED}
+        if not cancel_wait:
+            allowed_states.update({TASK_STATE_COMPLETED, TASK_STATE_FAILED})
+        async with self._termination_commit_locks.setdefault(context_id, asyncio.Lock()):
+            async with self._mutation_lock:
+                record = self._tasks.get(task_id)
+                if (
+                    record is None
+                    or record.context_id != context_id
+                    or (record.active_task is not None and not record.active_task.done())
+                    or record.state not in allowed_states
+                ):
+                    return False
+                if cancel_wait:
+                    record.state = TASK_STATE_CANCELED
+                record.active_task = None
+                record.touch()
+                self._pending_permissions.pop(task_id, None)
+                context = self._contexts.get(context_id)
+                if context is not None and context.active_task_id == task_id:
+                    context.active_task_id = None
+                    context.touch()
+                for owner_tasks in self._sdk_tasks.values():
+                    task = owner_tasks.get(task_id)
+                    if task is None or task.context_id != context_id:
+                        continue
+                    if not cancel_wait:
+                        task.status.state = TaskState.Value("TASK_STATE_" + record.state.upper().replace("-", "_"))
+                        continue
+                    task.status.CopyFrom(
+                        TaskStatus(
+                            state=TaskState.Name(TaskState.TASK_STATE_CANCELED),
+                            message=Message(
+                                message_id=f"{task_id}-terminated",
+                                task_id=task_id,
+                                context_id=context_id,
+                                role=Role.ROLE_AGENT,
+                                parts=[Part(text=_("Task canceled."))],
+                            ),
+                        )
+                    )
+                    task.status.timestamp.GetCurrentTime()
+                    self._attach_context_metadata(task)
+                    self._attach_pending_permissions(task)
+                if context is None:
+                    raise OSError("A2A terminated context snapshot is unavailable")
+                task_snapshot = A2ATaskSnapshot(
+                    task_id=record.task_id,
+                    context_id=record.context_id,
+                    state=record.state,
+                    owner=record.owner,
+                    output_text=list(record.output_text),
+                    updated_at=record.updated_at,
+                    expected_permission_backup_generation=record.expected_permission_backup_generation,
+                )
+                context_snapshot = A2AContextSnapshot(
+                    context_id=context.context_id,
+                    session_id=context.session_id,
+                    cwd=context.cwd,
+                    telemetry_channel=context.telemetry_channel,
+                    active_task_id=context.active_task_id,
+                )
+                self._task_persistence_dirty.add(task_id)
+            await run_sync_fenced(self._persist_terminated_task_snapshots_strict, task_snapshot, context_snapshot)
+            async with self._mutation_lock:
+                if (
+                    self._tasks.get(task_id) is not record
+                    or self._contexts.get(context_id) is not context
+                    or record.updated_at != task_snapshot.updated_at
+                    or context.session_id != context_snapshot.session_id
+                    or context.cwd != context_snapshot.cwd
+                    or context.telemetry_channel != context_snapshot.telemetry_channel
+                    or record.state != task_snapshot.state
+                    or context.active_task_id is not None
+                ):
+                    raise OSError("A2A termination snapshot changed during commit; retry termination")
+                self._task_persistence_dirty.discard(task_id)
+            return True
+
+    def _persist_terminated_task_snapshots_strict(
+        self,
+        task_snapshot: A2ATaskSnapshot,
+        context_snapshot: A2AContextSnapshot,
+    ) -> None:
+        """Write detached snapshots in a worker; never access mutable task-store records."""
+
+        if self._persistence is not None:
+            self._persistence.save_task(task_snapshot)
+            persisted_task = self._persistence.load_task(task_snapshot.task_id)
+            if persisted_task is None or persisted_task.state != task_snapshot.state:
+                raise OSError("A2A terminated task snapshot verification failed")
+        session_paths = _session_paths_for_a2a_snapshot(context_snapshot)
+        if session_paths is None:
+            raise OSError("A2A terminated task session path is unavailable")
+        _write_session_snapshot(session_paths.session_dir, session_paths.a2a_task_path, asdict(task_snapshot))
+        persisted_session_task = json.loads(session_paths.a2a_task_path.read_text(encoding="utf-8"))
+        if (
+            persisted_session_task.get("task_id") != task_snapshot.task_id
+            or persisted_session_task.get("state") != task_snapshot.state
+        ):
+            raise OSError("A2A terminated session task snapshot verification failed")
+
+        if self._persistence is not None:
+            self._persistence.save_context(context_snapshot)
+            persisted_context = self._persistence.load_context(context_snapshot.context_id)
+            if persisted_context is None or persisted_context.active_task_id is not None:
+                raise OSError("A2A terminated context snapshot verification failed")
+        _write_session_snapshot(session_paths.session_dir, session_paths.a2a_context_path, asdict(context_snapshot))
+        persisted_session_context = json.loads(session_paths.a2a_context_path.read_text(encoding="utf-8"))
+        if (
+            persisted_session_context.get("context_id") != context_snapshot.context_id
+            or persisted_session_context.get("active_task_id") is not None
+        ):
+            raise OSError("A2A terminated session context snapshot verification failed")
+
     async def cancel_task_and_wait(self, task_id: str, *, timeout: float | None = None) -> bool:
         task_id = validate_protocol_id(task_id)
         async with self._mutation_lock:
@@ -923,6 +1149,7 @@ class A2ATaskStore(TaskStore):
                 or any(lock.locked() for lock in self._reconciliation_locks.values())
                 or any(count > 0 for count in self._context_runtime_waiters.values())
                 or any(not task.done() for task in self._discarded_context_runtime_tasks)
+                or bool(self._execution_control_active_probe and self._execution_control_active_probe())
                 or bool(self._permission_wait_active_probe and self._permission_wait_active_probe())
             )
 
@@ -954,8 +1181,18 @@ class A2ATaskStore(TaskStore):
                 and not self._context_execution_starts.get(context_id)
                 and context_id not in active_context_ids
                 and context_id not in reconciling_context_ids
+                and not self._execution_retains_context(context_id)
             ]
             for context_id in expired_context_ids:
+                # Closing an earlier runtime can yield while a later context
+                # accepts pause/resume. Recheck its hold and idle timestamp.
+                record = self._contexts.get(context_id)
+                if (
+                    record is None
+                    or now - record.last_active <= self._idle_timeout_seconds
+                    or self._execution_retains_context(context_id)
+                ):
+                    continue
                 record = self._contexts.pop(context_id, None)
                 if record is not None:
                     await _close_runtime(record.runtime)
@@ -1020,6 +1257,11 @@ class A2ATaskStore(TaskStore):
                 logger.exception("A2A cleanup loop failed")
 
     def _mirror_task(self, record: A2ATaskRecord, *, persist_shared_snapshot: bool = True) -> None:
+        if self._execution_is_terminating(record.context_id):
+            # Final snapshots are committed after all execution participants drain.
+            # This also covers SDK saves and executor finally blocks on slow OSS.
+            self._task_persistence_dirty.add(record.task_id)
+            return
         snapshot = A2ATaskSnapshot(
             task_id=record.task_id,
             context_id=record.context_id,
@@ -1049,6 +1291,8 @@ class A2ATaskStore(TaskStore):
         self._persist_context_snapshot(snapshot)
 
     def _persist_context_snapshot(self, snapshot: A2AContextSnapshot) -> None:
+        if self._execution_is_terminating(snapshot.context_id):
+            return
         if self._persistence is not None:
             try:
                 self._persistence.save_context(snapshot)

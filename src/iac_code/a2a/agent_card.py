@@ -31,9 +31,11 @@ from iac_code.i18n import _
 from iac_code.pipeline.config import RunMode, get_run_mode
 
 IAC_CODE_ARTIFACT_METADATA_EXTENSION_URI = "urn:iac-code:a2a:artifact-metadata:v1"
+IAC_CODE_EXECUTION_CONTROL_EXTENSION_URI = "urn:iac-code:a2a:execution-control:v1"
 IAC_CODE_PIPELINE_EVENTS_EXTENSION_URI = PIPELINE_EVENTS_EXTENSION_URI
 IAC_CODE_THINKING_EXPOSURE_EXTENSION_URI = "urn:iac-code:a2a:thinking-exposure:v1"
 CANONICAL_CALLER_EXTENSION_URIS = {
+    IAC_CODE_EXECUTION_CONTROL_EXTENSION_URI,
     IAC_CODE_PIPELINE_EVENTS_EXTENSION_URI,
 }
 
@@ -167,6 +169,40 @@ def build_agent_card(
             required=False,
         )
     )
+    has_http_extension_surface = any(
+        interface.url.startswith(("http://", "https://"))
+        and interface.protocol_binding.upper() in {"JSONRPC", "HTTP+JSON"}
+        for interface in interfaces
+    )
+    if has_http_extension_surface:
+        execution_control_extension = AgentExtension(
+            uri=IAC_CODE_EXECUTION_CONTROL_EXTENSION_URI,
+            description="Control and recover a live iac-code A2A execution during sandbox reconnects.",
+            required=False,
+        )
+        ParseDict(
+            {
+                "schemaVersion": "1.0",
+                "pauseEndpoint": "/iac-code/execution/pause",
+                "stateEndpoint": "/iac-code/execution/state",
+                "resumeEndpoint": "/iac-code/execution/resume",
+                "terminateEndpoint": "/iac-code/execution/terminate",
+                "sessionRecoveryEndpoint": "/iac-code/session/recovery",
+                "phases": [
+                    "running",
+                    "pausing",
+                    "pause_committing",
+                    "paused",
+                    "resuming",
+                    "terminating",
+                    "terminated",
+                ],
+                "toolBatchDrainOnPause": True,
+                "transportScope": "http",
+            },
+            execution_control_extension.params,
+        )
+        card.capabilities.extensions.append(execution_control_extension)
     if thinking_exposure_types is not None:
         enabled_types = format_a2a_exposure_types(thinking_exposure_types)
         if enabled_types:

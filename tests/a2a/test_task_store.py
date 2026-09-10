@@ -1277,6 +1277,33 @@ async def test_save_clears_consumed_input_metadata_when_task_leaves_input_requir
 
 
 @pytest.mark.asyncio
+async def test_save_attaches_current_execution_control_metadata() -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    await store.get_or_create_context(context_id="ctx-1", cwd="/tmp", runtime_factory=lambda _sid: object())
+    store.set_execution_control_provider(
+        lambda context_id: {
+            "contextId": context_id,
+            "executionId": "exec-1",
+            "phase": "pausing",
+            "revision": 2,
+        },
+        lambda: True,
+    )
+
+    await store.save(sdk_task("task-1", context_id="ctx-1", state=TaskState.TASK_STATE_WORKING))
+
+    saved = await store.get("task-1")
+    assert saved is not None
+    metadata = MessageToDict(saved.metadata, preserving_proto_field_name=False)
+    assert metadata["iac_code"]["executionControl"] == {
+        "contextId": "ctx-1",
+        "executionId": "exec-1",
+        "phase": "pausing",
+        "revision": 2.0,
+    }
+
+
+@pytest.mark.asyncio
 async def test_save_retries_failed_shared_task_snapshot_when_sdk_state_is_unchanged(tmp_path) -> None:
     persistence = FlakyTaskPersistence(tmp_path / "a2a")
     store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
@@ -1385,6 +1412,69 @@ async def test_task_store_mirrors_task_and_context_to_persistence(tmp_path) -> N
 
     assert persistence.load_context("ctx-1").session_id == context.session_id
     assert persistence.load_task("task-1").context_id == task.context_id
+
+
+@pytest.mark.asyncio
+async def test_cancel_inactive_input_required_task_updates_internal_and_sdk_state(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda _session_id: object(),
+    )
+    context.active_task_id = "task-1"
+    store.mirror_context(context)
+    await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    await store.save(sdk_task("task-1", state=TaskState.TASK_STATE_INPUT_REQUIRED))
+
+    assert await store.cancel_inactive_input_required_task(task_id="task-1", context_id="ctx-1") is True
+
+    record = await store.get_task_record("task-1")
+    task = await store.get("task-1")
+    refreshed_context = await store.get_context_record("ctx-1")
+    assert record.state == "canceled"
+    assert task is not None and task.status.state == TaskState.TASK_STATE_CANCELED
+    assert refreshed_context.active_task_id is None
+    assert persistence.load_task("task-1").state == "canceled"
+
+    assert await store.cancel_inactive_input_required_task(task_id="task-1", context_id="ctx-1") is True
+
+
+@pytest.mark.asyncio
+async def test_cancel_inactive_input_required_task_retries_strict_session_snapshot(tmp_path, monkeypatch) -> None:
+    from iac_code.a2a import task_store as task_store_module
+
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda _session_id: object(),
+    )
+    context.active_task_id = "task-1"
+    store.mirror_context(context)
+    await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    await store.save(sdk_task("task-1", state=TaskState.TASK_STATE_INPUT_REQUIRED))
+    original_write = task_store_module._write_session_snapshot
+    failed = False
+
+    def fail_first_canceled_task_snapshot(session_dir, path, data):
+        nonlocal failed
+        if path.name == "task.json" and data.get("state") == "canceled" and not failed:
+            failed = True
+            raise OSError("temporary session snapshot failure")
+        original_write(session_dir, path, data)
+
+    monkeypatch.setattr(task_store_module, "_write_session_snapshot", fail_first_canceled_task_snapshot)
+
+    with pytest.raises(OSError, match="temporary session snapshot failure"):
+        await store.cancel_inactive_input_required_task(task_id="task-1", context_id="ctx-1")
+    session_task_path = SessionStorage().session_dir(str(tmp_path), context.session_id) / "a2a" / "task.json"
+    assert json.loads(session_task_path.read_text(encoding="utf-8"))["state"] == "input-required"
+
+    assert await store.cancel_inactive_input_required_task(task_id="task-1", context_id="ctx-1") is True
+    assert json.loads(session_task_path.read_text(encoding="utf-8"))["state"] == "canceled"
 
 
 @pytest.mark.asyncio

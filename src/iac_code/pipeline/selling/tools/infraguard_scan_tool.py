@@ -13,6 +13,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from iac_code.a2a.backup import run_sync_fenced
 from iac_code.desktop.external_env import create_subprocess_exec, guarded_command, spawn_env
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
@@ -46,12 +47,12 @@ async def _desktop_consumer_lease() -> tuple[Any | None, str | None]:
         # reader that would block repair in another Desktop channel.
         with suppress(Exception):
             await asyncio.shield(acquire)
-            await asyncio.to_thread(lease.__exit__, None, None, None)
+            await run_sync_fenced(lease.__exit__, None, None, None)
         raise
     except TimeoutError:
         return None, "installing"
     if lease.recovery_required():
-        await asyncio.to_thread(lease.__exit__, None, None, None)
+        await run_sync_fenced(lease.__exit__, None, None, None)
         return None, "recovery_required"
     return lease, None
 
@@ -100,7 +101,7 @@ async def _run_infraguard_with_desktop_lease(
         )
     finally:
         if lease is not None:
-            await asyncio.to_thread(lease.__exit__, None, None, None)
+            await run_sync_fenced(lease.__exit__, None, None, None)
 
 
 def _extract_findings(parsed: dict[str, Any]) -> list[dict[str, Any]]:

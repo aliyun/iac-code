@@ -23,7 +23,7 @@ from iac_code.a2a.input_required import (
 )
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
-from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
+from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher, _unified_input_projection
 from iac_code.a2a.runtime_overrides import a2a_request_context
 from iac_code.a2a.task_store import A2ATaskStore
@@ -40,6 +40,127 @@ from iac_code.types.permissions import PermissionAuditMetadata, PermissionResult
 from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent
 
 from .fakes import FakeEventQueue, pending_future
+
+
+@pytest.mark.asyncio
+async def test_cancel_durable_detached_permission_runs_suspend_callback() -> None:
+    registry = PermissionInputRegistry()
+    future = pending_future()
+    request = PermissionRequestEvent(
+        tool_name="bash",
+        tool_input={"cmd": "true"},
+        tool_use_id="tool-1",
+        response_future=future,
+    )
+    pending = await registry.register(request, task_id="task-1", context_id="ctx-1", scope="normal")
+    pending.boundary_id = "boundary-1"
+    suspended = asyncio.Event()
+
+    class Coordinator:
+        async def cancel_live(self, boundary_id: str) -> bool:
+            assert boundary_id == "boundary-1"
+            future.cancel()
+            return True
+
+        def unregister_live(self, boundary_id: str) -> None:
+            assert boundary_id == "boundary-1"
+
+    async def suspend() -> None:
+        pending.continuation = None
+        suspended.set()
+
+    pending.continuation = object()
+    pending.suspend_callback = suspend
+    registry.set_permission_wait_coordinator(Coordinator())
+
+    assert await registry.has_pending_task("task-1") is True
+    await registry.cancel_task("task-1")
+
+    assert suspended.is_set()
+    assert pending.continuation is None
+    assert pending.state == "completed"
+    assert await registry.has_pending_task("task-1") is False
+
+
+@pytest.mark.asyncio
+async def test_terminate_detached_pipeline_permission_cancels_sidecar_without_handoff(tmp_path) -> None:
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+
+    class DisabledBackup:
+        def initialize_session(self, *_args, **_kwargs):
+            return None
+
+        def backup_session(self, *_args, **_kwargs):
+            return BackupResult(enabled=False)
+
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    store = A2ATaskStore(backup_service=DisabledBackup())
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: object(),
+    )
+    context.active_task_id = "task-1"
+    store.mirror_context(context)
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.state = "input-required"
+    store.mirror_task(task)
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=context.session_id)
+    pending_input = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-permission",
+        "sequence": 1,
+        "createdAt": "2026-09-10T10:00:00Z",
+        "eventType": "input_required",
+        "scope": "step",
+        "pipelineRunId": "ctx-1",
+        "taskId": "task-1",
+        "contextId": "ctx-1",
+        "pipelineName": "selling",
+        "status": "input_required",
+        "step": {"runId": "step-1", "id": "confirm_and_select", "attempt": 1},
+        "input": {"inputId": "permission-1", "kind": "permission", "prompt": "Allow?"},
+    }
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(pending_input)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending_input]))
+
+    registry = PermissionInputRegistry()
+    future = pending_future()
+    request = PermissionRequestEvent(
+        tool_name="bash",
+        tool_input={"cmd": "true"},
+        tool_use_id="tool-1",
+        response_future=future,
+    )
+    pending = await registry.register(request, task_id="task-1", context_id="ctx-1", scope="pipeline")
+    suspended = asyncio.Event()
+
+    async def suspend() -> None:
+        pending.continuation = None
+        suspended.set()
+
+    pending.continuation = object()
+    pending.suspend_callback = suspend
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="fake-model",
+        permission_input_registry=registry,
+        backup_service=DisabledBackup(),
+    )
+
+    result = await executor._terminate_detached_execution("ctx-1", "task-1", "disconnect_timeout")
+
+    assert result == "canceled"
+    assert suspended.is_set()
+    assert (await store.get_task_record("task-1")).state == "canceled"
+    snapshot = A2APipelineSnapshotStore(pipeline_dir).load()
+    assert snapshot is not None and snapshot["status"] == "canceled"
+    event_types = [event["eventType"] for event in journal.read_all()]
+    assert "pipeline_canceled" in event_types
+    assert "pipeline_handoff_ready" not in event_types
 
 
 @pytest.fixture(autouse=True)

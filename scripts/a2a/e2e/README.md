@@ -1,5 +1,32 @@
 # A2A E2E Session Recovery and Redaction
 
+## Execution pause, resume, and timeout-termination matrix
+
+`execution_control/run_execution_control_scenarios.py` starts a separate real
+HTTP A2A server process and uses deterministic provider, long-tool, and sync-SDK
+boundaries to verify pause, in-place resume, timeout termination, shared backup,
+and safe-release gating for Normal and Pipeline executions. It uses no real LLM,
+cloud account, or ROS resource.
+
+```bash
+uv run python scripts/a2a/e2e/execution_control/run_execution_control_scenarios.py \
+  --run-dir /tmp/iac-execution-control \
+  --scenario warm-resume-pausing \
+  --mode normal
+
+uv run pytest -q tests/a2a_e2e/test_execution_control_scenarios.py
+```
+
+`--scenario` may be repeated; compatible scenarios run serially in independent
+child directories for the selected `--mode`. Each scenario preserves
+`summary.json`, `requests.jsonl`, `*.events.jsonl`, `control-requests.json`,
+`execution-state-timeline.json`, provider/tool lifecycle logs,
+`backup-audit.json`, recovery snapshots, Pipeline journal/snapshot/sidecar,
+shared-backup contents, `server-lifecycle.json`, and `server.log`. `--timeout`
+bounds one wait step and `--overall-timeout` bounds the whole scenario. Failure
+cleanup releases every marker, closes streams, and stops the server with bounded
+waits.
+
 ## Real StartChat permission-wait matrix
 
 `run_start_chat_permission_wait.py` is the credential-gated, repeatable chain
