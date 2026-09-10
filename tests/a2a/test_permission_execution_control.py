@@ -233,7 +233,7 @@ async def test_normal_permission_resident_timer_keeps_paused_runtime(tmp_path, m
         model="test",
         backup_service=backup,
         execution_control_service=service,
-        permission_wait_policy=PermissionWaitPolicy(resident_timeout_seconds=0.2, timeout_grace_seconds=0),
+        permission_wait_policy=PermissionWaitPolicy(resident_timeout_seconds=1.0, timeout_grace_seconds=0),
     )
     future = asyncio.get_running_loop().create_future()
     ran = asyncio.Event()
@@ -278,7 +278,7 @@ async def test_normal_permission_resident_timer_keeps_paused_runtime(tmp_path, m
             reconnect_timeout_seconds=60,
         )
         await wait_until(lambda: control.phase == "paused")
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(1.1)
         assert not closed and not future.done() and pending.continuation is not None
         assert control.phase == "paused"
         if action == "terminate":

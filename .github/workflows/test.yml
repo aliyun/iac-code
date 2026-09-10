@@ -137,10 +137,29 @@ jobs:
       - name: Compile translations
         run: make translate
 
-      - name: Run tests with coverage
+      - name: Run A2A execution-control tests serially with coverage
+        # These tests deliberately gate durable writes, backups, timers, and
+        # subprocesses. Running them together under xdist makes their real-time
+        # assertions depend on shared runner I/O load, especially on Windows.
+        run: |
+          uv run pytest \
+            tests/a2a/test_execution_control.py \
+            tests/a2a/test_execution_control_regressions.py \
+            tests/a2a/test_execution_control_review_regressions.py \
+            tests/a2a/test_permission_execution_control.py \
+            tests/a2a_e2e/test_execution_control_scenarios.py \
+            -v --cov --cov-report= \
+            --junitxml=execution-control-testcase.xml
+
+      - name: Run remaining tests with coverage
         run: |
           uv run pytest tests/ -v -n auto \
-            --cov --cov-report=term-missing \
+            --ignore=tests/a2a/test_execution_control.py \
+            --ignore=tests/a2a/test_execution_control_regressions.py \
+            --ignore=tests/a2a/test_execution_control_review_regressions.py \
+            --ignore=tests/a2a/test_permission_execution_control.py \
+            --ignore=tests/a2a_e2e/test_execution_control_scenarios.py \
+            --cov --cov-append --cov-report=term-missing \
             --junitxml=testcase.xml
 
       - name: Check coverage threshold
@@ -163,11 +182,27 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras
 
-      - name: Run A2A app lifecycle tests serially
+      - name: Run A2A lifecycle and execution-control tests serially
         # These async lifecycle tests can terminate an xdist worker without a
-        # Python traceback on Windows. Keep the coverage, but run the module in
-        # the pytest coordinator process so worker loss cannot mask the result.
-        run: uv run pytest tests/a2a/test_app.py -v --no-header
+        # Python traceback on Windows. Execution-control tests also gate real
+        # durable writes, backups, timers, and subprocesses, so run both groups
+        # in the pytest coordinator process.
+        run: |
+          uv run pytest \
+            tests/a2a/test_app.py \
+            tests/a2a/test_execution_control.py \
+            tests/a2a/test_execution_control_regressions.py \
+            tests/a2a/test_execution_control_review_regressions.py \
+            tests/a2a/test_permission_execution_control.py \
+            tests/a2a_e2e/test_execution_control_scenarios.py \
+            -v --no-header
 
       - name: Run remaining tests
-        run: uv run pytest tests/ -v --no-header -n auto --ignore=tests/a2a/test_app.py
+        run: |
+          uv run pytest tests/ -v --no-header -n auto \
+            --ignore=tests/a2a/test_app.py \
+            --ignore=tests/a2a/test_execution_control.py \
+            --ignore=tests/a2a/test_execution_control_regressions.py \
+            --ignore=tests/a2a/test_execution_control_review_regressions.py \
+            --ignore=tests/a2a/test_permission_execution_control.py \
+            --ignore=tests/a2a_e2e/test_execution_control_scenarios.py
