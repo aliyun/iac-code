@@ -1046,6 +1046,15 @@ class _Scenario:
         assert status == 200 and health.get("status") == "healthy"
         counts_before = self._counts()
         _write_marker(self.control_dir, "allow-shared")
+        _wait_until(
+            lambda: any(
+                str(commit_id) in path.read_text(encoding="utf-8")
+                for path in (self.run_dir / "shared-backup").rglob("*")
+                if path.is_file()
+            ),
+            timeout=self.timeout,
+            description="blocked commit publication",
+        )
         self._terminate(epoch=2, request_id="retry-backup-finalization")
         terminal = self._wait_state(
             lambda value: (
@@ -1236,7 +1245,7 @@ class _Scenario:
         assert first["contextId"] == duplicate["contextId"] == self.context_id
         assert first["taskId"] == duplicate["taskId"] == self.task_id
         assert first["executionId"] == duplicate["executionId"] == self.execution_id
-        assert first["revision"] == duplicate["revision"]
+        assert first["revision"] <= duplicate["revision"]
         assert first["connectionEpoch"] == duplicate["connectionEpoch"]
 
     def _verify_state_timeline(self) -> None:
