@@ -175,16 +175,6 @@ def _format_exception(exc: BaseException) -> str:
     return raw[:_ERROR_TEXT_MAX_CHARS]
 
 
-async def _drain_normal_turn_events(event_queue: Any) -> None:
-    """Finish SDK task-store updates before capturing the completed turn's backup."""
-    join_incoming = getattr(event_queue, "test_only_join_incoming_queue", None)
-    if callable(join_incoming):
-        await join_incoming()
-    join_consumer = getattr(getattr(event_queue, "queue", None), "join", None)
-    if callable(join_consumer):
-        await join_consumer()
-
-
 def _a2a_safe_mode_enabled() -> bool:
     return a2a_safe_mode_enabled()
 
@@ -1977,10 +1967,6 @@ class IacCodeA2AExecutor(AgentExecutor):
                             metadata={"iac_code": final_metadata},
                             session_id=ctx.session_id,
                         )
-                        # Earlier working events can still be queued in the SDK.
-                        # Drain them before persisting input-required, otherwise
-                        # their late saves can overwrite the backup's task state.
-                        await await_fenced(_drain_normal_turn_events(target_queue))
                         task.state = TASK_STATE_INPUT_REQUIRED
                         ctx.active_task_id = None
                         task.touch()

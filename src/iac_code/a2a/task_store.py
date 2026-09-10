@@ -141,6 +141,8 @@ class A2ATaskStore(TaskStore):
         task_id = validate_protocol_id(task.id)
         async with self._mutation_lock:
             record = self._tasks.get(task_id)
+            next_state = _task_state_from_sdk_task(task)
+            incoming_updated_at = _task_updated_at_from_sdk_task(task)
             preserve_terminal = bool(
                 record is not None
                 and record.state
@@ -153,6 +155,18 @@ class A2ATaskStore(TaskStore):
                 assert record is not None
                 task = _copy_task(task)
                 task.status.state = TaskState.Value("TASK_STATE_" + record.state.upper().replace("-", "_"))
+            stale_state_projection = bool(
+                record is not None
+                and record.state
+                in {TASK_STATE_CANCELED, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_INPUT_REQUIRED}
+                and next_state in {TASK_STATE_SUBMITTED, TASK_STATE_WORKING}
+                and incoming_updated_at < record.updated_at
+            )
+            if stale_state_projection:
+                # The SDK consumes executor events asynchronously. An event
+                # queued before a newer executor mirror must not roll either
+                # the SDK-visible task or its durable record back.
+                return
             self._attach_context_metadata(task)
             self._attach_pending_permissions(task)
             owner_tasks = self._sdk_tasks.setdefault(owner, {})
@@ -163,7 +177,6 @@ class A2ATaskStore(TaskStore):
             self._sdk_tasks_by_context.setdefault(owner, {}).setdefault(task.context_id, set()).add(task_id)
             if preserve_terminal:
                 return
-            next_state = _task_state_from_sdk_task(task)
             # The SDK saves the full Task before yielding every streaming frame. Executors already
             # mirror task records explicitly at output/state durability boundaries, so repeated SDK
             # saves with the same projected state only need the session-local mirror below.
@@ -179,14 +192,14 @@ class A2ATaskStore(TaskStore):
                     context_id=task.context_id,
                     state=next_state,
                     owner=owner,
-                    updated_at=_task_updated_at_from_sdk_task(task),
+                    updated_at=incoming_updated_at,
                 )
                 self._tasks[task_id] = record
                 self._metrics.record_task_created()
             else:
                 record.state = next_state
                 record.owner = owner
-                record.updated_at = _task_updated_at_from_sdk_task(task)
+                record.updated_at = incoming_updated_at
                 record.touch()
             self._mirror_task(record, persist_shared_snapshot=persist_shared_snapshot)
 
