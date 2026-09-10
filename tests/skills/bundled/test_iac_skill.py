@@ -81,6 +81,15 @@ class TestIacSkill:
         assert "方案之间可以采用不同架构" in iac_skill.content
         assert "不得添加非必要资源或堆叠功能重复的资源" in iac_skill.content
 
+    def test_iac_skill_replans_quota_blocked_resources_without_requesting_ids(self):
+        init_bundled_skills()
+        skills = get_bundled_skills()
+        iac_skill = next(s for s in skills if s.name == "iac-aliyun")
+
+        assert "若复用已有资源可满足需求" in iac_skill.content
+        assert "先询问是否改用" in iac_skill.content
+        assert "不要求提供资源 ID" in iac_skill.content
+
     def test_iac_skill_delegates_infraguard_work_to_pac_skill(self):
         init_bundled_skills()
         skills = get_bundled_skills()
@@ -117,6 +126,18 @@ class TestIacSkill:
         assert "纯 Terraform" in content
         assert "IaCService" in content
         assert "脱敏后的摘要" in content
+        assert "已有资源参数：用户选择复用方向后只读查询" in content
+        assert "不要求输入 ID" in content
+        assert "新建资源受限" in content
+
+    def test_vpc_reference_guides_quota_remediation_and_readable_selection(self):
+        content = (IAC_SKILL_ROOT / "references" / "cloud-products" / "vpc.md").read_text(encoding="utf-8")
+
+        assert "新建 VPC 因配额、容量或账号限制失败" in content
+        assert "从 `create` 改为 `use_existing`" in content
+        assert "DescribeVpcs" in content
+        assert "DescribeVSwitches" in content
+        assert "不要求用户手工查找或输入 `vpc-...`、`vsw-...`" in content
 
     def test_cloud_product_catalogs_list_all_bundled_product_references(self):
         product_names = {path.name for path in (IAC_SKILL_ROOT / "references" / "cloud-products").glob("*.md")}

@@ -153,6 +153,18 @@
         {"name": "status_awaiting_selection_again", "check": "再次提交 status 为 awaiting_selection"},
         {"name": "no_template_generation", "check": "不生成 ROS 模板，不调用 write_file 或询价工具"}
       ]
+    },
+    {
+      "id": 13,
+      "name": "quota-remediation-reuses-existing-vpc",
+      "prompt": "从物化步骤回退：新建 VPC 因配额已满不可行，用户已经选择改用已有 VPC；原目标是在青岛创建一台 ECS",
+      "expected_behavior": "保留 ECS 部署目标，把 VPC 生命周期从 create 改为 use_existing 后重新规划，不向用户索取 VPC ID",
+      "assertions": [
+        {"name": "preserves_ecs_goal", "check": "新的 intent 和候选继续包含一台 ECS，不丢失地域等未变更要求"},
+        {"name": "changes_only_vpc_lifecycle", "check": "VPC resource_intent 为 use_existing，候选不再新建 VPC"},
+        {"name": "replans_and_reshows", "check": "重新生成完整候选并再次提交 awaiting_selection"},
+        {"name": "no_manual_vpc_id", "check": "不要求用户提供 VPC ID；可用只读查询了解候选，具体参数由物化步骤继续求解"}
+      ]
     }
   ]
 }

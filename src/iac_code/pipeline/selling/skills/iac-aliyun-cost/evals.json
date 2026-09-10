@@ -112,13 +112,13 @@
         "region": "cn-hangzhou",
         "description": "PreviewStack 需要完整的已有网络参数，但 ECS 费用可先基于规格和磁盘参数估算"
       },
-      "expected_behavior": "询价前必须先尝试参数推荐和 PreviewStack，不得直接跳过；如果 VpcId/VSwitchId/SecurityGroupId 无法自动补齐，PreviewStack 不是成本估算硬门禁，不要直接终止。可用 ZoneId、InstanceType、ImageId、SystemDiskCategory 等当前可询价参数调用 ros_estimate_template_cost，并在 conclusion.missing_deployment_parameters 中列出仍需用户通过选择阶段 parameter_overrides 补充的完整部署参数缺口，同时将 conclusion.preview_validation.succeeded 置为 false",
+      "expected_behavior": "询价前必须先尝试参数推荐、只读查询和 PreviewStack，不得直接跳过；如果 VpcId/VSwitchId/SecurityGroupId 暂未解出，PreviewStack 不是成本估算硬门禁，可用当前可询价参数调用 ros_estimate_template_cost，但缺口应说明需要继续查询或重新规划，不能要求用户通过 parameter_overrides 手工填写资源 ID",
       "assertions": [
         {"name": "preview_is_attempted_soft_gate", "check": "不得直接跳过 PreviewStack；它不是成本估算硬门禁，不能仅因完整部署参数暂缺就停止询价"},
         {"name": "attempts_pricing_with_available_params", "check": "调用 ros_estimate_template_cost，用当前已选或可用于询价的参数估算费用"},
-        {"name": "reports_missing_deployment_parameters", "check": "conclusion.missing_deployment_parameters 包含 VpcId、VSwitchId、SecurityGroupId 等缺口"},
+        {"name": "reports_unresolved_existing_resources", "check": "conclusion.missing_deployment_parameters 包含尚未解出的 VpcId、VSwitchId、SecurityGroupId，并说明应继续只读查询或重新规划"},
         {"name": "outputs_partial_deployment_parameters", "check": "conclusion.deployment_parameters 保留已用于询价的 ZoneId、InstanceType、ImageId、SystemDiskCategory"},
-        {"name": "mentions_later_overrides", "check": "说明用户后续可在选择阶段通过 parameter_overrides 补充缺失参数"},
+        {"name": "no_manual_id_override", "check": "不要求用户后续通过 parameter_overrides 手工填写 VpcId、VSwitchId 或 SecurityGroupId"},
         {"name": "marks_preview_validation_failed", "check": "完整部署参数缺失导致 PreviewStack 未通过时，conclusion.preview_validation.succeeded 为 false"}
       ]
     },
@@ -176,6 +176,24 @@
         {"name": "binds_storage_parameter", "check": "存储约束的 parameter_values.DBInstanceStorage 与 deployment_parameters 中的最终值一致且位于 100~200 GiB"},
         {"name": "does_not_keep_conflicting_default", "check": "不使用违反用户下限的模板 Default 20 GiB"},
         {"name": "passes_code_validation", "check": "全部约束满足后 complete_step 的代码校验通过"}
+      ]
+    },
+    {
+      "id": 10,
+      "name": "new-vpc-quota-requires-architecture-remediation",
+      "prompt": "预估这个模板费用；PreviewStack 返回当前地域 VPC 已有 11 个、配额为 10",
+      "template_context": {
+        "template": "ROSTemplateFormatVersion: '2015-09-01'\nParameters:\n  ZoneId:\n    Type: String\n    Default: cn-qingdao-b\nResources:\n  Vpc:\n    Type: ALIYUN::ECS::VPC\n    Properties:\n      CidrBlock: 10.0.0.0/16\n  VSwitch:\n    Type: ALIYUN::ECS::VSwitch\n    Properties:\n      VpcId: !Ref Vpc\n      ZoneId: !Ref ZoneId\n      CidrBlock: 10.0.1.0/24\n  Ecs:\n    Type: ALIYUN::ECS::InstanceGroup\n    Properties:\n      VpcId: !Ref Vpc\n      VSwitchId: !Ref VSwitch\n      ZoneId: !Ref ZoneId\n      MaxAmount: 1",
+        "file_path": "templates/10-new-vpc-ecs.yml",
+        "region": "cn-qingdao",
+        "description": "当前候选明确新建 VPC，但 PreviewStack 已证明账号 VPC 配额不足"
+      },
+      "expected_behavior": "如实记录价格信息，但明确当前候选需要重新规划，并优先建议复用已有 VPC；不把配额错误降级为 VpcId 参数缺口，也不描述为可直接部署",
+      "assertions": [
+        {"name": "identifies_created_resource_limit", "check": "识别失败针对模板正在新建的 VPC，而不是参数组合或临时 API 问题"},
+        {"name": "marks_candidate_for_replanning", "check": "parameter_set_summary 或 error 明确当前候选不可直接部署，需要重新规划"},
+        {"name": "suggests_existing_vpc_direction", "check": "说明复用已有 VPC 是可选解决方向，交由支持用户交互的阶段确认"},
+        {"name": "does_not_request_vpc_id", "check": "不把问题改写为缺少 VpcId，也不要求用户手工输入 vpc-..."}
       ]
     }
   ]

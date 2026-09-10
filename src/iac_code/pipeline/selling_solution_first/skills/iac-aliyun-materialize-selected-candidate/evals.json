@@ -128,7 +128,7 @@
     },
     {
       "id": 7,
-      "name": "user-required-parameters-collected-before-confirm",
+      "name": "existing-resource-ids-resolved-without-manual-input",
       "prompt": "实现方案，模板需要已有 KeyPairName 和 VpcId",
       "candidate_context": {
         "candidate_id": "existing-network",
@@ -140,13 +140,13 @@
         ],
         "hard_constraints": []
       },
-      "expected_behavior": "user_required 缺口在部署确认之前通过 ask_user_question 逐个收齐，确认时 user_required_missing_parameters 为空数组",
+      "expected_behavior": "通过参数约束或只读 API 获取 KeyPairName 和 VpcId 候选；只有一个兼容候选时采用，多个候选时用可读信息让用户选择，不要求用户手工输入资源 ID",
       "assertions": [
-        {"name": "classifies_gaps", "check": "missing_deployment_parameters 中每条标注 classification 为 auto_solvable 或 user_required"},
-        {"name": "asks_one_parameter_at_a_time", "check": "每次 ask_user_question 只问一个参数，且允许自由输入"},
+        {"name": "queries_existing_resources", "check": "先调用 ros_get_template_parameter_constraints 或产品只读 API 获取 KeyPairName 和 VpcId 候选"},
+        {"name": "readable_candidate_choice", "check": "多个候选时 ask_user_question 展示资源名称、CIDR、地域/可用区等可读信息，而不是自由输入资源 ID"},
+        {"name": "ids_are_auto_solvable", "check": "已有资源 ID 不归入 user_required；可查询时按 auto_solvable 处理"},
         {"name": "no_fabricated_external_input", "check": "不编造 KeyPairName、VpcId 等外部输入，也不使用占位值"},
-        {"name": "user_required_empty_on_confirm", "check": "提交 status confirmed 时 user_required_missing_parameters 为空数组"},
-        {"name": "confirm_after_collection", "check": "外部必填参数收齐之后才提交 deployment_confirmation 等待态"}
+        {"name": "no_manual_resource_id_question", "check": "不要求用户手工查找或输入 vpc-...、vsw-...、sg-... 等资源 ID"}
       ]
     },
     {
@@ -191,11 +191,11 @@
     {
       "id": 10,
       "name": "preview-failure-soft-gate",
-      "prompt": "实现方案，PreviewStack 因外部输入缺失失败",
+      "prompt": "实现方案，PreviewStack 因暂时性 API 错误失败",
       "candidate_context": {
-        "candidate_id": "existing-network",
-        "name": "复用已有网络方案",
-        "output_path": "templates/1-existing-network.yml",
+        "candidate_id": "web-standard",
+        "name": "Web 应用标准方案",
+        "output_path": "templates/2-web-standard.yml",
         "hard_constraints": []
       },
       "expected_behavior": "Preview 失败不禁止确认；如实展示失败原因，preview_ready_for_create 为 false，仍输出已选参数集",
@@ -275,6 +275,29 @@
         {"name": "no_ros_stack", "check": "不调用 ros_stack 或 ros_stack_instances"},
         {"name": "no_ros_api_via_aliyun_api", "check": "模板校验、参数约束、预览和询价不通过 aliyun_api 直接调用对应 ROS 接口"},
         {"name": "no_pricing_doc_search", "check": "不使用 aliyun_doc_search 查询价格，也不自行编造费用数据"}
+      ]
+    },
+    {
+      "id": 15,
+      "name": "vpc-quota-asks-direction-before-confirmation",
+      "prompt": "实现一台 ECS；PreviewStack 返回当前地域 VPC 已有 11 个、配额为 10",
+      "candidate_context": {
+        "candidate_id": "new-vpc-ecs",
+        "name": "新建网络的 ECS",
+        "output_path": "templates/1-new-vpc-ecs.yml",
+        "resource_intents": [
+          {"product": "VPC", "action": "create"},
+          {"product": "ECS", "action": "create"}
+        ],
+        "hard_constraints": []
+      },
+      "expected_behavior": "识别当前新建 VPC 方案不可直接创建，在普通部署确认前询问解决方向；用户选择复用已有 VPC 后回滚 Step 1 重新规划，不要求提供 VPC ID",
+      "assertions": [
+        {"name": "asks_resolution_direction", "check": "ask_user_question 让用户选择复用已有 VPC、处理配额后重试或取消/调整地域，问题不要求输入资源 ID"},
+        {"name": "does_not_claim_ready", "check": "用户确定方向前不把当前候选描述为方案已就绪，也不提交普通 awaiting_confirmation"},
+        {"name": "reuse_is_reselection", "check": "用户选择复用已有 VPC 后提交 reselect_requested，回滚到 solution_planning_and_selection"},
+        {"name": "preserves_remaining_intent", "check": "reselect_reason 保留 ECS 等原部署目标，只把 VPC 从 create 改为 use_existing"},
+        {"name": "does_not_patch_in_id", "check": "不在当前模板临时增加 VpcId 后继续，也不要求用户输入 vpc-..."}
       ]
     }
   ]

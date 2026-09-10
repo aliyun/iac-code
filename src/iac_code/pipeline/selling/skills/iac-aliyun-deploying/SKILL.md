@@ -84,10 +84,10 @@ conclusion_schema:
 1. 先从 `selected_plan.effective_deployment_parameters`、`selected_plan.selected_candidate_result.cost.deployment_parameters`、用户 `parameter_overrides`、模板 Default 和上下文已有值合并当前参数。
 2. 仍缺少模板必填参数时，调用 `ros_get_template_parameter_constraints`，传当前 `parameters` 字典继续求解可用候选。
 3. 对可推断配置（名称、CIDR、布尔值、小整数、非敏感字符串、模板安全默认值）直接给出合规值；对普通密码（ECS/RDS/Redis/RocketMQ/WordPress 等密码，或参数名、`NoEcho`、AssociationProperty、描述/约束表明是密码）生成合规随机值，必须满足长度、复杂度、`AllowedPattern`、`ConstraintDescription`。同一个真实值必须贯穿参数补全、`parameters`、结构化结论和部署，不得替换为 `***`、`[REDACTED]` 或 `<redacted>`；服务端日志由运行时单独脱敏。
-4. 对库存相关参数只在工具/API 返回的合法候选内筛选或排序，不得编造库存值；对 LicenseKey、Token、证书、真实域名、已有资源 ID、VpcId、VSwitchId、SecurityGroupId、KeyPairName 等外部或账号特定输入，不得编造。
+4. 库存值只从 API 候选中选择；已有资源参数通过约束或只读查询解析，不要求用户输入 ID；LicenseKey、Token、证书、真实域名等外部输入不得编造。
 5. 补齐后的参数不再调用预览工具；直接进入 `ros_deploy` 创建类动作，由部署调用做最终参数校验。部署错误指向参数时按上述优先级恢复；错误指向模板时按模板校验/修复流程处理。
 
-不得仅因部署参数缺失返回 `status: failed`。只有在已经先尽量补齐或生成参数、调用可用工具仍无法形成合法完整参数集，且剩余缺口属于不得编造的外部输入时，才允许失败或回滚；失败原因必须列出剩余缺口和为什么不能自动补齐。
+不得仅因部署参数缺失返回 `status: failed`。只有尽量补齐、生成或查询后仍无法形成合法参数集，才允许失败或回滚，并说明剩余缺口。
 
 ## 可用性查询
 
@@ -116,7 +116,7 @@ conclusion_schema:
 2. 否则使用 `selected_plan.selected_candidate_result.cost.deployment_parameters` 作为当前参数基础。
 3. `selected_plan.selected_candidate_result.cost.missing_deployment_parameters` 非空，或仍缺少模板必填参数时，按「部署前参数补全」先尽量补齐或生成参数，再交由 `ros_deploy` 做最终参数校验。
 
-装配参数时不得改写模板 `Default`，不得编造缺失的外部输入（LicenseKey、Token、证书、真实域名、已有资源 ID、VpcId、VSwitchId、SecurityGroupId、KeyPairName 等）。部署步骤不计算费用。
+装配参数时不得改写模板 `Default` 或编造缺失值；已有资源通过只读查询解析，不可查询的外部输入仍缺失时按上节失败或回滚。部署步骤不计算费用。
 
 ## StackName
 
@@ -142,7 +142,7 @@ conclusion_schema:
 ### 部署失败
 分析错误原因：
 - 工具调用超时但已有 `stack_id`，且 Stack 仍在创建 → 调用 `ros_deploy` 的 `wait`
-- 权限/配额 → 告知用户处理
+- 权限/配额 → 若可复用已有资源，停止重复创建并建议按 `use_existing` 重新规划，不要求资源 ID
 - 模板/参数 → 修复后调用 `ros_deploy` 的 `continue_create`
 - `continue_create` 返回 `ContinueCreateStackValidationFailed` → 告知用户需要重建本步骤创建的失败 Stack，再调用 `ros_deploy` 的 `delete_and_create`
 

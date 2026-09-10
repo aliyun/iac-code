@@ -815,6 +815,12 @@ class TestStepOneContract:
         assert "丢弃旧 `intent`、旧候选及其产品组合" in skill_text
         assert "不要把旧架构约束合并到新目标" in skill_text
 
+    def test_skill_replans_quota_remediation_as_existing_resource_lifecycle(self, skill_text):
+        assert "因配额等限制回退且用户已选择复用" in skill_text
+        assert "只把受限资源从 `create` 改为 `use_existing`" in skill_text
+        assert "具体资源由下一步查询" in skill_text
+        assert "不要求用户输入 ID" in skill_text
+
     def test_prompt_only_adapts_runtime_context_and_pipeline_handoff(self, prompt_text):
         assert "{solution_selection.status}" in prompt_text
         assert "{solution_selection.intent}" in prompt_text

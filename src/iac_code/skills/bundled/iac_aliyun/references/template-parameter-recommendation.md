@@ -97,11 +97,12 @@ ROS Terraform 类型模板若返回 `TerraformStackNotSupported` / `QueryErrors`
 |---|---|
 | 可推断配置 | 本模板创建资源的名称、CIDR、布尔、小数值、非敏感字符串、模板支持的安全默认值 |
 | 可生成测试输入 | ECS/RDS/Redis/RocketMQ/WordPress 等普通密码（参数名/`NoEcho`/AssociationProperty/描述/资源属性表明是密码，且用户要求代理准备） |
-| 外部 / 账号特定 ❌ 不得编造 | `VpcId`、`VSwitchId`、`SecurityGroupId`、`KeyPairName`、已有 `InstanceId`；真实域名/ICP/DNS/证书；Token/Webhook/AK/SK/LicenseKey/ARMS/MSE 等凭证 |
+| 可查询的已有云资源 | `VpcId`、`VSwitchId`、`SecurityGroupId`、`KeyPairName`、已有 `InstanceId`；通过参数约束或只读 API 获取候选，不得编造 |
+| 外部输入 ❌ 不得编造 | 真实域名/ICP/DNS/证书；Token/Webhook/AK/SK/LicenseKey/ARMS/MSE 等凭证 |
 
 生成的密码必须满足模板长度、复杂度、`AllowedPattern`、`ConstraintDescription`，日志或临时配置含明文时测试后必须脱敏或删除。
 
-已有资源参数：只读查询可在用户确认后校验；模板会修改资源、DNS、安全组或 RunCommand 的，必须显式确认资源与影响，不自动选择账号内资源。
+已有资源参数：用户选择复用方向后只读查询；单一兼容候选可采用，多个候选按可读信息让用户选择，不要求输入 ID。模板会修改资源、DNS、安全组或 RunCommand 的，最终确认必须说明影响。
 
 ### 9. PreviewStack 预览验证
 
@@ -123,7 +124,9 @@ aliyun_api(
 - 成功 → 形成 Preview-Validated Parameter Set。
 - 失败 → 记录组合与错误，回到第 6/7 步。
 - 最多尝试 5 个组合；5 次失败后停止，总结冲突并询问用户。
-- 失败来自外部输入缺失 → 停止并要求用户提供，不用占位值伪造。
+- 失败来自已有云资源参数未解出 → 继续只读查询或展示可读候选；查询失败、没有兼容候选时询问解决方向，不要求用户输入资源 ID，也不用占位值伪造。
+- 失败来自不可查询的外部输入缺失 → 停止并要求用户提供，不用占位值伪造。
+- 失败表明模板要新建的资源受配额、容量或账号限制 → 说明当前方案不可直接创建；若复用已有资源可满足目标，优先询问是否改用已有资源，用户同意后调整资源生命周期并重新生成、预览，而不是把已有资源 ID 当作输入题。
 - 失败来自模板固定配置（不存在的条件名、data source 空列表、硬编码规格不可用）→ 按模板问题报告。
 
 ### 10. 可选询价
@@ -157,7 +160,9 @@ aliyun_api(
 |---|---|
 | 参数不可行 | 候选被约束拒绝、依赖组合无交集、Preview 回溯耗尽 |
 | 模板问题 | 语法/条件名错误、Terraform data source 空列表、硬编码规格/地域不可用、Output 引用错误 |
-| 外部输入缺失 | LicenseKey、Token、证书、真实域名、已有资源 ID 等不可代填 |
+| 已有资源未解出 | VPC/VSwitch/安全组等候选查询失败或没有兼容资源，需要用户选择解决方向 |
+| 外部输入缺失 | LicenseKey、Token、证书、真实域名等不可代填 |
+| 新建资源受限 | 配额、容量或账号限制使当前新建方案不可行，可复用已有资源时优先提出该方向 |
 | 供应商/API/库存异常 | RDS `InternalError`、定价计划缺失、临时 API 错误 |
 | 应用初始化失败 | `ALIYUN::ECS::RunCommand`、SAE 部署任务、WaitCondition 超时 |
 | 清理失败 | 删除超时、残留安全组/ServerGroup/依赖资源，需补充清理与最终确认 |

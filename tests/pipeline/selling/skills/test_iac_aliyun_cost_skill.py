@@ -300,9 +300,15 @@ class TestSkillContentRosOnly:
 
     def test_existing_resource_parameters_can_use_api_candidates(self, body):
         assert "VpcId、VSwitchId、SecurityGroupId、KeyPairName" in body
-        assert "API 返回候选不是编造" in body
-        assert "先查询约束或只读资源候选" in body
+        assert "通过约束或只读 API 求解" in body
         assert "不要仅因参数名是 VpcId" in body
+        assert "不要求用户手工输入资源 ID" in body
+
+    def test_new_resource_quota_failure_requests_architecture_remediation(self, body):
+        assert "新建资源受配额、容量或账号限制" in body
+        assert "候选标为需要重新规划" in body
+        assert "建议后续交互阶段确认该方向" in body
+        assert "不把问题改写成缺少资源 ID" in body
 
     def test_preview_stack_uses_dedicated_tool_not_ros_stack(self, body):
         assert "ros_preview_template" in body
@@ -345,7 +351,8 @@ class TestSkillContentRosOnly:
         assert "完整部署参数" in body
         assert "ros_estimate_template_cost" in body
         assert "missing_deployment_parameters" in body
-        assert "选择阶段" in body and "parameter_overrides" in body
+        assert "已有资源继续查询或重新规划" in body
+        assert "只有不可查询的外部输入才交由用户补充" in body
 
     def test_contains_template_url(self, body):
         assert "template_url" in body
@@ -464,6 +471,15 @@ class TestReferencesExist:
         assert "同一地域" not in content
         assert "参数必须一致" not in content
         assert "最终参数由 `CreateStack` 校验" in content
+
+    def test_template_parameter_recommendation_resolves_existing_resources_without_raw_ids(self):
+        reference = _direct_references_dir_or_skip() / "template-parameter-recommendation.md"
+        content = reference.read_text(encoding="utf-8")
+
+        assert "可查询的已有云资源" in content
+        assert "已有资源参数：用户选择复用方向后只读查询" in content
+        assert "不要求用户输入资源 ID" in content
+        assert "新建资源受限" in content
 
     def test_ecs_reference_covers_size_and_scenario_driven_public_access(self):
         reference = _direct_references_dir_or_skip() / "cloud-products" / "ecs.md"
@@ -607,6 +623,14 @@ class TestEvalsJson:
         assert "不得直接跳过 PreviewStack" in eval_text
         assert "PreviewStack 不是成本估算硬门禁" in eval_text
         assert "missing_deployment_parameters" in eval_text
+
+    def test_evals_cover_vpc_quota_replanning_without_manual_id_input(self):
+        data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))
+        eval_text = json.dumps(data, ensure_ascii=False)
+
+        assert "new-vpc-quota-requires-architecture-remediation" in eval_text
+        assert "当前候选不可直接部署，需要重新规划" in eval_text
+        assert "不要求用户手工输入 vpc-..." in eval_text
 
     def test_evals_cover_hard_constraints_across_products(self):
         data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))

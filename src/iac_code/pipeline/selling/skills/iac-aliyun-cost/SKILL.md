@@ -230,7 +230,7 @@ ros_validate_template(
 
 PreviewStack 必须传 StackName；调用 `ros_preview_template` 前，必须先确定唯一 `stack_name`。`stack_name` 使用候选方案或服务简名作为前缀，并追加时间或 6 位小写字母/数字随机串后缀（如 `ai-app-20260623-a1b2c3`），避免重名。该 `stack_name` 是预览工具参数，不写入模板 `parameters`，不放入 `deployment_parameters`。
 
-完成上述 PreviewStack 尝试后，如果完整部署参数无法自动补齐、或预览因外部参数缺口失败，但已有参数足以询价，则可以调用 `ros_estimate_template_cost` 估算费用。软降级前必须先尽量形成完整部署参数集，不要过早把可补齐参数列入 `missing_deployment_parameters`。此时必须在 `parameter_set_summary` 说明 PreviewStack 状态，在 `missing_deployment_parameters` 列出缺口，后续选择阶段可通过 `parameter_overrides` 补充，deploying 也可继续补齐并做最终部署校验。
+完成上述 PreviewStack 尝试后，如果完整部署参数无法自动补齐、或预览因外部参数缺口失败，但已有参数足以询价，则可以调用 `ros_estimate_template_cost` 估算费用。软降级前必须先尽量形成完整部署参数集，不要过早把可补齐参数列入 `missing_deployment_parameters`。此时必须在 `parameter_set_summary` 说明 PreviewStack 状态，在 `missing_deployment_parameters` 列出缺口；已有资源继续查询或重新规划，只有不可查询的外部输入才交由用户补充，deploying 也可继续补齐并做最终部署校验。
 
 本步骤的裁剪规则：
 - `candidate.hard_constraints` 是进入成本步骤时当前有效的完整用户硬约束快照，也是本步骤的唯一硬约束来源；不比较更早步骤的约束版本。硬约束优先级高于候选推荐、模板 Default、场景推荐和软偏好。
@@ -238,10 +238,11 @@ PreviewStack 必须传 StackName；调用 `ros_preview_template` 前，必须先
 - 每条硬约束都必须在 `hard_constraint_checks` 中原样复制 `constraint`，填写可按其 `operator` 比较的 `actual_value/actual_unit`，以及为满足它选定的 `parameter_values`。`parameter_values` 必须是最终 `deployment_parameters` 的真实子集。
 - 证据来自上下文、模板或工具。每条证据都填写与检查一致的 `actual_value`。`verification_mode: direct` 可由模板或最终参数的实际值证明；`verification_mode: tool` 必须使用对应产品 reference 指定的 API，并提交 `type: tool` 的真实证据。工具证据还要填写真实 `tool_name`、`product/action` 和 API 结果的 `result_path`，不得用推测值替代。
 - 不要自行输出“是否验证通过”的布尔结论。调用 `complete_step` 后，代码会逐条检查约束覆盖、status、operator/value/unit、关联参数及真实工具证据；失败结果会包含具体校验码，应按原因修正 `hard_constraint_checks`、参数或证据后重试。不得通过删除检查或放宽约束绕过代码校验。
-- VpcId、VSwitchId、SecurityGroupId、KeyPairName 等已有资源参数：先查询约束或只读资源候选；API 返回候选不是编造，可作为参数候选参与回溯与 PreviewStack。没有上下文值、模板 Default、用户提供值或 API 返回候选时，才按外部输入缺失处理。
+- VpcId、VSwitchId、SecurityGroupId、KeyPairName 等已有资源参数先通过约束或只读 API 求解；未解出时报告需要继续查询、选择可读候选或重新规划，不要求用户手工输入资源 ID。
 - 只能在合法候选内筛选或排序，不得编造 API 未返回的库存值；LicenseKey、Token、证书、真实域名等外部输入不得编造。不要仅因参数名是 VpcId、VSwitchId、SecurityGroupId 或 KeyPairName 就跳过参数推荐并直接停止询价。
 - 对可生成参数要主动补齐：普通密码（ECS/RDS/Redis/RocketMQ/WordPress 等密码，或参数名、`NoEcho`、AssociationProperty、描述/约束表明是密码）应生成合规随机值，必须满足模板长度、复杂度、`AllowedPattern`、`ConstraintDescription`。同一个真实值必须贯穿预览、询价、`deployment_parameters`、`preview_validation.parameters` 和 `complete_step.conclusion`，不得写入 `***`、`[REDACTED]` 或 `<redacted>`；服务端日志由运行时单独脱敏。
 - `PreviewStack` 因候选组合不可行失败时，按 reference 的回溯规则更换候选；因外部输入缺失失败时，记录缺口，不用占位值伪造，并按上方软门禁规则决定是否继续询价。
+- Preview 表明新建资源受配额、容量或账号限制时，将候选标为需要重新规划；若可复用已有资源，建议后续交互阶段确认该方向，不把问题改写成缺少资源 ID。
 - 最终得到的参数集不写入模板 `Default`；将当前已选、已验证或已用于询价的参数作为结构化数据放入 `complete_step.conclusion.deployment_parameters`，传递给 deploying。`ros_preview_template` 成功时，还必须把 `succeeded: true`、同一个 `template_url` 和预览时使用的 `parameters` 写入 `complete_step.conclusion.preview_validation`；deploying 用它判断同一模板是否已完成预览验证，实际部署参数由 `ros_deploy` 做最终校验。模板 Default 只是参数求解的输入来源之一，不是跨步骤传参介质。
 - PreviewStack 成功但询价失败时，不要丢弃 Preview-Validated Pricing Parameter Set；仍在 `deployment_parameters` 输出该参数集，同时如实报告询价失败原因。
 
