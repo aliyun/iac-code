@@ -199,7 +199,7 @@ user_invocable: false
 | `rough_cost` | 架构粗估费用，含区间、假设和不含项 |
 | `decision_notes` | 方案说服力字段：`why_recommended`、`problems_solved`、`pros`、`cons` **必填**，另可含 `risks`、`tradeoffs`。详见「方案说服力」 |
 
-产品组合只包含实现需求所必需的资源，不要为了"看起来完整"添加用户没需要的东西。
+无论生成一个还是多个候选，每个候选都只包含实现该方案目标的最小必要资源集合；方案之间可以采用不同架构，但单个候选不得堆叠非必要或功能重复的资源。
 
 `candidate_id`、`output_path`、`products`、文字版 topology 和候选 hard_constraints 快照均由 Python
 根据候选下标、资源清单、拓扑图与 `intent.hard_constraints` 生成，不要在模型输入中提交。
@@ -209,7 +209,7 @@ user_invocable: false
 `intent.resource_intents` 是架构设计的硬约束：
 
 - 只有 `action=create` 的资源可以作为本方案要新建的资源。不要把 `action=use_existing` 或 `action=reference` 的资源设计成新建资源。
-- `action=use_existing/reference` 必须作为已有资源引用，后续模板中应通过参数（如 `VpcId`）或用户提供 ID 引用，不得生成对应的新建资源。
+- `action=use_existing/reference` 必须作为参数引用且不得新建；具体资源由下一步只读查询解析，不要求用户输入 ID。
 - `action=forbid` 的资源不得出现在候选方案的新增资源里，也不得作为"顺手补齐"的依赖加入。
 - 将 `resource_intents` 原样或按方案收窄后写入每个候选，供实现步骤继续执行同一约束。
 - 用户说“不要使用 ECS，改用 FC”时，`intent.resource_intents` 和每个候选都必须同时保留
@@ -387,6 +387,8 @@ user_invocable: false
 ### 用户要求修改架构
 
 如果恢复时用户的消息不是选择，而是新的架构要求（"换成按量付费""加个 Redis""不要 RDS"），在本步骤内结合原有候选和新增要求重新规划，提交新的完整轻量摘要批次，再逐个细化并提交 `status: awaiting_selection`。新批次会原子替换旧批次；除用户明确提出新的架构要求外，恢复阶段不要重新规划架构。
+
+物化步骤因配额等限制回退且用户已选择复用时，保留其它目标，只把受限资源从 `create` 改为 `use_existing` 后重新规划；具体资源由下一步查询。
 
 ### 用户改变部署意图
 

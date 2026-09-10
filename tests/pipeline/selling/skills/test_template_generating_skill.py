@@ -267,3 +267,15 @@ class TestEvalsJson:
             for assertion in ev["assertions"]:
                 assert "name" in assertion
                 assert "check" in assertion
+
+    def test_evals_cover_private_and_public_ecs_modes(self):
+        data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))
+        evals = {ev["name"]: ev for ev in data["evals"]}
+
+        private = evals["private-ecs-by-default"]
+        assert "AllocatePublicIP: false" in private["expected_behavior"]
+        assert "no_eip" in {assertion["name"] for assertion in private["assertions"]}
+
+        public = evals["simple-vpc-ecs"]
+        assert "公网入口" in public["expected_behavior"]
+        assert "has_public_entry" in {assertion["name"] for assertion in public["assertions"]}

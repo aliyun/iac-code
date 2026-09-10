@@ -2159,7 +2159,9 @@ def test_mapping_getatt_runtime_iterable_is_accepted_without_count() -> None:
     report = validate(
         """ROSTemplateFormatVersion: 2015-09-01
 Resources:
-  Target: {Type: ALIYUN::ECS::Instance}
+  Target:
+    Type: ALIYUN::ECS::Instance
+    Properties: {VSwitchId: vsw-test}
   Wait:
     Type: ALIYUN::ROS::Sleep
     Properties:

@@ -29,6 +29,7 @@ auto_trigger:
 - **应用部署**（用户想部署某个应用但不清楚该应用是什么）→ 先 aliyun_doc_search 搜索，搜不到再 web_fetch 搜索
   - 如果部署地域属于中国，那么对 Docker、PyPI、npm、Maven、Go 等需配置国内镜像源，否则可能有网络问题等
 - **业务需求**（用户描述业务场景）→ 提供 1-3 个方案含优缺点，用户选择后生成
+- 无论直接生成还是提供多个方案，每个方案都只包含实现其目标的最小必要资源集合；方案之间可以采用不同架构，但单个方案不得添加非必要资源或堆叠功能重复的资源
 - 默认 ROS 模板，用户指定 Terraform 时生成 Terraform 文件。**ROS 与 Terraform 共用同一套校验/部署链路（均通过 aliyun_api / ros_stack）**，不要建议用户用 `terraform init/apply` 等本地 CLI 替代
 - 对用户未指定的参数直接使用合理默认值，不反复询问
 - **库存相关属性必须参数化为 Parameters**，不写死具体值（见「参数化规则」）
@@ -42,7 +43,7 @@ auto_trigger:
 - 首版仅覆盖 `CreateStack` 前的新建栈参数推荐；`UpdateStack`、`ContinueCreateStack`、资源栈组和资源栈实例不走该流程。
 - 纯 Terraform 工作目录不直接走该流程；必须先按 [references/terraform-template.md](references/terraform-template.md) 打包为 ROS Terraform 类型模板。
 - 推荐结果必须先通过 `PreviewStack`，形成 Preview-Validated Parameter Set 后才能展示为推荐参数；这不等于保证 `CreateStack` 一定成功。
-- 密码类测试输入可在用户要求代理准备参数时生成合规随机值并脱敏；LicenseKey、Token、证书、真实域名、已有资源 ID 等外部输入不得编造。
+- 密码类测试输入可在用户要求代理准备参数时生成合规随机值并脱敏；LicenseKey、Token、证书、真实域名等外部输入不得编造；已有云资源 ID 应通过参数约束或只读查询解析，必要时让用户按可读信息选择，不要求其手工输入 ID。
 - `PreviewStack` 和后续 `CreateStack` 对共同支持的输入必须保持一致，包括模板来源、地域、最终 `StackName`、`DisableRollback` 和模板参数。
 
 ### 部署/更新/删除
@@ -206,5 +207,5 @@ auto_trigger:
 
 ### 部署失败
 分析错误原因：
-- 权限/配额 → 告知用户处理
+- 权限/配额 → 若复用已有资源可满足需求，先询问是否改用；用户同意后查询候选并重新生成模板，不要求提供资源 ID
 - 模板/参数 → 修复后 ContinueCreateStack（不重新 CreateStack）

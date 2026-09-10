@@ -811,6 +811,24 @@ class TestPromptContract:
         assert "user_required_missing_parameters" in skill_text
         assert "ask_user_question" in skill_text
 
+    def test_existing_resource_ids_are_queried_or_selected_readably(self, skill_text):
+        assert "通过约束或只读 API 求解" in skill_text
+        assert "多个候选时用名称、CIDR、地域/可用区等可读信息" in skill_text
+        assert "不要求手工输入 ID" in skill_text
+        assert "不归为 `user_required`" in skill_text
+
+    def test_quota_blocked_creation_asks_direction_and_replans_lifecycle(self, skill_text):
+        assert "新建资源受限时先确认解决方向" in skill_text
+        assert "先用 `ask_user_question` 询问" in skill_text
+        assert "不要求资源 ID，也不进入普通部署确认" in skill_text
+        assert "`create → use_existing`" in skill_text
+        assert "提交 `reselect_requested`" in skill_text
+        assert "不临时给当前模板补 ID 参数" in skill_text
+
+    def test_other_preview_failures_remain_a_soft_gate(self, skill_text):
+        assert "除上述“当前新建资源受限、需要先确认解决方向”的情况外" in skill_text
+        assert "Preview 失败**不禁止**确认部署" in skill_text
+
     def test_dedicated_confirmation_supports_structured_and_natural_language_input(self, prompt_text, skill_text):
         assert "deployment_confirmation" in prompt_text
         assert "不使用 `ask_user_question`" in prompt_text

@@ -139,11 +139,13 @@ conclusion_schema:
 如果 intent 中存在 `resource_intents`，它是架构设计的硬约束：
 
 - 只有 `action=create` 的资源可以作为本方案要新建的资源。不要把 `action=use_existing` 或 `action=reference` 的资源设计成新建资源。
-- `action=use_existing/reference` 必须作为已有资源引用，后续模板中应通过参数（如 `VpcId`）或用户提供 ID 引用，不得生成对应的新建资源。换句话说，use_existing/reference 必须作为已有资源引用。
+- action=use_existing/reference 必须作为已有资源引用且不得新建；具体资源由后续只读查询解析，不要求用户输入 ID。
 - `action=forbid` 的资源不得出现在候选方案的新增资源里，也不得作为“顺手补齐”的依赖加入。
 - 将 `resource_intents` 原样或按方案收窄后写入每个 candidate，供模板生成步骤继续执行同一约束。
 
 示例：intent 表示“已有 VPC 中创建安全组”时，candidate 应包含 `resource_intents: [{"product": "VPC", "action": "use_existing"}, {"product": "SecurityGroup", "action": "create"}]`。不得生成 VSwitch，也不得设计成“创建 VPC + VSwitch + SecurityGroup”。
+
+配额等限制触发回退且用户已选择复用时，保留其它需求，只把受限资源改为 `use_existing` 后重新规划。
 
 ## 用户硬约束
 
@@ -162,5 +164,5 @@ conclusion_schema:
 
 ## 约束
 
-- 产品组合只包含实现需求所必需的资源，不要为了"看起来完整"添加用户没需要的东西
+- 无论生成一个还是多个候选，每个候选都只包含实现该方案目标的最小必要资源集合；方案之间可以采用不同架构，但单个候选不得堆叠非必要或功能重复的资源
 - 费用估算基于阿里云公开定价的合理范围，不需要精确到个位

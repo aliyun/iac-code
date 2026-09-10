@@ -94,6 +94,7 @@ user_invocable: false
 - 模板格式为 YAML
 - 使用 `!Ref`、`!GetAtt` 等内置函数引用参数和资源属性，避免硬编码
 - Outputs 中所有输出变量必须定义 Label
+- 只生成实现所选方案所需的最小必要资源集合；不要添加候选未要求、也非必要依赖的资源，或同时创建功能重复的资源。
 
 ## 阶段 B：参数求解、Preview 与 ROS 精确询价
 
@@ -143,10 +144,10 @@ PreviewStack 必须传 StackName；调用 `ros_preview_template` 前，必须先
 - 每条硬约束只提交 `constraint_id`、LLM 独立判断的 `status`、语义 `actual_value/actual_unit`、相关最终 `parameter_values` 和可用的 evidence locator，不复制 constraint。
 - `type: tool` 证据提交真实 ordered record 的 `record_id` 与 `result_path`，可带 `tool_name`；`type: context` 提交受限 `context_path`；`type: template` 提交 `template_path` 或最终参数 `parameter_name` 二选一。这里的 `template_path` 是最终 ROS YAML **内部字段的点路径**（例如 `Resources.VSwitch.Properties.CidrBlock`），绝不是模板文件路径；模板参数值优先用 `parameter_name`。不要提交 evidence summary 或 evidence actual，Python 会从权威来源读取。
 - 工具已真实尝试但响应没有可定位的结果字段时，`evidence` 提交空数组，不得编造 `record_id`、`result_path` 或工具返回值。Python 会核对可用 locator、实际值、参数子集、operator/value/unit，并生成完整公共 hard_constraint_checks。接受规则保持兼容：LLM `status=satisfied` 或 Python code verification 通过任一成立即放行；只有二者都不通过才阻止确认。
-- VpcId、VSwitchId、SecurityGroupId、KeyPairName 等已有资源参数：先查询约束或只读资源候选；API 返回候选不是编造，可作为参数候选参与回溯与 PreviewStack。没有上下文值、模板 Default、用户提供值或 API 返回候选时，才按外部输入缺失处理。
+- VpcId、VSwitchId、SecurityGroupId、KeyPairName 等已有资源参数通过约束或只读 API 求解；多个候选时用名称、CIDR、地域/可用区等可读信息让用户选择，不要求手工输入 ID，也不归为 `user_required`。
 - 只能在合法候选内筛选或排序，不得编造 API 未返回的库存值；LicenseKey、Token、证书、真实域名等外部输入不得编造。不要仅因参数名是 VpcId、VSwitchId、SecurityGroupId 或 KeyPairName 就跳过参数推荐并直接停止询价。
 - 对可生成参数要主动补齐：普通密码等应生成合规随机值，并让同一真实值贯穿 Preview 与最后一次询价的 `parameters`；Python 直接以该询价 input 作为最终参数锚点。不得写入占位值。
-- `PreviewStack` 因候选组合不可行失败时，按 reference 的回溯规则更换候选值；因外部输入缺失失败时，记录缺口，不用占位值伪造。
+- `PreviewStack` 因候选组合不可行失败时，按 reference 的回溯规则更换候选值；因不可查询的外部输入缺失失败时，记录缺口，不用占位值伪造。
 - 最终参数集不写入模板 `Default`；模板 Default 只是参数求解来源。跨步骤参数由 Python 从最后一次 `ros_estimate_template_cost.input.parameters` 投影。
 - PreviewStack 成功但询价失败时仍使用同一参数调用询价；失败记录的 input 也能建立 ParameterSetAnchor，Python 会投影失败状态。
 
@@ -154,10 +155,10 @@ PreviewStack 必须传 StackName；调用 `ros_preview_template` 前，必须先
 
 把仍未解出的参数写入 `missing_deployment_parameters`，并逐项标注 `classification`：
 
-- `auto_solvable`：可继续用 `ros_get_template_parameter_constraints`、产品只读 API 或规则生成解出的参数（库存规格、可用区、普通密码、名称、CIDR 等）。这类缺口应尽量在本步骤解掉，不要过早列入缺口。
-- `user_required`：只能由用户提供的外部输入（已有资源 ID、KeyPairName、LicenseKey、Token、证书、真实域名、第三方账号等）。这类缺口同时写入 `user_required_missing_parameters`。
+- `auto_solvable`：可继续用 `ros_get_template_parameter_constraints`、产品只读 API、可读候选选择或规则生成解出的参数（已有云资源 ID、库存规格、可用区、普通密码、名称、CIDR 等）。这类缺口应尽量在本步骤解掉，不要过早列入缺口。
+- `user_required`：只能由用户提供且无法从云账号只读查询的外部输入（LicenseKey、Token、证书、真实域名、第三方账号等）。这类缺口同时写入 `user_required_missing_parameters`。
 
-**部署确认之前必须补齐所有 `user_required` 参数**：用 `ask_user_question` 一次只问一个参数，允许自由输入，说明参数用途和格式要求。收齐后 `user_required_missing_parameters` 必须是空数组，否则不得提交 `status: confirmed`。
+**部署确认之前必须补齐所有 `user_required` 参数**：用 `ask_user_question` 一次只问一个，说明用途和格式。收齐后 `user_required_missing_parameters` 必须是空数组，否则不得提交 `status: confirmed`。
 
 ### 调用询价 API
 
@@ -193,11 +194,15 @@ ros_estimate_template_cost(
 `¥<OriginalAmount>/月（列表价，合同优惠后约 ¥<TradeAmount>/月）` 投影到公共 cost 路径；明确空
 `Resources` 且无金额才是 `¥0/月`，缺失或无效字段不得冒充免费。
 
+### 新建资源受限时先确认解决方向
+
+Preview 明确表明新建资源受配额、容量或账号限制时，先用 `ask_user_question` 询问复用已有资源、处理限制后重试或取消/调整地域，不要求资源 ID，也不进入普通部署确认。选择复用属于 `create → use_existing` 的架构变化：提交 `reselect_requested`，在 `reselect_reason` 中保留其它目标并交由 Step 1 重规划，不临时给当前模板补 ID 参数。
+
 ### Preview 软门槛
 
 模型不提交 `preview_validation`。Python 只接受路径、parameters 和有效 region 与 ParameterSetAnchor 全等的最后一次 Preview 记录。
 
-Preview 失败**不禁止**确认部署：只要模板已校验通过、`user_required` 参数已补齐，并且 Preview/询价失败原因已如实展示，用户仍可确认，此时 `preview_ready_for_create: false`，由部署步骤走既有校验路径。
+除上述“当前新建资源受限、需要先确认解决方向”的情况外，Preview 失败**不禁止**确认部署：只要模板已校验通过、`user_required` 参数已补齐，并且 Preview/询价失败原因已如实展示，用户仍可确认，此时 `preview_ready_for_create: false`，由部署步骤走既有校验路径。
 
 `preview_ready_for_create` 完全由 Python 根据匹配 Preview 和参数缺口计算，模型不要提交。
 
@@ -234,6 +239,7 @@ Preview 失败**不禁止**确认部署：只要模板已校验通过、`user_re
   都直接沿用当前模板提交 `confirmed`；不得重做模板、Preview、询价，也不得再次提交 `awaiting_confirmation`。
   界面已用「模板正文 + 最新参数」自行询价，Python 负责把旧询价参数与本轮覆盖合并成最终参数并校验合法性。
 - 非结构化输入由 LLM 像旧 pipeline 的确认步骤一样判断为确认、取消、调整当前参数、重新规划当前架构或替换为全新部署意图，并提取用户明确给出的参数值。参数调整留在本步骤重算；架构变化或全新部署意图回滚 Step 1，且全新意图以最新输入替换旧部署目标，不能合并新旧需求。
+- “改用已有 VPC/已有网络/已有资源”属于架构变化，按上面的 `reselect_requested` 流程处理。
 - 自然语言含义不清或缺少具体参数值时，可以用 `ask_user_question` 澄清一个缺口；工具回答只用于澄清，不能直接作为最终部署授权，处理完成后仍须回到专用等待态。
 - 空的 `parameter_overrides` 表示没有用户覆盖，是合法状态。
 

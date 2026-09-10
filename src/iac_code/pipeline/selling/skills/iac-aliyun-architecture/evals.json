@@ -20,7 +20,7 @@
       "expected_behavior": "只输出1个方案，不添加ECS/RDS等用户未提及的资源",
       "assertions": [
         {"name": "single_candidate", "check": "candidates数组长度为1"},
-        {"name": "no_extra_resources", "check": "products中只包含VPC相关资源（VPC/VSwitch/SecurityGroup），不含ECS/RDS/SLB等"}
+        {"name": "no_extra_resources", "check": "products 中只包含 VPC，不额外创建 VSwitch、SecurityGroup、ECS、RDS 或 SLB"}
       ]
     },
     {
